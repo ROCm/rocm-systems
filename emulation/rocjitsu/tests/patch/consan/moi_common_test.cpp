@@ -331,7 +331,33 @@ TEST(ConSanMoi, SpilledVgprReloadResultNamesAreDistinctAndComplete) {
   }
 }
 
-TEST(ConSanMoi, ResourcePlanAlternativeSelectionTracksFinalPlanVeto) {
+TEST(ConSanMoi, ResourcePlanAlternativeNamesAreExhaustiveAndDistinct) {
+  EXPECT_EQ(ConSanResourcePlanAlternative{}.kind,
+            ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill);
+  EXPECT_STREQ(consan_resource_plan_alternative_kind_name(
+                   ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill),
+               "guest_operand_overlap_spill");
+  EXPECT_STREQ(consan_resource_plan_alternative_kind_name(
+                   ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery),
+               "spill_backed_operand_recovery");
+  EXPECT_STREQ(
+      consan_resource_plan_alternative_outcome_name(ConSanResourcePlanAlternativeOutcome::Selected),
+      "selected");
+  EXPECT_STREQ(
+      consan_resource_plan_alternative_outcome_name(ConSanResourcePlanAlternativeOutcome::Rejected),
+      "rejected");
+  EXPECT_STREQ(consan_resource_plan_alternative_outcome_name(
+                   ConSanResourcePlanAlternativeOutcome::Superseded),
+               "superseded");
+  EXPECT_STREQ(consan_resource_plan_alternative_outcome_name(
+                   ConSanResourcePlanAlternativeOutcome::Contributed),
+               "contributed");
+  EXPECT_STREQ(
+      consan_resource_plan_alternative_outcome_name(ConSanResourcePlanAlternativeOutcome::Vetoed),
+      "vetoed");
+}
+
+TEST(ConSanMoi, ResourcePlanAlternativeOutcomeTracksFinalPlanVeto) {
   ConSanCandidateResourcePlan plan;
   plan.source = ConSanRegisterAllocationSource::SpillRequired;
   plan.reason = ConSanRegisterPlanReason::None;
@@ -341,16 +367,23 @@ TEST(ConSanMoi, ResourcePlanAlternativeSelectionTracksFinalPlanVeto) {
       .source = ConSanRegisterAllocationSource::SpillRequired,
       .reason = ConSanRegisterPlanReason::None,
       .scratch_vgpr_count = 16u,
+      .outcome = ConSanResourcePlanAlternativeOutcome::Selected,
   };
-  EXPECT_TRUE(consan_resource_plan_alternative_selected(plan, alternative));
-  EXPECT_STREQ(consan_resource_plan_alternative_kind_name(
-                   ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery),
-               "spill_backed_operand_recovery");
+  EXPECT_EQ(consan_resource_plan_alternative_outcome(plan, alternative),
+            ConSanResourcePlanAlternativeOutcome::Selected);
 
   plan.source = ConSanRegisterAllocationSource::Unsupported;
   plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
   plan.scratch_vgpr.reset();
-  EXPECT_FALSE(consan_resource_plan_alternative_selected(plan, alternative));
+  EXPECT_EQ(consan_resource_plan_alternative_outcome(plan, alternative),
+            ConSanResourcePlanAlternativeOutcome::Vetoed);
+
+  ConSanResourcePlanAlternative rejected = alternative;
+  rejected.source = ConSanRegisterAllocationSource::Unsupported;
+  rejected.reason = ConSanRegisterPlanReason::NoLegalWindow;
+  rejected.outcome = ConSanResourcePlanAlternativeOutcome::Rejected;
+  EXPECT_EQ(consan_resource_plan_alternative_outcome(plan, rejected),
+            ConSanResourcePlanAlternativeOutcome::Rejected);
 }
 
 TEST(ConSanMoi, PrivateWorkgroupSourceAppliesPackedCoordinateExtraction) {

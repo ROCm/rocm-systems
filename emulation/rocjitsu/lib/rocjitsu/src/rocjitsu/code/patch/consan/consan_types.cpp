@@ -266,17 +266,38 @@ const char *consan_register_plan_reason_name(ConSanRegisterPlanReason reason) {
   return "unknown";
 }
 
-bool consan_resource_plan_alternative_selected(const ConSanCandidateResourcePlan &plan,
-                                               const ConSanResourcePlanAlternative &alternative) {
-  return plan.source == ConSanRegisterAllocationSource::SpillRequired &&
-         plan.source == alternative.source && plan.reason == alternative.reason &&
-         plan.scratch_vgpr_count == alternative.scratch_vgpr_count;
+ConSanResourcePlanAlternativeOutcome
+consan_resource_plan_alternative_outcome(const ConSanCandidateResourcePlan &plan,
+                                         const ConSanResourcePlanAlternative &alternative) {
+  if (alternative.outcome == ConSanResourcePlanAlternativeOutcome::Selected &&
+      plan.source == ConSanRegisterAllocationSource::Unsupported)
+    return ConSanResourcePlanAlternativeOutcome::Vetoed;
+  return alternative.outcome;
 }
 
 const char *consan_resource_plan_alternative_kind_name(ConSanResourcePlanAlternativeKind kind) {
   switch (kind) {
+  case ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill:
+    return "guest_operand_overlap_spill";
   case ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery:
     return "spill_backed_operand_recovery";
+  }
+  return "unknown";
+}
+
+const char *
+consan_resource_plan_alternative_outcome_name(ConSanResourcePlanAlternativeOutcome outcome) {
+  switch (outcome) {
+  case ConSanResourcePlanAlternativeOutcome::Selected:
+    return "selected";
+  case ConSanResourcePlanAlternativeOutcome::Rejected:
+    return "rejected";
+  case ConSanResourcePlanAlternativeOutcome::Superseded:
+    return "superseded";
+  case ConSanResourcePlanAlternativeOutcome::Contributed:
+    return "contributed";
+  case ConSanResourcePlanAlternativeOutcome::Vetoed:
+    return "vetoed";
   }
   return "unknown";
 }

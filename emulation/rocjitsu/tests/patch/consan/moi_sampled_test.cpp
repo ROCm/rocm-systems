@@ -904,6 +904,69 @@ TEST(ConSanMoi, Cdna4SampledAtomicTracksCacheAssociatedOrdering) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, Cdna4SampledAtomicReportsGuestOperandOverlapFallback) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+  const auto acquire = cdna4::build_mubuf(cdna4::kBufferInvMubuf, {.sc1 = 1});
+  const auto atomic = build_cdna4_flat_atomic_add_u32(
+      /*vaddr=*/0, /*vsrc=*/11, /*vdst=*/22, /*return_old_value=*/true,
+      /*scope=*/2, kArch);
+  const auto wait = build_cdna4_s_wait_flat0(kArch);
+  ASSERT_TRUE(atomic && wait);
+  std::vector<uint32_t> text_words = {
+      0xd81a0004u,
+      0x00000302u, // ds_write_b32 v2, v3 offset:4
+  };
+  text_words.insert(text_words.end(), release.begin(), release.end());
+  text_words.push_back(*wait);
+  text_words.insert(text_words.end(), atomic->begin(), atomic->end());
+  text_words.push_back(*wait);
+  text_words.insert(text_words.end(), acquire.begin(), acquire.end());
+  text_words.resize(800, build_s_nop(0, kArch));
+  text_words.back() = build_s_endpgm(kArch);
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "sampled_atomic_overlap_fallback", /*vgpr_granulated=*/7u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 7u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_track_atomics = true;
+  options.moi_exec_save_sgpr = 80;
+  // Persistent values split the ordinary bank into three potential ten-VGPR
+  // windows. Atomic guest operands occupy each window, so only the qualified
+  // spill-backed guest-overlap retry can place the operational probe.
+  options.moi_owner_vgpr = 10;
+  options.moi_epoch_vgpr = 21;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+  options.max_patches = 2;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto atomic_plan =
+      std::ranges::find_if(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
+        return plan.site_kind == ConSanResourceSiteKind::Atomic;
+      });
+  ASSERT_NE(atomic_plan, result.resource_plans.end());
+  ASSERT_EQ(atomic_plan->alternatives.size(), 1u);
+  const ConSanResourcePlanAlternative &alternative = atomic_plan->alternatives.front();
+  EXPECT_EQ(alternative.kind, ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill);
+  EXPECT_EQ(alternative.source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(alternative.scratch_vgpr_count, 10u);
+  EXPECT_EQ(consan_resource_plan_alternative_outcome(*atomic_plan, alternative),
+            ConSanResourcePlanAlternativeOutcome::Selected);
+  EXPECT_EQ(result.resource_plan_summary.alternative_attempts, 1u);
+  EXPECT_EQ(result.resource_plan_summary.alternative_selected, 1u);
+  EXPECT_EQ(result.resource_plan_summary.alternative_rejected, 0u);
+  EXPECT_EQ(result.resource_plan_summary.alternative_superseded, 0u);
+  EXPECT_EQ(result.resource_plan_summary.alternative_contributed, 0u);
+  EXPECT_EQ(result.resource_plan_summary.alternative_vetoed, 0u);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Cdna4SampledBarrierPublishesSelectedEpochTransition) {
   const auto barrier = build_cdna4_s_barrier(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(barrier);

@@ -87,23 +87,33 @@ struct ConSanSiteDispositionRecord {
   ConSanRegisterPlanReason resource_reason = ConSanRegisterPlanReason::None;
 };
 
-/// A lower-resource window shape considered after the primary resource plan.
+/// A structurally distinct fallback considered after the primary resource plan.
 ///
-/// Keeping the shape explicit lets diagnostics distinguish a rejected compact
-/// plan from a site that never had a correctness-preserving alternative.
-/// This currently records the single spill-backed CDNA Inline Shadow access
-/// fallback. The retained plan determines whether the recorded attempt won;
-/// no mutable selection state is stored here.
+/// Keeping every attempt explicit lets diagnostics distinguish rejected,
+/// superseded, contributing, and vetoed plans from sites that never had a
+/// correctness-preserving alternative. Producers stamp the outcome while the
+/// planning branch that made the decision is still available.
 enum class ConSanResourcePlanAlternativeKind : uint8_t {
+  GuestOperandOverlapSpill,
   SpillBackedOperandRecovery,
+};
+
+enum class ConSanResourcePlanAlternativeOutcome : uint8_t {
+  Selected,
+  Rejected,
+  Superseded,
+  Contributed,
+  Vetoed,
 };
 
 struct ConSanResourcePlanAlternative {
   ConSanResourcePlanAlternativeKind kind =
-      ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery;
+      ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill;
   ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
   ConSanRegisterPlanReason reason = ConSanRegisterPlanReason::None;
   uint16_t scratch_vgpr_count = 0;
+  ConSanResourcePlanAlternativeOutcome outcome =
+      ConSanResourcePlanAlternativeOutcome::Rejected;
 };
 
 struct ConSanCandidateResourcePlan {
@@ -128,10 +138,10 @@ struct ConSanCandidateResourcePlan {
   bool has_indirect_sgpr_access = false;
   bool sgpr_reference_coverage_complete = false;
   uint32_t original_private_segment_size = 0;
-  /// Present only when planning evaluated the currently supported structurally
-  /// distinct compact window. A rejected attempt remains attached to the
-  /// retained primary plan.
-  std::optional<ConSanResourcePlanAlternative> alternative;
+  /// Every structurally distinct fallback evaluated while producing this plan,
+  /// in chronological planning order. At most one attempt is Selected; nested
+  /// attempts that enable it are Contributed.
+  std::vector<ConSanResourcePlanAlternative> alternatives;
 };
 
 struct ConSanResourcePlanSummary {
@@ -146,6 +156,9 @@ struct ConSanResourcePlanSummary {
   size_t alternative_attempts = 0;
   size_t alternative_selected = 0;
   size_t alternative_rejected = 0;
+  size_t alternative_superseded = 0;
+  size_t alternative_contributed = 0;
+  size_t alternative_vetoed = 0;
 };
 
 /// Exact redundant-access selection proven by an internal validated composite

@@ -4156,14 +4156,17 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   "descriptor_growth=%zu spill=%zu unsupported=%zu "
                   "planned_spill_slot_bytes=%zu emitted_spill_patches=%zu "
                   "emitted_spill_slot_bytes=%zu alternative_attempts=%zu "
-                  "alternative_selected=%zu alternative_rejected=%zu",
+                  "alternative_selected=%zu alternative_rejected=%zu "
+                  "alternative_superseded=%zu alternative_contributed=%zu "
+                  "alternative_vetoed=%zu",
                   static_cast<unsigned long long>(code_object_reader.handle),
                   resource_summary.explicit_plans, resource_summary.dead_plans,
                   resource_summary.descriptor_growth_plans, resource_summary.spill_plans,
                   resource_summary.unsupported_plans, resource_summary.planned_spill_slot_bytes,
                   resource_summary.emitted_spill_patches, resource_summary.emitted_spill_slot_bytes,
                   resource_summary.alternative_attempts, resource_summary.alternative_selected,
-                  resource_summary.alternative_rejected);
+                  resource_summary.alternative_rejected, resource_summary.alternative_superseded,
+                  resource_summary.alternative_contributed, resource_summary.alternative_vetoed);
       for (const rocjitsu::ConSanCandidateResourcePlan &plan : patch_result.resource_plans) {
         constexpr size_t kMaxLoggedResourceOwners = 8;
         std::string owner_names;
@@ -4210,20 +4213,22 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             plan.scalar_tail_floor, plan.has_indirect_sgpr_access ? "true" : "false",
             plan.sgpr_reference_coverage_complete ? "complete" : "open",
             plan.original_private_segment_size);
-        if (plan.alternative) {
-          log_message(kLogDebug,
+        for (size_t alternative_index = 0; alternative_index < plan.alternatives.size();
+             ++alternative_index) {
+          const rocjitsu::ConSanResourcePlanAlternative &alternative =
+              plan.alternatives[alternative_index];
+          log_message(kLogInfo,
                       "ConSan MOI resource-alternative reader=%llu site=%s candidate=%zu "
-                      "text_offset=0x%llx kind=%s scratch_count=%u source=%s reason=%s selected=%s",
+                      "text_offset=0x%llx attempt=%zu kind=%s scratch_count=%u "
+                      "source=%s reason=%s outcome=%s",
                       static_cast<unsigned long long>(code_object_reader.handle),
                       moi_resource_site_kind_name(plan.site_kind), plan.candidate_index,
-                      static_cast<unsigned long long>(plan.text_offset),
-                      rocjitsu::consan_resource_plan_alternative_kind_name(plan.alternative->kind),
-                      plan.alternative->scratch_vgpr_count,
-                      moi_resource_source_name(plan.alternative->source),
-                      rocjitsu::consan_register_plan_reason_name(plan.alternative->reason),
-                      rocjitsu::consan_resource_plan_alternative_selected(plan, *plan.alternative)
-                          ? "true"
-                          : "false");
+                      static_cast<unsigned long long>(plan.text_offset), alternative_index,
+                      rocjitsu::consan_resource_plan_alternative_kind_name(alternative.kind),
+                      alternative.scratch_vgpr_count, moi_resource_source_name(alternative.source),
+                      rocjitsu::consan_register_plan_reason_name(alternative.reason),
+                      rocjitsu::consan_resource_plan_alternative_outcome_name(
+                          rocjitsu::consan_resource_plan_alternative_outcome(plan, alternative)));
         }
       }
       if (patch_result.resolved_moi_owner_vgpr || patch_result.resolved_moi_epoch_vgpr ||

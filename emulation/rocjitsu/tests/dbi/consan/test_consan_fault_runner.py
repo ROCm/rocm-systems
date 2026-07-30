@@ -844,7 +844,12 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                     "print('[rocjitsu-dbi-hooks] ConSan summary reader=7 supported_lds_sites=3 function_supported_lds_sites=2 skips=4 rejects=1')",
                     "print('[rocjitsu-dbi-hooks] ConSan coverage_site reader=7 kind=atomic disposition=supported reason=none outcome=patched lowering_reason=none resource_reason=none container=atomic_kernel scope=kernel text=0x20 mnemonic=global_atomic_add')",
                     "print('[rocjitsu-dbi-hooks] ConSan coverage_site reader=7 kind=access disposition=unsupported reason=unsupported_mnemonic outcome=unsupported lowering_reason=semantic_unsupported resource_reason=none container=unsupported_helper scope=function text=0x30 mnemonic=ds_load_b96')",
-                    "print('[rocjitsu-dbi-hooks] ConSan MOI resources reader=7 emitted_spill_patches=2 emitted_spill_slot_bytes=24')",
+                    "print('[rocjitsu-dbi-hooks] ConSan MOI resources reader=7 emitted_spill_patches=2 emitted_spill_slot_bytes=24 alternative_attempts=5 alternative_selected=1 alternative_rejected=1 alternative_superseded=1 alternative_contributed=1 alternative_vetoed=1')",
+                    "print('[rocjitsu-dbi-hooks] ConSan MOI resource-alternative reader=7 site=access candidate=0 text_offset=0x20 attempt=0 kind=guest_operand_overlap_spill scratch_count=17 source=spill reason=none outcome=superseded')",
+                    "print('[rocjitsu-dbi-hooks] ConSan MOI resource-alternative reader=7 site=access candidate=0 text_offset=0x20 attempt=1 kind=spill_backed_operand_recovery scratch_count=16 source=spill reason=none outcome=selected')",
+                    "print('[rocjitsu-dbi-hooks] ConSan MOI resource-alternative reader=7 site=access candidate=0 text_offset=0x20 attempt=2 kind=guest_operand_overlap_spill scratch_count=16 source=spill reason=none outcome=contributed')",
+                    "print('[rocjitsu-dbi-hooks] ConSan MOI resource-alternative reader=7 site=atomic candidate=1 text_offset=0x40 attempt=0 kind=guest_operand_overlap_spill scratch_count=10 source=unsupported reason=no_legal_window outcome=rejected')",
+                    "print('[rocjitsu-dbi-hooks] ConSan MOI resource-alternative reader=7 site=fence candidate=2 text_offset=0x60 attempt=0 kind=guest_operand_overlap_spill scratch_count=8 source=spill reason=none outcome=vetoed')",
                     "print('[rocjitsu-dbi-hooks] ConSan MOI auto report buffer skipped reader=6: no MOI report sites')",
                     "print('[rocjitsu-dbi-hooks] ConSan MOI auto report plan reader=7 outcome=complete reason=none required_bytes=4096 cap_bytes=16777216 per_buffer_ceiling=16777216 process_ceiling=268435456 access_ranges=5 barriers=2 atomics=4 fences=1 diagnostics=4 sampled_banks=3 sampled_watchpoints=3 inline_lds_bytes=128 inline_releases=64 inline_snapshots=64 inline_tokens=64')",
                     "print('[rocjitsu-dbi-hooks] ConSan MOI auto report buffer reader=7 bytes=4096 required_bytes=4096 cap_bytes=16777216 process_current_bytes=4096 process_peak_bytes=4096 process_ceiling_bytes=268435456 allocation_outcome=allocated access_record_capacity=5 barrier_record_capacity=2 atomic_record_capacity=4 fence_record_capacity=1 exact_shadow_entry_capacity=32 diagnostic_capacity=4 inline_atomic_release_capacity=64 inline_acquired_epoch_token_capacity=64 inline_causal_snapshot_capacity=64 sampled_watchpoint_capacity=3 sampled_causal_window_capacity=6 sampled_sync_metadata_capacity=6 sampled_pending_acquire_capacity=6')",
@@ -1076,6 +1081,92 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                 result["metrics"]["inline_causal_snapshot_capacity_entries"], 64
             )
             self.assertEqual(result["metrics"]["spill_slot_bytes"], 24)
+            self.assertEqual(
+                result["metrics"]["resource_plan_alternative_counts"],
+                {
+                    "attempts": 5,
+                    "selected": 1,
+                    "rejected": 1,
+                    "superseded": 1,
+                    "contributed": 1,
+                    "vetoed": 1,
+                },
+            )
+            self.assertEqual(
+                result["metrics"]["resource_plan_alternatives"],
+                [
+                    {
+                        "reader": "7",
+                        "site": "access",
+                        "candidate": 0,
+                        "text_offset": 0x20,
+                        "attempt": 0,
+                        "kind": "guest_operand_overlap_spill",
+                        "scratch_count": 17,
+                        "source": "spill",
+                        "reason": "none",
+                        "outcome": "superseded",
+                    },
+                    {
+                        "reader": "7",
+                        "site": "access",
+                        "candidate": 0,
+                        "text_offset": 0x20,
+                        "attempt": 1,
+                        "kind": "spill_backed_operand_recovery",
+                        "scratch_count": 16,
+                        "source": "spill",
+                        "reason": "none",
+                        "outcome": "selected",
+                    },
+                    {
+                        "reader": "7",
+                        "site": "access",
+                        "candidate": 0,
+                        "text_offset": 0x20,
+                        "attempt": 2,
+                        "kind": "guest_operand_overlap_spill",
+                        "scratch_count": 16,
+                        "source": "spill",
+                        "reason": "none",
+                        "outcome": "contributed",
+                    },
+                    {
+                        "reader": "7",
+                        "site": "atomic",
+                        "candidate": 1,
+                        "text_offset": 0x40,
+                        "attempt": 0,
+                        "kind": "guest_operand_overlap_spill",
+                        "scratch_count": 10,
+                        "source": "unsupported",
+                        "reason": "no_legal_window",
+                        "outcome": "rejected",
+                    },
+                    {
+                        "reader": "7",
+                        "site": "fence",
+                        "candidate": 2,
+                        "text_offset": 0x60,
+                        "attempt": 0,
+                        "kind": "guest_operand_overlap_spill",
+                        "scratch_count": 8,
+                        "source": "spill",
+                        "reason": "none",
+                        "outcome": "vetoed",
+                    },
+                ],
+            )
+            self.assertEqual(
+                result["metrics"]["resource_plan_alternative_record_count"], 5
+            )
+            self.assertEqual(
+                result["metrics"]["resource_plan_alternatives_truncated"], 0
+            )
+            self.assertTrue(result["metrics"]["resource_plan_alternatives_complete"])
+            self.assertIsNone(
+                result["metrics"]["resource_plan_alternative_parse_error"]
+            )
             self.assertEqual(result["metrics"]["private_segment_bytes"], 96)
             self.assertEqual(result["metrics"]["workgroup_shadow_bytes"], 128)
             self.assertEqual(result["metrics"]["group_segment_bytes"], 512)
@@ -1085,6 +1176,96 @@ class ConSanFaultRunnerTest(unittest.TestCase):
             self.assertEqual(reader["group_segment_bytes"], 512)
             self.assertEqual(result["metrics"]["modified_code_object_count"], 1)
             self.assertEqual(result["metrics"]["code_growth_bytes"], 16)
+
+    def test_resource_plan_alternative_parser_surfaces_unknown_vocabulary(self) -> None:
+        parsed = runner._parse_consan_log(
+            "\n".join(
+                (
+                    "[rocjitsu-dbi-hooks] ConSan MOI resources reader=7 "
+                    "alternative_attempts=1 alternative_selected=1 "
+                    "alternative_rejected=0 alternative_superseded=0 "
+                    "alternative_contributed=0 alternative_vetoed=0",
+                    "[rocjitsu-dbi-hooks] ConSan MOI resource-alternative "
+                    "reader=7 site=access candidate=0 text_offset=0x20 attempt=0 "
+                    "kind=future_kind scratch_count=17 source=future_source "
+                    "reason=none outcome=future_outcome",
+                )
+            )
+        )
+
+        metrics = parsed["metrics"]
+        self.assertFalse(metrics["resource_plan_alternatives_complete"])
+        self.assertFalse(parsed["coverage"]["evidence_complete"])
+        self.assertIn(
+            "unknown kind future_kind", metrics["resource_plan_alternative_parse_error"]
+        )
+        self.assertIn(
+            "unknown source future_source",
+            metrics["resource_plan_alternative_parse_error"],
+        )
+        self.assertIn(
+            "unknown outcome future_outcome",
+            metrics["resource_plan_alternative_parse_error"],
+        )
+
+    def test_resource_plan_alternative_parser_rejects_inconsistent_counts(self) -> None:
+        parsed = runner._parse_consan_log(
+            "\n".join(
+                (
+                    "[rocjitsu-dbi-hooks] ConSan MOI resources reader=7 "
+                    "alternative_attempts=2 alternative_selected=2 "
+                    "alternative_rejected=0 alternative_superseded=0 "
+                    "alternative_contributed=0 alternative_vetoed=0",
+                    "[rocjitsu-dbi-hooks] ConSan MOI resource-alternative "
+                    "reader=7 site=access candidate=0 text_offset=0x20 attempt=0 "
+                    "kind=guest_operand_overlap_spill scratch_count=17 source=spill "
+                    "reason=none outcome=selected",
+                    "[rocjitsu-dbi-hooks] ConSan MOI resource-alternative "
+                    "reader=7 site=access candidate=0 text_offset=0x20 attempt=2 "
+                    "kind=spill_backed_operand_recovery scratch_count=16 source=spill "
+                    "reason=none outcome=selected",
+                )
+            )
+        )
+
+        metrics = parsed["metrics"]
+        self.assertFalse(metrics["resource_plan_alternatives_complete"])
+        self.assertIn(
+            "non-chronological attempt",
+            metrics["resource_plan_alternative_parse_error"],
+        )
+        self.assertIn(
+            "more than one selected alternative",
+            metrics["resource_plan_alternative_parse_error"],
+        )
+
+    def test_resource_plan_alternative_parser_bounds_retained_records(self) -> None:
+        record_count = runner.MAX_RESOURCE_PLAN_ALTERNATIVES + 1
+        records = [
+            "[rocjitsu-dbi-hooks] ConSan MOI resources reader=7 "
+            f"alternative_attempts={record_count} alternative_selected=0 "
+            f"alternative_rejected={record_count} alternative_superseded=0 "
+            "alternative_contributed=0 alternative_vetoed=0"
+        ]
+        records.extend(
+            "[rocjitsu-dbi-hooks] ConSan MOI resource-alternative "
+            f"reader=7 site=access candidate={candidate} text_offset=0x20 attempt=0 "
+            "kind=guest_operand_overlap_spill scratch_count=17 source=unsupported "
+            "reason=no_legal_window outcome=rejected"
+            for candidate in range(record_count)
+        )
+
+        metrics = runner._parse_consan_log("\n".join(records))["metrics"]
+        self.assertEqual(
+            len(metrics["resource_plan_alternatives"]),
+            runner.MAX_RESOURCE_PLAN_ALTERNATIVES,
+        )
+        self.assertEqual(
+            metrics["resource_plan_alternative_record_count"], record_count
+        )
+        self.assertEqual(metrics["resource_plan_alternatives_truncated"], 1)
+        self.assertFalse(metrics["resource_plan_alternatives_complete"])
+        self.assertIsNone(metrics["resource_plan_alternative_parse_error"])
 
     def test_strict_site_disposition_parse_failure_is_retained(self) -> None:
         parsed = runner._parse_consan_log(

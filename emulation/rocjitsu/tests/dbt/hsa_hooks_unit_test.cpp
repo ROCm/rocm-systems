@@ -4416,6 +4416,107 @@ TEST(HsaHooksUnitTest, ConSanCoverageSiteDiagnosticsRetainStableReasonsAndSource
       << log;
 }
 
+TEST(HsaHooksUnitTest, ConSanResourcePlanFallbackTelemetryIsVisibleAtQualificationLogLevel) {
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  const ConSanHookProfile &profile = kConSanHookProfiles[1];
+  rocjitsu::ConSanResult result;
+  result.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  result.flavor = profile.expected_flavor;
+  result.moi_engine = profile.expected_engine;
+  result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  result.modified = true;
+  result.final_validation_passed = true;
+  result.elf_bytes = {0x7f, 'E', 'L', 'F', 'p', 'a', 't', 'c', 'h'};
+
+  rocjitsu::ConSanCandidateResourcePlan access_plan;
+  access_plan.site_kind = rocjitsu::ConSanResourceSiteKind::Access;
+  access_plan.candidate_index = 0;
+  access_plan.text_offset = 0x20;
+  access_plan.source = rocjitsu::ConSanRegisterAllocationSource::SpillRequired;
+  access_plan.alternatives = {
+      {.kind = rocjitsu::ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill,
+       .source = rocjitsu::ConSanRegisterAllocationSource::SpillRequired,
+       .scratch_vgpr_count = 17,
+       .outcome = rocjitsu::ConSanResourcePlanAlternativeOutcome::Superseded},
+      {.kind = rocjitsu::ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery,
+       .source = rocjitsu::ConSanRegisterAllocationSource::SpillRequired,
+       .scratch_vgpr_count = 16,
+       .outcome = rocjitsu::ConSanResourcePlanAlternativeOutcome::Selected},
+      {.kind = rocjitsu::ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill,
+       .source = rocjitsu::ConSanRegisterAllocationSource::SpillRequired,
+       .scratch_vgpr_count = 16,
+       .outcome = rocjitsu::ConSanResourcePlanAlternativeOutcome::Contributed},
+  };
+  result.resource_plans.push_back(std::move(access_plan));
+
+  rocjitsu::ConSanCandidateResourcePlan atomic_plan;
+  atomic_plan.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic;
+  atomic_plan.candidate_index = 1;
+  atomic_plan.text_offset = 0x40;
+  atomic_plan.source = rocjitsu::ConSanRegisterAllocationSource::Unsupported;
+  atomic_plan.reason = rocjitsu::ConSanRegisterPlanReason::ForbiddenOverlap;
+  atomic_plan.alternatives = {
+      {.kind = rocjitsu::ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill,
+       .source = rocjitsu::ConSanRegisterAllocationSource::SpillRequired,
+       .scratch_vgpr_count = 10,
+       .outcome = rocjitsu::ConSanResourcePlanAlternativeOutcome::Selected},
+  };
+  result.resource_plans.push_back(std::move(atomic_plan));
+
+  rocjitsu::ConSanCandidateResourcePlan fence_plan;
+  fence_plan.site_kind = rocjitsu::ConSanResourceSiteKind::Fence;
+  fence_plan.candidate_index = 2;
+  fence_plan.text_offset = 0x60;
+  fence_plan.source = rocjitsu::ConSanRegisterAllocationSource::Unsupported;
+  fence_plan.reason = rocjitsu::ConSanRegisterPlanReason::NoLegalWindow;
+  fence_plan.alternatives = {
+      {.kind = rocjitsu::ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill,
+       .source = rocjitsu::ConSanRegisterAllocationSource::Unsupported,
+       .reason = rocjitsu::ConSanRegisterPlanReason::NoLegalWindow,
+       .scratch_vgpr_count = 8,
+       .outcome = rocjitsu::ConSanResourcePlanAlternativeOutcome::Rejected},
+  };
+  result.resource_plans.push_back(std::move(fence_plan));
+  result.resource_plan_summary.alternative_attempts = 5;
+  result.resource_plan_summary.alternative_selected = 1;
+  result.resource_plan_summary.alternative_rejected = 1;
+  result.resource_plan_summary.alternative_superseded = 1;
+  result.resource_plan_summary.alternative_contributed = 1;
+  result.resource_plan_summary.alternative_vetoed = 1;
+
+  testing::internal::CaptureStderr();
+  run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 102u, result.elf_bytes);
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_NE(log.find("alternative_attempts=5 alternative_selected=1 "
+                     "alternative_rejected=1 alternative_superseded=1 "
+                     "alternative_contributed=1 alternative_vetoed=1"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("attempt=0 kind=guest_operand_overlap_spill scratch_count=17 "
+                     "source=spill reason=none outcome=superseded"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("attempt=1 kind=spill_backed_operand_recovery scratch_count=16 "
+                     "source=spill reason=none outcome=selected"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("attempt=2 kind=guest_operand_overlap_spill scratch_count=16 "
+                     "source=spill reason=none outcome=contributed"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("site=atomic candidate=1 text_offset=0x40 attempt=0 "
+                     "kind=guest_operand_overlap_spill scratch_count=10 "
+                     "source=spill reason=none outcome=vetoed"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("site=fence candidate=2 text_offset=0x60 attempt=0 "
+                     "kind=guest_operand_overlap_spill scratch_count=8 "
+                     "source=unsupported reason=no_legal_window outcome=rejected"),
+            std::string::npos)
+      << log;
+}
+
 TEST(HsaHooksUnitTest, ConSanCoverageDoesNotResurrectNotApplicableResourcePlan) {
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   const ConSanHookProfile &profile = kConSanHookProfiles[1];

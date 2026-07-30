@@ -32,6 +32,8 @@ from consan_validation_support import (
 )
 
 MAX_GPU_JOBS = 4
+MAX_RESOURCE_PLAN_ALTERNATIVES = 4096
+MAX_RESOURCE_PLAN_ALTERNATIVE_ERRORS = 16
 QUARANTINE_FILE = ".gpu-quarantine.json"
 GLOBAL_DESTRUCTIVE_LOCK_ENV = "CONSAN_DESTRUCTIVE_GPU_LOCK"
 DEFAULT_GLOBAL_DESTRUCTIVE_LOCK = "/tmp/rocjitsu-consan-destructive-gpu.lock"
@@ -52,6 +54,25 @@ _MUTATION_PATCH_KINDS = {
     "inline-atomic-order-rewrite",
     "inline-atomic-scope-rewrite",
 }
+
+_RESOURCE_PLAN_ALTERNATIVE_KINDS = {
+    "guest_operand_overlap_spill",
+    "spill_backed_operand_recovery",
+}
+_RESOURCE_PLAN_ALTERNATIVE_SOURCES = {
+    "unsupported",
+    "explicit",
+    "dead",
+    "descriptor-growth",
+    "spill",
+}
+_RESOURCE_PLAN_ALTERNATIVE_OUTCOMES = (
+    "selected",
+    "rejected",
+    "superseded",
+    "contributed",
+    "vetoed",
+)
 
 _MODE_SELECTIONS = {
     "record-replay": ("moi", "record_replay"),
@@ -93,6 +114,11 @@ def _required_integer(fields: dict[str, str], name: str) -> int | None:
         return int(value, 0)
     except ValueError:
         return None
+
+
+def _append_resource_plan_error(errors: list[str], message: str) -> None:
+    if len(errors) < MAX_RESOURCE_PLAN_ALTERNATIVE_ERRORS:
+        errors.append(message)
 
 
 def _parse_inline_release_evidence(fields: dict[str, str]) -> dict[str, object] | None:
@@ -270,6 +296,23 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
     rejected_sites = 0
     spill_patch_count = 0
     spill_slot_bytes = 0
+    resource_plan_alternative_counts = {
+        "attempts": 0,
+        "selected": 0,
+        "rejected": 0,
+        "superseded": 0,
+        "contributed": 0,
+        "vetoed": 0,
+    }
+    resource_plan_alternatives: list[dict[str, object]] = []
+    resource_plan_alternative_tallies = {
+        outcome: 0 for outcome in _RESOURCE_PLAN_ALTERNATIVE_OUTCOMES
+    }
+    resource_plan_alternative_record_count = 0
+    resource_plan_alternatives_truncated = 0
+    resource_plan_alternative_errors: list[str] = []
+    resource_plan_next_attempt: dict[tuple[str, str, int, int], int] = {}
+    resource_plan_selected_per_plan: dict[tuple[str, str, int, int], int] = {}
     report_buffer_bytes = 0
     report_plan_count = 0
     report_memory_summary_count = 0
@@ -479,6 +522,107 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
         elif record.startswith("MOI resources "):
             spill_patch_count += _integer(fields, "emitted_spill_patches")
             spill_slot_bytes += _integer(fields, "emitted_spill_slot_bytes")
+            for key, field in (
+                ("attempts", "alternative_attempts"),
+                ("selected", "alternative_selected"),
+                ("rejected", "alternative_rejected"),
+                ("superseded", "alternative_superseded"),
+                ("contributed", "alternative_contributed"),
+                ("vetoed", "alternative_vetoed"),
+            ):
+                value = _required_integer(fields, field)
+                if value is None or value < 0:
+                    _append_resource_plan_error(
+                        resource_plan_alternative_errors,
+                        f"invalid aggregate field {field}",
+                    )
+                else:
+                    resource_plan_alternative_counts[key] += value
+        elif record.startswith("MOI resource-alternative "):
+            resource_plan_alternative_record_count += 1
+            reader = fields.get("reader", "")
+            site = fields.get("site", "")
+            kind = fields.get("kind", "")
+            source = fields.get("source", "")
+            outcome = fields.get("outcome", "")
+            numbers = {
+                name: _required_integer(fields, name)
+                for name in ("candidate", "text_offset", "attempt", "scratch_count")
+            }
+            for name, value in numbers.items():
+                if value is None or value < 0:
+                    _append_resource_plan_error(
+                        resource_plan_alternative_errors,
+                        f"invalid detail field {name} at record "
+                        f"{resource_plan_alternative_record_count}",
+                    )
+            if not reader:
+                _append_resource_plan_error(
+                    resource_plan_alternative_errors,
+                    f"missing reader at record {resource_plan_alternative_record_count}",
+                )
+            if site not in {"access", "barrier", "atomic", "fence"}:
+                _append_resource_plan_error(
+                    resource_plan_alternative_errors,
+                    f"unknown site {site or '<missing>'}",
+                )
+            if kind not in _RESOURCE_PLAN_ALTERNATIVE_KINDS:
+                _append_resource_plan_error(
+                    resource_plan_alternative_errors,
+                    f"unknown kind {kind or '<missing>'}",
+                )
+            if source not in _RESOURCE_PLAN_ALTERNATIVE_SOURCES:
+                _append_resource_plan_error(
+                    resource_plan_alternative_errors,
+                    f"unknown source {source or '<missing>'}",
+                )
+            if outcome not in resource_plan_alternative_tallies:
+                _append_resource_plan_error(
+                    resource_plan_alternative_errors,
+                    f"unknown outcome {outcome or '<missing>'}",
+                )
+            else:
+                resource_plan_alternative_tallies[outcome] += 1
+
+            candidate = numbers["candidate"] if numbers["candidate"] is not None else 0
+            text_offset = (
+                numbers["text_offset"] if numbers["text_offset"] is not None else 0
+            )
+            attempt = numbers["attempt"] if numbers["attempt"] is not None else 0
+            plan_identity = (reader, site, candidate, text_offset)
+            if outcome == "selected":
+                resource_plan_selected_per_plan[plan_identity] = (
+                    resource_plan_selected_per_plan.get(plan_identity, 0) + 1
+                )
+            expected_attempt = resource_plan_next_attempt.get(plan_identity, 0)
+            if attempt != expected_attempt:
+                _append_resource_plan_error(
+                    resource_plan_alternative_errors,
+                    f"non-chronological attempt for {reader}:{site}:{candidate}:"
+                    f"0x{text_offset:x}: expected {expected_attempt}, got {attempt}",
+                )
+            resource_plan_next_attempt[plan_identity] = attempt + 1
+
+            parsed_alternative = {
+                "reader": reader,
+                "site": site or "unknown",
+                "candidate": candidate,
+                "text_offset": text_offset,
+                "attempt": attempt,
+                "kind": kind or "unknown",
+                "scratch_count": (
+                    numbers["scratch_count"]
+                    if numbers["scratch_count"] is not None
+                    else 0
+                ),
+                "source": source or "unknown",
+                "reason": fields.get("reason", "unknown"),
+                "outcome": outcome or "unknown",
+            }
+            if len(resource_plan_alternatives) < MAX_RESOURCE_PLAN_ALTERNATIVES:
+                resource_plan_alternatives.append(parsed_alternative)
+            else:
+                resource_plan_alternatives_truncated += 1
         elif record.startswith("MOI auto report plan "):
             plan = {
                 "reader": fields.get("reader", ""),
@@ -979,6 +1123,47 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
         mutation_reader_map.values(),
         key=lambda record: (record["process"], record["reader"]),
     )
+    classified_alternative_count = sum(
+        resource_plan_alternative_counts[outcome]
+        for outcome in _RESOURCE_PLAN_ALTERNATIVE_OUTCOMES
+    )
+    if classified_alternative_count != resource_plan_alternative_counts["attempts"]:
+        _append_resource_plan_error(
+            resource_plan_alternative_errors,
+            "aggregate alternative attempts do not equal classified outcomes",
+        )
+    if (
+        resource_plan_alternative_record_count
+        != resource_plan_alternative_counts["attempts"]
+    ):
+        _append_resource_plan_error(
+            resource_plan_alternative_errors,
+            "detail record count does not equal aggregate alternative attempts",
+        )
+    for outcome in _RESOURCE_PLAN_ALTERNATIVE_OUTCOMES:
+        if (
+            resource_plan_alternative_tallies[outcome]
+            != resource_plan_alternative_counts[outcome]
+        ):
+            _append_resource_plan_error(
+                resource_plan_alternative_errors,
+                f"detail {outcome} count does not match aggregate",
+            )
+    if any(count > 1 for count in resource_plan_selected_per_plan.values()):
+        _append_resource_plan_error(
+            resource_plan_alternative_errors,
+            "more than one selected alternative was recorded for a plan",
+        )
+    resource_plan_alternative_parse_error = (
+        "; ".join(resource_plan_alternative_errors)
+        if resource_plan_alternative_errors
+        else None
+    )
+    resource_plan_alternatives_complete = (
+        resource_plan_alternative_parse_error is None
+        and resource_plan_alternatives_truncated == 0
+    )
+
     requested = max(
         (int(record["requested"]) for record in mutation_readers), default=0
     )
@@ -1173,7 +1358,10 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             "site_dispositions": coverage_sites,
             "site_disposition_parse_error": coverage_site_parse_error,
             "site_dispositions_complete": coverage_site_parse_error is None,
-            "evidence_complete": coverage_site_parse_error is None,
+            "evidence_complete": (
+                coverage_site_parse_error is None
+                and resource_plan_alternative_parse_error is None
+            ),
             "inventoried_fault_sites": fault_sites,
             "supported_sites": supported_sites,
             "skipped_sites": skipped_sites,
@@ -1248,6 +1436,20 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             "inline_causal_snapshot_capacity_entries": inline_causal_snapshot_capacity_entries,
             "spill_patch_count": spill_patch_count,
             "spill_slot_bytes": spill_slot_bytes,
+            "resource_plan_alternative_counts": resource_plan_alternative_counts,
+            "resource_plan_alternatives": resource_plan_alternatives,
+            "resource_plan_alternative_record_count": (
+                resource_plan_alternative_record_count
+            ),
+            "resource_plan_alternatives_truncated": (
+                resource_plan_alternatives_truncated
+            ),
+            "resource_plan_alternatives_complete": (
+                resource_plan_alternatives_complete
+            ),
+            "resource_plan_alternative_parse_error": (
+                resource_plan_alternative_parse_error
+            ),
             "private_segment_bytes": sum(
                 record["private_segment_bytes"] for record in reader_coverage
             ),

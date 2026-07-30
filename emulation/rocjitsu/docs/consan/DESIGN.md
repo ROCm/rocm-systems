@@ -239,6 +239,40 @@ Use `inline_shadow` or `sampled` only when their different sensitivity,
 retained-state, and overhead trade-offs are desired. Ordinary runs do not
 require site, register, report-buffer, barrier, atomic, or sampling selection.
 
+### Resource-plan fallback telemetry
+
+The HSA hook emits a `ConSan MOI resources` aggregate and one
+`ConSan MOI resource-alternative` record for every structurally distinct
+fallback attempt. These records are qualification evidence and are visible at
+`RJ_CONSAN_LOG=1`.
+
+The `attempt` field starts at zero for each resource plan and follows stable
+planning order: attempts retained from the initial plan, the outer
+spill-backed recovery, then attempts nested inside that recovery. The kinds
+are:
+
+- `guest_operand_overlap_spill`: retries allocation with the admitted guest
+  operand overlap and a spill-backed save/restore window.
+- `spill_backed_operand_recovery`: retries a clobbering Inline Shadow load with
+  its compact address-recovery transaction shape.
+
+Each attempt has exactly one outcome:
+
+- `selected`: the final resource plan uses this attempt. At most one attempt
+  per plan is selected.
+- `rejected`: the attempt could not produce the required resource plan.
+- `superseded`: the attempt worked, but a later outer attempt replaced it.
+- `contributed`: the nested attempt enabled the selected outer attempt.
+- `vetoed`: the attempt worked locally, but a later whole-plan constraint
+  rejected it.
+
+The aggregate attempt count equals the sum of these five outcome counts. The
+fault runner validates the detailed vocabulary, chronological attempt numbers,
+per-outcome totals, and the at-most-one-selected invariant against the
+aggregate. It retains at most 4096 detailed records while still validating all
+records, and reports the total, truncated count, completeness, and any parse
+error in the `resource_plan_alternative_*` metrics.
+
 ## Interception and code-object flow
 
 The HSA hook wraps the code-object load path. For each memory-backed code

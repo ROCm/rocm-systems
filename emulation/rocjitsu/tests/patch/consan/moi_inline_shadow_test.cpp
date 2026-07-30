@@ -665,7 +665,7 @@ TEST(ConSanMoi, CdnaInlineShadowClobberingLoadFitsBelowAccumulatorBoundary) {
   }
 }
 
-TEST(ConSanMoi, Cdna4InlineShadowReportsRejectedSpillBackedWindowAlternative) {
+TEST(ConSanMoi, Cdna4InlineShadowRecordsEveryRejectedFallbackAttempt) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 6u, .vdst = 6u});
   std::vector<uint32_t> text_words(1200u, build_s_nop(0, kArch));
@@ -702,18 +702,32 @@ TEST(ConSanMoi, Cdna4InlineShadowReportsRejectedSpillBackedWindowAlternative) {
   const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
   EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::Unsupported);
   EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::NoLegalWindow);
-  ASSERT_TRUE(plan.alternative);
-  EXPECT_EQ(plan.alternative->kind, ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery);
-  EXPECT_EQ(plan.alternative->scratch_vgpr_count, 16u);
-  EXPECT_EQ(plan.alternative->source, ConSanRegisterAllocationSource::Unsupported);
-  EXPECT_EQ(plan.alternative->reason, ConSanRegisterPlanReason::NoLegalWindow);
-  EXPECT_FALSE(consan_resource_plan_alternative_selected(plan, *plan.alternative));
-  EXPECT_EQ(result.resource_plan_summary.alternative_attempts, 1u);
+  ASSERT_EQ(plan.alternatives.size(), 3u);
+  EXPECT_EQ(plan.alternatives[0].kind, ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill);
+  EXPECT_EQ(plan.alternatives[0].scratch_vgpr_count, 17u);
+  EXPECT_EQ(plan.alternatives[1].kind,
+            ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery);
+  EXPECT_EQ(plan.alternatives[1].scratch_vgpr_count, 16u);
+  EXPECT_EQ(plan.alternatives[2].kind, ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill);
+  EXPECT_EQ(plan.alternatives[2].scratch_vgpr_count, 16u);
+  for (const ConSanResourcePlanAlternative &alternative : plan.alternatives) {
+    EXPECT_EQ(alternative.source, ConSanRegisterAllocationSource::Unsupported);
+    EXPECT_EQ(alternative.reason, ConSanRegisterPlanReason::NoLegalWindow);
+    EXPECT_EQ(consan_resource_plan_alternative_outcome(plan, alternative),
+              ConSanResourcePlanAlternativeOutcome::Rejected);
+  }
+  EXPECT_EQ(result.resource_plan_summary.alternative_attempts, 3u);
   EXPECT_EQ(result.resource_plan_summary.alternative_selected, 0u);
-  EXPECT_EQ(result.resource_plan_summary.alternative_rejected, 1u);
+  EXPECT_EQ(result.resource_plan_summary.alternative_rejected, 3u);
+  EXPECT_EQ(result.resource_plan_summary.alternative_superseded, 0u);
+  EXPECT_EQ(result.resource_plan_summary.alternative_contributed, 0u);
+  EXPECT_EQ(result.resource_plan_summary.alternative_vetoed, 0u);
   EXPECT_EQ(result.resource_plan_summary.alternative_attempts,
             result.resource_plan_summary.alternative_selected +
-                result.resource_plan_summary.alternative_rejected);
+                result.resource_plan_summary.alternative_rejected +
+                result.resource_plan_summary.alternative_superseded +
+                result.resource_plan_summary.alternative_contributed +
+                result.resource_plan_summary.alternative_vetoed);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             0u);
@@ -757,8 +771,13 @@ TEST(ConSanMoi, Cdna4InlineShadowReloadsOverlappingDynamicStackAddress) {
   EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_EQ(plan.scratch_vgpr, 0u);
   EXPECT_EQ(plan.scratch_vgpr_count, 16u);
-  EXPECT_FALSE(plan.alternative.has_value());
-  EXPECT_EQ(result.resource_plan_summary.alternative_attempts, 0u);
+  ASSERT_EQ(plan.alternatives.size(), 1u);
+  EXPECT_EQ(plan.alternatives.front().kind,
+            ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill);
+  EXPECT_EQ(consan_resource_plan_alternative_outcome(plan, plan.alternatives.front()),
+            ConSanResourcePlanAlternativeOutcome::Selected);
+  EXPECT_EQ(result.resource_plan_summary.alternative_attempts, 1u);
+  EXPECT_EQ(result.resource_plan_summary.alternative_selected, 1u);
   const auto patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
@@ -831,9 +850,12 @@ TEST(ConSanMoi, CdnaInlineShadowAtomicTrackingFitsSpillBackedTransactionWindow) 
 
     ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
     options.force_vgpr_spill = true;
-    options.moi_owner_vgpr = 24u;
-    options.moi_epoch_vgpr = 25u;
-    options.moi_workgroup_key_vgpr = 26u;
+    // Both fallback shapes fit through guest overlap, while no disjoint
+    // window exists. The compact 24-register recovery supersedes the initial
+    // 25-register attempt and its nested overlap contributes to that result.
+    options.moi_owner_vgpr = 25u;
+    options.moi_epoch_vgpr = 26u;
+    options.moi_workgroup_key_vgpr = 27u;
     options.moi_exec_save_sgpr = 40u;
     options.moi_track_atomics = true;
     options.moi_track_barriers = false;
@@ -853,16 +875,30 @@ TEST(ConSanMoi, CdnaInlineShadowAtomicTrackingFitsSpillBackedTransactionWindow) 
     EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
     EXPECT_EQ(plan.scratch_vgpr, 0u);
     EXPECT_EQ(plan.scratch_vgpr_count, 24u);
-    ASSERT_TRUE(plan.alternative);
-    EXPECT_EQ(plan.alternative->kind,
+    ASSERT_EQ(plan.alternatives.size(), 3u);
+    EXPECT_EQ(plan.alternatives[0].kind,
+              ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill);
+    EXPECT_EQ(plan.alternatives[0].scratch_vgpr_count, 25u);
+    EXPECT_EQ(consan_resource_plan_alternative_outcome(plan, plan.alternatives[0]),
+              ConSanResourcePlanAlternativeOutcome::Superseded);
+    EXPECT_EQ(plan.alternatives[1].kind,
               ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery);
-    EXPECT_EQ(plan.alternative->scratch_vgpr_count, 24u);
-    EXPECT_EQ(plan.alternative->source, ConSanRegisterAllocationSource::SpillRequired);
-    EXPECT_EQ(plan.alternative->reason, plan.reason);
-    EXPECT_TRUE(consan_resource_plan_alternative_selected(plan, *plan.alternative));
-    EXPECT_EQ(result.resource_plan_summary.alternative_attempts, 1u);
+    EXPECT_EQ(plan.alternatives[1].scratch_vgpr_count, 24u);
+    EXPECT_EQ(consan_resource_plan_alternative_outcome(plan, plan.alternatives[1]),
+              ConSanResourcePlanAlternativeOutcome::Selected);
+    EXPECT_EQ(plan.alternatives[2].kind,
+              ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill);
+    EXPECT_EQ(plan.alternatives[2].scratch_vgpr_count, 24u);
+    EXPECT_EQ(plan.alternatives[2].source, ConSanRegisterAllocationSource::SpillRequired);
+    EXPECT_EQ(plan.alternatives[2].reason, plan.reason);
+    EXPECT_EQ(consan_resource_plan_alternative_outcome(plan, plan.alternatives[2]),
+              ConSanResourcePlanAlternativeOutcome::Contributed);
+    EXPECT_EQ(result.resource_plan_summary.alternative_attempts, 3u);
     EXPECT_EQ(result.resource_plan_summary.alternative_selected, 1u);
     EXPECT_EQ(result.resource_plan_summary.alternative_rejected, 0u);
+    EXPECT_EQ(result.resource_plan_summary.alternative_superseded, 1u);
+    EXPECT_EQ(result.resource_plan_summary.alternative_contributed, 1u);
+    EXPECT_EQ(result.resource_plan_summary.alternative_vetoed, 0u);
     const auto patch = std::ranges::find(
         result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
     ASSERT_NE(patch, result.patches.end());

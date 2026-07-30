@@ -1129,12 +1129,25 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
 void summarize_moi_resource_plans(ConSanResult &result) {
   result.resource_plan_summary = {};
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-    if (plan.alternative) {
+    for (const ConSanResourcePlanAlternative &alternative : plan.alternatives) {
       ++result.resource_plan_summary.alternative_attempts;
-      if (consan_resource_plan_alternative_selected(plan, *plan.alternative))
+      switch (consan_resource_plan_alternative_outcome(plan, alternative)) {
+      case ConSanResourcePlanAlternativeOutcome::Selected:
         ++result.resource_plan_summary.alternative_selected;
-      else
+        break;
+      case ConSanResourcePlanAlternativeOutcome::Rejected:
         ++result.resource_plan_summary.alternative_rejected;
+        break;
+      case ConSanResourcePlanAlternativeOutcome::Superseded:
+        ++result.resource_plan_summary.alternative_superseded;
+        break;
+      case ConSanResourcePlanAlternativeOutcome::Contributed:
+        ++result.resource_plan_summary.alternative_contributed;
+        break;
+      case ConSanResourcePlanAlternativeOutcome::Vetoed:
+        ++result.resource_plan_summary.alternative_vetoed;
+        break;
+      }
     }
     switch (plan.source) {
     case ConSanRegisterAllocationSource::Explicit:
