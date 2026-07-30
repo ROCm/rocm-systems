@@ -161,8 +161,7 @@ if(HAVE_HIPCC_WRAPPERS)
   endif()
 
   # Compile each wrapper file with hipcc (custom commands)
-  foreach(wrapper paths_wrapper search_wrapper NullParentTests_wrapper
-                  mem_manager_src_wrapper mem_manager_test_wrapper)
+  foreach(wrapper mem_manager_src_wrapper mem_manager_test_wrapper)
     add_custom_command(
       OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${wrapper}.o
       COMMAND ${HIPCC_EXECUTABLE} ${HIPCC_COMPILE_FLAGS} ${HIPCC_INCLUDE_FLAGS}
@@ -175,17 +174,11 @@ if(HAVE_HIPCC_WRAPPERS)
 
   # wrapper_link_stubs.cpp is pure C++ — compiled with the regular g++ compiler
   set_source_files_properties(
-    ${CMAKE_CURRENT_BINARY_DIR}/paths_wrapper.o
-    ${CMAKE_CURRENT_BINARY_DIR}/search_wrapper.o
-    ${CMAKE_CURRENT_BINARY_DIR}/NullParentTests_wrapper.o
     ${CMAKE_CURRENT_BINARY_DIR}/mem_manager_src_wrapper.o
     ${CMAKE_CURRENT_BINARY_DIR}/mem_manager_test_wrapper.o
     PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE
   )
   add_library(rccl-real-source-wrappers STATIC
-    ${CMAKE_CURRENT_BINARY_DIR}/paths_wrapper.o
-    ${CMAKE_CURRENT_BINARY_DIR}/search_wrapper.o
-    ${CMAKE_CURRENT_BINARY_DIR}/NullParentTests_wrapper.o
     ${CMAKE_CURRENT_BINARY_DIR}/mem_manager_src_wrapper.o
     ${CMAKE_CURRENT_BINARY_DIR}/mem_manager_test_wrapper.o
     wrapper_link_stubs.cpp
