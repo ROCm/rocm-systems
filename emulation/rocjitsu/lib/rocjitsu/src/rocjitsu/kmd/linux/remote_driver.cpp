@@ -119,7 +119,8 @@ Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
 /// are entitled to oversize it: the uapi contract is that KFD fills only the
 /// devices that exist and reports the true total back, so libhsakmt's
 /// hsaKmtDbgGetDeviceDataCtx() just passes UINT32_MAX. Taken literally that
-/// reserves UINT32_MAX * 120 bytes (~480 GiB); the resize throws std::bad_alloc
+/// reserves UINT32_MAX * sizeof(kfd_dbg_device_info_entry) bytes (128 B/entry,
+/// so ~512 GiB); the resize throws std::bad_alloc
 /// out of an interposed ioctl() and takes the process down.
 ///
 /// Clamping the transmitted count keeps the ioctl's semantics rather than
@@ -132,8 +133,12 @@ Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
 /// @returns the device count to transmit, whose tail is guaranteed to fit
 /// within @ref kMaxPayloadBytes alongside @p arg_size bytes of ioctl args.
 uint32_t clamp_snapshot_devices(uint32_t num_devices, uint32_t entry_size, size_t arg_size) {
-  if (entry_size == 0 || num_devices == 0)
-    return 0;
+  // A zero stride reserves nothing whatever the count is, so pass the caller's
+  // count through untouched. Clamping it to zero would rewrite a request the
+  // driver rejects with -EFAULT ("you asked for entries but gave no stride")
+  // into the count-only probe (num_devices(IN) == 0) it answers with success.
+  if (entry_size == 0)
+    return num_devices;
 
   const size_t overhead = sizeof(RpcIoctlRequest) + arg_size;
   if (overhead >= kMaxPayloadBytes)

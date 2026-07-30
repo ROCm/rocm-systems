@@ -1312,6 +1312,51 @@ TEST(RemoteDriverDbgSnapshotTest, NullSnapshotBufferIsNeverWrittenThrough) {
   }
 }
 
+// A zero entry_size reserves no inline tail whatever the device count is, so
+// the transmitted num_devices must survive the request clamp untouched.
+// Rewriting it to zero would turn the request SimulatedKfd rejects with -EFAULT
+// (DbgTrapDeviceSnapshotRejectsUnwritableBuffer) into the count-only probe
+// num_devices(IN) == 0, which the daemon answers with success -- daemon mode
+// would silently disagree with local mode.
+TEST(RemoteDriverDbgSnapshotTest, ZeroStrideSnapshotKeepsTheRequestedDeviceCount) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  constexpr uint32_t kRequested = 1;
+  constexpr uint8_t kSentinel = 0xAB;
+  const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
+
+  std::array<uint8_t, sizeof(kfd_dbg_device_info_entry)> caller_buf{};
+  caller_buf.fill(kSentinel);
+  std::atomic<uint32_t> observed_num_devices{0};
+
+  std::jthread server([&, server_fd = sv[1]] {
+    const CloseOnScopeExit closer{server_fd};
+    serve_one_ioctl_reply(server_fd, -EFAULT, arg_struct_size, 0, 0,
+                          [&](const rocjitsu::RpcHeader &, kfd_ioctl_dbg_trap_args &echoed) {
+                            observed_num_devices = echoed.device_snapshot.num_devices;
+                          });
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = 4242;
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.num_devices = kRequested;
+  snap.device_snapshot.entry_size = 0;
+  snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
+
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), -EFAULT);
+  server.join();
+
+  EXPECT_EQ(observed_num_devices.load(), kRequested)
+      << "a zero stride was clamped into the count-only probe";
+  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(), [](uint8_t b) {
+    return b == kSentinel;
+  })) << "rejected snapshot mutated caller memory";
+}
+
 // Reply patch modelling a daemon that enumerates fewer GPUs than the caller
 // asked for: report the true device total and the driver's clamped entry size.
 IoctlReplyPatch snapshot_outputs(uint32_t out_num_devices, uint32_t out_entry_size) {
