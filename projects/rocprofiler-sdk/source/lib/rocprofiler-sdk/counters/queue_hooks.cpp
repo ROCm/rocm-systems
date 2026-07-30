@@ -82,7 +82,8 @@ signal_completion_hook(const hsa::Queue& /*queue*/,
 {
     // Route by packet provenance, not current activeness: completed_cb self-filters via
     // packet_return_map, so in-flight dispatches still complete after stop_context removes the
-    // context from the active list (required for kernel replay and ordinary stop/drain).
+    // context from the active list. This is the mechanism that makes stop_context safe without a
+    // GPU drain, and it is also what kernel replay needs, since each pass completes separately.
     auto contexts = context::get_registered_contexts(counter_contexts_filter());
     for(const auto* ctx : contexts)
     {

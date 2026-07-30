@@ -182,13 +182,17 @@ stop_context(const context::context* ctx)
 
     if(controller)
     {
-        // Drain in-flight dispatches while the context remains in the active list (see
-        // context::stop_context ordering). Completions are routed via registered contexts in
-        // counters::signal_completion_hook.
-        hsa::queue_controller_sync();
+        // No GPU drain here. In-flight dispatches are handled by signal_completion_hook routing
+        // over registered rather than active contexts; the serializer transition is reconciled
+        // GPU-side by the hsa_barrier that profiler_serializer::disable() pushes.
         controller->disable_serialization();
+        // No per-queue callback to remove; counters::write_hook no-ops once
+        // dispatch_counter_collection is disabled above.
     }
 
+    // Safe with completions still outstanding: consumer_thread_t::exit() waits until the queue is
+    // empty before joining, and consumer_thread_t::add() consumes inline once the thread is gone,
+    // so a completion arriving after this point is still processed on the async handler thread.
     callback_thread_stop();
 }
 
