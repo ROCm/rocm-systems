@@ -26,6 +26,17 @@ namespace rocprofiler
 {
 namespace tool
 {
+namespace defaults
+{
+void
+validate_perfetto_buffer_size(size_t value)
+{
+    LOG_IF(FATAL, !is_valid_perfetto_buffer_size(value))
+        << "Invalid Perfetto buffer size: " << value << " KB. Expected a value from "
+        << perfetto_buffer_size_min_kb << " to " << perfetto_buffer_size_max_kb << " KB";
+}
+}  // namespace defaults
+
 output_config
 output_config::load_from_env()
 {
@@ -57,6 +68,7 @@ output_config::parse_env()
     perfetto_shmem_size_hint =
         common::get_env("ROCPROF_PERFETTO_SHMEM_SIZE_HINT_KB", perfetto_shmem_size_hint);
     perfetto_buffer_size = common::get_env("ROCPROF_PERFETTO_BUFFER_SIZE_KB", perfetto_buffer_size);
+    defaults::validate_perfetto_buffer_size(perfetto_buffer_size);
 
     output_path    = common::get_env("ROCPROF_OUTPUT_PATH", output_path);
     output_file    = common::get_env("ROCPROF_OUTPUT_FILE_NAME", output_file);

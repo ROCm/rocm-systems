@@ -85,8 +85,13 @@ PerfettoSession::PerfettoSession(const tool::output_config& output_cfg, sqlite3*
     auto shmem_size_hint = config.perfetto_shmem_size_hint;
     auto buffer_size_kb  = config.perfetto_buffer_size;
 
+    // The rocpd path sets perfetto_buffer_size directly through the pybind binding
+    // and never runs output_config::parse_env(), so validate here before narrowing
+    // to Perfetto's uint32_t size_kb.
+    tool::defaults::validate_perfetto_buffer_size(buffer_size_kb);
+
     auto* buffer_config = cfg.add_buffers();
-    buffer_config->set_size_kb(buffer_size_kb);
+    buffer_config->set_size_kb(static_cast<uint32_t>(buffer_size_kb));
 
     args.supports_multiple_data_source_instances = true;
     // track_event_cfg.clear_disabled_categories();
