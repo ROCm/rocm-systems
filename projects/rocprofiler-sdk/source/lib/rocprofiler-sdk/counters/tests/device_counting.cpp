@@ -316,7 +316,7 @@ struct argument_test_context
 };
 
 void
-set_argument_test_profile(rocprofiler_context_id_t               context_id,
+set_argument_test_profile(rocprofiler_context_id_t context_id,
                           rocprofiler_agent_id_t,
                           rocprofiler_device_counting_agent_cb_t set_config,
                           void*                                  user_data)
@@ -1089,9 +1089,10 @@ TEST_F(device_counting_service_test, immediate_output_requires_record_count)
 
     std::array<rocprofiler_counter_record_t, 1> output{};
     output.front().counter_value = -1.0;
-    EXPECT_EQ(rocprofiler_sample_device_counting_service(
-                  state.context, {.value = 1}, ROCPROFILER_COUNTER_FLAG_NONE, output.data(), nullptr),
-              ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+    EXPECT_EQ(
+        rocprofiler_sample_device_counting_service(
+            state.context, {.value = 1}, ROCPROFILER_COUNTER_FLAG_NONE, output.data(), nullptr),
+        ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
     EXPECT_EQ(output.front().counter_value, -1.0);
 
     EXPECT_EQ(rocprofiler_stop_context(state.context), ROCPROFILER_STATUS_SUCCESS);
