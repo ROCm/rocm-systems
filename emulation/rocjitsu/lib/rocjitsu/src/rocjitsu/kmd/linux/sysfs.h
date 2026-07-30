@@ -45,7 +45,8 @@ public:
     // Compute unit organization
     uint32_t simd_count = 0;
     uint32_t max_waves_per_simd = 10;
-    uint32_t num_shader_engines = 0; ///< KFD array_count: total shader arrays.
+    uint32_t num_shader_engines = 0; ///< KFD array_count per XCC (the emitted
+                                     ///< property is this times num_xcc).
     uint32_t num_shader_arrays_per_engine = 1;
     uint32_t num_cu_per_sh = 0;
     uint32_t simd_per_cu = 4;

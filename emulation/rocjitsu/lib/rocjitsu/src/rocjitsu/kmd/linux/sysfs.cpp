@@ -296,7 +296,11 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   // simd_arrays_per_engine and cu_per_simd_array stay per-XCC. The DBG_TRAP
   // device snapshot passes the unscaled value through instead (kfd_debug.c),
   // which is why the two paths report different numbers for the same property.
-  const uint32_t node_array_count = gpu.num_shader_engines * std::max(1u, gpu.num_xcc);
+  // Normalize once so array_count and the num_xcc property cannot disagree:
+  // a node reporting "num_xcc 0" next to a scaled array_count would make
+  // rocdbgapi's array_count * num_xcc / simd_arrays_per_engine come out zero.
+  const uint32_t num_xcc = std::max(1u, gpu.num_xcc);
+  const uint32_t node_array_count = gpu.num_shader_engines * num_xcc;
 
   std::ostringstream props;
   props << "cpu_cores_count 0\n"
@@ -337,7 +341,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "debug_prop " << topology.debug_prop << "\n"
         << "sdma_fw_version " << gpu.sdma_fw_version << "\n"
         << "unique_id " << gpu.unique_id << "\n"
-        << "num_xcc " << gpu.num_xcc << "\n"
+        << "num_xcc " << num_xcc << "\n"
         << "vram_public 1\n"
         << "vram_size " << gpu.local_mem_size << "\n";
 
