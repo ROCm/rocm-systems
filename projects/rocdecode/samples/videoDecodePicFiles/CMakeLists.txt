@@ -69,7 +69,7 @@ if(NOT GPU_TARGETS AND NOT AMDGPU_TARGETS)
     include(ROCMCheckTargetIds OPTIONAL RESULT_VARIABLE HAS_ROCM_CHECK_TARGET_IDS)
 
     set(OPTIONAL_GPU_TARGETS "gfx950;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250")
-    if(HAS_ROCM_CHECK_TARGET_IDS)
+    if(HAS_ROCM_CHECK_TARGET_IDS AND NOT WIN32)
         rocm_check_target_ids(OPTIONAL_GPU_TARGETS_AVAILABLE TARGETS ${OPTIONAL_GPU_TARGETS})
     else() # if we don't have rocm_check_target_ids, just assume the targets are available
         set(OPTIONAL_GPU_TARGETS_AVAILABLE "${OPTIONAL_GPU_TARGETS}")
@@ -156,7 +156,7 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
     # symbol scope first and wins VA symbol interposition, loading the matching
     # vendored VA driver. It must be injected as a raw path because CMake
     # topologically reorders normal link entries, placing FFmpeg ahead otherwise.
-    if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+    if(NOT WIN32 AND EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
       set(LINK_LIBRARY_LIST -Wl,--push-state,--no-as-needed ${rocdecode_LIBRARY} -Wl,--pop-state ${LINK_LIBRARY_LIST})
     endif()
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
