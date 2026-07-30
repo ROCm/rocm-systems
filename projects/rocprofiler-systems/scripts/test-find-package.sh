@@ -44,7 +44,7 @@ if [ -d "$(realpath /tmp)" ]; then
 fi
 
 : ${EXAMPLE_DIR:=examples}
-: ${EXAMPLE_NAME:=user-api}
+: ${EXAMPLE_NAME:=causal}
 : ${SOURCE_DIR:=$(mktemp -t -d rocprof-sys-test-source-XXXX)}
 : ${BINARY_DIR:=$(mktemp -t -d rocprof-sys-test-build-XXXX)}
 : ${INSTALL_DIR:=$(mktemp -t -d rocprof-sys-install-XXXX)}
@@ -114,9 +114,9 @@ do
     esac
 done
 
-if [ ! -f "${INSTALL_DIR}/include/rocprofiler-systems/user.h" ]; then
+if [ ! -f "${INSTALL_DIR}/include/rocprofiler-systems/causal_api.h" ]; then
     if [ -z "${INSTALL_SCRIPT}" ]; then
-        error-message "Unable to find \"rocprofiler-systems/user.h\" in \"${INSTALL_DIR}/include\" and installation script not provided"
+        error-message "Unable to find \"rocprofiler-systems/causal_api.h\" in \"${INSTALL_DIR}/include\" and installation script not provided"
     elif [ ! -f "${INSTALL_SCRIPT}" ]; then
         error-message "Unable to locate \"${INSTALL_SCRIPT}\" in directory \"${PWD}\""
     else
@@ -144,7 +144,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(rocprofiler-systems REQUIRED COMPONENTS user)
+find_package(rocprofiler-systems REQUIRED COMPONENTS causal-api)
 find_package(Threads REQUIRED)
 
 get_target_property(LIBS rocprofiler-systems::rocprofiler-systems INTERFACE_LINK_LIBRARIES)
@@ -159,6 +159,10 @@ endforeach()
 
 file(GLOB sources \${CMAKE_CURRENT_LIST_DIR}/*.cpp \${CMAKE_CURRENT_LIST_DIR}/*.c)
 add_executable(app \${sources})
+# USE_RNG/USE_CPU give the causal example real work; USE_OMNI routes its
+# CAUSAL_* macros to the real rocprofiler-systems/causal.h calls instead of
+# no-ops, so this smoke test actually exercises the causal-api component.
+target_compile_definitions(app PRIVATE USE_RNG=1 USE_CPU=1 USE_OMNI=1)
 target_link_libraries(app PRIVATE Threads::Threads rocprofiler-systems::rocprofiler-systems)
 EOF
 
