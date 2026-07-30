@@ -46,6 +46,23 @@ constexpr uint16_t kWmmaScaleSrc2PrefixOp = 0x35;
 constexpr uint16_t kWmmaScale16PrefixOp = 0x3a;
 constexpr uint16_t kGfx1250InlineZero = 128;
 
+/// @brief Diagnose control fields that are invalid for floating-point WMMA.
+///
+/// @details CM in the matrix body and SCL_CM in a scale prefix are both
+/// required to be zero. Keep this validation at every floating-point WMMA
+/// entry point so malformed encodings cannot be copied or expanded.
+[[nodiscard]] const char *
+gfx1250_floating_wmma_control_error(const gfx1250::Vop3pMachineInst &matrix,
+                                    const gfx1250::Vop3pMachineInst *scale = nullptr) {
+  if (scale != nullptr && scale->clamp != 0)
+    return "Input is malformed, SCL_CM must be set to zero for scaled floating-point WMMA";
+  if (matrix.clamp != 0) {
+    return "Input is malformed, CLAMP \"must be set to zero\" for WMMA/SWMMAC producing "
+           "floating-point results";
+  }
+  return nullptr;
+}
+
 /// @brief Append a generated instruction's words to one replacement sequence.
 template <size_t N>
 void append_words(std::vector<uint32_t> &output, const std::array<uint32_t, N> &words) {
@@ -363,12 +380,12 @@ void set_word_field(uint32_t &word, uint32_t value, uint32_t shift, uint32_t wid
 ///
 /// gfx1250 B0 additionally introduces the M=32 FP4 form. A0 has the M=16
 /// F8F6F4 operation, so the profile translates M=32 into two independent
-/// halves. The scale layout assigns M=0..15 and M=16..31 to lanes 0..15 and
-/// 16..31 of the same
-/// A-scale VGPR; SCL_OPSEL selects the corresponding lane half. Matrix B and
-/// its scale are shared. D, A, and a VGPR C are sliced by eight dwords. Both
-/// replacement matrix-format fields are forced to FP4, and reuse promises are
-/// cleared because each half names a different A/D register range.
+/// halves. The first operation covers rows 0..15, and the second covers rows
+/// 16..31. SCL_OPSEL=0 and SCL_OPSEL=1 select the matching A-scale lanes
+/// 0..15 and 16..31. Matrix B and its scale are shared. D, A, and a VGPR C are
+/// sliced by eight dwords. Both replacement matrix-format fields are forced to
+/// FP4, and reuse promises are cleared because each half names a different A/D
+/// register range.
 ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, uint64_t,
                                             std::span<const uint8_t>,
                                             const LivenessAnalysis &liveness, TranslationContext &,
@@ -383,6 +400,8 @@ ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, u
   gfx1250::Vop3pMachineInst matrix{};
   std::memcpy(&scale, inst.raw_encoding(), sizeof(scale));
   std::memcpy(&matrix, inst.raw_encoding() + 2, sizeof(matrix));
+  if (const char *error = gfx1250_floating_wmma_control_error(matrix, &scale))
+    return ExpandResult::failed(error);
   if (matrix.op != gfx1250::kVWmmaF3232x16x128F4Vop3p) {
     std::vector<uint32_t> words(inst.raw_encoding(), inst.raw_encoding() + 4);
     // Instruction bits [58:50] occupy word 1 bits [26:18].
@@ -523,9 +542,10 @@ ExpandResult expand_gfx1250_wmma_32x16_f4(const Instruction &inst, uint32_t, uin
 ///
 /// The M=32 FP4 form is represented by two native M=16 Scale16 instructions.
 /// Matrix A, C, and D are sliced by eight dwords; matrix B and both Scale16
-/// sources are shared. SCL_OPSEL selects lanes 0..15 for rows 0..15 and lanes
-/// 16..31 for rows 16..31. This partitions independent output rows without
-/// introducing a new accumulation boundary along K.
+/// sources are shared. The first operation covers rows 0..15 using A-scale
+/// lanes 0..15, and the second covers rows 16..31 using A-scale lanes 16..31.
+/// This partitions independent output rows without introducing a new
+/// accumulation boundary along K.
 ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint64_t,
                                          std::span<const uint8_t>, const LivenessAnalysis &liveness,
                                          TranslationContext &, const LaneLayout *,
@@ -548,8 +568,21 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
                                            matrix.op != gfx1250::kVWmmaF3232x16x128F4Vop3p)) {
     return ExpandResult::failed("gfx1250 Scale16 WMMA rule received an unsupported base opcode");
   }
+  if (const char *error = gfx1250_floating_wmma_control_error(matrix, &scale))
+    return ExpandResult::failed(error);
 
   constexpr uint16_t kVgprEncoding = 256;
+  const std::array<uint16_t, 2> encoded_scales = {static_cast<uint16_t>(scale.src0),
+                                                  static_cast<uint16_t>(scale.src1)};
+  for (const uint16_t encoded_scale : encoded_scales) {
+    if (encoded_scale < kVgprEncoding)
+      continue;
+    const uint16_t base = static_cast<uint16_t>(encoded_scale - kVgprEncoding);
+    if ((base & 1u) != 0 || base > 254u) {
+      return ExpandResult::failed(
+          "gfx1250 Scale16 VGPR scale sources must be even-aligned pairs in v0:v255");
+    }
+  }
   if (matrix.op == gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p) {
     std::vector<uint32_t> words(inst.raw_encoding(), inst.raw_encoding() + 4);
     set_word_field(words[1], kVgprEncoding, 18, 9);
@@ -584,8 +617,6 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
   const uint16_t upper_a = physical(*src0_bank, static_cast<uint16_t>(src0 + kHalfDwords));
   const uint16_t shared_b = physical(*src1_bank, src1);
   bool first_dst_overlaps_scale = false;
-  const std::array<uint16_t, 2> encoded_scales = {static_cast<uint16_t>(scale.src0),
-                                                  static_cast<uint16_t>(scale.src1)};
   for (const uint16_t encoded_scale : encoded_scales) {
     if (encoded_scale >= kVgprEncoding) {
       const uint16_t scale_base = static_cast<uint16_t>(encoded_scale - kVgprEncoding);
@@ -987,6 +1018,11 @@ ExpandResult expand_gfx1250_bare_f8f6f4_wmma(const Instruction &inst, uint32_t, 
         "gfx1250 bare F8F6F4 WMMA rule received an unsupported instruction");
   }
 
+  gfx1250::Vop3pMachineInst matrix{};
+  std::memcpy(&matrix, inst.raw_encoding(), sizeof(matrix));
+  if (const char *error = gfx1250_floating_wmma_control_error(matrix))
+    return ExpandResult::failed(error);
+
   std::vector<uint32_t> words;
   words.reserve(4);
   constexpr uint16_t kVgprEncoding = 256;
@@ -995,22 +1031,6 @@ ExpandResult expand_gfx1250_bare_f8f6f4_wmma(const Instruction &inst, uint32_t, 
                                                                     .src2 = kVgprEncoding}));
   words.insert(words.end(), inst.raw_encoding(), inst.raw_encoding() + 2);
   return ExpandResult::success(std::move(words));
-}
-
-/// @brief Return the K=64 replacement opcode for one B0 K=128 FP8/BF8 WMMA.
-[[nodiscard]] uint16_t gfx1250_k128_wmma_replacement(uint16_t opcode) {
-  switch (opcode) {
-  case gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p:
-    return gfx1250::kVWmmaF3216x16x64Fp8Fp8Vop3p;
-  case gfx1250::kVWmmaF3216x16x128Fp8Bf8Vop3p:
-    return gfx1250::kVWmmaF3216x16x64Fp8Bf8Vop3p;
-  case gfx1250::kVWmmaF3216x16x128Bf8Fp8Vop3p:
-    return gfx1250::kVWmmaF3216x16x64Bf8Fp8Vop3p;
-  case gfx1250::kVWmmaF3216x16x128Bf8Bf8Vop3p:
-    return gfx1250::kVWmmaF3216x16x64Bf8Bf8Vop3p;
-  default:
-    return 0;
-  }
 }
 
 /// @brief Return the mixed-format selections for one f32 K=128 FP8/BF8 WMMA.
@@ -1044,15 +1064,15 @@ ExpandResult expand_gfx1250_bare_f8f6f4_wmma(const Instruction &inst, uint32_t, 
 /// reuse hints are cleared: the target instruction family differs, and a
 /// preceding source instruction may itself expand to more than one operation.
 ///
-/// The source family's OPSEL[1:0] fields do not have a proven mapping into the
-/// mixed-format matrix body: the detailed scaled encoding reserves prefix bit
-/// 12 and consumes the body OPSEL fields as matrix formats. If either source
-/// field is nonzero, retain the two-K=64 fallback. That fallback writes the
-/// first partial to a dead aligned tuple when VDST overlaps an upper A/B input.
-ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_t offset,
-                                      std::span<const uint8_t> source_text,
-                                      const LivenessAnalysis &liveness, TranslationContext &context,
-                                      const LaneLayout *, const LaneLayout *) {
+/// The source opcode has no matrix-format or OPSEL modifiers. Those encoding
+/// fields are therefore ignored rather than copied into the target's format
+/// selectors. Matrix reuse hints are also deliberately cleared because the
+/// target belongs to a different instruction family. Only the defined C
+/// absolute and negate bits are transferred.
+ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_t,
+                                      std::span<const uint8_t>, const LivenessAnalysis &,
+                                      TranslationContext &, const LaneLayout *,
+                                      const LaneLayout *) {
   switch (inst.opcode()) {
   case gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p:
   case gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p:
@@ -1065,175 +1085,39 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
     break;
   }
 
-  const uint16_t replacement_opcode = gfx1250_k128_wmma_replacement(inst.opcode());
-  if (replacement_opcode == 0)
-    return ExpandResult::failed("gfx1250 K=128 WMMA rule received an unsupported opcode");
-
   uint8_t matrix_a_fmt = 0;
   uint8_t matrix_b_fmt = 0;
-  if (inst.size() == static_cast<int>(sizeof(gfx1250::Vop3pMachineInst)) &&
-      inst.raw_encoding() != nullptr &&
-      gfx1250_k128_wmma_formats(inst.opcode(), matrix_a_fmt, matrix_b_fmt)) {
-    gfx1250::Vop3pMachineInst source{};
-    std::memcpy(&source, inst.raw_encoding(), sizeof(source));
-    if (source.clamp != 0) {
-      return ExpandResult::failed(
-          "Input is malformed, CLAMP \"must be set to zero\" for WMMA/SWMMAC producing "
-          "floating-point results");
-    }
-    const bool has_mappable_opsel = (source.opsel & 0x3u) == 0 && source.opsel_hi == 0;
-    constexpr uint16_t kVgprEncoding = 256;
-    if (has_mappable_opsel && source.src0 >= kVgprEncoding && source.src1 >= kVgprEncoding) {
-      std::vector<uint32_t> words;
-      words.reserve(4);
-      append_words(words, gfx1250::build_vop3p(kWmmaScaleSrc2PrefixOp, {.src0 = kGfx1250InlineZero,
-                                                                        .src1 = kGfx1250InlineZero,
-                                                                        .src2 = kVgprEncoding}));
-      append_words(words, gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
-                                               {.vdst = static_cast<uint8_t>(source.vdst),
-                                                .neg_hi = static_cast<uint8_t>(source.neg_hi),
-                                                .opsel = matrix_a_fmt,
-                                                .clamp = static_cast<uint8_t>(source.clamp),
-                                                .src0 = static_cast<uint16_t>(source.src0),
-                                                .src1 = static_cast<uint16_t>(source.src1),
-                                                .src2 = static_cast<uint16_t>(source.src2),
-                                                .opsel_hi = matrix_b_fmt,
-                                                .neg = static_cast<uint8_t>(source.neg)}));
-      return ExpandResult::success(std::move(words));
-    }
-  }
-
-  const auto dst_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
-  const auto src2_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
-  if (!dst_bank || !src2_bank) {
-    return ExpandResult::failed(
-        "gfx1250 K=128 WMMA split cannot prove VDST and SRC2 VGPR-MSB banks",
-        {"Make the VGPR-MSB fields known on every CFG path reaching this instruction."});
-  }
-  if (offset > source_text.size() ||
-      static_cast<size_t>(inst.size()) > source_text.size() - offset ||
-      inst.size() < static_cast<int>(sizeof(gfx1250::Vop3pMachineInst))) {
+  if (inst.size() != static_cast<int>(sizeof(gfx1250::Vop3pMachineInst)) ||
+      inst.raw_encoding() == nullptr) {
     return ExpandResult::failed("gfx1250 K=128 WMMA has no complete source encoding");
   }
+  if (!gfx1250_k128_wmma_formats(inst.opcode(), matrix_a_fmt, matrix_b_fmt))
+    return ExpandResult::failed("gfx1250 K=128 WMMA rule received an unsupported opcode");
 
-  const size_t source_word_count = static_cast<size_t>(inst.size()) / sizeof(uint32_t);
-  std::vector<uint32_t> first(source_word_count);
-  std::memcpy(first.data(), source_text.data() + offset, static_cast<size_t>(inst.size()));
-  std::array<uint32_t, 2> second = {first[0], first[1]};
+  gfx1250::Vop3pMachineInst source{};
+  std::memcpy(&source, inst.raw_encoding(), sizeof(source));
+  if (const char *error = gfx1250_floating_wmma_control_error(source))
+    return ExpandResult::failed(error);
 
-  set_word_field(first[0], replacement_opcode, 16, 8);
-  first[0] &= ~((uint32_t{1} << 13) | (uint32_t{1} << 14));
-  set_word_field(second[0], replacement_opcode, 16, 8);
-  second[0] &= ~((uint32_t{1} << 13) | (uint32_t{1} << 14));
-
-  const uint16_t src0 = static_cast<uint16_t>(first[1] & 0x1ffu);
-  const uint16_t src1 = static_cast<uint16_t>((first[1] >> 9) & 0x1ffu);
   constexpr uint16_t kVgprEncoding = 256;
-  constexpr uint16_t kHalfInputDwords = 8;
-  if (src0 < kVgprEncoding || src1 < kVgprEncoding) {
+  if (source.src0 < kVgprEncoding || source.src1 < kVgprEncoding) {
     return ExpandResult::failed("gfx1250 K=128 WMMA matrix operands are not ordinary VGPR ranges");
   }
 
-  const uint16_t src0_low = static_cast<uint16_t>(src0 - kVgprEncoding);
-  const uint16_t src1_low = static_cast<uint16_t>(src1 - kVgprEncoding);
-  const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
-  const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
-  if (!src0_bank || !src1_bank) {
-    return ExpandResult::failed(
-        "gfx1250 K=128 WMMA split cannot prove A/B VGPR-MSB banks",
-        {"Make the VGPR-MSB fields known on every CFG path reaching this instruction."});
-  }
-
-  const auto overlaps = [](uint16_t lhs, uint16_t lhs_count, uint16_t rhs, uint16_t rhs_count) {
-    return lhs < static_cast<uint32_t>(rhs) + rhs_count &&
-           rhs < static_cast<uint32_t>(lhs) + lhs_count;
-  };
-  const uint16_t physical_dst =
-      static_cast<uint16_t>(*dst_bank * 256u + static_cast<uint16_t>(first[0] & 0xffu));
-  const uint16_t dst_dwords =
-      inst.dst_operand(0) != nullptr ? inst.dst_operand(0)->vgpr_count() : kHalfInputDwords;
-  const uint16_t physical_upper_a =
-      static_cast<uint16_t>(*src0_bank * 256u + src0_low + kHalfInputDwords);
-  const uint16_t physical_upper_b =
-      static_cast<uint16_t>(*src1_bank * 256u + src1_low + kHalfInputDwords);
-  const bool needs_partial_accumulator_scratch =
-      overlaps(physical_dst, dst_dwords, physical_upper_a, kHalfInputDwords) ||
-      overlaps(physical_dst, dst_dwords, physical_upper_b, kHalfInputDwords);
-
-  std::optional<SemanticScratchLease> partial_accumulator_scratch;
-  if (needs_partial_accumulator_scratch) {
-    SemanticScratchAllocator allocator(
-        inst, liveness, context,
-        SemanticScratchPolicy{.max_vgprs = static_cast<uint16_t>(REGISTER_SET_MAX_VGPRS),
-                              .max_spill_dword_offset = 0});
-    SemanticScratchRequest request;
-    request.count = dst_dwords;
-    request.alignment = dst_dwords;
-    request.allow_spill = false;
-    const auto forbid = [&](uint16_t base, uint16_t count) {
-      request.forbidden.expand(RegisterRef{RegClass::VGPR, base, static_cast<uint8_t>(count)});
-    };
-    forbid(physical_dst, dst_dwords);
-    forbid(static_cast<uint16_t>(*src0_bank * 256u + src0_low), 2 * kHalfInputDwords);
-    forbid(static_cast<uint16_t>(*src1_bank * 256u + src1_low), 2 * kHalfInputDwords);
-    const uint16_t encoded_src2 = static_cast<uint16_t>((first[1] >> 18) & 0x1ffu);
-    if (encoded_src2 >= kVgprEncoding) {
-      forbid(static_cast<uint16_t>(*src2_bank * 256u + encoded_src2 - kVgprEncoding), dst_dwords);
-    }
-
-    const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
-    if (!scratch) {
-      return ExpandResult::failed(
-          "gfx1250 K=128 WMMA could not allocate a partial accumulator",
-          {"Provide one aligned dead VGPR tuple matching the WMMA destination width."});
-    }
-    partial_accumulator_scratch = *scratch.lease;
-  }
-
-  const bool src0_crosses_bank = static_cast<uint32_t>(src0_low) + kHalfInputDwords > 0xffu;
-  const bool src1_crosses_bank = static_cast<uint32_t>(src1_low) + kHalfInputDwords > 0xffu;
-  if ((src0_crosses_bank && *src0_bank == 3) || (src1_crosses_bank && *src1_bank == 3)) {
-    return ExpandResult::failed(
-        "gfx1250 K=128 WMMA bank-crossing input exceeds the addressable VGPR range");
-  }
-
-  const uint8_t original_mode =
-      static_cast<uint8_t>(*src0_bank | (*src1_bank << 2) | (*src2_bank << 4) | (*dst_bank << 6));
-  const uint16_t second_src0 =
-      static_cast<uint16_t>(*src0_bank * 256u + src0_low + kHalfInputDwords);
-  const uint16_t second_src1 =
-      static_cast<uint16_t>(*src1_bank * 256u + src1_low + kHalfInputDwords);
-
-  // The gfx1250 dependency table requires software spacing only when the first
-  // Matrix D overlaps the following WMMA's A/B/Index inputs. The ordinary path
-  // proves that no such overlap exists, and the scratch path forbids its
-  // partial tuple from every A/B window. Matrix D feeding Matrix C through
-  // SRC2 is interlocked, so no V_NOP is inserted between the two K64 WMMAs.
-  uint16_t partial_accumulator = physical_dst;
-  if (partial_accumulator_scratch) {
-    partial_accumulator = partial_accumulator_scratch->base;
-    set_word_field(first[0], partial_accumulator & 0xffu, 0, 8);
-  }
-
-  set_word_field(second[1], kVgprEncoding + (second_src0 & 0xffu), 0, 9);
-  set_word_field(second[1], kVgprEncoding + (second_src1 & 0xffu), 9, 9);
-  set_word_field(second[1], kVgprEncoding + (partial_accumulator & 0xffu), 18, 9);
-  second[0] &= ~(uint32_t{1} << 10);
-  second[1] &= ~(uint32_t{1} << 31);
-
-  const uint8_t partial_bank = static_cast<uint8_t>(partial_accumulator / 256u);
-  const uint8_t first_mode = static_cast<uint8_t>((original_mode & 0x3fu) | (partial_bank << 6));
-  const uint8_t second_mode = static_cast<uint8_t>(
-      (second_src0 / 256u) | ((second_src1 / 256u) << 2) | (partial_bank << 4) | (*dst_bank << 6));
-
   std::vector<uint32_t> words;
-  words.reserve(first.size() + second.size() + 9);
-  uint8_t current_mode = original_mode;
-  append_gfx1250_vgpr_msb_transition(words, current_mode, first_mode);
-  words.insert(words.end(), first.begin(), first.end());
-  append_gfx1250_vgpr_msb_transition(words, current_mode, second_mode);
-  append_words(words, second);
-  append_gfx1250_vgpr_msb_transition(words, current_mode, original_mode);
+  words.reserve(4);
+  append_words(words, gfx1250::build_vop3p(kWmmaScaleSrc2PrefixOp, {.src0 = kGfx1250InlineZero,
+                                                                    .src1 = kGfx1250InlineZero,
+                                                                    .src2 = kVgprEncoding}));
+  append_words(words, gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
+                                           {.vdst = static_cast<uint8_t>(source.vdst),
+                                            .neg_hi = static_cast<uint8_t>(source.neg_hi & 0x4u),
+                                            .opsel = matrix_a_fmt,
+                                            .src0 = static_cast<uint16_t>(source.src0),
+                                            .src1 = static_cast<uint16_t>(source.src1),
+                                            .src2 = static_cast<uint16_t>(source.src2),
+                                            .opsel_hi = matrix_b_fmt,
+                                            .neg = static_cast<uint8_t>(source.neg & 0x4u)}));
   return ExpandResult::success(std::move(words));
 }
 
@@ -1254,13 +1138,13 @@ inline constexpr std::array<TranslationRule, 38> kGfx1250B0ToA0ExpandRules = {{
     {gfx1250::encoding::kVop3p, gfx1250::kVSwmmacI3216x16x128Iu8Vop3p, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_wmma_iu8_spacing, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Fp8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Bf8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Bf8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p, RuleAction::Expand, 0,
      0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p, RuleAction::Expand, 0,
