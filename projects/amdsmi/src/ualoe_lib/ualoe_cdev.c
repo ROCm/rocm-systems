@@ -264,10 +264,10 @@ int ualoe_cdev_set_ifoe_config(ualoe_handle_t handle, ifoe_virt_mode_e virt_mode
   struct cfg_ifoe_config config;
   int rc;
 
-  config.v_mode = virt_mode;
-  config.e_type = encap_type;
-  config.f_mode = failover_mode;
-  config.loopback_mode = loopback_mode;
+  config.v_mode = (enum cfg_ifoe_virt_mode)virt_mode;
+  config.e_type = (enum cfg_ifoe_encap_type)encap_type;
+  config.f_mode = (enum cfg_ifoe_failover_mode)failover_mode;
+  config.loopback_mode = (enum cfg_ifoe_loopback_mode)loopback_mode;
 
   rc = ioctl(handle, CFG_SET_IFOE_CONFIG, &config);
   if (rc == -1) return errno;
@@ -279,7 +279,7 @@ int ualoe_cdev_next_config_phase(ualoe_handle_t handle, ualoe_config_phase_e nex
   enum cfg_config_phase n_phase;
   int rc;
 
-  n_phase = next_phase;
+  n_phase = (enum cfg_config_phase)next_phase;
   rc = ioctl(handle, CFG_NEXT_CONFIG_PHASE, &n_phase);
   if (rc == -1) return errno;
 
@@ -293,7 +293,7 @@ int ualoe_cdev_get_current_config_phase(ualoe_handle_t handle, ualoe_config_phas
   rc = ioctl(handle, CFG_GET_CURRENT_CONFIG_PHASE, &curr_phase);
   if (rc == -1) return errno;
 
-  *phase = curr_phase;
+  *phase = (ualoe_config_phase_e)curr_phase;
   return 0;
 }
 
@@ -573,7 +573,7 @@ int ualoe_cdev_telemetry_get(ualoe_handle_t handle, ualoe_telemetry_t* telemetry
     /* Skip NULL datasets (filtered categories) */
     if (telemetry->datasets[i] == NULL) continue;
 
-    telemetry->datasets[i]->category = cfg_tele.datasets[i].category;
+    telemetry->datasets[i]->category = (ualoe_telemetry_category_e)cfg_tele.datasets[i].category;
     telemetry->datasets[i]->generation_count = cfg_tele.datasets[i].generation_count;
     telemetry->datasets[i]->timestamp = cfg_tele.datasets[i].timestamp;
     telemetry->datasets[i]->instance_count = cfg_tele.datasets[i].instance_count;

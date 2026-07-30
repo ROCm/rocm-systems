@@ -236,12 +236,12 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
 
     status_code = rsmi_compute_process_info_get(nullptr, &cache_ptr->num_running_processes);
     if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-      return status_code;
+      return static_cast<int32_t>(status_code);
     }
     if (cache_ptr->num_running_processes <= 0) {
       compute_process_list.clear();
       cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
-      return status_code;
+      return static_cast<int32_t>(status_code);
     }
 
     /**
@@ -256,7 +256,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     status_code = rsmi_compute_process_info_get(cache_ptr->list_all_processes_ptr.get(),
                                                 &cache_ptr->num_running_processes);
     if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-      return status_code;
+      return static_cast<int32_t>(status_code);
     }
 
     if (cache_ptr->num_running_processes <= 0) {
@@ -275,7 +275,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
   auto list_device_allocation_size = uint32_t(0);
   status_code = rsmi_num_monitor_devices(&num_running_devices);
   if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (num_running_devices <= 0)) {
-    return status_code;
+    return static_cast<int32_t>(status_code);
   }
 
   /**
@@ -405,7 +405,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
       amdsmi_proc_info.mem = total_vram;
     }
 
-    return status_code;
+    return static_cast<int32_t>(status_code);
   };
 
   /**
@@ -420,7 +420,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
         rsmi_proc_info.process_id, list_device_ptr.get(), &list_device_allocation_size);
     if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
       status_result = false;
-      return status_result;
+      return static_cast<int32_t>(status_result);
     }
 
     for (auto device_idx = uint32_t(0); device_idx < list_device_allocation_size; ++device_idx) {
@@ -444,7 +444,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
       }
     }
 
-    return status_result;
+    return static_cast<int32_t>(status_result);
   };
 
   /**
@@ -460,7 +460,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     }
   }
 
-  return status_code;
+  return static_cast<int32_t>(status_code);
 }
 
 const GPUComputeProcessList_t& AMDSmiGPUDevice::amdgpu_get_compute_process_list(
@@ -506,11 +506,14 @@ std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_numa_node(int32_t node_i
         if (hyphen != std::string::npos) {
           int start = std::stoi(node_cpus.substr(0, hyphen));
           int end = std::stoi(node_cpus.substr(hyphen + 1));
+          if (start < 0 || end < 0 || end >= static_cast<int>(size * 64)) continue;
           for (int i = start; i <= end; ++i) {
-            bitmask[i / 64] |= (1ULL << (i % 64));
+            bitmask[static_cast<size_t>(i) / 64] |= (1ULL << (i % 64));
           }
         } else {
-          int core = std::stoi(node_cpus);
+          int core_int = std::stoi(node_cpus);
+          if (core_int < 0) continue;
+          size_t core = static_cast<size_t>(core_int);
           bitmask[core / 64] |= (1ULL << (core % 64));
         }
       }
@@ -541,11 +544,14 @@ std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_local_cpulist(uint32_t d
         if (hyphen != std::string::npos) {
           int start = std::stoi(node_cpus.substr(0, hyphen));
           int end = std::stoi(node_cpus.substr(hyphen + 1));
+          if (start < 0 || end < 0 || end >= static_cast<int>(size * 64)) continue;
           for (int i = start; i <= end; ++i) {
-            bitmask[i / 64] |= (1ULL << (i % 64));
+            bitmask[static_cast<size_t>(i) / 64] |= (1ULL << (i % 64));
           }
         } else {
-          int core = std::stoi(node_cpus);
+          int core_int = std::stoi(node_cpus);
+          if (core_int < 0) continue;
+          size_t core = static_cast<size_t>(core_int);
           bitmask[core / 64] |= (1ULL << (core % 64));
         }
       }

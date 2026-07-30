@@ -42,7 +42,7 @@
       status = amdsmi_get_esmi_err_msg(RET, &err_str);                                        \
       std::cout << "AMDSMI call returned " << status << " at line " << __LINE__ << std::endl; \
       std::cout << err_str << std::endl;                                                      \
-      return RET;                                                                             \
+      return static_cast<int>(RET);                                                           \
     }                                                                                         \
   }
 
@@ -143,7 +143,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
         cout << setprecision(7) << (prochot ? "active" : "inactive") << "\t|";
       } else {
         err_bits |= 1 << ret;
-        cout << " NA (Err:" << ret << "     |";
+        cout << " NA (Err:" << err_bits << "     |";
       }
       cout << "\n-------------------------------------------------\n";
 
@@ -168,7 +168,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
         retVal = snprintf(str + len, SHOWLINESZ - len, " %d\t\t|", mclk);
       } else {
         err_bits |= 1 << ret;
-        cout << " NA (Err: " << setprecision(2) << ret << "     |";
+        cout << " NA (Err: " << setprecision(2) << err_bits << "     |";
         retVal = snprintf(str + len, SHOWLINESZ - len, " NA (Err: %-2d)     |", ret);
       }
       if (retVal > 0 && retVal < SHOWLINESZ)
@@ -192,7 +192,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
         cout << fixed << setprecision(3) << static_cast<double>(socket_power) << "\t|";
       } else {
         err_bits |= 1 << ret;
-        cout << " NA (Err:" << ret << "     |";
+        cout << " NA (Err:" << err_bits << "     |";
       }
 
       uint32_t power_limit = 0;
@@ -207,7 +207,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
         cout << fixed << setprecision(3) << static_cast<double>(power_limit) << "\t|";
       } else {
         err_bits |= 1 << ret;
-        cout << " NA (Err:" << ret << "     |";
+        cout << " NA (Err:" << err_bits << "     |";
       }
 
       uint32_t power_max = 0;
@@ -222,7 +222,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
         cout << fixed << setprecision(3) << static_cast<double>(power_max) << "\t|";
       } else {
         err_bits |= 1 << ret;
-        cout << " NA (Err:" << ret << "     |";
+        cout << " NA (Err:" << err_bits << "     |";
       }
       cout << "\n-------------------------------------------------\n";
 
@@ -265,7 +265,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
         cout << fixed << setprecision(3) << static_cast<double>(power_limit) << "\t|";
       } else {
         err_bits |= 1 << ret;
-        cout << " NA (Err:" << ret << "     |";
+        cout << " NA (Err:" << err_bits << "     |";
       }
       cout << "\n-------------------------------------------------\n";
 

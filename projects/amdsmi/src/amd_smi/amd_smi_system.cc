@@ -152,7 +152,7 @@ amdsmi_status_t AMDSmiSystem::get_cpu_model_name(uint32_t socket_id, std::string
       if (info.find("model name") != std::string::npos) {
         *model_name = info.substr(info.find(':') + 2);
         if (current_socket_id != -1) {
-          socket_model_map[current_socket_id] = *model_name;
+          socket_model_map[static_cast<uint32_t>(current_socket_id)] = *model_name;
         }
       }
     }
@@ -459,8 +459,10 @@ std::tuple<uint64_t, amdsmi_bdf_t> bdf_to_int(const std::string& bdf) {
     bdf_info.bus_number = std::stoul(matches[2], nullptr, 16) & 0xff;
     bdf_info.device_number = std::stoul(matches[3], nullptr, 16) & 0x1f;
     bdf_info.function_number = std::stoul(matches[4], nullptr, 16) & 0x7;
-    return {(bdf_info.domain_number << 16) | (bdf_info.bus_number << 8) |
-                (bdf_info.device_number << 3) | (bdf_info.function_number << 0),
+    return {(static_cast<uint64_t>(bdf_info.domain_number) << 16) |
+                (static_cast<uint64_t>(bdf_info.bus_number) << 8) |
+                (static_cast<uint64_t>(bdf_info.device_number) << 3) |
+                (static_cast<uint64_t>(bdf_info.function_number) << 0),
             bdf_info};
   }
   return {0, bdf_info};
@@ -516,7 +518,7 @@ amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
       sockets_.push_back(socket);
     }
 
-    auto device = std::make_unique<AMDSmiAINICDevice>(nic_idx, bdf_info, ai_nic_info);
+    auto device = std::make_unique<AMDSmiAINICDevice>(ai_nic_info);
     socket->add_processor(device.get());
     ainic_processors_.insert(device.get());
     device.release();

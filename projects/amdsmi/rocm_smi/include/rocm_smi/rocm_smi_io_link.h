@@ -72,7 +72,7 @@ class IOLink {
         link_indx_(link_indx),
         link_dir_type_(link_dir_type),
         link_cap_{UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX} {}
-  ~IOLink();
+  virtual ~IOLink();
 
   int Initialize();
   int ReadProperties(void);
