@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <cstdint>
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -203,6 +204,87 @@ void RdcMetricFetcherImpl::get_ecc(uint32_t gpu_index, rdc_field_t field_id,
   } else {
     value->value.l_int = ec.uncorrectable_count;
   }
+}
+
+void RdcMetricFetcherImpl::get_afid(uint32_t gpu_index, rdc_field_value* value) {
+  if (!value) {
+    return;
+  }
+
+  value->type = STRING;
+
+  amdsmi_processor_handle processor_handle = nullptr;
+  amdsmi_status_t err = get_processor_handle_from_id(gpu_index, &processor_handle);
+  if (err != AMDSMI_STATUS_SUCCESS) {
+    value->status = err;
+    return;
+  }
+
+  auto severity_str = [](amdsmi_cper_sev_t sev) -> const char* {
+    switch (sev) {
+      case AMDSMI_CPER_SEV_FATAL:
+        return "FATAL";
+      case AMDSMI_CPER_SEV_NON_FATAL_CORRECTED:
+        return "CORRECTED";
+      case AMDSMI_CPER_SEV_NON_FATAL_UNCORRECTED:
+        return "UNCORRECTED";
+      default:
+        return "UNKNOWN";
+    }
+  };
+
+  // Read CPER records straight from the driver ring; no manual folder/cursor setup needed.
+  const uint32_t severity_mask = (1u << AMDSMI_CPER_SEV_FATAL) |
+                                 (1u << AMDSMI_CPER_SEV_NON_FATAL_CORRECTED) |
+                                 (1u << AMDSMI_CPER_SEV_NON_FATAL_UNCORRECTED);
+
+  std::vector<char> cper_data(64 * 1024);
+  uint64_t buf_size = cper_data.size();
+  std::vector<amdsmi_cper_hdr_t*> cper_hdrs(256, nullptr);
+  uint64_t entry_count = cper_hdrs.size();
+  uint64_t cursor = 0;
+
+  err = amdsmi_get_gpu_cper_entries(processor_handle, severity_mask, cper_data.data(), &buf_size,
+                                    cper_hdrs.data(), &entry_count, &cursor);
+  // MORE_DATA just means the buffers are full; the returned entries are still valid.
+  if (err != AMDSMI_STATUS_SUCCESS && err != AMDSMI_STATUS_MORE_DATA) {
+    RDC_LOG(RDC_INFO, "Error getting CPER entries for gpu " << gpu_index << ": " << err);
+    value->status = err;
+    return;
+  }
+
+  std::string result;
+  for (uint64_t i = 0; i < entry_count; ++i) {
+    amdsmi_cper_hdr_t* hdr = cper_hdrs[i];
+    if (hdr == nullptr) {
+      continue;
+    }
+    uint64_t afids[MAX_NUMBER_OF_AFIDS_PER_RECORD] = {0};
+    uint32_t num_afids = MAX_NUMBER_OF_AFIDS_PER_RECORD;
+    amdsmi_status_t afid_err = amdsmi_get_afids_from_cper(reinterpret_cast<char*>(hdr),
+                                                          hdr->record_length, afids, &num_afids);
+    if (afid_err != AMDSMI_STATUS_SUCCESS) {
+      continue;
+    }
+    if (num_afids > MAX_NUMBER_OF_AFIDS_PER_RECORD) {
+      num_afids = MAX_NUMBER_OF_AFIDS_PER_RECORD;
+    }
+    const char* sev = severity_str(hdr->error_severity);
+    for (uint32_t a = 0; a < num_afids; ++a) {
+      if (!result.empty()) {
+        result += ",";
+      }
+      result += std::to_string(afids[a]);
+      result += ":";
+      result += sev;
+    }
+  }
+
+  if (result.empty()) {
+    result = "N/A";
+  }
+  snprintf(value->value.str, RDC_MAX_STR_LENGTH, "%s", result.c_str());
+  value->status = AMDSMI_STATUS_SUCCESS;
 }
 
 void RdcMetricFetcherImpl::get_ecc_total(uint32_t gpu_index, rdc_field_t field_id,
@@ -1081,6 +1163,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       break;
     case RDC_FI_ECC_DEFERRED_TOTAL:
       get_ecc_deferred_total(gpu_index, value);
+      break;
+    case RDC_FI_AFID:
+      get_afid(gpu_index, value);
       break;
     case RDC_FI_PCIE_TX:
     case RDC_FI_PCIE_RX:

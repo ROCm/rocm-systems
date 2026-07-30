@@ -46,14 +46,18 @@ endif()
 
 include(GoogleTest)
 
-# rdc_codec_tests: pure-logic entity-codec tests. Links only librdc_bootstrap
-# (which holds the codec) and NOT librdc, so it pulls in no amdsmi. librdc runs
-# amdsmi_init in a load-time static initializer that throws when no GPU/driver is
-# present, which would abort the process before main(); keeping these tests out of
-# that library lets them run on GPU-less CI and satisfy the unit-test gate
-# anywhere. Uses gtest_main since it needs no custom setup.
-add_executable(${RDC_CODEC_TESTS} ${SRC_DIR}/test_entity_codec.cc)
-target_include_directories(${RDC_CODEC_TESTS} PRIVATE ${PROJECT_SOURCE_DIR}/include)
+# rdc_codec_tests: pure-logic tests (entity codec + AFID field registration).
+# Links only librdc_bootstrap (which holds the codec and the field descriptor
+# table) and NOT librdc, so it pulls in no amdsmi. librdc runs amdsmi_init in a
+# load-time static initializer that throws when no GPU/driver is present, which
+# would abort the process before main(); keeping these tests out of that library
+# lets them run on GPU-less CI and satisfy the unit-test gate anywhere. Uses
+# gtest_main since it needs no custom setup.
+add_executable(${RDC_CODEC_TESTS} ${SRC_DIR}/test_entity_codec.cc ${SRC_DIR}/test_afid_field.cc)
+target_include_directories(
+    ${RDC_CODEC_TESTS}
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include
+)
 target_link_libraries(${RDC_CODEC_TESTS} PRIVATE rdc_bootstrap GTest::gtest_main pthread)
 set_target_properties(${RDC_CODEC_TESTS} PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib")
 add_test(NAME ${RDC_CODEC_TESTS} COMMAND ${RDC_CODEC_TESTS})
