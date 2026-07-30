@@ -624,22 +624,26 @@ NCCL_DEVICE_INLINE static ncclResult_t flushImplMode(ncclGinCtx ctx, Coop coop, 
     if NCCL_IF_CONSTEXPR (HasTimeout) startCycle = clock64();
     else (void)startCycle; // referenced only when HasTimeout is true
 
-    /* For each endpoint with outstanding work, snapshot submitted_count
-     * (scoped atomic load matching the relaxed bumps from the post
-     * path), then spin on the NIC-written FI_WRITE counter until it
-     * reaches the snapshot. The HW counter is read with system-scope
-     * acquire so the GPU bypasses caches and observes the latest NIC
-     * update through PCIe-coherent memory. */
+    /* For each endpoint with outstanding work, spin on the NIC-written
+     * FI_WRITE counter until it catches up with submitted_count.
+     * submitted_count is re-read (scoped relaxed atomic load matching the
+     * relaxed bumps from the post path) on every iteration rather than
+     * snapshotted once: another thread may keep posting on this context
+     * while we drain, and completions passing a stale snapshot would leave
+     * the masked difference permanently non-zero. The HW counter is read
+     * with system-scope acquire so the GPU bypasses caches and observes the
+     * latest NIC update through PCIe-coherent memory. */
     auto wait_for_endpoint = [abortFlag, startCycle,
                               timeoutCycles](nccl_ofi_gin_gdaki_dev_endpoint_handle& ep) -> ncclResult_t {
-      uint64_t target = scopedAtomicLoad<ncclGinScope<mode>, cuda::memory_order_relaxed>(&ep.submitted_count);
+      cuda::atomic_ref<uint64_t, ncclGinScope<mode>> target_ref(ep.submitted_count);
 
       /* Drain-to-zero: outstanding = (submitted - completed) reduced to
        * 31 bits, since the NIC FI_WRITE counter wraps at 2^31. Wait until
        * no work is outstanding. Outstanding is bounded by sq_size « 2^31,
        * so the masked difference is exact and cannot be fooled by a
        * counter wrap. */
-      while (((((uint32_t)target) - (uint32_t)hwCounterLoad(ep.local_cntr_value)) & EFA_CNTR_MASK) != 0) {
+      while (((((uint32_t)target_ref.load(cuda::memory_order_relaxed)) - (uint32_t)hwCounterLoad(ep.local_cntr_value)) &
+              EFA_CNTR_MASK) != 0) {
         if NCCL_IF_CONSTEXPR (HasTimeout) {
           if (clock64() - startCycle >= timeoutCycles) return ncclTimeout;
         }
