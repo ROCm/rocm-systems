@@ -36,6 +36,10 @@ docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/xml")
 docs_core.enable_api_reference()
 docs_core.setup()
 
+# Auto-expand the left sidebar with Doxygen API child pages
+# (rocm-docs-core doxygen_toc branch).
+doxygen_toc_auto_expand = True
+
 external_projects_current_project = "hip"
 
 # Generate llms.txt and llms-full.txt (requires the rocm-docs-core[llms] extra).
