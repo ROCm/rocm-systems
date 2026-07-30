@@ -45,6 +45,11 @@
 #  MATCH='alltoall_test' ./resource_usage_compare.sh
 ###############################################################################
 set -euo pipefail
+# Without this, command substitution $(...) (e.g. CSV_1="$(measure_commit ...)")
+# runs in a subshell with errexit silently UNSET, so a failing command inside
+# measure_commit (e.g. python3 erroring out) does not stop the script -- it
+# just falls through to `echo "$csv"`, which exits 0 and masks the failure.
+shopt -s inherit_errexit
 
 COMMIT_1="${COMMIT_1:-HEAD}"
 COMMIT_2="${COMMIT_2:-}"
@@ -74,6 +79,15 @@ fi
 
 CACHE_ROOT="$ROCSHMEM_DIR/resource-usage-cache"
 mkdir -p "$CACHE_ROOT"
+
+# Snapshot the tool scripts *before* any git checkout below moves the working
+# tree to an older commit that may not contain them (or may contain an older,
+# incompatible version). Always run the current (ORIGINAL_REF) version of
+# these scripts, regardless of which commit is checked out for the build.
+TOOLS_DIR="$CACHE_ROOT/.tools"
+mkdir -p "$TOOLS_DIR"
+cp "$ROCSHMEM_DIR/scripts/functional_tests/resource_usage_to_csv.py" "$TOOLS_DIR/"
+cp "$ROCSHMEM_DIR/scripts/functional_tests/resource_usage_diff.py" "$TOOLS_DIR/"
 
 # measure_commit <commit> -> prints the path to that commit's cached CSV
 measure_commit() {
@@ -119,7 +133,7 @@ measure_commit() {
   # and must contain only the final `echo "$csv"` path -- redirect this script's own
   # report (which prints to stdout) to stderr so it stays visible without corrupting
   # the captured path.
-  python3 "$ROCSHMEM_DIR/scripts/functional_tests/resource_usage_to_csv.py" \
+  python3 "$TOOLS_DIR/resource_usage_to_csv.py" \
     --log "$cache_dir/resource_usage_summary.log" \
     --arch "$GPU_TARGET" --build-config "$BUILD_CONFIG" --commit "$sha" \
     --out "$csv" >&2
@@ -173,7 +187,7 @@ SORT_BY_TYPE=(
   "OccupancyWavesPerSIMD" "SGPRsSpill" "VGPRsSpill" "LDSBytesPerBlock"
 )
 for sort_by in "${SORT_BY_TYPE[@]}"; do
-  python3 "$ROCSHMEM_DIR/scripts/functional_tests/resource_usage_diff.py" \
+  python3 "$TOOLS_DIR/resource_usage_diff.py" \
     --baseline "$CSV_1" \
     --branch "$CSV_2" \
     --out "$OUTDIR/res_diff_${sort_by}.csv" \
