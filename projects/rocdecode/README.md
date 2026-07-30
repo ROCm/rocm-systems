@@ -71,13 +71,14 @@ SDK, the following standalone rocDecode packages are also available:
 | Package | apt name (Debian/Ubuntu) | dnf/zypper name (RHEL/SLES) | Contents |
 |---------|--------------------------|-----------------------------|----------|
 | Runtime | `amdrocm-decode` | `amdrocm-decode` | Runtime library |
-| Development | `amdrocm-decode-dev` | `amdrocm-decode-devel` | Library, headers, and samples |
-| Test | `amdrocm-decode-test` | `amdrocm-decode-test` | CTest verification, utility sources, and test media |
+| Development | `amdrocm-decode-dev` | `amdrocm-decode-devel` | Library, headers, and CMake helper modules (`share/rocdecode/cmake/`) |
+| Test | `amdrocm-decode-test` | `amdrocm-decode-test` | CTest verification, utility sources (`utils/`), samples, and test media |
 
 > [!IMPORTANT]
-> The rocDecode library and headers come with a standard ROCm Core SDK install,
-> but the files under `/opt/rocm/share/rocdecode/` — the `utils/` utility sources,
-> the `cmake/` helper modules, the `samples/` sources, and the test media — do
+> The rocDecode library, headers, and the CMake helper modules
+> (`/opt/rocm/share/rocdecode/cmake/`) come with a standard ROCm Core SDK install
+> and the development package. However, the `utils/` utility sources, the
+> `samples/` sources, and the test media under `/opt/rocm/share/rocdecode/` do
 > **not** ship with the Core SDK or the development package. These are required to
 > build applications against rocDecode and to build or run the samples and CTests,
 > and are provided by the `amdrocm-decode-test` package. Install it if you build
@@ -121,20 +122,22 @@ After installation, the following files are available:
 
 * Libraries in `/opt/rocm/lib`
 * Header files in `/opt/rocm/include/rocdecode`
-* Samples, utility sources, and CMake helper modules in `/opt/rocm/share/rocdecode`
+* CMake helper modules in `/opt/rocm/share/rocdecode/cmake`
+* Utility sources, samples, and test media in `/opt/rocm/share/rocdecode` (from the test package)
 * Documents in `/opt/rocm/share/doc/rocdecode`
 
   > [!NOTE]
-  > The `utils/`, `cmake/`, and `samples/` sources and the test media under
-  > `/opt/rocm/share/rocdecode/` are provided by the `amdrocm-decode-test` package.
-  > Install it (see [Install](#install)) if you build against rocDecode or run the
-  > samples and CTests.
+  > The `utils/` and `samples/` sources and the test media under
+  > `/opt/rocm/share/rocdecode/` are provided by the `amdrocm-decode-test` package
+  > (the CMake helper modules in `share/rocdecode/cmake/` ship with the development
+  > package). Install `amdrocm-decode-test` (see [Install](#install)) if you build
+  > against rocDecode or run the samples and CTests.
 
 If you obtain rocDecode from [TheRock](https://github.com/ROCm/TheRock)'s generic
-(`.tar.zst`) artifacts instead of distribution packages, these `share/rocdecode/`
-files ship in the `rocdecode-test` artifact (for example, `rocdecode_test_generic`)
-rather than `rocdecode-dev`. Install it with TheRock's
-`install_rocm_from_artifacts.py` helper by adding `--tests` together with
+(`.tar.zst`) artifacts instead of distribution packages, the `utils/`, `samples/`,
+and test media under `share/rocdecode/` ship in the `rocdecode-test` artifact (for
+example, `rocdecode_test_generic`) rather than `rocdecode-dev`. Install it with
+TheRock's `install_rocm_from_artifacts.py` helper by adding `--tests` together with
 `--rocdecode`:
 
   ```shell
