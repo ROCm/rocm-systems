@@ -34,6 +34,19 @@ namespace
 // samples likewise) -> `lane`, parent always no-parent. Per draft principle #4/#6.
 // Open for Anthony review — see design/draft_api_2026-06-22.md §4-6,
 // design/gap_analysis_current_vs_design_2026-07-23.md.
+// schema_version is stored as "3" (v3) or "4.0.0"/"4.1.0" (v4); the leading integer is
+// the major version. Returns -1 when there is no leading digit so the caller can fall
+// through to the metadata-less detection path rather than guess a version.
+int
+schema_major_from_version(const std::string& version)
+{
+    std::size_t i = 0;
+    while(i < version.size() && version[i] >= '0' && version[i] <= '9')
+        ++i;
+    if(i == 0) return -1;
+    return std::stoi(version.substr(0, i));
+}
+
 reader_types::nesting_model_t
 nesting_for(reader_types::track_type_t t)
 {
@@ -59,15 +72,57 @@ reader_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage)
                           "Provided pointer to a non-existing storage!"))
 , m_backend(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::read))
 {
-    // VERSION DISPATCH (task 002B): the read backend is selected ONCE here, off the
-    // physical schema, so every m_read_statements->foo() call site downstream stays
-    // schema-agnostic and there is no per-call schema sniffing. v4.0 normalizes all
-    // timestamps into the rocpd_timestamp spine; the presence of the
-    // rocpd_timestamp_{uuid} table (absent in v3) is the detection key. Because the
-    // executors PREPARE their SQL at construction, only the matching backend is ever
-    // built — the v4 backend never prepares v3-only SQL and vice versa.
+    // VERSION DISPATCH (task 002B; hardened task 064): the read backend is selected ONCE
+    // here, off the AUTHORITATIVE rocpd_metadata.schema_version VALUE, so every
+    // m_read_statements->foo() call site downstream stays schema-agnostic and there is no
+    // per-call schema sniffing. Detection is binary: major version 4 (covers BOTH v4.0 =
+    // "4.0.0" AND v4.1 = "4.1.0") selects the v4 backend, 3 selects v3. Reading the
+    // stored version rather than inferring it from the presence of the convention-named
+    // rocpd_timestamp_{uuid} table removes a hidden coupling to get_uuid(): a truncated
+    // uuid used to make that existence probe miss and misdetect a real v4 DB as v3.
+    // schema_version_major is NOT used — it is an unsubstituted "{{...}}" placeholder on
+    // templated captures, whereas schema_version itself is always concrete.
+    //
+    // Three tiers (mirroring discover_uuids' probe-then-read) keep every input shape
+    // green; each SELECT is prepared only after sqlite_master confirms its object exists,
+    // because preparing a read against a missing view/table throws:
+    //   Primary    - unsuffixed rocpd_metadata view (real captures + committed .db
+    //   fixtures) Fallback A - suffixed rocpd_metadata_<uuid> table (.sql-generated
+    //   fixtures load
+    //                rocpd_tables.sql only, so they have no unsuffixed view)
+    //   Fallback B - no rocpd_metadata anywhere (e.g. metadata-less captures): retain the
+    //                original rocpd_timestamp_<uuid> existence probe, behavior unchanged.
     const auto uuid = m_backend->get_uuid();
 
+    auto object_exists = [&](const std::string& name) {
+        auto probe =
+            m_backend->create_read_statement_executor<data_storage::count_result>(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name='" + name + "';",
+                &data_storage::count_result::count);
+        auto rows = probe().to_vector();
+        return !rows.empty() && rows.front().count > 0;
+    };
+
+    auto read_schema_major = [&](const std::string& metadata_object) {
+        auto stmt =
+            m_backend->create_read_statement_executor<data_storage::string_result>(
+                "SELECT value FROM " + metadata_object + " WHERE tag='schema_version';",
+                &data_storage::string_result::value);
+        auto rows = stmt().to_vector();
+        return rows.empty() ? -1 : schema_major_from_version(rows.front().value);
+    };
+
+    int schema_major = -1;
+    if(object_exists("rocpd_metadata"))
+        schema_major = read_schema_major("rocpd_metadata");
+    else if(object_exists("rocpd_metadata_" + uuid))
+        schema_major = read_schema_major("rocpd_metadata_" + uuid);
+
+    if(schema_major >= 0)
+    {
+        m_is_v4 = (schema_major == 4);
+    }
+    else
     {
         auto detect =
             m_backend->create_read_statement_executor<data_storage::count_result>(
