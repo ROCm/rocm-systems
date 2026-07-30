@@ -1642,7 +1642,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     TranslationContext kernel_context(
         scope.translation->target_vgpr_count, scope.translation->target_agpr_count,
         scope.translation->target_accvgpr_base, scope.translation->target_sgpr_count,
-        scope.translation->target_private_size);
+        scope.translation->target_private_size, scope.translation->uses_dynamic_stack);
     if (scope.translation->needs_lds_overflow_buf) {
       auto virtual_lds_base =
           reserve_virtual_lds_base_sgpr_pair(kernel_context, KernelBlockScope(scope.blocks),
@@ -2655,8 +2655,18 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         remaining_growth_words -= requested_growth_words;
       } else if (!layout.long_branch_sgpr) {
         auto sgpr = reserve_long_branch_sgpr_pair(kernel_context);
-        if (!sgpr)
+        if (!sgpr) {
+          patched_control_flow = {
+              .ok = false,
+              .failure = TextLayoutFailureCategory::ResourceLimit,
+              .source_offset = patched_control_flow.source_offset,
+              .required_windows = {},
+              .message =
+                  "long direct branch requires an additional descriptor-backed SGPR pair after "
+                  "semantic expansion",
+          };
           break;
+        }
         layout.long_branch_sgpr = *sgpr;
       } else {
         break;

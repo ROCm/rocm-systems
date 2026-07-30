@@ -97,6 +97,10 @@ SemanticScratchAllocator::acquire_vgprs(const SemanticScratchRequest &request) {
   if (!victim)
     return {.lease = std::nullopt, .failure = SemanticScratchFailure::NoRegisterWindow};
 
+  if (context_.uses_dynamic_stack) {
+    return {.lease = std::nullopt, .failure = SemanticScratchFailure::DynamicStackUnsupported};
+  }
+
   auto spill = allocate_spill_dwords(request.count);
   if (!spill)
     return {.lease = std::nullopt, .failure = SemanticScratchFailure::SpillOffsetUnencodable};

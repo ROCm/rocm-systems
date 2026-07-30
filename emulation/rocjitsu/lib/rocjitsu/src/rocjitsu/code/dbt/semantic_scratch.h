@@ -24,6 +24,7 @@ enum class SemanticScratchFailure : uint8_t {
   None,
   InvalidRequest,
   NoRegisterWindow,
+  DynamicStackUnsupported,
   SpillOffsetUnencodable,
 };
 
@@ -88,7 +89,10 @@ struct SemanticScratchResult {
 /// @details Each semantic instruction begins at the same transient frame base,
 /// after persistent kernel-wide semantic storage. Allocations within the frame
 /// advance a cursor so simultaneously-live spill payloads cannot overlap. The
-/// kernel descriptor records only the largest frame high-water mark.
+/// kernel descriptor records only the largest frame high-water mark. The frame
+/// does not know whether private memory above the fixed segment is a
+/// runtime-managed call stack, so it leaves dynamic-stack policy to its callers.
+/// SemanticScratchAllocator rejects reservations that would require a spill.
 class SemanticSpillFrame final {
 public:
   explicit SemanticSpillFrame(TranslationContext &context);
@@ -112,6 +116,8 @@ public:
                            TranslationContext &context, SemanticScratchPolicy policy);
 
   /// @brief Prefer dead VGPRs, then borrow and spill an allowed guest window.
+  /// @details Rejects a spill victim in a dynamic-stack kernel, while allowing
+  ///          a genuinely free VGPR window that does not need private storage.
   [[nodiscard]] SemanticScratchResult acquire_vgprs(const SemanticScratchRequest &request);
 
   /// @brief Reserve additional non-overlapping spill state in this rule's frame.
