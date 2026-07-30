@@ -619,8 +619,16 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           "ConSan MOI inline-shadow probe skipped access site inside a relocated prefix");
       continue;
     }
-    const uint16_t scratch_count = inline_shadow_scratch_count(options, candidate, arch);
-    const auto resources = resolve_moi_scratch(result, candidate, options, scratch_count);
+    const ConSanCandidateResourcePlan *resource_plan =
+        resource_plan_for_candidate(result, candidate);
+    if (resource_plan == nullptr)
+      continue;
+    const uint16_t expected_scratch_count =
+        resource_plan->source == ConSanRegisterAllocationSource::SpillRequired
+            ? inline_shadow_spill_backed_scratch_count(options, candidate, arch)
+            : inline_shadow_scratch_count(options, candidate, arch);
+    const auto resources =
+        resolve_moi_scratch_plan(*resource_plan, options, expected_scratch_count);
     if (!resources)
       continue;
     const std::optional<uint64_t> direct_descriptor =
@@ -861,7 +869,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
         private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
         private_layout ? private_layout->workgroup_key_offset : std::nullopt,
-        workgroup_shadow_compact_token, candidate_errors);
+        workgroup_shadow_compact_token, resources->count, spill ? &*spill : nullptr,
+        candidate_errors);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -1465,6 +1474,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           planned_patch.workgroup_shadow, planned_patch.private_epoch_offset,
           planned_patch.private_owner_offset, planned_patch.private_owner_shift,
           planned_patch.private_workgroup_key_offset, planned_patch.workgroup_shadow_compact_token,
+          planned_patch.resources.count, planned_patch.spill ? &*planned_patch.spill : nullptr,
           result.errors);
       if (!words)
         return;
@@ -1861,7 +1871,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                 planned_patch.workgroup_sources, planned_patch.workgroup_shadow,
                 planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
                 planned_patch.private_owner_shift, planned_patch.private_workgroup_key_offset,
-                planned_patch.workgroup_shadow_compact_token, result.errors);
+                planned_patch.workgroup_shadow_compact_token, planned_patch.resources.count,
+                planned_patch.spill ? &*planned_patch.spill : nullptr, result.errors);
           },
           [](const PlannedInlineShadowPatch &planned_patch) {
             const ConSanMoiCandidate &candidate = *planned_patch.candidate;

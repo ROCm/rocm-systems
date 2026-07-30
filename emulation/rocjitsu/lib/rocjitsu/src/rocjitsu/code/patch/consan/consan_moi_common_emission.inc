@@ -510,6 +510,52 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
   return spill;
 }
 
+/// Recover one guest VGPR from its authoritative spill slot.
+///
+/// Callers must prove that the source lies in the spill window. Dynamic-stack
+/// spills address the same slot metadata relative to their site-local frame.
+[[nodiscard]] bool append_reload_moi_spilled_vgpr(std::vector<uint32_t> &words,
+                                                  const VgprSpillSequence &spill,
+                                                  uint16_t destination, uint16_t source,
+                                                  rj_code_arch_t arch) {
+  const uint32_t spill_end = static_cast<uint32_t>(spill.vgpr_base) + spill.vgpr_count;
+  if (source < spill.vgpr_base || source >= spill_end || !spill.has_complete_slot_metadata())
+    return false;
+  const size_t slot_index = static_cast<size_t>(source - spill.vgpr_base);
+  if (slot_index >= spill.slot_offsets.size())
+    return false;
+  const uint32_t slot_offset = spill.slot_offsets[slot_index];
+  const auto append_load = [&](const auto &load) {
+    if (!load)
+      return false;
+    words.insert(words.end(), load->begin(), load->end());
+    return true;
+  };
+  if (spill.uses_dynamic_stack_frame) {
+    if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+      if (!append_load(build_cdna3_scratch_load_b32_saddr(
+              destination, spill.dynamic_frame_base_sgpr, slot_offset, arch)))
+        return false;
+    } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      if (!append_load(build_cdna4_scratch_load_b32_saddr(
+              destination, spill.dynamic_frame_base_sgpr, slot_offset, arch)))
+        return false;
+    } else {
+      if (!append_load(build_scratch_load_b32_saddr(destination, spill.dynamic_frame_base_sgpr,
+                                                    slot_offset, arch)))
+        return false;
+    }
+  } else {
+    if (!append_load(instrumentation::build_private_load_b32(destination, slot_offset, arch)))
+      return false;
+  }
+  const auto wait = instrumentation::build_s_wait_private_load0(arch);
+  if (!wait)
+    return false;
+  words.push_back(*wait);
+  return true;
+}
+
 [[nodiscard]] bool
 apply_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object,
                               std::span<const uint8_t> image, const ConSanResult &result,

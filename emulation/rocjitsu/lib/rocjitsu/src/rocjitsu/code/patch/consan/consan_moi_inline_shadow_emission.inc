@@ -727,7 +727,7 @@
   const uint16_t prior_dispatch_high_vgpr = static_cast<uint16_t>(old_value_vgpr + 7u);
   const uint16_t ready_version_vgpr = static_cast<uint16_t>(old_value_vgpr + 8u);
   const uint16_t cas_new_vgpr = static_cast<uint16_t>(old_value_vgpr + 9u);
-  const uint16_t cas_expected_vgpr = static_cast<uint16_t>(old_value_vgpr + 10u);
+  const uint16_t cas_expected_vgpr = consan_detail::inline_shadow_cas_expected_vgpr(old_value_vgpr);
   const uint16_t tmp_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
 
   const auto narrow_vcc = [&]() -> bool {
@@ -1152,7 +1152,8 @@
     std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const ConSanOptions &options,
     rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout, uint16_t address_lo_vgpr,
     uint16_t current_low_vgpr, uint16_t current_high_vgpr, uint16_t old_value_vgpr,
-    uint16_t lds_byte_offset_vgpr, uint32_t static_byte_offset, uint32_t byte_count) {
+    uint16_t lds_byte_offset_vgpr, uint32_t static_byte_offset, uint32_t byte_count,
+    const VgprSpillSequence *spill, std::optional<uint16_t> spill_backed_lds_byte_offset_source) {
   if (!options.moi_exec_save_sgpr)
     return false;
 
@@ -1340,6 +1341,14 @@
   // partition iteration.
   words.push_back(restore_address_lo);
   words.push_back(restore_address_hi);
+  // Narrow spill-backed paths deliberately pay one reload per partition only
+  // when diagnostics can consume the recovered guest address.
+  if (layout.diagnostic_capacity != 0 && spill_backed_lds_byte_offset_source &&
+      (spill == nullptr ||
+       !append_reload_moi_spilled_vgpr(words, *spill, lds_byte_offset_vgpr,
+                                       *spill_backed_lds_byte_offset_source, arch))) {
+    return false;
+  }
 
   // The partition operations changed VCC/SCC. Restore the incoming values so
   // the existing diagnostic helper can snapshot and restore the true program
@@ -1802,7 +1811,7 @@
     std::optional<uint32_t> private_epoch_offset, std::optional<uint32_t> private_owner_offset,
     std::optional<uint16_t> private_owner_shift,
     std::optional<uint32_t> private_workgroup_key_offset, uint16_t workgroup_shadow_compact_token,
-    std::vector<std::string> &errors) {
+    uint16_t scratch_count, const VgprSpillSequence *spill, std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI inline-shadow probe requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -1818,7 +1827,21 @@
     errors.emplace_back("ConSan MOI partition-mask debug requires wave-coalesced InlineShadow");
     return std::nullopt;
   }
-  const uint16_t scratch_count = inline_shadow_scratch_count(options, candidate, arch);
+  const uint16_t normal_scratch_count = inline_shadow_scratch_count(options, candidate, arch);
+  const uint16_t spill_scratch_count =
+      inline_shadow_spill_backed_scratch_count(options, candidate, arch);
+  if (scratch_count != normal_scratch_count &&
+      (spill == nullptr || scratch_count != spill_scratch_count)) {
+    errors.emplace_back(
+        "ConSan MOI inline-shadow probe scratch VGPR count disagrees with its resource plan");
+    return std::nullopt;
+  }
+  if (spill != nullptr &&
+      (spill->vgpr_base != *options.scratch_vgpr || spill->vgpr_count != scratch_count)) {
+    errors.emplace_back(
+        "ConSan MOI inline-shadow probe spill window disagrees with its resource plan");
+    return std::nullopt;
+  }
   if (static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count > kMaxVgprs) {
     errors.emplace_back("ConSan MOI inline-shadow probe scratch VGPR window exceeds the limit");
     return std::nullopt;
@@ -1858,18 +1881,33 @@
   const uint16_t high_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 3u);
   const uint16_t tmp_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
   const uint16_t old_value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
+  const uint16_t cas_expected_vgpr = consan_detail::inline_shadow_cas_expected_vgpr(old_value_vgpr);
+  if (cas_expected_vgpr >= static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count) {
+    errors.emplace_back(
+        "ConSan MOI inline-shadow probe has no scratch VGPR for the expected CAS value");
+    return std::nullopt;
+  }
   const bool materialize_flat_offset =
       candidate_requires_gfx1250_flat_offset_materialization(candidate);
+  const auto source_is_spilled = [&](uint16_t source) {
+    return spill != nullptr && source >= spill->vgpr_base &&
+           source < static_cast<uint32_t>(spill->vgpr_base) + spill->vgpr_count;
+  };
+  const std::optional<uint16_t> spill_backed_lds_byte_offset_source =
+      spill != nullptr && !materialize_flat_offset &&
+              (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+              source_is_spilled(*lds_byte_offset_vgpr)
+          ? lds_byte_offset_vgpr
+          : std::nullopt;
   std::optional<uint16_t> saved_lds_byte_offset_vgpr;
   if (materialize_flat_offset) {
     saved_lds_byte_offset_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + scratch_count - 2u);
-  } else if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
-    const uint16_t first_snapshot =
-        static_cast<uint16_t>(*options.scratch_vgpr + scratch_count - 2u);
-    saved_lds_byte_offset_vgpr =
-        *lds_byte_offset_vgpr == first_snapshot
-            ? std::optional<uint16_t>(static_cast<uint16_t>(first_snapshot + 1u))
-            : std::optional<uint16_t>(first_snapshot);
+  } else if (spill_backed_lds_byte_offset_source) {
+    // Address construction and local exchange consume the guest offset before
+    // the transaction initializes its expected CAS value. The authoritative
+    // spill slot reloads the offset again before diagnostics. This phase
+    // sharing keeps the minimum native CDNA access window at 16 VGPRs.
+    saved_lds_byte_offset_vgpr = cas_expected_vgpr;
   } else if (moi_load_clobbers_address(candidate)) {
     saved_lds_byte_offset_vgpr =
         static_cast<uint16_t>(consan_detail::inline_shadow_loop_counter_vgpr(
@@ -1902,6 +1940,11 @@
   std::vector<uint32_t> words;
   words.reserve(candidate.size / sizeof(uint32_t) + 64u + (options.moi_exec_save_sgpr ? 120u : 0u) +
                 (options.moi_epoch_vgpr ? 2u : 0u));
+  const auto reload_spill_backed_lds_byte_offset = [&]() {
+    return !spill_backed_lds_byte_offset_source ||
+           append_reload_moi_spilled_vgpr(words, *spill, *saved_lds_byte_offset_vgpr,
+                                          *spill_backed_lds_byte_offset_source, arch);
+  };
   const auto append_guest_access = [&] {
     for (uint64_t offset = 0; offset < candidate.size; offset += sizeof(uint32_t)) {
       uint32_t word = 0;
@@ -1913,12 +1956,14 @@
   // the effective address before executing the displaced guest instruction;
   // otherwise the loaded payload becomes the exact-shadow cell index.
   if (saved_lds_byte_offset_vgpr) {
-    words.push_back(build_v_mov_b32_e32(*saved_lds_byte_offset_vgpr,
-                                        vector_source_vgpr(*lds_byte_offset_vgpr), arch));
-    if (materialize_flat_offset) {
-      words.push_back(build_v_mov_b32_e32(
-          static_cast<uint16_t>(*saved_lds_byte_offset_vgpr + 1u),
-          vector_source_vgpr(static_cast<uint16_t>(*lds_byte_offset_vgpr + 1u)), arch));
+    if (!spill_backed_lds_byte_offset_source) {
+      words.push_back(build_v_mov_b32_e32(*saved_lds_byte_offset_vgpr,
+                                          vector_source_vgpr(*lds_byte_offset_vgpr), arch));
+      if (materialize_flat_offset) {
+        words.push_back(build_v_mov_b32_e32(
+            static_cast<uint16_t>(*saved_lds_byte_offset_vgpr + 1u),
+            vector_source_vgpr(static_cast<uint16_t>(*lds_byte_offset_vgpr + 1u)), arch));
+      }
     }
     lds_byte_offset_vgpr = saved_lds_byte_offset_vgpr;
   }
@@ -2048,11 +2093,21 @@
     // address comparison used by hardware: a 32-bit SHARED_BASE source is the
     // shared aperture's high half. Global lanes bypass shadow bookkeeping and
     // later rejoin for the displaced guest access.
-    const auto in_shared_aperture = instrumentation::build_v_cmp_eq_u32_vcc(
-        kScalarOperandSharedBase,
-        materialize_flat_offset ? static_cast<uint16_t>(*lds_byte_offset_vgpr + 1u)
-                                : static_cast<uint16_t>(*candidate.addr_vgpr + 1u),
-        arch);
+    uint16_t address_hi_source = materialize_flat_offset
+                                     ? static_cast<uint16_t>(*lds_byte_offset_vgpr + 1u)
+                                     : static_cast<uint16_t>(*candidate.addr_vgpr + 1u);
+    if (!materialize_flat_offset && source_is_spilled(address_hi_source)) {
+      const uint16_t recovered_address_hi = static_cast<uint16_t>(*options.scratch_vgpr + 1u);
+      if (!append_reload_moi_spilled_vgpr(words, *spill, recovered_address_hi, address_hi_source,
+                                          arch)) {
+        errors.emplace_back(
+            "ConSan MOI inline-shadow probe could not recover a spilled flat address");
+        return std::nullopt;
+      }
+      address_hi_source = recovered_address_hi;
+    }
+    const auto in_shared_aperture =
+        instrumentation::build_v_cmp_eq_u32_vcc(kScalarOperandSharedBase, address_hi_source, arch);
     const auto retain_shared_lanes = instrumentation::build_s_and_saveexec_b64(
         static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u), kRdna4VccLo, arch);
     if (!in_shared_aperture || !retain_shared_lanes) {
@@ -2117,7 +2172,8 @@
         const uint32_t cells_per_iteration = use_compact_pairs ? 2u : 1u;
         const uint32_t iteration_count = cell_range.cell_count / cells_per_iteration;
         if (use_compact_pairs && cell_range.cell_count == 2u) {
-          if (!append_workgroup_local_exact_shadow_swap(
+          if (!reload_spill_backed_lds_byte_offset() ||
+              !append_workgroup_local_exact_shadow_swap(
                   words, candidate, options, arch, layout, *workgroup_shadow, address_lo_vgpr,
                   low_vgpr, high_vgpr, local_old_value_vgpr, *lds_byte_offset_vgpr,
                   range.static_byte_offset, /*cell_index=*/0u, range.byte_count,
@@ -2136,6 +2192,11 @@
               *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
               options.moi_track_atomics);
           const uint16_t loop_offset_vgpr = static_cast<uint16_t>(loop_counter_vgpr + 1u);
+          if (!reload_spill_backed_lds_byte_offset()) {
+            errors.emplace_back(
+                "ConSan MOI inline-shadow probe could not recover its spilled LDS address");
+            return std::nullopt;
+          }
           if (range.static_byte_offset == 0u) {
             words.push_back(build_v_mov_b32_e32(loop_offset_vgpr,
                                                 vector_source_vgpr(*lds_byte_offset_vgpr), arch));
@@ -2208,7 +2269,8 @@
           }
           words.push_back(*loop);
           words.push_back(*restore_valid_workgroup);
-        } else if (!append_workgroup_local_exact_shadow_swap(
+        } else if (!reload_spill_backed_lds_byte_offset() ||
+                   !append_workgroup_local_exact_shadow_swap(
                        words, candidate, options, arch, layout, *workgroup_shadow, address_lo_vgpr,
                        low_vgpr, high_vgpr, local_old_value_vgpr, *lds_byte_offset_vgpr,
                        range.static_byte_offset, cell_index, range.byte_count,
@@ -2289,6 +2351,11 @@
       words.insert(words.end(), scale_dispatch_bank->begin(), scale_dispatch_bank->end());
       words.insert(words.end(), add_dispatch_bank->begin(), add_dispatch_bank->end());
 
+      if (!reload_spill_backed_lds_byte_offset()) {
+        errors.emplace_back(
+            "ConSan MOI inline-shadow probe could not recover its spilled LDS address");
+        return std::nullopt;
+      }
       uint16_t effective_lds_byte_offset_vgpr = *lds_byte_offset_vgpr;
       if (range.static_byte_offset != 0) {
         if (!append_compute_effective_lds_byte_offset(words, tmp_vgpr, *lds_byte_offset_vgpr,
@@ -2344,7 +2411,8 @@
       }
       if (!append_wave_coalesced_exact_shadow_swap(
               words, candidate, options, arch, layout, address_lo_vgpr, low_vgpr, high_vgpr,
-              old_value_vgpr, *lds_byte_offset_vgpr, range.static_byte_offset, range.byte_count)) {
+              old_value_vgpr, *lds_byte_offset_vgpr, range.static_byte_offset, range.byte_count,
+              spill, spill_backed_lds_byte_offset_source)) {
         errors.emplace_back(
             "ConSan MOI inline-shadow probe could not encode versioned shadow publish");
         return std::nullopt;

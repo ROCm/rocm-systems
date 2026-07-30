@@ -857,16 +857,6 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
 [[nodiscard]] uint16_t inline_shadow_scratch_count(const ConSanOptions &options,
                                                    const ConSanMoiCandidate &candidate,
                                                    rj_code_arch_t arch) {
-  // A CDNA3/4 spill window may overlap the displaced guest operands. Reserve
-  // two otherwise-unused registers at the end of the window so emission can
-  // snapshot the DS address before the probe starts clobbering that window.
-  // Two registers ensure the chosen snapshot is distinct even when the guest
-  // address itself happens to be one of the reserved registers.
-  const bool cdna_spill_capable =
-      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-      (options.force_vgpr_spill || options.automatic_moi_private_epoch ||
-       options.moi_dynamic_stack_spill);
-  const uint16_t spill_address_snapshot_count = cdna_spill_capable ? 2u : 0u;
   const uint16_t flat_offset_address_count =
       candidate_requires_gfx1250_flat_offset_materialization(candidate) ? 2u : 0u;
   const uint16_t dynamic_stack_reservoir_count =
@@ -876,8 +866,23 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
   return static_cast<uint16_t>(
       inline_shadow_scratch_count(options) + inline_shadow_loop_scratch_count(options, candidate) +
       (moi_load_clobbers_address(candidate) && flat_offset_address_count == 0u ? 1u : 0u) +
-      std::max(spill_address_snapshot_count, flat_offset_address_count) +
-      dynamic_stack_reservoir_count);
+      flat_offset_address_count + dynamic_stack_reservoir_count);
+}
+
+[[nodiscard]] uint16_t inline_shadow_spill_backed_scratch_count(const ConSanOptions &options,
+                                                                const ConSanMoiCandidate &candidate,
+                                                                rj_code_arch_t arch) {
+  const uint16_t normal_count = inline_shadow_scratch_count(options, candidate, arch);
+  // A spill-backed CDNA probe can recover an overlapping guest address from
+  // its authoritative private slot into a phase-shared transaction register.
+  // Only the non-spill path must retain a dedicated address snapshot when a
+  // load overwrites its address operand.
+  const bool can_reload_clobbered_address =
+      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      candidate.source == ConSanMoiCandidateSource::NativeLds &&
+      moi_load_clobbers_address(candidate) &&
+      !candidate_requires_gfx1250_flat_offset_materialization(candidate);
+  return static_cast<uint16_t>(normal_count - (can_reload_clobbered_address ? 1u : 0u));
 }
 
 [[nodiscard]] uint16_t direct_sampled_scratch_count(const ConSanOptions &options,
@@ -2028,7 +2033,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
                        ConSanResourceSiteKind site_kind, size_t candidate_index,
                        uint64_t text_offset, std::optional<uint64_t> kernel_descriptor_file_offset,
                        uint16_t scratch_count, const ConSanMoiCandidate *access_candidate = nullptr,
-                       const ConSanAtomicSite *atomic_site = nullptr) {
+                       const ConSanAtomicSite *atomic_site = nullptr, bool require_spill = false) {
   ConSanCandidateResourcePlan plan;
   plan.site_kind = site_kind;
   plan.candidate_index = candidate_index;
@@ -2127,7 +2132,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   request.max_referenced_count = plan.max_referenced_vgpr_count;
   request.architecture_limit = plan.ordinary_vgpr_limit;
   request.explicit_base = options.scratch_vgpr;
-  request.force_spill = options.force_vgpr_spill;
+  request.force_spill = options.force_vgpr_spill || require_spill;
   request.forbidden = anchor_def_use.defs | anchor_def_use.uses;
   // Candidate decoding is the authoritative operand-width source for native
   // two-address LDS operations.  Some generic instruction def/use models only
@@ -2300,9 +2305,27 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpti
        ++candidate_index) {
     const ConSanMoiCandidate &candidate = result.moi_candidates[candidate_index];
     const uint16_t scratch_count = moi_access_scratch_vgpr_count(options, candidate, state.arch);
-    result.resource_plans.push_back(plan_moi_resource_site(
+    ConSanCandidateResourcePlan plan = plan_moi_resource_site(
         state, options, ConSanResourceSiteKind::Access, candidate_index, candidate.text_offset,
-        candidate.kernel_descriptor_file_offset, scratch_count, &candidate));
+        candidate.kernel_descriptor_file_offset, scratch_count, &candidate);
+    if (options.moi_engine == ConSanMoiEngine::InlineShadow &&
+        (state.arch == ROCJITSU_CODE_ARCH_CDNA3 || state.arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+        candidate.source == ConSanMoiCandidateSource::NativeLds &&
+        moi_load_clobbers_address(candidate) &&
+        !candidate_requires_gfx1250_flat_offset_materialization(candidate) &&
+        (plan.source == ConSanRegisterAllocationSource::SpillRequired ||
+         (plan.source == ConSanRegisterAllocationSource::Unsupported &&
+          plan.reason == ConSanRegisterPlanReason::NoLegalWindow))) {
+      const uint16_t spill_scratch_count =
+          inline_shadow_spill_backed_scratch_count(options, candidate, state.arch);
+      ConSanCandidateResourcePlan spill_plan = plan_moi_resource_site(
+          state, options, ConSanResourceSiteKind::Access, candidate_index, candidate.text_offset,
+          candidate.kernel_descriptor_file_offset, spill_scratch_count, &candidate,
+          /*atomic_site=*/nullptr, /*require_spill=*/true);
+      if (spill_plan.source == ConSanRegisterAllocationSource::SpillRequired)
+        plan = std::move(spill_plan);
+    }
+    result.resource_plans.push_back(std::move(plan));
   }
 }
 

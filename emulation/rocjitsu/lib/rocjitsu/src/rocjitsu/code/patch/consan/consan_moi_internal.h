@@ -143,6 +143,15 @@ inline_shadow_loop_counter_vgpr(uint16_t scratch_vgpr, bool has_exec_save, bool 
       scratch_vgpr + inline_shadow_transaction_scratch_count(has_exec_save, track_atomics));
 }
 
+/// Return the transaction register that holds the expected version for CAS.
+///
+/// The address-formation phase completes before this register is initialized,
+/// so a narrow spill-backed probe may use it temporarily to recover one guest
+/// LDS address component.
+[[nodiscard]] constexpr uint16_t inline_shadow_cas_expected_vgpr(uint16_t old_value_vgpr) {
+  return static_cast<uint16_t>(old_value_vgpr + 10u);
+}
+
 /// Return the offset/counter scratch reserved when one access spans multiple
 /// exact-shadow cells.
 [[nodiscard]] constexpr uint16_t inline_shadow_loop_scratch_count(uint32_t width_bits,
