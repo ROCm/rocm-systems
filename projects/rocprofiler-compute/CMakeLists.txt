@@ -823,27 +823,6 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-if(TARGET test-torch-trace-collector)
-    if(TEST_FROM_INSTALL)
-        set(_ttc_test_cmd tests/test-torch-trace-collector)
-    else()
-        set(_ttc_test_cmd $<TARGET_FILE:test-torch-trace-collector>)
-    endif()
-    add_test(NAME test-torch-trace-collector COMMAND ${_ttc_test_cmd})
-    get_target_property(
-        _ttc_ld_path
-        test-torch-trace-collector
-        ROCPROF_TEST_LD_LIBRARY_PATH
-    )
-    set(_ttc_test_env "LD_LIBRARY_PATH=${_ttc_ld_path}:$ENV{LD_LIBRARY_PATH}")
-    sanitizer_runtime_env(_san_env OFF)
-    list(APPEND _ttc_test_env ${_san_env})
-    set_tests_properties(
-        test-torch-trace-collector
-        PROPERTIES LABELS "profile" ENVIRONMENT "${_ttc_test_env}"
-    )
-endif()
-
 # -----------------------------------
 # Torch trace tests
 # -----------------------------------
@@ -988,6 +967,24 @@ if(TARGET test-pc-sampling-collector)
             PROPERTIES ENVIRONMENT "${_san_env}"
         )
     endif()
+endif()
+
+# Registered here rather than in src/lib/torch_trace_collector/tests so the YAML
+# category labels, applied in this directory scope, can reach it. The target
+# only exists when torch and the Python development files were found.
+if(TARGET test-torch-trace-collector)
+    if(TEST_FROM_INSTALL)
+        set(_rcfn_launcher tests/roctx_recordfn_launcher.py)
+        set(_rcfn_test_cmd tests/test-torch-trace-collector)
+    else()
+        set(_rcfn_launcher ${PROJECT_SOURCE_DIR}/tests/roctx_recordfn_launcher.py)
+        set(_rcfn_test_cmd $<TARGET_FILE:test-torch-trace-collector>)
+    endif()
+    add_test(
+        NAME test-torch-trace-collector
+        COMMAND ${PYTHON_TEST_COMMAND} ${_rcfn_launcher} ${_rcfn_test_cmd}
+    )
+    set_tests_properties(test-torch-trace-collector PROPERTIES SKIP_RETURN_CODE 125)
 endif()
 
 # -----------------------------------
