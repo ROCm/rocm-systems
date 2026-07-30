@@ -35,11 +35,14 @@ from ._structs import (
     _LLVMPtrType,
     ncclTeam,
     ncclCoopAny,
-    ncclLsaBarrierHandle,
-    ncclGinBarrierHandle,
     ncclMultimemHandle,
 )
 from .comm import DevComm
+from .handles import (
+    GinBarrierHandle,
+    LsaBarrierHandle,
+    MultimemHandle,
+)
 from .gin import Gin
 from .types import MemoryOrder, GinFenceLevel
 
@@ -121,11 +124,11 @@ def lsa_session(
     coop: ncclCoopAny,
     dev_comm: DevComm,
     team: ncclTeam,
-    handle: ncclLsaBarrierHandle,
+    handle: LsaBarrierHandle,
     index: int,
     *,
     multimem: bool = False,
-    mm_handle: ncclMultimemHandle = None,
+    mm_handle: MultimemHandle = None,
 ) -> "LsaBarrierSession":
     """Create and initialize an :class:`LsaBarrierSession`.
 
@@ -175,7 +178,7 @@ def gin_session(
     coop: ncclCoopAny,
     gin: Gin,
     team: ncclTeam,
-    handle: ncclGinBarrierHandle,
+    handle: GinBarrierHandle,
     index: int,
 ) -> "GinBarrierSession":
     """Create and initialize a :class:`GinBarrierSession`.
@@ -229,12 +232,12 @@ def hybrid_session(
     inner_team: ncclTeam,
     outer_team: ncclTeam,
     gin: Gin,
-    inner_handle: ncclLsaBarrierHandle,
-    outer_handle: ncclGinBarrierHandle,
+    inner_handle: LsaBarrierHandle,
+    outer_handle: GinBarrierHandle,
     index: int,
     *,
     multimem: bool = False,
-    inner_mm_handle: ncclMultimemHandle = None,
+    inner_mm_handle: MultimemHandle = None,
 ) -> "BarrierSession":
     """Create and initialize a hybrid :class:`BarrierSession`.
 
@@ -275,7 +278,7 @@ def lsa_default(
     index: int,
     *,
     multimem: bool = False,
-    mm_handle: ncclMultimemHandle = None,
+    mm_handle: MultimemHandle = None,
 ) -> "LsaBarrierSession":
     """LSA barrier on the default LSA team using ``dev_comm.lsa_barrier``.
 
@@ -341,7 +344,7 @@ def world_hybrid(
     index: int,
     *,
     multimem: bool = False,
-    inner_mm_handle: ncclMultimemHandle = None,
+    inner_mm_handle: MultimemHandle = None,
 ) -> "BarrierSession":
     """Hybrid barrier (LSA + rail-GIN) using the embedded hybrid handles.
 

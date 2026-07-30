@@ -11,7 +11,8 @@ from cutlass.cutlass_dsl import ir
 from ...resources import RegisteredWindowHandle
 from . import _bindings
 from ._helpers import _to_value
-from ._structs import _LLVMPtrType, ncclMultimemHandle, ncclTeam as Team
+from ._structs import _LLVMPtrType, ncclTeam as Team
+from .handles import MultimemHandle
 
 if TYPE_CHECKING:
     from .comm import DevComm
@@ -115,13 +116,15 @@ class Window:
             self.ptr, cutlass.Int64(offset), _to_value(team), cutlass.Int32(peer))
 
     def multimem_pointer(
-        self, offset: int, mm_handle: ncclMultimemHandle
+        self, offset: int, mm_handle: MultimemHandle
     ) -> ir.Value:
         """Translate ``offset`` to its multimem virtual address.
 
         Args:
             offset: Byte offset within the window.
-            mm_handle: Multimem handle covering this window.
+            mm_handle: Multimem handle covering this window —
+                :py:attr:`DevComm.lsa_multimem`, or one passed in from the
+                host for a non-LSA team.
 
         Returns:
             ``!llvm.ptr`` MLIR value.
@@ -129,7 +132,7 @@ class Window:
         return _bindings.nccl_get_multimem_pointer(
             self.ptr, cutlass.Int64(offset), _to_value(mm_handle))
 
-    def lsa_multimem_pointer(self, offset: int, comm: "DevComm") -> ir.Value:
+    def lsa_multimem_pointer(self, offset: int, comm: DevComm) -> ir.Value:
         """Translate ``offset`` to the LSA multimem virtual address.
 
         Args:

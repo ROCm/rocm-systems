@@ -19,11 +19,9 @@ from ._structs import (
     DevCommValue,
     ncclGin_C,
     ncclTeam as Team,
-    ncclLsaBarrierHandle,
-    ncclGinBarrierHandle,
-    ncclMultimemHandle,
 )
 from .gin import Gin
+from .handles import GinBarrierHandle, LsaBarrierHandle, MultimemHandle
 from .types import GinBackendMask, GinResourceSharingMode
 
 
@@ -133,29 +131,34 @@ class DevComm:
 
     # === Embedded barrier handles ===
 
-    @property
-    def lsa_barrier(self) -> ncclLsaBarrierHandle:
-        return self.value.lsa_barrier
+    # Wrapped so an embedded handle and a host-passed one are the same type.
 
     @property
-    def rail_gin_barrier(self) -> ncclGinBarrierHandle:
-        return self.value.rail_gin_barrier
+    def lsa_barrier(self) -> LsaBarrierHandle:
+        return LsaBarrierHandle.from_native_struct(self.value.lsa_barrier)
 
     @property
-    def hybrid_lsa_barrier(self) -> ncclLsaBarrierHandle:
-        return self.value.hybrid_lsa_barrier
+    def rail_gin_barrier(self) -> GinBarrierHandle:
+        return GinBarrierHandle.from_native_struct(self.value.rail_gin_barrier)
 
     @property
-    def hybrid_rail_gin_barrier(self) -> ncclGinBarrierHandle:
-        return self.value.hybrid_rail_gin_barrier
+    def hybrid_lsa_barrier(self) -> LsaBarrierHandle:
+        return LsaBarrierHandle.from_native_struct(
+            self.value.hybrid_lsa_barrier)
 
     @property
-    def world_gin_barrier(self) -> ncclGinBarrierHandle:
-        return self.value.world_gin_barrier
+    def hybrid_rail_gin_barrier(self) -> GinBarrierHandle:
+        return GinBarrierHandle.from_native_struct(
+            self.value.hybrid_rail_gin_barrier)
 
     @property
-    def lsa_multimem(self) -> ncclMultimemHandle:
-        return self.value.lsa_multimem
+    def world_gin_barrier(self) -> GinBarrierHandle:
+        return GinBarrierHandle.from_native_struct(
+            self.value.world_gin_barrier)
+
+    @property
+    def lsa_multimem(self) -> MultimemHandle:
+        return MultimemHandle.from_native_struct(self.value.lsa_multimem)
 
     # === Team factories ===
 
@@ -246,13 +249,15 @@ class DevComm:
             cutlass.Int32(peer))
 
     def resource_buffer_multimem_pointer(
-        self, handle: int, mm_handle: ncclMultimemHandle
+        self, handle: int, mm_handle: MultimemHandle
     ) -> ir.Value:
         """Translate a resource handle to its multimem buffer address.
 
         Args:
             handle: ``ncclDevResourceHandle`` from ``DevCommResource``.
-            mm_handle: Multimem handle covering the resource window.
+            mm_handle: Multimem handle covering the resource window —
+                :py:attr:`lsa_multimem`, or one passed in from the host for
+                a non-LSA team.
 
         Returns:
             ``!llvm.ptr`` MLIR value.
