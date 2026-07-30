@@ -327,6 +327,16 @@ ncclResult_t ncclIbGetGidIndex(struct ibv_context* context, uint8_t portNum, str
   return ncclSuccess;
 }
 
+ncclResult_t ncclIbGidInfoQuery(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
+                                struct ncclIbGidInfo* gidInfo) {
+  if (context == NULL || portAttr == NULL || gidInfo == NULL) return ncclInternalError;
+  gidInfo->link_layer = portAttr->link_layer;
+  NCCLCHECK(ncclIbGetGidIndex(context, portNum, portAttr, &gidInfo->localGidIndex));
+  if (gidInfo->localGidIndex < 0) return ncclInternalError;
+  NCCLCHECK(wrap_ibv_query_gid(context, portNum, gidInfo->localGidIndex, &gidInfo->localGid));
+  return ncclSuccess;
+}
+
 // Resolve NCCL_IB_PKEY_VALUE to a PKey-table index, else fall back to the NCCL_IB_PKEY index.
 // ibv_query_pkey() returns network byte order with the MSB as the membership bit, so compare low 15 bits.
 ncclResult_t ncclIbGetPkeyIndex(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
@@ -961,13 +971,9 @@ ib_recv_dev_list:
     devInfo->rkey = commDev->ctsFifoMr->rkey;
 
     // Pack local GID info
-    devInfo->link_layer = commDev->base.gidInfo.link_layer = ibDev->portAttr.link_layer;
-    NCCLCHECKGOTO(ncclIbGetGidIndex(ibDev->context, ibDev->portNum, &ibDev->portAttr,
-                                    &commDev->base.gidInfo.localGidIndex),
-                  ret, fail);
-    NCCLCHECKGOTO(wrap_ibv_query_gid(ibDev->context, ibDev->portNum, commDev->base.gidInfo.localGidIndex,
-                                     &commDev->base.gidInfo.localGid),
-                  ret, fail);
+    NCCLCHECKGOTO(ncclIbGidInfoQuery(ibDev->context, ibDev->portNum, &ibDev->portAttr, &commDev->base.gidInfo), ret,
+                  fail);
+    devInfo->link_layer = commDev->base.gidInfo.link_layer;
     devInfo->gid.global.subnet_prefix = commDev->base.gidInfo.localGid.global.subnet_prefix;
     devInfo->gid.global.interface_id = commDev->base.gidInfo.localGid.global.interface_id;
 
@@ -1567,12 +1573,8 @@ ib_recv:
       NCCLCHECKGOTO(ncclIbResiliencyDevInit(rComm->base.resiliency, i, &ncclIbDevs[ibDevN]), ret, fail);
     }
     ibDev = ncclIbDevs + ibDevN;
-    NCCLCHECKGOTO(ncclIbGetGidIndex(ibDev->context, ibDev->portNum, &ibDev->portAttr,
-                                    &rCommDev->base.gidInfo.localGidIndex),
-                  ret, fail);
-    NCCLCHECKGOTO(wrap_ibv_query_gid(ibDev->context, ibDev->portNum, rCommDev->base.gidInfo.localGidIndex,
-                                     &rCommDev->base.gidInfo.localGid),
-                  ret, fail);
+    NCCLCHECKGOTO(ncclIbGidInfoQuery(ibDev->context, ibDev->portNum, &ibDev->portAttr, &rCommDev->base.gidInfo), ret,
+                  fail);
     if (link_layer == IBV_LINK_LAYER_UNSPECIFIED) link_layer = ibDev->portAttr.link_layer;
     if (link_layer != ibDev->portAttr.link_layer) {
       int ibDev0 = rComm->devs[0].base.ibDevN;
@@ -1659,7 +1661,7 @@ ib_recv:
 
     // Fill Handle
     meta.devs[i].lid = ibDev->portAttr.lid;
-    meta.devs[i].link_layer = rCommDev->base.gidInfo.link_layer = ibDev->portAttr.link_layer;
+    meta.devs[i].link_layer = rCommDev->base.gidInfo.link_layer;
     meta.devs[i].ib_port = ibDev->portNum;
     meta.devs[i].gid.global.subnet_prefix = rCommDev->base.gidInfo.localGid.global.subnet_prefix;
     meta.devs[i].gid.global.interface_id = rCommDev->base.gidInfo.localGid.global.interface_id;

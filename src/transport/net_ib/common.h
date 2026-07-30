@@ -683,6 +683,8 @@ ncclResult_t ncclIbGetGidIndex(struct ibv_context* context, uint8_t portNum, str
                                int* gidIndex);
 ncclResult_t ncclIbGetPkeyIndex(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
                                 int* pkeyIndex);
+ncclResult_t ncclIbGidInfoQuery(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
+                                struct ncclIbGidInfo* gidInfo);
 ncclResult_t ncclIbGetRequest(struct ncclIbNetCommBase* base, struct ncclIbRequest** req);
 ncclResult_t ncclIbFreeRequest(struct ncclIbRequest* r);
 
