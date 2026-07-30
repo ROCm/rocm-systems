@@ -14,6 +14,7 @@ printf:
   Unit_Buffered_Printf_Specifier: *level_2
   Unit_Host_Printf: *level_2
   Unit_NonHost_Printf_basic: *level_2
+  Unit_NonHost_Printf_Positive_DuplicateFormatStringMetadata: *level_2
   Unit_NonHost_Printf_loop: *level_2
   Unit_NonHost_Printf_multiple_Threads: *level_2
   Unit_NonHost_Printf_BufferAvailability: *level_2
