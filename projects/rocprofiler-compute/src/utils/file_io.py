@@ -208,8 +208,8 @@ def build_agent_to_gpu_map_from_json(
     Map agent ``id.handle`` values to 0-indexed GPU IDs.
 
     GPU agents are identified by the rocprofiler-sdk agent ``type`` enum
-    value 2 in the ``agents`` array of ``ps_file_results.json``.  They are
-    sorted by ``node_id`` so that the first GPU agent maps to GPU 0,
+    value 2 in the ``agents`` array of ``<pid>_ps_file_results.json``.  They
+    are sorted by ``node_id`` so that the first GPU agent maps to GPU 0,
     the second to GPU 1, etc.
     """
     rocprofiler_agent_type_gpu = 2
@@ -223,7 +223,7 @@ def build_agent_to_gpu_map_from_json(
 def discover_pc_sampling_result_files(
     workload_path: Path,
 ) -> tuple[Path, ...]:
-    """Discover direct-child PC sampling result files for a workload."""
+    """Discover direct-child ``<pid>_ps_file_results.json`` files."""
     if not workload_path.is_dir():
         direct_child_files: tuple[Path, ...] = ()
     else:
@@ -231,15 +231,15 @@ def discover_pc_sampling_result_files(
             child_path for child_path in workload_path.iterdir() if child_path.is_file()
         )
 
-    return _select_pc_sampling_result_files(direct_child_files)
+    return _find_pid_prefixed_pc_sampling_result_files(direct_child_files)
 
 
 @demarcate
 def load_pc_sampling_results(workload_path: str) -> list[dict[str, Any]]:
     """Load valid PC sampling tool records for a workload.
 
-    PID-prefixed results are returned in numeric PID order and take precedence
-    over the legacy unprefixed result. Malformed files are skipped with a warning.
+    ``<pid>_ps_file_results.json`` records are returned in numeric PID order.
+    Malformed files are skipped with a warning.
 
     Result files can be multiple GB, so parse each once here and share the records
     with every PC sampling consumer instead of re-reading the files.
@@ -295,7 +295,7 @@ def process_pc_sampling_kernel_trace(
         console_warning("PC sampling results not found. Cannot build dispatch data.")
         return pd.DataFrame(columns=columns)
 
-    process_id = tool_data.get("metadata", {}).get("pid")
+    process_id = int(tool_data["metadata"]["pid"])
     dispatches = tool_data["buffer_records"]["kernel_dispatch"]
     kernel_id_to_name = {
         symbol["kernel_id"]: symbol["formatted_kernel_name"]
@@ -422,18 +422,6 @@ def is_single_panel_config(
         )
 
 
-def _select_pc_sampling_result_files(
-    direct_child_files: tuple[Path, ...],
-) -> tuple[Path, ...]:
-    """Prefer PID-prefixed result files, falling back to the legacy file."""
-    pid_result_files = _find_pid_prefixed_pc_sampling_result_files(direct_child_files)
-    if pid_result_files:
-        return pid_result_files
-
-    legacy_result_file = _find_legacy_pc_sampling_result_file(direct_child_files)
-    return (legacy_result_file,) if legacy_result_file is not None else ()
-
-
 def _find_pid_prefixed_pc_sampling_result_files(
     direct_child_files: tuple[Path, ...],
 ) -> tuple[Path, ...]:
@@ -462,33 +450,18 @@ def _find_pid_prefixed_pc_sampling_result_files(
     )
 
 
-def _find_legacy_pc_sampling_result_file(
-    direct_child_files: tuple[Path, ...],
-) -> Optional[Path]:
-    """Return the unprefixed legacy result file, if present."""
-    legacy_results_filename = "ps_file_results.json"
-    return next(
-        (
-            candidate_path
-            for candidate_path in direct_child_files
-            if candidate_path.name == legacy_results_filename
-        ),
-        None,
-    )
-
-
 def _validate_pc_sampling_process_ids(
     tool_data_records: list[dict[str, Any]],
 ) -> None:
-    """Require unique process IDs when combining PC-sampling tool records."""
-    if len(tool_data_records) <= 1:
+    """Require a concrete, unique process ID for every tool record."""
+    if not tool_data_records:
         return
 
     process_ids = [
         tool_data.get("metadata", {}).get("pid") for tool_data in tool_data_records
     ]
     if any(process_id is None for process_id in process_ids):
-        console_error("PC sampling: multiple result records require metadata.pid.")
+        console_error("PC sampling: every result record requires metadata.pid.")
 
     if len(set(process_ids)) != len(process_ids):
         console_error(
@@ -499,8 +472,8 @@ def _validate_pc_sampling_process_ids(
 def _parse_pc_sampling_result_file(json_path: Path) -> Optional[dict[str, Any]]:
     """Extract the sole ``rocprofiler-sdk-tool`` record at index 0.
 
-    Each per-process SDK output contains exactly one tool record, so index 0 is
-    the complete record for that process.
+    Each ``<pid>_ps_file_results.json`` output contains exactly one tool record,
+    so index 0 is the complete record for that process.
 
     Log a warning and return ``None`` when the result file is malformed.
     """

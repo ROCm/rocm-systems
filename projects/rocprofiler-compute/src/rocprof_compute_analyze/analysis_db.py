@@ -71,7 +71,7 @@ from utils.utils_counter_defs import (
 )
 
 KernelKey = tuple[Optional[int], str]
-CodeObjectKey = tuple[Optional[int], int]
+CodeObjectKey = tuple[int, int]
 
 
 def _normalize_pid(pid: Any) -> Optional[int]:  # noqa: ANN401
@@ -225,6 +225,13 @@ class db_analysis(OmniAnalyze_Base):
                         lds_cache_data=workload_roofline.get("lds_cache_data"),
                         workload=workload_obj,
                     )
+                )
+
+            if self.pc_sampling_collected() and not self.pc_sampling_only():
+                self._add_pid_scoped_pc_sampling_kernels(
+                    workload_path,
+                    workload_obj,
+                    kernel_objs,
                 )
 
             # Add pc sampling data, then the full code-object ISA
@@ -421,7 +428,7 @@ class db_analysis(OmniAnalyze_Base):
         )
 
         for tool_data in tool_data_records:
-            pid = _normalize_pid(tool_data.get("metadata", {}).get("pid"))
+            pid = int(tool_data["metadata"]["pid"])
 
             for code_object in load_aggregated_pc_sampling(tool_data):
                 code_object_key: CodeObjectKey = (pid, code_object.code_object_id)
@@ -448,7 +455,7 @@ class db_analysis(OmniAnalyze_Base):
     @staticmethod
     def _add_instruction_line(
         line: InstructionLineRecord,
-        pid: Optional[int],
+        pid: int,
         code_object_store: orm.CodeObjectStore,
         kernel_objs: dict[KernelKey, orm.Kernel],
     ) -> None:
@@ -510,10 +517,7 @@ class db_analysis(OmniAnalyze_Base):
         )
         tool_data_by_pid = self._pc_sampling_tool_data_by_pid(tool_data_records)
 
-        for raw_pid, disassemblies in load_code_object_disassemblies(
-            workload_path
-        ).items():
-            pid = _normalize_pid(raw_pid)
+        for pid, disassemblies in load_code_object_disassemblies(workload_path).items():
             tool_data = tool_data_by_pid.get(pid)
             if tool_data is None:
                 continue
@@ -1024,14 +1028,43 @@ class db_analysis(OmniAnalyze_Base):
 
         return dispatch_data_per_workload
 
+    def _add_pid_scoped_pc_sampling_kernels(
+        self,
+        workload_path: str,
+        workload_obj: orm.Workload,
+        kernel_objs: dict[KernelKey, orm.Kernel],
+    ) -> None:
+        tool_data_records = self._pc_sampling_tool_data_per_workload.get(
+            workload_path, []
+        )
+        for tool_data in tool_data_records:
+            pid = int(tool_data["metadata"]["pid"])
+            dispatched_kernel_ids = {
+                dispatch_record["dispatch_info"]["kernel_id"]
+                for dispatch_record in tool_data["buffer_records"]["kernel_dispatch"]
+            }
+            for symbol in tool_data.get("kernel_symbols", []):
+                if symbol["kernel_id"] not in dispatched_kernel_ids:
+                    continue
+                kernel_name = symbol["formatted_kernel_name"]
+                if (None, kernel_name) not in kernel_objs:
+                    continue
+                kernel_key: KernelKey = (pid, kernel_name)
+                if kernel_key in kernel_objs:
+                    continue
+                kernel_objs[kernel_key] = orm.Kernel(
+                    kernel_name=kernel_name,
+                    workload=workload_obj,
+                )
+                Database.get_session().add(kernel_objs[kernel_key])
+
     @staticmethod
     def _pc_sampling_tool_data_by_pid(
         tool_data_records: list[dict[str, Any]],
-    ) -> dict[Optional[int], dict[str, Any]]:
+    ) -> dict[int, dict[str, Any]]:
         return {
-            _normalize_pid(tool_data["metadata"]["pid"]): tool_data
+            int(tool_data["metadata"]["pid"]): tool_data
             for tool_data in tool_data_records
-            if "pid" in tool_data.get("metadata", {})
         }
 
     @staticmethod
@@ -1048,7 +1081,7 @@ class db_analysis(OmniAnalyze_Base):
         tool_data: dict[str, Any],
         kernel_objs: dict[KernelKey, orm.Kernel],
     ) -> dict[tuple[Any, str], orm.Kernel]:
-        pid = _normalize_pid(tool_data.get("metadata", {}).get("pid"))
+        pid = int(tool_data["metadata"]["pid"])
         dispatched_kernel_ids = {
             dispatch_record["dispatch_info"]["kernel_id"]
             for dispatch_record in tool_data["buffer_records"]["kernel_dispatch"]
