@@ -74,6 +74,8 @@ ncclResult_t ncclIbInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base
     base->pd = ibDev->pd;
   }
 
+  ncclIbGidInfoSnapshot(base, ibDev);
+
   NCCLCHECK(wrap_ibv_create_cq(&base->cq, ibDev->context, cqSize, cq_context, NULL, 0));
 
   NCCLCHECK(ncclIbGetPkeyIndex(ibDev->context, ibDev->portNum, &ibDev->portAttr, &base->pkeyIndex));
@@ -971,8 +973,6 @@ ib_recv_dev_list:
     devInfo->rkey = commDev->ctsFifoMr->rkey;
 
     // Pack local GID info
-    NCCLCHECKGOTO(ncclIbGidInfoQuery(ibDev->context, ibDev->portNum, &ibDev->portAttr, &commDev->base.gidInfo), ret,
-                  fail);
     devInfo->link_layer = commDev->base.gidInfo.link_layer;
     devInfo->gid.global.subnet_prefix = commDev->base.gidInfo.localGid.global.subnet_prefix;
     devInfo->gid.global.interface_id = commDev->base.gidInfo.localGid.global.interface_id;
@@ -1573,8 +1573,6 @@ ib_recv:
       NCCLCHECKGOTO(ncclIbResiliencyDevInit(rComm->base.resiliency, i, &ncclIbDevs[ibDevN]), ret, fail);
     }
     ibDev = ncclIbDevs + ibDevN;
-    NCCLCHECKGOTO(ncclIbGidInfoQuery(ibDev->context, ibDev->portNum, &ibDev->portAttr, &rCommDev->base.gidInfo), ret,
-                  fail);
     if (link_layer == IBV_LINK_LAYER_UNSPECIFIED) link_layer = ibDev->portAttr.link_layer;
     if (link_layer != ibDev->portAttr.link_layer) {
       int ibDev0 = rComm->devs[0].base.ibDevN;
