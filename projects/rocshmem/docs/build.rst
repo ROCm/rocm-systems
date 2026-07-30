@@ -141,7 +141,7 @@ The allocator is selected at runtime via the ``ROCSHMEM_HEAP_ALLOCATOR_TYPE`` en
 
 * **coarsegrained**: GPU memory with coarse-grained coherency. Better performance for GPU-only access patterns.
 
-* **uncached**: GPU memory in uncached mode. May provide better performance on some architectures.
+* **uncached**: GPU memory in uncached mode (requires ROCm 5.5+). May provide better performance on some architectures.
 
 * **vmm_posix**: GPU memory using Virtual Memory Management (VMM) with POSIX file descriptor-based IPC (requires ROCm 7.2+).
   This allocator uses advanced HIP VMM APIs (``hipMemCreate``, ``hipMemAddressReserve``, ``hipMemMap``) and
@@ -155,7 +155,6 @@ The allocator is selected at runtime via the ``ROCSHMEM_HEAP_ALLOCATOR_TYPE`` en
     * Linux kernel 5.6 or newer
     * TCP Bootstrap-based initialization (not compatible with MPI-based initialization)
 
-    This allocator is experimental and primarily intended for advanced use cases requiring fine-grained control over GPU memory management and IPC mechanisms.
 
 * **vmm_fabric**: GPU memory using VMM with fabric handle-based IPC (requires ROCm 7.14+ with AMD SMI fabric handle support).
   This allocator is only supported on gfx1250 (MI455) GPUs.
