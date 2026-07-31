@@ -2241,15 +2241,17 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
 
   if (device.settings().fenceScopeAgent_) {
     const auto& isa = device.isa();
-    const bool isGfx12 = (isa.versionMajor() == 12) && (isa.versionMinor() == 0) &&
-                         (isa.versionStepping() == 0 || isa.versionStepping() == 1);
+    const bool needsSystemScopeAcquire =
+        ((isa.versionMajor() == 12) && (isa.versionMinor() == 0) &&
+         (isa.versionStepping() == 0 || isa.versionStepping() == 1)) ||
+        (isa.versionMajor() >= 13);
 
     dispatchPacketHeaderNoSync_ =
         ((device.settings().ext_dispatch_packet_ ? vendorSpecificHBits : kernelDispatchHBits) |
-         (isGfx12 ? sysAcquireAgentReleaseHBits : agentScopeHBits));
+         (needsSystemScopeAcquire ? sysAcquireAgentReleaseHBits : agentScopeHBits));
     dispatchPacketHeader_ =
         ((device.settings().ext_dispatch_packet_ ? vendorSpecificHBits : kernelDispatchHBits) |
-         barrierHBits | (isGfx12 ? sysAcquireAgentReleaseHBits : agentScopeHBits));
+         barrierHBits | (needsSystemScopeAcquire ? sysAcquireAgentReleaseHBits : agentScopeHBits));
   } else {
     dispatchPacketHeaderNoSync_ =
         ((device.settings().ext_dispatch_packet_ ? vendorSpecificHBits : kernelDispatchHBits) |
