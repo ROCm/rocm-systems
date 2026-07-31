@@ -86,6 +86,8 @@ jobs:
   prepare_matrix:
     needs: ci_config
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       matrix: ${{ steps.generate_matrix.outputs.matrix }}
 
