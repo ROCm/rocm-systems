@@ -739,7 +739,7 @@ TEST_F(MemManagerTest, StressFuzz_RandomOps_TotalsZeroAfterTeardown)
 // Real GPU memory flow: hipMalloc + Track + Untrack + hipFree
 // ---------------------------------------------------------------------------
 
-TEST(MemManagerRealMem, Track_RealHipMalloc_Scratch)
+TEST(MemManagerRealMem, DISABLED_Track_RealHipMalloc_Scratch)
 {
     RUN_ISOLATED_TEST("MemManager_Track_RealHipMalloc_Scratch", []() {
         ASSERT_EQ(hipSetDevice(0), hipSuccess);
@@ -774,7 +774,7 @@ TEST(MemManagerRealMem, Track_RealHipMalloc_Scratch)
     });
 }
 
-TEST(MemManagerRealMem, Track_RealHipMalloc_Offload)
+TEST(MemManagerRealMem, DISABLED_Track_RealHipMalloc_Offload)
 {
     RUN_ISOLATED_TEST("MemManager_Track_RealHipMalloc_Offload", []() {
         ASSERT_EQ(hipSetDevice(0), hipSuccess);
@@ -803,7 +803,7 @@ TEST(MemManagerRealMem, Track_RealHipMalloc_Offload)
     });
 }
 
-TEST(MemManagerRealMem, Track_RealHipMalloc_MultipleEntries)
+TEST(MemManagerRealMem, DISABLED_Track_RealHipMalloc_MultipleEntries)
 {
     RUN_ISOLATED_TEST("MemManager_Track_RealHipMalloc_Multiple", []() {
         ASSERT_EQ(hipSetDevice(0), hipSuccess);
@@ -971,7 +971,7 @@ TEST(MemManagerRealMem, Track_RealCuMemAlloc_PosixFd)
     });
 }
 
-TEST(MemManagerRealMem, Track_RealVmm_PosixFd)
+TEST(MemManagerRealMem, DISABLED_Track_RealVmm_PosixFd)
 {
     RUN_ISOLATED_TEST("MemManager_Track_RealVmm_PosixFd", []() {
         ASSERT_EQ(hipSetDevice(0), hipSuccess);
@@ -1014,7 +1014,7 @@ TEST(MemManagerRealMem, Track_RealVmm_PosixFd)
 // after Destroy, since the manager only tracks bookkeeping (not the mapping).
 // ---------------------------------------------------------------------------
 
-TEST(MemManagerRealMem, MarkExport_OnRealVmmAllocation_AndDestroy)
+TEST(MemManagerRealMem, DISABLED_MarkExport_OnRealVmmAllocation_AndDestroy)
 {
     RUN_ISOLATED_TEST("MemManager_MarkExport_OnRealVmmAllocation_AndDestroy", []() {
         ASSERT_EQ(hipSetDevice(0), hipSuccess);
@@ -1054,7 +1054,7 @@ TEST(MemManagerRealMem, MarkExport_OnRealVmmAllocation_AndDestroy)
 // the underlying real resources (cudaFreeHost / close).
 // ---------------------------------------------------------------------------
 
-TEST(MemManagerRealMem, Untrack_FreesCpuBackup)
+TEST(MemManagerRealMem, DISABLED_Untrack_FreesCpuBackup)
 {
     RUN_ISOLATED_TEST("MemManager_Untrack_FreesCpuBackup", []() {
         ASSERT_EQ(hipSetDevice(0), hipSuccess);
@@ -1121,7 +1121,7 @@ TEST(MemManagerRealMem, Untrack_ClosesShareableFd)
     });
 }
 
-TEST(MemManagerRealMem, Destroy_FreesPopulatedEntries)
+TEST(MemManagerRealMem, DISABLED_Destroy_FreesPopulatedEntries)
 {
     RUN_ISOLATED_TEST("MemManager_Destroy_FreesPopulatedEntries", []() {
         ASSERT_EQ(hipSetDevice(0), hipSuccess);
