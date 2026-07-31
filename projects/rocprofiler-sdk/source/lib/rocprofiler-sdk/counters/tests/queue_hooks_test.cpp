@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,12 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/rocprofiler-sdk/counters/core.hpp"
-#include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
 #include "lib/rocprofiler-sdk/counters/queue_hooks.hpp"
-#include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/core.hpp"
+#include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
+#include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
@@ -139,13 +139,9 @@ TEST(counters_queue_hooks, stop_context_in_flight_completion_routes_via_hook_pat
     context::push_client(1);
 
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
-    ROCPROFILER_CALL(
-        rocprofiler_configure_callback_dispatch_counting_service(get_client_ctx(),
-                                                                 user_dispatch_cb,
-                                                                 nullptr,
-                                                                 nullptr,
-                                                                 nullptr),
-        "Could not setup counting service");
+    ROCPROFILER_CALL(rocprofiler_configure_callback_dispatch_counting_service(
+                         get_client_ctx(), user_dispatch_cb, nullptr, nullptr, nullptr),
+                     "Could not setup counting service");
     ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
 
     auto* ctx_p = context::get_mutable_registered_context(get_client_ctx());
@@ -163,7 +159,7 @@ TEST(counters_queue_hooks, stop_context_in_flight_completion_routes_via_hook_pat
 
     rocprofiler_counter_id_t counter_id = {.handle = 0};
     {
-        auto mets = rocprofiler::counters::loadMetrics();
+        auto        mets = rocprofiler::counters::loadMetrics();
         const auto* gfx_metrics =
             rocprofiler::common::get_val(mets->arch_to_metric, std::string(agent.name()));
         ASSERT_TRUE(gfx_metrics);
@@ -180,18 +176,18 @@ TEST(counters_queue_hooks, stop_context_in_flight_completion_routes_via_hook_pat
     ASSERT_NE(counter_id.handle, 0U);
 
     expected_dispatch expected = {};
-    ROCPROFILER_CALL(rocprofiler_create_counter_config(
-                         agent.get_rocp_agent()->id, &counter_id, 1, &expected.id),
-                     "Unable to create profile");
+    ROCPROFILER_CALL(
+        rocprofiler_create_counter_config(agent.get_rocp_agent()->id, &counter_id, 1, &expected.id),
+        "Unable to create profile");
     cb_info->callback_args = &expected;
     expected.queue_id      = {.handle = 1};
-    expected.agent_id    = agent.get_rocp_agent()->id;
-    expected.kernel_id   = 42;
-    expected.dispatch_id = 7;
+    expected.agent_id      = agent.get_rocp_agent()->id;
+    expected.kernel_id     = 42;
+    expected.dispatch_id   = 7;
 
     hsa::QueueHooksFakeQueue fq(agent, expected.queue_id);
-    hsa::rocprofiler_packet pkt{};
-    context::correlation_id corr_id{.internal = 99};
+    hsa::rocprofiler_packet  pkt{};
+    context::correlation_id  corr_id{.internal = 99};
 
     auto user_data = rocprofiler_user_data_t{.value = corr_id.internal};
     auto ret_pkt   = rocprofiler::counters::queue_cb(ctx_p,
@@ -206,34 +202,31 @@ TEST(counters_queue_hooks, stop_context_in_flight_completion_routes_via_hook_pat
     ASSERT_TRUE(ret_pkt.packet);
 
     size_t map_size_before_stop = 0;
-    cb_info->packet_return_map.rlock(
-        [&](const auto& data) { map_size_before_stop = data.size(); });
+    cb_info->packet_return_map.rlock([&](const auto& data) { map_size_before_stop = data.size(); });
     ASSERT_EQ(map_size_before_stop, 1U) << "queue_cb should register instrumentation in the map";
 
     // Simulate stop while the dispatch is still in flight on the GPU.
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
     EXPECT_FALSE(rocprofiler::counters::is_any_active());
 
-    auto  sess        = std::make_shared<hsa::queue_info_session_t>(hsa::queue_info_session_t{.queue = fq});
-    auto& packet_data = sess->packet_data.emplace_back();
+    auto sess = std::make_shared<hsa::queue_info_session_t>(hsa::queue_info_session_t{.queue = fq});
+    auto& packet_data    = sess->packet_data.emplace_back();
     sess->correlation_id = &corr_id;
 
     rocprofiler::counters::inst_pkt_t inst_pkt;
-    inst_pkt.emplace_back(
-        std::make_pair(std::move(ret_pkt.packet), hsa::queue_hooks::COUNTERS_CLIENT_ID));
+    // Construct the pair in place rather than via make_pair: make_pair would deduce the tag's
+    // enum type and rely on a pair-to-pair conversion, where piecewise construction converts the
+    // tag to ClientID directly. Also matches how the production hook emplaces.
+    inst_pkt.emplace_back(std::move(ret_pkt.packet), hsa::queue_hooks::COUNTERS_CLIENT_ID);
 
-    rocprofiler::counters::signal_completion_hook(fq,
-                                                  pkt,
-                                                  sess,
-                                                  packet_data,
-                                                  inst_pkt,
-                                                  rocprofiler::kernel_dispatch::profiling_time{});
+    rocprofiler::counters::kernel_dispatch_phase_exit_hook(
+        fq, pkt, sess, packet_data, inst_pkt, rocprofiler::kernel_dispatch::profiling_time{});
 
     size_t map_size_after_completion = 1;
     cb_info->packet_return_map.rlock(
         [&](const auto& data) { map_size_after_completion = data.size(); });
     EXPECT_EQ(map_size_after_completion, 0U)
-        << "packet_return_map must drain via signal_completion_hook after stop_context";
+        << "packet_return_map must drain via kernel_dispatch_phase_exit_hook after stop_context";
 
     registration::set_init_status(1);
     registration::finalize();

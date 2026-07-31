@@ -175,12 +175,12 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         // Services migrated off the callback registry (see WriteInterceptor) are invoked
         // explicitly here, ordered by client id (hsa/queue_hooks/client_ids.hpp). With all four
         // migrated, the loop above no longer has any registered clients to iterate.
-        counters::signal_completion_hook(queue_info_session.queue,
-                                         packet.kernel_packet,
-                                         _session,
-                                         packet,
-                                         packet.instrumentation_packets,
-                                         dispatch_time);
+        counters::kernel_dispatch_phase_exit_hook(queue_info_session.queue,
+                                                  packet.kernel_packet,
+                                                  _session,
+                                                  packet,
+                                                  packet.instrumentation_packets,
+                                                  dispatch_time);
 
         thread_trace::signal_completion_hook(queue_info_session.queue,
                                              packet.kernel_packet,
@@ -666,15 +666,16 @@ WriteInterceptor(const void* packets,
             // service appends to instrumentation_packets, which the registry previously left to
             // registration order. Services still on the registry flow through signal_callback
             // above.
-            counters::write_hook(queue,
-                                 kernel_packet,
-                                 kernel_id,
-                                 dispatch_id,
-                                 &_packet_data.user_data,
-                                 _packet_data.tracing_data.external_correlation_ids,
-                                 corr_id,
-                                 _packet_data.instrumentation_packets,
-                                 _packet_data.is_serialized);
+            counters::kernel_dispatch_phase_enter_hook(
+                queue,
+                kernel_packet,
+                kernel_id,
+                dispatch_id,
+                &_packet_data.user_data,
+                _packet_data.tracing_data.external_correlation_ids,
+                corr_id,
+                _packet_data.instrumentation_packets,
+                _packet_data.is_serialized);
 
             thread_trace::write_hook(queue,
                                      kernel_packet,

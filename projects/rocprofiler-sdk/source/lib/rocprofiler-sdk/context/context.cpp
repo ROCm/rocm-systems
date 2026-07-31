@@ -370,9 +370,9 @@ stop_context(rocprofiler_context_id_t idx)
         {
             // Stop queue-interposed services before clearing the active slot so
             // disable_serialization() always runs before dispatches stop being instrumented.
-            // Clearing the slot first opens the opposite window, in which write_hook sees no
-            // active context and a dispatch is submitted without serializer packets while the
-            // serializer is still enabled.
+            // Clearing the slot first opens the opposite window, in which
+            // kernel_dispatch_phase_enter_hook sees no active context and a dispatch is submitted
+            // without serializer packets while the serializer is still enabled.
             if(_expected->dispatch_counter_collection)
             {
                 rocprofiler::counters::stop_context(const_cast<context*>(_expected));
@@ -382,8 +382,7 @@ stop_context(rocprofiler_context_id_t idx)
                 rocprofiler::spm::stop_context(const_cast<context*>(_expected));
 
             if(_expected->device_thread_trace) _expected->device_thread_trace->stop_context();
-            if(_expected->dispatch_thread_trace)
-                _expected->dispatch_thread_trace->stop_context();
+            if(_expected->dispatch_thread_trace) _expected->dispatch_thread_trace->stop_context();
 
             bool success = itr.compare_exchange_strong(_expected, nullptr);
 
