@@ -1743,15 +1743,21 @@ write_rocpd(
         }
     };
 
-    auto insert_event_operation = [&, node_id, this_pid]() {
+    auto insert_event_operation = [&db,
+                                    &tool_metadata,
+                                    &string_entries,
+                                    node_id,
+                                    this_pid,
+                                    &get_thread_id,
+                                    &get_queue_id,
+                                    &get_stream_id](const auto& _gen) {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_event_operation");
 
-        for(auto pitr : gpu_event_gen)
+        for(auto pitr : _gen)
         {
             auto _deferred = sql::deferred_transaction{db.conn};
-            for(auto itr : gpu_event_gen.get(pitr))
+            for(auto itr : _gen.get(pitr))
             {
-                // insert thread info if it doesn't already exist
                 get_thread_id(itr.thread_id);
 
                 auto kind = tool_metadata.buffer_names.at(itr.kind);
@@ -1766,13 +1772,15 @@ write_rocpd(
                     });
 
                 auto type =
-                    itr.event_info.type_id == 1 ? std::string("WAIT") : std::string("SIGNAL");
+                    (itr.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE ||
+                     itr.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_COMPLETE)
+                        ? std::string("WAIT")
+                        : std::string("RECORD");
 
                 get_insert_statement(
                     db,
                     "rocpd_event_operation{{uuid}}",
                     {
-                        insert_value("id", itr.event_info.issue_id),
                         insert_value("nid", node_id),
                         insert_value("pid", this_pid),
                         insert_value("tid", itr.thread_id),
@@ -2272,7 +2280,7 @@ write_rocpd(
     insert_pmc_event_data(dispatch_to_evt_id);
     insert_memory_copy_data(memory_copy_gen);
     insert_graph_launch_data(graph_launch_gen);
-    insert_event_operation();
+    insert_event_operation(gpu_event_gen);
 
     {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_memory_allocate");

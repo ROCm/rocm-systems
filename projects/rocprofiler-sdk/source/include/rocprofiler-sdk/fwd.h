@@ -186,7 +186,7 @@ typedef enum rocprofiler_callback_tracing_kind_t  // NOLINT(performance-enum-siz
     ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,     ///< @see ::rocprofiler_hip_graph_operation_t
     ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,  ///< rocSHMEM API tracing
     ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,   ///< hipFILE API Tracing
-    ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS,    ///< @see rocprofiler_gpu_event_operation_t
+    ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS,    ///< @see ::rocprofiler_gpu_event_operation_t
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -243,7 +243,7 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT,
     ROCPROFILER_BUFFER_TRACING_HIPFILE_API,  ///< hipFILE tracing
     ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT,
-    ROCPROFILER_BUFFER_TRACING_GPU_EVENTS,  ///< @see rocprofiler_gpu_event_operation_t
+    ROCPROFILER_BUFFER_TRACING_GPU_EVENTS,  ///< @see ::rocprofiler_gpu_event_operation_t
     ROCPROFILER_BUFFER_TRACING_LAST,
 
     /// @var ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT
@@ -541,7 +541,7 @@ typedef enum rocprofiler_pc_sampling_record_kind_t
 } rocprofiler_pc_sampling_record_kind_t;
 
 /**
- * @brief ROCProfiler GPU Event Tracing Operation Types
+ * @brief (experimental) ROCProfiler GPU Event Tracing Operation Types
  */
 typedef enum rocprofiler_gpu_event_operation_t  // NOLINT(performance-enum-size)
 {
@@ -945,17 +945,18 @@ typedef rocprofiler_counter_config_id_t rocprofiler_profile_config_id_t;
 #endif
 
 /**
- * @brief (experimental) ROCProfiler GPU event record information.
+ * @brief (experimental) ROCProfiler GPU Event record information.
  */
 typedef struct rocprofiler_gpu_event_info_t
 {
-    uint64_t                size;       ///< Size of this struct
-    uint64_t                issue_id;   ///< Issue index for this command
-    rocprofiler_agent_id_t  agent_id;   ///< Agent ID where gpu event op is encoded
-    rocprofiler_queue_id_t  queue_id;   ///< Queue ID where gpu event packet is enqueued
-    rocprofiler_stream_id_t stream_id;  ///< Stream ID where gpu event packet is enqueued
-    uint64_t                event_id;   ///< Event ID being operated upon
-    uint32_t                type_id;    ///< Type of operation
+    uint64_t                size;               ///< Size of this struct
+    uint64_t                issue_id;           ///< Issue index for this command
+    rocprofiler_agent_id_t  agent_id;           ///< Agent ID where the gpu event packet is enqueued
+    rocprofiler_queue_id_t  queue_id;           ///< Queue ID where gpu event packet is enqueued
+    rocprofiler_stream_id_t stream_id;          ///< Stream ID where gpu event packet is enqueued
+    uint64_t                event_id;           ///< Event ID being operated upon
+    uint64_t                type_id;            ///< Type of operation @see ::rocprofiler_gpu_event_operation_t
+    uint8_t                 reserved_padding[72];  ///< reserved for extensions w/o ABI break
 } rocprofiler_gpu_event_info_t;
 
 /** @} */
@@ -964,4 +965,6 @@ ROCPROFILER_EXTERN_C_FINI
 
 ROCPROFILER_CXX_CODE(
     static_assert(sizeof(rocprofiler_kernel_dispatch_info_t) == 128,
-                  "Increasing the size of the kernel dispatch info is not permitted");)
+                  "Increasing the size of the kernel dispatch info is not permitted");
+    static_assert(sizeof(rocprofiler_gpu_event_info_t) == 128,
+                  "Increasing the size of the gpu event info is not permitted");)

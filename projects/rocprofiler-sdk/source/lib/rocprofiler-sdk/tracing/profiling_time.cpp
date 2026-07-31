@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,8 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
+#include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 
 namespace rocprofiler
 {
@@ -96,6 +98,42 @@ profiling_time::operator*=(uint64_t scale)
     start *= scale;
     end *= scale;
     return *this;
+}
+profiling_time
+get_signal_profiling_time(
+    hsa_agent_t             _hsa_agent,
+    hsa_signal_t            _signal,
+    rocprofiler_kernel_id_t _kernel_id,
+    std::optional<uint64_t> _baseline)  // NOLINT(performance-unnecessary-value-param)
+{
+    auto ts                   = common::timestamp_ns();
+    auto dispatch_time        = hsa_amd_profiling_dispatch_time_t{};
+    auto dispatch_time_status = hsa::get_amd_ext_table()->hsa_amd_profiling_get_dispatch_time_fn(
+        _hsa_agent, _signal, &dispatch_time);
+
+    auto _profile_time =
+        profiling_time{dispatch_time_status, dispatch_time.start, dispatch_time.end};
+
+    if(_profile_time.status == HSA_STATUS_SUCCESS)
+    {
+        _profile_time = adjust_profiling_time(
+            "dispatch",
+            "hsa_amd_profiling_get_dispatch_time",
+            _profile_time,
+            profiling_time{HSA_STATUS_SUCCESS, _baseline.value_or(dispatch_time.start), ts});
+    }
+    else
+    {
+        ROCP_CI_LOG(ERROR) << fmt::format(
+            "hsa_amd_profiling_get_dispatch_time for kernel id={} on agent-{} returned status={} "
+            ":: {}",
+            _kernel_id,
+            CHECK_NOTNULL(agent::get_rocprofiler_agent(_hsa_agent))->node_id,
+            static_cast<int>(dispatch_time_status),
+            hsa::get_hsa_status_string(dispatch_time_status));
+    }
+
+    return _profile_time;
 }
 }  // namespace tracing
 }  // namespace rocprofiler

@@ -380,7 +380,7 @@ CREATE TABLE IF NOT EXISTS
         "type_id" INTEGER NOT NULL,
         "start" BIGINT NOT NULL,
         "end" BIGINT NOT NULL,
-        "type" TEXT CHECK ("type" IN ('WAIT', 'SIGNAL')),
+        "type" TEXT CHECK ("type" IN ('WAIT', 'RECORD')),
         "event_id" INTEGER,
         FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE,

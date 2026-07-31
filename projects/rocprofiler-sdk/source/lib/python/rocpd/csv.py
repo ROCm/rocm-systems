@@ -2,7 +2,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -481,7 +481,6 @@ def write_region_csv(importData, config) -> None:
 
 
 def write_event_operation_csv(importData, config) -> None:
-
     agent_id = build_agent_id_string(config.agent_index_value)
 
     query = f"""
@@ -490,6 +489,7 @@ def write_event_operation_csv(importData, config) -> None:
             type AS Kind,
             type_id AS Type_Id,
             tid AS Thread_Id,
+            stack_id AS Correlation_Id,
             {agent_id} AS Agent_Id,
             queue_id AS Queue_Id,
             queue_name AS Queue_Name,

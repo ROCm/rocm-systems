@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -416,6 +416,9 @@ struct event_operation
     uint64_t                type_id          = 0;
     uint64_t                issue_id         = 0;
     uint64_t                stream_id        = 0;
+    uint64_t                stack_id         = 0;
+    uint64_t                parent_stack_id  = 0;
+    uint64_t                corr_id          = 0;
 };
 
 struct scratch_memory
@@ -936,6 +939,9 @@ load(ArchiveT& ar, rocpd::types::event_operation& data)
     LOAD_DATA_FIELD(type_id);
     LOAD_DATA_FIELD(issue_id);
     LOAD_DATA_FIELD(stream_id);
+    LOAD_DATA_FIELD(stack_id);
+    LOAD_DATA_FIELD(parent_stack_id);
+    LOAD_DATA_FIELD(corr_id);
 }
 
 template <typename ArchiveT>

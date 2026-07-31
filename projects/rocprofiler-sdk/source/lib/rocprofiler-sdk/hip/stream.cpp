@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -148,8 +148,9 @@ remove_stream(hipStream_t stream)
         },
         stream);
 }
+}  // namespace
 
-auto
+rocprofiler_stream_id_t
 get_stream_id(hipStream_t stream)
 {
     // Handle special case where stream is hipStreamLegacy (0x01). Changes sync behavior of
@@ -189,6 +190,8 @@ get_stream_id(hipStream_t stream)
     return add_stream(stream, false);
 }
 
+namespace
+{
 // Map rocprofiler_hip_stream_operation_t to respective name
 template <size_t OpIdx>
 struct hip_stream_operation_name;

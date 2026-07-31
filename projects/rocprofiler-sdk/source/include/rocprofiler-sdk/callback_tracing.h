@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -369,7 +369,7 @@ typedef struct rocprofiler_callback_tracing_hip_stream_data_t
 } rocprofiler_callback_tracing_hip_stream_data_t;
 
 /**
- * @brief ROCProfiler GPU event Callback Data.
+ * @brief ROCProfiler GPU Event Callback Data.
  */
 typedef struct rocprofiler_callback_tracing_gpu_event_data_t
 {

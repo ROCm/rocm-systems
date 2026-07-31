@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -604,13 +604,13 @@ typedef struct rocprofiler_buffer_tracing_kfd_queue_record_t
 } rocprofiler_buffer_tracing_kfd_queue_record_t;
 
 /**
- * @brief ROCProfiler Buffer Queue GPU event record.
+ * @brief ROCProfiler Buffer GPU Event Tracer Record.
  */
 typedef struct rocprofiler_buffer_tracing_gpu_event_record_t
 {
     uint64_t                           size;            ///< size of this struct
     rocprofiler_buffer_tracing_kind_t  kind;            ///< ::ROCPROFILER_BUFFER_TRACING_GPU_EVENTS
-    rocprofiler_gpu_event_operation_t  operation;       ///< @see rocprofiler_gpu_event_operation_t
+    rocprofiler_gpu_event_operation_t  operation;       ///< @see ::rocprofiler_gpu_event_operation_t
     rocprofiler_async_correlation_id_t correlation_id;  ///< correlation ids for record
     rocprofiler_thread_id_t            thread_id;       ///< id for thread that encoded event op
     rocprofiler_timestamp_t            start_timestamp;  ///< start time in nanoseconds

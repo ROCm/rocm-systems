@@ -137,10 +137,3 @@ SELECT
     *
 FROM
     `rocpd_memory_allocate{{uuid}}`;
-
-CREATE VIEW IF NOT EXISTS
-    `rocpd_event_operation` AS
-SELECT
-    *
-FROM
-    `rocpd_event_operation{{uuid}}`;

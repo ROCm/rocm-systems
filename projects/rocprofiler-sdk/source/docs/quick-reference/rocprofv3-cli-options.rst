@@ -63,11 +63,11 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                 <tr>
                     <th rowspan="2">Aggregate tracing</th>
                     <td>-r [BOOL] | --runtime-trace [BOOL]</td>
-                    <td>Collects tracing data for HIP runtime API, marker (ROCTx) API, RCCL API, memory operations (copies, scratch, and allocation), and kernel dispatches. Similar to --sys-trace without HIP compiler API and the underlying HSA API tracing. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#runtime-trace">Read more...</a></td>
+                    <td>Collects tracing data for HIP runtime API, marker (ROCTx) API, RCCL API, memory operations (copies, scratch, and allocation), kernel dispatches, and GPU event operations. Similar to --sys-trace without HIP compiler API and the underlying HSA API tracing. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#runtime-trace">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>-s [BOOL] | --sys-trace [BOOL]</td>
-                    <td>Collects tracing data for HIP API, HSA API, marker (ROCTx) API, RCCL API, memory operations (copies, scratch, and allocations), and kernel dispatches. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#system-trace">Read more...</a></td>
+                    <td>Collects tracing data for HIP API, HSA API, marker (ROCTx) API, RCCL API, memory operations (copies, scratch, and allocations), kernel dispatches, and GPU event operations. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#system-trace">Read more...</a></td>
                 </tr>
                 <tr>
                     <th rowspan="4">PC sampling</th>
@@ -87,7 +87,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                     <td>Specifies the PC sample generation frequency. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-pc-sampling.html">PC sampling.</a></td>
                 </tr>
                 <tr>
-                    <th rowspan="12">Basic tracing</th>
+                    <th rowspan="13">Basic tracing</th>
                     <td>--hip-trace [BOOL]</td>
                     <td>Combination of --hip-runtime-trace and --hip-compiler-trace. This option enables only the HIP API tracing. Unlike previous iterations of rocprofv3, this option doesn’t enable kernel tracing, memory copy tracing, and so on. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#hip-trace">Read more...</a></td>
                 </tr>
@@ -133,6 +133,10 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                 <tr>
                     <td>--hipfile-trace [BOOL]</td>
                     <td>Collects traces for hipFILE APIs. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#hipfile-trace">Read more...</a></td>
+                </tr>
+                <tr>
+                    <td>--gpu-event-trace [BOOL]</td>
+                    <td>Collects GPU event (wait/record) traces. Captures GPU-side wait and record operations on HIP events, including enqueue and completion timestamps.</td>
                 </tr>
                 <tr>
                     <td>--ompt-trace [CATEGORY ...]</td>

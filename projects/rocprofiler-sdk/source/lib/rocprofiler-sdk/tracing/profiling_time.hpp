@@ -33,6 +33,7 @@
 #include <fmt/format.h>
 
 #include <cstdint>
+#include <optional>
 
 namespace rocprofiler
 {
@@ -144,5 +145,10 @@ adjust_profiling_time(std::string_view _label,
 
     return _value;
 }
+profiling_time
+get_signal_profiling_time(hsa_agent_t             agent,
+                          hsa_signal_t            signal,
+                          rocprofiler_kernel_id_t kernel_id,
+                          std::optional<uint64_t> baseline = {});
 }  // namespace tracing
 }  // namespace rocprofiler

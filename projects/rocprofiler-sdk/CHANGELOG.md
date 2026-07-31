@@ -12,6 +12,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - New experimental API in `rocprofiler-sdk/experimental/spm.h`:
     - GPU-timestamped counter values alongside kernel dispatch information.
   - Added `spm_support` along with reserved padding to `rocprofiler_counter_info_v1_t`
+  - GPU Event tracing support (experimental): new tracing domain for GPU-side wait and record operations on HIP events. Callback kind `ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS`, buffer kind `ROCPROFILER_BUFFER_TRACING_GPU_EVENTS`, operation enum `rocprofiler_gpu_event_operation_t`, and record types `rocprofiler_callback_tracing_gpu_event_data_t` / `rocprofiler_buffer_tracing_gpu_event_record_t`.
 
 **rocprofv3 (CLI):**
 
@@ -24,6 +25,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - OpenMP (OMPT) tracing via the new `--ompt-trace` flag:
     - Accepts a bare boolean or category list (`all, thread, parallel, task, sync, mutex, target, device, error`); also folded into `--sys-trace`/`--runtime-trace`.
     - rocpd-only trace: records go to the rocpd database (auto-added when another format is requested) and export via `rocpd convert`.
+  - `--gpu-event-trace` flag for collecting GPU event wait/record traces. Folded into `--sys-trace` and `--runtime-trace`.
+  - rocpd and JSON output format support for GPU event traces.
 
 **Documentation:**
 
@@ -35,6 +38,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Bump rocpd schema to version 3.0.1 which supports NIC agent types.
 - Bump rocpd schema to version 3.0.2 for HIP graph per-node attribution (`graph_exec_id`/`graph_node_id` columns on `rocpd_kernel_dispatch`/`rocpd_memory_copy` and the new `rocpd_graph_launch` table). The pre-graph-attribution 3.0.1 schema is now frozen under `versions/3.0.1/` per the rocpd schema versioning scheme.
 - Bump rocpd schema to version 3.0.3 for SPM support. The pre-spm-support 3.0.2 schema is now frozen under `versions/3.0.2/` per the rocpd schema versioning scheme.
+- Bump rocpd schema to version 3.0.4 for GPU event operations (`rocpd_event_operation` table and `event_operations` data view). The pre-GPU-event 3.0.3 schema is frozen under `versions/3.0.3/`.
+- Moved `get_dispatch_time` from `kernel_dispatch` namespace to `tracing::get_signal_profiling_time` for reuse by GPU event tracing.
 
 ### Removed
 

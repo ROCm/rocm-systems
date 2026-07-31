@@ -395,29 +395,3 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (queue_id) REFERENCES `rocpd_info_queue{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
     );
-
-CREATE TABLE IF NOT EXISTS
-    `rocpd_event_operation{{uuid}}` (
-        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
-        "nid" INTEGER NOT NULL,
-        "pid" INTEGER NOT NULL,
-        "tid" INTEGER,
-        "agent_id" INTEGER NOT NULL,
-        "event_obj" INTEGER NOT NULL,
-        "type_id" INTEGER NOT NULL,
-        "issue_id" INTEGER NOT NULL,
-        "queue_id" INTEGER NOT NULL,
-        "stream_id" INTEGER NOT NULL,
-        "start" BIGINT NOT NULL,
-        "end" BIGINT NOT NULL,
-        "type" TEXT CHECK ("type" IN ('WAIT', 'SIGNAL')),
-        "event_id" INTEGER,
-        FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (tid) REFERENCES `rocpd_info_thread{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (agent_id) REFERENCES `rocpd_info_agent{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (queue_id) REFERENCES `rocpd_info_queue{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (stream_id) REFERENCES `rocpd_info_stream{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
-    );

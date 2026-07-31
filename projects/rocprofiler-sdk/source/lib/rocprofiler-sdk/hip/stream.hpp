@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,9 @@ namespace hip
 namespace stream
 {
 using hip_runtime_api_table_t = HipDispatchTable;
+
+rocprofiler_stream_id_t
+get_stream_id(hipStream_t stream);
 
 const char*
 name_by_id(uint32_t id);

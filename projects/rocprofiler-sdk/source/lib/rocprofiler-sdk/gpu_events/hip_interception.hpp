@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,12 +22,32 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
+#include <rocprofiler-sdk/fwd.h>
+
+#include <cstdint>
 
 namespace rocprofiler
 {
-namespace kernel_dispatch
+namespace gpu_events
 {
-using profiling_time = tracing::profiling_time;
-}  // namespace kernel_dispatch
+bool
+gpu_event_tracing();
+
+uint64_t
+get_gpu_event_id();
+
+rocprofiler_stream_id_t
+get_gpu_event_stream_id();
+}  // namespace gpu_events
 }  // namespace rocprofiler
+
+extern "C" {
+
+ROCPROFILER_API void
+hip_gpu_event_registration_callback(rocprofiler_intercept_table_t type,
+                                    uint64_t                      lib_version,
+                                    uint64_t                      lib_instance,
+                                    void**                        tables,
+                                    uint64_t                      num_tables,
+                                    void*                         user_data);
+}

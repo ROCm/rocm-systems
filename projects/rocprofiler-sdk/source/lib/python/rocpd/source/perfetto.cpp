@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -669,12 +669,13 @@ write_perfetto(
             {
                 auto& track = thread_tracks.at(itr.tid);
 
-                auto name = itr.type == "WAIT" ? "Event-Wait" : "Event-Signal";
+                auto name = itr.type == "WAIT" ? "Event-Wait" : "Event-Record";
 
                 TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::gpu_events>::name,
                                   ::perfetto::DynamicString(name),
                                   track,
                                   itr.start,
+                                  ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
                                   "begin_ns",
                                   itr.start,
                                   "end_ns",
@@ -685,6 +686,10 @@ write_perfetto(
                                   "GPU_EVENTS",
                                   "tid",
                                   itr.tid,
+                                  "corr_id",
+                                  itr.stack_id,
+                                  "ancestor_id",
+                                  itr.parent_stack_id,
                                   "agent",
                                   itr.agent_abs_index,
                                   "agent_type",

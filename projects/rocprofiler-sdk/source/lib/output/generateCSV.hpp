@@ -88,9 +88,10 @@ generate_csv(const output_config&                                           cfg,
              const generator<rocprofiler_buffer_tracing_rccl_api_record_t>& data,
              const stats_entry_t&                                           stats);
 
-// NOTE: OMPT, rocSHMEM, and GPU Events are not emitted to CSV directly. They are written to
-// the rocpd database (rocSHMEM and GPU Events are additionally emitted to JSON) and exported
-// to CSV via `rocpd convert`, so there is intentionally no generate_csv() overload for them.
+// NOTE: OMPT, rocSHMEM, hipFILE, and GPU Events are not emitted to CSV directly. They are
+// written to the rocpd database (rocSHMEM, hipFILE, and GPU Events are additionally emitted
+// to JSON) and exported to CSV via `rocpd convert`, so there is intentionally no
+// generate_csv() overload for them.
 
 void
 generate_csv(const output_config&                                                    cfg,

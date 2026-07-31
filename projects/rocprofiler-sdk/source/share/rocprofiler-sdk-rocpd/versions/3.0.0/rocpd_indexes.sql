@@ -25,7 +25,6 @@
 -- CREATE INDEX `rocpd_kernel_dispatch{{uuid}}_guid_idx` ON `rocpd_kernel_dispatch{{uuid}}` ("id", "guid");
 -- CREATE INDEX `rocpd_memory_copy{{uuid}}_guid_idx` ON `rocpd_memory_copy{{uuid}}` ("id", "guid");
 -- CREATE INDEX `rocpd_memory_allocate{{uuid}}_guid_idx` ON `rocpd_memory_allocate{{uuid}}` ("id", "guid");
--- CREATE INDEX `rocpd_event_operation{{uuid}}_guid_idx` ON `rocpd_event_operation{{uuid}}` ("id", "guid");
 
 -- CREATE INDEX `rocpd_event{{uuid}}_category_idx` ON `rocpd_event{{uuid}}` ("id", "guid", "category_id");
 -- CREATE INDEX `rocpd_region{{uuid}}_event_idx` ON `rocpd_region{{uuid}}` ("id", "guid", "event_id");
@@ -38,7 +37,6 @@
 -- CREATE INDEX `rocpd_kernel_dispatch{{uuid}}_guid_nid_pid_idx` ON `rocpd_kernel_dispatch{{uuid}}` ("guid", "nid", "pid");
 -- CREATE INDEX `rocpd_region{{uuid}}_guid_idx` ON `rocpd_region{{uuid}}` ("guid", "nid", "pid");
 -- CREATE INDEX `rocpd_sample{{uuid}}_guid_nid_pid_idx` ON `rocpd_sample{{uuid}}` ("guid", "nid", "pid");
--- CREATE INDEX `rocpd_event_operation{{uuid}}_guid_nid_pid_idx` ON `rocpd_event_operation{{uuid}}` ("guid", "nid", "pid");
 
 -- CREATE INDEX `rocpd_region{{uuid}}_guid_idx` ON `rocpd_region{{uuid}}` ("guid");
 -- CREATE INDEX `rocpd_region{{uuid}}_nid_idx` ON `rocpd_region{{uuid}}` ("nid");

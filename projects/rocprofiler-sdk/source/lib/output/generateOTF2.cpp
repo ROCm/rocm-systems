@@ -944,7 +944,6 @@ write_otf2(const output_config&                                          cfg,
         }
     }
 
-    // GPU Events
     shutdown();
 }
 

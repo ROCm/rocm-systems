@@ -571,7 +571,6 @@ FROM
     INNER JOIN `rocpd_info_thread` T ON T.id = G.tid
     AND T.guid = G.guid;
 
-
 --
 --
 CREATE VIEW IF NOT EXISTS

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +27,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
-#include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
+#include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -50,7 +50,8 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
     auto        _signal         = packet_data.kernel_packet.kernel_dispatch.completion_signal;
     auto        _kern_id        = callback_record.dispatch_info.kernel_id;
 
-    return (_hsa_agent) ? get_dispatch_time(*_hsa_agent, _signal, _kern_id, session.enqueue_ts)
+    return (_hsa_agent) ? tracing::get_signal_profiling_time(
+                              *_hsa_agent, _signal, _kern_id, session.enqueue_ts)
                         : profiling_time{.status = HSA_STATUS_ERROR_INVALID_AGENT};
 }
 

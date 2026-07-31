@@ -21,23 +21,16 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/gpu_events/tracing.hpp"
-#include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/gpu_events/profiling_time.hpp"
-#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 
 #include <hsa/hsa.h>
-
-#include <map>
-#include <mutex>
-#include <string_view>
 
 namespace rocprofiler
 {
@@ -46,16 +39,18 @@ namespace gpu_events
 profiling_time
 get_gpu_event_time(const queue_info_session_t& session, packet_data_t& packet_data)
 {
-    const auto& callback_record = packet_data.event_record;
-    const auto* _rocp_agent     = agent::get_agent(callback_record.event_info.agent_id);
-    auto        _hsa_agent      = agent::get_hsa_agent(_rocp_agent);
+    const auto& event_record = packet_data.event_record;
+    const auto* _rocp_agent  = agent::get_agent(event_record.event_info.agent_id);
+    auto        _hsa_agent   = agent::get_hsa_agent(_rocp_agent);
 
-    auto _signal = (callback_record.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE)
+    auto _signal = (event_record.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE ||
+                    event_record.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_COMPLETE)
                        ? packet_data.kernel_packet.barrier_and.completion_signal
                        : packet_data.kernel_packet.ext_amd_aql_pm4.completion_signal;
 
-    return (_hsa_agent) ? get_gpu_event_time(*_hsa_agent, _signal, 0, session.enqueue_ts)
-                        : profiling_time{.status = HSA_STATUS_ERROR_INVALID_AGENT};
+    return (_hsa_agent)
+               ? tracing::get_signal_profiling_time(*_hsa_agent, _signal, 0, session.enqueue_ts)
+               : profiling_time{.status = HSA_STATUS_ERROR_INVALID_AGENT};
 }
 
 void
@@ -69,11 +64,10 @@ gpu_event_complete(queue_info_session_t& session,
     auto& tracing_data_v = packet_data.tracing_data;
     if(tracing_data_v.callback_contexts.empty() && tracing_data_v.buffered_contexts.empty()) return;
 
-    // we need to decrement this reference count at the end of the functions
     auto* _corr_id = session.correlation_id;
 
     // only do the following work if there are contexts that require this info
-    auto&       callback_record   = packet_data.event_record;
+    auto&       event_record      = packet_data.event_record;
     const auto& _extern_corr_ids  = packet_data.tracing_data.external_correlation_ids;
     auto        _tid              = session.tid;
     auto        _internal_corr_id = (_corr_id) ? _corr_id->internal : 0;
@@ -81,12 +75,20 @@ gpu_event_complete(queue_info_session_t& session,
 
     if(dispatch_time.status == HSA_STATUS_SUCCESS)
     {
-        callback_record.start_timestamp = dispatch_time.start;
-        callback_record.end_timestamp   = dispatch_time.end;
+        event_record.start_timestamp = dispatch_time.start;
+        event_record.end_timestamp   = dispatch_time.end;
+
+        auto complete_op =
+            (event_record.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE ||
+             event_record.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_COMPLETE)
+                ? ROCPROFILER_GPU_EVENT_WAIT_COMPLETE
+                : ROCPROFILER_GPU_EVENT_RECORD_COMPLETE;
+
+        event_record.event_info.type_id = static_cast<uint64_t>(complete_op);
 
         if(!tracing_data_v.callback_contexts.empty())
         {
-            auto tracer_data = callback_record;
+            auto tracer_data = event_record;
             tracing::execute_phase_none_callbacks(
                 tracing_data_v.callback_contexts,
                 _tid,
@@ -94,9 +96,7 @@ gpu_event_complete(queue_info_session_t& session,
                 _extern_corr_ids,
                 _ancestor_corr_id,
                 ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS,
-                (callback_record.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE)
-                    ? ROCPROFILER_GPU_EVENT_WAIT_COMPLETE
-                    : ROCPROFILER_GPU_EVENT_RECORD_COMPLETE,
+                complete_op,
                 tracer_data);
         }
 
@@ -105,14 +105,12 @@ gpu_event_complete(queue_info_session_t& session,
             auto record = gpu_event_record_t{
                 sizeof(gpu_event_record_t),
                 ROCPROFILER_BUFFER_TRACING_GPU_EVENTS,
-                (callback_record.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE)
-                    ? ROCPROFILER_GPU_EVENT_WAIT_COMPLETE
-                    : ROCPROFILER_GPU_EVENT_RECORD_COMPLETE,
+                complete_op,
                 rocprofiler_async_correlation_id_t{},
                 _tid,
-                callback_record.start_timestamp,
-                callback_record.end_timestamp,
-                callback_record.event_info};
+                event_record.start_timestamp,
+                event_record.end_timestamp,
+                event_record.event_info};
 
             tracing::execute_buffer_record_emplace(
                 tracing_data_v.buffered_contexts,
@@ -121,262 +119,11 @@ gpu_event_complete(queue_info_session_t& session,
                 _extern_corr_ids,
                 _ancestor_corr_id,
                 ROCPROFILER_BUFFER_TRACING_GPU_EVENTS,
-                (callback_record.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE)
-                    ? ROCPROFILER_GPU_EVENT_WAIT_COMPLETE
-                    : ROCPROFILER_GPU_EVENT_RECORD_COMPLETE,
+                complete_op,
                 record);
         }
     }
 }
 
-struct hip_event_api_record_t
-{
-    rocprofiler_hip_runtime_api_id_t operation;
-    hipEvent_t                       event;
-    uint64_t                         event_id;
-};
-
-thread_local hip_event_api_record_t* hip_event_record_tls = nullptr;
-
-void
-SetHipEventRecordTag(hip_event_api_record_t* record)
-{
-    ROCP_CI_LOG_IF(WARNING, record != nullptr && hip_event_record_tls != nullptr)
-        << "gpu_events TLS already set when entering HIP event API wrapper — possible reentrancy";
-    hip_event_record_tls = record;
-}
-
-struct EventMap
-{
-    std::map<hipEvent_t, uint64_t> event_ids;
-    std::mutex                     event_mutex;
-    uint64_t                       event_index = 0;
-};
-
-static EventMap event_map;
-
-static t_hipEventCreate baseEventCreate = nullptr;
-hipError_t
-hipEventCreateWrapper(hipEvent_t* event)
-{
-    hipError_t err = baseEventCreate(event);
-
-    if(event && *event && err == hipSuccess)
-    {
-        auto _lk = std::lock_guard<std::mutex>{event_map.event_mutex};
-        event_map.event_ids.insert(std::make_pair(*event, ++event_map.event_index));
-    }
-
-    return err;
-}
-
-static t_hipEventCreateWithFlags baseEventCreateWithFlags = nullptr;
-hipError_t
-hipEventCreateWithFlagsWrapper(hipEvent_t* event, unsigned flags)
-{
-    hipError_t err = baseEventCreateWithFlags(event, flags);
-
-    if(event && *event && err == hipSuccess)
-    {
-        auto _lk = std::lock_guard<std::mutex>{event_map.event_mutex};
-        event_map.event_ids.insert(std::make_pair(*event, ++event_map.event_index));
-    }
-
-    return err;
-}
-
-static t_hipEventDestroy baseEventDestroy = nullptr;
-hipError_t
-hipEventDestroyWrapper(hipEvent_t event)
-{
-    {
-        auto _lk = std::lock_guard<std::mutex>{event_map.event_mutex};
-        event_map.event_ids.erase(event);
-    }
-
-    return baseEventDestroy(event);
-}
-
-static t_hipStreamWaitEvent baseStreamWaitEvent = nullptr;
-hipError_t
-hipStreamWaitEventWrapper(hipStream_t stream, hipEvent_t event, unsigned int flags)
-{
-    hip_event_api_record_t hip_record;
-    hip_record.operation =
-        (rocprofiler_hip_runtime_api_id_t) ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent;
-    hip_record.event    = event;
-    hip_record.event_id = 0;
-
-    {
-        auto _lk = std::lock_guard<std::mutex>{event_map.event_mutex};
-        auto it  = event_map.event_ids.find(hip_record.event);
-        if(it != event_map.event_ids.end()) hip_record.event_id = it->second;
-    }
-
-    SetHipEventRecordTag(&hip_record);
-
-    hipError_t err = baseStreamWaitEvent(stream, event, flags);
-
-    SetHipEventRecordTag(nullptr);
-
-    return err;
-}
-
-static t_hipStreamWaitEvent_spt baseStreamWaitEventSpt = nullptr;
-hipError_t
-hipStreamWaitEventSptWrapper(hipStream_t stream, hipEvent_t event, unsigned int flags)
-{
-    hip_event_api_record_t hip_record;
-    hip_record.operation =
-        (rocprofiler_hip_runtime_api_id_t) ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent_spt;
-    hip_record.event    = event;
-    hip_record.event_id = 0;
-
-    {
-        auto _lk = std::lock_guard<std::mutex>{event_map.event_mutex};
-        auto it  = event_map.event_ids.find(hip_record.event);
-        if(it != event_map.event_ids.end()) hip_record.event_id = it->second;
-    }
-
-    SetHipEventRecordTag(&hip_record);
-
-    hipError_t err = baseStreamWaitEventSpt(stream, event, flags);
-
-    SetHipEventRecordTag(nullptr);
-
-    return err;
-}
-
-static t_hipEventRecord baseEventRecord = nullptr;
-hipError_t
-hipEventRecordWrapper(hipEvent_t event, hipStream_t stream)
-{
-    hip_event_api_record_t hip_record;
-    hip_record.operation =
-        (rocprofiler_hip_runtime_api_id_t) ROCPROFILER_HIP_RUNTIME_API_ID_hipEventRecord;
-    hip_record.event    = event;
-    hip_record.event_id = 0;
-
-    {
-        auto _lk = std::lock_guard<std::mutex>{event_map.event_mutex};
-        auto it  = event_map.event_ids.find(hip_record.event);
-        if(it != event_map.event_ids.end()) hip_record.event_id = it->second;
-    }
-
-    SetHipEventRecordTag(&hip_record);
-
-    hipError_t err = baseEventRecord(event, stream);
-
-    SetHipEventRecordTag(nullptr);
-
-    return err;
-}
-
-static t_hipEventRecord_spt baseEventRecordSpt = nullptr;
-hipError_t
-hipEventRecordSptWrapper(hipEvent_t event, hipStream_t stream)
-{
-    hip_event_api_record_t hip_record;
-    hip_record.operation =
-        (rocprofiler_hip_runtime_api_id_t) ROCPROFILER_HIP_RUNTIME_API_ID_hipEventRecord_spt;
-    hip_record.event    = event;
-    hip_record.event_id = 0;
-
-    {
-        auto _lk = std::lock_guard<std::mutex>{event_map.event_mutex};
-        auto it  = event_map.event_ids.find(hip_record.event);
-        if(it != event_map.event_ids.end()) hip_record.event_id = it->second;
-    }
-
-    SetHipEventRecordTag(&hip_record);
-
-    hipError_t err = baseEventRecordSpt(event, stream);
-
-    SetHipEventRecordTag(nullptr);
-
-    return err;
-}
-
-static t_hipEventRecordWithFlags baseEventRecordWithFlags = nullptr;
-hipError_t
-hipEventRecordWithFlagsWrapper(hipEvent_t event, hipStream_t stream, unsigned int flags)
-{
-    hip_event_api_record_t hip_record;
-    hip_record.operation =
-        (rocprofiler_hip_runtime_api_id_t) ROCPROFILER_HIP_RUNTIME_API_ID_hipEventRecordWithFlags;
-    hip_record.event    = event;
-    hip_record.event_id = 0;
-
-    {
-        auto _lk = std::lock_guard<std::mutex>{event_map.event_mutex};
-        auto it  = event_map.event_ids.find(hip_record.event);
-        if(it != event_map.event_ids.end()) hip_record.event_id = it->second;
-    }
-
-    SetHipEventRecordTag(&hip_record);
-
-    hipError_t err = baseEventRecordWithFlags(event, stream, flags);
-
-    SetHipEventRecordTag(nullptr);
-
-    return err;
-}
-
-bool
-gpu_event_tracing()
-{
-    return (hip_event_record_tls != nullptr);
-}
-
-uint64_t
-get_gpu_event_id()
-{
-    return (hip_event_record_tls ? hip_event_record_tls->event_id : 0);
-}
-
 }  // namespace gpu_events
 }  // namespace rocprofiler
-
-extern "C" {
-
-ROCPROFILER_API void
-hip_gpu_event_registration_callback(rocprofiler_intercept_table_t type,
-                                    uint64_t                      lib_version,
-                                    uint64_t                      lib_instance,
-                                    void**                        tables,
-                                    uint64_t                      num_tables,
-                                    void*                         user_data)
-{
-    (void) type;
-    (void) lib_version;
-    (void) lib_instance;
-    (void) num_tables;
-    (void) user_data;
-
-    ROCP_FATAL_IF(tables == nullptr || num_tables < 1) << "invalid tables in gpu_events "
-                                                          "registration callback";
-
-    auto* hip_api_table = static_cast<HipDispatchTable*>(tables[0]);
-
-    rocprofiler::gpu_events::baseEventCreate          = hip_api_table->hipEventCreate_fn;
-    rocprofiler::gpu_events::baseEventCreateWithFlags = hip_api_table->hipEventCreateWithFlags_fn;
-    rocprofiler::gpu_events::baseEventDestroy         = hip_api_table->hipEventDestroy_fn;
-    rocprofiler::gpu_events::baseStreamWaitEvent      = hip_api_table->hipStreamWaitEvent_fn;
-    rocprofiler::gpu_events::baseStreamWaitEventSpt   = hip_api_table->hipStreamWaitEvent_spt_fn;
-    rocprofiler::gpu_events::baseEventRecord          = hip_api_table->hipEventRecord_fn;
-    rocprofiler::gpu_events::baseEventRecordSpt       = hip_api_table->hipEventRecord_spt_fn;
-    rocprofiler::gpu_events::baseEventRecordWithFlags = hip_api_table->hipEventRecordWithFlags_fn;
-
-    hip_api_table->hipEventCreate_fn = &rocprofiler::gpu_events::hipEventCreateWrapper;
-    hip_api_table->hipEventCreateWithFlags_fn =
-        &rocprofiler::gpu_events::hipEventCreateWithFlagsWrapper;
-    hip_api_table->hipEventDestroy_fn = &rocprofiler::gpu_events::hipEventDestroyWrapper;
-    hip_api_table->hipStreamWaitEvent_fn = &rocprofiler::gpu_events::hipStreamWaitEventWrapper;
-    hip_api_table->hipStreamWaitEvent_spt_fn =
-        &rocprofiler::gpu_events::hipStreamWaitEventSptWrapper;
-    hip_api_table->hipEventRecord_fn     = &rocprofiler::gpu_events::hipEventRecordWrapper;
-    hip_api_table->hipEventRecord_spt_fn = &rocprofiler::gpu_events::hipEventRecordSptWrapper;
-    hip_api_table->hipEventRecordWithFlags_fn =
-        &rocprofiler::gpu_events::hipEventRecordWithFlagsWrapper;
-}
-}

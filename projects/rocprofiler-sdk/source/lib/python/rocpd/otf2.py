@@ -2,7 +2,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2023 Advanced Micro Devices, Inc.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -318,9 +318,9 @@ def write_otf2(importData, config):
 
                             cursor = conn.cursor()
                             cursor.execute(
-                                """SELECT tid, agent_id, queue_id, type,
-                                start, end, event_id
-                                FROM rocpd_event_operation WHERE guid = ? AND nid = ?
+                                """SELECT tid, agent_abs_index, queue_id, type,
+                                start, end
+                                FROM event_operations WHERE guid = ? AND nid = ?
                                 AND pid = ? ORDER BY start ASC""",
                                 (guid, nid, pid),
                             )
@@ -332,10 +332,9 @@ def write_otf2(importData, config):
                                     event_type,
                                     start,
                                     end,
-                                    event_id,
                                 ) = row
                                 event_operations[(tid, agent_id, queue_id)].append(
-                                    (start, end, event_type, event_id)
+                                    (start, end, event_type)
                                 )
 
                             cursor = conn.cursor()
@@ -526,7 +525,7 @@ def write_otf2(importData, config):
                                     archive, event_op_location
                                 )
                                 event_op_events = []
-                                for start, end, event_type, event_id in data:
+                                for start, end, event_type in data:
                                     region = archive.definitions.region(
                                         name=event_type,
                                         region_role=RegionRole.BARRIER,

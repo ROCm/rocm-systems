@@ -24,27 +24,10 @@
 
 #include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
 
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/hsa.h>
-
-#include <hsa/hsa.h>
-
-#include <cstdint>
-#include <optional>
-
 namespace rocprofiler
 {
 namespace gpu_events
 {
 using profiling_time = tracing::profiling_time;
-
-// get the profiling time for a signal on an agent, if start time is less than baseline, correct to
-// start at baseline. If kernel_id is provided, it will be included in error log message if there is
-// an issue with
-profiling_time
-get_gpu_event_time(hsa_agent_t             agent,
-                   hsa_signal_t            signal,
-                   rocprofiler_kernel_id_t kernel_id,
-                   std::optional<uint64_t> baseline = {});
 }  // namespace gpu_events
 }  // namespace rocprofiler

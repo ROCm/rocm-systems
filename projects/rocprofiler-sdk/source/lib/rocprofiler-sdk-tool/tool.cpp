@@ -1428,8 +1428,8 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_gpu_event_record_t*>(header->payload);
 
-                auto stream_id               = get_stream_id(record);
-                record->event_info.stream_id = stream_id;
+                auto attr                    = get_ext_attribution(record);
+                record->event_info.stream_id = attr.stream_id;
                 tool::write_ring_buffer(*record, domain_type::GPU_EVENTS);
             }
             else
@@ -3542,10 +3542,10 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
     // function can warn if data was left unflushed, but nothing is written.
     if(skip_output) return;
 
-    // OMPT, rocSHMEM, hipFILE, and GPU Events do not produce direct CSV/stats output. They are
-    // emitted directly only to JSON and rocpd; all rely on `rocpd convert` for
-    // CSV/Perfetto/OTF2. The record count above is still tallied so that rocpd/JSON output
-    // is produced even when one of these is the only active trace domain.
+    // OMPT is rocpd-only (not emitted to JSON). rocSHMEM, hipFILE, and GPU Events are emitted
+    // directly to JSON and rocpd. None produce direct CSV/stats output; all rely on
+    // `rocpd convert` for CSV/Perfetto/OTF2. The record count above is still tallied so that
+    // rocpd/JSON output is produced even when one of these is the only active trace domain.
     if constexpr(DomainT != domain_type::OMPT && DomainT != domain_type::ROCSHMEM &&
                  DomainT != domain_type::HIPFILE && DomainT != domain_type::GPU_EVENTS)
     {

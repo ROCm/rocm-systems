@@ -594,13 +594,18 @@ SELECT
     EO.event_id,
     EO.type_id,
     EO.issue_id,
-    EO.stream_id
+    EO.stream_id,
+    E.stack_id,
+    E.parent_stack_id,
+    E.correlation_id AS corr_id
 FROM
     `rocpd_event_operation` EO
     LEFT JOIN `rocpd_info_agent` A ON A.id = EO.agent_id
     AND A.guid = EO.guid
     LEFT JOIN `rocpd_info_queue` Q ON Q.id = EO.queue_id
     AND Q.guid = EO.guid
+    INNER JOIN `rocpd_event` E ON E.id = EO.event_id
+    AND E.guid = EO.guid
     INNER JOIN `rocpd_info_process` P ON P.id = EO.pid
     AND P.guid = EO.guid
     INNER JOIN `rocpd_info_thread` T ON T.id = EO.tid
