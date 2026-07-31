@@ -61,14 +61,12 @@ template<> struct SumTraits<false> {
   using elem_t = rccl_float8;
   static __device__ fp8x2_storage_t packed(fp8x2_storage_t x, fp8x2_storage_t y) { return hadd2(x, y); }
   static __device__ elem_t          scalar(elem_t a, elem_t b)                   { return hadd(a, b); }
-  static constexpr float            kMaxFinite = RCCL_FP8_MAX_FINITE;
 };
 
 template<> struct SumTraits<true> {
   using elem_t = rccl_bfloat8;
   static __device__ fp8x2_storage_t packed(fp8x2_storage_t x, fp8x2_storage_t y) { return hadd2_b(x, y); }
   static __device__ elem_t          scalar(elem_t a, elem_t b)                   { return hadd_b(a, b); }
-  static constexpr float            kMaxFinite = RCCL_BF8_MAX_FINITE;
 };
 
 template<bool IsBf8>
@@ -79,10 +77,24 @@ __device__ inline void decode2(fp8x2_storage_t v, float& lo, float& hi) {
   hi = float(u.e[1]);
 }
 
-// RCCL_FP8_MAX_FINITE differs between the host pass (OCP, 448) and an fnuz
-// device build (240), so the device reports the limit it actually saturates to.
+// The limit is a property of the encoding, which the architecture decides:
+// e4m3 stops at 240 in the fnuz form gfx942 uses and at 448 in the OCP form
+// gfx950 uses. The device recovers it from the type by decoding all 256
+// encodings and keeping the largest finite magnitude, rather than reading the
+// constant the implementation clamps with, which would leave the saturation
+// check unable to see an error in that constant. It also keeps the test off a
+// macro that exists only on the architectures whose fp8 hardware the header
+// targets, so this still compiles for the likes of gfx90a.
 template<bool IsBf8>
-__global__ void kReportMaxFinite(float* out) { *out = SumTraits<IsBf8>::kMaxFinite; }
+__global__ void kReportMaxFinite(float* out) {
+  float best = 0.0f;
+  for (int b = 0; b < 256; ++b) {
+    float lo, hi;
+    decode2<IsBf8>(static_cast<fp8x2_storage_t>(b), lo, hi);
+    if (isfinite(lo) && lo > best) best = lo;
+  }
+  *out = best;
+}
 
 template<bool IsBf8>
 __global__ void kSum(const fp8x2_storage_t* __restrict__ X, const fp8x2_storage_t* __restrict__ Y,
