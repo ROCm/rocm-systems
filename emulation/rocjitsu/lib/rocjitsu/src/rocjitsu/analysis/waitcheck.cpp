@@ -669,7 +669,7 @@ struct Analyzer {
     RegisterSet local_ready_regs;
     std::optional<PendingWaitGroup> pending_wait_group;
     std::vector<uint32_t> padded(words.begin(), words.end());
-    padded.resize(padded.size() + 2);
+    padded.resize(padded.size() + Decoder::kMaximumInstructionWords - 1);
 
     size_t word_index = 0;
     while (word_index < words.size()) {

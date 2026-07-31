@@ -5,6 +5,7 @@
 #include "rocjitsu/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/analysis/waitcheck.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
@@ -130,6 +131,32 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
 [[nodiscard]] WaitcheckReport analyze_gfx1250_normal(const std::vector<uint32_t> &program) {
   TestCodeObject code_object(program);
   return analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+}
+
+TEST(WaitcheckTest, ReachableGfx1250DecodePreservesFourWordInstruction) {
+  const std::vector<uint32_t> program{
+      0xcc3a0200u, 0x42020d04u, 0xcc336008u, 0x04223110u,
+      0xbfb00000u, // s_endpgm.
+  };
+  TestCodeObject code_object(program);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  const std::array<uint64_t, 1> entries{0};
+  const std::array<uint64_t, 1> entry_sizes{program.size() * sizeof(uint32_t)};
+  auto blocks = BasicBlock::build_reachable(code_object, *decoder, ROCJITSU_CODE_ARCH_GFX1250,
+                                            entries, entry_sizes, 32);
+
+  ASSERT_FALSE(blocks.empty());
+  const Instruction &instruction = *blocks.front()->instructions().begin();
+  ASSERT_EQ(instruction.size(), 4 * sizeof(uint32_t));
+  ASSERT_EQ(instruction.num_dst_operands(), 1);
+  ASSERT_EQ(instruction.num_src_operands(), 5);
+  EXPECT_EQ(instruction.dst_operand(0)->to_register_ref(), (RegisterRef{RegClass::VGPR, 8, 8}));
+  EXPECT_EQ(instruction.src_operand(0)->to_register_ref(), (RegisterRef{RegClass::VGPR, 16, 8}));
+  EXPECT_EQ(instruction.src_operand(1)->to_register_ref(), (RegisterRef{RegClass::VGPR, 24, 8}));
+  EXPECT_EQ(instruction.src_operand(2)->to_register_ref(), (RegisterRef{RegClass::VGPR, 8, 8}));
+  ASSERT_NE(instruction.raw_encoding(), nullptr);
+  EXPECT_EQ(instruction.raw_encoding()[3], program[3]);
 }
 
 [[nodiscard]] rdna4::Vop1MachineInst v_mov_b32(uint32_t vdst, uint32_t src_vgpr) {

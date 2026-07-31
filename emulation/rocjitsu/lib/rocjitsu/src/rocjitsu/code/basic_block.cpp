@@ -495,10 +495,9 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch
           auto decoded_it = decoded.find(offset);
           if (decoded_it == decoded.end()) {
             // Decode from a small local window instead of copying the complete
-            // .text section. AMDGPU instructions occupy at most three words;
-            // zero padding preserves the decoder's established lookahead
+            // .text section. Zero padding preserves the decoder's lookahead
             // contract at the end of a section.
-            std::array<uint32_t, 3> window{};
+            std::array<uint32_t, Decoder::kMaximumInstructionWords> window{};
             const size_t available =
                 static_cast<size_t>(std::min<uint64_t>(sizeof(window), decode_end - offset));
             std::memcpy(window.data(), text.data() + offset, available);
