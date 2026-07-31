@@ -820,7 +820,16 @@ def format_table_output(
             )
 
         if is_gfx9(gpu_arch):
-            content += mem_chart_gfx9.plot_mem_chart(args.normal_unit, mem_data) + "\n"
+            content += (
+                mem_chart_gfx9.plot_mem_chart(
+                    mem_data,
+                    chart_title=_mem_chart_heading(
+                        int(table_config["id"]),
+                        args.normal_unit,
+                    ),
+                )
+                + "\n"
+            )
         elif is_gfx115x(gpu_arch):
             content += (
                 mem_chart_gfx11.plot_mem_chart(
@@ -1021,7 +1030,6 @@ def show_all(
             if is_gfx115x(gpu_arch):
                 panel_content += (
                     mem_chart_gfx11.plot_mem_chart(
-                        args.normal_unit,
                         mem_chart_data,
                         chart_title=heading,
                     )
@@ -1029,7 +1037,7 @@ def show_all(
                 )
             elif is_gfx9(gpu_arch):
                 panel_content += (
-                    mem_chart_gfx9.plot_mem_chart(args.normal_unit, mem_chart_data)
+                    mem_chart_gfx9.plot_mem_chart(mem_chart_data, chart_title=heading)
                     + "\n"
                 )
             else:
