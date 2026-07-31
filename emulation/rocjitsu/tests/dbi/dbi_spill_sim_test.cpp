@@ -466,11 +466,11 @@ protected:
         build_s_mov_b32(kSpilledSgprHi, static_cast<uint16_t>(128 + kSentinel2), a_.arch);
     // s_mov s8,K1 ; s_mov s9,K2 ; v_mov v3,s8 (ANCHOR at offset 8: reads s8, s9 read
     // next -> both live) ; v_mov v4,s9 ; s_endpgm.
-    auto target = test::make_amdgpu_kernel_elf({mov_s8_k, mov_s9_k, kMovV3S8, kMovV4S9, endpgm},
-                                               /*private_bytes=*/64, /*granulated_sgpr_count=*/3,
-                                               a_.e_flags);
-    auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {kMovS8Zero, kMovS9Zero, setpc},
-                                             a_.e_flags);
+    auto target =
+        test::make_amdgpu_kernel_elf({mov_s8_k, mov_s9_k, kMovV3S8, kMovV4S9, endpgm},
+                                     /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+    auto probe =
+        test::make_amdgpu_probe_elf("rj_test_probe", {kMovS8Zero, kMovS9Zero, setpc}, a_.e_flags);
 
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
