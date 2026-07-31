@@ -468,6 +468,77 @@ json_has_project_name_root(const std::string& json_path)
         return false;
     }
 }
+
+void
+configure_rocm_tracing_settings(const std::shared_ptr<settings>& _config)
+{
+    using sdk_tracing_config_t =
+        rocprofiler_sdk::sdk_tracing_config<rocprofiler_sdk::wrapper,
+                                            rocprofiler_sdk::default_sdk_externals>;
+
+    const auto domains = sdk_tracing_config_t::domain_settings();
+
+    ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::ROCM_DOMAINS,
+                              domains.domain_description, domains.domain_defaults, "rocm",
+                              "rocprofiler-sdk")
+        ->set_choices(domains.domain_choices);
+
+    ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::ROCM_EVENTS,
+                              "ROCm hardware counters. Use ':device=N' syntax to "
+                              "specify collection on device number N, e.g. ':device=0'. "
+                              "If no device specification is provided, the event is "
+                              "collected on every available device",
+                              std::string{}, "rocm", "hardware_counters");
+
+    auto registered_operation_settings = std::unordered_set<std::string>{};
+    for(const auto& spec : sdk_tracing_config_t::operation_settings())
+    {
+        if(registered_operation_settings.emplace(spec.all_operations_env).second)
+        {
+            ROCPROFSYS_CONFIG_SETTING(std::string, spec.all_operations_env,
+                                      "Inclusive filter for domain operations (for API "
+                                      "domains, this selects the functions to trace) "
+                                      "[regex supported]",
+                                      std::string{}, "rocm", "rocprofiler-sdk",
+                                      "advanced")
+                ->set_choices(spec.operation_choices);
+        }
+        if(registered_operation_settings.emplace(spec.exclude_operations_env).second)
+        {
+            ROCPROFSYS_CONFIG_SETTING(std::string, spec.exclude_operations_env,
+                                      "Exclusive filter for domain operations applied "
+                                      "after the inclusive filter (for API domains, "
+                                      "removes function from trace) [regex supported]",
+                                      std::string{}, "rocm", "rocprofiler-sdk",
+                                      "advanced")
+                ->set_choices(spec.operation_choices);
+        }
+        if(registered_operation_settings.emplace(spec.annotate_backtrace_env).second)
+        {
+            ROCPROFSYS_CONFIG_SETTING(std::string, spec.annotate_backtrace_env,
+                                      "Specification of domain operations which will "
+                                      "record a backtrace (for API domains, this is a "
+                                      "list of function names) [regex supported]",
+                                      std::string{}, "rocm", "rocprofiler-sdk",
+                                      "advanced")
+                ->set_choices(spec.operation_choices);
+        }
+    }
+
+    // Add the ROCPROFSYS_ROCM_GROUP_BY_QUEUE setting if the hip_stream domain is
+    // present in supported ROCProfiler-SDK domains.
+    if(std::ranges::find(domains.domain_choices, std::string{ "hip_stream" }) !=
+       domains.domain_choices.end())
+    {
+        ROCPROFSYS_CONFIG_SETTING(bool, env_vars::ROCM_GROUP_BY_QUEUE,
+                                  "By default, Perfetto trace will show the HIP streams "
+                                  "to which kernel and memory copy operations submitted. "
+                                  "With the `ROCPROFSYS_ROCM_GROUP_BY_QUEUE` option, the "
+                                  "trace will display HSA queues to which these kernel "
+                                  "and memory operations were submitted.",
+                                  false, "rocm", "perfetto");
+    }
+}
 }  // namespace
 
 void
@@ -986,9 +1057,7 @@ configure_settings(bool _init)
         std::string{ "perf::PERF_COUNT_HW_CACHE_REFERENCES" }, "sampling",
         "hardware_counters");
 
-    rocprofiler_sdk::sdk_tracing_config<
-        rocprofiler_sdk::wrapper,
-        rocprofiler_sdk::default_sdk_externals>::config_settings(_config);
+    configure_rocm_tracing_settings(_config);
     amd_smi::config_settings(_config);
 
     ROCPROFSYS_CONFIG_SETTING(size_t, env_vars::PERFETTO_SHMEM_SIZE_HINT_KB,
