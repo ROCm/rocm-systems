@@ -408,6 +408,7 @@ hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
         amd::Os::releaseMemory(*pointer, managedVar->GetSize());
       }
       assert(err == hipSuccess);
+      managedVarGenerations_.erase(managedVar);
       delete managedVar;
     }
     managedVars_.erase(managedVarsIter);
@@ -487,6 +488,8 @@ void StatCO::RemoveAllFatBinaries() {
     }
   }
   managedVars_.clear();
+  managedVarGenerations_.clear();
+  managedVarGeneration_ = 0;
 
   deferredInitManagedVarStates_.clear();
 
@@ -614,7 +617,10 @@ hipError_t StatCO::GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_
 }
 
 hipError_t StatCO::RegisterManagedVar(Var* var) {
+  std::scoped_lock lock(sclock_);
+
   managedVars_[var->ModuleInfo()].push_back(var);
+  managedVarGenerations_.emplace(var, ++managedVarGeneration_);
   return hipSuccess;
 }
 
@@ -642,8 +648,8 @@ hipError_t StatCO::QueueManagedVarInitialization(int deviceId,
     return error;
   };
 
-  if (managedVars_.empty()) {
-    state.phase = DeferredInitManagedVarState::Phase::Completed;
+  const uint64_t batchGeneration = managedVarGeneration_;
+  if (state.queuedGeneration == batchGeneration) {
     return hipSuccess;
   }
 
@@ -653,8 +659,15 @@ hipError_t StatCO::QueueManagedVarInitialization(int deviceId,
     return fail(hipErrorInvalidResourceHandle);
   }
 
+  bool queuedWork = false;
   for (auto& [_, managedVars] : managedVars_) {
     for (Var* var : managedVars) {
+      const uint64_t registrationGeneration = managedVarGenerations_.at(var);
+      if (registrationGeneration <= state.queuedGeneration ||
+          registrationGeneration > batchGeneration) {
+        continue;
+      }
+
       FatBinaryInfo** module = var->ModuleInfo();
       if (*module == nullptr) {
         // Lazy module loading re-enters sclock_ through DigestFatBinary.
@@ -679,7 +692,16 @@ hipError_t StatCO::QueueManagedVarInitialization(int deviceId,
       if (result != hipSuccess) {
         return fail(result);
       }
+      queuedWork = true;
     }
+  }
+
+  state.queuedGeneration = batchGeneration;
+  if (!queuedWork) {
+    if (state.phase == DeferredInitManagedVarState::Phase::NotStarted) {
+      state.phase = DeferredInitManagedVarState::Phase::Completed;
+    }
+    return hipSuccess;
   }
 
   state.completion.reset(new amd::Marker(*stream, kMarkerDisableFlush));
@@ -720,10 +742,16 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId, hip::Stream* orderStrea
 
   if (state.phase == Phase::Failed) {
     return state.terminalError;
-  } else if (state.phase == Phase::NotStarted) {
-    IHIP_RETURN_ONFAIL(QueueManagedVarInitialization(deviceId, state));
-  } else if (state.phase == Phase::InProgress) {
+  }
+
+  if (state.phase == Phase::InProgress) {
     UpdateManagedVarInitialization(state);
+  }
+
+  if (state.queuedGeneration < managedVarGeneration_) {
+    IHIP_RETURN_ONFAIL(QueueManagedVarInitialization(deviceId, state));
+  } else if (state.phase == Phase::NotStarted) {
+    state.phase = Phase::Completed;
   }
 
   if (state.phase == Phase::InProgress) {

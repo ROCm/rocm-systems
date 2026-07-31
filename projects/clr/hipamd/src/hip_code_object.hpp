@@ -9,6 +9,7 @@
 
 #include "hip_global.hpp"
 
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <unordered_map>
@@ -203,6 +204,9 @@ class StatCO : public CodeObject {
   std::unordered_map<const void*, Var*> vars_;               //!< Populated during __hipRegisterVars
   //! Populated during __hipRegisterManagedVar
   std::unordered_map<FatBinaryInfo**, std::vector<Var*> > managedVars_;
+  //! Monotonic registration number used to identify pending variables on each device
+  std::unordered_map<const Var*, uint64_t> managedVarGenerations_;
+  uint64_t managedVarGeneration_ = 0;
   //! Reverse mapping of modules to speed up removal
   std::unordered_map<FatBinaryInfo**, const void*> module_to_hostModule_;
   //! Reverse mapping of functions
@@ -216,6 +220,7 @@ class StatCO : public CodeObject {
     Phase phase = Phase::NotStarted;
     CommandHandle completion;
     hipError_t terminalError = hipSuccess;
+    uint64_t queuedGeneration = 0;
   };
 
   hipError_t QueueManagedVarInitialization(int deviceId, DeferredInitManagedVarState& state);
@@ -223,7 +228,7 @@ class StatCO : public CodeObject {
   void OrderStreamAfterManagedVarInitialization(int deviceId, hip::Stream* orderStream,
                                                 const DeferredInitManagedVarState& state);
 
-  //! One state-machine instance per device prevents duplicate initialization.
+  //! Each device tracks the newest registration queued to prevent duplicate initialization.
   std::unordered_map<int, DeferredInitManagedVarState> deferredInitManagedVarStates_;
 };
 

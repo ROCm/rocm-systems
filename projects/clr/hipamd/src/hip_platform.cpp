@@ -256,8 +256,7 @@ void __hipRegisterManagedVar(
 
   hip::Var* var_ptr = new hip::Var(std::string(name), hip::Var::DeviceVarKind::DVK_Managed, pointer,
                                    size, align, reinterpret_cast<hip::FatBinaryInfo**>(hipModule));
-  hipError_t status = PlatformState::Instance().StatCO().RegisterManagedVar(var_ptr);
-  guarantee(status == hipSuccess, "Cannot register Static Managed Var, error: %d", status);
+  hipError_t status = hipSuccess;
 
   if (enable_deferred_loading) {
     // Allocate temporary var on host and initialize
@@ -279,6 +278,9 @@ void __hipRegisterManagedVar(
       guarantee(false, "Error during allocation of managed memory!, error: %d", status);
     }
   }
+
+  status = PlatformState::Instance().StatCO().RegisterManagedVar(var_ptr);
+  guarantee(status == hipSuccess, "Cannot register Static Managed Var, error: %d", status);
 }
 
 // ================================================================================================
