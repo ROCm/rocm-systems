@@ -3451,6 +3451,38 @@ TEST(ExecFlagsRealDecode, Cdna4VgprDefStaysLiveWithoutFullExec) {
   EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
 }
 
+// v_writelane_b32 writes a single lane, so even under Full EXEC it is a
+// read-modify-write of its destination and must not be promoted to a kill.
+TEST(ExecFlagsRealDecode, Cdna4WritelaneDestStaysLiveUnderFullExec) {
+  // s_mov_b64 exec, -1 ; v_writelane_b32 v5, s4, s2 ; v_mov_b32 v2, v5 ; s_endpgm
+  auto blocks =
+      build_cdna4_blocks({0xBEFE01C1u, 0xD28A0005u, 0x00000404u, 0x7E040305u, 0xBF810000u});
+  ASSERT_FALSE(blocks.empty());
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 3u);
+
+  // Sanity-check the decode so an encoding typo fails loudly.
+  EXPECT_EQ(insts[0]->mnemonic(), "s_mov_b64");
+  const Instruction &writelane = *insts[1];
+  EXPECT_EQ(writelane.mnemonic(), "v_writelane_b32");
+  ASSERT_NE(writelane.dst_operand(0), nullptr);
+  auto dst_ref = writelane.dst_operand(0)->to_register_ref();
+  ASSERT_TRUE(dst_ref.has_value());
+  EXPECT_EQ(*dst_ref, (RegisterRef{RegClass::VGPR, 5, 1}));
+
+  // Full-EXEC tracking needs the regenerated s_mov RESULT_COPY metadata.
+  if (!(insts[0]->flags() & RESULT_COPY))
+    GTEST_SKIP() << "s_mov lacks RESULT_COPY; regenerate ISA to enable EXEC-Full tracking";
+
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 64};
+  EXPECT_EQ(exec.before(writelane), ExecState::Full);
+
+  // Contrast Cdna4SMovExecAllOnesPromotesVgprDefToKill: the RMW dst stays live.
+  LivenessAnalysis liveness = analyze_scope(blocks);
+  EXPECT_TRUE(liveness.is_live_before(writelane, {RegClass::VGPR, 5, 1}));
+}
+
 TEST(ExecMaskAnalysis, EntryIsUnknownAllOnesIsFullNarrowingIsUnknown) {
   // exec=all-ones; v0=...; exec=narrow; v0=...; end
   auto blocks =
@@ -3490,6 +3522,31 @@ TEST(ExecMaskAnalysis, LoopHeaderEntryWithBackedgeIsPinnedUnknown) {
   const BasicBlock *const entries[] = {header};
   ExecMaskAnalysis pinned{KernelBlockScope(scope), 64, /*extra_edges=*/{}, entries};
   EXPECT_EQ(pinned.before(header_first), ExecState::Unknown);
+}
+
+TEST(ExecMaskAnalysis, SecondHardwareEntryReachedAfterFullIsPinnedUnknown) {
+  // Models a kernel with two hardware entries (descriptor entry + kernarg-preload
+  // firmware entry): block0 @0 establishes Full and falls through to block1 @4, a
+  // second entry (forced to be a leader). block1 is reachable with Full via the
+  // ordinary path, but hardware may enter it directly with unknown EXEC, so both
+  // entries must be seeded -- unlike the single-entry tests above.
+  const uint64_t firmware_leader[] = {4};
+  auto blocks = build_test_blocks(
+      {TestOpcode::WriteExecFull, TestOpcode::DefVgpr0, TestOpcode::End}, firmware_leader);
+  auto scope = block_scope(blocks);
+  BasicBlock *firmware = block_starting_at(blocks, 4);
+  ASSERT_NE(firmware, nullptr);
+  ASSERT_TRUE(has_predecessor(*firmware, blocks.front().get()));
+  const Instruction &firmware_first = *insts_of(*firmware).front();
+
+  // Without pinning, the ordinary fallthrough carries Full into the second entry.
+  ExecMaskAnalysis unpinned{KernelBlockScope(scope), 64};
+  EXPECT_EQ(unpinned.before(firmware_first), ExecState::Full);
+
+  // Seeding both entries keeps the second Unknown despite the incoming Full.
+  const BasicBlock *const entries[] = {blocks.front().get(), firmware};
+  ExecMaskAnalysis pinned{KernelBlockScope(scope), 64, /*extra_edges=*/{}, entries};
+  EXPECT_EQ(pinned.before(firmware_first), ExecState::Unknown);
 }
 
 TEST(ExecMaskAnalysis, OrWithAllOnesConstantIsFull) {

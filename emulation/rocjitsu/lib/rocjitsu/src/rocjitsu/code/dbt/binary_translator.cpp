@@ -1594,7 +1594,23 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     LivenessAnalysis liveness = LivenessAnalysis::unavailable();
     if (scope_requires_liveness) {
       const auto liveness_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
-      const BasicBlock *const entry_blocks[] = {scope.entry};
+      // Seed every hardware entry: the descriptor entry plus, when present, the
+      // kernarg-preload firmware entry (+256), which hardware enters with unknown
+      // EXEC and so must be pinned Unknown even if an ordinary path reaches it.
+      // (The firmware entry is seeded here for EXEC state, but deliberately
+      // excluded from the relocation-root gate above, which reasons about PC
+      // provenance rather than EXEC.)
+      std::vector<const BasicBlock *> entry_blocks{scope.entry};
+      if (scope.translation->has_kernarg_preload_firmware_skip) {
+        const uint64_t firmware_offset =
+            scope.translation->kernarg_preload_firmware_entry_text_offset;
+        for (const BasicBlock *block : scope.blocks) {
+          if (block != nullptr && block->start_offset() == firmware_offset) {
+            entry_blocks.push_back(block);
+            break;
+          }
+        }
+      }
       const ExecMaskAnalysis exec(KernelBlockScope(scope.blocks),
                                   scope.translation->guest_wavefront_size, liveness_edges,
                                   entry_blocks);
