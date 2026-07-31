@@ -160,4 +160,31 @@ build_scratch_load_dword(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arc
   }
 }
 
+/// @brief Drain every memory-load counter that could still be writing a register
+///        about to be spilled: VMEM/LDS loads (VGPR targets) and scalar loads
+///        (SGPR targets).
+///
+/// A register live at the anchor may be the destination of a load issued before
+/// the anchor whose consumer s_waitcnt sits *after* it in the original code.
+/// Storing that register in the spill prologue without first waiting would spill
+/// a stale value (and the epilogue would then restore the stale value over the
+/// load's later result). Emitted once, before any store.
+///
+/// CDNA's monolithic s_waitcnt 0 drains vmcnt+lgkmcnt (VMEM, LDS, and scalar) in
+/// one word. RDNA4/GFX12 split the counters, so it takes s_wait_loadcnt_dscnt 0
+/// (VMEM + LDS -> VGPRs) and s_wait_kmcnt 0 (scalar -> SGPRs).
+[[nodiscard]] inline std::vector<uint32_t> build_wait_all_loads_complete(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return {build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0)};
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return {build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0)};
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return {build_sopp_encoding(arch, rdna4::kSWaitLoadcntDscntSopp, 0),
+            build_sopp_encoding(arch, rdna4::kSWaitKmcntSopp, 0)};
+  default:
+    throw util::UnimplementedInst("all-loads wait for target architecture");
+  }
+}
+
 } // namespace rocjitsu
