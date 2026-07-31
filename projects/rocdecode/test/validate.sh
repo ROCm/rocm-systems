@@ -34,10 +34,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/../build"
 SKIP_CTEST=0
 SKIP_CONFORMANCE=0
+CHECK_ROCM=0
 
 usage() {
   cat <<'EOF'
-Usage: validate.sh [--build-dir DIR] [--skip-ctest] [--skip-conformance]
+Usage: validate.sh [--build-dir DIR] [--skip-ctest] [--skip-conformance] [--check-rocm]
 
 Runs the rocDecode CTest suite and per-codec conformance tests, then prints a
 combined summary. Exits 0 if everything passed, 1 otherwise.
@@ -46,14 +47,43 @@ Options:
   --build-dir DIR      Path to the CMake build directory (default: ../build)
   --skip-ctest         Skip the CTest phase
   --skip-conformance   Skip all conformance phases
+  --check-rocm         Only verify the ROCm toolchain (ROCM_PATH) and exit
   -h, --help           Show this help and exit
 
 Environment:
+  ROCM_PATH                   ROCm install used for the compiler, install prefix,
+                              and CTest data. Defaults to /opt/rocm when unset.
   ROCDECODE_CONFORMANCE_DIR   Parent directory holding the per-codec conformance
                               stream folders AvcConformance, Av1Conformance,
                               HevcConformance, Vp9Conformance.
                               Default: $HOME/rocDecodeConformance
 EOF
+}
+
+# Fail fast if ROCM_PATH does not point at a usable ROCm toolchain. The build
+# derives its compiler, install prefix, and CTest data path from ROCM_PATH
+# (defaulting to /opt/rocm), so a wrong/unset value fails confusingly.
+check_rocm_path() {
+  local rp="${ROCM_PATH:-/opt/rocm}"
+  local note
+  if [[ -n "${ROCM_PATH:-}" ]]; then
+    note="ROCM_PATH=$ROCM_PATH"
+  else
+    note="ROCM_PATH is unset; defaulting to /opt/rocm"
+  fi
+  local compiler="$rp/lib/llvm/bin/amdclang++"
+  if [[ ! -x "$compiler" ]]; then
+    {
+      echo "ERROR: ROCm toolchain not found at: $compiler"
+      echo "       ($note)"
+      echo "  Fix: point ROCM_PATH at your ROCm install (the dir containing lib/llvm/bin)."
+      echo "       Skills run cmake in a NON-interactive shell that does not source ~/.bashrc,"
+      echo "       so set ROCM_PATH in ~/.profile (or export it before launching Claude Code)."
+    } >&2
+    return 1
+  fi
+  echo "Using ROCM_PATH=$rp (amdclang++ found)"
+  return 0
 }
 
 # --- parse args ---
@@ -70,10 +100,17 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-ctest) SKIP_CTEST=1; shift ;;
     --skip-conformance) SKIP_CONFORMANCE=1; shift ;;
+    --check-rocm) CHECK_ROCM=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1"; echo; usage; exit 1 ;;
   esac
 done
+
+# Verify the ROCm toolchain up front (and exit early if only checking).
+check_rocm_path || exit 1
+if [[ $CHECK_ROCM -eq 1 ]]; then
+  exit 0
+fi
 
 TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 RESULTS_DIR="$SCRIPT_DIR/../validation_results/$TIMESTAMP"

@@ -9,6 +9,16 @@ All commands are shown relative to the rocDecode project root (the directory con
 
 ## Prerequisites
 
+* `ROCM_PATH` pointing at your ROCm install — the build derives its compiler, install
+  prefix, and CTest data path from it (default `/opt/rocm`). If ROCm is elsewhere (e.g. a
+  TheRock or custom build), set it. Because Claude Code skills run cmake in a
+  **non-interactive** shell that does not source `~/.bashrc`, set it in `~/.profile`:
+
+  ```shell
+  export ROCM_PATH="$HOME/TheRock_XXXX"
+  ```
+
+  `test/validate.sh --check-rocm` verifies this and fails fast with guidance.
 * rocDecode built and installed (`make install`) — the CTest cases and conformance
   runners test against the installed library and data.
 * [FFmpeg](https://ffmpeg.org/about.html) dev libraries — required for the samples and

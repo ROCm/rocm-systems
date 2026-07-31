@@ -26,6 +26,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR/.."
 JOBS="${1:-$(nproc)}"
 
+# Fail fast if ROCM_PATH does not point at a usable ROCm toolchain (samples derive
+# their compiler from it; a wrong/unset value fails confusingly).
+ROCM_PATH_EFF="${ROCM_PATH:-/opt/rocm}"
+if [[ ! -x "$ROCM_PATH_EFF/lib/llvm/bin/amdclang++" ]]; then
+  echo "ERROR: ROCm toolchain not found at: $ROCM_PATH_EFF/lib/llvm/bin/amdclang++" >&2
+  echo "       Set ROCM_PATH to your ROCm install. Skills run cmake in a non-interactive" >&2
+  echo "       shell (no ~/.bashrc), so set ROCM_PATH in ~/.profile so the build sees it." >&2
+  exit 1
+fi
+
 for sample in rocdecDecode videoDecode videoDecodeBatch videoDecodeMem \
               videoDecodeMultiFiles videoDecodePerf videoDecodePicFiles \
               videoDecodeRaw videoDecodeRGB videoToSequence; do
