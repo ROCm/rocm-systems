@@ -71,27 +71,40 @@ corpus_work_dir="$(pwd -P)"
 rocjitsu_launcher="$(command -v rocjitsu)"
 run_wrapper_prefix=()
 
-# Clang's shared ASan runtime cannot safely initialize a late-loaded HIP
-# runtime. Preload HIP for those builds and suppress only ROCR's known
-# process-lifetime allocations; GCC ASan and non-sanitized builds need neither.
-clang_asan_runtime="$(
-  ldd "${rocjitsu_launcher}" |
-    awk '$1 ~ /^libclang_rt\.asan/ { print $3; exit }'
-)"
-if [[ -n "${clang_asan_runtime}" ]]; then
-  hip_runtime="${ROCM_PATH}/lib/libamdhip64.so.7"
+# Keep sanitizer-specific policy separate from preload ordering: the launcher
+# remains responsible for placing any active ASan or TSan runtime first.
+launcher_dependencies="$(readelf -d "${rocjitsu_launcher}" 2>/dev/null)"
+asan_enabled=false
+clang_asan_enabled=false
+if [[ "${launcher_dependencies}" == *"libclang_rt.asan"* ]]; then
+  asan_enabled=true
+  clang_asan_enabled=true
+elif [[ "${launcher_dependencies}" == *"libasan.so"* ]]; then
+  asan_enabled=true
+fi
+
+if [[ "${asan_enabled}" == true ]]; then
   lsan_suppressions="${ROCJITSU_SOURCE_DIR}/tests/corpus/lsan.supp"
-  if [[ ! -f "${hip_runtime}" || ! -f "${lsan_suppressions}" ]]; then
-    echo "Could not resolve HIP runtime or LSan suppressions for corpus preload" >&2
+  if [[ ! -f "${lsan_suppressions}" ]]; then
+    echo "Could not resolve LSan suppressions for corpus tests" >&2
     exit 1
   fi
-  corpus_preload="${clang_asan_runtime}:${hip_runtime}${LD_PRELOAD:+:${LD_PRELOAD}}"
   corpus_lsan_options="${LSAN_OPTIONS:+${LSAN_OPTIONS}:}suppressions=${lsan_suppressions}"
   run_wrapper_prefix=(
     env
-    "LD_PRELOAD=${corpus_preload}"
     "LSAN_OPTIONS=${corpus_lsan_options}"
   )
+fi
+
+# Clang's shared ASan runtime cannot safely initialize a late-loaded HIP
+# runtime. Request a child-only preload; GCC ASan does not require this.
+if [[ "${clang_asan_enabled}" == true ]]; then
+  hip_runtime="${ROCM_PATH}/lib/libamdhip64.so.7"
+  if [[ ! -f "${hip_runtime}" ]]; then
+    echo "Could not resolve HIP runtime for Clang ASan corpus preload" >&2
+    exit 1
+  fi
+  run_wrapper_prefix+=("RJ_LAUNCH_PRELOAD=${hip_runtime}")
 fi
 
 for target in "${targets[@]}"; do
