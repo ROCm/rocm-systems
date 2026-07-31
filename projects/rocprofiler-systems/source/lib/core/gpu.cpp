@@ -28,11 +28,18 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/cxx/serialization.hpp>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/version.h>
 
 #include "logger/debug.hpp"
 
+#include <algorithm>
 #include <atomic>
+#include <cstddef>
+#include <exception>
 #include <mutex>
+#include <optional>
+#include <stdexcept>
+#include <vector>
 
 namespace rocprofsys
 {
@@ -147,11 +154,13 @@ device_count()
     return _num_devices;
 }
 
-std::set<std::string>
+std::optional<std::set<std::string>>
 get_visible_gpu_bdfs()
 {
     // Ensure the rocprofiler-sdk agents (and their runtime_visibility) are populated.
-    device_count();
+    // No GPU agents means the query found nothing to report on (or failed), so runtime
+    // visibility is unknown rather than empty.
+    if(device_count() == 0) return std::nullopt;
 
     std::set<std::string> _bdfs;
     for(const auto& _agent :

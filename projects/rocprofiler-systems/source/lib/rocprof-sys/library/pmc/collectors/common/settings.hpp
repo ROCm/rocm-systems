@@ -5,6 +5,7 @@
 
 #include "common/env_vars.hpp"
 #include "core/config.hpp"
+#include "core/gpu_visibility.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
@@ -15,6 +16,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -84,6 +86,25 @@ struct settings_policy
         result.mode    = device_selection_mode::SPECIFIC;
         result.indices = parse_numeric_range(filter_str);
         return result;
+    }
+
+    /**
+     * @brief Get the GPU device filter from ROCPROFSYS_SAMPLING_GPUS.
+     */
+    static device_filter get_gpu_device_filter()
+    {
+        return get_device_filter(rocprofsys::get_sampling_gpus());
+    }
+
+    /**
+     * @brief PCIe BDFs of the GPUs the ROCm runtime exposes.
+     *
+     * Honors ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES. Returns std::nullopt when
+     * visibility could not be determined; see rocprofsys::gpu::get_visible_gpu_bdfs.
+     */
+    static std::optional<std::set<std::string>> get_visible_gpu_bdfs()
+    {
+        return rocprofsys::gpu::get_visible_gpu_bdfs();
     }
 
     static gpu::enabled_metrics get_enabled_metrics() noexcept
