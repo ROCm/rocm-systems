@@ -290,23 +290,28 @@ stop_context(const context::context* ctx)
 
     if(controller)
     {
-        // No GPU drain here. The sync this replaced existed to (a) avoid dangling callback
-        // pointers once the per-queue callbacks were unregistered and (b) let in-flight
-        // dispatches complete. (a) no longer applies -- nothing is registered, and
-        // signal_completion_hook resolves contexts at completion time. (b) is handled by that
-        // hook routing over registered rather than active contexts. Neither the serializer
-        // transition nor anything else in this function requires an idle GPU:
-        // profiler_serializer::disable() pushes an hsa_barrier carrying the previous state, so
-        // in-flight serialized dispatches are reconciled GPU-side.
+        // Drain in-flight dispatches, then disable serialization. The review of #8887 asked for
+        // this sync to be kept and for SPM to stay visible to the enter hook and to serialization
+        // through a "draining" window until both this and disable_serialization() complete.
         //
-        // This is a deliberate divergence from one review of #8887, which asked instead for the
-        // sync to be kept and the service held visible to the enter hook through an explicit
-        // "draining" state until sync and disable_serialization complete. The serialization window
-        // that state would protect is closed differently here: context::stop_context now runs this
-        // function before clearing the active slot, so disable_serialization happens while the
-        // enter hook can still see the context, and no dispatch is submitted unserialized while the
-        // serializer is enabled. Recorded here because the two approaches are not obviously
-        // equivalent and the choice should be revisited if that ordering changes.
+        // The visibility half comes from ordering rather than a separate flag:
+        // context::stop_context calls this function while the context is still in the active list,
+        // so for the duration of the drain the enter hook still reaches pre_kernel_call, whose
+        // disabled path deliberately returns serialize=true to coordinate the
+        // serialized->unserialized transition. Only once this function returns does the active slot
+        // get cleared. Introducing a draining flag as well would duplicate that guarantee, but the
+        // ordering is load-bearing: if the slot were cleared first, the enter hook would go blind
+        // before disable_serialization() ran and a dispatch could be submitted unserialized while
+        // the serializer was still enabled.
+        //
+        // A removal of this sync was considered on the grounds that its two original purposes --
+        // avoiding dangling callback pointers once the per-queue callbacks were unregistered, and
+        // letting in-flight dispatches complete -- are both addressed by the migration and by
+        // routing completions over registered contexts. The first is genuinely gone. The second is
+        // weaker than it looks: provenance routing ensures a completion that arrives is delivered,
+        // whereas the drain bounds when completions arrive at all, which is what the rest of the
+        // teardown depends on. Keeping it.
+        hsa::queue_controller_sync();
         controller->disable_serialization();
         // No per-queue callback to remove; spm::write_hook no-ops once dispatch_spm is
         // disabled above.

@@ -29,12 +29,12 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/spm/decode.hpp"
 #include "lib/rocprofiler-sdk/spm/dispatch_handlers.hpp"
 #include "lib/rocprofiler-sdk/spm/queue_hooks.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/experimental/spm.h>
@@ -930,7 +930,7 @@ TEST(spm_core, stop_context_removes_callbacks)
     ASSERT_TRUE(ctx.dispatch_spm);
     ASSERT_EQ(ctx.dispatch_spm->callbacks.size(), 1);
 
-    // Stop disables collection and tears the context down (no GPU drain; see spm::stop_context).
+    // Stop disables collection, drains in-flight dispatches, then tears the context down.
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
 
     bool enabled = true;
@@ -971,7 +971,7 @@ TEST(spm_core, stop_context_sync_and_restart)
 
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
 
-    // Restart to verify the queue controller is in a clean state after teardown
+    // Restart to verify the queue controller is in a clean state after drain + teardown
     ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "restart context");
 
     bool enabled = false;
@@ -988,7 +988,8 @@ TEST(spm_core, stop_context_sync_and_restart)
 
 // Regression for callback-registry removal (#8887): a dispatch enqueued while the SPM context
 // is active must still complete (and drain packet_return_map) when stop_context runs before the
-// GPU completion callback. Exercises the queue_hooks routing layer, not pre/post_kernel_call directly.
+// GPU completion callback. Exercises the queue_hooks routing layer, not pre/post_kernel_call
+// directly.
 TEST(spm_queue_hooks, stop_context_in_flight_completion_routes_via_hook_path)
 {
     rocprofiler::common::set_env("ROCPROFILER_SPM_BETA_ENABLED", true);
@@ -1000,12 +1001,10 @@ TEST(spm_queue_hooks, stop_context_in_flight_completion_routes_via_hook_path)
     context::push_client(1);
 
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
-    ROCPROFILER_CALL(rocprofiler_spm_configure_callback_dispatch_service(get_client_ctx(),
-                                                                         user_dispatch_cb,
-                                                                         nullptr,
-                                                                         null_record_callback,
-                                                                         nullptr),
-                     "Could not setup SPM service");
+    ROCPROFILER_CALL(
+        rocprofiler_spm_configure_callback_dispatch_service(
+            get_client_ctx(), user_dispatch_cb, nullptr, null_record_callback, nullptr),
+        "Could not setup SPM service");
     ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
 
     auto* ctx_p = context::get_mutable_registered_context(get_client_ctx());
@@ -1025,15 +1024,15 @@ TEST(spm_queue_hooks, stop_context_in_flight_completion_routes_via_hook_path)
         if(!is_spm_supported_arch(agent)) continue;
 
         found_spm_agent = true;
-        auto metrics = getSPMMetrics(agent);
+        auto metrics    = getSPMMetrics(agent);
         for(auto& metric : metrics)
         {
             if(!metric.expression().empty()) continue;
 
-            expected_dispatch expected = {};
-            rocprofiler_counter_id_t id = {.handle = metric.id()};
+            expected_dispatch                          expected = {};
+            rocprofiler_counter_id_t                   id       = {.handle = metric.id()};
             std::vector<rocprofiler_spm_parameters_t*> input_params{};
-            rocprofiler_spm_parameters_t param{
+            rocprofiler_spm_parameters_t               param{
                 .size  = sizeof(rocprofiler_spm_parameters_t),
                 .type  = ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
                 .value = 1200};
@@ -1048,10 +1047,10 @@ TEST(spm_queue_hooks, stop_context_in_flight_completion_routes_via_hook_path)
                              "Unable to create profile");
             cb_info->callback_args = &expected;
 
-            rocprofiler_queue_id_t qid = {.handle = 1};
-            hsa::FakeQueue         fq(agent, qid);
-            hsa::rocprofiler_packet  pkt{};
-            context::correlation_id  corr_id{.internal = 99};
+            rocprofiler_queue_id_t  qid = {.handle = 1};
+            hsa::FakeQueue          fq(agent, qid);
+            hsa::rocprofiler_packet pkt{};
+            context::correlation_id corr_id{.internal = 99};
 
             expected.queue_id    = qid;
             expected.agent_id    = agent.get_rocp_agent()->id;
@@ -1078,7 +1077,8 @@ TEST(spm_queue_hooks, stop_context_in_flight_completion_routes_via_hook_path)
             ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
             EXPECT_FALSE(rocprofiler::spm::is_any_active());
 
-            auto sess = std::make_shared<hsa::queue_info_session_t>(hsa::queue_info_session_t{.queue = fq});
+            auto sess =
+                std::make_shared<hsa::queue_info_session_t>(hsa::queue_info_session_t{.queue = fq});
             sess->correlation_id = &corr_id;
 
             spm::inst_pkt_t inst_pkt;
