@@ -19,6 +19,7 @@
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/dbt/lds_virtualization.h"
 #include "rocjitsu/code/dbt/legalization/gfx1250_b0_to_a0.h"
+#include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
 #include "rocjitsu/code/dbt/semantic_translator.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
@@ -1118,15 +1119,19 @@ BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t hos
       semantic_translator_(std::make_unique<SemanticTranslator>(
           guest_arch, host_arch, options.input_revision, options.output_revision)) {}
 
+bool BinaryTranslator::is_gfx1250_b0_to_a0() const {
+  return guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
+         options_.input_revision == ProcessorRevision::Gfx1250B0 &&
+         options_.output_revision == ProcessorRevision::Gfx1250A0;
+}
+
 const InstructionLegalization *
 BinaryTranslator::lookup_legalization(const Instruction &inst) const {
   // gfx1250 B0 and A0 have the same structural ISA, so the generated cross-ISA
   // tables cannot express their revision-specific behavior. Instructions in
   // the B0-to-A0 profile use handwritten legalization; everything else follows
   // the raw same-ISA copy path.
-  if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
-      options_.input_revision == ProcessorRevision::Gfx1250B0 &&
-      options_.output_revision == ProcessorRevision::Gfx1250A0)
+  if (is_gfx1250_b0_to_a0())
     return gfx1250_b0_to_a0_legalization(inst);
 
   return legalization_lookup_ ? legalization_lookup_(inst.encoding_id(), inst.opcode()) : nullptr;
@@ -1642,7 +1647,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     TranslationContext kernel_context(
         scope.translation->target_vgpr_count, scope.translation->target_agpr_count,
         scope.translation->target_accvgpr_base, scope.translation->target_sgpr_count,
-        scope.translation->target_private_size);
+        scope.translation->target_private_size, scope.translation->uses_dynamic_stack);
     if (scope.translation->needs_lds_overflow_buf) {
       auto virtual_lds_base =
           reserve_virtual_lds_base_sgpr_pair(kernel_context, KernelBlockScope(scope.blocks),
@@ -1735,7 +1740,13 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         if (block == nullptr)
           continue;
         for (const Instruction &inst : block->instructions()) {
-          if (semantic_translator_->expand_rule_requires_liveness(inst)) {
+          // The gfx1250 flat-scratch-base rewrite is selected by operand rather
+          // than by (encoding, opcode), so the rule-table query above cannot see
+          // it. It borrows an SGPR pair for vector reads and therefore carries
+          // its own live-before requirement.
+          const bool operand_driven_rewrite =
+              is_gfx1250_b0_to_a0() && gfx1250_reads_flat_scratch_base_64bit(inst);
+          if (semantic_translator_->expand_rule_requires_liveness(inst) || operand_driven_rewrite) {
             scope_requires_liveness = true;
             live_before_instructions.push_back(&inst);
           }
@@ -2412,6 +2423,39 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           }
         }
 
+        // Operand-driven gfx1250 rewrites cannot be keyed by (encoding, opcode)
+        // the way the semantic rule table is, so they run after that lookup
+        // misses and before the missing-rule failure below.
+        if (is_gfx1250_b0_to_a0()) {
+          auto base_expansion =
+              gfx1250_lower_flat_scratch_base_source(inst, offset, text, liveness, kernel_context);
+          if (base_expansion.status == ExpandStatus::Failed) {
+            auto failure = make_kernel_failure(DiagnosticKind::ExpandFailed, base_expansion.message,
+                                               offset, std::string(inst.mnemonic()),
+                                               std::move(base_expansion.required_work));
+            if (continue_after_failure && !skip_failed_kernels) {
+              append_error(result.diagnostics, failure.kind, failure.message, failure.guest_offset,
+                           failure.mnemonic, failure.required_work);
+              if (continue_after_instruction_error(inst, offset, kernel_text, pending_traces)) {
+                continue;
+              }
+            }
+            if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                    text_relocations_begin, data_relocations_begin)) {
+              skip_scope = true;
+              break;
+            }
+            return leave_unchanged();
+          }
+          if (base_expansion.status == ExpandStatus::Success) {
+            std::vector<uint32_t> target_words = std::move(base_expansion.words);
+            append_words(kernel_text, target_words);
+            queue_trace(pending_traces, inst, offset, leg, false, true, true, target_offset,
+                        std::move(target_words));
+            continue;
+          }
+        }
+
         if (leg && leg->action == Action::Expand) {
           auto failure = make_kernel_failure(
               DiagnosticKind::ExpandMissing,
@@ -2655,8 +2699,18 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         remaining_growth_words -= requested_growth_words;
       } else if (!layout.long_branch_sgpr) {
         auto sgpr = reserve_long_branch_sgpr_pair(kernel_context);
-        if (!sgpr)
+        if (!sgpr) {
+          patched_control_flow = {
+              .ok = false,
+              .failure = TextLayoutFailureCategory::ResourceLimit,
+              .source_offset = patched_control_flow.source_offset,
+              .required_windows = {},
+              .message =
+                  "long direct branch requires an additional descriptor-backed SGPR pair after "
+                  "semantic expansion",
+          };
           break;
+        }
         layout.long_branch_sgpr = *sgpr;
       } else {
         break;
