@@ -474,7 +474,7 @@ struct ExecSimArch {
   return {kCdna3SpillArch,
           /*active_lanes=*/32,
           {build_s_mov_b32(/*exec_hi=*/127, /*inline 0=*/128, kArch)},
-          {build_s_mov_b32(/*exec_hi=*/127, kScalarInlineNegOne, kArch)}};
+          {build_s_mov_b32(/*exec_hi=*/127, scalar_inline_neg_one(kArch), kArch)}};
 }
 
 // CDNA4 wave64: clear exec_hi -> lanes 0..31; restore with exec_hi = -1.
@@ -483,7 +483,7 @@ struct ExecSimArch {
   return {kCdna4SpillArch,
           /*active_lanes=*/32,
           {build_s_mov_b32(/*exec_hi=*/127, /*inline 0=*/128, kArch)},
-          {build_s_mov_b32(/*exec_hi=*/127, kScalarInlineNegOne, kArch)}};
+          {build_s_mov_b32(/*exec_hi=*/127, scalar_inline_neg_one(kArch), kArch)}};
 }
 
 // RDNA4 wave32: narrow exec_lo to 0x0000FFFF (lanes 0..15); restore with exec_lo = -1.
@@ -491,8 +491,8 @@ struct ExecSimArch {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   return {kRdna4SpillArch,
           /*active_lanes=*/16,
-          s_mov_b32_literal(kScalarOperandExecLo, /*lanes 0..15=*/0x0000FFFFu, kArch),
-          {build_s_mov_b32(kScalarOperandExecLo, kScalarInlineNegOne, kArch)}};
+          s_mov_b32_literal(scalar_operand_exec_lo(kArch), /*lanes 0..15=*/0x0000FFFFu, kArch),
+          {build_s_mov_b32(scalar_operand_exec_lo(kArch), scalar_inline_neg_one(kArch), kArch)}};
 }
 
 // Index of the trampoline's EXEC restore: an s_mov_b64 writing EXEC_LO from a
@@ -503,7 +503,7 @@ struct ExecSimArch {
   for (size_t i = 0; i < text.size(); ++i) {
     const uint32_t w = text[i];
     if ((w >> 23) == kSop1EncodingPrefix && ((w >> 8) & 0xFFu) == mov64 &&
-        ((w >> 16) & 0x7Fu) == kScalarOperandExecLo && (w & 0xFFu) < kScalarOperandVccLo)
+        ((w >> 16) & 0x7Fu) == scalar_operand_exec_lo(arch) && (w & 0xFFu) < scalar_operand_vcc_lo(arch))
       return i;
   }
   return text.size();
@@ -523,7 +523,7 @@ protected:
     const uint32_t mov_v3_k = 0x7E060200u | (128u + kSentinel); // v_mov_b32 v3, K
     // Probe clobbers the whole EXEC pair: s_mov_b64 exec, 0.
     const uint32_t probe_clobber_exec =
-        build_s_mov_b64(kScalarOperandExecLo, /*inline 0=*/128, a_.base.arch);
+        build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch), /*inline 0=*/128, a_.base.arch);
 
     // v_mov v3,0 (all lanes) ; <narrow EXEC> ; ANCHOR v_mov v3,K ; s_endpgm.
     std::vector<uint32_t> code = {mov_v3_0};
@@ -661,7 +661,7 @@ protected:
     const uint32_t mov_v3_v2 = kMovV3V2;                           // v_mov v3, v2
     // Probe widens EXEC to all lanes, then clobbers v2 on all of them.
     const uint32_t probe_widen =
-        build_s_mov_b64(kScalarOperandExecLo, kScalarInlineNegOne, a_.base.arch);
+        build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch), scalar_inline_neg_one(a_.base.arch), a_.base.arch);
 
     // v2=K ; v3=0 ; <narrow EXEC> ; ANCHOR v_mov v4,v2 ; <widen EXEC> ; v3=v2 ; endpgm.
     std::vector<uint32_t> code = {mov_v2_k, mov_v3_0};
@@ -721,7 +721,7 @@ protected:
   void expect_missing_store_full_mask_loses_high_lanes() {
     const std::vector<uint32_t> store = build_scratch_store_dword(2, 64, a_.base.arch);
     const uint32_t toggle =
-        build_s_mov_b64(kScalarOperandExecLo, kScalarInlineNegOne, a_.base.arch);
+        build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch), scalar_inline_neg_one(a_.base.arch), a_.base.arch);
     auto it = std::search(patched_text_.begin(), patched_text_.end(), store.begin(), store.end());
     ASSERT_NE(it, patched_text_.end()) << "spill scratch_store not found";
     ASSERT_NE(it, patched_text_.begin());

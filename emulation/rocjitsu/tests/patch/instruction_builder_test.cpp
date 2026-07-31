@@ -343,32 +343,32 @@ TEST(InstructionBuilder, BuildWaitStoresComplete) {
   EXPECT_EQ(build_wait_stores_complete(ROCJITSU_CODE_ARCH_RDNA4), 0xBFC10000u);
 }
 
-// VCC_LO/EXEC_LO scalar-operand codes are generation-stable: the header sources
-// them from one arch's generated table, so this guards that every generation's
+// VCC_LO/EXEC_LO scalar-operand codes are resolved per-arch: each case returns
+// its generation's generated table entry. This guards that every generation's
 // table still agrees (and that the well-known 106/126 values have not moved).
 TEST(InstructionBuilder, ScalarOperandCodesMatchGeneratedTables) {
-  EXPECT_EQ(kScalarOperandVccLo, 106);
-  EXPECT_EQ(kScalarOperandExecLo, 126);
+  EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_CDNA4), 106);
+  EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_CDNA4), 126);
 
-  EXPECT_EQ(kScalarOperandVccLo, cdna1::OPR_SDST_VCC_LO);
-  EXPECT_EQ(kScalarOperandVccLo, cdna4::OPR_SDST_VCC_LO);
-  EXPECT_EQ(kScalarOperandVccLo, rdna2::OPR_SDST_VCC_LO);
-  EXPECT_EQ(kScalarOperandVccLo, rdna4::OPR_SDST_VCC_LO);
-  EXPECT_EQ(kScalarOperandVccLo, gfx1250::OPR_SDST_VCC_LO);
+  EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_CDNA1), cdna1::OPR_SDST_VCC_LO);
+  EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_CDNA4), cdna4::OPR_SDST_VCC_LO);
+  EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_RDNA2), rdna2::OPR_SDST_VCC_LO);
+  EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_RDNA4), rdna4::OPR_SDST_VCC_LO);
+  EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_GFX1250), gfx1250::OPR_SDST_VCC_LO);
 
-  EXPECT_EQ(kScalarOperandExecLo, cdna1::OPR_SDST_EXEC_LO);
-  EXPECT_EQ(kScalarOperandExecLo, cdna4::OPR_SDST_EXEC_LO);
-  EXPECT_EQ(kScalarOperandExecLo, rdna2::OPR_SDST_EXEC_LO);
-  EXPECT_EQ(kScalarOperandExecLo, rdna4::OPR_SDST_EXEC_LO);
-  EXPECT_EQ(kScalarOperandExecLo, gfx1250::OPR_SDST_EXEC_LO);
+  EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_CDNA1), cdna1::OPR_SDST_EXEC_LO);
+  EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_CDNA4), cdna4::OPR_SDST_EXEC_LO);
+  EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_RDNA2), rdna2::OPR_SDST_EXEC_LO);
+  EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_RDNA4), rdna4::OPR_SDST_EXEC_LO);
+  EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_GFX1250), gfx1250::OPR_SDST_EXEC_LO);
 
   // Inline-constant source for -1 (193), also generation-stable.
-  EXPECT_EQ(kScalarInlineNegOne, 193);
-  EXPECT_EQ(kScalarInlineNegOne, cdna1::OPR_SRC_NEG_INT_MIN);
-  EXPECT_EQ(kScalarInlineNegOne, cdna4::OPR_SRC_NEG_INT_MIN);
-  EXPECT_EQ(kScalarInlineNegOne, rdna2::OPR_SRC_NEG_INT_MIN);
-  EXPECT_EQ(kScalarInlineNegOne, rdna4::OPR_SRC_NEG_INT_MIN);
-  EXPECT_EQ(kScalarInlineNegOne, gfx1250::OPR_SRC_NEG_INT_MIN);
+  EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_CDNA4), 193);
+  EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_CDNA1), cdna1::OPR_SRC_NEG_INT_MIN);
+  EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_CDNA4), cdna4::OPR_SRC_NEG_INT_MIN);
+  EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_RDNA2), rdna2::OPR_SRC_NEG_INT_MIN);
+  EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_RDNA4), rdna4::OPR_SRC_NEG_INT_MIN);
+  EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_GFX1250), gfx1250::OPR_SRC_NEG_INT_MIN);
 
   // Base for non-negative inline integers (128 = 0), also generation-stable.
   EXPECT_EQ(kScalarPositiveInlineBase, 128);

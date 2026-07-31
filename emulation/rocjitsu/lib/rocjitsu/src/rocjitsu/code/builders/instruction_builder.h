@@ -22,7 +22,8 @@
 /// (RDNA4). Every build_* therefore takes rj_code_arch_t and throws
 /// util::UnimplementedInst for an arch it does not model. Scalar-operand codes
 /// (VCC, EXEC, M0) and inline constants come from the generated operand tables
-/// (operand_types.h); see scalar_operand_m0 and the kScalarOperand* constants.
+/// (operand_types.h); see scalar_operand_m0 / scalar_operand_vcc_lo /
+/// scalar_operand_exec_lo.
 ///
 /// The SOPP format, for reference:
 ///   bits[31:23] = SOPP encoding selector
@@ -89,24 +90,8 @@ inline constexpr uint32_t kSopcEncodingPrefix = 0x17E;
 // SOPK has the same representation split: its machine field stores the low
 // fixed selector, while generated encoding IDs describe primary decode.
 inline constexpr uint32_t kSopkEncodingPrefix = 0xB;
-// Base scalar-source code for non-negative inline integers: code 128 encodes 0,
-// 129 encodes 1, etc. (see scalar_positive_inline_u32). Generation-stable; sourced
-// from the operand table and checked in the same test as the other inline codes.
-inline constexpr uint16_t kScalarPositiveInlineBase = cdna4::OPR_SRC_POS_INT_MIN;
+inline constexpr uint16_t kScalarPositiveInlineBase = 128;
 inline constexpr uint16_t kDelayAluSaluDep1 = 9;
-// Scalar-operand codes for special registers, used as the ssrc/sdst of a plain
-// s_mov to save/restore them across a probe call. VCC_LO and EXEC_LO are stable
-// across every AMDGPU generation, so we take them from a representative arch's
-// generated operand table; the generation-stability check lives in
-// InstructionBuilder.ScalarOperandCodesMatchGeneratedTables. M0 moved between
-// generations and is resolved per-arch (see scalar_operand_m0).
-inline constexpr uint16_t kScalarOperandVccLo = cdna4::OPR_SDST_VCC_LO;
-inline constexpr uint16_t kScalarOperandExecLo = cdna4::OPR_SDST_EXEC_LO;
-// Inline-constant scalar source for -1 (all bits set); as a b64 source it sign-
-// extends to 0xFFFF'FFFF'FFFF'FFFF, i.e. `s_mov_b64 exec, -1` = all lanes active.
-// OPR_SRC_NEG_INT_MIN is the smallest-magnitude negative inline integer (-1) and,
-// like the VCC/EXEC codes, is generation-stable (checked in the same test).
-inline constexpr uint16_t kScalarInlineNegOne = cdna4::OPR_SRC_NEG_INT_MIN;
 /// @brief Pack a SOPP instruction word from its constituent fields.
 ///
 /// @param op      7-bit SOPP opcode.
@@ -365,6 +350,102 @@ inline constexpr uint16_t kScalarInlineNegOne = cdna4::OPR_SRC_NEG_INT_MIN;
     return gfx1250::OPR_SDST_M0;
   default:
     throw util::UnimplementedInst("M0 operand code for target architecture");
+  }
+}
+
+/// @brief Scalar-operand code for VCC_LO on @p arch.
+///
+/// VCC_LO is operand 106 on every modeled AMDGPU generation; each case still
+/// returns that arch's generated OPR_SDST_VCC_LO so the value tracks the operand
+/// table rather than a hard-coded constant.
+[[nodiscard]] inline constexpr uint16_t scalar_operand_vcc_lo(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::OPR_SDST_VCC_LO;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::OPR_SDST_VCC_LO;
+  default:
+    throw util::UnimplementedInst("VCC_LO operand code for target architecture");
+  }
+}
+
+/// @brief Scalar-operand code for EXEC_LO on @p arch.
+///
+/// EXEC_LO is operand 126 on every modeled AMDGPU generation; each case still
+/// returns that arch's generated OPR_SDST_EXEC_LO so the value tracks the operand
+/// table rather than a hard-coded constant.
+[[nodiscard]] inline constexpr uint16_t scalar_operand_exec_lo(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::OPR_SDST_EXEC_LO;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::OPR_SDST_EXEC_LO;
+  default:
+    throw util::UnimplementedInst("EXEC_LO operand code for target architecture");
+  }
+}
+
+/// @brief Inline-constant scalar source for -1 (all bits set) on @p arch.
+///
+/// A b64 source sign-extends to all ones, so `s_mov_b64 exec, -1` = all lanes
+/// active. Code 193 on every modeled generation; each case returns that arch's
+/// generated code so the value tracks the operand table.
+[[nodiscard]] inline constexpr uint16_t scalar_inline_neg_one(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::OPR_SRC_NEG_INT_MIN;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::OPR_SRC_NEG_INT_MIN;
+  default:
+    throw util::UnimplementedInst("inline -1 source code for target architecture");
   }
 }
 
