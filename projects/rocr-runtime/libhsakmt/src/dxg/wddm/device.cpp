@@ -45,11 +45,14 @@
 #include <bitset>
 
 #if defined(__linux__)
+#include <poll.h>
+#include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/sysinfo.h>
 #include <unistd.h>
 #include <linux/mman.h>
 #endif
+#include <mutex>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include "impl/wddm/status.h"
@@ -658,6 +661,111 @@ bool WDDMDevice::OpenSyncobjFromNtHandle(void *nt_handle,
   return true;
 }
 
+#if defined(__linux__)
+bool WDDMDevice::CreateCpuEventSyncobj(int efd, D3DKMT_HANDLE *handle) {
+  // CPU_NOTIFICATION syncobj bound to a guest eventfd. SignalByKmd lets the
+  // host AMD KMD signal it on GPU completion; dxgkrnl converts the Event field
+  // into an eventfd_ctx and bumps it, waking a guest poll() waiter.
+  D3DKMT_CREATESYNCHRONIZATIONOBJECT2 args = {0};
+  args.hDevice = device_;
+  args.Info.Type = D3DDDI_CPU_NOTIFICATION;
+  args.Info.Flags.SignalByKmd = 1;
+  args.Info.CPUNotification.Event =
+      reinterpret_cast<HANDLE>(static_cast<intptr_t>(efd));
+
+  NTSTATUS ret = DXCORE_CALL(D3DKMTCreateSynchronizationObject2(&args));
+  if (ret == STATUS_SUCCESS) {
+    *handle = args.hSyncObject;
+    return true;
+  }
+
+  pr_err("fail %x\n", ret);
+  return false;
+}
+
+bool WDDMDevice::CreateCpuNotificationEventLocked(int *efd, D3DKMT_HANDLE *syncobj) {
+  int fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  if (fd < 0) {
+    pr_debug("eventfd call failed\n");
+    return false;
+  }
+
+  D3DKMT_HANDLE h = 0;
+  if (!CreateCpuEventSyncobj(fd, &h)) {
+    close(fd);
+    return false;
+  }
+
+  *efd = fd;
+  *syncobj = h;
+  return true;
+}
+
+void WDDMDevice::DestroyCpuNotificationEventLocked(int efd, D3DKMT_HANDLE syncobj) {
+  if (syncobj != 0)
+    DestroySyncobj(syncobj);
+  if (efd >= 0)
+    close(efd);
+}
+
+void WDDMDevice::DestroyCpuNotificationEvent(int efd, D3DKMT_HANDLE syncobj) {
+  std::lock_guard<std::mutex> lock(event_mutex_);
+  DestroyCpuNotificationEventLocked(efd, syncobj);
+}
+
+bool WDDMDevice::CreateEvent(int *efd, uint32_t type, uint32_t *event_id,
+                             uint64_t *mailbox, D3DKMT_HANDLE *syncobj) {
+  (void)type;
+
+  // Reserve the slot first so the id bitmap is never touched under event_mutex_.
+  uint32_t id = AllocEventId();
+  if (id == 0) {
+    pr_info("out of HSA event slots\n");
+    return false;
+  }
+
+  bool ret = false;
+  {
+    std::lock_guard<std::mutex> lock(event_mutex_);
+    if (CreateCpuNotificationEventLocked(efd, syncobj)) {
+      ret = RegisterEventEscape(id, 0, mailbox);
+      if (!ret) {
+        DestroyCpuNotificationEventLocked(*efd, *syncobj);
+        *efd = -1;
+        *syncobj = 0;
+      }
+    }
+  }
+
+  if (!ret) {
+    FreeEventId(id);
+    return false;
+  }
+
+  *event_id = id | kAqlPayloadId;
+  return true;
+}
+
+bool WDDMDevice::DestroyEvent(uint32_t event_id, int efd, D3DKMT_HANDLE syncobj) {
+  // Strip the AQL payload bit to get the actual slot index.
+  uint32_t id = event_id & (kAqlPayloadId - 1);
+  bool ret;
+
+  if (id == 0 || id >= kNumberOfHsaEvents)
+    return false;
+
+  {
+    std::lock_guard<std::mutex> lock(event_mutex_);
+    ret = UnregisterEventEscape(id, 0);
+    DestroyCpuNotificationEventLocked(efd, syncobj);
+  }
+
+  // Recycle the id only once KMD has dropped the registration.
+  FreeEventId(id);
+  return ret;
+}
+#endif
+
 void WDDMDevice::InitCmdbufInfo(void) {
   if (device_info_.major == 9) {
     cmdbuf_aql_frame_size_ = 2 * sizeof(gfx9::AcquireMemTemplate);
@@ -1261,7 +1369,6 @@ bool WDDMDevice::SetCuMask(uint32_t doorbell, uint32_t cu_mask_count,
 // ================================================================================================
 bool WDDMDevice::SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint64_t command_size,
                                   uint64_t fence_value) {
-#if defined(WIN32)
   int priv_size = Wkmi::GetAqlSubmitPrivDataSize();
   void* priv_data = alloca(priv_size);
   memset(priv_data, 0, priv_size);
@@ -1280,7 +1387,7 @@ bool WDDMDevice::SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint6
     pr_err("fail %x\n", ret);
     return false;
   }
-#endif
+
   return true;
 }
 
@@ -1302,59 +1409,93 @@ bool WDDMDevice::Escape(void* priv_data, uint32_t priv_size, bool hw_access) con
 }
 
 // ================================================================================================
-uint32_t WDDMDevice::RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t* mailbox) {
-#if defined(WIN32)
-  // Reset maibox locaiton to 0
-  *mailbox = 0;
-  // Start from 1, since 0 is the default state and can't be identified in KMD
+// Reserves a free slot in the event id bitmap. Ids start at 1 since 0 is the
+// default state and can't be identified in KMD, so 0 means the bitmap is full.
+uint32_t WDDMDevice::AllocEventId() {
+  std::lock_guard<std::mutex> lock(event_id_lock_);
   for (uint32_t event_id = 1; event_id < kNumberOfHsaEvents; event_id++) {
-    // Check if the current slot is free and assing the mailbox
     if (!alloced_events_.test(event_id)) {
-      // Fill private KMD data
-      int priv_size = Wkmi::GetRegisterEventPrivDataSize();
-      void* priv_data = alloca(priv_size);
-      memset(priv_data, 0, priv_size);
-      Wkmi::FillinRegisterEventPrivData(priv_data, reinterpret_cast<uint64_t>(event_handle),
-                                               event_id);
-      // Make the escape call to KMD to get the mailbox and assign event ID
-      if (Escape(priv_data, priv_size, false)) {
-        // Initialize the mailbox array if it's the first call
-        if (base_mailbox_va_ == 0) {
-          base_mailbox_va_ = Wkmi::GetRegisterEventMailbox(priv_data);
-        }
-        alloced_events_.set(event_id);
-        *mailbox = base_mailbox_va_ + event_id * sizeof(uint32_t);
-        return event_id | kAqlPayloadId;
-      } else {
-        pr_debug("Request HSA event failed\n");
-        return 0;
-      }
+      alloced_events_.set(event_id);
+      return event_id;
     }
   }
-#endif
   return 0;
 }
 
 // ================================================================================================
-bool WDDMDevice::UnregisterEvent(uint32_t event_id, HANDLE event_handle) {
-#if defined(WIN32)
-  // Find the actual event ID by masking the AQL payload bit
-  event_id &= kAqlPayloadId - 1;
-  if (alloced_events_.test(event_id)) {
-    alloced_events_.reset(event_id);
-    // Fill private KMD data
-    int priv_size = Wkmi::GetUnregisterEventPrivDataSize();
-    void* priv_data = alloca(priv_size);
-    memset(priv_data, 0, priv_size);
-    Wkmi::FillinUnregisterEventPrivData(priv_data, reinterpret_cast<uint64_t>(event_handle));
-    // Make the escape call to KMD to remove event assignment
-    if (!Escape(priv_data, priv_size, false)) {
-      pr_debug("Unregister event failed\n");
-      return false;
-    }
+void WDDMDevice::FreeEventId(uint32_t event_id) {
+  if (event_id == 0 || event_id >= kNumberOfHsaEvents)
+    return;
+
+  std::lock_guard<std::mutex> lock(event_id_lock_);
+  alloced_events_.reset(event_id);
+}
+
+// ================================================================================================
+bool WDDMDevice::RegisterEventEscape(uint32_t event_id, uint64_t handle, uint64_t* mailbox) {
+  int priv_size = Wkmi::GetRegisterEventPrivDataSize();
+  void* priv_data = alloca(priv_size);
+
+  *mailbox = 0;
+  memset(priv_data, 0, priv_size);
+  Wkmi::FillinRegisterEventPrivData(priv_data, handle, event_id);
+  if (!Escape(priv_data, priv_size, false)) {
+    pr_debug("Request HSA event failed\n");
+    return false;
   }
-#endif
+
+  // KMD reports the base of the mailbox array on the first registration only.
+  if (base_mailbox_va_ == 0) {
+    base_mailbox_va_ = Wkmi::GetRegisterEventMailbox(priv_data);
+  }
+  *mailbox = base_mailbox_va_ + event_id * sizeof(uint32_t);
   return true;
+}
+
+// ================================================================================================
+bool WDDMDevice::UnregisterEventEscape(uint32_t event_id, uint64_t handle) {
+  int priv_size = Wkmi::GetUnregisterEventPrivDataSize();
+  void* priv_data = alloca(priv_size);
+
+  memset(priv_data, 0, priv_size);
+  Wkmi::FillinUnregisterEventPrivData(priv_data, handle, event_id);
+  if (!Escape(priv_data, priv_size, false)) {
+    pr_debug("Unregister event failed\n");
+    return false;
+  }
+  return true;
+}
+
+// ================================================================================================
+uint32_t WDDMDevice::RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t* mailbox) {
+  (void)type;
+
+  *mailbox = 0;
+  uint32_t event_id = AllocEventId();
+  if (event_id == 0) {
+    pr_info("out of HSA event slots\n");
+    return 0;
+  }
+
+  if (!RegisterEventEscape(event_id, reinterpret_cast<uint64_t>(event_handle), mailbox)) {
+    FreeEventId(event_id);
+    return 0;
+  }
+  return event_id | kAqlPayloadId;
+}
+
+// ================================================================================================
+bool WDDMDevice::UnregisterEvent(uint32_t event_id, HANDLE event_handle) {
+  // Find the actual event ID by masking the AQL payload bit
+  uint32_t id = event_id & (kAqlPayloadId - 1);
+
+  if (id == 0 || id >= kNumberOfHsaEvents)
+    return false;
+
+  bool ret = UnregisterEventEscape(id, reinterpret_cast<uint64_t>(event_handle));
+
+  FreeEventId(id);
+  return ret;
 }
 
 // ================================================================================================
@@ -1397,6 +1538,8 @@ HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_
       size_to_process -= MAXIMUM_WAIT_OBJECTS;
     }
   }
+#else
+  return Event::WaitOnMultipleEvents(events, num_elems, wait_all, msec);
 #endif
   return HSAKMT_STATUS_WAIT_TIMEOUT;
 }
