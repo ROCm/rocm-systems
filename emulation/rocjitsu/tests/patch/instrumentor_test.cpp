@@ -567,72 +567,19 @@ std::vector<uint8_t> make_gfx950_elf_with_two_text_sections() {
   return image;
 }
 
-// gfx950 ELF with .text containing two `s_nop 0` words (8 bytes total).
-// The two-instruction layout lets tests verify that anchor resolution finds
-// the second instruction at offset 4, not just the first at offset 0.
+// gfx950 ELF with .text containing two `s_nop 0` words (8 bytes total). The
+// two-instruction layout lets tests verify that anchor resolution finds the second
+// instruction at offset 4, not just the first at offset 0.
 std::vector<uint8_t> make_gfx950_elf_with_two_nops() {
-  constexpr uint64_t text_offset = 0x100;
-  constexpr uint64_t text_size = 8;
-  constexpr uint64_t rodata_size = 4;
+  return make_gfx950_elf_with_text_words({0xBF800000u, 0xBF800000u});
+}
 
-  std::vector<uint8_t> shstrtab{'\0'};
-  const uint32_t text_name = add_elf_name(shstrtab, ".text");
-  const uint32_t rodata_name = add_elf_name(shstrtab, ".rodata");
-  const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
-
-  const uint64_t rodata_offset = text_offset + text_size;
-  const uint64_t shstrtab_offset = rodata_offset + rodata_size;
-  const uint64_t shoff = align_up_for_test(shstrtab_offset + shstrtab.size(), 8);
-  constexpr uint16_t section_count = 4;
-
-  std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
-
-  Elf64_Ehdr ehdr{};
-  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
-  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
-  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
-  ehdr.e_type = ET_REL;
-  ehdr.e_machine = EM_AMDGPU;
-  ehdr.e_version = 1;
-  ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
-  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
-  ehdr.e_shentsize = sizeof(Elf64_Shdr);
-  ehdr.e_shnum = section_count;
-  ehdr.e_shstrndx = 3;
-  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
-
-  // Two s_nop 0 words: SOPP encoding prefix 0x17F << 23, opcode 0, simm16 0.
-  const std::array<uint32_t, 2> text_words = {0xBF800000u, 0xBF800000u};
-  std::memcpy(image.data() + text_offset, text_words.data(), text_size);
-
-  const uint32_t rodata_word = 0xA5A55A5Au;
-  std::memcpy(image.data() + rodata_offset, &rodata_word, sizeof(rodata_word));
-  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
-
-  std::array<Elf64_Shdr, section_count> shdrs{};
-  shdrs[1].sh_name = text_name;
-  shdrs[1].sh_type = SHT_PROGBITS;
-  shdrs[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
-  shdrs[1].sh_offset = text_offset;
-  shdrs[1].sh_size = text_size;
-  shdrs[1].sh_addralign = sizeof(uint32_t);
-
-  shdrs[2].sh_name = rodata_name;
-  shdrs[2].sh_type = SHT_PROGBITS;
-  shdrs[2].sh_flags = SHF_ALLOC;
-  shdrs[2].sh_offset = rodata_offset;
-  shdrs[2].sh_size = rodata_size;
-  shdrs[2].sh_addralign = sizeof(uint32_t);
-
-  shdrs[3].sh_name = shstrtab_name;
-  shdrs[3].sh_type = SHT_STRTAB;
-  shdrs[3].sh_offset = shstrtab_offset;
-  shdrs[3].sh_size = shstrtab.size();
-  shdrs[3].sh_addralign = 1;
-
-  std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
-  return image;
+// Like make_gfx950_elf_with_two_nops() but with a discoverable `.kd` descriptor
+// (nops at .text offsets 0 and 4). Probe calls require a discovered descriptor to
+// bound SGPR selection, so probe-call tests use this variant. private_bytes is 0
+// because these bodies clobber nothing live, so no site spills.
+std::vector<uint8_t> make_gfx950_kernel_elf_with_two_nops() {
+  return make_gfx950_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
 }
 
 TEST(Instrumentor, AddPointByOffsetResolvesValidatedSite) {
@@ -1733,7 +1680,7 @@ TEST(InstrumentorSpill, PlanSgprSpillsRejectsNonSgpr) {
 //==============================================================================
 
 TEST(InstrumentorProbePatch, EmitsValidElfWithProbeMetadata) {
-  auto target = make_gfx950_elf_with_two_nops();
+  auto target = make_gfx950_kernel_elf_with_two_nops();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -1768,7 +1715,7 @@ TEST(InstrumentorProbePatch, EmitsValidElfWithProbeMetadata) {
 }
 
 TEST(InstrumentorProbePatch, PatchedAnchorIsBranchToTrampoline) {
-  auto target = make_gfx950_elf_with_two_nops();
+  auto target = make_gfx950_kernel_elf_with_two_nops();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -1794,7 +1741,7 @@ TEST(InstrumentorProbePatch, PatchedAnchorIsBranchToTrampoline) {
 }
 
 TEST(InstrumentorProbePatch, CopiesProbeBodyOnceAndCallTargetsIt) {
-  auto target = make_gfx950_elf_with_two_nops();
+  auto target = make_gfx950_kernel_elf_with_two_nops();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -1850,7 +1797,7 @@ TEST(InstrumentorProbePatch, CopiesProbeBodyOnceAndCallTargetsIt) {
 // the body is emitted once and both trampolines target that one copy. Locks in
 // the resolve_probe_index dedup so a regression that copies per site is caught.
 TEST(InstrumentorProbePatch, TwoSitesSharingOneProbeCopyBodyOnce) {
-  auto target = make_gfx950_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -1897,7 +1844,7 @@ TEST(InstrumentorProbePatch, TwoSitesSharingOneProbeCopyBodyOnce) {
 // the probes were first requested, and each trampoline's probe_target_offset
 // points at its own body. Catches ordering / wrong-body-target regressions.
 TEST(InstrumentorProbePatch, TwoSitesDistinctProbesEachTargetsItsBody) {
-  auto target = make_gfx950_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
   // Distinguishable 2-word bodies: a unique leading marker then the return.
   auto probe_a = make_gfx950_probe_elf("rj_probe_a", {kProbeMarkerMovS5, kProbeSetpcS30S31});
   auto probe_b = make_gfx950_probe_elf("rj_probe_b", {kProbeMarkerMovS6, kProbeSetpcS30S31});
@@ -1995,7 +1942,7 @@ TEST(InstrumentorProbePatch, ProbeObjWithoutSymbolFailsClosed) {
 // build_probe_callable accepts it (the final instruction is still the setpc), so
 // the orchestrator's check_probe_link_pair is what fails closed.
 TEST(InstrumentorProbePatch, ProbeClobberingLinkPairFailsClosed) {
-  auto target = make_gfx950_elf_with_two_nops();
+  auto target = make_gfx950_kernel_elf_with_two_nops();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMovS30_0, kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -2011,6 +1958,29 @@ TEST(InstrumentorProbePatch, ProbeClobberingLinkPairFailsClosed) {
   EXPECT_TRUE(result.elf_bytes.empty());
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("return-link pair"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
+// A probe call needs the kernel's SGPR allocation to bound temp selection. On a
+// descriptorless object that bound is unknown, so the call fails closed rather than
+// fall back to the device-wide default (which could pick temps past the allocation).
+TEST(InstrumentorProbePatch, DescriptorlessProbeCallFailsClosed) {
+  auto target = make_gfx950_elf_with_two_nops(); // no `.kd` descriptor
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 4;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch();
+  EXPECT_TRUE(result.elf_bytes.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("discovered kernel descriptor"), std::string::npos)
       << "error was: " << result.errors.front();
 }
 

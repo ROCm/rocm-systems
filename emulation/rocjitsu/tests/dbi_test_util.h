@@ -102,10 +102,13 @@ inline uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
 // `text_words`, entry at .text offset 0. The `.kd` symbol is a global STT_OBJECT
 // of descriptor size so scan_kernel_descriptors() (and replace_text) can find and
 // keep it coherent. `e_flags` selects the target ISA (e.g. GFX950 / GFX1200).
+// When `unterminated_kd_name` is set, the .strtab section size is trimmed to drop
+// the `.kd` name's terminating NUL, so the name runs to the table end unterminated
+// (exercises the scanner's boundary rejection).
 inline std::vector<uint8_t> make_amdgpu_kernel_elf(const std::vector<uint32_t> &text_words,
                                                    uint32_t private_bytes,
-                                                   uint32_t granulated_sgpr_count,
-                                                   uint32_t e_flags) {
+                                                   uint32_t granulated_sgpr_count, uint32_t e_flags,
+                                                   bool unterminated_kd_name = false) {
   namespace kd = rocr::llvm::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
@@ -226,7 +229,9 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(const std::vector<uint32_t> &
   shdrs[4].sh_name = strtab_name;
   shdrs[4].sh_type = SHT_STRTAB;
   shdrs[4].sh_offset = strtab_offset;
-  shdrs[4].sh_size = strtab.size();
+  // Declared size excludes the `.kd` name's NUL, so the scanner sees it unterminated.
+  shdrs[4].sh_size =
+      unterminated_kd_name ? kd_symbol_name + std::strlen("test_kernel.kd") : strtab.size();
   shdrs[4].sh_addralign = 1;
 
   shdrs[5].sh_name = shstrtab_name;
@@ -261,6 +266,16 @@ inline std::vector<uint8_t> make_gfx1200_kernel_elf(const std::vector<uint32_t> 
                                                     uint32_t granulated_sgpr_count = 3) {
   return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count,
                                 EF_AMDGPU_MACH_AMDGCN_GFX1200);
+}
+
+// gfx950 target ELF whose `.kd` symbol name runs to the end of its string table
+// with no in-bounds NUL terminator, for exercising the scanner's rejection of an
+// unterminated descriptor name.
+inline std::vector<uint8_t>
+make_gfx950_unterminated_kd_name_elf(const std::vector<uint32_t> &text_words,
+                                     uint32_t private_bytes) {
+  return make_amdgpu_kernel_elf(text_words, private_bytes, /*granulated_sgpr_count=*/3,
+                                EF_AMDGPU_MACH_AMDGCN_GFX950, /*unterminated_kd_name=*/true);
 }
 
 // Like make_gfx950_kernel_elf but exports *two* `.kd` descriptors (both entering
