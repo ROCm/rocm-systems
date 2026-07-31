@@ -59,7 +59,7 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   // Shared epoch counter (same as AG/RS) so bank = flag & 1 is consistent
   // across all LL operation types and cannot alias scratch banks.
   uint32_t* epochDev = comm->ddaLLEpochDev;
-  const int epochLen = comm->ddaLLEpochLen;
+  const int epochLen = std::min(comm->ddaLLEpochLen, nccl_dda_detail::kDdaFabricLLArMaxBlocks);
 
   INFO(NCCL_COLL, "DDA fabric AllReduce LL: nRanks=%d bytes=%zu nPk=%zu grid=%u block=%u", nRanks, bytes, nPk, grid.x,
        block.x);
