@@ -9,12 +9,14 @@
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys::pmc::collectors::gpu
@@ -177,19 +179,8 @@ struct gpu_traits
         auto       devices      = provider->template get_gpu_devices<device_t>();
         const auto visible_bdfs = get_visible_gpu_bdfs<Settings>();
 
-        // Visibility unknown (the ROCm runtime reported no GPU agents at all) is not the
-        // same as "nothing is visible". Stay quiet when AMD SMI found no GPUs either,
-        // which is simply a machine without them.
-        if(!visible_bdfs.has_value() && !devices.empty())
-        {
-            LOG_WARNING("Could not determine which GPUs the ROCm runtime exposes (no "
-                        "agents reported); sampling the selected {} devices without "
-                        "applying ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES filtering",
-                        device_name);
-        }
-
-        size_t selected_count = 0;
-        size_t excluded_count = 0;
+        size_t                                      selected_count = 0;
+        std::vector<std::pair<size_t, std::string>> excluded;
 
         for(auto& device : devices)
         {
@@ -206,9 +197,8 @@ struct gpu_traits
                 const auto& bdf = device->get_bdf();
                 if(!is_runtime_visible(bdf, *visible_bdfs))
                 {
-                    log_visibility_exclusion(filter, index, bdf);
+                    excluded.emplace_back(index, bdf);
                     should_include = false;
-                    ++excluded_count;
                 }
             }
 
@@ -219,23 +209,62 @@ struct gpu_traits
             }
         }
 
-        // Losing every selected device to the visibility filter is either a deliberate
-        // mask or a failure to correlate AMD SMI devices with ROCm agents. The two are
-        // indistinguishable from a single exclusion message, so report the runtime's own
-        // view of the machine to make the difference diagnosable.
-        if(selected_count > 0 && excluded_count == selected_count)
-        {
-            LOG_WARNING("None of the {} selected {} device(s) are visible to the ROCm "
-                        "runtime; GPU sampling is disabled. Runtime-visible BDFs: {}",
-                        selected_count, device_name, format_bdf_list(*visible_bdfs));
-        }
-
+        report_visibility(filter, visible_bdfs, devices.size(), selected_count, excluded);
         warn_invalid_indices(filter, devices.size());
         return entries;
     }
 
     /**
-     * @brief Report a device dropped because the ROCm runtime does not expose it.
+     * @brief Emit the runtime-visibility report once per process.
+     *
+     * enumerate_devices() re-runs on sampler-thread reinit after fork, but the masks (env
+     * vars) and the device/agent set are fixed for the process, so every run produces the
+     * same report. A single flag emits it once and stays quiet thereafter.
+     */
+    static void report_visibility(
+        const device_filter& filter, const std::optional<std::set<std::string>>& visible,
+        size_t num_devices, size_t selected_count,
+        const std::vector<std::pair<size_t, std::string>>& excluded)
+    {
+        static std::atomic<bool> s_reported{ false };
+        if(s_reported.exchange(true)) return;
+
+        // Visibility unknown (the ROCm runtime reported no GPU agents at all) is not the
+        // same as "nothing is visible". Stay quiet when AMD SMI found no GPUs either,
+        // which is simply a machine without them.
+        if(!visible.has_value())
+        {
+            if(num_devices > 0)
+            {
+                LOG_WARNING(
+                    "Could not determine which GPUs the ROCm runtime exposes (no agents "
+                    "reported); sampling the selected {} devices without applying "
+                    "ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES filtering",
+                    device_name);
+            }
+            return;
+        }
+
+        if(excluded.empty()) return;
+
+        // Losing every selected device is either a deliberate mask or a failure to
+        // correlate AMD SMI devices with ROCm agents. The runtime's own visible-BDF list
+        // makes the two distinguishable, so a single summary is more useful here than one
+        // line per masked device.
+        if(selected_count > 0 && excluded.size() == selected_count)
+        {
+            LOG_WARNING("None of the {} selected {} device(s) are visible to the ROCm "
+                        "runtime; GPU sampling is disabled. Runtime-visible BDFs: {}",
+                        selected_count, device_name, format_bdf_list(*visible));
+            return;
+        }
+
+        for(const auto& [index, bdf] : excluded)
+            log_visibility_exclusion(filter, index, bdf);
+    }
+
+    /**
+     * @brief Report a single device dropped because the ROCm runtime does not expose it.
      */
     static void log_visibility_exclusion(const device_filter& filter, size_t index,
                                          const std::string& bdf)

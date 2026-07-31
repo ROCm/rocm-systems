@@ -38,21 +38,23 @@ format_pci_bdf_from_location_id(std::uint32_t domain, std::uint32_t location_id)
     return format_pci_bdf(domain, bus, device, function);
 }
 
-// The KFD / rocminfo "BDFID": bus/device/function packed as
-// (bus << 8) | (device << 3) | function, with the PCI domain excluded. This is the
-// value `rocminfo` prints as "BDFID" (HSA_AMD_AGENT_INFO_BDFID) and equals the low 16
-// bits of a KFD/rocprofiler-sdk location_id.
-[[nodiscard]] inline std::uint16_t
-pci_bdfid(std::uint64_t bus, std::uint64_t device, std::uint64_t function)
+// The rocminfo "BDFID": (domain << 16) | (bus << 8) | (device << 3) | function, matching
+// ROCR's std::uint32_t HSA_AMD_AGENT_INFO_BDFID (domain in the upper 16 bits). The domain
+// keeps otherwise-identical devices distinct across PCI domains; single-domain values are
+// the 16-bit bus/device/function.
+[[nodiscard]] inline std::uint32_t
+pci_bdfid(std::uint64_t domain, std::uint64_t bus, std::uint64_t device,
+          std::uint64_t function)
 {
-    return static_cast<std::uint16_t>(((bus & 0xFFULL) << 8U) |
+    return static_cast<std::uint32_t>(((domain & 0xFFFFULL) << 16U) |
+                                      ((bus & 0xFFULL) << 8U) |
                                       ((device & 0x1FULL) << 3U) | (function & 0x7ULL));
 }
 
 // Parse a canonical BDF string ("domain:bus:device.function", as produced by
-// format_pci_bdf) and return its rocminfo-style BDFID. Returns 0 if the string is not in
-// the expected format.
-[[nodiscard]] inline std::uint16_t
+// format_pci_bdf) and return its rocminfo-style BDFID, domain included. Returns 0 if the
+// string is not in the expected format.
+[[nodiscard]] inline std::uint32_t
 pci_bdfid_from_string(const std::string& bdf)
 {
     unsigned domain = 0U, bus = 0U, device = 0U, function = 0U;
@@ -60,6 +62,6 @@ pci_bdfid_from_string(const std::string& bdf)
     {
         return 0U;
     }
-    return pci_bdfid(bus, device, function);
+    return pci_bdfid(domain, bus, device, function);
 }
 }  // namespace rocprofsys::inline common
