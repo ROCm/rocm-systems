@@ -347,7 +347,8 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // Full-mask the spill store so a probe that widens EXEC cannot leave inactive-
   // lane copies unsaved. EXEC was just saved and is restored after the loads.
   if (full_mask_exec)
-    env.push_back(build_s_mov_b64(scalar_operand_exec_lo(plan.arch), scalar_inline_neg_one(plan.arch), plan.arch));
+    env.push_back(build_s_mov_b64(scalar_operand_exec_lo(plan.arch),
+                                  scalar_inline_neg_one(plan.arch), plan.arch));
 
   // Spill saves: store each live+clobbered register before the call.
   env.insert(env.end(), spill.prologue.begin(), spill.prologue.end());
@@ -393,7 +394,8 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
 
   // Full-mask the spill load to match the store (the probe may have changed EXEC).
   if (full_mask_exec)
-    env.push_back(build_s_mov_b64(scalar_operand_exec_lo(plan.arch), scalar_inline_neg_one(plan.arch), plan.arch));
+    env.push_back(build_s_mov_b64(scalar_operand_exec_lo(plan.arch),
+                                  scalar_inline_neg_one(plan.arch), plan.arch));
 
   // Spill fills: reload each saved register after the call and wait for the loads.
   env.insert(env.end(), spill.epilogue.begin(), spill.epilogue.end());
