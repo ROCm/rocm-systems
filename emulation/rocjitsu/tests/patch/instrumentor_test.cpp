@@ -1984,9 +1984,7 @@ TEST(InstrumentorProbePatch, DescriptorlessProbeCallFailsClosed) {
       << "error was: " << result.errors.front();
 }
 
-//==============================================================================
 // Section 8: probe-call register spilling (end-to-end)
-//==============================================================================
 
 // True if `cave` holds a SOP1 s_mov (opcode `mov_op`) whose scalar source (save,
 // as_src=true) or scalar destination (restore, as_src=false) is `operand`. Used
@@ -2007,13 +2005,11 @@ TEST(InstrumentorProbePatch, DescriptorlessProbeCallFailsClosed) {
   return false;
 }
 
-//==============================================================================
 // DBI probe-call spill path: static e2e over CDNA3 (gfx942), CDNA4 (gfx950), and
 // RDNA4 (gfx1200). CDNA shares one GFX9 FLAT-scratch bracket on wave64; RDNA4 uses
 // VSCRATCH on wave32. One base fixture drives the shared patch/extract flow -- the
 // arch differs only in its {kernel, probe} ELF factory pair and the setpc word.
 // Per-arch derived fixtures pin the arch; TEST_F names read <Arch>ProbeSpill.<Case>.
-//==============================================================================
 
 // The arch-varying inputs: the ISA enum plus its {kernel, probe} ELF factories.
 struct SpillArch {

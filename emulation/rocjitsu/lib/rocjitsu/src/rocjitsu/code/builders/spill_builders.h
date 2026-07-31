@@ -6,9 +6,10 @@
 ///
 /// @details These are the vector/memory ops the scalar helpers in
 /// instruction_builder.h do not cover (CDNA3, CDNA4, and RDNA4): the SGPR<->VGPR
-/// lane bridge, off-mode scratch store/load, and the load-completion wait. All
-/// use off-mode addressing (lds/sve left 0), so the caller passes only a
-/// within-lane byte offset from SpillManager.
+/// lane bridge, off-mode scratch store/load, and the store- and load-completion
+/// waits (RDNA4 splits store and load counters, so both are needed). All use
+/// off-mode addressing (lds/sve left 0), so the caller passes only a within-lane
+/// byte offset from SpillManager.
 
 #pragma once
 
