@@ -48,3 +48,10 @@ rocprofiler_add_unit_test(
     TIMEOUT 30
     LABELS "unittests;aqlprofile"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+rocprofiler_sdk_label_spm_tests(
+    TESTS
+    unit.aqlprofile.pm4.SpmBuilderTest.BeginWithValidParameters
+    unit.aqlprofile.pm4.SpmBuilderTest.EndWithValidParameters
+    unit.aqlprofile.pm4.SpmBuilderTest.BeginEndSequenceWithMock
+    unit.aqlprofile.pm4.SpmBuilderTest.NullParameterHandling)

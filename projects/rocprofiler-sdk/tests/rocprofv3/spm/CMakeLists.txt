@@ -22,9 +22,11 @@ endif()
 
 rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 if(${SANITIZER})
-    set(IS_SPM_DISABLED True)
+    set(IS_SPM_DISABLED TRUE)
 endif()
-set(IS_DISABLED True)
+# Intentionally hard-disabled until selectively re-enabled with other devs.
+# Labels are kept so CI can route these via -L/-LE spm when ready.
+set(IS_DISABLED TRUE)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")

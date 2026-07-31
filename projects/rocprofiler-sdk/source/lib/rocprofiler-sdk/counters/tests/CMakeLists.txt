@@ -102,6 +102,8 @@ rocprofiler_add_unit_test(
         "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*"
     )
 
+rocprofiler_sdk_label_spm_tests(TESTS unit.metrics.has_spm_support)
+
 set(ROCPROFILER_LIB_CONSUMER_TEST_SOURCES consumer_test.cpp)
 
 add_executable(consumer-test)

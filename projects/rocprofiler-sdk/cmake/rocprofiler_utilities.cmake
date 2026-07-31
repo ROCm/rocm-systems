@@ -1247,6 +1247,17 @@ function(rocprofiler_add_unit_test)
     cmake_policy(POP)
 endfunction()
 
+function(rocprofiler_sdk_label_spm_tests)
+    cmake_parse_arguments(ARG "" "" "TESTS" ${ARGN})
+    foreach(_test IN LISTS ARG_TESTS)
+        get_property(_labels TEST ${_test} PROPERTY LABELS)
+        if(NOT "spm" IN_LIST _labels)
+            list(APPEND _labels "spm")
+            set_tests_properties(${_test} PROPERTIES LABELS "${_labels}")
+        endif()
+    endforeach()
+endfunction()
+
 # gets the user local python bin directory from `python3 -m pip install --user ...`
 #
 function(_rocprofiler_get_python_user_bin _OUT)

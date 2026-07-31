@@ -43,3 +43,8 @@ rocprofiler_add_unit_test(
     TIMEOUT 30
     LABELS "unittests;aqlprofile"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+rocprofiler_sdk_label_spm_tests(
+    TESTS
+    unit.aqlprofile.core.AqlProfileV2ApiTest.SpmQueryAgentConfigurations_NullCallback
+    unit.aqlprofile.core.AqlProfileV2ApiTest.SpmQueryAgentConfigurations_InvalidAgent)
