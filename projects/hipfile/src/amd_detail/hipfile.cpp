@@ -768,7 +768,7 @@ hipFileGetStatsL3(hipFileStatsLevel3_t *stats)
                 g.n_reads_err += rErrors;
                 g.n_unaligned_reads += pg->unalignedCount[static_cast<size_t>(IoType::Read)].load();
 
-                g.writes_bytes += wBytes;
+                g.write_bytes += wBytes;
                 g.write_duration_us += wTimeUs;
                 g.n_total_writes += wCount;
                 g.n_writes_err += wErrors;
@@ -789,7 +789,7 @@ hipFileGetStatsL3(hipFileStatsLevel3_t *stats)
                                                                 static_cast<double>(g.read_duration_us));
             }
             if (g.write_duration_us > 0) {
-                g.write_bw_bytes_per_sec = static_cast<uint64_t>(static_cast<double>(g.writes_bytes) * 1e6 /
+                g.write_bw_bytes_per_sec = static_cast<uint64_t>(static_cast<double>(g.write_bytes) * 1e6 /
                                                                  static_cast<double>(g.write_duration_us));
             }
 

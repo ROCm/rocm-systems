@@ -1196,7 +1196,7 @@ typedef struct hipFilePerGpuStats {
     uint64_t n_inline_regions;      //!< Number of inline regions (zero-filled)
     uint64_t n_reads_err;           //!< Number of read errors
 
-    uint64_t writes_bytes;           //!< Total bytes written
+    uint64_t write_bytes;            //!< Total bytes written
     uint64_t write_bw_bytes_per_sec; //!< Write bandwidth (bytes/sec), derived from bytes and duration
     uint64_t write_utilization;      //!< Write utilization percentage (zero-filled)
     uint64_t write_duration_us;      //!< Total write duration (us)
