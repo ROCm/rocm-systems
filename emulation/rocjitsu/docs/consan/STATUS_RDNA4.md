@@ -29,6 +29,10 @@ The colors form a strict progression:
 - 🟩 **everything works:** clean oracle, coverage, reviewed fault, containment,
   overhead, memory, timeout, health, and provenance gates are all retained.
 
+Overhead cells are warm steady-state ratios unless they explicitly say
+**cold first-operation**. Cold and warm ratios have different denominators and
+must not be compared cell-to-cell.
+
 A crash, trap, timeout, oracle mismatch, or device loss is not a ConSan
 diagnostic.  A green cell may contain an honest qualified miss only when that
 outcome was precommitted and the exact mutation, containment, independent
@@ -109,7 +113,10 @@ below.
   patches 58,992/58,992 accesses. Record/Replay and Sampled each patch
   418,292/418,292 accesses plus 100,916/100,916 barriers; Inline Shadow patches
   418,292/418,292 accesses plus 50,458/50,458 barriers. Every row is statically,
-  dynamically, and analytically complete.
+  dynamically, and analytically complete. The current object is pinned as
+  `fnv1a64:3833562345afa454`; the former 63,474-access SuperCollider denominator
+  belonged to a different retained object, so it is not a partial-coverage
+  denominator for this row.
 - **Cold paired gate:** each physical profile uses ten fresh one-repetition
   processes so a sample has one bounded report-buffer lifetime. The retained
   artifacts are

@@ -1575,8 +1575,11 @@ function(rj_add_consan_hip_tests)
             ARCH gfx1201
             SOURCE dbi/consan/hip_consan_moi_test.hip
             INCLUDE_DIRS "${_rj_consan_include_dir}"
-            # This physical gfx1201 fixture uses a staged DS-counter sequence
-            # that is not part of the registered gfx1250 simulator matrix.
+            # The packaged gfx1250 runtime translator processes the complete
+            # test object before gtest filtering and cannot yet translate this
+            # staged DS_LOAD_ADDTID sequence. Registration filtering alone is
+            # therefore insufficient to keep the physical-only discriminator
+            # out of the aggregate gfx1250 object.
             COMPILE_DEFINITIONS RJ_CONSAN_ENABLE_STAGED_DSCNT_TEST=1
             EXTRA_DEPENDS "${_rj_consan_moi_hip_fixture_headers}"
     )
@@ -2708,6 +2711,7 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_LDS_MOI_SAMPLED_SATURATION_OUTPUT_TEST}"
                 TIMEOUT 30
+                PASS_REGEX "sampled_saturated_windows=[1-9]"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=sampled"
@@ -2718,10 +2722,6 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_MAX_PATCHES=4"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
-        )
-        set_tests_properties(
-            "ConSanMoiHipTest.DbiSampledSaturationPreservesRepeatedDispatchOutput"
-            PROPERTIES PASS_REGULAR_EXPRESSION "sampled_saturated_windows=[1-9]"
         )
         rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.DbiSampledStagedDscntLoadPreservesOutput"

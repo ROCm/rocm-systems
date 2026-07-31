@@ -515,7 +515,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
+        overhead_processes=1,
         fault_families=("barrier-drop",),
         targets=("gfx1250",),
     ),
@@ -531,7 +531,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
+        overhead_processes=1,
         fault_families=("barrier-drop",),
         targets=("gfx1250",),
     ),
@@ -547,7 +547,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
+        overhead_processes=1,
         fault_families=("barrier-drop",),
         targets=("gfx950", "gfx1250", "gfx1201"),
         # This row proves the large object fits the ordinary bound even if the
@@ -566,7 +566,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
+        overhead_processes=1,
         fault_families=("barrier-drop",),
         targets=("gfx950", "gfx1250"),
     ),
@@ -582,7 +582,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
+        overhead_processes=1,
         fault_families=("barrier-drop",),
         targets=("gfx950", "gfx1250"),
     ),
@@ -598,7 +598,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=False,
         tracks_atomics=True,
-        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
+        overhead_processes=1,
         fault_families=("atomic-weaken-order", "atomic-weaken-scope"),
         targets=("gfx950", "gfx1250", "gfx1201"),
         moi_record_evidence_expected=False,
@@ -615,7 +615,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=True,
-        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
+        overhead_processes=1,
         fault_families=("barrier-drop", "atomic-weaken-order", "atomic-weaken-scope"),
         # This ordinary upstream operation is selected independently by each
         # installed wheel.  The gfx1201 wheel chooses a native histogram
@@ -635,7 +635,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
+        overhead_processes=1,
         fault_families=("barrier-drop",),
         targets=("gfx950", "gfx1250"),
     ),
@@ -651,7 +651,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
+        overhead_processes=1,
         fault_families=("barrier-drop",),
         targets=("gfx1201",),
     ),
@@ -667,7 +667,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
+        overhead_processes=1,
         fault_families=("barrier-drop",),
         targets=("gfx1201",),
     ),
@@ -700,7 +700,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
+        overhead_processes=1,
         fault_families=("barrier-drop",),
         targets=("gfx1201",),
     ),
@@ -1951,6 +1951,14 @@ def _health_smoke_command(
     return _workload_command(workspace, target, workload, "clean", output)
 
 
+def _inner_repetitions(target: str, phase: str, workload: Workload) -> int:
+    if phase != "overhead" or target in SINGLE_REPETITION_TARGETS:
+        return 1
+    # A workload either collects warm in-process samples or declares multiple
+    # isolated outer processes. Do not multiply the two repetition axes.
+    return 1 if workload.overhead_processes > 1 else 10
+
+
 def _workload_command(
     workspace: Path,
     target: str,
@@ -1965,11 +1973,7 @@ def _workload_command(
     if workload.kind == "sharktank":
         # The active architecture campaigns use one end-to-end repetition.
         # Keep both the outer process count and this inner suite count at one.
-        repetitions = (
-            1
-            if target in SINGLE_REPETITION_TARGETS or workload.overhead_processes > 1
-            else (10 if overhead else 1)
-        )
+        repetitions = _inner_repetitions(target, phase, workload)
         return [
             str(_sharktank_python()),
             str(Path(__file__).with_name("consan_sharktank_validation.py")),
@@ -1985,15 +1989,10 @@ def _workload_command(
             f"{workload.id}-{phase}",
         ]
     if workload.kind == "pytorch":
-        # Repeated instrumented dispatches accumulate bounded report state in a
-        # single process. Native overhead measurements therefore collect one
-        # sample per process and aggregate those independent samples outside
-        # the workload client. Simulator targets remain single-shot.
-        repetitions = (
-            1
-            if target in SINGLE_REPETITION_TARGETS or workload.overhead_processes > 1
-            else (10 if overhead else 1)
-        )
+        # Large rows may declare isolated outer processes because repeated
+        # instrumented dispatches accumulate bounded report state. Small rows
+        # retain warm in-process timing, and simulator targets stay single-shot.
+        repetitions = _inner_repetitions(target, phase, workload)
         return [
             str(_pytorch_python(workspace)),
             str(Path(__file__).with_name(workload.relative_path)),

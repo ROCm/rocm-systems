@@ -484,6 +484,8 @@ std::vector<std::optional<rocjitsu::ConSanMoiReportLayoutOverride>>
     g_transform_override_report_layouts;
 bool g_seed_auto_replay_report_on_load = false;
 bool g_seed_auto_replay_report_succeeded = false;
+bool g_seed_auto_sampled_report_on_load = false;
+bool g_seed_auto_sampled_report_succeeded = false;
 std::vector<std::vector<uint8_t>> g_fake_allocations;
 std::vector<hsa_amd_memory_pool_t> g_fake_allocation_pools;
 std::vector<size_t> g_fake_allocation_sizes;
@@ -1006,6 +1008,41 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
     };
     g_seed_auto_replay_report_succeeded = true;
   }
+  if (g_seed_auto_sampled_report_on_load) {
+    g_seed_auto_sampled_report_on_load = false;
+    if (g_core_memory_allocations.empty() || g_transform_override_report_layouts.empty() ||
+        !g_transform_override_report_layouts.back()) {
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
+    const rocjitsu::ConSanMoiReportLayoutOverride &layout =
+        *g_transform_override_report_layouts.back();
+    if (layout.sampled_watchpoint_capacity == 0u || layout.sampled_causal_window_capacity == 0u) {
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
+
+    auto *const report = static_cast<uint8_t *>(g_core_memory_allocations.back());
+    auto *const header = reinterpret_cast<rocjitsu::ConSanMoiReportHeader *>(report);
+    header->sampled_causal_window_count = 1u;
+    auto *const windows = reinterpret_cast<rocjitsu::ConSanMoiSampledCausalWindow *>(
+        report + layout.sampled_causal_windows_offset);
+    windows[0] = {
+        .generation = header->generation,
+        .dispatch_id = 0x1122334455667788ull,
+        .workgroup_x = 3u,
+        .workgroup_y = 4u,
+        .workgroup_z = 5u,
+        .epoch = 2u,
+        .first_entry = 0u,
+        .entry_count = 1u,
+        .publication_state =
+            static_cast<uint32_t>(rocjitsu::ConSanMoiSampledCausalPublicationState::Ready),
+    };
+    const uint64_t watchpoint = rocjitsu::pack_consan_moi_sampled_watchpoint_entry(
+        rocjitsu::ConSanMoiShadowAccessKind::Write, /*owner_id=*/7u, /*epoch=*/2u,
+        static_cast<uint32_t>(header->generation), /*start_cell=*/9u, /*cell_count=*/2u);
+    std::memcpy(report + layout.sampled_watchpoints_offset, &watchpoint, sizeof(watchpoint));
+    g_seed_auto_sampled_report_succeeded = true;
+  }
   if (loaded_code_object != nullptr)
     loaded_code_object->handle = 77;
   g_loaded_executable_readers.emplace_back(executable.handle, reader.handle);
@@ -1498,6 +1535,8 @@ void reset_code_object_observations() {
   g_transform_override_results.clear();
   g_seed_auto_replay_report_on_load = false;
   g_seed_auto_replay_report_succeeded = false;
+  g_seed_auto_sampled_report_on_load = false;
+  g_seed_auto_sampled_report_succeeded = false;
   g_transform_override_result = {};
 }
 
@@ -4606,6 +4645,21 @@ rocjitsu::ConSanResult auto_report_replay_transform_result() {
   return result;
 }
 
+rocjitsu::ConSanResult auto_report_sampled_transform_result(bool malformed_mapping = false) {
+  rocjitsu::ConSanResult result = auto_report_replay_transform_result();
+  rocjitsu::ConSanPatchInfo patch;
+  patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+  patch.anchor_offset = 0x120u;
+  patch.trampoline_offset = 0x440u;
+  patch.sampled_first_slot = malformed_mapping ? 1u : 0u;
+  patch.sampled_window_bank_count = 1u;
+  patch.sampled_access_range_count = 1u;
+  patch.relocated_guest_instruction_offset = 0x448u;
+  patch.scratch_vgpr = 12u;
+  result.patches.push_back(std::move(patch));
+  return result;
+}
+
 TEST(HsaHooksUnitTest, ConSanAutoReportLiveFaultUsesPristineSizingAndLateBoundLiveOptions) {
   constexpr std::array fault_environments = {
       "RJ_CONSAN_FAULT_DROP_BARRIER",
@@ -5431,6 +5485,84 @@ TEST(HsaHooksUnitTest, AutoReportMetadataMatchesReaderAndGeneration) {
   EXPECT_EQ(log.find("code_object=missing"), std::string::npos) << log;
   EXPECT_TRUE(g_core_memory_allocations.empty());
   EXPECT_EQ(g_core_memory_free_calls, 2);
+}
+
+TEST(HsaHooksUnitTest, AutoSampledReportLogsPatchProvenance) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar runtime_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "1");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_sampled_transform_result();
+  g_seed_auto_sampled_report_on_load = true;
+
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                reader, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_TRUE(g_seed_auto_sampled_report_succeeded) << log;
+  const size_t detail = log.find("ConSan MOI auto sampled reader=101");
+  ASSERT_NE(detail, std::string::npos) << log;
+  for (std::string_view field :
+       {"dispatch=0x1122334455667788", "workgroup=(3,4,5)", "instruction=0x120", "trampoline=0x440",
+        "relocated_guest=0x448", "scratch_vgpr=12", "range=0", "bank=0", "mapped=true"}) {
+    EXPECT_NE(log.find(field, detail), std::string::npos) << field << "\n" << log;
+  }
+}
+
+TEST(HsaHooksUnitTest, AutoSampledReportSurfacesMalformedPatchMapping) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar runtime_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "1");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_sampled_transform_result(/*malformed_mapping=*/true);
+
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                reader, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_NE(log.find("ConSan MOI sampled diagnostic map reader=101 patches=1 mappings=0 "
+                     "capacity=1 malformed=true"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("sampled_patch_mapping_malformed=1"), std::string::npos) << log;
 }
 
 TEST(HsaHooksUnitTest, RecordReplayProvenanceMismatchRemainsUnknown) {

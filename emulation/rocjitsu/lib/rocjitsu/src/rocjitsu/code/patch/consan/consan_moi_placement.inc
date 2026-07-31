@@ -3034,6 +3034,8 @@ moi_runtime_sample_counter_sgpr(const ConSanOptions &options) {
 
 struct MoiSpecialStateSgprs {
   uint16_t vcc_save_sgpr = 0;
+  // For Sampled this is entry-boundary SCC scratch that aliases the
+  // publication EXEC-save pair. It is not the post-body guest SCC snapshot.
   uint16_t scc_save_sgpr = 0;
 };
 
@@ -3061,6 +3063,19 @@ moi_sampled_publication_state_sgprs(const ConSanOptions &options) {
 moi_special_state_sgprs(const ConSanOptions &options) {
   if (!options.moi_exec_save_sgpr)
     return std::nullopt;
+  if (options.moi_engine == ConSanMoiEngine::Sampled) {
+    const auto publication = moi_sampled_publication_state_sgprs(options);
+    if (!publication)
+      return std::nullopt;
+    return MoiSpecialStateSgprs{
+        .vcc_save_sgpr = publication->selection_vcc_save_sgpr,
+        .scc_save_sgpr =
+            options.automatic_moi_record_replay_sgpr_spill &&
+                    options.moi_inline_indirect_scc_sgpr
+                ? *options.moi_inline_indirect_scc_sgpr
+                : publication->publication_exec_save_sgpr,
+    };
+  }
   const uint16_t vcc_offset = options.moi_engine == ConSanMoiEngine::InlineShadow ? 8u : 2u;
   return MoiSpecialStateSgprs{
       .vcc_save_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + vcc_offset),

@@ -80,9 +80,12 @@ proving workload execution.
 
 The current Sampled artifact
 `consan-validation-large-objects-gfx1250-qwen-sim-sampled-clean-v2-0bf1d17-20260731`
-fails loader admission before execution.  Its 3,396,472-byte object and the
-Record/Replay object independently reproduce 17 unrecovered generated
-long-return targets in the newer standalone revision translator.  Inline
+fails loader admission before execution. It loaded hook SHA-256
+`2113c773bdcac837e58cbd0cc0e784d7d99d971de3a8e08c377743cd245f8e6e`,
+which contains the guest-SCC return fix; the `0bf1d17` suffix identifies the
+checked-out source ref rather than the loaded binary. Its 3,396,472-byte object
+and the Record/Replay object independently reproduce 17 unrecovered generated
+long-return targets in the newer standalone revision translator. Inline
 Shadow's 4,666,232-byte object in
 `consan-validation-large-objects-gfx1250-qwen-sim-inline-diagnostic-0bf1d17-20260731`
 is accepted by the installed runtime translator and begins execution, but has

@@ -260,24 +260,31 @@ public:
 
     entry->input_fingerprint = result.input_fingerprint;
     entry->sampled_patch_mappings.clear();
+    entry->sampled_patch_mapping_malformed = false;
+    const bool collect_sampled_mappings = g_log_level.load() >= kLogInfo;
     auto *mappings = reinterpret_cast<rocjitsu::ConSanMoiCompactDiagnosticTokenMapping *>(
         static_cast<uint8_t *>(entry->ptr) + entry->layout.inline_compact_token_mappings_offset);
     size_t compact_patch_count = 0;
+    size_t sampled_patch_count = 0;
     for (const rocjitsu::ConSanPatchInfo &patch : result.patches) {
       if (patch.sampled_access_range_count != 0u && patch.sampled_window_bank_count != 0u) {
+        ++sampled_patch_count;
         const uint64_t slot_count = static_cast<uint64_t>(patch.sampled_access_range_count) *
                                     patch.sampled_window_bank_count;
         if (patch.sampled_first_slot <= entry->layout.sampled_watchpoint_capacity &&
             slot_count <= entry->layout.sampled_watchpoint_capacity - patch.sampled_first_slot) {
-          entry->sampled_patch_mappings.push_back({
-              .first_slot = patch.sampled_first_slot,
-              .range_count = patch.sampled_access_range_count,
-              .bank_count = patch.sampled_window_bank_count,
-              .instruction_offset = patch.anchor_offset,
-              .trampoline_offset = patch.trampoline_offset,
-              .relocated_guest_offset = patch.relocated_guest_instruction_offset.value_or(0u),
-              .scratch_vgpr = patch.scratch_vgpr,
-          });
+          if (collect_sampled_mappings)
+            entry->sampled_patch_mappings.push_back({
+                .first_slot = patch.sampled_first_slot,
+                .range_count = patch.sampled_access_range_count,
+                .bank_count = patch.sampled_window_bank_count,
+                .instruction_offset = patch.anchor_offset,
+                .trampoline_offset = patch.trampoline_offset,
+                .relocated_guest_offset = patch.relocated_guest_instruction_offset.value_or(0u),
+                .scratch_vgpr = patch.scratch_vgpr,
+            });
+        } else {
+          entry->sampled_patch_mapping_malformed = true;
         }
       }
       if (!patch.workgroup_shadow_compact || patch.workgroup_shadow_compact_token == 0u)
@@ -296,6 +303,14 @@ public:
               .instruction_offset = static_cast<uint32_t>(patch.anchor_offset),
               .token = patch.workgroup_shadow_compact_token,
           };
+    }
+    if (sampled_patch_count != 0u && collect_sampled_mappings) {
+      log_message(kLogInfo,
+                  "ConSan MOI sampled diagnostic map reader=%llu patches=%zu mappings=%zu "
+                  "capacity=%u malformed=%s",
+                  static_cast<unsigned long long>(reader), sampled_patch_count,
+                  entry->sampled_patch_mappings.size(), entry->layout.sampled_watchpoint_capacity,
+                  entry->sampled_patch_mapping_malformed ? "true" : "false");
     }
     if (compact_patch_count != 0u) {
       log_message(kLogInfo,
@@ -376,6 +391,8 @@ public:
       total.sampled_incomplete_snapshot_count += entry_summary.sampled_incomplete_snapshot_count;
       total.sampled_changed_snapshot_count += entry_summary.sampled_changed_snapshot_count;
       total.sampled_malformed_snapshot_count += entry_summary.sampled_malformed_snapshot_count;
+      total.sampled_patch_mapping_malformed_count +=
+          entry_summary.sampled_patch_mapping_malformed_count;
       total.sampled_unsupported_sync_count += entry_summary.sampled_unsupported_sync_count;
       total.sampled_malformed_sync_count += entry_summary.sampled_malformed_sync_count;
       bool freed = entries_[i].ptr == nullptr;
@@ -476,6 +493,7 @@ private:
     std::vector<SampledPatchMapping> sampled_patch_mappings;
     uint32_t compact_token_mapping_count = 0;
     bool compact_token_mapping_malformed = false;
+    bool sampled_patch_mapping_malformed = false;
   };
 
   void record_allocation_attempt(uint64_t required_size) {
@@ -568,6 +586,10 @@ private:
   Summary summarize(CoreApiTable *core, const Entry &entry) {
     Summary summary;
     summary.buffer_count = 1;
+    if (entry.compact_token_mapping_malformed)
+      ++summary.inline_malformed_count;
+    if (entry.sampled_patch_mapping_malformed)
+      ++summary.sampled_patch_mapping_malformed_count;
     std::vector<uint8_t> snapshot;
     const void *report_ptr = entry.ptr;
     if (!entry.fine_grained) {
@@ -1171,6 +1193,7 @@ private:
         "sampled_dropped_windows=%u sampled_saturated_windows=%u "
         "sampled_stale_snapshots=%llu sampled_incomplete_snapshots=%llu "
         "sampled_changed_snapshots=%llu sampled_malformed_snapshots=%llu "
+        "sampled_patch_mapping_malformed=%llu "
         "fine_grained=%s",
         static_cast<unsigned long long>(entry.reader),
         static_cast<unsigned long long>(reinterpret_cast<uint64_t>(entry.ptr)), entry.size,
@@ -1218,6 +1241,7 @@ private:
         static_cast<unsigned long long>(summary.sampled_incomplete_snapshot_count),
         static_cast<unsigned long long>(summary.sampled_changed_snapshot_count),
         static_cast<unsigned long long>(summary.sampled_malformed_snapshot_count),
+        static_cast<unsigned long long>(summary.sampled_patch_mapping_malformed_count),
         entry.fine_grained ? "true" : "false");
 
     for (size_t i = 0; i < visible_inline_atomic_releases.size(); ++i) {
@@ -1276,8 +1300,6 @@ private:
     for (uint32_t index : visible_diagnostic_indices)
       resolved_diagnostics.push_back(raw_diagnostics[index]);
     const auto *diagnostics = resolved_diagnostics.data();
-    if (entry.compact_token_mapping_malformed)
-      ++summary.inline_malformed_count;
     if (visible_diagnostics != 0u && entry.compact_token_mapping_count != 0u) {
       const auto *mappings =
           reinterpret_cast<const rocjitsu::ConSanMoiCompactDiagnosticTokenMapping *>(

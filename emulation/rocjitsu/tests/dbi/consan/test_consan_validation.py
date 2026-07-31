@@ -2243,8 +2243,12 @@ class ConSanValidationTest(unittest.TestCase):
             if workload.kind == "pytorch"
             and workload.targets is not None
             and "gfx1201" in workload.targets
+            and workload.overhead_processes > 1
         )
-        self.assertTrue(workloads)
+        self.assertEqual(
+            tuple(workload.id for workload in workloads),
+            ("pytorch-rdna4-llm-topk",),
+        )
         for workload in workloads:
             with self.subTest(workload=workload.id):
                 self.assertEqual(
@@ -2266,6 +2270,17 @@ class ConSanValidationTest(unittest.TestCase):
                     validation._outer_repetitions("gfx1201", "clean", workload),
                     1,
                 )
+
+        small = validation.WORKLOAD_BY_ID["pytorch-scatter-reduce"]
+        self.assertEqual(validation._outer_repetitions("gfx1201", "overhead", small), 1)
+        command = validation._workload_command(
+            Path("/workspace"),
+            "gfx1201",
+            small,
+            "overhead",
+            Path("/unused"),
+        )
+        self.assertEqual(command[command.index("--repetitions") + 1], "10")
 
     def test_topk_record_replay_is_a_strict_clean_and_overhead_gate(
         self,

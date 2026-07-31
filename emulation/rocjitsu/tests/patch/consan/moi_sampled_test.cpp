@@ -2222,6 +2222,24 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
                                  ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                  &ConSanPatchInfo::kind),
               9u);
+    ASSERT_TRUE(assignment.indirect_pc_sgpr);
+    ASSERT_TRUE(assignment.indirect_scc_sgpr);
+    const auto restore_return_scc = instrumentation::build_s_cmp_lg_u32(
+        *assignment.indirect_scc_sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_TRUE(restore_return_scc);
+    const std::array return_tail = {
+        *restore_return_scc,
+        build_s_setpc_b64(*assignment.indirect_pc_sgpr, ROCJITSU_CODE_ARCH_GFX1250),
+    };
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    for (const ConSanPatchInfo &patch : result.patches) {
+      if (patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
+        continue;
+      const std::vector<uint32_t> trampoline =
+          text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+      EXPECT_TRUE(contains_subsequence(trampoline, return_tail));
+    }
     EXPECT_TRUE(std::ranges::all_of(result.patches, [](const ConSanPatchInfo &patch) {
       return patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore ||
              patch.required_private_segment_size > 0u;

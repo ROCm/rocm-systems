@@ -758,6 +758,7 @@ struct AutoMoiReportSummary {
   uint64_t sampled_incomplete_snapshot_count = 0;
   uint64_t sampled_changed_snapshot_count = 0;
   uint64_t sampled_malformed_snapshot_count = 0;
+  uint64_t sampled_patch_mapping_malformed_count = 0;
   uint64_t sampled_unsupported_sync_count = 0;
   uint64_t sampled_malformed_sync_count = 0;
 

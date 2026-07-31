@@ -641,8 +641,15 @@ a ConSan detection.
   The single-shot paired campaign
   `consan-validation-large-objects-gfx950-qwen-sim-overhead-all-final-v2-0bf1d17-20260731`
   passes baseline-before and baseline-after and records 1.34x, 1.25x, 1.70x,
-  and 21.75x slowdowns respectively.  The cells remain yellow until their
-  current reviewed-fault and containment bundles are refreshed.
+  and 21.75x slowdowns respectively. Its Sampled row loaded hook SHA-256
+  `2113c773bdcac837e58cbd0cc0e784d7d99d971de3a8e08c377743cd245f8e6e`,
+  which contains the guest-SCC return fix and repeats the exact 628/628 plus
+  51/51 gate. The standalone Sampled clean artifact above used the earlier
+  hook SHA-256
+  `bfd03857e262d7b02da55a1a72ea0207737b25cb3a40acd6cf90ea547ff1dfdf`;
+  artifact names containing `0bf1d17` identify the checked-out source ref, not
+  the loaded hook binary. The cells remain yellow until their current
+  reviewed-fault and containment bundles are refreshed.
 
 - 2026-07-25: Completed the current-producer `bd-1w9.42` qualification for
   Record/Replay, Sampled, and Inline Shadow.  One shared target-native

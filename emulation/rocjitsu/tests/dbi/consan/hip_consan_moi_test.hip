@@ -718,7 +718,7 @@ moi_native_b96_aliasing_access_for_instrumentation(uint32_t lds_addr, uint32_t *
     // Deliberately alias the address and destination at v4. The ConSan
     // trampoline must snapshot the address before executing this load.
     asm volatile("v_mov_b32 v4, %3\n\t"
-                 "ds_load_b96 v[4:6], v4\n\t" RJ_CONSAN_MOI_RECORD_NOP_CAVE "s_wait_loadcnt 0\n\t"
+                 "ds_load_b96 v[4:6], v4\n\t" RJ_CONSAN_MOI_RECORD_NOP_CAVE "s_wait_dscnt 0\n\t"
                  "v_mov_b32 %0, v4\n\t"
                  "v_mov_b32 %1, v5\n\t"
                  "v_mov_b32 %2, v6\n\t"
@@ -920,7 +920,7 @@ __launch_bounds__(64) void moi_repeated_dispatch_saturation_preserves_output_for
   __syncthreads();
   if (tid == 32) {
     uint32_t loaded = 0;
-    asm volatile("ds_load_b32 %0, %1\n\t" RJ_CONSAN_MOI_RECORD_NOP_CAVE "s_wait_loadcnt 0\n\t"
+    asm volatile("ds_load_b32 %0, %1\n\t" RJ_CONSAN_MOI_RECORD_NOP_CAVE "s_wait_dscnt 0\n\t"
                  : "=v"(loaded)
                  : "v"(lds_addr)
                  : "memory");
@@ -938,12 +938,14 @@ __global__ __launch_bounds__(64) void moi_staged_dscnt_load_preserves_output_for
 
   const auto lds_addr =
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[threadIdx.x]) & 0xFFFFu);
-  uint32_t sum = 0;
+  uint32_t sum;
   // Keep three addtid loads outstanding ahead of one ordinary LDS load, then
   // consume the four results with descending counter waits. ConSan only
   // supports the ordinary load, but relocating it must preserve its position
   // in the shared DS completion stream.
-  asm volatile("s_mov_b32 m0, 0x10000\n\t"
+  // DS_LOAD_ADDTID_B32 uses M0[15:0] as its byte base. Make that base zero
+  // explicitly instead of relying on truncation of a nonzero literal.
+  asm volatile("s_mov_b32 m0, 0\n\t"
                "v_mov_b32 v8, %1\n\t"
                "ds_load_addtid_b32 v0\n\t"
                "ds_load_addtid_b32 v1\n\t"
