@@ -357,12 +357,21 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
     return false;
   }
   decoder_ = std::move(decoder);
-  blocks_ = BasicBlock::build(obj_, *decoder_, arch_);
+  // Force every kernel entry to begin a block. BasicBlock::build only leads at
+  // natural boundaries, so a descriptor entry inside a fallthrough block would
+  // not start a block and would be silently dropped by the entry match below;
+  // a preceding `s_mov exec, -1` could then make it look Full even though
+  // hardware may enter with unknown EXEC, licensing unsound VGPR kills.
+  const std::vector<uint64_t> entry_offsets = obj_.kernel_entry_text_offsets();
+  blocks_ = BasicBlock::build(obj_, *decoder_, arch_, entry_offsets);
   // BasicBlock::build returns blocks in .text order. Keep clause state across
   // block boundaries because a branch target may split the linear instruction
   // stream in the middle of a clause.
   uint32_t clause_remaining = 0;
+  std::unordered_set<uint64_t> block_starts;
+  block_starts.reserve(blocks_.size());
   for (const auto &block : blocks_) {
+    block_starts.insert(block->start_offset());
     uint64_t cur = block->start_offset();
     for (const Instruction &inst : block->instructions()) {
       if (clause_remaining > 0) {
@@ -373,6 +382,16 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
       if (is_s_clause(inst))
         clause_remaining = std::max(clause_remaining, s_clause_following_instruction_count(inst));
       cur += static_cast<uint64_t>(inst.size());
+    }
+  }
+  // Fail closed if a readable entry still has no exact block (e.g. it points
+  // into undecodable bytes).
+  for (const uint64_t entry : entry_offsets) {
+    if (!block_starts.contains(entry)) {
+      report(error_out, ("kernel entry offset " + std::to_string(entry) +
+                         " has no basic block after construction")
+                            .c_str());
+      return false;
     }
   }
   blocks_built_ = true;
