@@ -2131,9 +2131,22 @@ retry:
 			}
 
 			/* To simplify, allocate maximum needed memory for io_links for each node. This
-			 * removes the need for realloc when indirect and QPI links are added later
+			 * removes the need for realloc when indirect and QPI links are added later.
+			 *
+			 * At this point NumIOLinks holds io_links_count + p2p_links_count, i.e. the
+			 * total number of links sysfs reports for this node. Topologies with link
+			 * aggregation (e.g. multiple XGMI links to the same peer) can report more
+			 * than NumNodes-1 links; sizing the buffer at NumNodes-1 truncated those
+			 * extra links and silently dropped peer connectivity, producing an
+			 * asymmetric/incomplete peer-access matrix. Size the buffer to the actual
+			 * link count, keeping NumNodes-1 as a floor because the indirect-link path
+			 * below (when sysfs does not expose p2p_links) may synthesize up to that
+			 * many links.
 			 */
-			temp_props[i].link = calloc(sys_props.NumNodes - 1, sizeof(HsaIoLinkProperties));
+			uint32_t max_links = temp_props[i].node.NumIOLinks;
+			if (max_links < sys_props.NumNodes - 1)
+				max_links = sys_props.NumNodes - 1;
+			temp_props[i].link = calloc(max_links, sizeof(HsaIoLinkProperties));
 			if (!temp_props[i].link) {
 				ret = HSAKMT_STATUS_NO_MEMORY;
 				free_properties(temp_props, i + 1);
@@ -2149,7 +2162,7 @@ retry:
 				 * remote node (node_to) is not accessible
 				 */
 				while (sys_link_id < num_ioLinks &&
-					link_id < sys_props.NumNodes - 1) {
+					link_id < max_links) {
 					ret = topology_sysfs_get_iolink_props(ctx, i, sys_link_id++,
 								&temp_props[i].link[link_id], false);
 					if (ret == HSAKMT_STATUS_NOT_SUPPORTED) {
@@ -2170,7 +2183,7 @@ retry:
 				/* Parse all the sysfs specified p2p links.
 				 */
 				while (sys_link_id < num_p2pLinks &&
-					link_id < sys_props.NumNodes - 1) {
+					link_id < max_links) {
 					ret = topology_sysfs_get_iolink_props(ctx, i, sys_link_id++,
 								&temp_props[i].link[link_id], true);
 					if (ret == HSAKMT_STATUS_NOT_SUPPORTED) {
