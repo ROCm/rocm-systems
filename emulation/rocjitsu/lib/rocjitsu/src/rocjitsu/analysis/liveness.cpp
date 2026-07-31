@@ -272,6 +272,11 @@ const BlockLiveness &LivenessAnalysis::block_liveness(const BasicBlock &block) c
   return liveness_.at(it->second);
 }
 
+bool LivenessAnalysis::has_live_before(const Instruction &inst) const {
+  require_available();
+  return live_before_.contains(&inst);
+}
+
 const RegisterSet &LivenessAnalysis::live_before(const Instruction &inst) const {
   require_available();
   auto it = live_before_.find(&inst);
