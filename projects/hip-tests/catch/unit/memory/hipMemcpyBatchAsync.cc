@@ -656,6 +656,343 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2H_Functional) {
   VerifyHostBuffers(dst, copy_size);
 }
 
+#if HT_AMD
+/**
+ * Test Description
+ * ------------------------
+ * - Verify hipMemcpyBatchAsync with hipMemcpyFlagExtOpSwap
+ *   exchanges the contents of a hipHostMalloc host buffer and a hipMalloc
+ *   device buffer (H->D direction: host src <-> device dst).
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_H2D_Functional) {
+  constexpr size_t kNumElements = 4096;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+  constexpr int kValHost = 42;
+  constexpr int kValDev = 99;
+
+  // Host buffer via hipHostMalloc so it is a tracked amd::Memory (Host type).
+  void* h_src = nullptr;
+  HIP_CHECK(hipHostMalloc(&h_src, kSizeBytes));
+
+  // Device buffer via hipMalloc.
+  void* d_dst = nullptr;
+  HIP_CHECK(hipMalloc(&d_dst, kSizeBytes));
+
+  // Fill host side with kValHost, device side with kValDev.
+  std::vector<int> hostInit(kNumElements, kValHost);
+  std::memcpy(h_src, hostInit.data(), kSizeBytes);
+
+  std::vector<int> devInit(kNumElements, kValDev);
+  HIP_CHECK(hipMemcpy(d_dst, devInit.data(), kSizeBytes, hipMemcpyHostToDevice));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {d_dst};
+  void* srcs[] = {h_src};
+  size_t sizes[] = {kSizeBytes};
+  size_t attrsIdxs[] = {0};
+
+  hipMemcpyAttributes attr{};
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  size_t failIdx = 0;
+  hipError_t err =
+      hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1, &failIdx, stream);
+  if (err == hipErrorNotSupported) {
+    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipFree(d_dst));
+    HIP_CHECK(hipHostFree(h_src));
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
+  }
+  HIP_CHECK(err);
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // After swap: host side should hold kValDev, device side kValHost.
+  std::vector<int> resultDev(kNumElements);
+  HIP_CHECK(hipMemcpy(resultDev.data(), d_dst, kSizeBytes, hipMemcpyDeviceToHost));
+
+  const int* resultHost = static_cast<const int*>(h_src);
+  for (size_t i = 0; i < kNumElements; i++) {
+    INFO("host[" << i << "] = " << resultHost[i] << " (expected " << kValDev << ")");
+    REQUIRE(resultHost[i] == kValDev);
+    INFO("dev[" << i << "] = " << resultDev[i] << " (expected " << kValHost << ")");
+    REQUIRE(resultDev[i] == kValHost);
+  }
+
+  HIP_CHECK(hipFree(d_dst));
+  HIP_CHECK(hipHostFree(h_src));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verify hipMemcpyBatchAsync swap in the reverse direction:
+ *   device src (hipMalloc) <-> host dst (hipHostMalloc).
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_D2H_Functional) {
+  constexpr size_t kNumElements = 4096;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+  constexpr int kValDev = 11;
+  constexpr int kValHost = 77;
+
+  // Device buffer.
+  void* d_src = nullptr;
+  HIP_CHECK(hipMalloc(&d_src, kSizeBytes));
+
+  // Host buffer via hipHostMalloc.
+  void* h_dst = nullptr;
+  HIP_CHECK(hipHostMalloc(&h_dst, kSizeBytes));
+
+  // Fill device side with kValDev, host side with kValHost.
+  std::vector<int> devInit(kNumElements, kValDev);
+  HIP_CHECK(hipMemcpy(d_src, devInit.data(), kSizeBytes, hipMemcpyHostToDevice));
+
+  std::vector<int> hostInit(kNumElements, kValHost);
+  std::memcpy(h_dst, hostInit.data(), kSizeBytes);
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  // dst=h_dst (host), src=d_src (device).
+  void* dsts[] = {h_dst};
+  void* srcs[] = {d_src};
+  size_t sizes[] = {kSizeBytes};
+  size_t attrsIdxs[] = {0};
+
+  hipMemcpyAttributes attr{};
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  size_t failIdx = 0;
+  hipError_t err =
+      hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1, &failIdx, stream);
+  if (err == hipErrorNotSupported) {
+    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipFree(d_src));
+    HIP_CHECK(hipHostFree(h_dst));
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
+  }
+  HIP_CHECK(err);
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // After swap: device side holds kValHost, host side holds kValDev.
+  std::vector<int> resultDev(kNumElements);
+  HIP_CHECK(hipMemcpy(resultDev.data(), d_src, kSizeBytes, hipMemcpyDeviceToHost));
+
+  const int* resultHost = static_cast<const int*>(h_dst);
+  for (size_t i = 0; i < kNumElements; i++) {
+    INFO("dev[" << i << "] = " << resultDev[i] << " (expected " << kValHost << ")");
+    REQUIRE(resultDev[i] == kValHost);
+    INFO("host[" << i << "] = " << resultHost[i] << " (expected " << kValDev << ")");
+    REQUIRE(resultHost[i] == kValDev);
+  }
+
+  HIP_CHECK(hipFree(d_src));
+  HIP_CHECK(hipHostFree(h_dst));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verify hipMemcpyBatchAsync with multiple H<->D swap ops in a
+ *   single call.
+ *
+ *   Four independent host<->device pairs are swapped in one call; all must be
+ *   correct after synchronization.
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_MultiOp) {
+  constexpr size_t kNumOps = 4;
+  constexpr size_t kNumElements = 1024;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+
+  // Each pair has distinct sentinel values to confirm independence.
+  constexpr int kHostVals[kNumOps] = {10, 20, 30, 40};
+  constexpr int kDevVals[kNumOps] = {55, 66, 77, 88};
+
+  void* h_bufs[kNumOps] = {};
+  void* d_bufs[kNumOps] = {};
+
+  for (size_t op = 0; op < kNumOps; ++op) {
+    HIP_CHECK(hipHostMalloc(&h_bufs[op], kSizeBytes));
+    HIP_CHECK(hipMalloc(&d_bufs[op], kSizeBytes));
+
+    std::vector<int> hi(kNumElements, kHostVals[op]);
+    std::memcpy(h_bufs[op], hi.data(), kSizeBytes);
+
+    std::vector<int> di(kNumElements, kDevVals[op]);
+    HIP_CHECK(hipMemcpy(d_bufs[op], di.data(), kSizeBytes, hipMemcpyHostToDevice));
+  }
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  // All ops share the same swap attribute (index 0).
+  size_t sizes[kNumOps];
+  size_t attrsIdxs[kNumOps];
+  for (size_t op = 0; op < kNumOps; ++op) {
+    sizes[op] = kSizeBytes;
+    attrsIdxs[op] = 0;
+  }
+
+  hipMemcpyAttributes attr{};
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  size_t failIdx = 0;
+  hipError_t err = hipMemcpyBatchAsync(d_bufs, h_bufs, sizes, kNumOps, &attr,
+                                       attrsIdxs, 1, &failIdx, stream);
+  if (err == hipErrorNotSupported) {
+    HIP_CHECK(hipStreamDestroy(stream));
+    for (size_t op = 0; op < kNumOps; ++op) {
+      HIP_CHECK(hipFree(d_bufs[op]));
+      HIP_CHECK(hipHostFree(h_bufs[op]));
+    }
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
+  }
+  HIP_CHECK(err);
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // Verify every pair independently.
+  for (size_t op = 0; op < kNumOps; ++op) {
+    std::vector<int> resultDev(kNumElements);
+    HIP_CHECK(hipMemcpy(resultDev.data(), d_bufs[op], kSizeBytes, hipMemcpyDeviceToHost));
+    const int* resultHost = static_cast<const int*>(h_bufs[op]);
+    for (size_t i = 0; i < kNumElements; i++) {
+      INFO("op=" << op << " dev[" << i << "]=" << resultDev[i]
+                 << " (expected " << kHostVals[op] << ")");
+      REQUIRE(resultDev[i] == kHostVals[op]);
+      INFO("op=" << op << " host[" << i << "]=" << resultHost[i]
+                 << " (expected " << kDevVals[op] << ")");
+      REQUIRE(resultHost[i] == kDevVals[op]);
+    }
+  }
+
+  for (size_t op = 0; op < kNumOps; ++op) {
+    HIP_CHECK(hipFree(d_bufs[op]));
+    HIP_CHECK(hipHostFree(h_bufs[op]));
+  }
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Parameterized H<->D swap correctness over mismatched src/dst
+ *   byte offsets and two transfer sizes.  For each (src_off, dst_off) pair the
+ *   difference d = (dst_addr - src_addr) selects the largest shareable op width
+ *   per the design doc's per-copy op-size algorithm, exercising op widths
+ *   1/2/4/8/16 plus head/tail handling:
+ *
+ *     (0,0)   -> 16-byte body, no head/tail
+ *     (4,4)   -> 4-byte-aligned, aligned fallback
+ *     (0,15)  -> d=15 (odd) -> 1-byte body
+ *     (1,15)  -> d=14 -> 2-byte body, head=1
+ *     (3,11)  -> d=8  -> 8-byte body, head=5
+ *     (3,9)   -> d=6  -> 2-byte body, head=1
+ *     (1,0)   -> d=-1 (odd) -> 1-byte body
+ *     (8,8)   -> 8-byte-aligned mismatch-free
+ *
+ *   Sizes: 4096 and 131072 above and below SDMA threshold
+ *
+ *   Each host/device allocation is size+64 bytes.  The full host allocation is
+ *   filled with 0xAA and the full device allocation with 0xBB.  A single swap of
+ *   `size` bytes is issued from host+src_off <-> device+dst_off.  After sync the
+ *   transfer region must be swapped (host holds 0xBB, device holds 0xAA) and all
+ *   bytes OUTSIDE the transfer region (the padding) must be UNCHANGED (host
+ *   padding still 0xAA, device padding still 0xBB).
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_UnalignedMatrix) {
+  constexpr uint8_t kHostFill = 0xAA;
+  constexpr uint8_t kDevFill = 0xBB;
+  constexpr size_t kPad = 64;
+
+  const std::pair<size_t, size_t> off =
+      GENERATE(std::make_pair(size_t{0}, size_t{0}), std::make_pair(size_t{4}, size_t{4}),
+               std::make_pair(size_t{0}, size_t{15}), std::make_pair(size_t{1}, size_t{15}),
+               std::make_pair(size_t{3}, size_t{11}), std::make_pair(size_t{3}, size_t{9}),
+               std::make_pair(size_t{1}, size_t{0}), std::make_pair(size_t{8}, size_t{8}));
+  const size_t size = GENERATE(size_t{4096}, size_t{131072});
+  const size_t src_off = off.first;
+  const size_t dst_off = off.second;
+
+  INFO("src_off=" << src_off << " dst_off=" << dst_off << " size=" << size);
+
+  void* h_base = nullptr;
+  void* d_base = nullptr;
+  HIP_CHECK(hipHostMalloc(&h_base, size + kPad));
+  HIP_CHECK(hipMalloc(&d_base, size + kPad));
+
+  std::memset(h_base, kHostFill, size + kPad);
+  HIP_CHECK(hipMemset(d_base, kDevFill, size + kPad));
+
+  void* src = static_cast<uint8_t*>(h_base) + src_off;
+  void* dst = static_cast<uint8_t*>(d_base) + dst_off;
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {dst};
+  void* srcs[] = {src};
+  size_t sizes[] = {size};
+  size_t attrsIdxs[] = {0};
+
+  hipMemcpyAttributes attr{};
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  size_t failIdx = 0;
+  // Do NOT skip on hipErrorNotSupported: at baseline the large unaligned case
+  // routes to SDMA and fails, which is the state [!shouldfail] absorbs.
+  HIP_CHECK(hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1, &failIdx, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // Copy both buffers back in full so padding can be verified too.
+  std::vector<uint8_t> devResult(size + kPad);
+  HIP_CHECK(hipMemcpy(devResult.data(), d_base, size + kPad, hipMemcpyDeviceToHost));
+  const uint8_t* hostResult = static_cast<const uint8_t*>(h_base);
+
+  for (size_t i = 0; i < size + kPad; i++) {
+    const bool in_host_region = (i >= src_off) && (i < src_off + size);
+    const uint8_t expected_host = in_host_region ? kDevFill : kHostFill;
+    INFO("host byte " << i << " (region=" << in_host_region << ") = "
+                      << static_cast<int>(hostResult[i]) << " expected "
+                      << static_cast<int>(expected_host));
+    REQUIRE(hostResult[i] == expected_host);
+
+    const bool in_dev_region = (i >= dst_off) && (i < dst_off + size);
+    const uint8_t expected_dev = in_dev_region ? kHostFill : kDevFill;
+    INFO("dev byte " << i << " (region=" << in_dev_region << ") = "
+                     << static_cast<int>(devResult[i]) << " expected "
+                     << static_cast<int>(expected_dev));
+    REQUIRE(devResult[i] == expected_dev);
+  }
+
+  HIP_CHECK(hipFree(d_base));
+  HIP_CHECK(hipHostFree(h_base));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+#endif
+
 /**
  * Test Description
  * ------------------------
