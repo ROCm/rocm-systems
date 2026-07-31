@@ -830,6 +830,24 @@ set_tests_properties(
             "rocjitsu launcher preserved and ordered HSA tools"
 )
 
+add_test(
+    NAME "RocjitsuLauncher.AppendsHsaToolToEmptyList"
+    COMMAND
+        ${RJ_CLI} --config
+        ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+        ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_launcher_hsa_tools.cmake
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+set_tests_properties(
+    "RocjitsuLauncher.AppendsHsaToolToEmptyList"
+    PROPERTIES
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=;RJ_EXPECTED_HSA_TOOLS_PREFIX=;RJ_EXPECTED_APPENDED_HSA_TOOL=$<TARGET_FILE:rocjitsu_hooks>"
+        PASS_REGULAR_EXPRESSION
+            "rocjitsu launcher preserved and ordered HSA tools"
+)
+
 function(rj_detect_kfd_gfx_target_versions out_var)
     set(_versions)
     foreach(

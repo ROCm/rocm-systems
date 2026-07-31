@@ -10,6 +10,7 @@ struct MoiEngineConformanceCase {
   ConSanMoiEngine engine;
   ConSanPatchKind access_patch_kind;
   uint32_t access_body_words;
+  uint32_t expected_island_bytes;
   const char *name;
 };
 
@@ -58,6 +59,7 @@ TEST_P(MoiEngineConformanceTest, UsesBranchIslandsForManyLargeAccessBodies) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
   EXPECT_EQ(std::ranges::count(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind),
             kAccessCount);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
@@ -66,7 +68,7 @@ TEST_P(MoiEngineConformanceTest, UsesBranchIslandsForManyLargeAccessBodies) {
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland)
       continue;
-    EXPECT_EQ(patch.trampoline_size, test_case.access_body_words * sizeof(uint32_t));
+    EXPECT_EQ(patch.trampoline_size, test_case.expected_island_bytes);
     EXPECT_TRUE(compute_sopp_branch_simm16(patch.anchor_offset, patch.trampoline_offset));
   }
 }
@@ -102,6 +104,7 @@ TEST_P(MoiEngineConformanceTest, RelocatesStraightLinePrefixWhenNoEntryIslandIsR
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
   const auto patch =
       std::ranges::find(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
@@ -112,7 +115,7 @@ TEST_P(MoiEngineConformanceTest, RelocatesStraightLinePrefixWhenNoEntryIslandIsR
             0);
 }
 
-TEST_P(MoiEngineConformanceTest, HandlesAdjacentAccessInsideRelocationRange) {
+TEST_P(MoiEngineConformanceTest, InstrumentsEveryAdjacentAccessInsideRelocationRange) {
   const MoiEngineConformanceCase &test_case = GetParam();
   const std::array<uint32_t, 2> kernel_words = {
       pack_sopk(/*s_call_b64=*/0x14, /*sdst=*/30, /*simm16=*/1),
@@ -138,16 +141,14 @@ TEST_P(MoiEngineConformanceTest, HandlesAdjacentAccessInsideRelocationRange) {
   const auto result = try_patch_consan(bytes, conformance_options(test_case, 2));
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  const size_t expected_access_patches =
-      test_case.engine == ConSanMoiEngine::RecordReplay ? 2u : 1u;
+  ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
+  // Relocation must not silently consume another admitted source site: every
+  // adjacent access retains an independently identifiable instrumentation patch.
   EXPECT_EQ(std::ranges::count(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind),
-            expected_access_patches);
-  if (test_case.engine == ConSanMoiEngine::RecordReplay) {
+            2u);
+  for (uint64_t anchor_offset : {28u, 40u}) {
     EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
-      return patch.kind == test_case.access_patch_kind && patch.anchor_offset == 28u;
-    }));
-    EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
-      return patch.kind == test_case.access_patch_kind && patch.anchor_offset == 40u;
+      return patch.kind == test_case.access_patch_kind && patch.anchor_offset == anchor_offset;
     }));
   }
 }
@@ -181,10 +182,19 @@ TEST_P(MoiEngineConformanceTest, Gfx1250RoutesSparseAccessesWithStrandedAppended
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
   EXPECT_EQ(std::ranges::count(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind),
             kAccessCount)
       << testing::PrintToString(result.warnings);
+  for (size_t store_offset : kStoreOffsets) {
+    const uint64_t anchor_offset = store_offset * sizeof(uint32_t);
+    EXPECT_TRUE(std::ranges::any_of(result.patches,
+                                    [&](const ConSanPatchInfo &patch) {
+                                      return patch.kind == test_case.access_patch_kind &&
+                                             patch.anchor_offset == anchor_offset;
+                                    }))
+        << "missing access patch at byte offset " << anchor_offset;
+  }
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
             2u); // One relocatable host plus one appended return-PC dispatcher.
@@ -193,13 +203,13 @@ TEST_P(MoiEngineConformanceTest, Gfx1250RoutesSparseAccessesWithStrandedAppended
 INSTANTIATE_TEST_SUITE_P(
     AllEngines, MoiEngineConformanceTest,
     testing::Values(MoiEngineConformanceCase{ConSanMoiEngine::RecordReplay,
-                                             ConSanPatchKind::TrampolineMoiAccessRecordStore, 7,
+                                             ConSanPatchKind::TrampolineMoiAccessRecordStore, 7, 40,
                                              "RecordReplay"},
                     MoiEngineConformanceCase{ConSanMoiEngine::Sampled,
                                              ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
-                                             7, "Sampled"},
+                                             7, 28, "Sampled"},
                     MoiEngineConformanceCase{ConSanMoiEngine::InlineShadow,
-                                             ConSanPatchKind::TrampolineMoiExactShadowStore, 8,
+                                             ConSanPatchKind::TrampolineMoiExactShadowStore, 8, 32,
                                              "InlineShadow"}),
     [](const testing::TestParamInfo<MoiEngineConformanceCase> &info) { return info.param.name; });
 

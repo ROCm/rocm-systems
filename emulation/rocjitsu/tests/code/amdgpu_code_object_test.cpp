@@ -551,9 +551,9 @@ bool set_aggregate_viewed_section_bytes(std::vector<uint8_t> &image, uint64_t ag
   return true;
 }
 
-enum class SymbolNameBudget {
-  AtBoundary,
-  OneByteOver,
+enum class SymbolNameBudgetCase {
+  AtOrBelowBoundary,
+  NextNameByteOverBoundary,
 };
 
 enum class RetainedSymbolKind {
@@ -588,7 +588,7 @@ static_assert((kMaximumShortRetainedKernelEntries + 1) *
               kDerivedStateFixtureRoleBudgetBytes);
 
 struct DerivedStateBoundaryOptions {
-  SymbolNameBudget budget = SymbolNameBudget::AtBoundary;
+  SymbolNameBudgetCase budget_case = SymbolNameBudgetCase::AtOrBelowBoundary;
   RetainedSymbolKind retained_kind = RetainedSymbolKind::Functions;
   uint8_t symbol_type = kElfSymbolTypeFunc;
   uint16_t symbol_section_index = 1;
@@ -625,14 +625,23 @@ make_elf_at_retained_derived_state_boundary(const DerivedStateBoundaryOptions &o
   size_t last_name_extra = 0;
   if (options.short_retained_name_count == 0) {
     const uint64_t fixed_entry_charge = retained_name_count * per_name_entry_charge;
-    if (fixed_entry_charge >= kDerivedStateFixtureRoleBudgetBytes ||
-        (kDerivedStateFixtureRoleBudgetBytes - fixed_entry_charge) % charged_name_copies != 0) {
-      ADD_FAILURE() << "boundary fixture charges do not divide the derived-state budget";
+    if (fixed_entry_charge >= kDerivedStateFixtureRoleBudgetBytes) {
+      ADD_FAILURE() << "boundary fixture fixed charges exhaust the derived-state budget";
       return {};
     }
-    size_t aggregate_name_bytes = static_cast<size_t>(
-        (kDerivedStateFixtureRoleBudgetBytes - fixed_entry_charge) / charged_name_copies);
-    if (options.budget == SymbolNameBudget::OneByteOver)
+    const uint64_t available_name_charge = kDerivedStateFixtureRoleBudgetBytes - fixed_entry_charge;
+    const uint64_t name_charge_remainder = available_name_charge % charged_name_copies;
+    if (name_charge_remainder != 0 &&
+        options.retained_kind != RetainedSymbolKind::KernelsAndFunctions) {
+      ADD_FAILURE() << "single-role boundary fixture must land exactly on the derived-state budget";
+      return {};
+    }
+    // A source-name byte is retained once for a function and twice for a
+    // kernel. The combined role therefore has three-byte granularity and may
+    // leave at most two bytes unused; its next source-name byte still crosses
+    // the limit. Single-role fixtures remain exact boundary checks.
+    size_t aggregate_name_bytes = static_cast<size_t>(available_name_charge / charged_name_copies);
+    if (options.budget_case == SymbolNameBudgetCase::NextNameByteOverBoundary)
       ++aggregate_name_bytes;
     const size_t distinct_length_delta = retained_name_count * (retained_name_count - 1) / 2;
     if (aggregate_name_bytes <= distinct_length_delta) {
@@ -1752,7 +1761,7 @@ TEST(AmdGpuCodeObjectValidation, AcceptsRetainedFunctionStateEqualToBudget) {
 
 TEST(AmdGpuCodeObjectValidation, RejectsRetainedFunctionStateOverBudget) {
   const auto image = make_elf_at_retained_derived_state_boundary({
-      .budget = SymbolNameBudget::OneByteOver,
+      .budget_case = SymbolNameBudgetCase::NextNameByteOverBoundary,
   });
   AmdGpuCodeObject obj(image.data(), image.size());
   EXPECT_FALSE(obj.is_valid());
@@ -1777,7 +1786,7 @@ TEST(AmdGpuCodeObjectValidation, RejectsOneTooManyShortRetainedFunctionEntries) 
 
 TEST(AmdGpuCodeObjectValidation, IgnoresUnretainedNamesAboveRetainedNameBudget) {
   const auto image = make_elf_at_retained_derived_state_boundary({
-      .budget = SymbolNameBudget::OneByteOver,
+      .budget_case = SymbolNameBudgetCase::NextNameByteOverBoundary,
       .symbol_type = kElfSymbolTypeNone,
       .symbol_section_index = SHN_UNDEF,
   });
@@ -1817,7 +1826,7 @@ TEST(AmdGpuCodeObjectValidation, AcceptsRetainedKernelStateEqualToBudget) {
 
 TEST(AmdGpuCodeObjectValidation, RejectsRetainedKernelStateOverBudget) {
   const auto image = make_elf_at_retained_derived_state_boundary({
-      .budget = SymbolNameBudget::OneByteOver,
+      .budget_case = SymbolNameBudgetCase::NextNameByteOverBoundary,
       .retained_kind = RetainedSymbolKind::KernelDescriptors,
   });
   AmdGpuCodeObject obj(image.data(), image.size());
@@ -1865,7 +1874,7 @@ TEST(AmdGpuCodeObjectValidation, ChargesKernelAndFunctionRetentionIndependently)
 
 TEST(AmdGpuCodeObjectValidation, RejectsCombinedKernelAndFunctionStateOverBudget) {
   const auto image = make_elf_at_retained_derived_state_boundary({
-      .budget = SymbolNameBudget::OneByteOver,
+      .budget_case = SymbolNameBudgetCase::NextNameByteOverBoundary,
       .retained_kind = RetainedSymbolKind::KernelsAndFunctions,
   });
   AmdGpuCodeObject obj(image.data(), image.size());
