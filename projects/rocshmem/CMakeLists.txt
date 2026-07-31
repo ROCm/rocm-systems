@@ -311,8 +311,8 @@ if (NOT BUILD_TESTS_ONLY)
       endif()
     endif()
 
-    if(NOT TARGET numa::numa)
-      message(STATUS "libnuma not found. Unable to build GDA or SDMA")
+    if(NOT TARGET numa::numa AND (USE_GDA OR USE_SDMA))
+      message(WARNING "libnuma not found. Unable to build GDA or SDMA")
       set(USE_SDMA OFF)
       set(USE_GDA OFF)
       set(GDA_IONIC OFF)
@@ -480,7 +480,8 @@ if (NOT BUILD_TESTS_ONLY)
       -fgpu-rdc
       $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
       $<$<BOOL:${USE_SDMA}>:hsakmt::hsakmt>
-      $<$<BOOL:${USE_GDA}>:numa::numa>
+    PRIVATE
+      $<$<BOOL:${USE_GDA} OR ${USE_SDMA}>:numa::numa>
   )
 
   target_link_options(
@@ -502,10 +503,8 @@ if (NOT BUILD_TESTS_ONLY)
   endif()
 
   if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
-    target_compile_definitions(${PROJECT_NAME}
-      PRIVATE ROCSHMEM_ROCPROFILER_REGISTER=1)
     target_link_libraries(${PROJECT_NAME}
-      PRIVATE rocprofiler-register::rocprofiler-register)
+                          PRIVATE rocprofiler-register::rocprofiler-register)
   endif()
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
@@ -551,11 +550,27 @@ if (NOT BUILD_TESTS_ONLY)
       rocm-dev
   )
 
-  # Generate a baked numa::numa imported target file from the paths resolved at
-  # rocshmem build time. This avoids re-detecting NUMA at consumer configure
-  # time (no find_dependency(NUMA), no FindNUMA.cmake, no CMAKE_MODULE_PATH
-  # manipulation) and works regardless of whether a NUMAConfig.cmake exists.
-  if(TARGET numa::numa)
+  set(_rocshmem_export_deps)
+  if(USE_SDMA AND TARGET hsakmt::hsakmt)
+    list(APPEND _rocshmem_export_deps PACKAGE hsakmt)
+  endif()
+  if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
+    list(APPEND _rocshmem_export_deps PACKAGE rocprofiler-register)
+  endif()
+
+  # ROCm 7.13+ ships NUMAConfig.cmake in rocm_sysdeps so find_dependency(NUMA)
+  # works cleanly for consumers. On older ROCm, bake the resolved paths into an
+  # included file since no config-mode NUMA package exists.
+  set(_rocshmem_numa_include)
+  if(${ROCM_MAJOR_VERSION} GREATER 7 OR
+     (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 13))
+    # ROCm 7.13+ ships NUMAConfig.cmake in rocm_sysdeps — find_dependency(NUMA)
+    # works for consumers via config mode.
+    if(USE_SDMA OR USE_GDA)
+      list(APPEND _rocshmem_export_deps PACKAGE NUMA)
+    endif()
+  elseif(TARGET numa::numa)
+    # Older ROCm: bake resolved paths so consumers need no FindNUMA.cmake.
     get_target_property(_numa_lib numa::numa IMPORTED_LOCATION)
     get_target_property(_numa_inc numa::numa INTERFACE_INCLUDE_DIRECTORIES)
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/rocshmem-numa-targets.cmake"
@@ -568,23 +583,20 @@ if (NOT BUILD_TESTS_ONLY)
       "set(NUMA_FOUND TRUE)\n")
     unset(_numa_lib)
     unset(_numa_inc)
-  else()
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/rocshmem-numa-targets.cmake" "")
+    set(_rocshmem_numa_include "${CMAKE_CURRENT_BINARY_DIR}/rocshmem-numa-targets.cmake")
   endif()
 
-  set(_rocshmem_export_deps)
-  if(USE_SDMA AND TARGET hsakmt::hsakmt)
-    list(APPEND _rocshmem_export_deps PACKAGE hsakmt)
-  endif()
-  if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
-    list(APPEND _rocshmem_export_deps PACKAGE rocprofiler-register)
+  set(_rocshmem_include_arg)
+  if(_rocshmem_numa_include)
+    set(_rocshmem_include_arg INCLUDE "${_rocshmem_numa_include}")
   endif()
   rocm_export_targets(
     TARGETS roc::rocshmem
     NAMESPACE roc::
     DEPENDS ${_rocshmem_export_deps}
-    INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/rocshmem-numa-targets.cmake"
+    ${_rocshmem_include_arg}
   )
+  unset(_rocshmem_include_arg)
   unset(_rocshmem_export_deps)
   include(ROCMPackageConfigHelpers)
   include(ROCMClients)
