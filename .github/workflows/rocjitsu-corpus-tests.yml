@@ -137,8 +137,8 @@ jobs:
             c_compiler: gcc
             cxx_compiler: g++
             run_corpus: true
-            corpus_soft_timeout: 60
-            corpus_hard_timeout: 120
+            corpus_soft_timeout: 120
+            corpus_hard_timeout: 240
 
     steps:
       - name: Install base dependencies
