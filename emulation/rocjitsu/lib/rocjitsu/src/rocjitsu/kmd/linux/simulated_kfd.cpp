@@ -302,10 +302,11 @@ void SimulatedKfd::init_command_processors_locked() {
       continue;
     if (!g.soc)
       continue;
-    uint64_t lds_base = 0x1000000000000ULL + i * 0x10000000000ULL;
-    uint64_t scratch_base = 0x2000000000000ULL + i * 0x10000000000ULL;
-    g.soc->set_apertures(lds_base, lds_base + 0xFFFFFFFFULL, scratch_base,
-                         scratch_base + 0xFFFFFFFFULL);
+    // Same source as the apertures GET_PROCESS_APERTURES_NEW and the DBG_TRAP
+    // device snapshot advertise: what the shaders translate LDS/scratch against
+    // must be what the runtime and the debugger were told.
+    const kfd_process_device_apertures ap = gpu_apertures(static_cast<uint32_t>(i));
+    g.soc->set_apertures(ap.lds_base, ap.lds_limit, ap.scratch_base, ap.scratch_limit);
     g.soc->for_each_cp([this](amdgpu::CommandProcessor *cp) {
       cp->set_interrupt_callback([this](uint32_t process_id, uint32_t event_id) {
         std::lock_guard<std::mutex> ilk(interrupt_mutex_);
