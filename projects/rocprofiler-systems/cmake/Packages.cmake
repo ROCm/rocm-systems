@@ -884,6 +884,20 @@ set(TIMEMORY_BUILD_CONTAINERS
 )
 
 # timemory build settings
+
+# With default value OFF, ConfigCpuArch host-detects the builder's CPU and can bake
+# in -mavx512* / -march=native, producing binaries that SIGILL on non-AVX-512 CPUs
+# (e.g. Zen3 / MI250X hosts). ON caps arch flags at AVX2.
+set(TIMEMORY_BUILD_PORTABLE
+    ${ROCPROFSYS_BUILD_PORTABLE}
+    CACHE BOOL
+    "Disable arch flags which may cause portability issues (e.g. AVX-512)"
+    FORCE
+)
+# End users configure this via ROCPROFSYS_BUILD_PORTABLE; hide the internal
+# timemory-prefixed variable to avoid confusion in ccmake / cmake-gui.
+mark_as_advanced(TIMEMORY_BUILD_PORTABLE)
+message(STATUS "Portable setting ROCPROFSYS_BUILD_PORTABLE: ${ROCPROFSYS_BUILD_PORTABLE}")
 set(TIMEMORY_TLS_MODEL "global-dynamic" CACHE STRING "Thread-local static model" FORCE)
 set(TIMEMORY_MAX_THREADS
     "${ROCPROFSYS_MAX_THREADS}"
