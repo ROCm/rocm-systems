@@ -244,6 +244,7 @@ class ActiveWFInfo {
  * for QueuePairTraits<Provider> that defines the documented members:
  *   - QueuePairTraits<Provider>::OpCode
  *   - QueuePairTraits<Provider>::Endianness
+ *   - QueuePairTraits<Provider>::InlineMax
  *   - QueuePairTraits<Provider>::InlineThreshold
  *
  * Sample specialization code for a QueuePairProvider subclass
@@ -260,6 +261,7 @@ class ActiveWFInfo {
  *
  *   static constexpr endian::Order Endianness = endian::Order::...;
  *
+ *   static constexpr size_t InlineMax       = ...;
  *   static constexpr size_t InlineThreshold = ...;
  * };
  * @endcode
@@ -293,8 +295,16 @@ class ActiveWFInfo {
  */
 
 /*
- * @var size_t QueuePairTraits<Provider>::InlineThreshold
+ * @var size_t QueuePairTraits<Provider>::InlineMax
  * @brief Maximum number of bytes that can be sent inline in a WQE.
+ *
+ * @qualifer static
+ * @qualifier constexpr
+ */
+
+/*
+ * @var size_t QueuePairTraits<Provider>::InlineThreshold
+ * @brief Preferred maximum number of bytes that should be sent inline in a WQE.
  *
  * @qualifer static
  * @qualifier constexpr
@@ -514,6 +524,10 @@ public:
    * @brief Type alias for QueuePairTraits<Provider>.
    */
   using Traits = QueuePairTraits<Provider>;
+
+  /* Check that Traits provides a valid inlining threshold */
+  static_assert(Traits::InlineThreshold <= Traits::InlineMax,
+                "Inlining threshold must be less than the inlining maximum.");
 
   /**
    * @brief Enumeration of the opcodes for Write, Read, Fetch-Add, and Compare-and-Swap.

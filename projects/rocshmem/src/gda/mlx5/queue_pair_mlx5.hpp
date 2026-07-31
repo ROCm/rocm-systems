@@ -48,7 +48,20 @@ template <> struct QueuePairTraits<QueuePairMLX5> {
    */
   static constexpr endian::Order Endianness = endian::Order::Big;
 
-  static constexpr size_t InlineThreshold = sizeof(gda_mlx5_wqe_inline_data::data);
+  /**
+   * @brief mlx5 inlining maximum is 28 bytes
+   *
+   * mlx5 inlining can use up to 2 inline data WQE segments:
+   * the first segment uses 4 (out of 16) bytes for encoding the data transfer size,
+   * leaving 12 bytes from the first segment and the full 16 bytes of the second segment
+   * for the actual inlined data.
+   */
+  static constexpr size_t InlineMax = sizeof(gda_mlx5_wqe_inline_data::data);
+
+  /*
+   * @brief mlx5 preferred inlining threshold is the same as the maximum
+   */
+  static constexpr size_t InlineThreshold = InlineMax;
 };
 
 class QueuePairMLX5 : public QueuePairBase<QueuePairMLX5> {

@@ -61,8 +61,6 @@ int GDABackend::mlx5_dv_dl_init() {
 }
 
 void GDABackend::mlx5_create_qps(int sq_length) {
-  // mlx5 provider can support up to 28B of inline data in a WQE
-  inline_threshold = sizeof(gda_mlx5_wqe_inline_data::data);
   for (size_t i = 0; i < mlx5_qps.size(); i++) {
     NicDevice &nic = nic_for_qp(i);
     int err = mlx5dv.create_qp(mlx5_qps[i], nic.context, nic.pd_orig, sq_length);

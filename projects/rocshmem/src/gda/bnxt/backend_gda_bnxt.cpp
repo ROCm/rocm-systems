@@ -231,7 +231,7 @@ void GDABackend::bnxt_create_qps(int sq_length) {
     ib_qp_attr.cap.max_recv_wr     = 0;
     ib_qp_attr.cap.max_send_sge    = 1;
     ib_qp_attr.cap.max_recv_sge    = 0;
-    ib_qp_attr.cap.max_inline_data = inline_threshold;
+    ib_qp_attr.cap.max_inline_data = QueuePairTraits<QueuePairBNXT>::InlineThreshold;
     ib_qp_attr.qp_type             = IBV_QPT_RC;
     ib_qp_attr.sq_sig_all          = 0;
 

@@ -48,8 +48,16 @@ template <> struct QueuePairTraits<QueuePairIONIC> {
    */
   static constexpr endian::Order Endianness = endian::Order::Big;
 
-  static constexpr size_t InlineThreshold = sizeof(ionic_v1_pld);
-  static_assert(InlineThreshold == 32, "ionic can send up to 32 bytes inline in a WQE");
+  /**
+   * @brief ionic inlining maximum is the WQE's payload segment, sizeof(ionic_v1_pld) = 32 bytes
+   */
+  static constexpr size_t InlineMax = sizeof(ionic_v1_pld);
+  static_assert(InlineMax == 32, "ionic can send up to 32 bytes inline in a WQE");
+
+  /*
+   * @brief ionic preferred inlining threshold is the same as the maximum
+   */
+  static constexpr size_t InlineThreshold = InlineMax;
 };
 
 class QueuePairIONIC : public QueuePairBase<QueuePairIONIC> {

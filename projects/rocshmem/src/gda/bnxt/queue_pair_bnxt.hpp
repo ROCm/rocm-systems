@@ -48,7 +48,15 @@ template <> struct QueuePairTraits<QueuePairBNXT> {
    */
   static constexpr endian::Order Endianness = endian::Order::Little;
 
-  static constexpr size_t InlineThreshold = sizeof(struct bnxt_re_sge);
+  /**
+   * @brief bnxt inlining maximum is one WQE segment: sizeof(struct bnxt_re_sge) = 16 bytes
+   */
+  static constexpr size_t InlineMax = sizeof(struct bnxt_re_sge);
+
+  /**
+   * @brief bnxt preferred inlining threshold is 8 bytes, for performance reasons
+   */
+  static constexpr size_t InlineThreshold = sizeof(uint64_t);
 };
 
 class QueuePairBNXT : public QueuePairBase<QueuePairBNXT> {

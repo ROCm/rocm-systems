@@ -62,6 +62,19 @@ template <> struct QueuePairTraits<QueuePairMux> {
     ATOMIC_FA,
   };
 
+  static constexpr size_t InlineMax =
+      std::min({
+#if defined(GDA_IONIC)
+                QueuePairTraits<QueuePairIONIC>::InlineMax,
+#endif
+#if defined(GDA_BNXT)
+                QueuePairTraits<QueuePairBNXT>::InlineMax,
+#endif
+#if defined(GDA_MLX5)
+                QueuePairTraits<QueuePairMLX5>::InlineMax,
+#endif
+                });
+
   static constexpr size_t InlineThreshold =
       std::min({
 #if defined(GDA_IONIC)

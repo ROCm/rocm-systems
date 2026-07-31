@@ -2221,13 +2221,32 @@ void GDABackend::create_qps(int sq_length) {
   memset(&attr, 0, sizeof(struct ibv_qp_init_attr_ex));
   attr.cap.max_send_wr     = sq_length;
   attr.cap.max_send_sge    = 1;
-  attr.cap.max_inline_data = inline_threshold;
   attr.sq_sig_all          = 0;
   attr.qp_type             = IBV_QPT_RC;
   attr.comp_mask           = IBV_QP_INIT_ATTR_PD;
 
-  if (gda_provider == GDAProvider::IONIC) {
+  /* Set provider-specific QP creation attibutes
+   * Note that only ionic actually uses this code path currently */
+  switch (gda_provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    attr.cap.max_inline_data = QueuePairTraits<QueuePairIONIC>::InlineThreshold;
     attr.cap.max_recv_sge    = 1; // TODO allow zero sges in the driver
+    break;
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    attr.cap.max_inline_data = QueuePairTraits<QueuePairBNXT>::InlineThreshold;
+    break;
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    attr.cap.max_inline_data = QueuePairTraits<QueuePairMLX5>::InlineThreshold;
+    break;
+#endif
+  default:
+    assert(false /* invalid GDAProvider */);
+    break;
   }
 
   for (size_t i = 0; i < qps.size(); i++) {
