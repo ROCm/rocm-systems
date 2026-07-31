@@ -331,7 +331,6 @@ removal itself because it also deletes user-facing surface, the dedicated
 `join_type_grid` / `join_type_kernel` golden workloads, their related tests,
 and the `--join-type` references in the docs.
 
-
 ## Phase B: Add Compression at CSV Read/Write
 
 We are to introduce gzip streaming to provide a size reduction to csv files.
