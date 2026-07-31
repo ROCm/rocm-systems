@@ -4,6 +4,38 @@
 include(rj_configure_target)
 include(rj_find_amdcxx)
 
+if(CMAKE_DL_LIBS)
+    add_library(
+        hsa_tool_lifetime_test_module
+        MODULE
+        hsa_tool_lifetime_test_module.cpp
+    )
+    target_include_directories(
+        hsa_tool_lifetime_test_module
+        PRIVATE ${ROCJITSU_SRC_DIR}
+    )
+    target_link_libraries(
+        hsa_tool_lifetime_test_module
+        PRIVATE rocjitsu_hsa_tool_lifetime
+    )
+    add_executable(hsa_tool_lifetime_test hsa_tool_lifetime_test.cpp)
+    target_link_libraries(
+        hsa_tool_lifetime_test
+        PRIVATE ${CMAKE_DL_LIBS} rj_build_config
+    )
+    add_dependencies(hsa_tool_lifetime_test hsa_tool_lifetime_test_module)
+    add_test(
+        NAME HsaToolLifetime.SelfPinSurvivesExternalClose
+        COMMAND
+            $<TARGET_FILE:hsa_tool_lifetime_test>
+            $<TARGET_FILE:hsa_tool_lifetime_test_module>
+    )
+    set_tests_properties(
+        HsaToolLifetime.SelfPinSurvivesExternalClose
+        PROPERTIES LABELS "runtime-lifetime"
+    )
+endif()
+
 # Device kernels (compiled from HIP sources for simulator testing).
 add_subdirectory(kernels)
 
@@ -1911,6 +1943,44 @@ set(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH FALSE)
 set(RJ_HIP_RUNTIME_SUPPORTS_GFX950 FALSE)
 set(RJ_HIP_RUNTIME_SUPPORTS_GFX942 FALSE)
 set(RJ_HIP_RUNTIME_SUPPORTS_GFX1250 FALSE)
+
+if(HIP_RUNTIME64 AND CMAKE_DL_LIBS)
+    add_executable(hip_runtime_dlopen_test hip_runtime_dlopen_test.cpp)
+    target_link_libraries(
+        hip_runtime_dlopen_test
+        PRIVATE ${CMAKE_DL_LIBS} rj_build_config
+    )
+    add_dependencies(
+        hip_runtime_dlopen_test
+        rocjitsu_bin
+        rocjitsu_shared
+        rocjitsu_dbi_hooks
+    )
+    if(RJ_INSTALL_TESTS)
+        rj_install_test_target(hip_runtime_dlopen_test)
+    endif()
+    rj_add_test(
+        NAME ConSanHook.DynamicHipRuntimeUnload
+        COMMAND
+            ${RJ_CLI}
+            --config
+            ${RJ_CDNA4_KMD_CONFIG}
+            --
+            $<TARGET_FILE:hip_runtime_dlopen_test>
+            ${HIP_RUNTIME64}
+            $<TARGET_FILE:rocjitsu_dbi_hooks>
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        TIMEOUT 30
+        LABELS consan runtime-lifetime
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "HSA_TOOLS_ROCPROFILER_V1_TOOLS=1"
+            "RJ_CONSAN_MODE=supercollider"
+            "RJ_CONSAN_POLICY=strict"
+            "RJ_CONSAN_REQUIRE_PATCH=0"
+            "RJ_CONSAN_LOG=0"
+    )
+endif()
 
 function(rj_hip_runtime_supports_arch out_var arch)
     set(_supports FALSE)

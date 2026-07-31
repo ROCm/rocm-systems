@@ -1318,7 +1318,8 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKer
 
   KD desc{};
   std::memcpy(&desc, current_image.data() + kernel.descriptor_file_offset, sizeof(desc));
-  if (!grow_moi_descriptor_vgpr_allocation(desc, required_vgpr_count, arch)) {
+  if (!grow_moi_descriptor_vgpr_allocation(desc, required_vgpr_count, arch,
+                                           kernel.agpr_count == 0u)) {
     errors.emplace_back("ConSan MOI could not grow descriptor VGPR allocation");
     return false;
   }
@@ -2228,10 +2229,11 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
         (options.moi_engine == ConSanMoiEngine::InlineShadow &&
          (options.automatic_moi_persistent_vgprs || options.automatic_moi_persistent_sgprs));
     if (instrument_entry_in_place && item.has_kernarg_preload) {
-      if (options.automatic_moi_persistent_vgprs) {
-        // The in-place relay currently represents one hardware entry. Retain
-        // the paired descriptor-redirection path when kernarg preloading
-        // exposes a second entry that must run identical initialization.
+      if (!requires_in_place_entry) {
+        // Automatic persistent state prefers an in-place entry only to avoid
+        // long descriptor redirects in large modules. A kernarg-preload
+        // descriptor exposes two hardware entries, so ordinary kernels use
+        // the paired descriptor-redirection path and initialize both entries.
         instrument_entry_in_place = false;
       } else {
         result.errors.emplace_back(

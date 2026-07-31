@@ -21,6 +21,7 @@
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_transform_memory.h"
+#include "rocjitsu/hooks/hsa_tool_lifetime.h"
 #include "util/arena_alloc.h"
 #include "util/intrusive_list.h"
 
@@ -4898,6 +4899,9 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
   (void)runtime_version;
   (void)failed_tool_count;
   (void)failed_tool_names;
+
+  if (!rocjitsu::hooks::retain_hsa_tool_dso())
+    return false;
 
   auto config = parse_config();
   if (!config)

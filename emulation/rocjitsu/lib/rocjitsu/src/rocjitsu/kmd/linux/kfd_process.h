@@ -113,15 +113,26 @@ public:
 
   /// @brief GPU memory allocation descriptor.
   struct GpuAllocation {
+    struct RetiredHostMapping {
+      void *host_ptr = nullptr;
+      size_t size = 0;
+    };
+
     uint64_t gpu_va = 0;
     uint64_t size = 0;
     void *host_ptr = nullptr;
+    uint64_t mapped_size = 0;
     uint32_t flags = 0;
     uint64_t handle = 0;
     int memfd = -1;
     uint32_t gpu_id = 0;
     bool user_va = false;
     bool imported = false;
+    bool scratch_backing = false;
+    // Scratch growth replaces page-table entries, but a memory access that
+    // resolved the prior entry may still hold its raw host pointer. Keep those
+    // shared-file views mapped until process teardown.
+    std::vector<RetiredHostMapping> retired_host_mappings;
     int dmabuf_fd = -1;
     // True when the driver created host_ptr (mmap it itself) and must munmap it
     // on teardown. False for caller-owned pages (e.g. reused MAP_FIXED pages

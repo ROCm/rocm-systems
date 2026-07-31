@@ -161,10 +161,10 @@ choose_flat_check_trap_indirect_scalar_scratch(
     const ConSanFlatSite &site, const ConSanOptions &options, const Instruction *inst,
     std::span<const LivenessAnalysis *const> owner_liveness,
     std::optional<uint16_t> min_auto_scratch_vgpr, std::optional<uint16_t> max_auto_scratch_vgpr,
-    uint16_t required_vgprs) {
+    uint16_t required_vgprs, rj_code_arch_t arch) {
   if (options.scratch_vgpr) {
     return choose_flat_scratch_vgpr(site, options, inst, nullptr, min_auto_scratch_vgpr,
-                                    max_auto_scratch_vgpr, required_vgprs);
+                                    max_auto_scratch_vgpr, required_vgprs, arch);
   }
   if (inst == nullptr || owner_liveness.empty() ||
       std::ranges::any_of(owner_liveness,
@@ -188,6 +188,7 @@ choose_flat_check_trap_indirect_scalar_scratch(
           return !liveness->any_live_before(*inst, ref);
         });
     if (candidate_end <= REGISTER_SET_MAX_VGPRS && dead_for_every_owner &&
+        flat_scratch_tuple_base_is_valid(site, arch, *candidate) &&
         !is_forbidden_flat_scratch_vgpr_run(site, *candidate, required_vgprs))
       return candidate;
     if (*candidate == UINT16_MAX)
@@ -485,7 +486,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     const uint32_t probe_scratch_vgprs = *required_vgprs + comparison_scratch_vgprs;
     const uint32_t report_alignment_padding =
         options.report_buffer_address &&
-                (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+                consan_arch_requires_even_vgpr_tuples(arch)
             ? 1u
             : 0u;
     const uint32_t instrumentation_scratch_vgprs =
@@ -521,7 +522,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         instrumentation_scratch_vgprs + (spill_vcc_save_pair_to_vgprs ? 1u : 0u);
     auto scratch = choose_flat_check_trap_scratch_vgpr(site, options, site_inst, owner_liveness,
                                                        min_auto_scratch_vgpr, max_auto_scratch_vgpr,
-                                                       scratch_vgprs);
+                                                       scratch_vgprs, arch);
     std::optional<VgprSpillSequence> vgpr_spill;
     std::optional<DynamicStackBorrowedSgprSpillSequence> dynamic_stack_spill;
     uint16_t scalar_vcc_spill_vgpr_count = spill_vcc_save_pair_to_vgprs ? 1u : 0u;
@@ -539,7 +540,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
             uses_dynamic_stack ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
                                : static_cast<uint16_t>(spill_vcc_save_pair_to_vgprs ? 2u : 0u);
         scratch_vgprs = instrumentation_scratch_vgprs + scalar_reservoir_count;
-        scratch = choose_flat_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs);
+        scratch =
+            choose_flat_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs, arch);
         if (scratch && uses_dynamic_stack) {
           dynamic_stack_spill = build_dynamic_stack_borrowed_sgpr_spill_sequence(
               *scratch, scratch_vgprs, *vcc_save,
@@ -1293,6 +1295,11 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     const bool use_trampoline = candidate.use_local_cave || candidate.use_appended_cave;
     ConSanPatchKind patch_kind = use_trampoline ? ConSanPatchKind::LocalCaveFlatLoadCheckTrap
                                                 : ConSanPatchKind::InlineFlatLoadCheckTrap;
+    if (!flat_scratch_tuple_base_is_valid(site, arch, candidate.scratch_vgpr)) {
+      result.errors.emplace_back(
+          "ConSan flat check/trap proof selected a misaligned tuple scratch base");
+      return;
+    }
     if (site.kind == ConSanLdsAccessKind::Read) {
       duplicate_load = retarget_flat_load_vdst(original_access, candidate.scratch_vgpr, arch);
     } else if (site.kind == ConSanLdsAccessKind::Write) {
@@ -1387,7 +1394,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     uint16_t report_scratch_vgpr =
         static_cast<uint16_t>(candidate.scratch_vgpr + *required_vgprs + comparison_scratch_vgprs);
     if (options.report_buffer_address &&
-        (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+        consan_arch_requires_even_vgpr_tuples(arch) &&
         report_scratch_vgpr % 2u != 0)
       ++report_scratch_vgpr;
     auto mismatch_action = build_mismatch_action_words(

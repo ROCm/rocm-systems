@@ -96,6 +96,7 @@ struct ConSanSiteDispositionRecord {
 enum class ConSanResourcePlanAlternativeKind : uint8_t {
   GuestOperandOverlapSpill,
   SpillBackedOperandRecovery,
+  EmptyAccumulatorDescriptorGrowth,
 };
 
 enum class ConSanResourcePlanAlternativeOutcome : uint8_t {

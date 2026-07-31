@@ -266,13 +266,19 @@ parse_kernel_metadata_payload(std::span<const uint8_t> payload, const void *cont
           if (tag != 0xc2u && tag != 0xc3u)
             return KernelMetadataVisitStatus::Malformed;
           metadata.uses_dynamic_stack = tag == 0xc3u;
-        } else if (kernel_key == ".sgpr_count") {
+        } else if (kernel_key == ".vgpr_count" || kernel_key == ".agpr_count" ||
+                   kernel_key == ".sgpr_count") {
           uint64_t count = 0;
           if (!read_metadata_unsigned(root, count) ||
               count > std::numeric_limits<uint16_t>::max()) {
             return KernelMetadataVisitStatus::Malformed;
           }
-          metadata.sgpr_count = static_cast<uint16_t>(count);
+          if (kernel_key == ".vgpr_count")
+            metadata.vgpr_count = static_cast<uint16_t>(count);
+          else if (kernel_key == ".agpr_count")
+            metadata.agpr_count = static_cast<uint16_t>(count);
+          else
+            metadata.sgpr_count = static_cast<uint16_t>(count);
         } else if (kernel_key == ".reqd_workgroup_size") {
           uint32_t dimension_count = 0;
           if (!read_metadata_collection_count(root, /*map=*/false, dimension_count) ||
@@ -294,8 +300,8 @@ parse_kernel_metadata_payload(std::span<const uint8_t> payload, const void *cont
         }
       }
       if (!visitor_rejected && name &&
-          (metadata.has_dynamic_lds || metadata.uses_dynamic_stack || metadata.sgpr_count ||
-           metadata.required_workgroup_size) &&
+          (metadata.has_dynamic_lds || metadata.uses_dynamic_stack || metadata.vgpr_count ||
+           metadata.agpr_count || metadata.sgpr_count || metadata.required_workgroup_size) &&
           !visitor(context, *name, metadata)) {
         visitor_rejected = true;
       }

@@ -496,6 +496,14 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
          site.mnemonic == "ds_write2st64_b64";
 }
 
+[[nodiscard]] bool is_two_address_lds_load(const ConSanLdsSite &site) {
+  return site.mnemonic == "ds_load_2addr_b32" || site.mnemonic == "ds_load_2addr_b64" ||
+         site.mnemonic == "ds_load_2addr_stride64_b32" ||
+         site.mnemonic == "ds_load_2addr_stride64_b64" || site.mnemonic == "ds_read2_b32" ||
+         site.mnemonic == "ds_read2st64_b32" || site.mnemonic == "ds_read2_b64" ||
+         site.mnemonic == "ds_read2st64_b64";
+}
+
 [[nodiscard]] std::optional<uint32_t>
 two_address_lds_element_width_bits(const ConSanLdsSite &site) {
   if (site.mnemonic.ends_with("b32"))
@@ -505,13 +513,43 @@ two_address_lds_element_width_bits(const ConSanLdsSite &site) {
   return std::nullopt;
 }
 
+[[nodiscard]] std::optional<uint32_t>
+two_address_lds_offset_scale_bytes(const ConSanLdsSite &site) {
+  if (site.mnemonic == "ds_load_2addr_b32" || site.mnemonic == "ds_store_2addr_b32" ||
+      site.mnemonic == "ds_read2_b32" || site.mnemonic == "ds_write2_b32")
+    return 4u;
+  if (site.mnemonic == "ds_load_2addr_b64" || site.mnemonic == "ds_store_2addr_b64" ||
+      site.mnemonic == "ds_read2_b64" || site.mnemonic == "ds_write2_b64")
+    return 8u;
+  if (site.mnemonic == "ds_load_2addr_stride64_b32" ||
+      site.mnemonic == "ds_store_2addr_stride64_b32" ||
+      site.mnemonic == "ds_read2st64_b32" || site.mnemonic == "ds_write2st64_b32")
+    return 256u;
+  if (site.mnemonic == "ds_load_2addr_stride64_b64" ||
+      site.mnemonic == "ds_store_2addr_stride64_b64" ||
+      site.mnemonic == "ds_read2st64_b64" || site.mnemonic == "ds_write2st64_b64")
+    return 512u;
+  return std::nullopt;
+}
+
+struct TwoAddressLdsByteOffsets {
+  uint32_t first = 0;
+  uint32_t second = 0;
+};
+
+[[nodiscard]] std::optional<TwoAddressLdsByteOffsets>
+two_address_lds_byte_offsets(const ConSanLdsSite &site, uint32_t word0) {
+  const auto scale = two_address_lds_offset_scale_bytes(site);
+  if (!scale)
+    return std::nullopt;
+  return TwoAddressLdsByteOffsets{
+      .first = (word0 & 0xffu) * *scale,
+      .second = ((word0 >> 8u) & 0xffu) * *scale,
+  };
+}
+
 [[nodiscard]] std::optional<uint16_t> lds_dword_count(const ConSanLdsSite &site) {
-  const bool is_two_addr_load =
-      site.mnemonic == "ds_load_2addr_b32" || site.mnemonic == "ds_load_2addr_b64" ||
-      site.mnemonic == "ds_load_2addr_stride64_b32" ||
-      site.mnemonic == "ds_load_2addr_stride64_b64" || site.mnemonic == "ds_read2_b32" ||
-      site.mnemonic == "ds_read2st64_b32" || site.mnemonic == "ds_read2_b64" ||
-      site.mnemonic == "ds_read2st64_b64";
+  const bool is_two_addr_load = is_two_address_lds_load(site);
   const bool is_two_addr_store = is_two_address_lds_store(site);
   if (site.mnemonic == "ds_load_i8" || site.mnemonic == "ds_load_u8" ||
       site.mnemonic == "ds_load_i16" || site.mnemonic == "ds_load_u16" ||
@@ -542,6 +580,26 @@ two_address_lds_element_width_bits(const ConSanLdsSite &site) {
   const uint32_t lhs_end = static_cast<uint32_t>(lhs_base) + lhs_count;
   const uint32_t rhs_end = static_cast<uint32_t>(rhs_base) + rhs_count;
   return static_cast<uint32_t>(lhs_base) < rhs_end && static_cast<uint32_t>(rhs_base) < lhs_end;
+}
+
+/// CDNA3, CDNA4, and gfx1250 require every multi-VGPR tuple operand to start
+/// at an even register. RDNA4 permits unaligned tuples. ConSan only admits
+/// these four architecture families, so this captures the complete target
+/// distinction used by its scratch planners.
+[[nodiscard]] constexpr bool consan_arch_requires_even_vgpr_tuples(rj_code_arch_t arch) {
+  return instrumentation::is_cdna_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250;
+}
+
+[[nodiscard]] bool lds_scratch_tuple_base_is_valid(const ConSanLdsSite &site,
+                                                   rj_code_arch_t arch, uint16_t candidate) {
+  const auto dword_count = lds_dword_count(site);
+  if (!dword_count || *dword_count <= 1u || !consan_arch_requires_even_vgpr_tuples(arch))
+    return true;
+
+  // gfx1250's transposed 96-bit six-lane load is the sole admitted exception
+  // to the target's even-tuple rule.
+  return (arch == ROCJITSU_CODE_ARCH_GFX1250 && site.mnemonic == "ds_load_tr6_b96") ||
+         candidate % 2u == 0u;
 }
 
 [[nodiscard]] bool lds_load_clobbers_address(const ConSanLdsSite &site) {
@@ -622,7 +680,8 @@ required_descriptor_vgpr_allocation_for_scratch(const ConSanLdsSite &site, uint1
 find_liveness_scratch_vgpr(const ConSanLdsSite &site, const Instruction *inst,
                            const LivenessAnalysis *liveness,
                            std::optional<uint16_t> min_auto_scratch_vgpr,
-                           std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs) {
+                           std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs,
+                           rj_code_arch_t arch) {
   if (inst == nullptr || liveness == nullptr)
     return std::nullopt;
 
@@ -639,7 +698,8 @@ find_liveness_scratch_vgpr(const ConSanLdsSite &site, const Instruction *inst,
     if (max_auto_scratch_vgpr && candidate_end == *max_auto_scratch_vgpr &&
         needs_scratch_headroom_at_descriptor_edge(site))
       return std::nullopt;
-    if (candidate_end <= 256 && !is_forbidden_scratch_vgpr_run(site, *candidate, required_vgprs))
+    if (candidate_end <= 256 && lds_scratch_tuple_base_is_valid(site, arch, *candidate) &&
+        !is_forbidden_scratch_vgpr_run(site, *candidate, required_vgprs))
       return candidate;
     if (*candidate == UINT16_MAX)
       return std::nullopt;
@@ -652,16 +712,18 @@ find_liveness_scratch_vgpr(const ConSanLdsSite &site, const Instruction *inst,
 choose_scratch_vgpr(const ConSanLdsSite &site, const ConSanOptions &options,
                     const Instruction *inst, const LivenessAnalysis *liveness,
                     std::optional<uint16_t> min_auto_scratch_vgpr,
-                    std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs) {
+                    std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs,
+                    rj_code_arch_t arch) {
   if (options.scratch_vgpr) {
     if (static_cast<uint32_t>(*options.scratch_vgpr) + required_vgprs <= 256 &&
+        lds_scratch_tuple_base_is_valid(site, arch, *options.scratch_vgpr) &&
         !is_forbidden_scratch_vgpr_run(site, *options.scratch_vgpr, required_vgprs))
       return *options.scratch_vgpr;
     return std::nullopt;
   }
 
   if (auto scratch = find_liveness_scratch_vgpr(site, inst, liveness, min_auto_scratch_vgpr,
-                                                max_auto_scratch_vgpr, required_vgprs))
+                                                max_auto_scratch_vgpr, required_vgprs, arch))
     return scratch;
 
   return std::nullopt;
@@ -669,11 +731,13 @@ choose_scratch_vgpr(const ConSanLdsSite &site, const ConSanOptions &options,
 
 [[nodiscard]] std::optional<uint16_t> choose_spill_scratch_vgpr(const ConSanLdsSite &site,
                                                                 uint16_t allocation_count,
-                                                                uint16_t required_vgprs) {
+                                                                uint16_t required_vgprs,
+                                                                rj_code_arch_t arch) {
   for (uint32_t candidate = 0;
        candidate + required_vgprs <= allocation_count && candidate + required_vgprs <= 256u;
        ++candidate) {
-    if (!is_forbidden_scratch_vgpr_run(site, static_cast<uint16_t>(candidate), required_vgprs))
+    if (lds_scratch_tuple_base_is_valid(site, arch, static_cast<uint16_t>(candidate)) &&
+        !is_forbidden_scratch_vgpr_run(site, static_cast<uint16_t>(candidate), required_vgprs))
       return static_cast<uint16_t>(candidate);
   }
   return std::nullopt;

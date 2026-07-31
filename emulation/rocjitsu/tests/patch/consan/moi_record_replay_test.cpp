@@ -1175,6 +1175,160 @@ TEST(ConSanMoi, RecordReplayRejectsAmbiguousPersistentWorkgroupRepresentations) 
   }));
 }
 
+TEST(ConSanMoi, RecordReplayRuntimeGateUsesPersistentWorkgroupTuple) {
+  std::vector<uint32_t> text_words;
+  for (uint32_t i = 0; i < 9u; ++i) {
+    text_words.push_back(0xD8340000u); // ds_store_b32 v0, v0
+    text_words.push_back(0x00000000u);
+  }
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "record_replay_runtime_gate", kRdna4Wave64AllVgprsGranulated,
+      /*wave32=*/false, /*uses_dynamic_stack=*/false,
+      /*workgroup_id_dimension_mask=*/7u);
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_dispatch_id_sgpr = 70u;
+  options.moi_owner_vgpr = 30u;
+  options.moi_epoch_vgpr = 31u;
+  options.moi_record_replay_workgroup_sgprs = {.x = 40u, .y = 41u, .z = 42u};
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(9, 0, 0, 0);
+  options.moi_runtime_sample_stride = 65536u;
+  options.moi_runtime_sample_offset = 1234u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 9u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "errors=" << testing::PrintToString(result.errors)
+      << " warnings=" << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            9);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  std::vector<uint32_t> patched_words(patched.text_sections().front()->size() / sizeof(uint32_t));
+  std::memcpy(patched_words.data(), patched.text_sections().front()->data(),
+              patched_words.size() * sizeof(uint32_t));
+  const uint16_t quotient_sgpr = 85u;
+  const uint16_t residue_sgpr = 86u;
+  EXPECT_NE(std::ranges::find(patched_words, build_s_lshr_b32(quotient_sgpr, residue_sgpr,
+                                                              scalar_positive_inline_u32(16u),
+                                                              ROCJITSU_CODE_ARCH_RDNA4)),
+            patched_words.end());
+  ASSERT_NE(std::ranges::find(patched_words, *build_s_sub_u32(residue_sgpr, residue_sgpr, 40u,
+                                                              ROCJITSU_CODE_ARCH_RDNA4)),
+            patched_words.end());
+  const auto literal_move = std::ranges::search(
+      patched_words,
+      std::array<uint32_t, 2>{
+          build_s_mov_b32(quotient_sgpr, /*literal source=*/255u, ROCJITSU_CODE_ARCH_RDNA4),
+          1234u,
+      });
+  EXPECT_NE(literal_move.begin(), patched_words.end());
+}
+
+TEST(ConSanMoi, RecordReplayRuntimeGateCoversBarrierRecords) {
+  constexpr uint32_t kBarrierWait = 0xBF940000u;
+  const std::array<uint32_t, 2> text_words = {
+      kBarrierWait,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_dispatch_id_sgpr = 70u;
+  options.moi_owner_vgpr = 30u;
+  options.moi_epoch_vgpr = 31u;
+  options.moi_record_replay_workgroup_sgprs = {.x = 40u, .y = 41u, .z = 42u};
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
+  options.moi_runtime_sample_stride = 65536u;
+  options.moi_runtime_sample_offset = 1234u;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanResult result =
+      try_patch_consan(make_rdna4_lds_code_object(text_words, "barrier_runtime_gate"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "errors=" << testing::PrintToString(result.errors)
+      << " warnings=" << testing::PrintToString(result.warnings);
+  const auto patch = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
+                                       &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> words =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const auto gate_entry = instrumentation::build_s_cselect_b32(
+      /*sdst=*/84u, scalar_positive_inline_u32(1u), scalar_positive_inline_u32(0u),
+      ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(gate_entry);
+  ASSERT_FALSE(words.empty());
+  EXPECT_EQ(words.front(), *gate_entry);
+  EXPECT_EQ(std::ranges::count(words, kBarrierWait), 2u);
+}
+
+TEST(ConSanMoi, RecordReplayRuntimeGateCoversStandaloneAtomicAndFenceRecords) {
+  const std::vector<uint8_t> bytes = make_rdna4_atomic_fence_sequence_code_object();
+  ASSERT_FALSE(bytes.empty());
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 16u;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_dispatch_id_sgpr = 70u;
+  options.moi_owner_vgpr = 30u;
+  options.moi_epoch_vgpr = 31u;
+  options.moi_record_replay_workgroup_sgprs = {.x = 40u, .y = 41u, .z = 42u};
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(
+      /*access_record_capacity=*/1u, /*diagnostic_capacity=*/0u,
+      /*exact_shadow_entry_capacity=*/0u, /*sampled_watchpoint_capacity=*/0u,
+      /*barrier_record_capacity=*/0u, /*atomic_record_capacity=*/1u,
+      /*fence_record_capacity=*/2u);
+  options.moi_runtime_sample_stride = 65536u;
+  options.moi_runtime_sample_offset = 1234u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.max_patches = 3u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "errors=" << testing::PrintToString(result.errors)
+      << " warnings=" << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
+                               &ConSanPatchInfo::kind),
+            1u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
+                               &ConSanPatchInfo::kind),
+            1u);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto gate_entry = instrumentation::build_s_cselect_b32(
+      /*sdst=*/84u, scalar_positive_inline_u32(1u), scalar_positive_inline_u32(0u),
+      ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(gate_entry);
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiAtomicRecord &&
+        patch.kind != ConSanPatchKind::TrampolineMoiFenceRecord)
+      continue;
+    const std::vector<uint32_t> words =
+        text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+    ASSERT_FALSE(words.empty());
+    EXPECT_EQ(words.front(), *gate_entry);
+  }
+}
+
 TEST(ConSanMoi, CdnaRecordReplayEnablesAndCapturesEveryLaunchCoordinate) {
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     for (const uint32_t dimension_mask : {0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u}) {

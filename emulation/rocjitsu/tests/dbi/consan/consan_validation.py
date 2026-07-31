@@ -94,7 +94,12 @@ ORDINARY_MOI_RUNTIME_DEFAULTS = {
 }
 
 SAMPLED_STANDARD_RUNTIME_DEFAULTS = {
-    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE": "16384",
+    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE": "256",
+    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "0",
+}
+
+RECORD_REPLAY_STANDARD_RUNTIME_DEFAULTS = {
+    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE": "65536",
     "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "0",
 }
 
@@ -1880,7 +1885,9 @@ def _profile_runtime_defaults(
     if PROFILES[profile].flavor != "moi":
         return []
     defaults = dict(ORDINARY_MOI_RUNTIME_DEFAULTS)
-    if profile == "sampled":
+    if profile == "record-replay":
+        defaults.update(RECORD_REPLAY_STANDARD_RUNTIME_DEFAULTS)
+    elif profile == "sampled":
         defaults.update(SAMPLED_STANDARD_RUNTIME_DEFAULTS)
     explicit_names = set(explicit_environment or {})
     settings = _audited_settings(

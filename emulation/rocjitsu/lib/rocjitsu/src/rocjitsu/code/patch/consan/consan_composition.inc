@@ -690,6 +690,10 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     info.has_text_range = kernel.has_text_range;
     info.has_dynamic_lds = kernel.has_dynamic_lds;
     info.uses_dynamic_stack = kernel.uses_dynamic_stack;
+    if (result.kernel_metadata_trustworthy) {
+      info.vgpr_count = kernel.vgpr_count;
+      info.agpr_count = kernel.agpr_count;
+    }
     info.sgpr_count = kernel.sgpr_count;
     info.required_workgroup_size = kernel.required_workgroup_size;
     result.kernels.push_back(std::move(info));

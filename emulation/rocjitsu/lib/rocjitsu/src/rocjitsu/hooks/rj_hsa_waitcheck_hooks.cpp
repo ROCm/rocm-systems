@@ -5,6 +5,7 @@
 /// @brief ROCR HSA tools hook for checking the final AMDGPU code object loaded.
 
 #include "hsa/hsa_api_trace_minimal.h"
+#include "rocjitsu/hooks/hsa_tool_lifetime.h"
 
 #include "rocjitsu/analysis/waitcheck.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -1146,6 +1147,8 @@ extern "C" RJ_WAITCHECK_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t run
   (void)runtime_version;
   (void)failed_tool_count;
   (void)failed_tool_names;
+  if (!rocjitsu::hooks::retain_hsa_tool_dso())
+    return false;
   return layer().install(table);
 }
 

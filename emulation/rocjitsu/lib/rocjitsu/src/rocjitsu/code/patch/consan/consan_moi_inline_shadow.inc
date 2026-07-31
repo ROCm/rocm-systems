@@ -2188,7 +2188,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     const ConSanMoiAccessRange &access_range, const ConSanOptions &options, rj_code_arch_t arch,
     uint32_t record_index, std::span<const uint32_t> prior_record_indices,
     uint32_t window_bank_count, bool relocate_instruction,
-    std::optional<uint16_t> preserved_lds_byte_offset_vgpr, size_t sampled_causal_windows_offset,
+    std::optional<uint16_t> preserved_lds_byte_offset_vgpr, const VgprSpillSequence *spill,
+    std::optional<uint16_t> spilled_lds_byte_offset_vgpr, size_t sampled_causal_windows_offset,
     size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr) {
   if (!options.scratch_vgpr) {
@@ -2204,7 +2205,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   const uint16_t base_scratch_count = static_cast<uint16_t>((options.moi_sampled_check ? 7u : 5u) +
                                                             (dedicated_bank_vgpr ? 1u : 0u));
   const uint16_t scratch_count = static_cast<uint16_t>(
-      direct_sampled_scratch_count(options, candidate) +
+      (options.moi_sampled_spill_backed_operand_recovery
+           ? sampled_spill_backed_scratch_count(options, candidate)
+           : direct_sampled_scratch_count(options, candidate)) +
       (window_bank_count > 1 && options.moi_runtime_sample_stride <= 1 ? 1u : 0u));
   if (static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count > kMaxVgprs) {
     errors.emplace_back("ConSan MOI sampled probe exceeds the VGPR file");
@@ -2213,6 +2216,10 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   auto lds_byte_offset_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
   if (!lds_byte_offset_vgpr)
     return std::nullopt;
+  if (spilled_lds_byte_offset_vgpr && spill == nullptr) {
+    errors.emplace_back("ConSan MOI sampled probe has no spill plan for its LDS address");
+    return std::nullopt;
+  }
   if (preserved_lds_byte_offset_vgpr)
     lds_byte_offset_vgpr = preserved_lds_byte_offset_vgpr;
   if (!options.moi_spill_overlaps_guest_operands &&
@@ -2310,6 +2317,17 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   const auto different_identity_label = sequence.make_label();
   const auto restore_label = sequence.make_label();
   ConSanMoiRecordEmitter record(words, *options.scratch_vgpr, tmp_vgpr, arch);
+  const auto reload_spilled_lds_byte_offset = [&](uint16_t destination_vgpr) {
+    if (!spilled_lds_byte_offset_vgpr)
+      return true;
+    const auto reload = consan_detail::append_reload_moi_spilled_vgpr(
+        words, *spill, destination_vgpr, *spilled_lds_byte_offset_vgpr, arch);
+    if (reload == consan_detail::MoiSpilledVgprReloadResult::Appended)
+      return true;
+    errors.emplace_back("ConSan MOI sampled probe could not recover its spilled LDS address: " +
+                        std::string(consan_detail::moi_spilled_vgpr_reload_result_name(reload)));
+    return false;
+  };
   // A DS load may overwrite its own address VGPR. Snapshot that address before
   // executing the displaced instruction so sampled publication remains tied
   // to the guest access rather than to the loaded payload.
@@ -2384,7 +2402,17 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     // Sample addresses while retaining every wave which touches the selected
     // cell. Selecting owners here would discard the cross-wave evidence that
     // the sampled checker needs in order to identify a race.
-    if (access_range.static_byte_offset != 0u) {
+    if (spilled_lds_byte_offset_vgpr) {
+      const uint16_t recovered_vgpr =
+          access_range.static_byte_offset == 0u ? low_vgpr : high_vgpr;
+      if (!reload_spilled_lds_byte_offset(recovered_vgpr))
+        return std::nullopt;
+      if (access_range.static_byte_offset != 0u &&
+          !append_compute_effective_lds_byte_offset(words, low_vgpr, recovered_vgpr,
+                                                    access_range.static_byte_offset, arch)) {
+        return std::nullopt;
+      }
+    } else if (access_range.static_byte_offset != 0u) {
       if (!append_compute_effective_lds_byte_offset(words, low_vgpr, *lds_byte_offset_vgpr,
                                                     access_range.static_byte_offset, arch))
         return std::nullopt;
@@ -2576,7 +2604,20 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     return std::nullopt;
   }
   uint16_t effective_lds_byte_offset_vgpr = *lds_byte_offset_vgpr;
-  if (access_range.static_byte_offset != 0u) {
+  if (spilled_lds_byte_offset_vgpr) {
+    const uint16_t recovered_vgpr =
+        access_range.static_byte_offset == 0u ? tmp_vgpr : high_vgpr;
+    if (!reload_spilled_lds_byte_offset(recovered_vgpr)) {
+      return std::nullopt;
+    }
+    if (access_range.static_byte_offset != 0u &&
+        !append_compute_effective_lds_byte_offset(words, tmp_vgpr, recovered_vgpr,
+                                                  access_range.static_byte_offset, arch)) {
+      errors.emplace_back("ConSan MOI sampled probe could not encode effective LDS byte offset");
+      return std::nullopt;
+    }
+    effective_lds_byte_offset_vgpr = tmp_vgpr;
+  } else if (access_range.static_byte_offset != 0u) {
     if (!append_compute_effective_lds_byte_offset(words, tmp_vgpr, *lds_byte_offset_vgpr,
                                                   access_range.static_byte_offset, arch)) {
       errors.emplace_back("ConSan MOI sampled probe could not encode effective LDS byte offset");
@@ -2798,6 +2839,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     std::optional<uint32_t> prior_first_record_index, uint32_t prior_access_range_count,
     uint32_t window_bank_count, size_t sampled_causal_windows_offset,
     size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
+    const VgprSpillSequence *spill,
     std::optional<uint32_t> private_epoch_offset, std::optional<uint32_t> private_owner_offset,
     std::optional<uint16_t> private_owner_shift, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset = nullptr) {
@@ -2810,9 +2852,66 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   std::vector<uint32_t> words;
   const bool select_guest_vgpr_bank =
       arch == ROCJITSU_CODE_ARCH_GFX1250 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+  const bool spill_backed_operand_recovery =
+      options.moi_sampled_spill_backed_operand_recovery;
+  if (spill_backed_operand_recovery &&
+      (spill == nullptr ||
+       !sampled_access_supports_spill_backed_operand_recovery(options, candidate, arch))) {
+    errors.emplace_back("ConSan MOI sampled probe has an invalid spill-backed operand plan");
+    return std::nullopt;
+  }
+  if (spill_backed_operand_recovery && select_guest_vgpr_bank) {
+    errors.emplace_back(
+        "ConSan MOI sampled spill-backed operand recovery cannot change the guest VGPR bank");
+    return std::nullopt;
+  }
   if (select_guest_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), 0u, arch));
+  std::optional<uint16_t> preserved_lds_byte_offset_vgpr;
+  std::optional<uint16_t> spilled_lds_byte_offset_vgpr;
+  const uint16_t base_scratch_count = static_cast<uint16_t>(
+      (options.moi_sampled_check ? 7u : 5u) +
+      (options.moi_runtime_sample_stride > 1 || window_bank_count > 1 ? 1u : 0u));
+  if (spill_backed_operand_recovery) {
+    if (!options.scratch_vgpr) {
+      errors.emplace_back("ConSan MOI sampled spill-backed operand recovery requires scratch VGPRs");
+      return std::nullopt;
+    }
+    const auto lds_byte_offset_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
+    if (!lds_byte_offset_vgpr)
+      return std::nullopt;
+    const bool spilled_address =
+        range_overlaps(*lds_byte_offset_vgpr, 1u, spill->vgpr_base, spill->vgpr_count);
+    if (candidate.dst_vgpr &&
+        range_overlaps(*candidate.dst_vgpr, candidate_payload_vgpr_count(candidate),
+                       spill->vgpr_base, spill->vgpr_count)) {
+      errors.emplace_back(
+          "ConSan MOI sampled spill-backed operand recovery overlaps the load destination");
+      return std::nullopt;
+    }
+    if (spilled_address) {
+      spilled_lds_byte_offset_vgpr = *lds_byte_offset_vgpr;
+    } else if (moi_load_clobbers_address(candidate)) {
+      preserved_lds_byte_offset_vgpr =
+          static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
+    }
+    if (moi_load_clobbers_address(candidate) && !spilled_address) {
+      words.push_back(build_v_mov_b32_e32(*preserved_lds_byte_offset_vgpr,
+                                          vector_source_vgpr(*lds_byte_offset_vgpr), arch));
+    }
+    if (guest_instruction_offset)
+      *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
+    for (uint64_t offset = 0; offset < candidate.size; offset += sizeof(uint32_t)) {
+      uint32_t word = 0;
+      std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
+      words.push_back(word);
+    }
+    if (!append_moi_lds_wait(words, arch)) {
+      errors.emplace_back("ConSan MOI sampled spill-backed operand recovery needs an LDS wait");
+      return std::nullopt;
+    }
+  }
   if (private_epoch_offset) {
     if (!options.automatic_moi_private_epoch || !options.moi_epoch_vgpr) {
       errors.emplace_back("ConSan MOI sampled probe has an invalid private epoch plan");
@@ -2855,15 +2954,12 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     words.push_back(
         build_v_mov_b32_e32(*options.moi_epoch_vgpr, *options.moi_persistent_epoch_sgpr, arch));
   }
-  std::optional<uint16_t> preserved_lds_byte_offset_vgpr;
   const bool materialize_flat_offset =
       candidate_requires_gfx1250_flat_offset_materialization(candidate);
-  if (moi_load_clobbers_address(candidate) || materialize_flat_offset) {
+  if (!preserved_lds_byte_offset_vgpr &&
+      (moi_load_clobbers_address(candidate) || materialize_flat_offset)) {
     if (!options.scratch_vgpr)
       return std::nullopt;
-    const uint16_t base_scratch_count = static_cast<uint16_t>(
-        (options.moi_sampled_check ? 7u : 5u) +
-        (options.moi_runtime_sample_stride > 1 || window_bank_count > 1 ? 1u : 0u));
     preserved_lds_byte_offset_vgpr =
         static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
     const auto lds_byte_offset_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
@@ -2892,12 +2988,13 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     auto range_words = build_direct_sampled_watchpoint_range_words(
         bytes, candidate, (*access_ranges)[range_index], options, arch,
         first_record_index + range_index * window_bank_count, prior_record_indices,
-        window_bank_count, range_index == 0u, preserved_lds_byte_offset_vgpr,
+        window_bank_count, range_index == 0u && !spill_backed_operand_recovery,
+        preserved_lds_byte_offset_vgpr, spill, spilled_lds_byte_offset_vgpr,
         sampled_causal_windows_offset, sampled_watchpoints_offset, sampled_pending_acquires_offset,
         errors, range_index == 0u ? &range_guest_instruction_offset : nullptr);
     if (!range_words)
       return std::nullopt;
-    if (range_index == 0u && guest_instruction_offset) {
+    if (!spill_backed_operand_recovery && range_index == 0u && guest_instruction_offset) {
       *guest_instruction_offset =
           static_cast<uint32_t>(words.size() * sizeof(uint32_t)) + range_guest_instruction_offset;
     }
@@ -2909,7 +3006,33 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   return words;
 }
 
-[[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_runtime_fast_gate_island_words(
+[[nodiscard]] bool append_moi_runtime_workgroup_residue_compare(
+    std::vector<uint32_t> &words, uint16_t residue_sgpr, uint16_t temporary_sgpr,
+    uint32_t selected_residue, rj_code_arch_t arch) {
+  std::optional<uint32_t> compare;
+  if (selected_residue <= 64u) {
+    compare = instrumentation::build_s_cmp_eq_u32(
+        residue_sgpr, scalar_positive_inline_u32(selected_residue), arch);
+  } else {
+    constexpr uint16_t kScalarLiteralSource = 255u;
+    words.push_back(build_s_mov_b32(temporary_sgpr, kScalarLiteralSource, arch));
+    words.push_back(selected_residue);
+    compare = instrumentation::build_s_cmp_eq_u32(residue_sgpr, temporary_sgpr, arch);
+  }
+  if (!compare)
+    return false;
+  words.push_back(*compare);
+  return true;
+}
+
+[[nodiscard]] constexpr uint64_t
+moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count) {
+  constexpr uint64_t kGateWordsWithoutGuest = 23u;
+  return kGateWordsWithoutGuest +
+         (static_cast<uint64_t>(guest_byte_count) + sizeof(uint32_t) - 1u) / sizeof(uint32_t);
+}
+
+[[nodiscard]] std::optional<std::vector<uint32_t>> build_moi_runtime_workgroup_gate_island_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanOptions &options, const ConSanMoiWorkgroupSources &workgroup_sources,
     [[maybe_unused]] uint32_t first_record_index, uint64_t island_text_offset,
@@ -2969,23 +3092,14 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   words.push_back(build_s_lshr_b32(quotient, residue, shift, arch));
   words.push_back(build_s_lshl_b32(quotient, quotient, shift, arch));
   const auto subtract = instrumentation::build_s_sub_u32(residue, residue, quotient, arch);
-  const auto compare =
-      instrumentation::build_s_cmp_eq_u32(residue, scalar_positive_inline_u32(0), arch);
   const auto restore_scc =
       instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch);
-  if (!subtract || !compare || !restore_scc)
+  if (!subtract || !restore_scc)
     return std::nullopt;
   words.push_back(*subtract);
-  for (uint32_t remaining = selected_residue; remaining != 0u;) {
-    const uint32_t chunk = std::min<uint32_t>(remaining, 64u);
-    const auto subtract_selected =
-        instrumentation::build_s_sub_u32(residue, residue, scalar_positive_inline_u32(chunk), arch);
-    if (!subtract_selected)
-      return std::nullopt;
-    words.push_back(*subtract_selected);
-    remaining -= chunk;
-  }
-  words.push_back(*compare);
+  if (!append_moi_runtime_workgroup_residue_compare(words, residue, quotient, selected_residue,
+                                                     arch))
+    return std::nullopt;
   const size_t selected_branch_index = words.size();
   words.push_back(build_s_nop(0, arch));
   words.push_back(*restore_scc);
@@ -3024,7 +3138,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   return words;
 }
 
-[[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_runtime_fast_gate_call_words(
+[[nodiscard]] std::optional<std::vector<uint32_t>> build_moi_runtime_workgroup_gate_call_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanOptions &options, const ConSanMoiWorkgroupSources &workgroup_sources,
     uint64_t gate_text_offset, uint64_t return_text_offset, uint64_t reserved_word_count,
@@ -3076,23 +3190,14 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   words.push_back(build_s_lshr_b32(quotient, residue, shift, arch));
   words.push_back(build_s_lshl_b32(quotient, quotient, shift, arch));
   const auto subtract = instrumentation::build_s_sub_u32(residue, residue, quotient, arch);
-  const auto compare =
-      instrumentation::build_s_cmp_eq_u32(residue, scalar_positive_inline_u32(0), arch);
   const auto restore_scc =
       instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch);
-  if (!subtract || !compare || !restore_scc)
+  if (!subtract || !restore_scc)
     return std::nullopt;
   words.push_back(*subtract);
-  for (uint32_t remaining = selected_residue; remaining != 0u;) {
-    const uint32_t chunk = std::min<uint32_t>(remaining, 64u);
-    const auto subtract_selected =
-        instrumentation::build_s_sub_u32(residue, residue, scalar_positive_inline_u32(chunk), arch);
-    if (!subtract_selected)
-      return std::nullopt;
-    words.push_back(*subtract_selected);
-    remaining -= chunk;
-  }
-  words.push_back(*compare);
+  if (!append_moi_runtime_workgroup_residue_compare(words, residue, quotient, selected_residue,
+                                                     arch))
+    return std::nullopt;
   const size_t selected_branch_index = words.size();
   words.push_back(build_s_nop(0, arch));
   words.push_back(*restore_scc);

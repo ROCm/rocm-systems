@@ -27,6 +27,8 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 
+class SimulatedKfdTestAccess;
+
 /// @brief 128-bit IPC share handle key, matching the kernel's random handle.
 struct IpcHandleKey {
   uint32_t words[4];
@@ -211,6 +213,8 @@ public:
   };
 
 private:
+  friend class SimulatedKfdTestAccess;
+
   /// @brief Look up the local-mode process.
   std::shared_ptr<KfdProcess> find_local_process() const;
 

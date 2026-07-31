@@ -331,6 +331,91 @@ TEST(ConSanMoi, CdnaInlineShadowMovesOnlyAnEmptyAccumulatorBoundaryForScratchGro
   }
 }
 
+TEST(ConSanMoi, CdnaInlineShadowUsesTrustedMetadataToMoveRoundedEmptyAccumulatorTail) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (const uint8_t agpr_count : {0u, 1u}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(agpr_count);
+      const std::string_view kernel_name = "rounded_accumulator_tail";
+      std::vector<uint32_t> text_words(1200u, build_s_nop(0, arch));
+      const auto store = arch == ROCJITSU_CODE_ARCH_CDNA3
+                             ? build_cdna3_ds_store_b32(/*vaddr=*/2u, /*vdata=*/3u,
+                                                        /*byte_offset=*/0u, arch)
+                             : build_cdna4_ds_store_b32(/*vaddr=*/2u, /*vdata=*/3u,
+                                                        /*byte_offset=*/0u, arch);
+      ASSERT_TRUE(store);
+      std::ranges::copy(*store, text_words.begin());
+      text_words.back() = build_s_endpgm(arch);
+      std::vector<uint8_t> bytes = arch == ROCJITSU_CODE_ARCH_CDNA3
+                                       ? make_cdna3_lds_code_object(text_words, kernel_name,
+                                                                    /*vgpr_granulated=*/1u)
+                                       : make_cdna4_lds_code_object(text_words, kernel_name,
+                                                                    /*vgpr_granulated=*/1u);
+      mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+        // The unified allocation is v0:v15, while ACCUM_OFFSET places the
+        // accumulator boundary at v12. Metadata is the only authoritative
+        // distinction between an empty rounded tail and live accumulator
+        // storage in v12:v15.
+        AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                        2u);
+      });
+      append_kernel_metadata_note(
+          bytes, kernel_name, /*uses_dynamic_stack=*/false, /*sgpr_count=*/0u,
+          /*private_segment_fixed_size=*/std::nullopt,
+          /*required_workgroup_size=*/std::nullopt, /*has_dynamic_lds=*/true,
+          /*additional_kernel_names=*/{}, agpr_count, /*vgpr_count=*/9u);
+
+      ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+      options.moi_track_atomics = false;
+      options.moi_track_barriers = false;
+      options.moi_report_buffer_address = 0x100000000ull;
+      options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+      const ConSanResult result = try_patch_consan(bytes, options);
+
+      ASSERT_TRUE(result.kernel_metadata_trustworthy);
+      ASSERT_EQ(result.kernels.size(), 1u);
+      EXPECT_EQ(result.kernels.front().vgpr_count, std::optional<uint16_t>(9u));
+      EXPECT_EQ(result.kernels.front().agpr_count,
+                std::optional<uint16_t>(static_cast<uint16_t>(agpr_count)));
+      ASSERT_EQ(result.resource_plans.size(), 1u);
+      if (agpr_count == 0u) {
+        ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+        ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+        EXPECT_EQ(result.resource_plans.front().source,
+                  ConSanRegisterAllocationSource::DescriptorGrowth);
+        ASSERT_EQ(result.resource_plans.front().alternatives.size(), 1u);
+        EXPECT_EQ(result.resource_plans.front().alternatives.front().kind,
+                  ConSanResourcePlanAlternativeKind::EmptyAccumulatorDescriptorGrowth);
+        EXPECT_EQ(result.resource_plans.front().alternatives.front().outcome,
+                  ConSanResourcePlanAlternativeOutcome::Selected);
+        ASSERT_TRUE(result.resource_plans.front().scratch_vgpr);
+        EXPECT_EQ(result.resource_plans.front().scratch_vgpr_count, 16u);
+        EXPECT_EQ(result.resource_plans.front().required_vgpr_count,
+                  *result.resource_plans.front().scratch_vgpr +
+                      result.resource_plans.front().scratch_vgpr_count);
+        EXPECT_GT(result.resource_plans.front().required_vgpr_count, 12u);
+        AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+        ASSERT_TRUE(patched.is_valid());
+        KD descriptor{};
+        std::memcpy(&descriptor,
+                    result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+                    sizeof(descriptor));
+        const uint32_t moved_accumulator_offset = AMDHSA_BITS_GET(
+            descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+        EXPECT_GT(moved_accumulator_offset, 2u);
+        EXPECT_GE((moved_accumulator_offset + 1u) * 4u,
+                  result.resource_plans.front().required_vgpr_count);
+        EXPECT_TRUE(result.final_validation_passed);
+      } else {
+        EXPECT_EQ(result.resource_plans.front().source,
+                  ConSanRegisterAllocationSource::Unsupported);
+        EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::NoLegalWindow);
+      }
+    }
+  }
+}
+
 TEST(ConSanMoi, Cdna4InlineShadowRecoversFullWindowKernargPreloadTail) {
   std::vector<uint32_t> text_words(1200, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
   text_words[0] = 0xd81a0004u;
@@ -570,6 +655,7 @@ TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
                                  /*group_segment_fixed_size=*/4u);
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.force_vgpr_spill = true;
+  options.force_private_epoch = true;
   options.moi_inline_workgroup_shadow = true;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -672,6 +758,90 @@ TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
       std::ranges::find(patch_words, build_v_mov_b32_e32(address_snapshot, vector_source_vgpr(2u),
                                                          ROCJITSU_CODE_ARCH_CDNA4)),
       patch_words.end());
+}
+
+TEST(ConSanMoi, Cdna4InlineShadowUsesScalarEpochForFullOrdinaryVgprBank) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto barrier = build_cdna4_s_barrier(kArch);
+  ASSERT_TRUE(barrier);
+  std::vector<uint32_t> text_words(1200u, build_s_nop(0, kArch));
+  text_words[0] = 0xd81a0004u;
+  text_words[1] = 0x00000302u; // ds_write_b32 v2, v3 offset:4
+  text_words[2] = *barrier;
+  size_t cursor = 3u;
+  for (uint16_t vgpr = 0u; vgpr < 64u; ++vgpr)
+    text_words[cursor++] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(vgpr), kArch);
+  text_words.back() = build_s_endpgm(kArch);
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "scalar_epoch_full_vgpr_bank", /*vgpr_granulated=*/7u,
+                                 /*uses_dynamic_stack=*/false, /*workgroup_id_dimension_mask=*/0u,
+                                 /*group_segment_fixed_size=*/4u);
+  mutate_kernel_descriptor(bytes, "scalar_epoch_full_vgpr_bank", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 15u);
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 14u);
+    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 1u);
+    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET, 3u);
+  });
+  append_kernel_metadata_note(bytes, "scalar_epoch_full_vgpr_bank",
+                              /*uses_dynamic_stack=*/false, /*sgpr_count=*/16u,
+                              /*private_segment_fixed_size=*/std::nullopt,
+                              /*required_workgroup_size=*/std::nullopt,
+                              /*has_dynamic_lds=*/false,
+                              /*additional_kernel_names=*/{}, /*agpr_count=*/0u,
+                              /*vgpr_count=*/64u);
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_inline_workgroup_shadow = true;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
+  EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
+  EXPECT_FALSE(result.moi_private_epoch_automatic);
+  ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
+  ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
+  ASSERT_TRUE(result.resolved_moi_persistent_workgroup_key_sgpr);
+  ASSERT_EQ(result.resolved_moi_prologue_scratch_vgpr_assignments.size(), 1u);
+  EXPECT_GE(result.resolved_moi_prologue_scratch_vgpr_assignments.front().scratch_vgpr, 64u);
+
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+  });
+  ASSERT_NE(access, result.patches.end());
+  EXPECT_FALSE(access->persistent_epoch_private_offset);
+  const auto barrier_patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier, &ConSanPatchInfo::kind);
+  ASSERT_NE(barrier_patch, result.patches.end());
+  EXPECT_FALSE(barrier_patch->persistent_epoch_private_offset);
+  EXPECT_EQ(barrier_patch->required_private_segment_size, 0u);
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  EXPECT_EQ(prologue->original_size, 0u);
+  EXPECT_EQ(std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
+                              &ConSanPatchInfo::kind),
+            result.patches.end());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD patched_descriptor{};
+  std::memcpy(&patched_descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(patched_descriptor));
+  EXPECT_GT(AMDHSA_BITS_GET(patched_descriptor.compute_pgm_rsrc3,
+                            kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+            15u);
+  EXPECT_TRUE(result.final_validation_passed);
 }
 
 TEST(ConSanMoi, CdnaInlineShadowClobberingLoadFitsBelowAccumulatorBoundary) {

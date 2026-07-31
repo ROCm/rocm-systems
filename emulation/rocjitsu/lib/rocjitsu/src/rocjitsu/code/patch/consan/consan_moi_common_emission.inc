@@ -655,13 +655,15 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
       errors.emplace_back("ConSan MOI resource-plan descriptor exceeds ELF bytes");
       return false;
     }
-    if (kernel_for_descriptor(result, descriptor_offset) == nullptr) {
+    const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+    if (kernel == nullptr) {
       errors.emplace_back("ConSan MOI resource plan references an unknown kernel descriptor");
       return false;
     }
     KD descriptor{};
     std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
-    if (!grow_moi_descriptor_vgpr_allocation(descriptor, required_count, arch)) {
+    if (!grow_moi_descriptor_vgpr_allocation(descriptor, required_count, arch,
+                                             kernel->agpr_count == 0u)) {
       errors.emplace_back("ConSan MOI could not satisfy planned descriptor VGPR allocation");
       return false;
     }

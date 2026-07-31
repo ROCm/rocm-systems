@@ -172,7 +172,7 @@ TEST(ConSanTransformMemoryTest, PinsDefaultPolicyReservationMagnitude) {
   const auto estimate =
       rocjitsu::consan_hook::consan_transform_major_image_reservation(8, default_policy);
   ASSERT_TRUE(estimate);
-  EXPECT_EQ(estimate->reservation_bytes, 2415919208u);
+  EXPECT_EQ(estimate->reservation_bytes, 4831838312u);
 }
 
 TEST(ConSanTransformMemoryTest, ReportsGoverningCompositePhaseForDefaultGrowth) {
@@ -3261,8 +3261,13 @@ void expect_transform_profile(const ConSanHookProfile &profile) {
   const bool expected_sync_defaults = profile.expected_flavor == rocjitsu::ConSanFlavor::Moi;
   EXPECT_EQ(g_transform_override_track_barriers.front(), expected_sync_defaults);
   EXPECT_EQ(g_transform_override_track_atomics.front(), expected_sync_defaults);
-  const uint32_t expected_runtime_sample_stride =
-      profile.expected_engine == rocjitsu::ConSanMoiEngine::Sampled ? 16384u : 1u;
+  uint32_t expected_runtime_sample_stride = 1u;
+  if (profile.expected_flavor == rocjitsu::ConSanFlavor::Moi) {
+    if (profile.expected_engine == rocjitsu::ConSanMoiEngine::RecordReplay)
+      expected_runtime_sample_stride = 65536u;
+    else if (profile.expected_engine == rocjitsu::ConSanMoiEngine::Sampled)
+      expected_runtime_sample_stride = 256u;
+  }
   EXPECT_EQ(g_transform_override_runtime_sample_strides.front(), expected_runtime_sample_stride);
   const auto &growth = g_transform_override_patched_image_growth_limits.front();
   EXPECT_EQ(growth.kind, rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes);

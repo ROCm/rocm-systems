@@ -58,6 +58,8 @@ struct AmdGpuKernelInfo {
   bool has_text_range = false;
   bool has_dynamic_lds = false;
   std::optional<bool> uses_dynamic_stack;
+  std::optional<uint16_t> vgpr_count;
+  std::optional<uint16_t> agpr_count;
   std::optional<uint16_t> sgpr_count;
   std::optional<std::array<uint32_t, 3>> required_workgroup_size;
 };
@@ -89,6 +91,7 @@ inline constexpr uint64_t kFunctionEvidenceEntryBytes =
     util::checked_align_up(3 * sizeof(uint64_t) + sizeof(bool), alignof(uint64_t)).value();
 inline constexpr uint64_t kKernelMetadataEntryBytes =
     util::checked_align_up(sizeof(std::string_view) + sizeof(bool) + sizeof(std::optional<bool>) +
+                               2 * sizeof(std::optional<uint16_t>) +
                                sizeof(std::optional<uint16_t>) +
                                sizeof(std::optional<std::array<uint32_t, 3>>) + sizeof(uint64_t),
                            alignof(void *))

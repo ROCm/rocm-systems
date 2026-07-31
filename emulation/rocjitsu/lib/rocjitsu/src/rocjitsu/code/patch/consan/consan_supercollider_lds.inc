@@ -913,13 +913,21 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         ++missing_width_plan_site_count;
         continue;
       }
+      const auto gfx1250_two_address =
+          gfx1250_two_address_expansion_plan(original_bytes, site, arch);
+      if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+          (is_two_address_lds_load(site) || is_two_address_lds_store(site)) &&
+          !gfx1250_two_address) {
+        ++missing_width_plan_site_count;
+        continue;
+      }
       auto action_words =
           mismatch_action_word_count(options, arch, result.errors, "ConSan LDS check/trap proof");
       if (!action_words)
         return;
       const uint32_t report_alignment_padding =
           options.report_buffer_address &&
-                  (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+                  consan_arch_requires_even_vgpr_tuples(arch)
               ? 1u
               : 0u;
       const Instruction *site_inst = site_context.instruction;
@@ -951,14 +959,17 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
       const uint16_t vcc_save_sgpr_width = sc_vcc_save_sgpr_width(arch);
       const uint32_t probe_scratch_vgprs =
-          *required_vgprs + lds_check_trap_extra_scratch_vgprs(site) + report_alignment_padding +
-          report_action_scratch_vgprs(options) + (lds_load_clobbers_address(site) ? 1u : 0u);
+          *required_vgprs + lds_check_trap_extra_scratch_vgprs(site, gfx1250_two_address) +
+          report_alignment_padding + report_action_scratch_vgprs(options) +
+          (lds_load_clobbers_address(site) ? 1u : 0u);
       const uint32_t scratch_vgprs = probe_scratch_vgprs + (spill_vcc_save_to_vgpr ? 1u : 0u);
       uint64_t requested_words = (lds_load_clobbers_address(site) ? 1u : 0u) + 2u +
                                  lds_check_trap_predelay_setup_words(site) +
                                  static_cast<uint64_t>(*delay_words) + 2u + 1u +
                                  lds_check_trap_precompare_words(site) + 1u +
                                  (2u + *action_words) * *required_vgprs + 1u;
+      if (gfx1250_two_address)
+        requested_words += gfx1250_two_address->total_additional_word_count();
       if (site.dst_accvgpr &&
           (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4))
         requested_words += 2u * *required_vgprs;
@@ -983,7 +994,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           [&](std::optional<uint16_t> allocation_limit) -> std::optional<uint16_t> {
         if (options.scratch_vgpr) {
           return choose_scratch_vgpr(site, options, site_inst, owner_liveness.front(),
-                                     min_auto_scratch_vgpr, allocation_limit, scratch_vgprs);
+                                     min_auto_scratch_vgpr, allocation_limit, scratch_vgprs, arch);
         }
         // A shared helper can reuse any run proved dead in every owner. An
         // owner-wide maximum-reference floor would discard those common holes
@@ -995,6 +1006,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         for (uint32_t base = begin; base + scratch_vgprs <= limit && base + scratch_vgprs <= 256u;
              ++base) {
           if (is_forbidden_scratch_vgpr_run(site, static_cast<uint16_t>(base), scratch_vgprs))
+            continue;
+          if (!lds_scratch_tuple_base_is_valid(site, arch, static_cast<uint16_t>(base)))
             continue;
           const RegisterRef run{RegClass::VGPR, static_cast<uint16_t>(base),
                                 static_cast<uint8_t>(scratch_vgprs)};
@@ -1022,7 +1035,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           ++dynamic_stack_private_spill_rejection_count;
         } else {
           const auto spill_scratch =
-              choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs);
+              choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs, arch);
           const auto private_limit = address_free_scratch_private_limit(arch);
           if (spill_scratch && private_limit) {
             scratch_vgpr = *spill_scratch;
@@ -3072,6 +3085,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   planned_patches.reserve(selected_candidates.size());
   for (const LdsCheckTrapCandidate &candidate : selected_candidates) {
     const ConSanLdsSite &site = *candidate.site;
+    const auto gfx1250_two_address =
+        gfx1250_two_address_expansion_plan(original_bytes, site, arch);
     auto words = build_lds_check_trap_words(
         original_bytes, site, arch, options, *delay_words, candidate.scratch_vgpr,
         candidate.vcc_save_sgpr, candidate.gfx1250_vgpr_msb_mode.value_or(0u), result.errors);
@@ -3096,7 +3111,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), 0u, arch);
       const auto restore_guest = instrumentation::build_s_set_vgpr_msb_transition(
           0u, static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), arch);
-      const size_t guest_prefix_words = lds_load_clobbers_address(site) ? 3u : 2u;
+      const size_t original_access_words =
+          gfx1250_two_address ? gfx1250_two_address->access_word_count() : 2u;
+      const size_t guest_prefix_words =
+          original_access_words + (lds_load_clobbers_address(site) ? 1u : 0u);
       if (!select_low || !restore_guest || words->size() < guest_prefix_words) {
         result.errors.emplace_back(
             "ConSan LDS check/trap proof could not preserve gfx1250 VGPR-bank mode");

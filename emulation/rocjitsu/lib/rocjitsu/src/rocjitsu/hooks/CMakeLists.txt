@@ -1,6 +1,17 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+add_library(rocjitsu_hsa_tool_lifetime OBJECT hsa_tool_lifetime.cpp)
+set_target_properties(
+    rocjitsu_hsa_tool_lifetime
+    PROPERTIES POSITION_INDEPENDENT_CODE ON
+)
+target_include_directories(
+    rocjitsu_hsa_tool_lifetime
+    PRIVATE ${ROCJITSU_SRC_DIR}
+)
+target_link_libraries(rocjitsu_hsa_tool_lifetime PUBLIC ${CMAKE_DL_LIBS})
+
 add_library(
     rocjitsu_hooks
     SHARED
@@ -59,6 +70,7 @@ target_link_libraries(
         util
         flatbuffers
         simdojo
+        rocjitsu_hsa_tool_lifetime
         Threads::Threads
         ${CMAKE_DL_LIBS}
 )
@@ -67,6 +79,7 @@ target_link_libraries(
     rocjitsu_waitcheck_hooks
     PRIVATE
         rocjitsu_waitcheck_objects
+        rocjitsu_hsa_tool_lifetime
         util
         Threads::Threads
         ZLIB::ZLIB
@@ -81,9 +94,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 if(MSVC)
+    target_compile_options(rocjitsu_hsa_tool_lifetime PRIVATE /W4 /WX)
     target_compile_options(rocjitsu_hooks PRIVATE /W4 /WX)
     target_compile_options(rocjitsu_waitcheck_hooks PRIVATE /W4 /WX)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    target_compile_options(
+        rocjitsu_hsa_tool_lifetime
+        PRIVATE -Wall -Wextra -Wpedantic -Werror
+    )
     target_compile_options(
         rocjitsu_hooks
         PRIVATE -Wall -Wextra -Wpedantic -Werror

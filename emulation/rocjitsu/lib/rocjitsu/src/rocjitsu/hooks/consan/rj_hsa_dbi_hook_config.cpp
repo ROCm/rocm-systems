@@ -1031,11 +1031,13 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     return std::nullopt;
   }
   config.moi_runtime_sample_stride_explicit = env_has_value("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE");
-  const uint32_t runtime_sample_stride_default =
-      config.flavor == rocjitsu::ConSanFlavor::Moi &&
-              config.moi_engine == rocjitsu::ConSanMoiEngine::Sampled
-          ? kMoiSampledStandardRuntimeStride
-          : 1u;
+  uint32_t runtime_sample_stride_default = 1u;
+  if (config.flavor == rocjitsu::ConSanFlavor::Moi) {
+    if (config.moi_engine == rocjitsu::ConSanMoiEngine::RecordReplay)
+      runtime_sample_stride_default = kMoiRecordReplayStandardRuntimeStride;
+    else if (config.moi_engine == rocjitsu::ConSanMoiEngine::Sampled)
+      runtime_sample_stride_default = kMoiSampledStandardRuntimeStride;
+  }
   if (!parse_u32_env("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", runtime_sample_stride_default,
                      &config.moi_runtime_sample_stride))
     return std::nullopt;

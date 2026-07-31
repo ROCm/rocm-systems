@@ -3472,6 +3472,11 @@ class ConSanValidationTest(unittest.TestCase):
         sampled = next(
             profile for profile in workload["profiles"] if profile["id"] == "sampled"
         )
+        record_replay = next(
+            profile
+            for profile in workload["profiles"]
+            if profile["id"] == "record-replay"
+        )
         self.assertEqual(
             {item["name"] for item in sampled["implicit_runtime_defaults"]},
             {
@@ -3482,6 +3487,15 @@ class ConSanValidationTest(unittest.TestCase):
             },
         )
         self.assertEqual(sampled["usability_exceptions"], [])
+        self.assertEqual(
+            {item["name"] for item in record_replay["implicit_runtime_defaults"]},
+            {
+                "RJ_CONSAN_MOI_TRACK_BARRIERS",
+                "RJ_CONSAN_MOI_TRACK_ATOMICS",
+                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
+                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE",
+            },
+        )
         self.assertEqual(
             audit["usability_audit"]["coverage_limiting_controls_present"], []
         )
@@ -3496,7 +3510,16 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(
             sampled_defaults["settings"]["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"],
-            "16384",
+            "256",
+        )
+        record_replay_defaults = next(
+            item
+            for item in audit["usability_audit"]["automatic_profile_defaults"]
+            if item["profile"] == "record-replay"
+        )
+        self.assertEqual(
+            record_replay_defaults["settings"]["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"],
+            "65536",
         )
 
     def test_explain_audits_reference_fault_outcomes_and_trial_knobs(self) -> None:

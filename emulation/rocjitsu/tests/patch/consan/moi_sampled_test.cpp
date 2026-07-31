@@ -17,6 +17,30 @@ constexpr std::array<SampledTarget, 2> kSampledCdnaTargets = {{
     {ROCJITSU_CODE_ARCH_CDNA4, "gfx950/cdna4"},
 }};
 
+std::vector<uint8_t> make_cdna4_full_pressure_sampled_access(std::span<const uint32_t> guest,
+                                                             std::string_view kernel_name) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  std::vector<uint32_t> text_words(1200u, build_s_nop(0, kArch));
+  std::copy(guest.begin(), guest.end(), text_words.begin());
+  size_t cursor = guest.size();
+  for (uint16_t vgpr = 0u; vgpr < 16u; ++vgpr)
+    text_words[cursor++] = build_v_mov_b32_e32(/*vdst=*/15u, vector_source_vgpr(vgpr), kArch);
+  text_words.back() = build_s_endpgm(kArch);
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, kernel_name, /*vgpr_granulated=*/3u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    // v16 is the first accumulator register. The access must use a spill
+    // window within the compiler-defined 16-register ordinary bank.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3u);
+  });
+  append_kernel_metadata_note(bytes, kernel_name, /*uses_dynamic_stack=*/false,
+                              /*sgpr_count=*/0u,
+                              /*private_segment_fixed_size=*/std::nullopt,
+                              /*required_workgroup_size=*/std::nullopt,
+                              /*has_dynamic_lds=*/true);
+  return bytes;
+}
+
 void expect_sampled_barrier_exact_existing_metadata_path(
     const ConSanResult &result, const ConSanPatchInfo &patch, rj_code_arch_t arch,
     ConSanMoiSampledSyncScope scope = ConSanMoiSampledSyncScope::Workgroup) {
@@ -2510,6 +2534,164 @@ TEST(ConSanMoi, Cdna4Wave64AccvgprBoundarySampledUsesPrivatePersistentState) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, Cdna4FullPressureSampledStoreRecoversSpilledAddressAfterGuest) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto guest =
+      build_cdna4_ds_store_b32(/*vaddr=*/7u, /*vdata=*/8u, /*byte_offset=*/0u, kArch);
+  ASSERT_TRUE(guest);
+  const std::vector<uint8_t> bytes =
+      make_cdna4_full_pressure_sampled_access(*guest, "sampled_store_spill_recovery");
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_runtime_sample_stride = 2u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "errors=" << testing::PrintToString(result.errors)
+      << " warnings=" << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(plan.scratch_vgpr, 0u);
+  EXPECT_EQ(plan.scratch_vgpr_count, 8u);
+  EXPECT_TRUE(std::ranges::any_of(plan.alternatives, [](const auto &alternative) {
+    return alternative.kind == ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery &&
+           alternative.outcome == ConSanResourcePlanAlternativeOutcome::Selected;
+  }));
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_TRUE(patch->relocated_guest_instruction_offset);
+  ASSERT_TRUE(patch->persistent_private_state_end);
+  EXPECT_EQ(patch->scratch_vgpr, 0u);
+  EXPECT_EQ(patch->spilled_vgpr_count, 8u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const size_t guest_index =
+      (*patch->relocated_guest_instruction_offset - patch->trampoline_offset) / sizeof(uint32_t);
+  ASSERT_LE(guest_index + guest->size(), cave.size());
+  EXPECT_TRUE(std::equal(guest->begin(), guest->end(), cave.begin() + guest_index));
+  const auto spill_base =
+      normalize_address_free_scratch_private_size(kArch, *patch->persistent_private_state_end);
+  ASSERT_TRUE(spill_base);
+  const uint32_t address_slot = *spill_base + 7u * sizeof(uint32_t);
+  const auto reload = build_cdna4_address_free_scratch_load_b32(/*vdst=*/2u, address_slot, kArch);
+  const auto wait = instrumentation::build_s_wait_private_load0(kArch);
+  ASSERT_TRUE(reload && wait);
+  std::vector<uint32_t> reload_sequence(reload->begin(), reload->end());
+  reload_sequence.push_back(*wait);
+  const auto reload_position = std::ranges::search(cave, reload_sequence).begin();
+  ASSERT_NE(reload_position, cave.end());
+  EXPECT_LT(guest_index, static_cast<size_t>(std::distance(cave.begin(), reload_position)));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, Cdna4FullPressureSampledLoadKeepsResultOutsideRecoveredSpillWindow) {
+  constexpr auto guest = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 7u, .vdst = 8u});
+  const std::vector<uint8_t> bytes =
+      make_cdna4_full_pressure_sampled_access(guest, "sampled_load_spill_recovery");
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_runtime_sample_stride = 2u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "errors=" << testing::PrintToString(result.errors)
+      << " warnings=" << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
+  ASSERT_TRUE(plan.scratch_vgpr);
+  EXPECT_EQ(*plan.scratch_vgpr, 0u);
+  EXPECT_TRUE(std::ranges::any_of(plan.alternatives, [](const auto &alternative) {
+    return alternative.kind == ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery &&
+           alternative.outcome == ConSanResourcePlanAlternativeOutcome::Selected;
+  }));
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_TRUE(patch->relocated_guest_instruction_offset);
+  EXPECT_EQ(patch->scratch_vgpr, plan.scratch_vgpr);
+  EXPECT_EQ(patch->spilled_vgpr_count, plan.scratch_vgpr_count);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, Cdna4FullPressureSampledRead2B64KeepsFourRegisterResult) {
+  constexpr auto guest =
+      cdna4::build_ds(cdna4::kDsRead2B64Ds, {.offset1 = 4u, .addr = 7u, .vdst = 8u});
+  const std::vector<uint8_t> bytes =
+      make_cdna4_full_pressure_sampled_access(guest, "sampled_read2_b64_spill_recovery");
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_runtime_sample_stride = 2u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(64);
+  options.max_patches = 64u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "errors=" << testing::PrintToString(result.errors)
+      << " warnings=" << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.modified) << "errors=" << testing::PrintToString(result.errors)
+                               << " warnings=" << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(plan.scratch_vgpr, 0u);
+  EXPECT_EQ(plan.scratch_vgpr_count, 8u);
+  EXPECT_TRUE(std::ranges::any_of(plan.alternatives, [](const auto &alternative) {
+    return alternative.kind == ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery &&
+           alternative.outcome == ConSanResourcePlanAlternativeOutcome::Selected;
+  }));
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_TRUE(patch->relocated_guest_instruction_offset);
+  EXPECT_EQ(patch->scratch_vgpr, 0u);
+  EXPECT_EQ(patch->spilled_vgpr_count, 8u);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, Cdna4FullPressureSampledLoadRejectsDestinationOverlap) {
+  constexpr auto guest = cdna4::build_ds(cdna4::kDsReadB128Ds, {.addr = 5u, .vdst = 6u});
+  const std::vector<uint8_t> bytes =
+      make_cdna4_full_pressure_sampled_access(guest, "sampled_load_result_pressure");
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_runtime_sample_stride = 2u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_FALSE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::NoLegalWindow);
+  EXPECT_TRUE(std::ranges::any_of(plan.alternatives, [](const auto &alternative) {
+    return alternative.kind == ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery &&
+           alternative.outcome == ConSanResourcePlanAlternativeOutcome::Rejected;
+  }));
+}
+
 TEST(ConSanMoi, CdnaSampledBarrierUsesPrivatePersistentStateAtAccvgprBoundary) {
   for (const SampledTarget &target : kSampledCdnaTargets) {
     for (uint32_t sample_stride : {1u, 2u}) {
@@ -3757,9 +3939,9 @@ TEST(ConSanMoi, SampledRuntimeGateUsesExpandedBranchIslands) {
       patched_words.end());
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland) {
-      // Offset zero needs the 21-word fixed gate plus the displaced two-word
+      // Offset zero needs the 23-word fixed gate plus the displaced two-word
       // instruction, rather than the former unconditional 40-word reservation.
-      EXPECT_EQ(patch.trampoline_size, 23u * sizeof(uint32_t));
+      EXPECT_EQ(patch.trampoline_size, 25u * sizeof(uint32_t));
       uint32_t workgroup_mix = 0;
       std::memcpy(&workgroup_mix,
                   patched.text_sections().front()->data() + patch.trampoline_offset +

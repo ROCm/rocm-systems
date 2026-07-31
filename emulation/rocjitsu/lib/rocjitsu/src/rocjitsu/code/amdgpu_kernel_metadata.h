@@ -24,6 +24,8 @@ inline constexpr unsigned kMaximumKernelMetadataNestingDepth = 64;
 struct KernelMetadata {
   bool has_dynamic_lds = false;
   std::optional<bool> uses_dynamic_stack;
+  std::optional<uint16_t> vgpr_count;
+  std::optional<uint16_t> agpr_count;
   std::optional<uint16_t> sgpr_count;
   std::optional<std::array<uint32_t, 3>> required_workgroup_size;
 };

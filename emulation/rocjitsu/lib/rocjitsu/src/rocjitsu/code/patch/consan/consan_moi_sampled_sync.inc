@@ -2239,6 +2239,34 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   const ConSanMoiWorkgroupSources workgroup_sources = *persistent_workgroup_sources;
 
   std::vector<uint32_t> words;
+  const uint64_t displaced_tail_bytes =
+      static_cast<uint64_t>(displaced_tail_words.size()) * sizeof(uint32_t);
+  if (displaced_tail_bytes >
+          std::numeric_limits<uint32_t>::max() - candidate.fence.size ||
+      candidate.fence.file_offset > bytes.size() ||
+      candidate.fence.size + displaced_tail_bytes >
+          bytes.size() - candidate.fence.file_offset) {
+    errors.emplace_back("ConSan MOI fence record runtime guest exceeds ELF bytes");
+    return std::nullopt;
+  }
+  const bool runtime_workgroup_gate =
+      options.moi_runtime_sample_stride > 1u &&
+      !options.automatic_moi_record_replay_sgpr_spill && workgroup_sources.x.scalar_src &&
+      workgroup_sources.y.scalar_src && workgroup_sources.z.scalar_src;
+  if (runtime_workgroup_gate) {
+    ConSanMoiCandidate fence_guest;
+    fence_guest.file_offset = candidate.fence.file_offset;
+    fence_guest.size = static_cast<uint32_t>(candidate.fence.size + displaced_tail_bytes);
+    auto gate = build_moi_runtime_workgroup_gate_call_words(
+        bytes, fence_guest, options, workgroup_sources, cave_text_offset, return_text_offset,
+        moi_runtime_workgroup_gate_reserved_words(fence_guest.size), arch);
+    if (!gate) {
+      errors.emplace_back(
+          "ConSan MOI fence record patch could not encode its runtime workgroup gate");
+      return std::nullopt;
+    }
+    words = std::move(*gate);
+  }
   const std::optional<uint16_t> vgpr_msb_mode =
       arch == ROCJITSU_CODE_ARCH_GFX1250
           ? gfx1250_vgpr_msb_mode_at(bytes, candidate.text_file_offset,
@@ -2246,7 +2274,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                                      candidate.fence.file_offset)
           : std::nullopt;
   const bool select_low_vgpr_bank = vgpr_msb_mode.value_or(0u) != 0u;
-  words.reserve(candidate.fence.size / sizeof(uint32_t) + 80u +
+  words.reserve(words.size() + candidate.fence.size / sizeof(uint32_t) + 80u +
                 (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
                 (select_low_vgpr_bank ? 2u : 0u));
   if (select_low_vgpr_bank)

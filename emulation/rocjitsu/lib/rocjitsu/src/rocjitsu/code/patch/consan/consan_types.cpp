@@ -281,6 +281,8 @@ const char *consan_resource_plan_alternative_kind_name(ConSanResourcePlanAlterna
     return "guest_operand_overlap_spill";
   case ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery:
     return "spill_backed_operand_recovery";
+  case ConSanResourcePlanAlternativeKind::EmptyAccumulatorDescriptorGrowth:
+    return "empty_accumulator_descriptor_growth";
   }
   return "unknown";
 }

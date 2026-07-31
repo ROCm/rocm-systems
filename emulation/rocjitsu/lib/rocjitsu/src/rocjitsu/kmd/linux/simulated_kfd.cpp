@@ -21,10 +21,12 @@ RJ_DIAGNOSTIC_POP
 #include <cassert>
 #include <cerrno>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <format>
+#include <limits>
 #include <linux/types.h>
 #include <sstream>
 #include <sys/mman.h>
@@ -45,6 +47,50 @@ namespace {
 bool vm_trace_enabled() {
   static const bool enabled = (std::getenv("RJ_VMEM_TRACE") != nullptr);
   return enabled;
+}
+
+bool anonymous_private_range_is_mapped(uintptr_t begin, uintptr_t end) {
+  if (begin >= end)
+    return true;
+
+  FILE *maps = std::fopen("/proc/self/maps", "r");
+  if (!maps)
+    return false;
+
+  uintptr_t cursor = begin;
+  char line[512];
+  while (cursor < end && std::fgets(line, sizeof(line), maps)) {
+    unsigned long long start = 0;
+    unsigned long long stop = 0;
+    unsigned long long offset = 0;
+    unsigned long long inode = 0;
+    char permissions[5] = {};
+    char device[16] = {};
+    int suffix_offset = 0;
+    if (std::sscanf(line, "%llx-%llx %4s %llx %15s %llu %n", &start, &stop, permissions, &offset,
+                    device, &inode, &suffix_offset) != 6) {
+      continue;
+    }
+    if (stop <= cursor)
+      continue;
+    if (start > cursor)
+      break;
+
+    const char *suffix = line + suffix_offset;
+    while (*suffix == ' ' || *suffix == '\t')
+      ++suffix;
+    const bool has_name = *suffix != '\0' && *suffix != '\n';
+    const bool private_mapping = permissions[3] == 'p';
+    const bool writable_or_reserved =
+        std::strncmp(permissions, "rw-p", 4) == 0 || std::strncmp(permissions, "---p", 4) == 0;
+    if (inode != 0 || has_name || !private_mapping || !writable_or_reserved)
+      break;
+
+    cursor = std::min<uintptr_t>(static_cast<uintptr_t>(stop), end);
+  }
+
+  std::fclose(maps);
+  return cursor == end;
 }
 
 constexpr uint32_t kTileConfigCount = 32;
@@ -633,11 +679,15 @@ int SimulatedKfd::close(uint32_t process_id) {
       if (trace_enabled)
         leaked_handles.push_back(handle);
       if (alloc.host_ptr && alloc.host_ptr_owned) {
-        unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
-        libc_passthrough().munmap(alloc.host_ptr, alloc.size);
+        unmap_from_gpu(proc, alloc.gpu_va, alloc.mapped_size);
+        libc_passthrough().munmap(alloc.host_ptr, alloc.mapped_size);
         alloc.host_ptr = nullptr;
+        alloc.mapped_size = 0;
         alloc.host_ptr_owned = false;
       }
+      for (const auto &retired : alloc.retired_host_mappings)
+        libc_passthrough().munmap(retired.host_ptr, retired.size);
+      alloc.retired_host_mappings.clear();
       if (alloc.memfd >= 0) {
         {
           std::lock_guard<std::mutex> flk(owned_fds_mutex_);
@@ -1101,6 +1151,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
   }
 
   alloc.host_ptr = host_ptr;
+  alloc.mapped_size = length;
   alloc.host_ptr_owned = host_ptr_owned;
 
   util::Logger::vm([&](auto &os) {
@@ -1185,9 +1236,13 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
   for (auto &[handle, alloc] : proc.allocations_) {
     if (alloc.host_ptr == addr) {
-      unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+      unmap_from_gpu(proc, alloc.gpu_va, alloc.mapped_size);
       libc_passthrough().munmap(addr, length);
+      for (const auto &retired : alloc.retired_host_mappings)
+        libc_passthrough().munmap(retired.host_ptr, retired.size);
+      alloc.retired_host_mappings.clear();
       alloc.host_ptr = nullptr;
+      alloc.mapped_size = 0;
       alloc.host_ptr_owned = false;
       return 0;
     }
@@ -1331,6 +1386,7 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   bool is_doorbell = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) != 0;
   if (is_userptr && !daemon_mode_) {
     alloc.host_ptr = reinterpret_cast<void *>(va);
+    alloc.mapped_size = args->size;
     map_to_gpu(proc, va, reinterpret_cast<void *>(va), args->size, alloc_mtype);
   } else if (daemon_mode_ || !user_provided_va) {
     auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
@@ -1354,6 +1410,7 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
               safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.memfd, 0);
           if (mapped != MAP_FAILED) {
             alloc.host_ptr = mapped;
+            alloc.mapped_size = alloc.size;
             alloc.host_ptr_owned = true;
             map_to_gpu(proc, va, alloc.host_ptr, alloc.size, alloc_mtype);
           }
@@ -1403,7 +1460,86 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
   if (!proc)
     return false;
 
+  if (size > std::numeric_limits<size_t>::max() - 0xFFF)
+    return false;
   size_t aligned_size = (size + 0xFFF) & ~0xFFFULL;
+  if (aligned_size > static_cast<size_t>(std::numeric_limits<off_t>::max()))
+    return false;
+
+  // A queue can encounter a larger private-segment dispatch after a smaller
+  // one. Reuse the allocation selected by ROCr when it exists; local mode
+  // commonly places it inside a larger PROT_NONE reservation and activates
+  // only the initial extent.
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    auto existing = std::ranges::find_if(proc->allocations_, [&](const auto &entry) {
+      const auto &alloc = entry.second;
+      return alloc.gpu_va == gpu_va;
+    });
+    if (existing != proc->allocations_.end()) {
+      auto &alloc = existing->second;
+      if (alloc.scratch_backing && alloc.host_ptr != nullptr && aligned_size <= alloc.mapped_size) {
+        proc->map_pages(gpu_va, alloc.host_ptr, aligned_size);
+        return true;
+      }
+
+      if (alloc.memfd < 0 && alloc.user_va && alloc.host_ptr == reinterpret_cast<void *>(gpu_va)) {
+        if (aligned_size > alloc.size) {
+          const auto host_begin = reinterpret_cast<uintptr_t>(alloc.host_ptr);
+          if (host_begin > std::numeric_limits<uintptr_t>::max() - aligned_size)
+            return false;
+          const size_t verified_begin = std::min<size_t>(alloc.mapped_size, aligned_size);
+          if (!anonymous_private_range_is_mapped(host_begin + verified_begin,
+                                                 host_begin + aligned_size)) {
+            return false;
+          }
+        }
+        if (libc_passthrough().mprotect(alloc.host_ptr, aligned_size, PROT_READ | PROT_WRITE) != 0)
+          return false;
+        proc->map_pages(gpu_va, alloc.host_ptr, aligned_size);
+        alloc.mapped_size = aligned_size;
+        alloc.scratch_backing = true;
+        util::Logger::vm([&](auto &os) {
+          os << "SCRATCH_BACKING_GROW pid=" << process_id << " gpu_va=0x" << std::hex << gpu_va
+             << " size=0x" << aligned_size << std::dec << " host=" << alloc.host_ptr
+             << " identity=true";
+        });
+        return true;
+      }
+
+      // Driver-owned allocations retain a shared file. Enlarge it and publish
+      // a new view without discarding any live spill values.
+      if (alloc.memfd < 0)
+        return false;
+      if (aligned_size > alloc.size) {
+        if (ftruncate(alloc.memfd, static_cast<off_t>(aligned_size)) != 0)
+          return false;
+        alloc.size = aligned_size;
+      }
+      auto *grown =
+          safe_mmap(nullptr, aligned_size, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.memfd, 0);
+      if (grown == MAP_FAILED)
+        return false;
+
+      // map_pages replaces the old PTEs for future translations. A concurrent
+      // memory operation may already hold a raw pointer returned by a prior
+      // translation, so retain the old shared-file view until process teardown.
+      proc->map_pages(gpu_va, grown, aligned_size);
+      if (alloc.host_ptr != nullptr && alloc.mapped_size != 0)
+        alloc.retired_host_mappings.push_back(
+            {alloc.host_ptr, static_cast<size_t>(alloc.mapped_size)});
+      alloc.host_ptr = grown;
+      alloc.mapped_size = aligned_size;
+      alloc.host_ptr_owned = true;
+      alloc.scratch_backing = true;
+      util::Logger::vm([&](auto &os) {
+        os << "SCRATCH_BACKING_GROW pid=" << process_id << " gpu_va=0x" << std::hex << gpu_va
+           << " size=0x" << aligned_size << std::dec << " host=" << grown;
+      });
+      return true;
+    }
+  }
+
   auto raw_fd = memfd_create("rocjitsu_scratch", MFD_CLOEXEC);
   if (raw_fd < 0)
     return false;
@@ -1435,12 +1571,6 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
     libc_passthrough().close(memfd);
     return false;
   }
-  {
-    std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-    owned_fds_.erase(memfd);
-  }
-  libc_passthrough().close(memfd);
-  std::memset(host_ptr, 0, aligned_size);
   proc->map_pages(gpu_va, host_ptr, aligned_size);
 
   {
@@ -1449,9 +1579,11 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
     alloc.gpu_va = gpu_va;
     alloc.size = aligned_size;
     alloc.host_ptr = host_ptr;
+    alloc.mapped_size = aligned_size;
     alloc.host_ptr_owned = true;
     alloc.handle = proc->next_handle_++;
-    alloc.memfd = -1;
+    alloc.memfd = memfd;
+    alloc.scratch_backing = true;
     proc->allocations_[alloc.handle] = alloc;
   }
 
@@ -1479,7 +1611,9 @@ int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
       }
     }
     if (alloc.host_ptr && !alloc.user_va)
-      unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+      unmap_from_gpu(proc, alloc.gpu_va, alloc.mapped_size);
+    for (const auto &retired : alloc.retired_host_mappings)
+      libc_passthrough().munmap(retired.host_ptr, retired.size);
     if (alloc.memfd >= 0) {
       {
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
@@ -1526,7 +1660,8 @@ int SimulatedKfd::map_memory_ioctl(KfdProcess &proc, void *arg) {
                       alloc.host_ptr != nullptr);
   });
   if (alloc.host_ptr)
-    map_to_gpu(proc, alloc.gpu_va, alloc.host_ptr, alloc.size, pte_mtype_for_flags(alloc.flags));
+    map_to_gpu(proc, alloc.gpu_va, alloc.host_ptr, alloc.mapped_size,
+               pte_mtype_for_flags(alloc.flags));
   args->n_success = args->n_devices;
   return 0;
 }
@@ -1542,7 +1677,7 @@ int SimulatedKfd::unmap_memory_ioctl(KfdProcess &proc, void *arg) {
     // no-op for this handle.
     auto &alloc = it->second;
     if (alloc.host_ptr)
-      unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+      unmap_from_gpu(proc, alloc.gpu_va, alloc.mapped_size);
   }
   args->n_success = args->n_devices;
   return 0;
@@ -1737,6 +1872,7 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
     alloc.imported = true;
     alloc.dmabuf_fd = dupfd;
     alloc.host_ptr = reinterpret_cast<void *>(args->va_addr);
+    alloc.mapped_size = size;
     proc.allocations_[handle] = alloc;
 
     KfdProcess::ImportedDmabuf info{};
@@ -1826,6 +1962,7 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
         libc_passthrough().munmap(alloc.host_ptr, alloc.size);
 
       alloc.host_ptr = new_host_ptr;
+      alloc.mapped_size = alloc.size;
       alloc.host_ptr_owned = true;
       alloc.memfd = promoted_fd;
       {
@@ -1960,6 +2097,7 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
     alloc.flags = alloc_flags;
     alloc.handle = handle;
     alloc.host_ptr = host_ptr;
+    alloc.mapped_size = alloc_size;
     alloc.host_ptr_owned = true;
     alloc.memfd = dup_fd;
     alloc.gpu_id = source_gpu_id;

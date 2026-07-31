@@ -178,6 +178,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     uint32_t probe_guest_instruction_offset = 0;
     std::optional<uint16_t> transient_exec_save_sgpr;
     bool spill_overlaps_guest_operands = false;
+    bool spill_backed_operand_recovery = false;
     bool wrap_embedded_guest_vgpr_bank = false;
   };
   std::vector<PlannedSampledPatch> planned_patches;
@@ -187,22 +188,19 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       code_object.text_sections().size() == 1 ? code_object.text_sections().front()->size() : 0;
   DbiPatchPlacementPlanner placement_planner(arch, original_text_size);
   constexpr uint64_t kIndirectIslandWords = kMoiRecordReplayIndirectIslandWords;
-  // The fast gate has 21 fixed worst-case words: dispatch/workgroup mixing for
-  // all three gfx1250 coordinates, branches, SCC preservation, and the long
-  // jump.  Add the displaced instruction and one subtract per 64 positions in
-  // the configured residue.  Reserving the old unconditional 40 words for an
-  // offset-zero profile made a thousand-site image exceed direct-branch reach
-  // even though each emitted gate only needed about two dozen words.
+  // The fast gate has 23 fixed worst-case words: dispatch/workgroup mixing for
+  // all three gfx1250 coordinates, a literal residue comparison, branches, SCC
+  // preservation, and the long jump. Reserving a larger unconditional envelope
+  // for an offset-zero profile makes thousand-site images exceed direct-branch
+  // reach even though each emitted gate only needs about two dozen words.
   uint64_t max_candidate_instruction_words = 0u;
   for (const ConSanMoiCandidate *candidate : candidates) {
     max_candidate_instruction_words = std::max(
         max_candidate_instruction_words,
         (static_cast<uint64_t>(candidate->size) + sizeof(uint32_t) - 1u) / sizeof(uint32_t));
   }
-  const uint64_t selected_runtime_residue =
-      options.moi_runtime_sample_offset & (options.moi_runtime_sample_stride - 1u);
   const uint64_t sampled_access_island_words =
-      21u + max_candidate_instruction_words + (selected_runtime_residue + 63u) / 64u;
+      23u + max_candidate_instruction_words;
   const uint64_t access_island_word_count =
       options.moi_runtime_sample_stride > 1u ? sampled_access_island_words : kIndirectIslandWords;
   const uint64_t access_relay_words = arch == ROCJITSU_CODE_ARCH_GFX1250
@@ -440,8 +438,21 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       capacity_limited = true;
       continue;
     }
-    const auto resources = resolve_moi_scratch(result, candidate, options,
-                                               direct_sampled_scratch_count(options, candidate));
+    const ConSanCandidateResourcePlan *candidate_resource_plan =
+        resource_plan_for_candidate(result, candidate);
+    const bool planned_spill_backed_operand_recovery =
+        candidate_resource_plan != nullptr &&
+        std::ranges::any_of(candidate_resource_plan->alternatives, [](const auto &alternative) {
+          return alternative.kind ==
+                     ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery &&
+                 alternative.outcome == ConSanResourcePlanAlternativeOutcome::Selected;
+        });
+    const uint16_t expected_scratch_count =
+        planned_spill_backed_operand_recovery
+            ? sampled_spill_backed_scratch_count(options, candidate)
+            : direct_sampled_scratch_count(options, candidate);
+    const auto resources =
+        resolve_moi_scratch(result, candidate, options, expected_scratch_count);
     if (!resources) {
       continue;
     }
@@ -494,7 +505,18 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     if (spill)
       required_private_bytes = std::max(required_private_bytes, spill->total_private_bytes);
     bool spill_overlaps_guest_operands = false;
-    if (spill && sampled_access_can_emit_spill_over_guest_operands(candidate_options, candidate)) {
+    bool spill_backed_operand_recovery = false;
+    if (spill && planned_spill_backed_operand_recovery &&
+        sampled_access_supports_spill_backed_operand_recovery(candidate_options, candidate, arch)) {
+      std::vector<std::string> ignored_overlap_errors;
+      spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
+          candidate, resources->base, resources->count, ignored_overlap_errors);
+      spill_backed_operand_recovery = spill_overlaps_guest_operands;
+      candidate_options.moi_spill_overlaps_guest_operands = spill_overlaps_guest_operands;
+      candidate_options.moi_sampled_spill_backed_operand_recovery =
+          spill_backed_operand_recovery;
+    } else if (spill &&
+               sampled_access_can_emit_spill_over_guest_operands(candidate_options, candidate)) {
       std::vector<std::string> ignored_overlap_errors;
       spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
           candidate, resources->base, resources->count, ignored_overlap_errors);
@@ -572,11 +594,10 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     }
     const bool runtime_fast_gate =
         !candidate_options.automatic_moi_record_replay_sgpr_spill && use_indirect_appended &&
-        !use_dense_call && !uses_local_entry_island && options.moi_runtime_sample_stride > 1u &&
-        options.moi_runtime_sample_offset <= 1024u;
+        !use_dense_call && !uses_local_entry_island && options.moi_runtime_sample_stride > 1u;
     const bool dense_runtime_fast_gate =
         !candidate_options.automatic_moi_record_replay_sgpr_spill && use_dense_call &&
-        options.moi_runtime_sample_stride > 1u && options.moi_runtime_sample_offset <= 1024u;
+        options.moi_runtime_sample_stride > 1u;
     ConSanMoiCandidate lowered_candidate = candidate;
     lowered_candidate.kernel_descriptor_file_offset = workgroup_descriptor;
     const auto prior_patch = std::find_if(
@@ -595,6 +616,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         prior_first_record_index, prior_access_range_count, window_bank_count,
         layout.sampled_causal_windows_offset, layout.sampled_watchpoints_offset,
         layout.sampled_pending_acquires_offset,
+        spill ? &*spill : nullptr,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
         private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
         candidate_errors, &probe_guest_instruction_offset);
@@ -696,6 +718,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     planned.probe_guest_instruction_offset = probe_guest_instruction_offset;
     planned.transient_exec_save_sgpr = candidate_options.moi_exec_save_sgpr;
     planned.spill_overlaps_guest_operands = spill_overlaps_guest_operands;
+    planned.spill_backed_operand_recovery = spill_backed_operand_recovery;
     planned.wrap_embedded_guest_vgpr_bank = wrap_embedded_guest_vgpr_bank;
     planned_patches.push_back(std::move(planned));
     if (use_indirect_appended && !use_dense_call)
@@ -1051,6 +1074,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       candidate_options.scratch_vgpr = planned_patch.resources.base;
       candidate_options.moi_spill_overlaps_guest_operands =
           planned_patch.spill_overlaps_guest_operands;
+      candidate_options.moi_sampled_spill_backed_operand_recovery =
+          planned_patch.spill_backed_operand_recovery;
       if (planned_patch.private_epoch_offset ||
           moi_uses_scalar_persistent_state(candidate_options)) {
         uint16_t state_vgpr =
@@ -1067,6 +1092,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           planned_patch.prior_first_record_index, planned_patch.prior_access_range_count,
           window_bank_count, layout.sampled_causal_windows_offset,
           layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
+          planned_patch.spill ? &*planned_patch.spill : nullptr,
           planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
           planned_patch.private_owner_shift, result.errors);
       if (!words)
@@ -1163,7 +1189,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                    workgroup_errors.end());
               return;
             }
-            auto fast_gate = build_sampled_runtime_fast_gate_island_words(
+            auto fast_gate = build_moi_runtime_workgroup_gate_island_words(
                 bytes, candidate, candidate_options, *workgroup_sources,
                 planned_patch.runtime_sample_index, *planned_patch.entry_island_offset,
                 cave_text_offset, planned_patch.placement.return_target,
@@ -1197,7 +1223,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                  workgroup_errors.end());
             return;
           }
-          auto gate = build_sampled_runtime_fast_gate_call_words(
+          auto gate = build_moi_runtime_workgroup_gate_call_words(
               bytes, candidate, candidate_options, *workgroup_sources, cave_text_offset,
               planned_patch.placement.return_target, access_island_word_count, arch);
           if (!gate) {
@@ -1340,6 +1366,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             candidate_options.scratch_vgpr = planned_patch.resources.base;
             candidate_options.moi_spill_overlaps_guest_operands =
                 planned_patch.spill_overlaps_guest_operands;
+            candidate_options.moi_sampled_spill_backed_operand_recovery =
+                planned_patch.spill_backed_operand_recovery;
             if (planned_patch.private_epoch_offset ||
                 moi_uses_scalar_persistent_state(candidate_options)) {
               uint16_t state_vgpr = static_cast<uint16_t>(planned_patch.resources.base +
@@ -1356,6 +1384,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                 planned_patch.prior_first_record_index, planned_patch.prior_access_range_count,
                 window_bank_count, layout.sampled_causal_windows_offset,
                 layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
+                planned_patch.spill ? &*planned_patch.spill : nullptr,
                 planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
                 planned_patch.private_owner_shift, result.errors);
             if (words) {

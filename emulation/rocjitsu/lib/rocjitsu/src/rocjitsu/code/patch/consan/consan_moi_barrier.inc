@@ -173,8 +173,26 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
           : std::nullopt;
   const bool select_low_vgpr_bank = vgpr_msb_mode.value_or(0u) != 0u;
   words.reserve(
-      162 + (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
+      186 + (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
       (scalar_spill ? scalar_spill->save_words.size() + scalar_spill->restore_words.size() : 0u));
+  const bool runtime_workgroup_gate =
+      options.moi_runtime_sample_stride > 1u &&
+      !options.automatic_moi_record_replay_sgpr_spill && workgroup_sources.x.scalar_src &&
+      workgroup_sources.y.scalar_src && workgroup_sources.z.scalar_src;
+  if (runtime_workgroup_gate) {
+    ConSanMoiCandidate barrier_guest;
+    barrier_guest.file_offset = candidate.site.file_offset;
+    barrier_guest.size = candidate.site.size;
+    auto gate = build_moi_runtime_workgroup_gate_call_words(
+        bytes, barrier_guest, options, workgroup_sources, cave_text_offset, return_text_offset,
+        moi_runtime_workgroup_gate_reserved_words(barrier_guest.size), arch);
+    if (!gate) {
+      errors.emplace_back(
+          "ConSan MOI barrier record patch could not encode its runtime workgroup gate");
+      return std::nullopt;
+    }
+    words = std::move(*gate);
+  }
   if (select_low_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         static_cast<uint8_t>(*vgpr_msb_mode), 0u, arch));

@@ -390,6 +390,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
     rj_code_arch_t arch, uint32_t record_index, uint32_t atomic_record_capacity,
     size_t atomic_records_offset, uint64_t cave_text_offset, uint64_t return_text_offset,
+    bool already_runtime_workgroup_gated,
     std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
     uint32_t &guest_instruction_offset, std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
@@ -447,7 +448,25 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   }
 
   std::vector<uint32_t> words;
-  words.reserve(candidate.site.size / sizeof(uint32_t) + 96u +
+  const bool runtime_workgroup_gate =
+      options.moi_runtime_sample_stride > 1u && !already_runtime_workgroup_gated &&
+      !options.automatic_moi_record_replay_sgpr_spill && workgroup_sources.x.scalar_src &&
+      workgroup_sources.y.scalar_src && workgroup_sources.z.scalar_src;
+  if (runtime_workgroup_gate) {
+    ConSanMoiCandidate atomic_guest;
+    atomic_guest.file_offset = candidate.site.file_offset;
+    atomic_guest.size = candidate.site.size;
+    auto gate = build_moi_runtime_workgroup_gate_call_words(
+        bytes, atomic_guest, options, workgroup_sources, cave_text_offset, return_text_offset,
+        moi_runtime_workgroup_gate_reserved_words(atomic_guest.size), arch);
+    if (!gate) {
+      errors.emplace_back(
+          "ConSan MOI atomic record patch could not encode its runtime workgroup gate");
+      return std::nullopt;
+    }
+    words = std::move(*gate);
+  }
+  words.reserve(words.size() + candidate.site.size / sizeof(uint32_t) + 96u +
                 (spill ? spill->save_words.size() + spill->restore_words.size() : 0u));
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());

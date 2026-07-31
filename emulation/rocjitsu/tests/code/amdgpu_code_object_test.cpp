@@ -142,7 +142,7 @@ std::vector<uint8_t> make_complete_kernel_metadata_payload() {
   payload.push_back(0x81u); // one-entry root map
   append_msgpack_string(payload, "amdhsa.kernels");
   payload.push_back(0x91u); // one kernel
-  payload.push_back(0x85u); // name plus four retained metadata fields
+  payload.push_back(0x87u); // name plus six retained metadata fields
   append_msgpack_string(payload, ".name");
   append_msgpack_string(payload, "kernel");
   append_msgpack_string(payload, ".args");
@@ -152,6 +152,10 @@ std::vector<uint8_t> make_complete_kernel_metadata_payload() {
   append_msgpack_string(payload, "hidden_dynamic_lds_size");
   append_msgpack_string(payload, ".uses_dynamic_stack");
   payload.push_back(0xc3u);
+  append_msgpack_string(payload, ".vgpr_count");
+  append_msgpack_unsigned(payload, 511u);
+  append_msgpack_string(payload, ".agpr_count");
+  append_msgpack_unsigned(payload, 0u);
   append_msgpack_string(payload, ".sgpr_count");
   append_msgpack_unsigned(payload, 65535u);
   append_msgpack_string(payload, ".reqd_workgroup_size");
@@ -1030,6 +1034,8 @@ TEST(AmdGpuKernelMetadataPayload, VisitsAllSupportedRetainedFields) {
   ASSERT_TRUE(visited_metadata);
   EXPECT_TRUE(visited_metadata->has_dynamic_lds);
   EXPECT_EQ(visited_metadata->uses_dynamic_stack, std::optional<bool>(true));
+  EXPECT_EQ(visited_metadata->vgpr_count, std::optional<uint16_t>(511u));
+  EXPECT_EQ(visited_metadata->agpr_count, std::optional<uint16_t>(0u));
   EXPECT_EQ(visited_metadata->sgpr_count, std::optional<uint16_t>(65535u));
   EXPECT_EQ(visited_metadata->required_workgroup_size,
             (std::optional<std::array<uint32_t, 3>>(
@@ -1104,6 +1110,36 @@ TEST(AmdGpuKernelMetadataPayload, EnforcesSgprCountRange) {
           invalid_payload,
           [](std::string_view, const amdgpu_code_object_detail::KernelMetadata &) { return true; }),
       amdgpu_code_object_detail::KernelMetadataVisitStatus::Malformed);
+}
+
+TEST(AmdGpuKernelMetadataPayload, EnforcesVectorRegisterCountRanges) {
+  std::vector<uint8_t> maximum;
+  append_msgpack_unsigned(maximum, std::numeric_limits<uint16_t>::max());
+  std::vector<uint8_t> one_too_many;
+  append_msgpack_unsigned(one_too_many,
+                          static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1u);
+
+  for (const std::string_view field : {".vgpr_count", ".agpr_count"}) {
+    SCOPED_TRACE(field);
+    const auto maximum_payload = make_single_kernel_metadata_field_payload(field, maximum);
+    EXPECT_EQ(amdgpu_code_object_detail::visit_kernel_metadata_payload(
+                  maximum_payload,
+                  [&](std::string_view, const amdgpu_code_object_detail::KernelMetadata &metadata) {
+                    const auto count =
+                        field == ".vgpr_count" ? metadata.vgpr_count : metadata.agpr_count;
+                    EXPECT_EQ(count, std::optional<uint16_t>(std::numeric_limits<uint16_t>::max()));
+                    return true;
+                  }),
+              amdgpu_code_object_detail::KernelMetadataVisitStatus::Complete);
+
+    const auto invalid_payload = make_single_kernel_metadata_field_payload(field, one_too_many);
+    EXPECT_EQ(amdgpu_code_object_detail::visit_kernel_metadata_payload(
+                  invalid_payload,
+                  [](std::string_view, const amdgpu_code_object_detail::KernelMetadata &) {
+                    return true;
+                  }),
+              amdgpu_code_object_detail::KernelMetadataVisitStatus::Malformed);
+  }
 }
 
 TEST(AmdGpuKernelMetadataPayload, RequiresThreeNonzeroWorkgroupDimensions) {

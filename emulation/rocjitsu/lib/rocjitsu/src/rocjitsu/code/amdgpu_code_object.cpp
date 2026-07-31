@@ -783,6 +783,8 @@ void AmdGpuCodeObject::load_sections() {
         metadata_entry != metadata.end()) {
       kernel.has_dynamic_lds = metadata_entry->second.metadata.has_dynamic_lds;
       kernel.uses_dynamic_stack = metadata_entry->second.metadata.uses_dynamic_stack;
+      kernel.vgpr_count = metadata_entry->second.metadata.vgpr_count;
+      kernel.agpr_count = metadata_entry->second.metadata.agpr_count;
       kernel.sgpr_count = metadata_entry->second.metadata.sgpr_count;
       kernel.required_workgroup_size = metadata_entry->second.metadata.required_workgroup_size;
     }

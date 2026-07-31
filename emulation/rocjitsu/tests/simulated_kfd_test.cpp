@@ -34,7 +34,20 @@ RJ_DIAGNOSTIC_POP
 #include <thread>
 #include <vector>
 
+#include <sys/mman.h>
 #include <unistd.h>
+
+namespace rocjitsu {
+
+class SimulatedKfdTestAccess {
+public:
+  static bool allocate_scratch_backing(SimulatedKfd &driver, uint32_t process_id, uint64_t gpu_va,
+                                       size_t size) {
+    return driver.allocate_scratch_backing(process_id, gpu_va, size);
+  }
+};
+
+} // namespace rocjitsu
 
 namespace {
 
@@ -92,6 +105,196 @@ TEST_F(SimulatedKfdTest, OpenAndClose) {
 
   int ret = t.driver()->close();
   EXPECT_EQ(ret, 0);
+}
+
+TEST_F(SimulatedKfdTest, ScratchBackingGrowthPreservesContentsAndZeroFillsExtension) {
+  auto t = create_test_vm();
+  ASSERT_NE(t.driver(), nullptr);
+  ASSERT_GE(t.driver()->open(), 0);
+
+  constexpr uint64_t kScratchGpuVa = 0x3000'0000'0000ULL;
+  constexpr size_t kInitialSize = 4096;
+  constexpr size_t kGrownSize = 8192;
+  const uint32_t process_id = t.driver()->local_process_id();
+  auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(t.engine->topology().root());
+  ASSERT_NE(vm, nullptr);
+  auto *memory = vm->memory();
+  ASSERT_NE(memory, nullptr);
+
+  ASSERT_TRUE(rocjitsu::SimulatedKfdTestAccess::allocate_scratch_backing(
+      *t.driver(), process_id, kScratchGpuVa, kInitialSize));
+  auto *initial = memory->resolve_host_ptr(kScratchGpuVa, process_id);
+  ASSERT_NE(initial, nullptr);
+  initial[0] = 0x5a;
+  initial[kInitialSize - 1] = 0xa5;
+
+  ASSERT_TRUE(rocjitsu::SimulatedKfdTestAccess::allocate_scratch_backing(
+      *t.driver(), process_id, kScratchGpuVa, kGrownSize));
+  auto *grown = memory->resolve_host_ptr(kScratchGpuVa, process_id);
+  ASSERT_NE(grown, nullptr);
+  unsigned char residency = 0;
+  ASSERT_EQ(::mincore(initial, kInitialSize, &residency), 0)
+      << "the prior view must remain valid for an in-flight translated access";
+  EXPECT_EQ(initial[0], 0x5a);
+  EXPECT_EQ(initial[kInitialSize - 1], 0xa5);
+  EXPECT_EQ(grown[0], 0x5a);
+  EXPECT_EQ(grown[kInitialSize - 1], 0xa5);
+  EXPECT_EQ(grown[kInitialSize], 0);
+  EXPECT_NE(memory->resolve_host_ptr(kScratchGpuVa + kGrownSize - 1, process_id), nullptr);
+
+  EXPECT_EQ(t.driver()->close(), 0);
+}
+
+TEST_F(SimulatedKfdTest, ScratchBackingGrowthDoesNotMistakePassthroughForMappedPages) {
+  auto t = create_test_vm();
+  ASSERT_NE(t.driver(), nullptr);
+  ASSERT_GE(t.driver()->open(), 0);
+
+  constexpr size_t kGpuVaAlignment = 64 * 1024;
+  constexpr size_t kReservationSize = 2 * kGpuVaAlignment;
+  constexpr size_t kAllocationSize = kGpuVaAlignment;
+  constexpr size_t kInitialSize = 4096;
+  constexpr size_t kGrownSize = 8192;
+  void *reservation =
+      ::mmap(nullptr, kReservationSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(reservation, MAP_FAILED);
+  const auto reservation_begin = reinterpret_cast<uintptr_t>(reservation);
+  const auto scratch_va =
+      (reservation_begin + kGpuVaAlignment - 1u) & ~(uintptr_t{kGpuVaAlignment - 1u});
+  ASSERT_LE(scratch_va + kGrownSize, reservation_begin + kReservationSize);
+
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = scratch_va;
+  alloc.size = kAllocationSize;
+  alloc.gpu_id = t.driver()->gpu_id();
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+  ASSERT_EQ(t.driver()->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  ASSERT_EQ(alloc.va_addr, scratch_va);
+  ASSERT_EQ(t.driver()->mmap(reinterpret_cast<void *>(scratch_va), kInitialSize,
+                             PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                             static_cast<off_t>(alloc.mmap_offset)),
+            reinterpret_cast<void *>(scratch_va));
+
+  const uint32_t process_id = t.driver()->local_process_id();
+  auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(t.engine->topology().root());
+  ASSERT_NE(vm, nullptr);
+  auto *memory = vm->memory();
+  ASSERT_NE(memory, nullptr);
+  ASSERT_TRUE(memory->has_page_table_mapping(scratch_va, process_id));
+  ASSERT_FALSE(memory->has_page_table_mapping(scratch_va + kInitialSize, process_id));
+  ASSERT_NE(memory->resolve_host_ptr(scratch_va + kInitialSize, process_id), nullptr)
+      << "identity passthrough deliberately remains available for ordinary local-mode pointers";
+
+  auto *bytes = reinterpret_cast<uint8_t *>(scratch_va);
+  bytes[0] = 0x5a;
+  bytes[kInitialSize - 1] = 0xa5;
+  ASSERT_TRUE(rocjitsu::SimulatedKfdTestAccess::allocate_scratch_backing(*t.driver(), process_id,
+                                                                         scratch_va, kGrownSize));
+  EXPECT_TRUE(memory->has_page_table_mapping(scratch_va + kGrownSize - 1u, process_id));
+  EXPECT_FALSE(memory->has_page_table_mapping(scratch_va + kGrownSize, process_id));
+  EXPECT_EQ(bytes[0], 0x5a);
+  EXPECT_EQ(bytes[kInitialSize - 1], 0xa5);
+  EXPECT_EQ(bytes[kInitialSize], 0);
+
+  EXPECT_EQ(t.driver()->close(), 0);
+  EXPECT_EQ(::munmap(reservation, kReservationSize), 0);
+}
+
+TEST_F(SimulatedKfdTest, ScratchBackingGrowthActivatesReservedUserptrTail) {
+  auto t = create_test_vm();
+  ASSERT_NE(t.driver(), nullptr);
+  ASSERT_GE(t.driver()->open(), 0);
+
+  constexpr size_t kGpuVaAlignment = 64 * 1024;
+  constexpr size_t kReservationSize = 2 * kGpuVaAlignment;
+  constexpr size_t kAllocationSize = kGpuVaAlignment;
+  constexpr size_t kInitialSize = 4096;
+  constexpr size_t kGrownSize = 8192;
+  void *reservation =
+      ::mmap(nullptr, kReservationSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(reservation, MAP_FAILED);
+  const auto reservation_begin = reinterpret_cast<uintptr_t>(reservation);
+  const auto scratch_va =
+      (reservation_begin + kGpuVaAlignment - 1u) & ~(uintptr_t{kGpuVaAlignment - 1u});
+  ASSERT_LE(scratch_va + kAllocationSize, reservation_begin + kReservationSize);
+  ASSERT_EQ(::mprotect(reinterpret_cast<void *>(scratch_va), kInitialSize, PROT_READ | PROT_WRITE),
+            0);
+
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = scratch_va;
+  alloc.size = kAllocationSize;
+  alloc.gpu_id = t.driver()->gpu_id();
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_USERPTR;
+  ASSERT_EQ(t.driver()->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+
+  const uint32_t process_id = t.driver()->local_process_id();
+  auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(t.engine->topology().root());
+  ASSERT_NE(vm, nullptr);
+  auto *memory = vm->memory();
+  ASSERT_NE(memory, nullptr);
+  ASSERT_TRUE(memory->has_page_table_mapping(scratch_va + kGrownSize - 1u, process_id))
+      << "USERPTR PTEs describe the reservation, not its current host permissions";
+
+  auto *bytes = reinterpret_cast<uint8_t *>(scratch_va);
+  bytes[0] = 0x5a;
+  bytes[kInitialSize - 1] = 0xa5;
+  ASSERT_TRUE(rocjitsu::SimulatedKfdTestAccess::allocate_scratch_backing(*t.driver(), process_id,
+                                                                         scratch_va, kGrownSize));
+  EXPECT_EQ(bytes[0], 0x5a);
+  EXPECT_EQ(bytes[kInitialSize - 1], 0xa5);
+  bytes[kInitialSize] = 0x3c;
+  EXPECT_EQ(bytes[kInitialSize], 0x3c);
+
+  EXPECT_EQ(t.driver()->close(), 0);
+  EXPECT_EQ(::munmap(reservation, kReservationSize), 0);
+}
+
+TEST_F(SimulatedKfdTest, ScratchBackingGrowthUsesVerifiedReservationBeyondUserptrRegistration) {
+  auto t = create_test_vm();
+  ASSERT_NE(t.driver(), nullptr);
+  ASSERT_GE(t.driver()->open(), 0);
+
+  constexpr size_t kGpuVaAlignment = 64 * 1024;
+  constexpr size_t kReservationSize = 2 * kGpuVaAlignment;
+  constexpr size_t kRegisteredSize = 4096;
+  constexpr size_t kGrownSize = 8192;
+  void *reservation =
+      ::mmap(nullptr, kReservationSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(reservation, MAP_FAILED);
+  const auto reservation_begin = reinterpret_cast<uintptr_t>(reservation);
+  const auto scratch_va =
+      (reservation_begin + kGpuVaAlignment - 1u) & ~(uintptr_t{kGpuVaAlignment - 1u});
+  ASSERT_LE(scratch_va + kGrownSize, reservation_begin + kReservationSize);
+  ASSERT_EQ(
+      ::mprotect(reinterpret_cast<void *>(scratch_va), kRegisteredSize, PROT_READ | PROT_WRITE), 0);
+
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = scratch_va;
+  alloc.size = kRegisteredSize;
+  alloc.gpu_id = t.driver()->gpu_id();
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_USERPTR;
+  ASSERT_EQ(t.driver()->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+
+  const uint32_t process_id = t.driver()->local_process_id();
+  auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(t.engine->topology().root());
+  ASSERT_NE(vm, nullptr);
+  auto *memory = vm->memory();
+  ASSERT_NE(memory, nullptr);
+  ASSERT_FALSE(memory->has_page_table_mapping(scratch_va + kGrownSize - 1u, process_id));
+
+  auto *bytes = reinterpret_cast<uint8_t *>(scratch_va);
+  bytes[0] = 0x5a;
+  bytes[kRegisteredSize - 1] = 0xa5;
+  ASSERT_TRUE(rocjitsu::SimulatedKfdTestAccess::allocate_scratch_backing(*t.driver(), process_id,
+                                                                         scratch_va, kGrownSize));
+  EXPECT_TRUE(memory->has_page_table_mapping(scratch_va + kGrownSize - 1u, process_id));
+  EXPECT_EQ(bytes[0], 0x5a);
+  EXPECT_EQ(bytes[kRegisteredSize - 1], 0xa5);
+  bytes[kRegisteredSize] = 0x3c;
+  EXPECT_EQ(bytes[kRegisteredSize], 0x3c);
+
+  EXPECT_EQ(t.driver()->close(), 0);
+  EXPECT_EQ(::munmap(reservation, kReservationSize), 0);
 }
 
 TEST_F(SimulatedKfdTest, GuestDiscoveryOpenIsReleasedOnLastClose) {

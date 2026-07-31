@@ -598,8 +598,11 @@ TEST(ConSan, InvalidGrowthPolicyAndNonPolicyReplacementFailureStayDistinct) {
                                    "test malformed replacement", malformed));
   const std::string expected_malformed =
       "ConSan test malformed replacement could not replace executable text (outcome malformed "
-      "input, patched-image remaining file growth limit 201326592 bytes, total limit 201326592 "
-      "bytes (policy absolute-bytes=201326592))";
+      "input, patched-image remaining file growth limit " +
+      std::to_string(kConSanDefaultMaxPatchedImageGrowthBytes) + " bytes, total limit " +
+      std::to_string(kConSanDefaultMaxPatchedImageGrowthBytes) +
+      " bytes (policy absolute-bytes=" + std::to_string(kConSanDefaultMaxPatchedImageGrowthBytes) +
+      "))";
   EXPECT_NE(std::ranges::find(malformed.errors, expected_malformed), malformed.errors.end())
       << testing::PrintToString(malformed.errors);
   EXPECT_TRUE(malformed.patched_image_growth_rejections.empty());
@@ -655,8 +658,11 @@ TEST(ConSan, ReplacementDiagnosticsReportLateMalformedInputAndExactResolvedGrowt
                                    result));
   const std::string expected =
       "ConSan test late malformed replacement could not replace executable text (outcome malformed "
-      "input, patched-image remaining file growth limit 201326592 bytes, total limit 201326592 "
-      "bytes (policy absolute-bytes=201326592), required file growth 64 bytes)";
+      "input, patched-image remaining file growth limit " +
+      std::to_string(kConSanDefaultMaxPatchedImageGrowthBytes) + " bytes, total limit " +
+      std::to_string(kConSanDefaultMaxPatchedImageGrowthBytes) +
+      " bytes (policy absolute-bytes=" + std::to_string(kConSanDefaultMaxPatchedImageGrowthBytes) +
+      "), required file growth 64 bytes)";
   EXPECT_NE(std::ranges::find(result.errors, expected), result.errors.end())
       << testing::PrintToString(result.errors);
   EXPECT_TRUE(result.patched_image_growth_rejections.empty());
@@ -2141,6 +2147,49 @@ TEST(ConSan, Gfx1250FlatLoadCheckTrapSpillsLiveVccSavePairForFullAndHighHalfLoad
   }
 }
 
+TEST(ConSan, Gfx1250FlatB64CheckTrapRejectsOddAndAcceptsEvenTupleScratch) {
+  constexpr auto load =
+      gfx1250::build_vflat(gfx1250::kFlatLoadB64Vflat, {.saddr = 124, .vdst = 2, .vaddr = 0});
+  std::vector<uint32_t> text_words = {
+      0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
+      build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_GFX1250),
+      build_v_mov_b32_e32(/*vdst=*/1, /*scalar s1=*/1, ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  text_words.insert(text_words.end(), load.begin(), load.end());
+  text_words.insert(text_words.end(), 32u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "gfx1250_flat_b64_tuple_scratch");
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_flat_check_trap = true;
+  options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  options.delay_nops = 1u;
+  options.max_patches = 1u;
+  options.scratch_vgpr = 5u;
+
+  const ConSanResult odd_result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(odd_result)) << testing::PrintToString(odd_result.errors);
+  EXPECT_FALSE(odd_result.modified);
+  EXPECT_TRUE(odd_result.patches.empty());
+
+  options.scratch_vgpr = 6u;
+  const ConSanResult even_result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(even_result)) << testing::PrintToString(even_result.errors);
+  ASSERT_TRUE(even_result.modified) << testing::PrintToString(even_result.warnings);
+  ASSERT_TRUE(even_result.final_validation_passed);
+  const auto patch =
+      std::ranges::find_if(even_result.patches, [](const ConSanPatchInfo &candidate) {
+        return candidate.kind == ConSanPatchKind::InlineFlatLoadCheckTrap ||
+               candidate.kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap;
+      });
+  ASSERT_NE(patch, even_result.patches.end());
+  EXPECT_EQ(patch->scratch_vgpr, 6u);
+}
+
 TEST(ConSan, Gfx950FlatCheckTrapFailsClosedWithoutDeadVccSavePair) {
   const auto store = build_cdna4_flat_store_b32(/*vaddr=*/0, /*vsrc=*/2, /*byte_offset=*/0,
                                                 ROCJITSU_CODE_ARCH_CDNA4);
@@ -2921,6 +2970,34 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250VdsLoadInPlace) {
   EXPECT_EQ(rewritten_words[5], duplicate[1]);
 }
 
+TEST(ConSan, ProbeLdsCheckTrapModeEvenAlignsAutomaticGfx1250B64Scratch) {
+  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB64Vds, {.addr = 4, .vdst = 2});
+  std::vector<uint32_t> text_words = {load[0], load[1]};
+  text_words.insert(text_words.end(), 20u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "gfx1250_vds_b64_even_scratch");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.delay_nops = 2;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.patches.size(), 1u);
+  ASSERT_TRUE(result.patches.front().scratch_vgpr);
+  EXPECT_EQ(*result.patches.front().scratch_vgpr, 6u);
+  EXPECT_EQ(*result.patches.front().scratch_vgpr % 2u, 0u);
+  EXPECT_TRUE(result.final_validation_passed);
+
+  const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
+  constexpr auto duplicate = gfx1250::build_vds(gfx1250::kDsLoadB64Vds, {.addr = 4, .vdst = 6});
+  EXPECT_EQ(rewritten_words[4], duplicate[0]);
+  EXPECT_EQ(rewritten_words[5], duplicate[1]);
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250GuestVgprBankMode) {
   constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   constexpr uint32_t kSelectLowVgprBank = 0xBF860100u;
@@ -2962,7 +3039,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250GuestVgprBankMode) {
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250LowBankAddressForHighBankLoad) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 2, .vdst = 2});
   constexpr uint32_t kSelectLowVgprBank = 0xBF864000u;
   constexpr uint32_t kSelectGuestVgprBank = 0xBF860040u;
   std::vector<uint32_t> text_words = {kSelectGuestVgprBank, load[0], load[1]};
@@ -3015,7 +3092,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeComparesGfx1250LoadAcrossVgprBankBoundary) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.probe_lds_check_trap = true;
-  options.scratch_vgpr = 3;
+  options.scratch_vgpr = 4;
 
   const ConSanResult result = try_patch_consan(bytes, options);
 
@@ -3171,7 +3248,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250I8VdsLoadInPlace) {
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250B96VdsLoadInPlace) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB96Vds, {.addr = 10, .vdst = 1});
+  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB96Vds, {.addr = 10, .vdst = 2});
   std::vector<uint32_t> text_words = {load[0], load[1]};
   text_words.insert(text_words.end(), 32u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
@@ -3179,7 +3256,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250B96VdsLoadInPlace) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.probe_lds_check_trap = true;
-  options.scratch_vgpr = 4;
+  options.scratch_vgpr = 6;
   options.delay_nops = 2;
 
   const ConSanResult result = try_patch_consan(bytes, options);
@@ -3193,7 +3270,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250B96VdsLoadInPlace) {
   EXPECT_TRUE(result.kernels.front().lds_sites.front().supported_mvp);
   EXPECT_TRUE(result.final_validation_passed);
   const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
-  constexpr auto duplicate = gfx1250::build_vds(gfx1250::kDsLoadB96Vds, {.addr = 10, .vdst = 4});
+  constexpr auto duplicate = gfx1250::build_vds(gfx1250::kDsLoadB96Vds, {.addr = 10, .vdst = 6});
   EXPECT_EQ(rewritten_words[4], duplicate[0]);
   EXPECT_EQ(rewritten_words[5], duplicate[1]);
 }
@@ -3423,11 +3500,11 @@ TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B16StoreValues) {
   check(gfx1250::kDsStoreB16D16HiVds, true, "gfx1250_vds_store_b16_d16_hi");
 }
 
-TEST(ConSan, ProbeLdsCheckTrapModeReadsBackGfx1250Stride64Stores) {
-  const auto check = [](uint16_t store_op, uint16_t load_op, uint8_t data1,
-                        std::string_view kernel_name) {
-    const auto store =
-        gfx1250::build_vds(store_op, {.offset1 = 8, .addr = 12, .data0 = 2, .data1 = data1});
+TEST(ConSan, ProbeLdsCheckTrapModeSplitsGfx1250TwoAddressStoresAndReadbacks) {
+  const auto check = [](uint16_t store_op, uint16_t element_dwords, uint8_t encoded_offset1,
+                        uint16_t byte_offset1, uint8_t data1, std::string_view kernel_name) {
+    const auto store = gfx1250::build_vds(
+        store_op, {.offset1 = encoded_offset1, .addr = 12, .data0 = 2, .data1 = data1});
     std::vector<uint32_t> text_words = {store[0], store[1]};
     text_words.insert(text_words.end(), 28u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
     text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
@@ -3445,16 +3522,120 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackGfx1250Stride64Stores) {
     EXPECT_TRUE(result.final_validation_passed);
     if (!result.modified)
       return;
-    const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
-    const auto readback = gfx1250::build_vds(load_op, {.offset1 = 8, .addr = 12, .vdst = 8});
-    EXPECT_EQ(rewritten_words[4], readback[0]);
-    EXPECT_EQ(rewritten_words[5], readback[1]);
+    const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
+      return candidate.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap ||
+             candidate.kind == ConSanPatchKind::InlineLdsStoreCheckTrap;
+    });
+    ASSERT_NE(patch, result.patches.end());
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    ASSERT_EQ(patched.text_sections().size(), 1u);
+    const uint64_t body_text_offset = patch->kind == ConSanPatchKind::InlineLdsStoreCheckTrap
+                                          ? patch->anchor_offset
+                                          : patch->trampoline_offset;
+    const uint64_t body_file_offset =
+        patched.text_sections().front()->sectionOffset() + body_text_offset;
+    const auto rewritten_words = patched_words_at_file_offset<10>(result, body_file_offset);
+    const auto first_store =
+        gfx1250::build_vds(element_dwords == 1u ? gfx1250::kDsStoreB32Vds : gfx1250::kDsStoreB64Vds,
+                           {.addr = 12, .data0 = 2});
+    const auto second_store =
+        gfx1250::build_vds(element_dwords == 1u ? gfx1250::kDsStoreB32Vds : gfx1250::kDsStoreB64Vds,
+                           {.offset0 = static_cast<uint8_t>(byte_offset1),
+                            .offset1 = static_cast<uint8_t>(byte_offset1 >> 8u),
+                            .addr = 12,
+                            .data0 = data1});
+    const auto first_load =
+        gfx1250::build_vds(element_dwords == 1u ? gfx1250::kDsLoadB32Vds : gfx1250::kDsLoadB64Vds,
+                           {.addr = 12, .vdst = 8});
+    const auto second_load =
+        gfx1250::build_vds(element_dwords == 1u ? gfx1250::kDsLoadB32Vds : gfx1250::kDsLoadB64Vds,
+                           {.offset0 = static_cast<uint8_t>(byte_offset1),
+                            .offset1 = static_cast<uint8_t>(byte_offset1 >> 8u),
+                            .addr = 12,
+                            .vdst = static_cast<uint8_t>(8u + element_dwords)});
+    const std::array<uint32_t, 10> expected = {
+        first_store[0],
+        first_store[1],
+        second_store[0],
+        second_store[1],
+        build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),
+        build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),
+        first_load[0],
+        first_load[1],
+        second_load[0],
+        second_load[1],
+    };
+    EXPECT_EQ(rewritten_words, expected);
   };
 
-  check(gfx1250::kDsStore2addrStride64B32Vds, gfx1250::kDsLoad2addrStride64B32Vds, 7,
+  check(gfx1250::kDsStore2addrB32Vds, 1, 66, 264, 7, "gfx1250_vds_store_2addr_b32");
+  check(gfx1250::kDsStore2addrB64Vds, 2, 34, 272, 4, "gfx1250_vds_store_2addr_b64");
+  check(gfx1250::kDsStore2addrStride64B32Vds, 1, 8, 2048, 7,
         "gfx1250_vds_store_2addr_stride64_b32");
-  check(gfx1250::kDsStore2addrStride64B64Vds, gfx1250::kDsLoad2addrStride64B64Vds, 4,
+  check(gfx1250::kDsStore2addrStride64B64Vds, 2, 8, 4096, 4,
         "gfx1250_vds_store_2addr_stride64_b64");
+}
+
+TEST(ConSan, ProbeLdsCheckTrapModeSplitsLargeGfx1250TwoAddressOffsetsWithAddressScratch) {
+  const auto store =
+      gfx1250::build_vds(gfx1250::kDsStore2addrStride64B64Vds,
+                         {.offset0 = 1, .offset1 = 255, .addr = 20, .data0 = 2, .data1 = 4});
+  std::vector<uint32_t> text_words = {store[0], store[1]};
+  text_words.insert(text_words.end(), 48u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "gfx1250_vds_store_2addr_large_offset");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 8;
+  options.delay_nops = 1;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
+    return candidate.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap ||
+           candidate.kind == ConSanPatchKind::InlineLdsStoreCheckTrap;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const uint64_t body_text_offset = patch->kind == ConSanPatchKind::InlineLdsStoreCheckTrap
+                                        ? patch->anchor_offset
+                                        : patch->trampoline_offset;
+  const uint64_t body_file_offset =
+      patched.text_sections().front()->sectionOffset() + body_text_offset;
+  const auto body_prefix = patched_words_at_file_offset<13>(result, body_file_offset);
+  const auto first_store =
+      gfx1250::build_vds(gfx1250::kDsStoreB64Vds, {.offset1 = 2, .addr = 20, .data0 = 2});
+  const auto second_store = gfx1250::build_vds(gfx1250::kDsStoreB64Vds, {.addr = 12, .data0 = 4});
+  const auto first_load =
+      gfx1250::build_vds(gfx1250::kDsLoadB64Vds, {.offset1 = 2, .addr = 20, .vdst = 8});
+  const auto second_load = gfx1250::build_vds(gfx1250::kDsLoadB64Vds, {.addr = 12, .vdst = 10});
+  const auto adjust =
+      instrumentation::build_v_add_u32_literal(12, 12, 255u * 512u, 20, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(adjust);
+  ASSERT_EQ(adjust->size(), 2u);
+  const std::array<uint32_t, 13> expected = {
+      first_store[0],
+      first_store[1],
+      (*adjust)[0],
+      (*adjust)[1],
+      second_store[0],
+      second_store[1],
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),
+      first_load[0],
+      first_load[1],
+      (*adjust)[0],
+      (*adjust)[1],
+      second_load[0],
+      second_load[1],
+  };
+  EXPECT_EQ(body_prefix, expected);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeSpillsGfx1250B8VdsStoreScratchWindow) {

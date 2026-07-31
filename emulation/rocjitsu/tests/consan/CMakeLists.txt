@@ -89,8 +89,10 @@ function(rj_add_consan_hip_case)
     # the focused default access-only and require barrier/atomic cases to opt in
     # explicitly below.
     set(_case_is_moi FALSE)
+    set(_case_is_record_replay FALSE)
     set(_case_sets_barrier_tracking FALSE)
     set(_case_sets_atomic_tracking FALSE)
+    set(_case_sets_runtime_sample_stride FALSE)
     foreach(_environment_entry IN LISTS _case_ENVIRONMENT)
         if(
             _environment_entry
@@ -98,10 +100,17 @@ function(rj_add_consan_hip_case)
                 "^RJ_CONSAN_MODE=(record-replay|inline-shadow|sampled)$"
         )
             set(_case_is_moi TRUE)
+            if(_environment_entry STREQUAL "RJ_CONSAN_MODE=record-replay")
+                set(_case_is_record_replay TRUE)
+            endif()
         elseif(_environment_entry MATCHES "^RJ_CONSAN_MOI_TRACK_BARRIERS=")
             set(_case_sets_barrier_tracking TRUE)
         elseif(_environment_entry MATCHES "^RJ_CONSAN_MOI_TRACK_ATOMICS=")
             set(_case_sets_atomic_tracking TRUE)
+        elseif(
+            _environment_entry MATCHES "^RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE="
+        )
+            set(_case_sets_runtime_sample_stride TRUE)
         endif()
     endforeach()
     if(_case_is_moi)
@@ -110,6 +119,16 @@ function(rj_add_consan_hip_case)
         endif()
         if(NOT _case_sets_atomic_tracking)
             list(APPEND _case_ENVIRONMENT "RJ_CONSAN_MOI_TRACK_ATOMICS=0")
+        endif()
+        # Compact Record/Replay fixtures assert on a particular dispatch's
+        # records. Keep that semantic contract deterministic unless a test is
+        # explicitly exercising runtime sampling; production profile defaults
+        # remain covered by configuration tests and large-object validation.
+        if(_case_is_record_replay AND NOT _case_sets_runtime_sample_stride)
+            list(
+                APPEND _case_ENVIRONMENT
+                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1"
+            )
         endif()
     endif()
 

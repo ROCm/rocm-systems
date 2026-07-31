@@ -1227,7 +1227,7 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
       EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
         return warning.find("cannot place persistent scalar state") != std::string::npos;
-      }));
+      })) << testing::PrintToString(result.warnings);
       continue;
     }
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);

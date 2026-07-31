@@ -17,6 +17,7 @@
 /// the original ELF may target a different GPU ISA.
 
 #include "hsa/hsa_api_trace_minimal.h"
+#include "rocjitsu/hooks/hsa_tool_lifetime.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -3924,6 +3925,9 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
   (void)runtime_version;
   (void)failed_tool_count;
   (void)failed_tool_names;
+
+  if (!rocjitsu::hooks::retain_hsa_tool_dso())
+    return false;
 
   auto config = parse_config();
   if (!config)

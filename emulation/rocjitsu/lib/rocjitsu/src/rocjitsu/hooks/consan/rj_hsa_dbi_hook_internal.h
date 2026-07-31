@@ -187,7 +187,17 @@ compute_consan_supercollider_access_coverage(const ConSanResult &result, const H
 }
 
 constexpr std::string_view kMoiStandardProfile = "standard-v1";
-constexpr uint32_t kMoiSampledStandardRuntimeStride = 16384u;
+// Automatic Record/Replay retains exact events for a bounded set of
+// dispatch/workgroup identities. Gate ordinary workloads at the same effective
+// evidence density as Sampled's independent workgroup and cell selectors so a
+// large launch does not spend unbounded time probing identities the frozen
+// report cannot retain.
+constexpr uint32_t kMoiRecordReplayStandardRuntimeStride = 65536u;
+// Sampled uses this stride independently for its workgroup fast gate and LDS
+// cell selector, so the effective evidence rate is the square of the configured
+// stride. Keep the standard operating point sparse without making ordinary
+// bounded workloads statistically likely to publish no evidence at all.
+constexpr uint32_t kMoiSampledStandardRuntimeStride = 256u;
 
 [[nodiscard]] inline const char *preflight_action_name(rocjitsu::ConSanPreflightAction action) {
   switch (action) {

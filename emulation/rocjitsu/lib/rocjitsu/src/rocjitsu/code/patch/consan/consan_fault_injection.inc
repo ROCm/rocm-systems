@@ -2087,6 +2087,13 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
   return std::nullopt;
 }
 
+[[nodiscard]] bool flat_scratch_tuple_base_is_valid(const ConSanFlatSite &site,
+                                                    rj_code_arch_t arch, uint16_t candidate) {
+  const auto dword_count = flat_dword_count(site);
+  return !dword_count || *dword_count <= 1u ||
+         !consan_arch_requires_even_vgpr_tuples(arch) || candidate % 2u == 0u;
+}
+
 [[nodiscard]] bool is_supported_flat_check_trap_site(const ConSanFlatSite &site,
                                                      ConSanFlatProvenanceMode mode) {
   if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)
@@ -2154,9 +2161,11 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
 choose_flat_scratch_vgpr(const ConSanFlatSite &site, const ConSanOptions &options,
                          const Instruction *inst, const LivenessAnalysis *liveness,
                          std::optional<uint16_t> min_auto_scratch_vgpr,
-                         std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs) {
+                         std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs,
+                         rj_code_arch_t arch) {
   if (options.scratch_vgpr) {
     if (static_cast<uint32_t>(*options.scratch_vgpr) + required_vgprs <= 256 &&
+        flat_scratch_tuple_base_is_valid(site, arch, *options.scratch_vgpr) &&
         !is_forbidden_flat_scratch_vgpr_run(site, *options.scratch_vgpr, required_vgprs))
       return *options.scratch_vgpr;
     return std::nullopt;
@@ -2175,6 +2184,7 @@ choose_flat_scratch_vgpr(const ConSanFlatSite &site, const ConSanOptions &option
     if (max_auto_scratch_vgpr && candidate_end > *max_auto_scratch_vgpr)
       return std::nullopt;
     if (candidate_end <= REGISTER_SET_MAX_VGPRS &&
+        flat_scratch_tuple_base_is_valid(site, arch, *candidate) &&
         !is_forbidden_flat_scratch_vgpr_run(site, *candidate, required_vgprs))
       return candidate;
     if (*candidate == UINT16_MAX)
@@ -2190,12 +2200,13 @@ choose_flat_scratch_vgpr(const ConSanFlatSite &site, const ConSanOptions &option
 /// memory before using it.
 [[nodiscard]] std::optional<uint16_t>
 choose_flat_spill_scratch_vgpr(const ConSanFlatSite &site, uint16_t allocation_count,
-                               uint16_t required_vgprs) {
+                               uint16_t required_vgprs, rj_code_arch_t arch) {
   for (uint32_t candidate = 0;
        candidate + required_vgprs <= allocation_count &&
        candidate + required_vgprs <= REGISTER_SET_MAX_VGPRS;
        ++candidate) {
-    if (!is_forbidden_flat_scratch_vgpr_run(site, static_cast<uint16_t>(candidate),
+    if (flat_scratch_tuple_base_is_valid(site, arch, static_cast<uint16_t>(candidate)) &&
+        !is_forbidden_flat_scratch_vgpr_run(site, static_cast<uint16_t>(candidate),
                                             required_vgprs)) {
       return static_cast<uint16_t>(candidate);
     }

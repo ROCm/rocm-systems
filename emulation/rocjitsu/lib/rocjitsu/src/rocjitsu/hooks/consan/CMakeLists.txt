@@ -27,6 +27,7 @@ target_include_directories(rocjitsu_dbi_hooks SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
 target_link_libraries(
     rocjitsu_dbi_hooks
     PRIVATE
+        rocjitsu_hsa_tool_lifetime
         rocjitsu_waitcheck_objects
         rocjitsu_dbt_internal
         util
@@ -36,13 +37,7 @@ target_link_libraries(
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(_rj_consan_linker_options "--gc-sections,--exclude-libs,ALL")
     if(
-        NOT
-        (
-            RJ_ENABLE_ASAN
-            OR RJ_ENABLE_UBSAN
-            OR RJ_ENABLE_TSAN
-            OR RJ_ENABLE_MSAN
-        )
+        NOT (RJ_ENABLE_ASAN OR RJ_ENABLE_UBSAN OR RJ_ENABLE_TSAN OR RJ_ENABLE_MSAN)
     )
         string(APPEND _rj_consan_linker_options ",--no-undefined")
     endif()

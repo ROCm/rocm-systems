@@ -364,25 +364,60 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   // Scratch (private segment) setup.
   // Each wavefront gets a unique slice of scratch memory. The per-lane
   // private size is private_segment_fixed_size; the per-wave region is
-  // that multiplied by wf_size. The global wave index is derived from
-  // (global_wg_id, wf_index_in_wg) to ensure non-overlapping scratch
-  // across all CUs and workgroups in the dispatch.
+  // that multiplied by wf_size. The global wave index includes the packet's
+  // workgroup offset so independently queued XCD partitions cannot overlap in
+  // a shared scratch pool. Provision the backing through the end of this
+  // partition, including any preceding offset.
   if (pkt.private_segment_fixed_size > 0) {
     uint64_t scratch_pool = pkt.scratch_backing_addr;
     if (scratch_pool == 0)
       scratch_pool = 0x1'0000'0000ULL;
     uint64_t per_wave_size = static_cast<uint64_t>(pkt.private_segment_fixed_size) * cu->wf_size();
-    uint32_t wg_total_size = static_cast<uint32_t>(pkt.workgroup_size_x) *
-                             std::max<uint16_t>(1, pkt.workgroup_size_y) *
-                             std::max<uint16_t>(1, pkt.workgroup_size_z);
-    uint32_t waves_per_wg = (wg_total_size + cu->wf_size() - 1) / cu->wf_size();
-    uint64_t global_wave_idx = static_cast<uint64_t>(global_wg_id) * waves_per_wg + wf_index_in_wg;
-    uint64_t wave_scratch = scratch_pool + global_wave_idx * per_wave_size;
+    const uint64_t wg_total_size = static_cast<uint64_t>(pkt.workgroup_size_x) *
+                                   std::max<uint16_t>(1, pkt.workgroup_size_y) *
+                                   std::max<uint16_t>(1, pkt.workgroup_size_z);
+    if (wg_total_size == 0)
+      throw std::runtime_error("kernel dispatch private segment has an empty workgroup");
+    const uint64_t waves_per_wg = (wg_total_size + cu->wf_size() - 1) / cu->wf_size();
+    if (global_wg_id < pkt.workgroup_id_offset)
+      throw std::runtime_error("kernel dispatch workgroup ID precedes its packet offset");
+    const uint32_t local_wg_id = global_wg_id - pkt.workgroup_id_offset;
+    if (local_wg_id >= pkt.total_wgs)
+      throw std::runtime_error("kernel dispatch workgroup ID exceeds its scratch allocation");
 
-    if (memory_ && memory_->resolve_host_ptr(wave_scratch, pkt.process_id) == nullptr &&
-        scratch_allocator_) {
-      uint64_t total_scratch = per_wave_size * pkt.total_wgs * waves_per_wg;
-      scratch_allocator_(pkt.process_id, scratch_pool, static_cast<size_t>(total_scratch));
+    const uint64_t global_wg_end = static_cast<uint64_t>(pkt.workgroup_id_offset) + pkt.total_wgs;
+    if (global_wg_end > std::numeric_limits<uint64_t>::max() / waves_per_wg)
+      throw std::runtime_error("kernel dispatch private segment wave count overflows");
+    const uint64_t total_waves = global_wg_end * waves_per_wg;
+    if (total_waves == 0)
+      throw std::runtime_error("kernel dispatch private segment has no wavefronts");
+    if (total_waves > std::numeric_limits<uint64_t>::max() / per_wave_size)
+      throw std::runtime_error(
+          "kernel dispatch private segment exceeds the simulator address space");
+    const uint64_t total_scratch = per_wave_size * total_waves;
+    if (scratch_pool > std::numeric_limits<uint64_t>::max() - (total_scratch - 1u))
+      throw std::runtime_error("kernel dispatch private segment wraps the simulator address space");
+    const uint64_t scratch_end = scratch_pool + total_scratch - 1u;
+    const uint64_t global_wave_idx =
+        static_cast<uint64_t>(global_wg_id) * waves_per_wg + wf_index_in_wg;
+    const uint64_t wave_scratch = scratch_pool + global_wave_idx * per_wave_size;
+    const bool first_partition_wave = local_wg_id == 0 && wf_index_in_wg == 0;
+    const bool backing_incomplete =
+        memory_ && (!memory_->has_page_table_mapping(scratch_pool, pkt.process_id) ||
+                    !memory_->has_page_table_mapping(scratch_end, pkt.process_id));
+    // USERPTR page-table entries can span a reserved host VA whose inaccessible
+    // tail has not been activated yet. Provision once at dispatch entry even
+    // when both endpoint PTEs exist; later waves retain the mapping check as a
+    // fail-safe for nonstandard scheduling.
+    const bool should_provision =
+        backing_incomplete || (first_partition_wave && scratch_allocator_);
+    if (should_provision) {
+      if (!scratch_allocator_ ||
+          total_scratch > static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+          !scratch_allocator_(pkt.process_id, scratch_pool, static_cast<size_t>(total_scratch))) {
+        throw std::runtime_error(
+            std::format("could not allocate {} bytes of private-segment backing", total_scratch));
+      }
     }
 
     wf->set_scratch_base(wave_scratch);

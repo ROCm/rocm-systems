@@ -491,6 +491,11 @@ struct ConSanOptions {
   /// Internal proof marker: an appended Inline access body saves and restores
   /// its complete scratch window before executing the displaced guest access.
   bool moi_spill_overlaps_guest_operands = false;
+  /// Internal Sampled-access marker: the displaced guest runs immediately
+  /// after the scratch-window save, and an overlapping LDS address is
+  /// recovered from that authoritative spill before publication. Load
+  /// destinations remain outside the restored window.
+  bool moi_sampled_spill_backed_operand_recovery = false;
   /// Internal marker set after ConSan assigns the hw_id owner temporary SGPR.
   bool automatic_moi_owner_sgpr = false;
   /// Internal marker set after ConSan assigns the persistent hardware

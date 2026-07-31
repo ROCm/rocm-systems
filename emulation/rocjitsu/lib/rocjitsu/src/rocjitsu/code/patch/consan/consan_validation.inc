@@ -3956,10 +3956,12 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
             (replacement_encoded_accum_offset + 1u) * kAccvgprOffsetGranularity;
         const uint32_t original_unified_vgprs = unified_vgpr_count(original_descriptor);
         const uint32_t replacement_unified_vgprs = unified_vgpr_count(replacement_descriptor);
+        const bool original_accumulator_bank_proven_empty = original_kernel.agpr_count == 0u;
         const bool valid_empty_boundary_move =
             requirement.allow_resource_delta && original_encoded_accum_offset != 0u &&
             replacement_encoded_accum_offset != 0u &&
-            original_unified_vgprs <= original_accvgpr_base &&
+            (original_unified_vgprs <= original_accvgpr_base ||
+             original_accumulator_bank_proven_empty) &&
             replacement_unified_vgprs == replacement_accvgpr_base &&
             replacement_accvgpr_base >= requirement.required_vgpr_count;
         if (!valid_empty_boundary_move) {
