@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use clap::{Args, Subcommand, ValueEnum};
-use mirage_core::common::{MaybeRef, SimpleValue};
+use mirage_core::common::{MaybeRef, SimpleMap, SimpleValue};
 use mirage_core::ctl::{CreateSessionRequest, MirageCtl, StdStream, StreamPacket};
 use mirage_core::emulator::ExecMode;
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId, ExecRef};
@@ -418,6 +418,11 @@ pub struct StartArgs {
     /// repeated.
     #[arg(long = "option", short = 'o', value_name = "KEY=VALUE")]
     pub options: Vec<String>,
+    /// Enable an execution plugin by name (e.g. `race`, `logging`),
+    /// applying its schema defaults. May be repeated. Merges with any
+    /// plugins the profile already enables.
+    #[arg(long = "plugin", value_name = "NAME")]
+    pub plugins: Vec<String>,
     /// Use an explicit emulator config file instead of synthesising one
     /// from the profile (the upstream `rocjitsu --config`).
     #[arg(long, value_name = "PATH")]
@@ -578,6 +583,11 @@ pub struct RunArgs {
     /// repeated.
     #[arg(long = "option", short = 'o', value_name = "KEY=VALUE")]
     options: Vec<String>,
+    /// Enable an execution plugin by name (e.g. `race`, `logging`),
+    /// applying its schema defaults. May be repeated. Merges with any
+    /// plugins the profile already enables.
+    #[arg(long = "plugin", value_name = "NAME")]
+    plugins: Vec<String>,
     /// Use an explicit emulator config file instead of synthesising one
     /// from the profile (the upstream `rocjitsu --config`).
     #[arg(long, value_name = "PATH")]
@@ -1246,6 +1256,29 @@ fn parse_option(spec: &str) -> anyhow::Result<(String, SimpleValue)> {
     Ok((key.to_string(), parsed))
 }
 
+/// Parse a `--plugin` spec (a plugin name) into a plugin entry.
+///
+/// The CLI flag only selects which plugins to enable; each is added with an
+/// empty argument object so the rocjitsu plugin loader applies the plugin's
+/// schema defaults. Plugins that need explicit arguments are configured
+/// through a profile or an explicit `--config` file. The accepted name
+/// characters match the loader's own validation (letters, digits, '_', '-'),
+/// so a plugin name can never contain a path separator and escape the
+/// loader's plugin directory.
+fn parse_plugin(spec: &str) -> anyhow::Result<(String, SimpleMap)> {
+    let name = spec.trim();
+    if name.is_empty() {
+        anyhow::bail!("invalid plugin {spec:?} (empty name)");
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        anyhow::bail!("invalid plugin name {name:?} (allowed: letters, digits, '_', '-')");
+    }
+    Ok((name.to_string(), SimpleMap::new()))
+}
+
 /// Apply direct CLI overrides (containerisation + emulator settings) to
 /// a profile fetched by name.
 ///
@@ -1263,6 +1296,7 @@ fn apply_profile_overrides(
     emulator: Option<String>,
     exec_mode: Option<ExecModeArg>,
     options: &[String],
+    plugins: &[String],
     config: Option<String>,
     num_nodes: Option<u32>,
     gpus_per_node: Option<u32>,
@@ -1276,6 +1310,7 @@ fn apply_profile_overrides(
         && emulator.is_none()
         && exec_mode.is_none()
         && options.is_empty()
+        && plugins.is_empty()
         && config.is_none()
         && num_nodes.is_none()
         && gpus_per_node.is_none()
@@ -1346,6 +1381,10 @@ fn apply_profile_overrides(
     for opt in options {
         let (key, value) = parse_option(opt)?;
         profile.emulator.options.insert(key, value);
+    }
+    for spec in plugins {
+        let (name, args) = parse_plugin(spec)?;
+        profile.emulator.plugins.insert(name, args);
     }
     // Drop-in `--config <path>`: an explicit emulator config file
     // (the upstream `rocjitsu --config`). Stored as the `config`
@@ -1435,6 +1474,7 @@ async fn session_start<C: MirageCtl>(
         None,
         args.exec_mode,
         &args.options,
+        &args.plugins,
         args.config,
         None,
         None,
@@ -1940,6 +1980,7 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
                 a.emulator.clone(),
                 a.exec_mode,
                 &a.options,
+                &a.plugins,
                 a.config.clone(),
                 a.num_nodes,
                 a.gpus_per_node,
@@ -2205,6 +2246,7 @@ mod tests {
             None,
             None,
             &[],
+            &[],
             None,
             None,
             None,
@@ -2227,6 +2269,7 @@ mod tests {
             None,
             Some(ExecModeArg::Clocked),
             &["gpu_model=cdna4".to_string(), "queues=8".to_string()],
+            &[],
             None,
             None,
             None,
@@ -2262,6 +2305,7 @@ mod tests {
             None,
             None,
             &[],
+            &[],
             None,
             Some(2),
             Some(4),
@@ -2279,5 +2323,106 @@ mod tests {
             },
             MaybeRef::Ref(_) => panic!("expected an inlined (owned) profile"),
         }
+    }
+
+    #[test]
+    fn parse_plugin_accepts_valid_names_and_rejects_bad() {
+        assert_eq!(
+            parse_plugin("race").unwrap(),
+            ("race".to_string(), SimpleMap::new())
+        );
+        // Surrounding whitespace is trimmed.
+        assert_eq!(
+            parse_plugin("  logging ").unwrap(),
+            ("logging".to_string(), SimpleMap::new())
+        );
+        assert!(parse_plugin("").is_err());
+        assert!(parse_plugin("   ").is_err());
+        // A path separator (or any other special char) is rejected, so a
+        // plugin name can never escape the loader's plugin directory.
+        assert!(parse_plugin("../evil").is_err());
+        assert!(parse_plugin("a b").is_err());
+    }
+
+    #[test]
+    fn plugins_enable_inline_owned_profile() {
+        let mut p = sample_profile();
+        let r = apply_profile_overrides(
+            &mut p,
+            None,
+            &[],
+            &[],
+            None,
+            None,
+            None,
+            &[],
+            &["race".to_string(), "logging".to_string()],
+            None,
+            None,
+            None,
+            &[],
+            "mi450x",
+        )
+        .unwrap();
+        match r {
+            MaybeRef::Owned(owned) => {
+                assert!(owned.emulator.plugins.contains_key("race"));
+                assert!(owned.emulator.plugins.contains_key("logging"));
+                // Enabled with empty args; the loader applies schema defaults.
+                assert_eq!(owned.emulator.plugins["race"], SimpleMap::new());
+            }
+            MaybeRef::Ref(_) => panic!("expected an inlined (owned) profile"),
+        }
+    }
+
+    #[test]
+    fn plugins_merge_with_profile_defined_plugins() {
+        let mut p = sample_profile();
+        p.emulator
+            .plugins
+            .insert("logging".to_string(), SimpleMap::new());
+        let r = apply_profile_overrides(
+            &mut p,
+            None,
+            &[],
+            &[],
+            None,
+            None,
+            None,
+            &[],
+            &["race".to_string()],
+            None,
+            None,
+            None,
+            &[],
+            "mi450x",
+        )
+        .unwrap();
+        match r {
+            MaybeRef::Owned(owned) => {
+                // The CLI plugin is added alongside the profile's existing one.
+                assert!(owned.emulator.plugins.contains_key("race"));
+                assert!(owned.emulator.plugins.contains_key("logging"));
+            }
+            MaybeRef::Ref(_) => panic!("expected an inlined (owned) profile"),
+        }
+    }
+
+    #[test]
+    fn run_args_parse_repeated_plugin_flags() {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Wrap {
+            #[command(flatten)]
+            run: RunArgs,
+        }
+        let w = Wrap::try_parse_from([
+            "mirage", "--plugin", "race", "--plugin", "logging", "--", "./app",
+        ])
+        .expect("`mirage run --plugin race --plugin logging -- ./app` should parse");
+        assert_eq!(
+            w.run.plugins,
+            vec!["race".to_string(), "logging".to_string()]
+        );
     }
 }

@@ -490,8 +490,9 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
   uint32_t copyMask = 0;
   bool kUseRegularCopyApi = false;
   constexpr size_t kRetainCountThreshold = 8;
-  bool forceSDMA =
+  const bool requireSDMA =
       (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA);
+  bool forceSDMA = requireSDMA;
   HwQueueEngine engine = HwQueueEngine::Unknown;
 
   hsa_agent_t copyAgent, peerAgent;
@@ -558,9 +559,12 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
                 &gpu(), copyMask, engine);
       } else {
         ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
-                "Failed to allocate SDMA engine for VirtualGPU %p, falling back to regular copy",
-                &gpu());
-        kUseRegularCopyApi = true;
+                "Failed to allocate SDMA engine for VirtualGPU %p", &gpu());
+        if (requireSDMA) {
+          status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+        } else {
+          kUseRegularCopyApi = true;
+        }
       }
     }
 
@@ -577,7 +581,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
       status =
           Hsa::memory_async_copy_on_engine(dst, peerAgent, src, copyAgent, size, wait_events.size(),
                                            wait_events.data(), active, copyEngine, forceSDMA);
-    } else {
+    } else if (!requireSDMA) {
       kUseRegularCopyApi = true;
     }
   }
@@ -599,49 +603,16 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
     gpu().setFenceDirty(false);
   } else {
     gpu().Barriers().ResetCurrentSignal();
-    LogPrintfError("HSA copy failed with code %d, falling to Blit copy", status);
+    if (requireSDMA) {
+      LogPrintfError("Required SDMA copy failed with code %d", status);
+    } else {
+      LogPrintfError("HSA copy failed with code %d, falling to Blit copy", status);
+    }
   }
 
   return (status == HSA_STATUS_SUCCESS);
 }
 
-
-// ================================================================================================
-// Resolves the real HSA agents for a src/dst memory pair using pointer_info
-inline void DmaBlitManager::resolveAgents(const Memory& srcMem, const Memory& dstMem,
-                                          address srcAddr, address dstAddr,
-                                          hsa_agent_t& srcAgent, hsa_agent_t& dstAgent) const {
-  // Use agents stored in memory objects during creation
-  srcAgent = srcMem.getOwningAgent();
-  dstAgent = dstMem.getOwningAgent();
-
-  // Handle invalid agent (shouldn't happen if create() properly initialized)
-  if (srcAgent.handle == 0) {
-    srcAgent = srcMem.isHostMemDirectAccess() ? dev().getCpuAgent() : dev().getBackendDevice();
-    if (static_cast<const amd::Memory*>(srcMem.owner())->ipcShared() ||
-        static_cast<const amd::Memory*>(srcMem.owner())->vmmImported()) {
-      hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
-      if (HSA_STATUS_SUCCESS ==
-          Hsa::pointer_info(const_cast<address>(srcAddr), &info, nullptr, nullptr, nullptr)) {
-        srcAgent = info.agentOwner;
-      }
-    } else {
-        srcAgent = srcMem.isHostMemDirectAccess() ? srcMem.dev().getCpuAgent() : srcMem.dev().getBackendDevice();
-    }
-  }
-  if (dstAgent.handle == 0) {
-    dstAgent = dstMem.isHostMemDirectAccess() ? dev().getCpuAgent() : dev().getBackendDevice();
-    if (static_cast<const amd::Memory*>(dstMem.owner())->ipcShared() ||
-        static_cast<const amd::Memory*>(dstMem.owner())->vmmImported()) {
-      hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
-      if (HSA_STATUS_SUCCESS == Hsa::pointer_info(dstAddr, &info, nullptr, nullptr, nullptr)) {
-        dstAgent = info.agentOwner;
-      }
-    } else {
-        dstAgent = dstMem.isHostMemDirectAccess() ? dstMem.dev().getCpuAgent() : dstMem.dev().getBackendDevice();
-    }
-  }
-}
 
 // ================================================================================================
 bool DmaBlitManager::hsaCopy(const Memory& srcMemory, const Memory& dstMemory,
@@ -655,9 +626,10 @@ bool DmaBlitManager::hsaCopy(const Memory& srcMemory, const Memory& dstMemory,
   src += srcOrigin[0];
   dst += dstOrigin[0];
 
-  hsa_agent_t srcAgent;
-  hsa_agent_t dstAgent;
-  resolveAgents(srcMemory, dstMemory, src, dst, srcAgent, dstAgent);
+  // Owning agents are computed when the memory is created, including IPC/VMM-imported
+  // memory, so no per-copy pointer_info query is needed.
+  hsa_agent_t srcAgent = srcMemory.getOwningAgent();
+  hsa_agent_t dstAgent = dstMemory.getOwningAgent();
 
   // Blocking D2H copies need a wait anyways so better wait here
   // than having to wait on the device for dependent signals for SDMA which is slow
@@ -695,9 +667,9 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
     address src = reinterpret_cast<address>(srcMem.getDeviceMemory()) + op.srcOffset;
     address dst = reinterpret_cast<address>(dstMem.getDeviceMemory()) + op.dstOffset;
 
-    hsa_agent_t srcAgent;
-    hsa_agent_t dstAgent;
-    resolveAgents(srcMem, dstMem, src, dst, srcAgent, dstAgent);
+    // Owning agents are cached at memory creation time.
+    hsa_agent_t srcAgent = srcMem.getOwningAgent();
+    hsa_agent_t dstAgent = dstMem.getOwningAgent();
 
     // Normalize agents to ensure the calling device's SDMA engines are used,
     // matching the rocrCopyBuffer agent selection logic.
@@ -3251,11 +3223,14 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
 
   const Memory& srcRocMemory = gpuMem(srcMemory);
   const Memory& dstRocMemory = gpuMem(dstMemory);
+  const bool requireSDMA =
+      copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA;
   bool useLimitedP2pBlitWg = false;
   const bool useShaderCopyBuffer =
       useShaderCopyBufferPath(srcRocMemory, dstRocMemory, sizeIn[0], copyMetadata,
                               &useLimitedP2pBlitWg);
-  const bool useShaderCopyPath = setup_.disableHwlCopyBuffer_ || useShaderCopyBuffer;
+  const bool useShaderCopyPath =
+      !requireSDMA && (setup_.disableHwlCopyBuffer_ || useShaderCopyBuffer);
   if (useLimitedP2pBlitWg) {
     constexpr uint32_t kLimitWgForKernelP2p = 16;
     blitWg = kLimitWgForKernelP2p;
@@ -3276,7 +3251,9 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
   }
 
   if (!result) {
-    if (DEBUG_CLR_DISABLE_FALLBACK) {
+    if (requireSDMA) {
+      LogError("SDMA copy failed and shader fallback is not permitted");
+    } else if (DEBUG_CLR_DISABLE_FALLBACK) {
       guarantee(false, "DMA copy failed and fallback path is disabled");
     } else {
       // Check CL_MEM_SVM_ATOMICS flag to see if we used system_coarse_segment_
