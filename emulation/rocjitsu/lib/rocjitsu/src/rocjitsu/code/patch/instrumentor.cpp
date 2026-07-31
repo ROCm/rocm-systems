@@ -765,10 +765,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       TrampolinePlan plan = make_base_plan(site, arch_, trampoline_offset);
       plan.probe_target_offset = probe.output_text_offset;
       // Preserve special state the probe clobbers by saving it to a dead SGPR
-      // around the call. EXEC/VCC are saved unconditionally: the clobber summary
-      // scans only explicit operands, so implicit defs (v_cmp->VCC, v_cmpx->EXEC)
-      // are invisible (see probe_clobber.cpp). M0 has no implicit writer here, so
-      // it stays clobber-gated.
+      // around the call. EXEC/VCC are saved unconditionally as a conservative
+      // policy: the summary detects the special-state writes the decoder exposes as
+      // operands, but always saving keeps correctness independent of per-opcode
+      // implicit-def coverage. M0 stays clobber-gated.
       plan.preserve_exec = true;
       plan.preserve_vcc = true;
       plan.preserve_m0 = summary->touches_m0;

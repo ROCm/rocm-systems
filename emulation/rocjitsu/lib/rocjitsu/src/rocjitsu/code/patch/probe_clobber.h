@@ -28,11 +28,11 @@ namespace rocjitsu {
 /// This struct is intended to stay callee-only.
 struct ProbeClobberSummary {
   RegisterSet ordinary_clobbers;
-  // touches_exec/touches_vcc are currently unread by the preserve decision: the
-  // orchestrator saves EXEC/VCC unconditionally because implicit v_cmp->VCC /
-  // v_cmpx->EXEC defs are invisible here (see the @details note above). They are
-  // retained for the deferred precise implicit-def detection that would let the
-  // preserve decision consume them again.
+  // touches_exec/touches_vcc are set from the special-state writes the decoder
+  // exposes as operands (see probe_clobber.cpp), but the preserve decision currently
+  // ignores them: the orchestrator saves EXEC/VCC unconditionally as a conservative
+  // policy, so correctness never rests on per-opcode implicit-def coverage. They are
+  // kept for a future refinement that preserves only when set.
   bool touches_exec = false;
   bool touches_vcc = false;
   bool touches_scc = false;
