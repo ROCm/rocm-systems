@@ -1,7 +1,10 @@
 //! A safe, RAII wrapper around the rocjitsu daemon lifecycle API.
 //!
-//! The daemon owns the simulated GPU out of process and serves the
-//! workload's KFD ioctls over a Unix socket. Its C API is three calls —
+//! The daemon owns the simulated GPU outside the *workload's* process and
+//! serves its KFD ioctls over a Unix socket. It is not a process of its
+//! own: the library is `dlopen`ed and the daemon runs on threads inside
+//! whoever called [`Daemon::start`] — the `mirage run` process. Its C API
+//! is three calls —
 //! start, status, stop — with a strict ownership contract: the handle
 //! returned by `rj_daemon_start` must be released exactly once, and using
 //! it afterwards is undefined.

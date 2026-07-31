@@ -15,7 +15,7 @@
 //! is terminals. A child inherits the standard streams of whoever forked
 //! it, so a process started by the run process would talk to the run's
 //! terminal — not to the terminal the user typed `mirage exec` into.
-//! Having the client spawn is what makes `mirage exec <run> -- bash` an
+//! Having the client spawn is what makes `mirage exec -- bash` an
 //! interactive shell in the window you ran it from, with no
 //! pseudo-terminal, no output forwarding and no stdin relay.
 //!
@@ -107,6 +107,17 @@ async fn run_owned(
     socket: &ControlSocket,
     interrupts: &mut Interrupts,
 ) -> anyhow::Result<ExitCode> {
+    // Answer clients from the first instant, bring-up included.
+    //
+    // The socket is bound before this function is called, so a connect
+    // succeeds immediately — and if nothing is accepting yet, the client
+    // sits in the backlog with no timeout and no output for however long
+    // an image pull takes. Serving from here turns that silent hang into
+    // `session … is not ready (pulling)`, because `Session::describe`
+    // refuses until the session is healthy.
+    let serving = socket.serve(run.clone());
+    tokio::pin!(serving);
+
     // Race bring-up against an interrupt. Pulling an image can take
     // minutes, and a user who changes their mind in the middle of it
     // should get their prompt back — with the half-built session removed
@@ -116,6 +127,7 @@ async fn run_owned(
         sig = interrupts.next() => {
             return Ok(ExitCode::from(u8::try_from(128 + sig).unwrap_or(130)));
         }
+        () = &mut serving => unreachable!("the control socket serves until dropped"),
     };
     if !health.healthy {
         let state = health.state.as_deref().unwrap_or("unknown");
@@ -144,12 +156,9 @@ async fn run_owned(
 
     let (exec, output) = run.exec(&def).await?;
 
-    // Serve the socket for as long as the workload runs. `select!` rather
+    // Keep serving for as long as the workload runs. `select!` rather
     // than a spawned task so the server stops when the workload does,
     // without a second thing to cancel.
-    let serving = socket.serve(run.clone());
-    tokio::pin!(serving);
-
     tokio::select! {
         code = supervise_locally(exec, output, !def.capture_all, interrupts) => code,
         () = &mut serving => unreachable!("the control socket serves until dropped"),
@@ -185,7 +194,15 @@ pub async fn exec_cmd(a: ExecArgsCli) -> anyhow::Result<ExitCode> {
     // A client-side exec id, distinct from anything the run process is
     // using. It only names this command's pid files, and two execs in
     // different processes must not collide on them.
-    let id = ExecId::new(format!("x-{}", std::process::id()))
+    //
+    // The pid alone is not enough: pids are recycled, the pid files live
+    // in the run's scratch directory for as long as the *run* lasts, and
+    // a long-lived run outlives many `mirage exec` invocations. A start
+    // timestamp makes the id unique per invocation rather than per pid.
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let id = ExecId::new(format!("x-{}-{started}", std::process::id()))
         .map_err(|e| anyhow::anyhow!("could not build an exec id: {e}"))?;
     let specs = mirage_supervisor::build_specs(&desc, &def, &id)?;
     let capture_all = def.capture_all;
@@ -212,7 +229,19 @@ async fn supervise_locally(
     // Put rank 0 in the foreground, so an interactive program can read
     // the terminal at all. Dropped — and so given back — on every exit
     // path below, including the interrupted one.
-    let _terminal = owns_terminal
+    //
+    // Only for a single-process job. Handing the terminal over makes rank
+    // 0's process group the terminal's *foreground* group, and the tty
+    // driver then delivers Ctrl-C to that group alone: not to mirage, and
+    // not to the other ranks. On a grid that means Ctrl-C kills rank 0,
+    // leaves ranks 1..N running, and never wakes the interrupt handling
+    // below — so `wait_finished` never resolves and a second Ctrl-C goes
+    // to a group that no longer exists. Keeping the terminal for a
+    // multi-process job costs nothing (a grid is not an interactive
+    // program) and makes Ctrl-C reach mirage, which forwards it to every
+    // rank.
+    let single_process = exec.live_pids().len() <= 1;
+    let _terminal = (owns_terminal && single_process)
         .then(|| exec.rank_zero_pid().map(TerminalHandoff::give_to))
         .flatten()
         .flatten();
@@ -346,18 +375,12 @@ fn sole_live_run() -> anyhow::Result<SessionId> {
             let names: Vec<&str> = live.iter().map(SessionId::as_str).collect();
             anyhow::bail!(
                 "several runs are live ({}); name the one you mean, \
-                 e.g. `mirage exec {} -- <command>`",
+                 e.g. `mirage exec --session {} -- <command>`",
                 names.join(", "),
                 names[0]
             )
         }
     }
-}
-
-/// How many runs are currently serving a socket.
-#[must_use]
-pub fn live_run_count() -> usize {
-    live_runs().len()
 }
 
 /// The sessions whose sockets actually answer, removing the corpses.
@@ -376,10 +399,33 @@ pub async fn answering_runs() -> Vec<SessionId> {
     let mut answering = Vec::new();
     for id in live_runs() {
         let path = mirage_core::paths::run_socket_path(&id);
-        if tokio::net::UnixStream::connect(&path).await.is_ok() {
-            answering.push(id);
-        } else {
-            let _ = std::fs::remove_file(&path);
+        match tokio::net::UnixStream::connect(&path).await {
+            Ok(_) => answering.push(id),
+            // Only these two say anything about the *run*: nothing is
+            // listening, or the file is gone.
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+                ) =>
+            {
+                let _ = std::fs::remove_file(&path);
+            }
+            // Everything else is about *us* — a full accept backlog on a
+            // live run that has not started serving yet, this process out
+            // of file descriptors — and must be read as "still alive".
+            // Reading it as death unlinks a live run's socket, which it
+            // never rebinds, and then `purge` sees no live runs and
+            // force-removes that run's containers and scratch directory
+            // out from under it.
+            Err(e) => {
+                tracing::warn!(
+                    session = %id,
+                    path = %path.display(),
+                    "could not probe a run's socket ({e}); assuming it is alive"
+                );
+                answering.push(id);
+            }
         }
     }
     answering

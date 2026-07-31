@@ -869,20 +869,39 @@ impl Engine {
                     // The client is spawned; the container is not up yet.
                     // Wait for it here rather than letting the first exec
                     // discover the race.
-                    self.await_running(&name, NODE_START_TIMEOUT).map(|()| child)
+                    //
+                    // The client is adopted by a `NodeClient` *before* the
+                    // wait, so that a timeout still has something that
+                    // owns it. Returning the bare `Child` and dropping it
+                    // on the error path left the provider client running
+                    // and unreaped — `std::process::Child` has no `Drop` —
+                    // and its container out of `state.nodes`, which is the
+                    // only list rollback removes. A slow node therefore
+                    // leaked exactly the orphan container and zombie
+                    // client this crate exists to prevent.
+                    let client = NodeClient {
+                        rank,
+                        name: name.clone(),
+                        child: Some(child),
+                    };
+                    match self.await_running(&name, NODE_START_TIMEOUT) {
+                        Ok(()) => Ok(client),
+                        Err(e) => {
+                            let mut client = client;
+                            client.kill();
+                            self.rm(&name);
+                            Err(e)
+                        }
+                    }
                 });
             match launched {
-                Ok(child) => {
+                Ok(client) => {
                     progress(BringUpPhase::NodeStarted {
                         rank,
                         total: node_count,
                         name: name.clone(),
                     });
-                    clients.push(NodeClient {
-                        rank,
-                        name: name.clone(),
-                        child: Some(child),
-                    });
+                    clients.push(client);
                     state.nodes.push(NodeContainer { rank, name });
                 }
                 Err(e) => {
@@ -967,29 +986,16 @@ impl Engine {
     }
 }
 
-/// Spawn a command, transparently retrying on `ETXTBSY`.
+/// Spawn a command, transparently retrying the transient spawn failures.
 ///
-/// In a multithreaded process a concurrent `fork` momentarily
-/// duplicates every open file descriptor — including a writable handle
-/// to a just-written executable — into the forked child. Until that
-/// child `exec`s (closing the descriptor via `O_CLOEXEC`), attempting to
-/// execute the file fails with `ETXTBSY` ("Text file busy"). The
-/// condition is transient, so retry a bounded number of times with a
-/// short backoff before surfacing the error. Real container providers
-/// (podman/docker) are stable binaries that never hit this, but the
-/// guard makes provider spawning robust regardless of how the binary
-/// came to exist.
-fn spawn_retrying_etxtbsy<T>(mut run: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
-    let mut attempts = 0;
-    loop {
-        match run() {
-            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempts < 50 => {
-                attempts += 1;
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            other => return other,
-        }
-    }
+/// Delegates to [`mirage_core::container::retrying_etxtbsy`] rather than
+/// keeping a second copy of the policy. The two had already diverged: this
+/// one retried only `ETXTBSY`, so a `fork` that failed with `EAGAIN` under
+/// the process-table pressure of a wide emulated job failed the whole
+/// bring-up, while the identical call shape in `mirage_core` retried and
+/// succeeded. Bring-up is the path that can least afford it.
+fn spawn_retrying_etxtbsy<T>(run: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    mirage_core::container::retrying_etxtbsy(run)
 }
 
 #[cfg(test)]

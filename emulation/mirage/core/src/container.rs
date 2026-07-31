@@ -179,6 +179,34 @@ pub fn network_is_ours(provider: &str, name: &str) -> bool {
     network_label(provider, name, LABEL_OWNER).as_deref() == Some(LABEL_OWNER_VALUE)
 }
 
+/// Whether the provider positively reports that `name` belongs to
+/// somebody else.
+///
+/// The distinction from `!container_is_ours` is the whole point: an
+/// *unanswerable* question is not an answer. [`inspect_label`] folds a
+/// provider that could not be spawned, one that exited non-zero, and a
+/// container that no longer exists all into `None`, so treating "not
+/// ours" as "leave it alone" turns a transient engine failure during
+/// shutdown — a restarting rootless service, a process at its fork limit
+/// — into containers and a network that survive the run silently.
+///
+/// Removal is therefore gated on a *positive* foreign label. The safety
+/// property that gate exists for is preserved: a container a user named
+/// `mirage-s1-node-0` themselves carries no mirage owner label, so it
+/// still has to be labelled by somebody else to be protected — and it is
+/// only ever consulted for names this session recorded at bring-up.
+#[must_use]
+pub fn container_is_foreign(provider: &str, name: &str) -> bool {
+    matches!(container_label(provider, name, LABEL_OWNER), Some(v) if v != LABEL_OWNER_VALUE)
+}
+
+/// Whether the provider positively reports that network `name` belongs to
+/// somebody else. See [`container_is_foreign`].
+#[must_use]
+pub fn network_is_foreign(provider: &str, name: &str) -> bool {
+    matches!(network_label(provider, name, LABEL_OWNER), Some(v) if v != LABEL_OWNER_VALUE)
+}
+
 /// Auto-detect a container provider on `PATH`, preferring podman.
 ///
 /// Returns the provider's bare name (`"podman"` / `"docker"`) when
@@ -255,26 +283,33 @@ pub struct ContainerState {
 /// Each resource's [`LABEL_OWNER`] is checked first. Container names are
 /// derived from the session id, so `mirage-s1-node-0` is a name a user
 /// can perfectly well have given a container of their own; `rm -f` on a
-/// name alone would then destroy it. Removing only what carries mirage's
-/// label makes cleanup safe to run against a shared engine.
+/// name alone would then destroy it. Skipping anything positively
+/// labelled as somebody else's makes cleanup safe to run against a shared
+/// engine — see [`container_is_foreign`] for why the check is phrased
+/// that way round rather than as "only what is ours".
 ///
 /// This blocks on the provider binary, so async callers must run it on a
 /// blocking task.
 pub fn teardown(state: &ContainerState) {
     for node in &state.nodes {
-        if container_is_ours(&state.provider, &node.name) {
-            run_quiet(&state.provider, &["rm", "-f", &node.name]);
-        } else {
+        if container_is_foreign(&state.provider, &node.name) {
             tracing::warn!(
                 container = %node.name,
-                "refusing to remove a container that is not labelled {LABEL_OWNER}={LABEL_OWNER_VALUE}"
+                "refusing to remove a container labelled as somebody else's"
             );
+        } else {
+            run_quiet(&state.provider, &["rm", "-f", &node.name]);
         }
     }
-    if let Some(network) = &state.network
-        && network_is_ours(&state.provider, network)
-    {
-        run_quiet(&state.provider, &["network", "rm", network]);
+    if let Some(network) = &state.network {
+        if network_is_foreign(&state.provider, network) {
+            tracing::warn!(
+                network = %network,
+                "refusing to remove a network labelled as somebody else's"
+            );
+        } else {
+            run_quiet(&state.provider, &["network", "rm", network]);
+        }
     }
 }
 
@@ -418,10 +453,13 @@ fn worth_retrying(e: &std::io::Error) -> bool {
 /// Run a provider command, retrying transient spawn failures.
 ///
 /// See [`worth_retrying`] for which failures are treated as transient and
-/// why the bias is towards retrying.
-fn retrying_etxtbsy<F>(mut run: F) -> std::io::Result<std::process::Output>
+/// why the bias is towards retrying. Generic over the result so the same
+/// policy covers both `output()` and `spawn()`; `mirage_container` calls
+/// it for the latter rather than keeping a second copy that had already
+/// drifted to a narrower predicate.
+pub fn retrying_etxtbsy<T, F>(mut run: F) -> std::io::Result<T>
 where
-    F: FnMut() -> std::io::Result<std::process::Output>,
+    F: FnMut() -> std::io::Result<T>,
 {
     const MAX_ATTEMPTS: u32 = 50;
     const BACKOFF: std::time::Duration = std::time::Duration::from_millis(10);

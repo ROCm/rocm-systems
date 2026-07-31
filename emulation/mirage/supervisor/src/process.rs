@@ -127,13 +127,22 @@ const PID_FILE_WAIT: Duration = Duration::from_millis(2_000);
 
 impl ContainerProc {
     /// The workload's pid inside the container, if it has recorded one.
+    ///
+    /// `1` is rejected along with `0`. The file is written by a shell
+    /// inside a container whose scratch directory is bind-mounted
+    /// read-write, so its contents are workload-influenced; a `1` reaching
+    /// [`ContainerProc::kill_argv`] would produce `kill -9 -1`, which POSIX
+    /// defines as *every process the caller may signal* — inside the
+    /// container that is every other rank sharing it. No legitimate
+    /// wrapper can record `1` either: PID 1 in a node container is its
+    /// `sleep infinity` entrypoint, never a `provider exec` child.
     fn pid(&self) -> Option<u32> {
         std::fs::read_to_string(&self.pid_file)
             .ok()?
             .trim()
             .parse::<u32>()
             .ok()
-            .filter(|pid| *pid > 0)
+            .filter(|pid| *pid > 1)
     }
 
     /// The workload's pid, waiting briefly for it to appear.
@@ -388,9 +397,26 @@ pub struct SpawnSpec {
 /// `HOME` a great deal of tooling writes to `/`. This is the floor a
 /// process needs to behave like a process, with everything
 /// workload-specific left to the emulator's injection and `--env`.
-const INHERITED_ENV: &[&str] = &[
+pub const INHERITED_ENV: &[&str] = &[
     "PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "TMPDIR", "SHELL",
 ];
+
+/// Variables whose value is a `:`-separated search list, where mirage's
+/// entries have to coexist with the caller's rather than replace them.
+///
+/// `spec.env` is applied on top of an inherited environment, and for an
+/// ordinary variable "on top" means "instead of", which is right. For a
+/// search list it is not: an emulator backend that sets `LD_LIBRARY_PATH`
+/// to its own directory silently deletes every directory the caller
+/// exported, and one that sets `PYTHONPATH` deletes their imports. That
+/// is precisely the loss inheriting the caller's environment was
+/// introduced to stop, and it is what the CLI documentation promises will
+/// not happen.
+///
+/// Mirage's entries go first: the interposer and the emulator's libraries
+/// must win the search, and a workload that loses the interposer runs
+/// unemulated and still exits 0.
+const PATH_LIST_ENV: &[&str] = &["LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH"];
 
 /// Spawn one workload process.
 ///
@@ -544,29 +570,29 @@ fn resolved_env(spec: &SpawnSpec) -> Vec<(std::ffi::OsString, std::ffi::OsString
         env.push(("TERM".into(), "xterm-256color".into()));
     }
     for (k, v) in &spec.env {
-        // `LD_PRELOAD` is the one variable that must not simply overwrite
-        // what the caller exported. `spec.env`'s value is the emulator's
-        // interposer (already merged with any `--env LD_PRELOAD` by
-        // `build_specs`), and a workload that loses the interposer runs
-        // unemulated and still exits 0 — so the interposer goes first and
-        // the caller's preload is appended rather than dropped. Both have
-        // to load, which is what the CLI documentation promises.
-        //
-        // Only when inheriting: under `--clear-env-vars` the caller's
-        // environment is deliberately not in play.
+        // A search list is merged with what the caller exported rather
+        // than replacing it; see [`PATH_LIST_ENV`]. Only when inheriting:
+        // under `--clear-env-vars` the caller's environment is
+        // deliberately not in play.
         if spec.inherit_env
-            && k == "LD_PRELOAD"
-            && let Some(inherited) = std::env::var_os("LD_PRELOAD").filter(|v| !v.is_empty())
+            && PATH_LIST_ENV.contains(&k.as_str())
+            && let Some(inherited) = std::env::var_os(k).filter(|v| !v.is_empty())
         {
-            let mut combined = std::ffi::OsString::from(v);
-            combined.push(":");
-            combined.push(&inherited);
-            env.push((k.into(), combined));
+            env.push((k.into(), merged_search_path(v, &inherited)));
             continue;
         }
         env.push((k.into(), v.into()));
     }
     env
+}
+
+/// One `:`-separated search list built from mirage's entries and the
+/// caller's, in that order. See [`PATH_LIST_ENV`].
+fn merged_search_path(injected: &str, inherited: &std::ffi::OsStr) -> std::ffi::OsString {
+    let mut combined = std::ffi::OsString::from(injected);
+    combined.push(":");
+    combined.push(inherited);
+    combined
 }
 
 /// Translate a spawn failure into something that names the problem.
@@ -644,6 +670,10 @@ impl Spawned {
     /// [`Spawned::terminate`] afterwards.
     pub async fn wait(&mut self) -> Exit {
         if let Some(exit) = self.exit {
+            // Drain anyway: an earlier call cancelled inside its own
+            // drain leaves pumps behind, and they hold a clone of the
+            // output sender. See [`Spawned::drain_pumps`].
+            self.drain_pumps().await;
             return exit;
         }
         let status = self.child.wait().await;
@@ -690,6 +720,9 @@ impl Spawned {
     /// already-reaped process returns its recorded exit.
     pub async fn terminate(&mut self) -> Exit {
         if let Some(exit) = self.exit {
+            // As in [`Spawned::wait`]: a cancellation that landed inside
+            // a drain leaves pumps to be finished off.
+            self.drain_pumps().await;
             return exit;
         }
 
@@ -698,13 +731,28 @@ impl Spawned {
         // container — a different PID namespace, which our signals do not
         // cross and which the client does not relay into — so it would
         // survive teardown holding the emulated device and its ports,
-        // with mirage reporting the exec as finished. Terminating the
-        // workload also ends the client naturally, so the group signal
-        // below stays the belt to this braces.
-        if let Some(container) = self.container.clone() {
-            container.signal(Signal::SIGTERM).await;
+        // with mirage reporting the exec as finished.
+        let reached_workload = match self.container.clone() {
+            Some(container) => container.signal(Signal::SIGTERM).await,
+            None => false,
+        };
+
+        // The client's own group is signalled only when the workload
+        // could *not* be reached through the provider — a rank whose
+        // in-container pid was never recorded, or a provider that failed.
+        //
+        // Signalling it unconditionally is what makes the grace period
+        // below a fiction for a containerised process: the `provider
+        // exec` client has no reason to ignore SIGTERM, so it dies in
+        // milliseconds, `self.child.wait()` returns, and the escalation
+        // arm — the only thing that sends SIGKILL *into* the container —
+        // is never reached. A workload that traps or ignores SIGTERM then
+        // survives teardown with mirage reporting the exec as finished,
+        // which is the exact outcome the container path exists to
+        // prevent. Terminating the workload ends the client naturally.
+        if !reached_workload {
+            signal_group(self.pid, Signal::SIGTERM);
         }
-        signal_group(self.pid, Signal::SIGTERM);
 
         // Give it the grace period to exit on its own terms.
         let status = match tokio::time::timeout(TERM_GRACE, self.child.wait()).await {
@@ -775,17 +823,27 @@ impl Spawned {
     /// holding a pipe fd and a clone of the exec's `OutputChunk` sender —
     /// and because that sender never drops, the channel never closes and
     /// `forward_output` never ends either.
+    ///
+    /// Which is also why each handle stays in `self.pumps` until it has
+    /// been joined or aborted. `Vec::drain` hands ownership to the
+    /// iterator, so this whole function being cancelled — the supervisor
+    /// races `wait` against a cancellation token, and the drain is inside
+    /// `wait` — would drop the remaining handles and detach exactly the
+    /// tasks the paragraph above says must never be detached. Leaving
+    /// them in place means a later `terminate` finishes the job.
     async fn drain_pumps(&mut self) {
         const DRAIN_GRACE: Duration = Duration::from_millis(250);
-        for mut pump in self.pumps.drain(..) {
-            if tokio::time::timeout(DRAIN_GRACE, &mut pump).await.is_err() {
+        let pid = self.pid;
+        while let Some(pump) = self.pumps.last_mut() {
+            if tokio::time::timeout(DRAIN_GRACE, &mut *pump).await.is_err() {
                 pump.abort();
                 tracing::debug!(
-                    pid = self.pid,
+                    pid,
                     "output pump still open after the child exited; \
                      a descendant is holding the pipe"
                 );
             }
+            self.pumps.pop();
         }
     }
 }
@@ -979,18 +1037,82 @@ mod tests {
 
     #[tokio::test]
     async fn env_is_not_inherited_unless_asked() {
-        let mut s = spec("/bin/sh", &["-c", "echo \"${MIRAGE_TEST_LEAK:-unset}\""]);
-        s.inherit_env = false;
-        // The variable is in this process's environment via `cmd.env`
-        // only, never exported globally, so this asserts the allowlist
-        // rather than the absence of the variable.
-        let (_, chunks) = run(&s).await;
-        assert_eq!(text(&chunks, StdStream::Stdout).trim(), "unset");
+        // A variable this process really exports and the allowlist does
+        // not keep. Testing with a name that is simply absent — as this
+        // did with `MIRAGE_TEST_LEAK` — proves nothing: the child prints
+        // `unset` with or without `env_clear`, so deleting the
+        // `env_clear` call left the test green. `expect` rather than a
+        // skip, so a sanitised environment fails loudly instead of
+        // quietly testing nothing.
+        let (key, value) = std::env::vars()
+            .find(|(k, v)| {
+                !INHERITED_ENV.contains(&k.as_str())
+                    && !v.is_empty()
+                    && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    && v.chars().all(|c| c.is_ascii_alphanumeric() || "_-./".contains(c))
+            })
+            .expect("this process must export at least one variable outside the allowlist");
 
-        s.env
-            .insert("MIRAGE_TEST_LEAK".to_string(), "visible".to_string());
+        let script = format!("echo \"${{{key}:-unset}}\"");
+        let mut s = spec("/bin/sh", &[script.as_str()]);
+        s.args = vec!["-c".to_string(), script.clone()];
+
+        s.inherit_env = false;
+        let (_, chunks) = run(&s).await;
+        assert_eq!(
+            text(&chunks, StdStream::Stdout).trim(),
+            "unset",
+            "`{key}` reached a workload that asked for a cleared environment"
+        );
+
+        s.inherit_env = true;
+        let (_, chunks) = run(&s).await;
+        assert_eq!(
+            text(&chunks, StdStream::Stdout).trim(),
+            value,
+            "`{key}` did not reach a workload that inherits the caller's environment"
+        );
+
+        // And an explicit value wins over both.
+        s.inherit_env = false;
+        s.env.insert(key, "visible".to_string());
         let (_, chunks) = run(&s).await;
         assert_eq!(text(&chunks, StdStream::Stdout).trim(), "visible");
+    }
+
+    #[test]
+    fn a_search_path_keeps_the_callers_entries_behind_mirages() {
+        // An emulator backend that sets `LD_LIBRARY_PATH` or `PYTHONPATH`
+        // must not delete what the caller exported — that is the loss
+        // inheriting the environment was introduced to stop — and
+        // mirage's own entries still have to win the search.
+        assert_eq!(
+            merged_search_path("/mirage/lib", std::ffi::OsStr::new("/home/me/lib")),
+            std::ffi::OsString::from("/mirage/lib:/home/me/lib")
+        );
+        for key in ["LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH"] {
+            assert!(
+                PATH_LIST_ENV.contains(&key),
+                "{key} is a search list and must be merged, not overwritten"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_search_path_the_caller_does_not_have_is_passed_through() {
+        // Nothing to merge with: the value must arrive exactly as the
+        // emulator built it, with no stray separator.
+        let key = "PYTHONPATH";
+        if std::env::var_os(key).is_some_and(|v| !v.is_empty()) {
+            // The ambient value would legitimately be appended; this
+            // half of the behaviour is covered by the unit test above.
+            return;
+        }
+        let mut s = spec("/bin/sh", &["-c", "echo \"$PYTHONPATH\""]);
+        s.inherit_env = true;
+        s.env.insert(key.to_string(), "/mirage/py".to_string());
+        let (_, chunks) = run(&s).await;
+        assert_eq!(text(&chunks, StdStream::Stdout).trim(), "/mirage/py");
     }
 
     #[tokio::test]

@@ -5,8 +5,8 @@ This guide covers building the `mirage` CLI and (optionally) the
 
 mirage is a single Cargo workspace ([`emulation/mirage/`](../)). One
 `cargo build` produces the unified `mirage` binary from a set of crates —
-`core`, `ctl`, `supervisor`, `container`, `builtin`, `rocjitsu_sys`, and
-the emulator backends (`rocjitsu`, `hotswap`). See
+`core`, `ctl`, `supervisor`, `container`, `builtin`, `sys`, `rocjitsu_sys`,
+and the emulator backends (`rocjitsu`, `hotswap`). See
 [`architecture.md`](architecture.md) for the full crate map.
 
 ## TL;DR
@@ -26,7 +26,7 @@ merely loads at runtime.
 
 | Tool | Version | Needed for | Notes |
 |------|---------|------------|-------|
-| Rust + Cargo | 1.85+ (edition 2024) | everything | Install via [rustup](https://rustup.rs). |
+| Rust + Cargo | 1.88+ (edition 2024) | everything | Install via [rustup](https://rustup.rs). 1.88 is the floor for let-chains, which the workspace uses. |
 | CMake | 3.28+ | building rocjitsu from source | Only if you want live GPU emulation. |
 | Ninja | any recent | building rocjitsu from source | `-G Ninja`. |
 | C++20 compiler | GCC 12+ / Clang 16+ | building rocjitsu from source | |

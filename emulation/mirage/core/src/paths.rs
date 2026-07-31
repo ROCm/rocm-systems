@@ -53,11 +53,13 @@
 //!
 //! ```text
 //! $XDG_RUNTIME_DIR/mirage/
-//!   mirage.sock       # supervisor daemon control socket
-//!   mirage.lock       # exclusive lock held by the running daemon
-//!   daemon.log        # daemon stderr when auto-started by the CLI
-//!   session/<id>/     # per-session emulator scratch (rocjitsu config, …)
+//!   run/<session>.sock  # one socket per live `mirage run`
+//!   session/<id>/       # per-session emulator scratch (rocjitsu config, …)
 //! ```
+//!
+//! There is no daemon socket, lock file or daemon log: a run *is* the
+//! server for its own session, and the set of sockets in `run/` is the
+//! whole registry of what is live.
 //!
 //! [xdg]: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
 
@@ -113,20 +115,6 @@ pub fn xdg_runtime_dir() -> PathBuf {
     let tmp = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
     let uid = nix::unistd::getuid().as_raw();
     PathBuf::from(tmp).join(format!("mirage-{uid}"))
-}
-
-/// Returns `$XDG_STATE_HOME` (or `$HOME/.local/state`).
-#[must_use]
-pub fn xdg_state_home() -> PathBuf {
-    if let Some(root) = test_root() {
-        return root.join("state");
-    }
-    if let Ok(p) = std::env::var("XDG_STATE_HOME")
-        && !p.is_empty()
-    {
-        return PathBuf::from(p);
-    }
-    home_dir().join(".local").join("state")
 }
 
 fn home_dir() -> PathBuf {

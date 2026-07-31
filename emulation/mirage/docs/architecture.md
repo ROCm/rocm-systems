@@ -34,6 +34,7 @@ itself has none.
 | `mirage_rocjitsu`   | The `rocjitsu` (and `rocjitsu-dbt`) backend.                         |
 | `mirage_hotswap`    | The `hotswap` load-time ISA-rewriting backend.                       |
 | `rocjitsu_sys`      | FFI bindings to `librocjitsu.so`, plus safe RAII wrappers over them.  |
+| `mirage_sys`        | The post-fork syscalls that cannot be expressed safely: today `PR_SET_PDEATHSIG`, so a workload dies with a `SIGKILL`ed supervisor. |
 
 Emulator backends are **link-only** dependencies: each registers itself
 into the emulator registry via [`inventory`] at link time. The binary
@@ -55,8 +56,8 @@ are the only optional things left in the build: there is no `daemon`,
 │  • owns the Tokio runtime          │    │    or takes -s <session>       │
 │  • Run::start → the session lives  │    │                                │
 │    in *this* process               │    │                                │
-│  • binds the run socket once the   │◄───┤  Request::Describe             │
-│    session is healthy              │───►│  SessionDescription (JSON)     │
+│  • binds the run socket first,     │◄───┤  Request::Describe             │
+│    answers once session is healthy │───►│  SessionDescription (JSON)     │
 │  • build_specs → spawn → wait      │    │  • build_specs, locally        │
 │  • destroy() on every exit path    │    │  • spawn → wait                │
 └──────────────┬─────────────────────┘    └──────────────┬─────────────────┘
@@ -322,10 +323,14 @@ Every mirage process runs a single Tokio runtime created in `main`.
   one.
 * **The run socket is served with `select!`** against the workload rather
   than from a spawned task, so it stops when the workload does and there
-  is no second thing to cancel. It is bound only once the session is
-  *healthy*: a client that connected earlier would get a description with
-  no containers and no emulator environment in it, and would happily start
-  a workload straight onto the real host.
+  is no second thing to cancel. It is bound *before* bring-up starts, so
+  a run is visible to `mirage state purge` from its first instant rather
+  than only once its image has finished pulling — purge would otherwise
+  reclaim the containers of a run it could not see. What waits for health
+  is the *answer*, not the bind: `Session::describe` refuses until the
+  session is healthy, because a client handed a description with no
+  containers and no emulator environment in it would happily start a
+  workload straight onto the real host.
 * **Stale sockets are tested, not locked.** A socket file outlives a
   `SIGKILL`ed process, so its existence proves nothing. Binding simply
   tries to connect to whatever is already at the path: if something
@@ -338,11 +343,16 @@ Every mirage process runs a single Tokio runtime created in `main`.
 ## Safety
 
 Every crate is `#![forbid(unsafe_code)]` through the workspace lint table,
-with one exception: `rocjitsu_sys`, the FFI layer to `librocjitsu.so`,
-which carries an equivalent lint table of its own with `unsafe` permitted.
-Safe RAII wrappers over the C API (e.g. the emulator daemon handle) live
-in that crate too, so the `unsafe` and the invariants justifying it sit in
-the same file and are reviewed together.
+with exactly two exceptions, each of which carries an equivalent lint
+table of its own with `unsafe` permitted:
+
+* `rocjitsu_sys`, the FFI layer to `librocjitsu.so`. Safe RAII wrappers
+  over the C API (e.g. the emulator daemon handle) live in that crate
+  too, so the `unsafe` and the invariants justifying it sit in the same
+  file and are reviewed together.
+* `mirage_sys`, which holds the post-fork operations that cannot be
+  expressed safely — today just `PR_SET_PDEATHSIG`, the kernel-side
+  backstop that kills a workload whose supervisor was `SIGKILL`ed.
 
 Mirage previously hand-rolled `unsafe` in three places outside the FFI
 layer. Each is now either unnecessary or delegated to a crate built for
@@ -357,8 +367,8 @@ it:
 The last two are the more interesting entries. They were not made safe;
 the feature that required them was removed, and the `unsafe` went with it.
 The rule is enforced, not aspirational: `forbid` cannot be relaxed by a
-later `allow`, so an `unsafe` block anywhere outside `rocjitsu_sys` fails
-the build.
+later `allow`, so an `unsafe` block anywhere outside those two crates
+fails the build.
 
 ## Adding an emulator backend
 

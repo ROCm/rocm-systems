@@ -344,6 +344,54 @@ async fn destroy_is_idempotent() {
 }
 
 #[tokio::test]
+async fn a_concurrent_destroy_waits_for_the_one_already_running() {
+    // `Run::destroy` promises that when it returns, nothing is left. That
+    // has to hold for the *second* caller too, and there is always a
+    // second caller: bring-up tears the session down itself when it
+    // fails, publishing the terminal health first, so `mirage run` reaches
+    // its own `destroy` while that teardown is still in flight. Returning
+    // early there let the process exit and drop the runtime, cancelling
+    // the unfinished teardown and leaking its containers and scratch
+    // directory.
+    //
+    // The workload ignores SIGTERM, so the first teardown is still inside
+    // its grace period when the second one starts.
+    let run = start(1).await;
+    let (_exec, output) = run
+        .exec(&def(&run, "trap '' TERM; while true; do sleep 1; done", true))
+        .await
+        .expect("exec starts");
+    let drain = tokio::spawn(async move {
+        let mut output = output;
+        while output.recv().await.is_some() {}
+    });
+
+    // Give the shell time to install its trap. Until it has, SIGTERM
+    // kills it outright and the first teardown finishes instantly — which
+    // would make this test pass whatever `teardown` does.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let first = tokio::spawn({
+        let run = Arc::clone(&run);
+        async move { run.destroy().await }
+    });
+    // Let the first call claim the teardown before the second arrives.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    tokio::time::timeout(Duration::from_secs(30), run.destroy())
+        .await
+        .expect("a concurrent teardown must return rather than hang");
+    assert_eq!(
+        run.health().state.as_deref(),
+        Some("stopped"),
+        "destroy returned while the teardown it was waiting on was still running"
+    );
+
+    first.await.expect("the first teardown finishes");
+    let _ = drain.await;
+}
+
+#[tokio::test]
 async fn an_exec_cannot_start_in_a_destroyed_session() {
     // Otherwise a process could be spawned after teardown collected the
     // list of things to kill, and would survive it.
@@ -356,11 +404,13 @@ async fn an_exec_cannot_start_in_a_destroyed_session() {
     );
 }
 
-/// The environment variables `--clear-env-vars` keeps, mirrored from
-/// `mirage_supervisor::process::INHERITED_ENV` (private there).
-const KEPT_WHEN_CLEARED: &[&str] = &[
-    "PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "TMPDIR", "SHELL",
-];
+/// The environment variables `--clear-env-vars` keeps.
+///
+/// Taken from the supervisor rather than copied: a list that drifts from
+/// the real one makes [`ambient_variable`] pick a variable that is
+/// actually preserved, and the tests below then assert the opposite of
+/// the behaviour.
+use mirage_supervisor::process::INHERITED_ENV as KEPT_WHEN_CLEARED;
 
 /// A variable this process has that a cleared workload would lose.
 ///
@@ -369,15 +419,22 @@ const KEPT_WHEN_CLEARED: &[&str] = &[
 /// forbids `unsafe`, and a process-wide mutation would race the other
 /// tests in this binary regardless. The value only has to be something a
 /// shell comparison can match, so anything awkward is skipped.
-fn ambient_variable() -> Option<(String, String)> {
-    std::env::vars().find(|(k, v)| {
-        !KEPT_WHEN_CLEARED.contains(&k.as_str())
-            && !k.starts_with("MIRAGE_")
-            && !k.is_empty()
-            && !v.is_empty()
-            && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-            && v.chars().all(|c| c.is_ascii_alphanumeric() || "._-/:".contains(c))
-    })
+///
+/// Panics rather than returning `None` when nothing suitable is found:
+/// the callers used to treat that as a reason to skip, which turned a
+/// sanitised CI environment into two tests that reported success without
+/// exercising either half of the environment model.
+fn ambient_variable() -> (String, String) {
+    std::env::vars()
+        .find(|(k, v)| {
+            !KEPT_WHEN_CLEARED.contains(&k.as_str())
+                && !k.starts_with("MIRAGE_")
+                && !k.is_empty()
+                && !v.is_empty()
+                && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                && v.chars().all(|c| c.is_ascii_alphanumeric() || "._-/:".contains(c))
+        })
+        .expect("this process must export a variable outside the allowlist to test with")
 }
 
 #[tokio::test]
@@ -386,10 +443,7 @@ async fn the_callers_environment_reaches_the_workload() {
     // the user typed in, so a variable exported there — an API token, a
     // PYTHONPATH, a proxy, a framework tuning knob — is one they meant
     // for the workload. Dropping it silently is the failure this guards.
-    let Some((key, value)) = ambient_variable() else {
-        eprintln!("SKIP: this process has no ambient variable to test with");
-        return;
-    };
+    let (key, value) = ambient_variable();
     let run = start(1).await;
     let code = run_to_completion(&run, &format!("test \"${key}\" = \"{value}\"")).await;
     assert_eq!(
@@ -403,10 +457,7 @@ async fn the_callers_environment_reaches_the_workload() {
 async fn clear_env_vars_drops_the_callers_environment() {
     // The opt-out, for a run whose result must not depend on ambient
     // state: a benchmark, a reproduction, a CI job against a baseline.
-    let Some((key, _)) = ambient_variable() else {
-        eprintln!("SKIP: this process has no ambient variable to test with");
-        return;
-    };
+    let (key, _) = ambient_variable();
     let run = start(1).await;
     let (exec, mut output) = run
         .exec(&def_env(&run, &format!("test -z \"${key}\""), true, true))

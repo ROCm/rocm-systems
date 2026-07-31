@@ -225,18 +225,31 @@ impl Exec {
         // Containerised ranks first, and concurrently: each one is a
         // `provider exec` round trip, and a job with many nodes would
         // otherwise deliver a Ctrl-C to rank 15 seconds after rank 0.
-        let forwarded = live
+        let (nodes, forwarded): (Vec<u32>, Vec<_>) = live
             .iter()
-            .filter_map(|(node, _)| self.containers.get(node))
-            .map(|container| container.signal(signal));
-        futures::future::join_all(forwarded).await;
+            .filter_map(|(node, _)| self.containers.get(node).map(|c| (*node, c.signal(signal))))
+            .unzip();
+        // Which ranks the provider actually reached. The result is not
+        // decoration: `ContainerProc::signal` reports `false` when the
+        // rank has not recorded its in-container pid yet, or when the
+        // provider itself failed, and a rank skipped below on the
+        // assumption that it was signalled would receive nothing at all —
+        // a Ctrl-C that visibly does nothing.
+        let delivered: std::collections::BTreeSet<u32> = futures::future::join_all(forwarded)
+            .await
+            .into_iter()
+            .zip(nodes)
+            .filter_map(|(reached, node)| reached.then_some(node))
+            .collect();
 
         for (node, pid) in live {
-            // A containerised rank has already been signalled through the
-            // provider. Signalling the client's group as well would kill
-            // the proxy out from under a workload that is handling the
-            // signal it was just sent.
-            if self.containers.contains_key(&node) {
+            // A containerised rank the provider reached has been
+            // signalled already. Signalling the client's group as well
+            // would kill the proxy out from under a workload that is
+            // handling the signal it was just sent — but if the forward
+            // failed there is no such workload to protect, and the
+            // client's group is the only thing left to signal.
+            if delivered.contains(&node) {
                 continue;
             }
             // The *group*, never the bare pid. A pid leaves this map only

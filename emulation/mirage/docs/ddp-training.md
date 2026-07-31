@@ -77,12 +77,13 @@ Three things make this work:
    multi-node you can point `torchrun --rdzv-endpoint` at
    `$MASTER_ADDR:$MASTER_PORT`.
 
-3. **A shared, out-of-process emulator (default).** mirage runs the
-   emulator as a separate process that every rank talks to, so the rank
+3. **One emulator shared by every rank (default).** mirage hosts a single
+   emulator daemon that every rank talks to over a socket, so the rank
    processes share GPU memory through it — which is what lets RCCL set up
-   its transports across ranks. That separate process is the
-   *emulator's* — mirage has no service of its own: `mirage run` is the
-   runtime, and the session lives and dies with it. The mode is the
+   its transports across ranks. It is *out of the workload's* process,
+   not a service of its own: the daemon is `dlopen`ed into the `mirage
+   run` process itself, so there is nothing else to start, nothing to
+   leave behind, and the session lives and dies with that one command. The mode is the
    default; `--daemon` asks for it explicitly (and is the spelling the
    `rocjitsu` drop-in accepts). Pass `mirage run --in-process` to instead
    give every process its own in-process emulator (no shared GPU memory;

@@ -281,7 +281,15 @@ impl Run {
                     if handle.is_some() {
                         tracing::info!(session = %session.id(), "emulator daemon hosted");
                     }
-                    session.set_emulator_daemon(handle);
+                    // Refused when teardown got here first; the daemon is
+                    // then ours to stop, and nothing else knows it exists.
+                    if let Some(orphan) = session.set_emulator_daemon(handle) {
+                        tracing::warn!(
+                            session = %session.id(),
+                            "emulator daemon started after teardown; stopping it"
+                        );
+                        let _ = tokio::task::spawn_blocking(move || orphan.stop()).await;
+                    }
                 }
                 Err(e) => {
                     // Not fatal: an emulator whose daemon will not start

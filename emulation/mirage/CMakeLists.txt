@@ -128,9 +128,10 @@ install(PROGRAMS ${_mirage_bin} DESTINATION bin RENAME mirage)
 enable_testing()
 
 # Full Rust workspace test suite: every crate's unit tests plus the
-# integration suites under `tests/` (e2e, rpc_e2e, container_e2e,
-# interactive, strain, daemon_e2e, matrix_e2e, the emulator benchmark)
-# and `supervisor/tests/`. Session tests skip without a rocjitsu runtime;
+# integration suites under `tests/` (e2e, container_e2e, matrix_e2e,
+# strain, the emulator benchmark) and `supervisor/tests/`. `--workspace`
+# picks up each member's integration targets, so a new `tests/*.rs` file
+# needs no change here. Session tests skip without a rocjitsu runtime;
 # see MIRAGE_ALLOW_TEST_SKIP above for what that means for `ctest`.
 add_test(
     NAME cargo_test

@@ -291,9 +291,11 @@ fn build_hotswap_env(
     env.insert("TRITON_ALWAYS_COMPILE".into(), "1".into());
 
     // The patched ROCR + COMGR shadow the system copies via the loader
-    // search path. The host launcher inherits a minimal env (no
-    // LD_LIBRARY_PATH), so set it explicitly to the HotSwap lib dir; an
-    // exec-level override still wins (applied afterwards).
+    // search path, so name the HotSwap lib dir explicitly. A workload
+    // inherits the caller's environment, and the supervisor treats
+    // `LD_LIBRARY_PATH` as a search list: this entry is prepended to
+    // whatever the caller exported rather than replacing it, so the
+    // patched libraries win the search without deleting the user's.
     env.insert("LD_LIBRARY_PATH".into(), dir.display().to_string());
     // Expose the install root so the workload/runtime can resolve the
     // sibling `llvm-tools/` and `runtime/hotswap_py/` trees.

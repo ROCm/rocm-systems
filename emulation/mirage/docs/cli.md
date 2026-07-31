@@ -224,9 +224,11 @@ Three things are layered on top of it, in this order:
    `MASTER_ADDR`, `MASTER_PORT`, `MIRAGE_RANK`, …).
 
 Mirage's own go last, so a workload cannot break its own rendezvous by
-exporting `RANK`. `LD_PRELOAD` is the one exception to "last wins": the
-emulator's interposer is *prepended* to yours rather than replacing it,
-because both have to be loaded.
+exporting `RANK`. Search lists are the exception to "last wins":
+`LD_PRELOAD`, `LD_LIBRARY_PATH` and `PYTHONPATH` are *prepended* to yours
+rather than replacing them, because both sets of entries have to be
+found — the emulator's interposer and libraries have to win the search,
+and your imports and libraries have to survive it.
 
 ### `--clear-env-vars`
 

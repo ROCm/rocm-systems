@@ -24,7 +24,6 @@ pub mod run;
 
 use std::io::IsTerminal;
 use std::process::ExitCode;
-use std::sync::OnceLock;
 
 use clap::{Args, Subcommand, ValueEnum};
 use mirage_core::common::{MaybeRef, SimpleMap, SimpleValue};
@@ -32,22 +31,6 @@ use mirage_core::emulator::ExecMode;
 use mirage_core::profile::{ContainerizedDef, FileMount, Hack, PortMapping, ProfileDef};
 use mirage_core::registry::EmulatorInfo;
 use mirage_core::session::SessionId;
-
-/// Log directive an auto-started daemon should inherit, derived from the
-/// CLI's `-v`/`-vv`.
-///
-/// Set once by [`init_logging`] and applied to the spawned daemon's
-/// `Command` environment rather than by mutating this process's own — a
-/// process-wide `set_var` is `unsafe` in Rust 2024 and would race every
-/// other thread reading the environment.
-static DAEMON_LOG_DIRECTIVE: OnceLock<String> = OnceLock::new();
-
-/// The log directive an auto-started daemon should inherit, if the user
-/// asked for one with `-v`/`-vv`.
-#[must_use]
-pub fn daemon_log_directive() -> Option<&'static str> {
-    DAEMON_LOG_DIRECTIVE.get().map(String::as_str)
-}
 
 /// Initialize the global tracing subscriber. Honours `MIRAGE_LOG` if
 /// set, otherwise uses the level implied by `-v` / `-vv`.
@@ -57,15 +40,6 @@ pub fn init_logging(verbose: u8) {
         1 => "info",
         _ => "debug",
     };
-    // Record the chosen level so an auto-started daemon inherits it. The
-    // daemon is spawned from this binary with no `-v` flag and would
-    // otherwise default to `warn`, silently dropping the session and exec
-    // events a user passing `-vv` is asking to see. Applied to the
-    // child's environment only when the user has not set `MIRAGE_LOG`
-    // themselves.
-    if verbose > 0 && std::env::var_os("MIRAGE_LOG").is_none() {
-        let _ = DAEMON_LOG_DIRECTIVE.set(level.to_string());
-    }
     let env = tracing_subscriber::EnvFilter::try_from_env("MIRAGE_LOG")
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(level));
     let _ = tracing_subscriber::fmt()
@@ -441,10 +415,10 @@ pub enum StateCmd {
     /// startup; this command additionally **overwrites** existing
     /// ones, useful after upgrading mirage.
     Builtins,
-    /// Completely stop and purge all mirage processes and state.
+    /// Remove mirage's runtime directory and reclaim orphaned containers.
     ///
-    /// Stops every running session and then removes the mirage
-    /// runtime and state directories. The config directory
+    /// Refuses while any `mirage run` is live: a run owns its session and
+    /// cleans up when it exits, so stop those first. The config directory
     /// (profiles, topologies) is left alone unless `--all` is passed.
     Purge {
         /// Don't prompt for confirmation.
@@ -1064,13 +1038,6 @@ fn parse_ports(ports: &[String]) -> anyhow::Result<Vec<PortMapping>> {
         .collect()
 }
 
-/// Apply container override flags to a freshly-loaded profile.
-///
-/// When no container flags are present and the profile is referenced by
-/// name, returns a [`MaybeRef::Ref`] so the host resolves the profile
-/// itself (the common, cheap path). When flags are present, they enable
-/// or extend the profile's containerisation and the (now modified)
-/// profile is returned inline via [`MaybeRef::Owned`].
 /// Emulator execution mode, exposed on the CLI as `--exec-mode`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum ExecModeArg {
@@ -1294,16 +1261,12 @@ fn apply_profile_overrides(
     Ok(MaybeRef::Owned(profile.clone()))
 }
 
-/// Wait for a session to become ready, turning a terminal bring-up
-/// failure into a hard error.
+/// Split a trailing `-- <command> <args…>` into its command and
+/// arguments.
 ///
-/// `session_wait_ready` resolves as soon as the session is either healthy
-/// *or* terminal, so a failed bring-up (a bad image, a node that won't
-/// start, a missing emulator asset) returns `Ok` carrying an *unhealthy,
-/// terminal* health rather than an error. Callers about to run a workload
-/// must treat that as fatal: otherwise they submit an exec into a session
-/// that can never run it. This surfaces the detailed health message
-/// instead.
+/// An empty `argv` yields an empty command rather than panicking; clap
+/// marks the field `required`, so the case is unreachable from the CLI
+/// and is not worth an error path.
 fn split_argv(argv: &[String]) -> (String, Vec<String>) {
     let mut it = argv.iter().cloned();
     let cmd = it.next().unwrap_or_default();
@@ -1403,11 +1366,6 @@ async fn state_cmd(
     Ok(ExitCode::from(0))
 }
 
-/// Wait, briefly, for the daemon to stop answering.
-///
-/// Once it has exited its socket is unlinked, so any request fails. This
-/// polls rather than watching the process because the control-plane trait
-/// deliberately exposes no pid: a client should not need one.
 /// Stop every live run and remove mirage's on-disk state.
 async fn purge(all: bool) -> anyhow::Result<()> {
     // Ask every live run to stop, by signalling nothing: a run owns its

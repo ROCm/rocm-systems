@@ -41,7 +41,14 @@ const CONTAINER_CONFIG_DIR: &str = "/mnt/mirage/config";
 const CONTAINER_LIB_DIR: &str = "/mnt/mirage/lib";
 
 /// Per-session scratch directory inside every node container.
-const CONTAINER_RUNTIME_DIR: &str = "/mnt/mirage/runtime";
+///
+/// Shared with [`crate::spec`] rather than declared twice: this is the
+/// mount target, and `spec` builds the in-container pid-file path *under*
+/// it that each workload's wrapper writes to. Two copies that drifted
+/// would leave the wrapper redirecting into a path that is not a mount —
+/// a write that fails silently, and every containerised signal then
+/// reaching nothing.
+use crate::spec::CONTAINER_RUNTIME_DIR;
 
 /// Foreground process of a node container.
 ///
@@ -50,7 +57,10 @@ const CONTAINER_RUNTIME_DIR: &str = "/mnt/mirage/runtime";
 /// so the container's own entrypoint has no work to do. An earlier design
 /// ran `mirage host --rank N` here, which meant every container had a
 /// second mirage process inside it polling a bind-mounted directory.
-const CONTAINER_IDLE_COMMAND: &[&str] = &["sleep", "infinity"];
+///
+/// Taken from `mirage_container`, which is what actually launches the
+/// containers, so the plan and the launch cannot disagree.
+use mirage_container::CONTAINER_IDLE_COMMAND;
 
 /// A live session.
 #[derive(Debug)]
@@ -72,6 +82,13 @@ pub struct Session {
     /// map. Teardown waits for this before collecting what to kill, so
     /// that window can never hide a workload from it.
     quiescent: watch::Sender<bool>,
+    /// Set once [`Session::teardown`] has run to completion.
+    ///
+    /// A second caller has to *wait* for the first rather than return, so
+    /// the field is a level-triggered `watch` and not just the
+    /// `tearing_down` flag: see the head of `teardown` for what returning
+    /// early costs.
+    torn_down: watch::Sender<bool>,
 }
 
 #[derive(Debug, Default)]
@@ -135,6 +152,7 @@ impl Session {
             health,
             inner: Mutex::new(Inner::default()),
             quiescent: watch::channel(true).0,
+            torn_down: watch::channel(false).0,
         }))
     }
 
@@ -243,8 +261,25 @@ impl Session {
     }
 
     /// Record the emulator's daemon handle so teardown can stop it.
-    pub fn set_emulator_daemon(&self, daemon: Option<Box<dyn EmulatorDaemon>>) {
-        self.lock().emulator_daemon = daemon;
+    ///
+    /// Returns the handle straight back if teardown has already run, for
+    /// the same reason [`Session::set_containers`] does: bring-up happens
+    /// in a background task that a `wait_ready` timeout or a Ctrl-C does
+    /// not wait for, so it can finish starting a daemon *after* teardown
+    /// has stopped the one it found (none) and deleted the scratch
+    /// directory the daemon's socket lives in. Storing it then would hand
+    /// a live emulator to a session nothing will ever tear down again.
+    #[must_use = "an emulator daemon refused by a session that is tearing down must be stopped by the caller"]
+    pub fn set_emulator_daemon(
+        &self,
+        daemon: Option<Box<dyn EmulatorDaemon>>,
+    ) -> Option<Box<dyn EmulatorDaemon>> {
+        let mut inner = self.lock();
+        if inner.tearing_down {
+            return daemon;
+        }
+        inner.emulator_daemon = daemon;
+        None
     }
 
     /// Whether teardown has begun.
@@ -308,6 +343,20 @@ impl Session {
                 "session {} is not ready ({})",
                 self.def.id,
                 health.state.as_deref().unwrap_or("unknown"),
+            )));
+        }
+
+        // Health is a record of how bring-up went, not a probe: nothing
+        // re-publishes it if a node container dies afterwards. Asking the
+        // containers directly is what turns "the provider says no such
+        // container", once per rank, into one error that names the cause —
+        // and it is also the only thing that reaps a provider client which
+        // exited on its own, rather than leaving it a zombie for the rest
+        // of the run.
+        if !self.containers_alive() {
+            return Err(MirageError::other(format!(
+                "session {} is no longer running: a node container has exited",
+                self.def.id,
             )));
         }
 
@@ -397,8 +446,27 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns an error if the topology cannot be resolved.
+    /// Returns an error if the session is not ready, or if the topology
+    /// cannot be resolved.
     pub fn describe(&self) -> Result<SessionDescription> {
+        // Refuse until bring-up has finished, for the reason spelled out
+        // on [`Session::start_exec`]: the injection and the container
+        // record are written by bring-up, and a description snapshotted
+        // before them names no containers and carries no `LD_PRELOAD`. A
+        // `mirage exec` handed one would run its workload directly on the
+        // host, unemulated, against whatever GPU is really installed, and
+        // exit 0. The control socket is bound before bring-up starts (so
+        // this run is visible to `mirage state purge` from the first
+        // instant), which makes this the gate that keeps a client from
+        // being answered too early.
+        let health = self.health();
+        if !health.healthy {
+            return Err(MirageError::other(format!(
+                "session {} is not ready ({})",
+                self.def.id,
+                health.state.as_deref().unwrap_or("unknown"),
+            )));
+        }
         let (injection, containers, head_port) = {
             let mut inner = self.lock();
             // Chosen once and remembered, so every caller — this run's own
@@ -512,14 +580,30 @@ impl Session {
     /// resources that actually matter.
     pub async fn teardown(&self) {
         {
-            let mut inner = self.lock();
-            if inner.tearing_down {
-                // Another teardown is already in flight. Returning here
-                // rather than racing it keeps the ordering guarantees
-                // above meaningful.
+            let already = {
+                let mut inner = self.lock();
+                let already = inner.tearing_down;
+                inner.tearing_down = true;
+                already
+            };
+            if already {
+                // Another teardown is already in flight. Racing it would
+                // break the ordering above — but *returning* breaks
+                // something worse. Bring-up tears the session down itself
+                // when it fails, and it publishes the terminal health
+                // first, so `wait_ready` unblocks and `mirage run` reaches
+                // `Run::destroy` while that teardown is still mid-flight.
+                // Returning here would let `destroy` report success, `main`
+                // return, and the tokio runtime drop — cancelling the
+                // unfinished teardown at its next await and leaving the
+                // containers, the network and the scratch directory
+                // behind. Waiting is what makes `Run::destroy`'s "returns
+                // only once all of it has happened" true for the second
+                // caller as well as the first.
+                let mut done = self.torn_down.subscribe();
+                let _ = done.wait_for(|done| *done).await;
                 return;
             }
-            inner.tearing_down = true;
         }
 
         self.set_phase(false, state::STOPPING, None);
@@ -612,6 +696,10 @@ impl Session {
         }
 
         self.set_phase(false, state::STOPPED, None);
+        // Release anyone who arrived while this was running. `send_replace`
+        // rather than `send`, for the reason given on `set_health`: the
+        // value has to be recorded even with nothing currently waiting.
+        self.torn_down.send_replace(true);
         tracing::info!(session = %self.def.id, "session destroyed");
     }
 
@@ -621,15 +709,6 @@ impl Session {
     }
 }
 
-/// Host path of the file rank `global` of `exec` records its
-/// in-container pid to.
-///
-/// It lives under the session scratch directory, which is already
-/// bind-mounted read-write into every node container at
-/// [`CONTAINER_RUNTIME_DIR`] — so the container writes it and the
-/// supervisor reads it off the host filesystem, with no provider round
-/// trip and nothing to clean up separately (teardown removes the whole
-/// directory).
 /// Resolve how many nodes a profile's topology describes.
 ///
 /// # Errors
@@ -653,13 +732,14 @@ pub fn resolve_node_count(profile: &ProfileDef) -> Result<u32> {
 pub fn resolve_profile(reference: &MaybeRef<ProfileDef>) -> Result<ProfileDef> {
     match reference {
         MaybeRef::Owned(p) => Ok(p.clone()),
-        MaybeRef::Ref(name) => {
-            let path = mirage_core::paths::profile_path(name);
-            if !path.exists() {
-                return Err(MirageError::ProfileNotFound(name.clone()));
-            }
-            mirage_core::state::read_json(&path)
-        }
+        // Through the store rather than by hand: `profile_get` validates
+        // the name before joining it to the config directory, and a name
+        // is only a filename by convention — `paths::profile_path` joins
+        // whatever it is given, so `../../etc/something` would resolve
+        // outside the config root. Today `mirage run` happens to have
+        // validated already, but `Run::start` is public API and this is
+        // the one place the name becomes a path.
+        MaybeRef::Ref(name) => mirage_core::store::profile_get(name),
     }
 }
 
@@ -759,11 +839,32 @@ pub fn plan_container(ctx: &SessionContext, injection: &InjectionDef) -> Contain
 
     // The session scratch directory, so an in-container emulator runtime
     // sees the same config files the supervisor wrote.
+    let scratch = ctx.runtime_dir.to_string_lossy().into_owned();
     mounts.push(FileMount {
-        host_path: ctx.runtime_dir.to_string_lossy().into_owned(),
+        host_path: scratch.clone(),
         container_path: CONTAINER_RUNTIME_DIR.to_string(),
         read_only: false,
     });
+
+    // And again at its *host* path.
+    //
+    // Only environment *values* are remapped onto the mount above
+    // (`remap_env_for_container`); nothing rewrites the contents of the
+    // files the emulator wrote, and those hold absolute host paths.
+    // rocjitsu's `config_path` discovery file is exactly that — it names
+    // `<scratch>/rj_config.json` — so an interposer inside the container
+    // reads a path that does not exist there, finds no simulation config,
+    // and the workload runs unemulated against the real device. The
+    // per-node `mirage host` process used to re-resolve the whole
+    // injection against the container's own filesystem; with it gone,
+    // making the host path resolve in both places is what replaces it.
+    if scratch != CONTAINER_RUNTIME_DIR {
+        mounts.push(FileMount {
+            host_path: scratch.clone(),
+            container_path: scratch,
+            read_only: false,
+        });
+    }
 
     // Config, read-only, so by-name profile/topology references resolve.
     let config_dir = mirage_core::paths::mirage_config_dir();

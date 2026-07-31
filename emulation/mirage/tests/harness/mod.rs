@@ -266,7 +266,25 @@ impl Run {
             std::thread::sleep(Duration::from_millis(20));
         }
         let child = self.child.take().expect("a run is waited on once");
-        child.wait_with_output().expect("collecting run output")
+
+        // Collecting the output has its own deadline, because it can hang
+        // for exactly the reason these tests exist to catch.
+        // `wait_with_output` reads the run's stdout and stderr to EOF, and
+        // a leaked descendant that inherited them holds the write end
+        // open forever. Without the bound, the regression "a workload's
+        // grandchild survived its run" hangs the whole test binary
+        // instead of failing the assertion that was written for it.
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(child.wait_with_output());
+        });
+        match rx.recv_timeout(timeout) {
+            Ok(out) => out.expect("collecting run output"),
+            Err(_) => panic!(
+                "`mirage run` exited but its output pipes are still open after {timeout:?}: \
+                 something it started outlived it and inherited them"
+            ),
+        }
     }
 
     /// Stop the run and wait for it to go away.
@@ -487,22 +505,24 @@ pub fn pid_is_zombie(pid: u32) -> bool {
 /// Tests tag their workloads with a unique marker so this counts only
 /// their own processes, never another test's or the harness's.
 pub fn count_processes(marker: &str) -> usize {
-    let uid = nix::unistd::getuid().to_string();
-    let Ok(output) = Command::new("pgrep")
-        .args(["-u", &uid, "-f", marker])
-        .output()
-    else {
-        return 0;
-    };
-    let me = std::process::id().to_string();
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && *l != me)
-        .count()
+    find_processes(marker).len()
 }
 
-/// Pids of this user's processes whose command line contains `marker`.
+/// Pids of this user's *workload* processes whose command line contains
+/// `marker`.
+///
+/// mirage's own CLI processes are excluded, and that exclusion is what
+/// makes every caller mean what it says. The marker is part of the
+/// workload's argv, and the workload's argv is part of the argv of the
+/// `mirage run` / `mirage exec` that was told to launch it — so `pgrep
+/// -f` matches the CLI as well. Without the filter, "wait until the
+/// workload is up" is satisfied by the CLI process the test just spawned,
+/// before the workload exists at all, and an assertion that the run's
+/// workload survived is satisfied by the run process itself.
+///
+/// Filtering on `comm` rather than on a pid list: `mirage exec` clients
+/// and any re-exec of the binary have to go too, and the test does not
+/// know their pids.
 pub fn find_processes(marker: &str) -> Vec<u32> {
     let uid = nix::unistd::getuid().to_string();
     let Ok(output) = Command::new("pgrep")
@@ -511,10 +531,18 @@ pub fn find_processes(marker: &str) -> Vec<u32> {
     else {
         return Vec::new();
     };
+    let me = std::process::id();
     String::from_utf8_lossy(&output.stdout)
         .lines()
-        .filter_map(|l| l.trim().parse().ok())
+        .filter_map(|l| l.trim().parse::<u32>().ok())
+        .filter(|pid| *pid != me && !is_mirage_process(*pid))
         .collect()
+}
+
+/// Whether `pid` is a mirage CLI process rather than a workload.
+fn is_mirage_process(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/comm"))
+        .is_ok_and(|comm| comm.trim() == "mirage")
 }
 
 /// Wait until `cond` holds, or fail with `what`.

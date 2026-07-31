@@ -158,12 +158,15 @@ impl EmulatorBackend for Rocjitsu {
         // stands up the emulated device, and the workload fails with
         // "Unable to open /dev/kfd ... No such device".
         //
-        // `config` is already resolved for whichever filesystem view this
-        // injection is computed in — host paths on the orchestrator, and
-        // container paths (`/mnt/mirage/...`) when the per-node host
-        // re-resolves this injection inside its container — so both the
-        // runtime directory and the path written into `config_path` are
-        // correct in either context.
+        // `config` is a host path, and the file records it verbatim.
+        // Nothing rewrites file *contents* on the way into a container —
+        // only environment values are remapped onto the in-container
+        // mounts — so the supervisor bind-mounts the session scratch
+        // directory at its host path as well as at
+        // `/mnt/mirage/runtime`, and this path resolves in both views.
+        // See `plan_container` in `mirage_supervisor::session`. (Before
+        // the supervisor existed, a per-node `mirage host` process inside
+        // each container re-resolved the whole injection instead.)
         let runtime_dir = write_config_discovery(&config)?;
 
         let mut env = std::collections::BTreeMap::new();

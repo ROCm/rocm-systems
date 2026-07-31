@@ -117,6 +117,16 @@ pub fn build_specs(
                         .join("exec")
                         .join(exec_id.as_str())
                         .join(format!("{global}.pid"));
+                    // Start from no file at all, so `ContainerProc::pid`
+                    // cannot read one left by an earlier exec that
+                    // happened to be given this id. It has no freshness
+                    // check — it cannot have one, the file is a bare
+                    // number — so a stale read is indistinguishable from a
+                    // fresh one, and signalling would then deliver
+                    // SIGTERM/SIGKILL to whatever process now holds that
+                    // pid inside the container while the real workload
+                    // ran on untouched.
+                    let _ = std::fs::remove_file(&pid_file);
                     let (command, rest) =
                         pid_recording_command(&args.command, &args.args, exec_id, global);
                     let argv = engine.exec_command_line(
