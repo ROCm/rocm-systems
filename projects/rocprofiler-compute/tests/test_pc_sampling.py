@@ -416,11 +416,10 @@ def test_load_pc_sampling_data_missing_or_empty_sources_return_empty() -> None:
     """Absent tool data and empty buffer records both yield empty frames."""
     workload = SimpleNamespace(filter_kernel_ids=[])
 
-    assert load_pc_sampling_data(workload, "none", "count", None).empty
-    assert load_pc_sampling_data(workload, "missing", "count", None).empty
+    assert load_pc_sampling_data(workload, "count", None).empty
 
     workload.filter_kernel_ids = [0, 1, 2]
-    assert load_pc_sampling_data(workload, "test", "count", None).empty
+    assert load_pc_sampling_data(workload, "count", None).empty
 
     empty_records = load_pc_sample_records({
         "buffer_records": {
@@ -443,7 +442,7 @@ def test_load_pc_sampling_data_out_of_bounds_kernel_warns(monkeypatch) -> None:
     }
 
     workload.filter_kernel_ids = [99]
-    result = load_pc_sampling_data(workload, "test", "count", tool_data)
+    result = load_pc_sampling_data(workload, "count", tool_data)
 
     mock_warning.assert_called()
     call_args_str = str(mock_warning.call_args)
@@ -468,7 +467,7 @@ def test_load_pc_sampling_data_single_kernel_uses_workload_dfs(monkeypatch) -> N
     }
 
     workload.filter_kernel_ids = [1]
-    load_pc_sampling_data(workload, "test", "count", tool_data)
+    load_pc_sampling_data(workload, "count", tool_data)
 
     if per_kernel_calls:
         assert "kernel_b" in str(per_kernel_calls[0])

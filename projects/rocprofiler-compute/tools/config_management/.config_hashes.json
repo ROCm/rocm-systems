@@ -36,7 +36,7 @@
         "1600_vector_l1_data_cache.yaml": "42e90d5f3dd1cabc365c807ee110c6fc",
         "1700_l2_cache.yaml": "8d98c1933a53493cec6decb0c0caab1e",
         "1800_l2_cache_per_channel.yaml": "f2d6a1151e56b6d09ba6cd0ab5b20204",
-        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
+        "2100_pc_sampling.yaml": "613f224a198140f0dfdbd4116bbb38db"
       }
     },
     "gfx90a": {
@@ -58,7 +58,7 @@
         "1600_vector_l1_data_cache.yaml": "42e90d5f3dd1cabc365c807ee110c6fc",
         "1700_l2_cache.yaml": "8b00ecb89ac2bad083a7dd7f3170218f",
         "1800_l2_cache_per_channel.yaml": "5e04128ee35a40ce5c7c49bd8edba847",
-        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
+        "2100_pc_sampling.yaml": "613f224a198140f0dfdbd4116bbb38db"
       }
     },
     "gfx940": {
@@ -80,7 +80,7 @@
         "1600_vector_l1_data_cache.yaml": "40d1c43fb97cd4082f09e2d9c6b4ce15",
         "1700_l2_cache.yaml": "c0d8f6b27b50077dacaea5b6ef8a8c41",
         "1800_l2_cache_per_channel.yaml": "2fa15a760d3b597376f8f1189d4cb1ad",
-        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
+        "2100_pc_sampling.yaml": "613f224a198140f0dfdbd4116bbb38db"
       }
     },
     "gfx941": {
@@ -102,7 +102,7 @@
         "1600_vector_l1_data_cache.yaml": "40d1c43fb97cd4082f09e2d9c6b4ce15",
         "1700_l2_cache.yaml": "c0d8f6b27b50077dacaea5b6ef8a8c41",
         "1800_l2_cache_per_channel.yaml": "2fa15a760d3b597376f8f1189d4cb1ad",
-        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
+        "2100_pc_sampling.yaml": "613f224a198140f0dfdbd4116bbb38db"
       }
     },
     "gfx942": {
@@ -124,7 +124,7 @@
         "1600_vector_l1_data_cache.yaml": "fd1defe228ba06e8e84a64aae7d1804e",
         "1700_l2_cache.yaml": "06db33cd33f2f00a5b2f105c6d9f2ea6",
         "1800_l2_cache_per_channel.yaml": "2fa15a760d3b597376f8f1189d4cb1ad",
-        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
+        "2100_pc_sampling.yaml": "613f224a198140f0dfdbd4116bbb38db"
       }
     },
     "gfx950": {
@@ -146,7 +146,7 @@
         "1600_vector_l1_data_cache.yaml": "623c2230982b1b4231b16f6d5162953b",
         "1700_l2_cache.yaml": "5e4e51138c2b081f371cf2cb1f1b9642",
         "1800_l2_cache_per_channel.yaml": "20fda1f38e9ad03df0bce18ce4d27858",
-        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b",
+        "2100_pc_sampling.yaml": "613f224a198140f0dfdbd4116bbb38db",
         "3000_mem_bw.yaml": "ffded5b303d4fa9c1ca1849d3934c6c1"
       }
     }

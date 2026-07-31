@@ -137,9 +137,9 @@ def build_dfs(
                         profile_panel_filter=profile_panel_filter,
                     ):
                         continue
-                    df = pd.DataFrame(
-                        [data_config["source"]], columns=["from_pc_sampling"]
-                    )
+                    # Only the column name is read downstream; the value is a
+                    # placeholder to keep the marker frame non-empty.
+                    df = pd.DataFrame([True], columns=["from_pc_sampling"])
 
                 else:
                     df = pd.DataFrame()
@@ -483,7 +483,6 @@ def load_pc_sampling_data_per_kernel(
 @demarcate
 def load_pc_sampling_data(
     workload: schema.Workload,
-    file_prefix: str,
     sorting_type: str,
     tool_data: Optional[dict[str, Any]],
     num_rows: Optional[int] = None,
@@ -495,14 +494,12 @@ def load_pc_sampling_data(
     kernel (one ``-k``). The output schema is identical either way. Callers
     pass the already-parsed *tool_data*.
     """
-    if not file_prefix or file_prefix.lower() == "none" or tool_data is None:
+    if tool_data is None:
         return pd.DataFrame()
 
     pc_sampling_method = detect_pc_sampling_method(tool_data)
     if pc_sampling_method is None:
-        console_warning(
-            f"PC sampling: can not detect pc sampling method for {file_prefix}"
-        )
+        console_warning("PC sampling: can not detect pc sampling method.")
         return pd.DataFrame()
 
     # No kernel filter: return every kernel's rows.
@@ -627,7 +624,6 @@ def load_non_mertrics_table(
         elif "from_pc_sampling" in df.columns:
             tmp[df_id] = load_pc_sampling_data(
                 workload,
-                df.loc[0, "from_pc_sampling"],
                 args.pc_sampling_sorting_type,
                 pc_sampling_tool_data,
                 num_rows=args.pc_sampling_rows,

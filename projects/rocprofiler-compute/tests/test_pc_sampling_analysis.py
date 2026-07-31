@@ -855,21 +855,9 @@ def test_load_per_kernel_invalid_sorting_type() -> None:
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_load_pc_sampling_data_empty_prefix() -> None:
-    """Return an empty DataFrame when the file prefix is an empty string."""
-    df = load_pc_sampling_data(schema.Workload(), "", "count", make_tool_data())
-    assert df.empty
-
-
-def test_load_pc_sampling_data_none_prefix() -> None:
-    """Return an empty DataFrame when the file prefix is the literal 'none'."""
-    df = load_pc_sampling_data(schema.Workload(), "none", "count", make_tool_data())
-    assert df.empty
-
-
 def test_load_pc_sampling_data_no_tool_data() -> None:
     """Return an empty DataFrame when no parsed tool data is provided."""
-    df = load_pc_sampling_data(schema.Workload(), "ps_file", "count", None)
+    df = load_pc_sampling_data(schema.Workload(), "count", None)
     assert df.empty
 
 
@@ -894,12 +882,11 @@ def test_load_pc_sampling_data_no_filter_schema_parity(method: str) -> None:
         **{method: samples},
     )
     kernel_top_df = pd.DataFrame({"Kernel_Name": ["vecCopy", "vecAdd"]})
-    no_filter = load_pc_sampling_data(schema.Workload(), "ps_file", "offset", tool_data)
+    no_filter = load_pc_sampling_data(schema.Workload(), "offset", tool_data)
     single = load_pc_sampling_data(
         schema.Workload(
             filter_kernel_ids=[0], dfs={PMC_KERNEL_TOP_TABLE_ID: kernel_top_df}
         ),
-        "ps_file",
         "offset",
         tool_data,
     )
@@ -918,7 +905,7 @@ def test_load_pc_sampling_data_multiple_kernels_error() -> None:
     tool_data = make_tool_data(stochastic=[make_record(100, 0x10, 0, dispatch_id=0)])
     workload = schema.Workload(filter_kernel_ids=[0, 1])
     with patch("utils.parser.console_error"):
-        df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
+        df = load_pc_sampling_data(workload, "count", tool_data)
     assert df.empty
 
 
@@ -935,7 +922,7 @@ def test_load_pc_sampling_data_single_kernel_valid() -> None:
         filter_kernel_ids=[0],
         dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": ["vecCopy"]})},
     )
-    df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
+    df = load_pc_sampling_data(workload, "count", tool_data)
     assert not df.empty
 
 
@@ -954,7 +941,7 @@ def test_load_pc_sampling_data_single_kernel_out_of_bounds() -> None:
             })
         },
     )
-    df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
+    df = load_pc_sampling_data(workload, "count", tool_data)
     assert df.empty
 
 
@@ -968,7 +955,7 @@ def test_load_pc_sampling_data_method_not_detected() -> None:
         filter_kernel_ids=[0],
         dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": ["vecCopy"]})},
     )
-    df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
+    df = load_pc_sampling_data(workload, "count", tool_data)
     assert df.empty
 
 
@@ -998,7 +985,7 @@ def test_load_pc_sampling_data_method_detection(
         filter_kernel_ids=[0],
         dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": ["vecCopy"]})},
     )
-    df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
+    df = load_pc_sampling_data(workload, "count", tool_data)
     assert len(df.columns) == expected_column_count
 
 
@@ -1011,7 +998,7 @@ def test_load_pc_sampling_data_no_filter_instruction_out_of_range() -> None:
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
     )
-    df = load_pc_sampling_data(schema.Workload(), "ps_file", "count", tool_data)
+    df = load_pc_sampling_data(schema.Workload(), "count", tool_data)
     assert not df.empty
     assert df.iloc[0]["instruction"] is None
     assert df.iloc[0]["source_line"] == ".../a.cpp:2"
@@ -1268,7 +1255,7 @@ def test_load_non_mertrics_table_populates_pc_sampling_from_tool_data(
     """A ``from_pc_sampling`` table is populated when tool data is provided."""
     args = argparse.Namespace(pc_sampling_sorting_type="count", pc_sampling_rows=10)
     workload = schema.Workload()
-    workload.dfs = {2101: pd.DataFrame({"from_pc_sampling": ["ps_file"]})}
+    workload.dfs = {2101: pd.DataFrame({"from_pc_sampling": [True]})}
     tool_data = make_tool_data(**sample_tool_data_kwargs())
     load_non_mertrics_table(
         workload, str(tmp_path), args, pc_sampling_tool_data=tool_data
@@ -1282,7 +1269,7 @@ def test_load_non_mertrics_table_pc_sampling_empty_without_tool_data(
     """Without tool data the ``from_pc_sampling`` table stays empty (no crash)."""
     args = argparse.Namespace(pc_sampling_sorting_type="count", pc_sampling_rows=10)
     workload = schema.Workload()
-    workload.dfs = {2101: pd.DataFrame({"from_pc_sampling": ["ps_file"]})}
+    workload.dfs = {2101: pd.DataFrame({"from_pc_sampling": [True]})}
     load_non_mertrics_table(workload, str(tmp_path), args)
     assert workload.dfs[2101].empty
 
@@ -1435,7 +1422,7 @@ def test_load_pc_sampling_data_no_debug_info_source_line_na() -> None:
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
     )
-    df = load_pc_sampling_data(schema.Workload(), "ps_file", "count", tool_data)
+    df = load_pc_sampling_data(schema.Workload(), "count", tool_data)
     assert len(df) == 2
     assert (df["source_line"] == "N/A").all()
 
