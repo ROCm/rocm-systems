@@ -403,11 +403,14 @@ int RemoteDriver::ioctl(unsigned long request, void *arg) {
 }
 
 int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
+  std::lock_guard<std::mutex> lock(rpc_mutex_);
   // The stream is misaligned past a rejected reply; every later header would be
   // parsed out of stale bytes. Fail closed instead of returning bogus results.
+  // Tested under rpc_mutex_, not before it: a thread that read the flag first
+  // and then blocked on the lock would go on to drive a full round trip against
+  // a connection another thread poisoned while it waited.
   if (protocol_failed_.load(std::memory_order_acquire))
     return -EPROTO;
-  std::lock_guard<std::mutex> lock(rpc_mutex_);
 
   size_t arg_size = 0;
   if (!validate_ioctl_arg_size(request, arg, arg_size))
