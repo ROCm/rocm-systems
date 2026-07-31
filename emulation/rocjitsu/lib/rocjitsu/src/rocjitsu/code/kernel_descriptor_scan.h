@@ -4,8 +4,7 @@
 /// @file kernel_descriptor_scan.h
 /// @brief Shared AMDHSA kernel-descriptor discovery used by DBT and DBI.
 
-#ifndef ROCJITSU_CODE_KERNEL_DESCRIPTOR_SCAN_H_
-#define ROCJITSU_CODE_KERNEL_DESCRIPTOR_SCAN_H_
+#pragma once
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -38,5 +37,3 @@ struct KernelDescriptorInfo {
 scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size);
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_CODE_KERNEL_DESCRIPTOR_SCAN_H_

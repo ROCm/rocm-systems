@@ -35,9 +35,7 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu::test {
 
-//==============================================================================
 // Instruction word constants (gfx950)
-//==============================================================================
 
 // VOP1 v_mov_b32 encodings (gfx950: [31:25]=0x3F, vdst[24:17], op=1<<9,
 // src0[8:0]; VGPR src = 256 + index, SGPR src = index, inline 0 = 128,
@@ -75,9 +73,7 @@ inline constexpr uint32_t kProbeMovS30_0 = 0xbe9e0080u;
 inline constexpr uint32_t kProbeMarkerMovS5 = 0xbe850080u; // s_mov_b32 s5, 0
 inline constexpr uint32_t kProbeMarkerMovS6 = 0xbe860080u; // s_mov_b32 s6, 0
 
-//==============================================================================
 // ELF-image string/alignment helpers
-//==============================================================================
 
 inline uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
@@ -93,9 +89,7 @@ inline uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
   return remainder == 0 ? value : value + alignment - remainder;
 }
 
-//==============================================================================
 // Target ELF: one kernel with a discoverable `.kd` descriptor
-//==============================================================================
 
 // ET_DYN ELF with one kernel: a .kd descriptor (scratch = private_bytes, SGPR
 // granulation big enough for the s[30:31] link pair) plus a .text holding
@@ -427,9 +421,7 @@ inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_
   return image;
 }
 
-//==============================================================================
 // Probe ELF: one exported STT_FUNC symbol
-//==============================================================================
 
 // ELF exporting one STT_FUNC probe symbol whose body is `body_words`, in an
 // executable .text. Sections: [1]=.text, [2]=.strtab, [3]=.symtab, [4]=.shstrtab.
@@ -535,9 +527,7 @@ inline std::vector<uint8_t> make_gfx1200_probe_elf(std::string_view symbol,
   return make_amdgpu_probe_elf(symbol, body_words, EF_AMDGPU_MACH_AMDGCN_GFX1200);
 }
 
-//==============================================================================
 // Readback helpers
-//==============================================================================
 
 // Copy a named section's bytes out of a reparsed code object as 32-bit words.
 inline std::vector<uint32_t> section_words(const AmdGpuCodeObject &obj, std::string_view name) {

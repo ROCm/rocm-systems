@@ -81,13 +81,13 @@ constexpr uint32_t kWaveSize = 64;
 constexpr uint32_t kSentinel = 7;  // Inline-const value placed into the spilled reg (1..64).
 constexpr uint32_t kSentinel2 = 9; // Distinct value for a second reg, to catch swapped restores.
 
-// Minimal single-CU simulator (CDNA4 or RDNA4, selected by the constructor arch)
-// that lays out a kernel descriptor + code in GPU memory (AMDHSA ABI), dispatches
+// Minimal single-CU simulator (CDNA3, CDNA4, or RDNA4, selected by the constructor
+// arch) that lays out a kernel descriptor + code in GPU memory (AMDHSA ABI), dispatches
 // one workgroup, runs to completion, and reads back a VGPR. Self-contained so this
 // slice does not disturb the file-local VmFixture in amdgpu_vm_test.cpp.
 class DbiSim {
 public:
-  // Defaults to CDNA4/wave64; pass ("rdna4", 32) for an RDNA4 wave32 sim.
+  // Defaults to CDNA4/wave64; pass ("cdna3", 64) or ("rdna4", 32) for other arches.
   explicit DbiSim(std::string_view arch = "cdna4", uint32_t wave_size = kWaveSize)
       : wave_size_(wave_size) {
     const std::string json =
@@ -172,11 +172,9 @@ private:
   std::unique_ptr<simdojo::SimulationEngine> engine_;
 };
 
-//==============================================================================
 // VGPR / SGPR spill, executed on CDNA3 (gfx942, wave64), CDNA4 (gfx950, wave64),
 // and RDNA4 (gfx1200, wave32). The arches share one base fixture each; the
 // DbiCdna3*/DbiCdna4*/DbiRdna4* fixtures are thin wrappers selecting the arch config.
-//==============================================================================
 
 // Per-arch knobs for a spill sim fixture: the sim/config arch string, the code
 // arch (for builders), the ELF machine flag, and the wavefront size.
@@ -316,9 +314,7 @@ TEST_F(DbiRdna4VgprSpillSimFixture, MissingRestoreLeavesVgprClobbered) {
   expect_missing_restore_clobbers_vgpr();
 }
 
-//==============================================================================
-// SGPR spill (bridged through a VGPR), on CDNA4 and RDNA4.
-//==============================================================================
+// SGPR spill (bridged through a VGPR), on CDNA3, CDNA4, and RDNA4.
 
 constexpr uint16_t kSpilledSgpr = 8;
 
@@ -445,11 +441,9 @@ TEST_F(DbiRdna4SgprSpillSimFixture, MissingReadlaneLeavesSgprClobbered) {
   expect_missing_readlane_clobbers_sgpr();
 }
 
-//==============================================================================
 // Two live+clobbered SGPRs spilled through one shared bridge VGPR, on CDNA3/CDNA4/
 // RDNA4. Runtime counterpart of the static SpillsMultipleLiveClobberedSgprs: it
 // asserts both restored scalar values survive, not just that the words were emitted.
-//==============================================================================
 
 constexpr uint16_t kSpilledSgprHi = 9;
 
@@ -547,7 +541,6 @@ TEST_F(DbiRdna4TwoSgprSpillSimFixture, BothSpilledSgprsSurviveClobberingProbe) {
   expect_both_sgprs_survive();
 }
 
-//==============================================================================
 // EXEC preservation + full-mask spilling on CDNA3 (wave64), CDNA4 (wave64), and
 // RDNA4 (wave32). The partial-EXEC-mask scenario is wave-size-specific, so it rides
 // a per-arch config (ExecSimArch) with thin DbiCdna3*/DbiCdna4*/DbiRdna4* wrappers.
@@ -556,7 +549,6 @@ TEST_F(DbiRdna4TwoSgprSpillSimFixture, BothSpilledSgprsSurviveClobberingProbe) {
 //
 // wave32 caveat: EXEC save/restore + full-mask toggle stay wave64-shaped
 // (s_mov_b64); on wave32 the extra EXEC_HI write is harmless (EXEC_LO round-trips).
-//==============================================================================
 
 // s_mov_b32 <sdst>, <32-bit literal>: two words (src0 = 255 selects a trailing
 // literal). Used for the RDNA4 wave32 partial EXEC mask (exec_lo=0x0000FFFF).
@@ -747,10 +739,8 @@ TEST_F(DbiRdna4ExecPreserveSimFixture, MissingExecRestoreLeavesAllLanesClobbered
   expect_missing_exec_restore_clobbers_all();
 }
 
-//==============================================================================
 // Full-mask spilling: an EXEC-widening probe must not corrupt inactive-lane
 // spilled registers. Executed on CDNA3 (wave64), CDNA4 (wave64), and RDNA4 (wave32).
-//==============================================================================
 
 // Spill a live VGPR (v2) at an anchor under a partial EXEC mask, with a probe that
 // *widens* EXEC then clobbers v2. Full-mask spilling runs the store/load under
@@ -892,7 +882,6 @@ TEST_F(DbiRdna4ExecWidenSpillSimFixture, MissingStoreFullMaskLosesHighLanes) {
   expect_missing_store_full_mask_loses_high_lanes();
 }
 
-//==============================================================================
 // Spilling site: the probe body runs under the ANCHOR mask, not EXEC=-1.
 //
 // The store bracket forces EXEC=-1 to spill all lanes; the trampoline must restore
@@ -901,7 +890,6 @@ TEST_F(DbiRdna4ExecWidenSpillSimFixture, MissingStoreFullMaskLosesHighLanes) {
 // reads -- so it is dead at the anchor and NOT spilled, letting the probe's write
 // (and thus the mask it ran under) survive to the end. v2 is the spilled register
 // (live + clobbered) that makes this a spilling site.
-//==============================================================================
 class DbiExecMaskAtSpillSimBase : public ::testing::Test {
 protected:
   explicit DbiExecMaskAtSpillSimBase(ExecSimArch a) : a_(std::move(a)) {}
