@@ -47,6 +47,23 @@ namespace {
   return RewriteDischarge::no_success(rationale);
 }
 
+/// @brief Internal-linkage adapters keep registry callback addresses usable in
+/// compile-time validation under GCC sanitizer builds.
+[[nodiscard]] bool flat_scratch_base_rewrite_applies(const Instruction &inst) {
+  return gfx1250_reads_flat_scratch_base_64bit(inst);
+}
+
+[[nodiscard]] ExpandResult lower_flat_scratch_base_rewrite(const Instruction &inst, uint64_t offset,
+                                                           std::span<const uint8_t> source_text,
+                                                           const LivenessAnalysis &liveness,
+                                                           TranslationContext &context) {
+  return gfx1250_lower_flat_scratch_base_source(inst, offset, source_text, liveness, context);
+}
+
+[[nodiscard]] bool flat_scratch_base_rewrite_residual(const Instruction &inst) {
+  return gfx1250_flat_scratch_base_residual(inst);
+}
+
 /// @brief gfx1250 special-scalar operand encodings.
 /// @details CRITICAL: on gfx1250 these are the INVERSE of CDNA — M0 = 125 and
 /// NULL = 124, whereas CDNA encodes M0 = 124. Every hand-written encoding below
@@ -2724,9 +2741,9 @@ static_assert(translation_rules_sorted(kGfx1250B0ToA0ExpandRules),
 
 inline constexpr std::array<RegisteredInstructionRewrite, 1> kGfx1250B0ToA0InstructionRewriteRules =
     {{
-        {"flat-scratch-base-64bit-source", gfx1250_reads_flat_scratch_base_64bit,
-         gfx1250_lower_flat_scratch_base_source, true,
-         checked_discharge(gfx1250_flat_scratch_base_residual)},
+        {"flat-scratch-base-64bit-source", flat_scratch_base_rewrite_applies,
+         lower_flat_scratch_base_rewrite, true,
+         checked_discharge(flat_scratch_base_rewrite_residual)},
     }};
 
 inline constexpr RewriteRegistry kGfx1250B0ToA0RewriteRegistry = {
