@@ -130,8 +130,13 @@ class Flag {
     visible_gpus_ = os::GetEnvVar("ROCR_VISIBLE_DEVICES");
     filter_visible_gpus_ = os::IsEnvVarSet("ROCR_VISIBLE_DEVICES");
 
-    var = os::GetEnvVar("HSA_RUNNING_UNDER_VALGRIND");
-    running_valgrind_ = (var == "1") ? true : false;
+    // Honor the env var as an explicit override; otherwise auto-detect Valgrind.
+    if (os::IsEnvVarSet("HSA_RUNNING_UNDER_VALGRIND")) {
+      var = os::GetEnvVar("HSA_RUNNING_UNDER_VALGRIND");
+      running_valgrind_ = (var == "1") ? true : false;
+    } else {
+      running_valgrind_ = DetectRunningUnderValgrind();
+    }
 
     var = os::GetEnvVar("HSA_SDMA_WAIT_IDLE");
     sdma_wait_idle_ = (var == "1") ? true : false;
@@ -641,6 +646,9 @@ class Flag {
   std::map<uint32_t, std::vector<uint32_t>> cu_mask_;
 
   void parse_masks(std::string& args, uint32_t maxGpu, uint32_t maxCU);
+
+  // Returns true when the process runs under Valgrind.
+  static bool DetectRunningUnderValgrind();
 
   DISALLOW_COPY_AND_ASSIGN(Flag);
 };

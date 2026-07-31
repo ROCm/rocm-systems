@@ -43,9 +43,8 @@ template <typename T, size_t N> struct RingBuffer {
   size_t size() const { return len; }
 };
 
-/// Find the memory instruction whose outstanding result conflicts with the
-/// racy read described by @p v, returning its PC and wave.
-std::optional<MarkedPc> findConflict(const RaceViolation &v, RaceDetector &detector);
+/// Return the memory instruction recorded as the exact conflict.
+MarkedPc findConflict(const RaceViolation &, RaceDetector &);
 
 /// Format a trace with ==> markers and wave/lane annotations.
 std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
@@ -65,11 +64,11 @@ std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
 /// compact, monotonic text range; helper/trampoline code can be far away from
 /// the first PC observed for the dispatch.
 struct DisasmCache {
-  void record(uint64_t pc, const Instruction &inst) { record(pc, inst.disassemble()); }
-
-  void record(uint64_t pc, std::string disasm) {
+  void record(uint64_t pc, const Instruction &inst) {
     std::lock_guard<std::mutex> lock(mutex_);
-    entries_.try_emplace(pc, std::move(disasm));
+    if (entries_.contains(pc))
+      return;
+    entries_.emplace(pc, inst.disassemble());
   }
 
   std::unordered_map<uint64_t, std::string> to_map() const {
@@ -104,7 +103,11 @@ public:
   void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) override;
 
   void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
-                             uint8_t byte_mask = 0xF) override;
+                             uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override;
+
+  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
+                              uint64_t lane_mask,
+                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override;
 
   void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) override;
 

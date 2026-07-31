@@ -30,9 +30,10 @@ enum class DbtExecutionBackend {
 
 /// @brief Silicon revision for a DBT translation side.
 ///
-/// @details gfx1250 A0 and B0 share an ELF machine ID but require different
-/// translation workarounds, so the revision is carried out of band. Unspecified
-/// is correct for architectures whose machine ID already identifies the silicon.
+/// @details gfx1250 A0 and B0 share an ELF machine ID, so the revision is
+/// carried out of band and selects the corresponding translation profile.
+/// Unspecified is the default for architectures whose machine ID identifies
+/// the silicon.
 enum class DbtSiliconRevision {
   Unspecified,
   Gfx1250A0,
