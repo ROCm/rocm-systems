@@ -42,10 +42,10 @@ RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
 RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
 RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
 RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
-RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 1);
+RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
-RCCL_PARAM_DECLARE(ForceCeAllReduce);
+RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 0);
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
 RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
@@ -791,7 +791,7 @@ bool rcclIsAboveWarpSpeedThreshold(struct ncclComm* comm, struct ncclTaskColl* i
 
 bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes) {
   return IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && (nNodes == 1) &&
-         (rcclParamWarpSpeedAutoMode() != 0) && comm-> cuCount > 128; // Only use in SPX mode, 256 CU on gfx950
+         (rcclParamWarpSpeedAutoMode() != 0) && comm->cuCount > 128; // Only use in SPX mode, 256 CU on gfx950
 }
 
 ncclResult_t validChannelsForWarpSpeed(struct ncclComm* comm, struct ncclTaskColl* info) {
@@ -855,7 +855,7 @@ int rcclGetMaxWarpsPerBlock(struct ncclComm* comm) {
 }
 
 // Compute the bandwidth channel count (nc) when WarpSpeed is enabled, scaling the
-// base channel count by the per-block warp multiplier. 
+// base channel count by the per-block warp multiplier.
 int rcclWarpSpeedComputeNChannels(struct ncclComm* comm, int nc, int channelMultiplier, int maxChannels,
                                   int adjustedMaxNchannels, bool userUpdatedMaxChannels) {
   const bool singleNode = comm->nNodes == 1;
@@ -880,7 +880,7 @@ int rcclWarpSpeedComputeNChannels(struct ncclComm* comm, int nc, int channelMult
 }
 
 // Adjust the per-collective channel count (nc) for WarpSpeed during algo/channel
-// tuning. No-op when WarpSpeed is disabled. 
+// tuning. No-op when WarpSpeed is disabled.
 int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info, int nc) {
   if (comm->topo->warpSpeedEnabled) {
     nc /= comm->warpSpeedChannelMultiplier;

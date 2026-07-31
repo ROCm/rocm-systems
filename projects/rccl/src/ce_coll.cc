@@ -912,7 +912,6 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
 
     writes[r] = {};
     writes[r].operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
-    ;
     writes[r].writeValue.value = 1;
     writes[r].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
   }
@@ -955,9 +954,13 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
 
   if (totalSteps > 1) {
+    // Pipelined path uses stream for the reduce kernel and copyStream for
+    // scatter/allgather. Synchronize them here so copyStream does not start until
+    // prior work on the caller stream has finished (pairs with the synceEvent at exit).
     CUDACHECKGOTO(cudaEventRecord(ceColl->synceEvent, stream), ret, fail);
     CUDACHECKGOTO(cudaStreamWaitEvent(ceStream, ceColl->synceEvent, 0), ret, fail);
   }
+  // Synchronize all ranks/GPUs before launching the collective operation.
   NCCLCHECKGOTO(ncclMemOpSync(comm, &collArgs, ceStream), ret, fail);
   // =========================================================================
   // STEP 1: LAUNCH PERSISTENT REDUCTION KERNEL (ONCE, BEFORE THE LOOP), IF TOTAL STEPS > 1
@@ -987,6 +990,11 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
       }
     }
     // A. Verify that the persistent kernel has fully consumed this slot from the prior loop
+    //
+    // ceARTmpBuf is double-buffered (NUM_SLOTS slots); chunk ch uses slot ch % NUM_SLOTS.
+    // The first NUM_SLOTS chunks get fresh slots — no drain wait. From chunk NUM_SLOTS on,
+    // scatterStream waits for the persistent reduce kernel to clear the slot (signal == 0)
+    // on all ranks before overwriting it (e.g. chunk 2 reuses slot 0 when NUM_SLOTS == 2).
     if (ch >= NUM_SLOTS) {
       for (int r = 0; r < comm->nRanks; r++) {
         if (r == comm->rank) {
@@ -1035,7 +1043,8 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     }
   }
   if (totalSteps > 1) {
-    // Phase 3: wait for all chunks to be reduced before starting allgather
+    // Phase 3: wait for NUM_SLOTS chunks to be reduced before starting allgather
+    // startch is chunkPerShard - NUM_SLOTS
     if (startCh < 0) startCh = 0;
     for (int chunkIndex = startCh; chunkIndex < (int)chunksPerShard; chunkIndex++) {
       const int drainSlot = chunkIndex % NUM_SLOTS;

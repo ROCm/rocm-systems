@@ -60,6 +60,7 @@ RCCL build & installation helper script
     -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)
        --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes
        --generate-sym-kernels  Generate symmetric memory kernels (default: OFF)
+       --ce-reduce-all-ops     Build CE AllReduce reduce kernels for Sum/Prod/Min/Max (default: Sum only)
     -h|--help                  Prints this help message
     -i|--install               Install RCCL library (see --prefix argument below)
     -j|--jobs                  Specify how many parallel compilation jobs to run ($nproc by default)
