@@ -790,6 +790,11 @@ class CodeGenerator:
                 f'OperandType::{operand_type}, '
                 f'(static_cast<uint64_t>({literal_expr}) << 32), true);'
             )
+        if CodeGenerator._literal_operand_uses_i64_sign_extension(opnd, operand_type):
+            return (
+                f'{opnd.name} = Operand::make_signed_literal32('
+                f'static_cast<uint32_t>({literal_expr}));'
+            )
         return (
             f'{opnd.name} = Operand({operand_size}, '
             f'OperandType::{operand_type}, static_cast<int>({literal_expr}));'
@@ -806,6 +811,14 @@ class CodeGenerator:
         if inst_sem and inst_sem.data_type:
             return 'f64' in inst_sem.data_type.split('_')
         return False
+
+    @staticmethod
+    def _literal_operand_uses_i64_sign_extension(
+        opnd: Operand, operand_type: str
+    ) -> bool:
+        if operand_type != 'OPR_SIMM32' or not opnd.is_input or opnd.size != 64:
+            return False
+        return opnd.data_format_name == 'FMT_NUM_I64'
 
     @staticmethod
     def _literal_operand_fixup_stmt(
@@ -9970,6 +9983,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
                 '          uint16_t literal16_display_value, bool has_literal16_display);\n'
                 '  Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);\n'
+                '  static Operand make_signed_literal32(uint32_t literal_value);\n'
                 '  std::string name() const override;\n'
                 f'{literal64_decl}'
                 '  std::optional<RegisterRef> to_register_ref() const override;\n'
@@ -9980,6 +9994,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  bool has_literal16_display_ = false;\n'
                 '  uint64_t literal64_value_ = 0;\n'
                 '  bool has_literal64_ = false;\n'
+                '  uint64_t sign_extended_literal32_value() const;\n'
+                '  bool sign_extend_literal32_ = false;\n'
                 f'{packed_16bit_field}'
                 '};'
             )
@@ -10059,6 +10075,19 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     f'{execution_backend_ctor_init},\n'
                     '      literal64_value_(literal64_value), has_literal64_(is_literal64) {\n'
                     '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
+                    '}'
+                ),
+                cgen.Line(
+                    'Operand Operand::make_signed_literal32(uint32_t literal_value) {\n'
+                    '  Operand operand(64, OperandType::OPR_SIMM32, static_cast<int>(literal_value));\n'
+                    '  operand.sign_extend_literal32_ = true;\n'
+                    '  return operand;\n'
+                    '}'
+                ),
+                cgen.Line(
+                    'uint64_t Operand::sign_extended_literal32_value() const {\n'
+                    '  return static_cast<uint64_t>(static_cast<int64_t>(\n'
+                    '      static_cast<int32_t>(static_cast<uint32_t>(encoding_value_))));\n'
                     '}'
                 ),
                 cgen.Line(literal64_impl),
@@ -10499,6 +10528,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    uint32_t idx = wf.vgpr_alloc().base + voff;\n'
             '    return amdgpu::RegisterAccess(wf.cu()).read_vgpr64(idx, lane);\n'
             '  }\n'
+            '  if (sign_extend_literal32_)\n'
+            '    return sign_extended_literal32_value();\n'
             '  if (has_literal64_)\n'
             '    return literal64_value_;\n'
             '  if (is_immediate_type(opr_type_))\n'
@@ -10699,14 +10730,17 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '\n'
             'uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {\n'
             + _inert_guard('0')
-            + '  if (has_literal64_)\n'
-            '    return literal64_value_;\n'
-            '  if (is_immediate_type(opr_type_))\n'
-            '    return read_immediate64(opr_type_, encoding_value_);\n'
-            '  return amdgpu::resolve_src_scalar64(wf, encoding_value_, kM0EncodingValue);\n'
-            '}\n'
-            '\n'
-            'void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {\n'
+            + (
+                '  if (sign_extend_literal32_)\n'
+                '    return sign_extended_literal32_value();\n'
+                '  if (has_literal64_)\n'
+                '    return literal64_value_;\n'
+                '  if (is_immediate_type(opr_type_))\n'
+                '    return read_immediate64(opr_type_, encoding_value_);\n'
+                '  return amdgpu::resolve_src_scalar64(wf, encoding_value_, kM0EncodingValue);\n'
+                '}\n\n'
+            )
+            + 'void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {\n'
             + _inert_guard(cond='!is_writable()')
             + '  amdgpu::resolve_dst_write64(wf, encoding_value_, val);\n'
             '}'

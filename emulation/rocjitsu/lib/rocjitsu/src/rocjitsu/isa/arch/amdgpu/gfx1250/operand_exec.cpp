@@ -263,6 +263,8 @@ uint64_t Operand::read_lane64_exec(const amdgpu::Wavefront &wf, uint32_t lane) c
     uint32_t idx = wf.vgpr_alloc().base + voff;
     return amdgpu::RegisterAccess(wf.cu()).read_vgpr64(idx, lane);
   }
+  if (sign_extend_literal32_)
+    return sign_extended_literal32_value();
   if (has_literal64_)
     return literal64_value_;
   if (is_immediate_type(opr_type_))
@@ -293,6 +295,8 @@ uint64_t Operand::read_scalar64_exec(const amdgpu::Wavefront &wf) const {
   // via apply_fieldless_caps() (see fieldless_policy.py).
   if (!reads_value())
     return 0;
+  if (sign_extend_literal32_)
+    return sign_extended_literal32_value();
   if (has_literal64_)
     return literal64_value_;
   if (is_immediate_type(opr_type_))

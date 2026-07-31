@@ -10542,9 +10542,8 @@ VCmpFI64Vopc::VCmpFI64Vopc(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
     throw util::InvalidInst("V_CMP_F_I64 does not support DPP", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
@@ -10568,9 +10567,8 @@ VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
     throw util::InvalidInst("V_CMP_LT_I64 does not support DPP", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
@@ -10594,9 +10592,8 @@ VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
     throw util::InvalidInst("V_CMP_EQ_I64 does not support DPP", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
@@ -10620,9 +10617,8 @@ VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
     throw util::InvalidInst("V_CMP_LE_I64 does not support DPP", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
@@ -10646,9 +10642,8 @@ VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
     throw util::InvalidInst("V_CMP_GT_I64 does not support DPP", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
@@ -10672,9 +10667,8 @@ VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
     throw util::InvalidInst("V_CMP_NE_I64 does not support DPP", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
@@ -10698,9 +10692,8 @@ VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
     throw util::InvalidInst("V_CMP_GE_I64 does not support DPP", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
@@ -10724,9 +10717,8 @@ VCmpTI64Vopc::VCmpTI64Vopc(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
     throw util::InvalidInst("V_CMP_T_I64 does not support DPP", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
@@ -10960,9 +10952,8 @@ VCmpxFI64Vopc::VCmpxFI64Vopc(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
     throw util::InvalidInst("V_CMPX_F_I64 does not support DPP", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
@@ -10998,9 +10989,8 @@ VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
     throw util::InvalidInst("V_CMPX_LT_I64 does not support DPP", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
@@ -11039,9 +11029,8 @@ VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
     throw util::InvalidInst("V_CMPX_EQ_I64 does not support DPP", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
@@ -11080,9 +11069,8 @@ VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
     throw util::InvalidInst("V_CMPX_LE_I64 does not support DPP", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
@@ -11121,9 +11109,8 @@ VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
     throw util::InvalidInst("V_CMPX_GT_I64 does not support DPP", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
@@ -11162,9 +11149,8 @@ VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
     throw util::InvalidInst("V_CMPX_NE_I64 does not support DPP", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
@@ -11203,9 +11189,8 @@ VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
     throw util::InvalidInst("V_CMPX_GE_I64 does not support DPP", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
@@ -11244,9 +11229,8 @@ VCmpxTI64Vopc::VCmpxTI64Vopc(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
+    src0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
     throw util::InvalidInst("V_CMPX_T_I64 does not support DPP", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)

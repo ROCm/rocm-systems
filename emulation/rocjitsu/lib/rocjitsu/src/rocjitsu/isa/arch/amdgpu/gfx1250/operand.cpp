@@ -88,6 +88,17 @@ Operand::Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, 
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
 
+Operand Operand::make_signed_literal32(uint32_t literal_value) {
+  Operand operand(64, OperandType::OPR_SIMM32, static_cast<int>(literal_value));
+  operand.sign_extend_literal32_ = true;
+  return operand;
+}
+
+uint64_t Operand::sign_extended_literal32_value() const {
+  return static_cast<uint64_t>(
+      static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(encoding_value_))));
+}
+
 std::optional<uint64_t> Operand::literal64_value() const {
   if (!has_literal64_)
     return std::nullopt;

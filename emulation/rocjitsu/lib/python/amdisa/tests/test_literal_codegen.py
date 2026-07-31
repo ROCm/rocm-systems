@@ -251,6 +251,123 @@ def test_u64_simm32_literal_operand_keeps_low_32_bit_value():
     ) == stmt
 
 
+def test_i64_simm32_literal_operand_sign_extends_from_data_format():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand(
+            'src0',
+            'OPR_SRC',
+            size=64,
+            data_format_name='FMT_NUM_I64',
+        ),
+        'Vop3InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'src0 = Operand::make_signed_literal32('
+        'static_cast<uint32_t>(reinterpret_cast<const '
+        'Vop3InstLiteralMachineInst *>(inst)->simm32));'
+    ) == stmt
+
+
+def test_i64_simm32_literal_operand_does_not_infer_from_instruction_semantics():
+    sem = InstructionSemantics(
+        'S_ASHR_I64',
+        'scalar_binop',
+        operation='ashr',
+        data_type='i64',
+        sets_scc='none',
+    )
+
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('ssrc0', 'OPR_SSRC', size=64),
+        'Sop2InstLiteralMachineInst',
+        inst_sem=sem,
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'ssrc0 = Operand(64, OperandType::OPR_SIMM32, '
+        'static_cast<int>(reinterpret_cast<const '
+        'Sop2InstLiteralMachineInst *>(inst)->simm32));'
+    ) == stmt
+
+
+def test_mixed_width_i64_literal_fixup_only_sign_extends_i64_operand():
+    operands = (
+        _operand('src0', 'OPR_SRC', size=32, data_format_name='FMT_NUM_I32'),
+        _operand('src1', 'OPR_SRC', size=32, data_format_name='FMT_NUM_I32'),
+        _operand('src2', 'OPR_SRC', size=64, data_format_name='FMT_NUM_I64'),
+    )
+
+    stmts = [
+        CodeGenerator._literal_operand_fixup_stmt(
+            operand,
+            'Vop3InstLiteralMachineInst',
+            literal_operand_type='OPR_SIMM32',
+        )
+        for operand in operands
+    ]
+
+    assert all(stmt is not None for stmt in stmts)
+    assert 'make_signed_literal32' not in stmts[0]
+    assert 'make_signed_literal32' not in stmts[1]
+    assert 'make_signed_literal32' in stmts[2]
+
+
+def test_generated_operand_derives_signed_simm32_value_without_literal64_provenance(
+    tmp_path,
+):
+    generator = CodeGenerator(
+        SimpleNamespace(
+            arch_name='rdna4',
+            opnd_selectors=[],
+            operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
+            profile=Rdna4Profile(),
+        ),
+        str(tmp_path),
+    )
+
+    generator.gen_operand()
+    operand_cpp = (tmp_path / 'rdna4' / 'operand.cpp').read_text()
+    operand_h = (tmp_path / 'rdna4' / 'operand.h').read_text()
+
+    assert 'static Operand make_signed_literal32(uint32_t literal_value);' in operand_h
+    assert 'uint64_t signed_literal32_value_' not in operand_h
+    assert 'uint64_t sign_extended_literal32_value() const;' in operand_h
+    assert 'bool sign_extend_literal32_ = false;' in operand_h
+    assert 'literal32_display' not in operand_h
+    assert 'Operand operand(64, OperandType::OPR_SIMM32' in operand_cpp
+    assert 'operand.sign_extend_literal32_ = true;' in operand_cpp
+    assert operand_cpp.count('if (sign_extend_literal32_)') == 2
+    assert operand_cpp.count('return sign_extended_literal32_value();') == 2
+    assert 'static_cast<uint32_t>(encoding_value_)' in operand_cpp
+    assert 'if (!has_literal64_)\n    return std::nullopt;' in operand_cpp
+
+
+def test_b64_simm32_literal_operand_keeps_low_32_bit_value():
+    sem = InstructionSemantics(
+        'S_AND_B64',
+        'scalar_binop',
+        operation='and',
+        data_type='b64',
+        sets_scc='nonzero',
+    )
+
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('ssrc0', 'OPR_SSRC', size=64, data_format_name='FMT_NUM_B64'),
+        'Sop2InstLiteralMachineInst',
+        inst_sem=sem,
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'ssrc0 = Operand(64, OperandType::OPR_SIMM32, '
+        'static_cast<int>(reinterpret_cast<const '
+        'Sop2InstLiteralMachineInst *>(inst)->simm32));'
+    ) == stmt
+
+
 def test_simm16_literal_operand_uses_low_half_of_extension_word():
     stmt = CodeGenerator._literal_operand_fixup_stmt(
         _literal_operand(16, 'OPR_SIMM16'), 'Vop2InstLiteralMachineInst'

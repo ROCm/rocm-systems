@@ -12,6 +12,7 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/sop2.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vds.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vglobal.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vimage.h"
@@ -54,6 +55,7 @@ RJ_DIAGNOSTIC_POP
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <memory>
 #include <optional>
 #include <set>
@@ -1657,6 +1659,100 @@ TEST(Gfx1250ExecutionTest, VMadU32LiteralTimesScalarAddsVector) {
   mad.execute_impl(*wf);
 
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 4, kLane), 0x6Cu);
+}
+
+TEST(Gfx1250LiteralOperandTest, SplitBackendPreservesSignedAndEncodingSemantics) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  ASSERT_TRUE(gfx1250::Operand::full_execution_backend_complete());
+  amdgpu::RegisterAccess regs(*wf);
+
+  struct LiteralCase {
+    uint32_t encoded;
+    uint64_t signed_value;
+  };
+  constexpr std::array cases{
+      LiteralCase{0x7fffffffu, 0x000000007fffffffULL},
+      LiteralCase{0x80000000u, 0xffffffff80000000ULL},
+      LiteralCase{0xffffffffu, 0xffffffffffffffffULL},
+  };
+
+  for (const auto &[literal, signed_value] : cases) {
+    SCOPED_TRACE(::testing::Message() << "literal=" << literal);
+
+    const auto signed_mad_base = gfx1250::build_vop3(
+        gfx1250::kVMadNcI64I32Vop3, {.vdst = 4, .src0 = 129, .src1 = 129, .src2 = 255});
+    const std::array signed_mad_words{signed_mad_base[0], signed_mad_base[1], literal};
+    std::unique_ptr<Instruction> signed_mad_decoded(decoder->decode(signed_mad_words.data()));
+    ASSERT_NE(signed_mad_decoded, nullptr);
+    EXPECT_EQ(signed_mad_decoded->mnemonic(), "v_mad_nc_i64_i32");
+    EXPECT_EQ(signed_mad_decoded->size(), 12);
+    auto *signed_mad = dynamic_cast<gfx1250::VMadNcI64I32Vop3 *>(signed_mad_decoded.get());
+    ASSERT_NE(signed_mad, nullptr);
+
+    const Operand *signed_addend = signed_mad->src_operand(2);
+    ASSERT_NE(signed_addend, nullptr);
+    EXPECT_EQ(signed_addend->name(), std::format("0x{:x}", literal));
+    EXPECT_EQ(static_cast<uint32_t>(signed_addend->encoding_value()), literal);
+    EXPECT_FALSE(signed_addend->literal64_value().has_value());
+    EXPECT_EQ(regs.read_lane64(*signed_addend, 0), signed_value);
+    signed_mad->execute_impl(*wf);
+    EXPECT_EQ(regs.read_lane64(*signed_mad->dst_operand(0), 0), signed_value + 1u);
+
+    const auto unsigned_mad_base = gfx1250::build_vop3(
+        gfx1250::kVMadNcU64U32Vop3, {.vdst = 6, .src0 = 129, .src1 = 129, .src2 = 255});
+    const std::array unsigned_mad_words{unsigned_mad_base[0], unsigned_mad_base[1], literal};
+    std::unique_ptr<Instruction> unsigned_mad_decoded(decoder->decode(unsigned_mad_words.data()));
+    ASSERT_NE(unsigned_mad_decoded, nullptr);
+    auto *unsigned_mad = dynamic_cast<gfx1250::VMadNcU64U32Vop3 *>(unsigned_mad_decoded.get());
+    ASSERT_NE(unsigned_mad, nullptr);
+
+    const Operand *unsigned_addend = unsigned_mad->src_operand(2);
+    ASSERT_NE(unsigned_addend, nullptr);
+    EXPECT_FALSE(unsigned_addend->literal64_value().has_value());
+    EXPECT_EQ(regs.read_lane64(*unsigned_addend, 0), static_cast<uint64_t>(literal));
+    unsigned_mad->execute_impl(*wf);
+    EXPECT_EQ(regs.read_lane64(*unsigned_mad->dst_operand(0), 0),
+              static_cast<uint64_t>(literal) + 1u);
+
+    const auto scalar_base =
+        gfx1250::build_sop2(gfx1250::kSAshrI64Sop2, {.ssrc0 = 255, .ssrc1 = 128, .sdst = 0});
+    const std::array scalar_words{scalar_base[0], literal};
+    std::unique_ptr<Instruction> scalar_decoded(decoder->decode(scalar_words.data()));
+    ASSERT_NE(scalar_decoded, nullptr);
+    EXPECT_EQ(scalar_decoded->mnemonic(), "s_ashr_i64");
+    EXPECT_EQ(scalar_decoded->size(), 8);
+    auto *scalar = dynamic_cast<gfx1250::SAshrI64Sop2 *>(scalar_decoded.get());
+    ASSERT_NE(scalar, nullptr);
+
+    const Operand *scalar_value = scalar->src_operand(0);
+    ASSERT_NE(scalar_value, nullptr);
+    EXPECT_FALSE(scalar_value->literal64_value().has_value());
+    EXPECT_EQ(regs.read_scalar64(*scalar_value), signed_value);
+    scalar->execute_impl(*wf);
+    EXPECT_EQ(regs.read_scalar64(*scalar->dst_operand(0)), signed_value);
+
+    const auto b64_base =
+        gfx1250::build_sop2(gfx1250::kSAndB64Sop2, {.ssrc0 = 255, .ssrc1 = 193, .sdst = 2});
+    const std::array b64_words{b64_base[0], literal};
+    std::unique_ptr<Instruction> b64_decoded(decoder->decode(b64_words.data()));
+    ASSERT_NE(b64_decoded, nullptr);
+    auto *b64 = dynamic_cast<gfx1250::SAndB64Sop2 *>(b64_decoded.get());
+    ASSERT_NE(b64, nullptr);
+
+    const Operand *b64_value = b64->src_operand(0);
+    ASSERT_NE(b64_value, nullptr);
+    EXPECT_FALSE(b64_value->literal64_value().has_value());
+    EXPECT_EQ(regs.read_scalar64(*b64_value), static_cast<uint64_t>(literal));
+    b64->execute_impl(*wf);
+    EXPECT_EQ(regs.read_scalar64(*b64->dst_operand(0)), static_cast<uint64_t>(literal));
+  }
 }
 
 TEST(Gfx1250ExecutionTest, VCmpGtU32Wave32ExplicitSdstPreservesHighSgpr) {

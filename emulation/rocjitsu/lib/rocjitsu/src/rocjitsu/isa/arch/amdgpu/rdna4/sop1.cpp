@@ -239,9 +239,8 @@ SClsI32I64Sop1::SClsI32I64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        64, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+    ssrc0 = Operand::make_signed_literal32(
+        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
 void SClsI32I64Sop1::execute_impl(amdgpu::Wavefront &wf) {

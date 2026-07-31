@@ -47,6 +47,17 @@ Operand::Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, 
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
 
+Operand Operand::make_signed_literal32(uint32_t literal_value) {
+  Operand operand(64, OperandType::OPR_SIMM32, static_cast<int>(literal_value));
+  operand.sign_extend_literal32_ = true;
+  return operand;
+}
+
+uint64_t Operand::sign_extended_literal32_value() const {
+  return static_cast<uint64_t>(
+      static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(encoding_value_))));
+}
+
 std::optional<uint64_t> Operand::literal64_value() const {
   if (!has_literal64_)
     return std::nullopt;
@@ -1217,6 +1228,8 @@ uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const 
     uint32_t idx = wf.vgpr_alloc().base + voff;
     return amdgpu::RegisterAccess(wf.cu()).read_vgpr64(idx, lane);
   }
+  if (sign_extend_literal32_)
+    return sign_extended_literal32_value();
   if (has_literal64_)
     return literal64_value_;
   if (is_immediate_type(opr_type_))
@@ -1247,6 +1260,8 @@ uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
   // via apply_fieldless_caps() (see fieldless_policy.py).
   if (!reads_value())
     return 0;
+  if (sign_extend_literal32_)
+    return sign_extended_literal32_value();
   if (has_literal64_)
     return literal64_value_;
   if (is_immediate_type(opr_type_))

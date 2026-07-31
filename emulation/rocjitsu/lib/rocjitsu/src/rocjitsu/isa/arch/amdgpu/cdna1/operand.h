@@ -21,6 +21,7 @@ public:
   Operand(int size_bits, OperandType opr_type, int encoding_value, uint16_t literal16_display_value,
           bool has_literal16_display);
   Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);
+  static Operand make_signed_literal32(uint32_t literal_value);
   std::string name() const override;
   std::optional<uint64_t> literal64_value() const override;
   std::optional<uint64_t> const_value() const override;
@@ -41,6 +42,8 @@ private:
   bool has_literal16_display_ = false;
   uint64_t literal64_value_ = 0;
   bool has_literal64_ = false;
+  uint64_t sign_extended_literal32_value() const;
+  bool sign_extend_literal32_ = false;
 };
 
 } // namespace cdna1

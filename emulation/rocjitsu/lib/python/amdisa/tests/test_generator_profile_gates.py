@@ -1926,6 +1926,56 @@ def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
     ) < ceil_body.index('read_vop3_true16_src(src0, wf, lane, opsel, 0)')
 
 
+def test_rdna4_signed_64bit_literals_use_operation_specific_extension(tmp_path):
+    args = SimpleNamespace(
+        multi=[f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}'],
+        gen_isas=True,
+        gen_dbt=False,
+        isa_output=str(tmp_path),
+        dbt_output=None,
+    )
+
+    _run_multi(args)
+
+    vop3 = (tmp_path / 'rdna4' / 'vop3.cpp').read_text()
+    signed_ctor = _generated_constructor_body(vop3, 'VCmpLtI64Vop3')
+    unsigned_ctor = _generated_constructor_body(vop3, 'VCmpLtU64Vop3')
+    operand_cpp = (tmp_path / 'rdna4' / 'operand.cpp').read_text()
+
+    assert 'Operand::make_signed_literal32' in signed_ctor
+    assert 'static_cast<uint32_t>' in signed_ctor
+    assert 'make_signed_literal32(\n        64,' not in signed_ctor
+    assert 'make_signed_literal32' not in unsigned_ctor
+    assert 'if (sign_extend_literal32_)' in operand_cpp
+    assert 'return sign_extended_literal32_value();' in operand_cpp
+    assert 'if (has_literal64_)' in operand_cpp
+    assert 'return literal64_value_;' in operand_cpp
+    assert 'uint64_t signed_literal32_value_' not in operand_cpp
+    assert 'static_cast<uint32_t>(encoding_value_)' in operand_cpp
+    assert (
+        'std::format("0x{:x}", static_cast<uint32_t>(encoding_value_))' in operand_cpp
+    )
+
+
+def test_generated_signed_literal_shapes_cover_gfx1250_and_cdna_vopc(
+    gfx1250_generated_root: Path,
+    cdna4_generated_root: Path,
+):
+    gfx_operand_exec = (gfx1250_generated_root / 'operand_exec.cpp').read_text()
+    gfx_vop3_ternary = (gfx1250_generated_root / 'vop3_ternary.cpp').read_text()
+    cdna_vopc = (cdna4_generated_root / 'vopc.cpp').read_text()
+
+    assert gfx_operand_exec.count('if (sign_extend_literal32_)') == 2
+    assert gfx_operand_exec.count('return sign_extended_literal32_value();') == 2
+
+    mixed_ctor = _generated_constructor_body(gfx_vop3_ternary, 'VMadNcI64I32Vop3')
+    assert mixed_ctor.count('Operand::make_signed_literal32') == 1
+    assert 'src2 = Operand::make_signed_literal32' in mixed_ctor
+
+    cdna_vopc_ctor = _generated_constructor_body(cdna_vopc, 'VCmpLtI64Vopc')
+    assert 'src0 = Operand::make_signed_literal32' in cdna_vopc_ctor
+
+
 def test_generated_rdna4_local_vop3_pack_paths_use_selected_halves(
     rdna4_generated_root: Path,
 ):
