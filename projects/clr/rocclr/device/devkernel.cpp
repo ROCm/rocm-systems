@@ -684,8 +684,8 @@ bool Kernel::createSignature(const parameters_t& params, uint32_t numParameters,
 Kernel::~Kernel() { delete signature_; }
 
 // ================================================================================================
-void Kernel::FindLocalWorkSize(size_t workDim, const amd::NDRange<>& gblWorkSize,
-                               amd::NDRange<>& lclWorkSize) const {
+void Kernel::FindLocalWorkSize(size_t workDim, const amd::NDRange& gblWorkSize,
+                               amd::NDRange& lclWorkSize) const {
   // Initialize the default workgoup info
   // Check if the kernel has the compiled sizes
   if (workGroupInfo()->compileSize_[0] == 0) {
