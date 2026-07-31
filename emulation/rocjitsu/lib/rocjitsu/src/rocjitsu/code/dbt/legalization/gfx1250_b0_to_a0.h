@@ -27,6 +27,14 @@ struct InstructionLegalization;
 /// changing code.
 [[nodiscard]] const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &inst);
 
+/// @brief True when a low-precision B0 WMMA needs an A0 completion wait.
+///
+/// @details This conservative classification covers every dense FP8/BF8,
+/// F8F6F4, and FP4 WMMA form that executes through the affected low-precision
+/// path after translation. It is intentionally separate from legalization
+/// because some of these instructions otherwise retain their original encoding.
+[[nodiscard]] bool gfx1250_b0_to_a0_requires_wmma_completion_wait(const Instruction &inst);
+
 } // namespace rocjitsu
 
 #endif // ROCJITSU_CODE_DBT_LEGALIZATION_GFX1250_B0_TO_A0_H_

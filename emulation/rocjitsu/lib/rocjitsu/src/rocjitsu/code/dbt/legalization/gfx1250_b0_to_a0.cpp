@@ -166,6 +166,16 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
 
 } // namespace
 
+bool gfx1250_b0_to_a0_requires_wmma_completion_wait(const Instruction &inst) {
+  const std::string_view mnemonic = inst.mnemonic();
+  if (!mnemonic.starts_with("v_wmma_"))
+    return false;
+
+  return mnemonic.find("_fp8") != std::string_view::npos ||
+         mnemonic.find("_bf8") != std::string_view::npos ||
+         mnemonic.find("_f8f6f4") != std::string_view::npos || mnemonic.ends_with("_f4");
+}
+
 const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &inst) {
   // CLAMP=0 is the common E4M3 operation on both steppings. CLAMP=1 selects
   // the B0-only E5M3 behavior and therefore requires a semantic expansion.

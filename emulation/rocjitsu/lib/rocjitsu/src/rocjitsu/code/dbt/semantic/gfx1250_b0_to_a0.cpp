@@ -873,6 +873,13 @@ ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, u
     std::vector<uint32_t> words(inst.raw_encoding(), inst.raw_encoding() + 4);
     // Instruction bits [58:50] occupy word 1 bits [26:18].
     set_word_field(words[1], 0x100, 18, 9);
+    // B0 code may schedule scaled WMMA consumers under SCHED_MODE 2 using
+    // B0 completion timing. A0 has a lower FP8/FP4 WMMA issue rate, and mode 2
+    // makes software responsible for VA_VDST dependencies. Wait for pending
+    // VALU destinations without draining unrelated ALU dependency counters.
+    constexpr uint16_t kWaitVaVdstZero = 0x0f9f;
+    append_words(
+        words, gfx1250::build_sopp(gfx1250::kSWaitAluSopp, {.simm16 = kWaitVaVdstZero}));
     return ExpandResult::success(std::move(words));
   }
 
