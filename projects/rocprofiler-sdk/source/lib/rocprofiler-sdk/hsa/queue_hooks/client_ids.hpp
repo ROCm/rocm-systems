@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,10 +34,18 @@ namespace queue_hooks
 // Only distinctness matters; values are fixed for test-order stability.
 // Services are migrated off the per-queue callback registry one at a time; the
 // unused ids are reserved so the tag values stay stable across those PRs.
-constexpr int64_t COUNTERS_CLIENT_ID     = 1;
-constexpr int64_t THREAD_TRACE_CLIENT_ID = 2;
-constexpr int64_t PC_SAMPLING_CLIENT_ID  = 3;
-constexpr int64_t SPM_CLIENT_ID          = 4;
+//
+// The underlying type is fixed to int64_t to match hsa::ClientID, which is how the
+// tag is stored in inst_pkt_t. The enum is deliberately unscoped rather than an
+// enum class: unscoped keeps the implicit conversion to ClientID, so the emplace
+// sites need no cast, while still grouping the values under one type.
+enum client_id : int64_t
+{
+    COUNTERS_CLIENT_ID     = 1,
+    THREAD_TRACE_CLIENT_ID = 2,
+    PC_SAMPLING_CLIENT_ID  = 3,
+    SPM_CLIENT_ID          = 4,
+};
 }  // namespace queue_hooks
 }  // namespace hsa
 }  // namespace rocprofiler

@@ -162,8 +162,8 @@ start_context(const context::context* ctx)
     if(!already_enabled)
     {
         // Counter collection no longer registers a per-queue callback with the queue
-        // controller; the HSA write interceptor calls counters::write_hook /
-        // signal_completion_hook directly (see hsa/queue.cpp). Keep the callback thread.
+        // controller; the HSA write interceptor calls counters::kernel_dispatch_phase_enter_hook /
+        // kernel_dispatch_phase_exit_hook directly (see hsa/queue.cpp). Keep the callback thread.
         callback_thread_start();
     }
 }
@@ -182,11 +182,11 @@ stop_context(const context::context* ctx)
 
     if(controller)
     {
-        // No GPU drain here. In-flight dispatches are handled by signal_completion_hook routing
-        // over registered rather than active contexts; the serializer transition is reconciled
-        // GPU-side by the hsa_barrier that profiler_serializer::disable() pushes.
+        // No GPU drain here. In-flight dispatches are handled by kernel_dispatch_phase_exit_hook
+        // routing over registered rather than active contexts; the serializer transition is
+        // reconciled GPU-side by the hsa_barrier that profiler_serializer::disable() pushes.
         controller->disable_serialization();
-        // No per-queue callback to remove; counters::write_hook no-ops once
+        // No per-queue callback to remove; counters::kernel_dispatch_phase_enter_hook no-ops once
         // dispatch_counter_collection is disabled above.
     }
 
