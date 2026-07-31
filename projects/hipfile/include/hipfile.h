@@ -1218,11 +1218,16 @@ typedef struct hipFilePerGpuStats {
 /*!
  * @brief Level 3 statistics: includes Level 2 plus per-GPU statistics
  * @ingroup stats
+ *
+ * @c per_gpu_stats is indexed by GPU ordinal, not packed: entry @c i holds the
+ * stats for GPU @c i, and slots for inactive GPUs are zero-filled. @c num_gpus
+ * is the count of active GPUs, not the largest populated index. Consumers must
+ * iterate all @c HIPFILE_MAX_GPUS slots rather than @c 0..num_gpus-1.
  */
 typedef struct hipFileStatsLevel3 {
     hipFileStatsLevel2_t detailed;                        //!< Level 2 statistics
-    uint32_t             num_gpus;                        //!< Number of GPUs with recorded activity
-    hipFilePerGpuStats_t per_gpu_stats[HIPFILE_MAX_GPUS]; //!< Per-GPU statistics
+    uint32_t             num_gpus;                        //!< Count of active GPUs
+    hipFilePerGpuStats_t per_gpu_stats[HIPFILE_MAX_GPUS]; //!< Per-GPU statistics, indexed by GPU ordinal
 } hipFileStatsLevel3_t;
 
 /*!
