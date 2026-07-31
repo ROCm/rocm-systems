@@ -69,6 +69,7 @@ OPT_PASSES := --passes='internalize,inline,globaldce' \
 # Build rules
 WRAPPER_HEADER := $(BUILDDIR)/include/nccl_device_wrapper.h
 
+# Never run llvm_ir and ltoir as concurrent sub-makes: this cp races (EEXIST).
 $(WRAPPER_HEADER): nccl_device_wrapper.h
 	@mkdir -p $(BUILDDIR)/include
 	@echo "Copying nccl_device_wrapper.h to build include..."

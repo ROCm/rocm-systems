@@ -4,17 +4,23 @@
 #
 # See LICENSE.txt for more license information
 #
-.PHONY: all clean
+.PHONY: all clean ir-emit
 
 EMIT_LLVM_IR ?= 0
 NCCL_EMIT_LTO_IR ?= 0
 
-default: src.build
+# One sub-make: llvm_ir and ltoir share nccl_device_wrapper.h, two processes race on it.
+IR_GOALS :=
 ifneq ($(EMIT_LLVM_IR), 0)
-default: ir.llvm_ir
+IR_GOALS += llvm_ir
 endif
 ifneq ($(NCCL_EMIT_LTO_IR), 0)
-default: ir.ltoir
+IR_GOALS += ltoir
+endif
+
+default: src.build
+ifneq ($(IR_GOALS),)
+default: ir-emit
 endif
 
 install: src.install
@@ -50,6 +56,9 @@ nccl4py.%:
 # IR generation requires src.build first
 ir.%:
 	${MAKE} -C bindings/ir $* BUILDDIR=${ABSBUILDDIR}
+
+ir-emit: src.build
+	${MAKE} -C bindings/ir $(IR_GOALS) BUILDDIR=${ABSBUILDDIR}
 
 pkg.debian.prep: lic
 pkg.txz.prep: lic
