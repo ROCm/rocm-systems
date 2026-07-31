@@ -146,6 +146,7 @@ for rocm_dir in "${ROCM_VERSIONS[@]}"; do
     # -----------------------------------------------------------------
     if [[ "$BUILD_ONLY" == false && "$HAS_GPU" == true ]]; then
         run_step "$version" "putnbi test" \
+            env LD_LIBRARY_PATH="${rocm_dir}/lib:${LD_LIBRARY_PATH}" \
             mpiexec -n 2 "$builddir/tests/functional_tests/rocshmem_functional_tests" \
                 -a 3 -w 1 -z 256 \
             || { FAIL+=("$version:putnbi"); ok=false; }

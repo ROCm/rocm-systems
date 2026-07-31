@@ -12,6 +12,15 @@
 #   docker build -f docker/smoketest-rocm-multiversions/Dockerfile \
 #     --build-arg ROCSHMEM_REF=develop -t rocshmem-multiversion .
 #
+# Add a TheRock nightly tarball from rocm.nightlies.amd.com:
+#   docker build ... \
+#     --build-arg ROCM_NIGHTLY_VERSION=10.1.0a20260731 \
+#     --build-arg ROCM_NIGHTLY_ARCH=gfx950 \
+#     -t rocshmem-multiversion .
+#   # Or resolve the latest automatically:
+#   docker build ... --build-arg ROCM_NIGHTLY_VERSION=latest \
+#     --build-arg ROCM_NIGHTLY_ARCH=gfx950 -t rocshmem-multiversion .
+#
 # Run (compile-only, no GPU needed):
 #   docker run --rm rocshmem-multiversion --build-only
 #
@@ -139,6 +148,41 @@ RUN if [ -n "${BUILD_THEROCK}" ]; then \
            -DTHEROCK_AMDGPU_FAMILIES="${THEROCK_GPU_FAMILIES}" \
       && cmake --build build \
       && echo "TheRock super-build: OK"; \
+    fi
+
+###############################################################################
+# TheRock nightly tarball (optional)
+# Downloads a pre-built nightly from https://rocm.nightlies.amd.com/tarball-multi-arch/
+# and installs it under /opt/rocm-<version> so build_and_test.sh picks it up.
+#
+# ROCM_NIGHTLY_ARCH:    GPU arch slice, e.g. gfx950, gfx94X (default: gfx94X)
+# ROCM_NIGHTLY_VERSION: version+date string, e.g. 10.1.0a20260731
+#                       Set to "latest" to auto-resolve the most recent build.
+#
+# Examples:
+#   --build-arg ROCM_NIGHTLY_VERSION=10.1.0a20260731
+#   --build-arg ROCM_NIGHTLY_VERSION=latest --build-arg ROCM_NIGHTLY_ARCH=gfx950
+###############################################################################
+ARG ROCM_NIGHTLY_VERSION=
+ARG ROCM_NIGHTLY_ARCH=gfx94X
+ARG ROCM_NIGHTLY_BASE_URL=https://rocm.nightlies.amd.com/tarball-multi-arch
+RUN if [ -n "${ROCM_NIGHTLY_VERSION}" ]; then \
+      arch="${ROCM_NIGHTLY_ARCH}" \
+      && ver="${ROCM_NIGHTLY_VERSION}" \
+      && if [ "${ver}" = "latest" ]; then \
+           ver=$(curl -fsSL "${ROCM_NIGHTLY_BASE_URL}/" \
+                 | grep -oE "therock-dist-linux-${arch}-dcgpu-[0-9]+\.[0-9]+\.[0-9]+a[0-9]+\.tar\.gz" \
+                 | sed "s/therock-dist-linux-${arch}-dcgpu-//;s/\.tar\.gz//" \
+                 | sort -t'a' -k1,1V -k2,2n | tail -1); \
+           echo "Resolved latest nightly: ${ver}"; \
+         fi \
+      && tarball="therock-dist-linux-${arch}-dcgpu-${ver}.tar.gz" \
+      && dest="/opt/rocm-${ver}" \
+      && mkdir -p "${dest}" \
+      && echo "Downloading ${tarball} -> ${dest}" \
+      && curl -fSL "${ROCM_NIGHTLY_BASE_URL}/${tarball}" \
+           | tar -xz -C "${dest}" \
+      && echo "Installed TheRock nightly ${ver} at ${dest}"; \
     fi
 
 ###############################################################################
