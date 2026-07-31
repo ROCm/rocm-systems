@@ -202,6 +202,11 @@ public:
   [[nodiscard]] TranslatedCodeObject translate(const AmdGpuCodeObject &obj);
 
 private:
+  /// @brief Translate without final-output validation.
+  /// @details Keeping the translation body in a separate call ensures its
+  /// analysis state is destroyed before translate() audits the resulting ELF.
+  [[nodiscard]] TranslatedCodeObject translate_impl(const AmdGpuCodeObject &obj);
+
   /// @brief Whether this translator is running the gfx1250 B0-to-A0 profile.
   [[nodiscard]] bool is_gfx1250_b0_to_a0() const;
 

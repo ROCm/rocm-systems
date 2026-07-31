@@ -2147,6 +2147,13 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
 }
 
 TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
+  TranslatedCodeObject result = translate_impl(obj);
+  if (options_.verify_rewrite_discharge && result.ok())
+    verify_rewrite_discharge(result);
+  return result;
+}
+
+TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &obj) {
   TranslatedCodeObject result;
   result.host_arch = host_arch_;
 
@@ -2158,8 +2165,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     const auto *image = reinterpret_cast<const uint8_t *>(obj.image_data());
     if (obj.image_size() != 0)
       result.elf_bytes.assign(image, image + obj.image_size());
-    if (options_.verify_rewrite_discharge && result.ok())
-      verify_rewrite_discharge(result);
     return result;
   };
 
@@ -4651,8 +4656,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   if (!materialized)
     return leave_unchanged();
   result.elf_bytes = std::move(*materialized);
-  if (options_.verify_rewrite_discharge && result.ok())
-    verify_rewrite_discharge(result);
   return result;
 }
 
