@@ -1331,7 +1331,6 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   if (!dense_fallback_indices.empty()) {
     constexpr uint64_t kDispatcherWordsPerSite = 20u;
 
-    const auto &blocks = resource_state.blocks;
     std::map<std::pair<bool, std::string>, std::vector<size_t>> owner_groups;
     for (size_t index : dense_fallback_indices) {
       const BarrierRecordCandidate &candidate = planned_candidates[index].candidate;
@@ -1358,8 +1357,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
     }
     std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
-    occupied_ranges.reserve(result.patches.size() + patches.size() + selected_candidates.size() +
-                            options.preapplied_reserved_ranges.size());
+    occupied_ranges.reserve(result.patches.size() + patches.size() + selected_candidates.size());
     const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
       if (size != 0u && begin <= std::numeric_limits<uint64_t>::max() - size)
         occupied_ranges.emplace_back(begin, begin + size);
@@ -1370,8 +1368,6 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       append_occupied_range(patch.anchor_offset, patch.original_size);
     for (const BarrierRecordCandidate &candidate : selected_candidates)
       append_occupied_range(candidate.site.text_offset, candidate.site.size);
-    for (const ConSanPreappliedReservedRange &reserved : options.preapplied_reserved_ranges)
-      append_occupied_range(reserved.text_offset, reserved.size);
     std::ranges::sort(occupied_ranges);
     size_t merged_range_count = 0u;
     for (const auto &range : occupied_ranges) {
@@ -1736,87 +1732,39 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       const ConSanCandidateResourcePlan *group_resource =
           resource_plan_for_site(result, ConSanResourceSiteKind::Barrier,
                                  planned_candidates[indices.front()].candidate.site.text_offset);
-      std::vector<MoiSgprRange> host_bootstrap_ranges;
-      MoiDenseOwnerLivenessProof host_owner_proof;
-      if (group_resource != nullptr) {
-        host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
-            group_options, MoiRelocatableHostScalarState::BarrierRouter, arch);
-        host_owner_proof = resource_state.prepare_dense_liveness_for_owners(
-            group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
+      if (group_resource == nullptr) {
+        result.warnings.emplace_back(
+            "ConSan MOI inline-shadow barrier epoch has no dense relay resource plan in " +
+            owner_name);
+        continue;
       }
+      const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
+          group_options, MoiRelocatableHostScalarState::BarrierRouter, arch);
+      MoiDenseOwnerLivenessProof host_owner_proof =
+          resource_state.prepare_dense_liveness_for_owners(
+              group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
 
-      std::optional<uint64_t> host_offset;
-      std::vector<uint32_t> displaced_words;
-      uint64_t best_max_distance = std::numeric_limits<uint64_t>::max();
-      auto block =
-          std::lower_bound(blocks.begin(), blocks.end(), owner_begin,
-                           [](const std::unique_ptr<BasicBlock> &candidate, uint64_t entry) {
-                             return candidate->end_offset() <= entry;
-                           });
-      for (; block != blocks.end() && (*block)->start_offset() < owner_end; ++block) {
-        if ((*block)->start_offset() < owner_begin || (*block)->end_offset() > owner_end ||
-            (*block)->size() < host_bytes)
-          continue;
-        const auto block_end = (*block)->instructions().end();
-        for (auto instruction_it = (*block)->instructions().begin(); instruction_it != block_end;
-             ++instruction_it) {
-          const Instruction &instruction = *instruction_it;
-          const uint64_t candidate_host = instruction.src_loc();
-          if (candidate_host + host_bytes > (*block)->end_offset() ||
-              overlaps_existing(candidate_host, candidate_host + host_bytes) ||
-              group_resource == nullptr)
-            continue;
-          RegisterSet relocated_references;
-          bool has_indirect_scalar_reference = false;
-          for (auto relocated = instruction_it;
-               relocated != block_end && (*relocated).src_loc() < candidate_host + host_bytes;
-               ++relocated) {
-            has_indirect_scalar_reference |= (*relocated).mnemonic().starts_with("s_movrel");
-            const InstDefUse def_use(*relocated);
-            relocated_references |= def_use.defs | def_use.uses;
-          }
-          if (has_indirect_scalar_reference || !moi_relocatable_host_preserves_transient_sgprs(
-                                                   host_owner_proof, **block, instruction,
-                                                   relocated_references, host_bootstrap_ranges)) {
-            continue;
-          }
-          const uint64_t relay_offset = candidate_host + sizeof(uint32_t);
-          uint64_t max_distance = 0u;
-          const bool reachable = std::ranges::all_of(anchors, [&](uint64_t anchor) {
-            if (!compute_sopp_branch_simm16(anchor, relay_offset))
-              return false;
-            max_distance = std::max(max_distance, anchor < relay_offset ? relay_offset - anchor
-                                                                        : anchor - relay_offset);
-            return true;
-          });
-          if (!reachable || max_distance >= best_max_distance)
-            continue;
-          std::vector<uint32_t> words;
-          std::vector<std::string> decode_errors;
-          while (words.size() < host_words_count) {
-            auto decoded = decode_relocatable_entry_instruction(
-                old_text, candidate_host + words.size() * sizeof(uint32_t), arch, decode_errors,
-                resource_state.decoder.get());
-            if (!decoded) {
-              words.clear();
-              break;
-            }
-            words.insert(words.end(), decoded->begin(), decoded->end());
-          }
-          if (words.size() != host_words_count)
-            continue;
-          host_offset = candidate_host;
-          displaced_words = std::move(words);
-          best_max_distance = max_distance;
-        }
-      }
-      if (!host_offset) {
+      auto dense_host = find_moi_dense_relay_host(
+          resource_state, old_text,
+          {
+              .owner_begin = owner_begin,
+              .owner_end = owner_end,
+              .host_word_count = static_cast<size_t>(host_words_count),
+              .anchors = anchors,
+              .preapplied_reserved_ranges = options.preapplied_reserved_ranges,
+              .owner_proof = host_owner_proof,
+              .bootstrap_ranges = host_bootstrap_ranges,
+          },
+          overlaps_existing);
+      if (!dense_host) {
         result.warnings.emplace_back(
             "ConSan MOI inline-shadow barrier epoch found no relocatable dense relay host in " +
             owner_name);
         continue;
       }
-      claimed_hosts.emplace(*host_offset, *host_offset + host_bytes);
+      const uint64_t host_offset = dense_host->host_offset;
+      std::vector<uint32_t> displaced_words = std::move(dense_host->displaced_words);
+      claimed_hosts.emplace(host_offset, host_offset + host_bytes);
 
       const uint64_t dispatcher_offset = new_text.size();
       const uint64_t dispatcher_reservation =
@@ -1878,14 +1826,14 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       const uint64_t host_body_offset = new_text.size();
       std::vector<uint32_t> host_words = displaced_words;
       if (!append_moi_scc_preserving_indirect_jump(host_words, host_body_offset,
-                                                   *host_offset + host_bytes, jump_pc_sgpr,
+                                                   host_offset + host_bytes, jump_pc_sgpr,
                                                    saved_scc_sgpr, /*capture_scc=*/true, arch)) {
         result.errors.emplace_back("ConSan MOI dense barrier relay could not return from its host");
         return;
       }
       append_words_bytes(new_text, host_words);
 
-      const uint64_t island_offset = *host_offset + sizeof(uint32_t);
+      const uint64_t island_offset = host_offset + sizeof(uint32_t);
       const auto island_words =
           build_moi_dense_barrier_entry_island(island_offset, dispatcher_offset,
                                                {.jump_pc_sgpr = jump_pc_sgpr,
@@ -1904,7 +1852,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         result.errors.emplace_back("ConSan MOI dense barrier relay could not encode its host call");
         return;
       }
-      std::memcpy(new_text.data() + *host_offset, &*host_call, sizeof(uint32_t));
+      std::memcpy(new_text.data() + host_offset, &*host_call, sizeof(uint32_t));
 
       std::vector<uint32_t> dispatcher_words;
       if (!spill_backed_router) {
@@ -1966,7 +1914,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
 
       ConSanPatchInfo host_info;
       host_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-      host_info.anchor_offset = *host_offset;
+      host_info.anchor_offset = host_offset;
       host_info.original_size = static_cast<uint32_t>(host_bytes);
       host_info.trampoline_offset = host_body_offset;
       host_info.trampoline_size = static_cast<uint32_t>(host_words.size() * sizeof(uint32_t));

@@ -2064,6 +2064,129 @@ moi_inline_dense_router_scalar_abi(const ConSanOptions &options, rj_code_arch_t 
   return !overlaps_window(relocated_references);
 }
 
+// A host discovered in existing text. Appended-body placement is deliberately
+// absent because the search has not reserved any emitted bytes.
+struct MoiDenseRelayHost {
+  uint64_t host_offset = 0;
+  std::vector<uint32_t> displaced_words;
+};
+
+// Entry-relay state retained after a caller reserves the appended host body.
+struct MoiDenseEntryHost {
+  uint64_t host_offset = 0;
+  std::vector<uint32_t> displaced_words;
+  uint64_t body_offset = 0;
+};
+
+struct MoiDenseRelayHostSearch {
+  uint64_t owner_begin = 0;
+  uint64_t owner_end = 0;
+  size_t host_word_count = 0;
+  std::span<const uint64_t> anchors;
+  // Mutation-stage ownership is universal; caller predicates add only
+  // engine-specific access, synchronization, and already-claimed ranges.
+  std::span<const ConSanPreappliedReservedRange> preapplied_reserved_ranges;
+  const MoiDenseOwnerLivenessProof &owner_proof;
+  std::span<const MoiSgprRange> bootstrap_ranges;
+};
+
+template <typename OverlapsReserved>
+[[nodiscard]] std::optional<MoiDenseRelayHost>
+find_moi_dense_relay_host(const MoiResourcePlanningState &resource_state,
+                          std::span<const uint8_t> text, const MoiDenseRelayHostSearch &search,
+                          OverlapsReserved &&overlaps_reserved) {
+  if (search.owner_begin >= search.owner_end || search.host_word_count == 0u ||
+      search.anchors.empty())
+    return std::nullopt;
+  if (search.host_word_count > std::numeric_limits<uint64_t>::max() / sizeof(uint32_t))
+    return std::nullopt;
+  const uint64_t host_bytes = static_cast<uint64_t>(search.host_word_count) * sizeof(uint32_t);
+
+  std::optional<MoiDenseRelayHost> best_host;
+  uint64_t best_max_distance = std::numeric_limits<uint64_t>::max();
+  auto block = std::lower_bound(resource_state.blocks.begin(), resource_state.blocks.end(),
+                                search.owner_begin,
+                                [](const std::unique_ptr<BasicBlock> &candidate, uint64_t entry) {
+                                  return candidate->end_offset() <= entry;
+                                });
+  for (; block != resource_state.blocks.end() && (*block)->start_offset() < search.owner_end;
+       ++block) {
+    // BasicBlock::build receives every preapplied cave and continuation as a
+    // leader. Requiring the complete host to remain in one owner-contained
+    // block makes that CFG split an executable relocation boundary.
+    if ((*block)->start_offset() < search.owner_begin ||
+        (*block)->end_offset() > search.owner_end || (*block)->size() < host_bytes)
+      continue;
+    const auto block_end = (*block)->instructions().end();
+    for (auto instruction_it = (*block)->instructions().begin(); instruction_it != block_end;
+         ++instruction_it) {
+      const Instruction &instruction = *instruction_it;
+      const uint64_t host_offset = instruction.src_loc();
+      const auto overlaps_preapplied = [&](const ConSanPreappliedReservedRange &reserved) {
+        if (reserved.size == 0u ||
+            reserved.text_offset > std::numeric_limits<uint64_t>::max() - reserved.size)
+          return false;
+        return host_offset < reserved.text_offset + reserved.size &&
+               reserved.text_offset < host_offset + host_bytes;
+      };
+      if (host_offset > std::numeric_limits<uint64_t>::max() - host_bytes ||
+          host_offset + host_bytes > (*block)->end_offset() ||
+          std::ranges::any_of(search.preapplied_reserved_ranges, overlaps_preapplied) ||
+          overlaps_reserved(host_offset, host_offset + host_bytes)) {
+        continue;
+      }
+
+      RegisterSet relocated_references;
+      bool has_indirect_scalar_reference = false;
+      for (auto relocated = instruction_it;
+           relocated != block_end && (*relocated).src_loc() < host_offset + host_bytes;
+           ++relocated) {
+        has_indirect_scalar_reference |= (*relocated).mnemonic().starts_with("s_movrel");
+        const InstDefUse def_use(*relocated);
+        relocated_references |= def_use.defs | def_use.uses;
+      }
+      if (has_indirect_scalar_reference || !moi_relocatable_host_preserves_transient_sgprs(
+                                               search.owner_proof, **block, instruction,
+                                               relocated_references, search.bootstrap_ranges)) {
+        continue;
+      }
+
+      const uint64_t relay_offset = host_offset + sizeof(uint32_t);
+      uint64_t max_distance = 0u;
+      const bool reachable = std::ranges::all_of(search.anchors, [&](uint64_t anchor) {
+        if (!compute_sopp_branch_simm16(anchor, relay_offset))
+          return false;
+        max_distance = std::max(max_distance, anchor < relay_offset ? relay_offset - anchor
+                                                                    : anchor - relay_offset);
+        return true;
+      });
+      if (!reachable || max_distance >= best_max_distance)
+        continue;
+
+      std::vector<uint32_t> displaced_words;
+      std::vector<std::string> decode_errors;
+      while (displaced_words.size() < search.host_word_count) {
+        auto decoded = decode_relocatable_entry_instruction(
+            text, host_offset + displaced_words.size() * sizeof(uint32_t), resource_state.arch,
+            decode_errors, resource_state.decoder.get());
+        if (!decoded) {
+          displaced_words.clear();
+          break;
+        }
+        displaced_words.insert(displaced_words.end(), decoded->begin(), decoded->end());
+      }
+      if (displaced_words.size() != search.host_word_count)
+        continue;
+      best_max_distance = max_distance;
+      best_host = MoiDenseRelayHost{
+          .host_offset = host_offset,
+          .displaced_words = std::move(displaced_words),
+      };
+    }
+  }
+  return best_host;
+}
+
 [[nodiscard]] RegisterSet
 dynamic_frame_save_registers_for_site(const MoiResourcePlanningState &state, uint64_t text_offset) {
   RegisterSet saved;

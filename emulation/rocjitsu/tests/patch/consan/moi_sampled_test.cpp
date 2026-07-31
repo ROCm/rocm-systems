@@ -4683,6 +4683,49 @@ TEST(ConSanMoi, Rdna4DenseSampledAccessesShareExplicitKeyRelay) {
   }));
 }
 
+TEST(ConSanMoi, Gfx1250SampledAccessDenseHostRejectsTransientSgprReferencesAndFallsBack) {
+  constexpr uint32_t kAccessCount = 9u;
+  const uint32_t router_reference =
+      build_s_mov_b32(/*sdst=*/80, /*ssrc0=*/80, ROCJITSU_CODE_ARCH_GFX1250);
+  std::vector<uint32_t> words(128u, router_reference);
+  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
+  for (uint32_t index = 0u; index < kAccessCount; ++index) {
+    words[8u + 2u * index] = store[0];
+    words[9u + 2u * index] = store[1];
+  }
+  // Dense gfx1250 anchors normally share a compact call relay. Make every
+  // otherwise viable host reference its transient router state; the ordinary
+  // per-site appended relays remain directly reachable.
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(kAccessCount);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(words, "gfx1250_sampled_dense_liveness_fallback"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount)
+      << testing::PrintToString(result.warnings)
+      << testing::PrintToString(result.site_dispositions);
+  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size != 0u;
+  }));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, SampledSharedAccessRelayPreservesEntryIslandForFarBarrier) {
   std::vector<uint32_t> kernel_words;
   for (uint32_t i = 0; i < 9u; ++i) {

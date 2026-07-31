@@ -825,6 +825,186 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
   EXPECT_FALSE(validate_consan_modified_elf(bytes, corrupted).empty());
 }
 
+TEST(ConSanMoi, Rdna4DenseMoiRelaysRespectPreappliedBarrierMoveContinuation) {
+  constexpr uint32_t kBarrierCount = 10u;
+  constexpr uint32_t kEarlyAccessCount = 9u;
+  constexpr size_t kFirstAccessWord = 32'900u;
+  std::vector<uint32_t> words(
+      33'000u, build_s_mov_b32(/*sdst=*/100, /*ssrc0=*/100, ROCJITSU_CODE_ARCH_RDNA4));
+  for (uint32_t index = 0u; index < kEarlyAccessCount; ++index) {
+    words[32u + 2u * index] = 0xD8340000u | index * sizeof(uint32_t);
+    words[33u + 2u * index] = 0x00000000u;
+  }
+  size_t cursor = kFirstAccessWord;
+  words[cursor++] = 0xD8340000u;
+  words[cursor++] = 0x00000000u; // ds_store_b32
+  words[cursor++] = 0xBE804EC1u; // s_barrier_signal -1
+  words[cursor++] = 0xBF94FFFFu; // s_barrier_wait -1
+  words[cursor++] = 0xD8D80000u;
+  words[cursor++] = 0x00000000u; // ds_load_b32 move destination
+  for (uint32_t index = 1u; index < kBarrierCount; ++index) {
+    words[cursor++] = 0xD8340000u | index * sizeof(uint32_t);
+    words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0 offset:index*4
+    words[cursor++] = 0xBE804EC1u; // s_barrier_signal -1
+    words[cursor++] = 0xBF94FFFFu; // s_barrier_wait -1
+  }
+  // The long owner forces retained CFG construction across a realistic dense
+  // kernel, while the tail-local group keeps the live mutation cave reachable.
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(words, "rdna4_dense_move_composition");
+
+  ConSanOptions inventory_options;
+  inventory_options.flavor = ConSanFlavor::SuperCollider;
+  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  const auto sequence = std::ranges::find(
+      inventory.sync_sequences, ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(sequence, inventory.sync_sequences.end());
+  const auto primary =
+      std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &site) {
+        return site.sync_sequence_identity == sequence->identity &&
+               site.mnemonic == "s_barrier_signal";
+      });
+  ASSERT_NE(primary, inventory.fault_sites.end());
+  const uint64_t destination_offset = (kFirstAccessWord + 4u) * sizeof(uint32_t);
+  const auto destination =
+      std::ranges::find(inventory.barrier_move_destinations, destination_offset,
+                        &ConSanBarrierMoveDestination::text_offset);
+  ASSERT_NE(destination, inventory.barrier_move_destinations.end());
+  ASSERT_TRUE(destination->suitable) << destination->rejection_reason;
+
+  for (ConSanMoiEngine engine : {ConSanMoiEngine::RecordReplay, ConSanMoiEngine::Sampled}) {
+    SCOPED_TRACE(static_cast<int>(engine));
+    ConSanOptions options = moi_options(engine);
+    options.moi_track_barriers = true;
+    options.scratch_vgpr = 8;
+    options.moi_exec_save_sgpr = 80;
+    options.moi_dispatch_id_sgpr = 70;
+    options.moi_owner_vgpr = 40;
+    options.moi_epoch_vgpr = 41;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = 64u * 1024u * 1024u;
+    options.moi_runtime_sample_stride = 16'384;
+    options.max_patches = 6u * kBarrierCount;
+    options.fault_move_barrier = true;
+    options.fault_require_exactly_one = true;
+    options.fault_site_identity = primary->identity;
+    options.fault_barrier_move_direction = ConSanBarrierMoveDirection::Later;
+    options.fault_barrier_destination_identity = destination->identity;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+        << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
+    EXPECT_TRUE(result.staged_composition_validated);
+    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.applied_fault_mutations, 1u);
+    const ConSanPatchKind barrier_patch = engine == ConSanMoiEngine::Sampled
+                                              ? ConSanPatchKind::TrampolineMoiSampledSyncMetadata
+                                              : ConSanPatchKind::TrampolineMoiBarrierRecord;
+    EXPECT_GE(std::ranges::count(result.patches, barrier_patch, &ConSanPatchInfo::kind), 8u);
+    const auto mutation = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+      return patch.phase == ConSanPatchPhase::Mutation &&
+             patch.kind == ConSanPatchKind::InlineBarrierMoveTargetRewrite;
+    });
+    ASSERT_NE(mutation, result.patches.end());
+    const uint64_t continuation = mutation->anchor_offset + mutation->original_size;
+    size_t dense_host_count = 0u;
+    for (const ConSanPatchInfo &patch : result.patches) {
+      if (patch.phase != ConSanPatchPhase::Instrumentation ||
+          patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
+          patch.original_size == 0u)
+        continue;
+      ++dense_host_count;
+      const uint64_t host_end = patch.anchor_offset + patch.original_size;
+      EXPECT_FALSE(patch.anchor_offset < mutation->anchor_offset + mutation->original_size &&
+                   mutation->anchor_offset < host_end);
+      EXPECT_FALSE(patch.anchor_offset < mutation->trampoline_offset + mutation->trampoline_size &&
+                   mutation->trampoline_offset < host_end);
+      EXPECT_FALSE(patch.anchor_offset < continuation && continuation < host_end);
+    }
+    EXPECT_GE(dense_host_count, 1u);
+  }
+}
+
+TEST(ConSanMoi, Rdna4SampledDenseBarrierHostFailurePreservesIndependentAccessPatches) {
+  constexpr uint32_t kBarrierCount = 10u;
+  std::vector<uint32_t> words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32
+      0xBE804EC1u, // s_barrier_signal -1
+      0xBF94FFFFu, // s_barrier_wait -1
+      0xD8D80000u,
+      0x00000000u, // ds_load_b32 move destination
+      build_s_branch(0, ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  for (uint32_t index = 1u; index < kBarrierCount; ++index) {
+    words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+    words.push_back(0xBE804EC1u); // s_barrier_signal -1
+    words.push_back(0xBF94FFFFu); // s_barrier_wait -1
+    // A branch to the immediately following instruction preserves execution
+    // while bounding every basic block below the dense host footprint.
+    words.push_back(build_s_branch(0, ROCJITSU_CODE_ARCH_RDNA4));
+  }
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(words, "rdna4_sampled_dense_move_no_host");
+
+  ConSanOptions inventory_options;
+  inventory_options.flavor = ConSanFlavor::SuperCollider;
+  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  const auto sequence = std::ranges::find(
+      inventory.sync_sequences, ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(sequence, inventory.sync_sequences.end());
+  const auto primary =
+      std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &site) {
+        return site.sync_sequence_identity == sequence->identity &&
+               site.mnemonic == "s_barrier_signal";
+      });
+  ASSERT_NE(primary, inventory.fault_sites.end());
+  const auto destination = std::ranges::find(inventory.barrier_move_destinations, 16u,
+                                             &ConSanBarrierMoveDestination::text_offset);
+  ASSERT_NE(destination, inventory.barrier_move_destinations.end());
+  ASSERT_TRUE(destination->suitable) << destination->rejection_reason;
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_track_barriers = true;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_dispatch_id_sgpr = 70;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2u * kBarrierCount);
+  options.moi_runtime_sample_stride = 64;
+  options.max_patches = 4u * kBarrierCount;
+  options.fault_move_barrier = true;
+  options.fault_require_exactly_one = true;
+  options.fault_site_identity = primary->identity;
+  options.fault_barrier_move_direction = ConSanBarrierMoveDirection::Later;
+  options.fault_barrier_destination_identity = destination->identity;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.staged_composition_validated);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("sampled barrier sync skipped dense relay") != std::string::npos &&
+           warning.find("no liveness-safe relocatable host") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                               &ConSanPatchInfo::kind),
+            0u);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+  }));
+}
+
 TEST(ConSanMoi, Gfx1250DenseInlineHostPreservesPreappliedBarrierDrop) {
   constexpr uint32_t kAccessCount = 9u;
   constexpr size_t kLargeTextWords = 33000u;

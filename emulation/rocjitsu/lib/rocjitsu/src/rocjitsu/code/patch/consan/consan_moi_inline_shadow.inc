@@ -281,12 +281,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   candidate_indices.reserve(candidates.size());
   for (size_t index = 0; index < candidates.size(); ++index)
     candidate_indices.emplace(candidates[index], index);
-  struct DenseEntryHost {
-    uint64_t host_offset = 0;
-    std::vector<uint32_t> displaced_words;
-    uint64_t body_offset = 0;
-  };
-  std::map<uint64_t, DenseEntryHost> dense_entry_hosts;
+  std::map<uint64_t, MoiDenseEntryHost> dense_entry_hosts;
   // Dense routing is partitioned by owning container, SOPP reach, and a
   // bounded number of candidates per dispatcher below. Its safety therefore
   // depends on the local group shape, not the total number of sites in an
@@ -367,24 +362,20 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       auto island = local_entry_islands->claim_reachable_from_all(anchors);
       if (island)
         retire_branch_relay_range(*island, kIndirectIslandWords);
-      std::vector<MoiSgprRange> host_bootstrap_ranges;
-      MoiDenseOwnerLivenessProof host_owner_proof;
-      if (!island && key.first) {
-        if (group_resource != nullptr) {
-          host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
-              group_options, MoiRelocatableHostScalarState::AccessRouter, arch);
-          host_owner_proof = resource_state.prepare_dense_liveness_for_owners(
-              group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
-        }
+      if (!island && key.first && group_resource != nullptr) {
         const auto kernel = std::ranges::find(result.kernels, key.second, &ConSanKernelInfo::name);
         if (kernel != result.kernels.end()) {
+          const std::vector<MoiSgprRange> host_bootstrap_ranges =
+              moi_relocatable_host_scalar_ranges(group_options,
+                                                 MoiRelocatableHostScalarState::AccessRouter, arch);
+          MoiDenseOwnerLivenessProof host_owner_proof =
+              resource_state.prepare_dense_liveness_for_owners(
+                  group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
           constexpr size_t kHostWords = kIndirectIslandWords + 1u;
-          constexpr uint64_t kHostBytes = kHostWords * sizeof(uint32_t);
           const uint64_t kernel_end = kernel->entry_text_offset + kernel->code_size;
           std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
           occupied_ranges.reserve(candidates.size() + kernel->barrier_sites.size() +
-                                  kernel->fence_sites.size() + kernel->atomic_sites.size() +
-                                  options.preapplied_reserved_ranges.size());
+                                  kernel->fence_sites.size() + kernel->atomic_sites.size());
           const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
             if (size != 0u)
               occupied_ranges.emplace_back(begin, begin + size);
@@ -402,8 +393,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             append_occupied_range(site.text_offset, site.size);
           for (const ConSanAtomicSite &site : kernel->atomic_sites)
             append_occupied_range(site.text_offset, site.size);
-          for (const ConSanPreappliedReservedRange &reserved : options.preapplied_reserved_ranges)
-            append_occupied_range(reserved.text_offset, reserved.size);
           std::ranges::sort(occupied_ranges);
           size_t merged_range_count = 0u;
           for (const auto &range : occupied_ranges) {
@@ -422,77 +411,25 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             return after != occupied_ranges.begin() && std::prev(after)->second > begin;
           };
 
-          std::optional<DenseEntryHost> best_host;
-          uint64_t best_max_distance = std::numeric_limits<uint64_t>::max();
-          auto block = std::lower_bound(
-              dense_host_blocks.begin(), dense_host_blocks.end(), kernel->entry_text_offset,
-              [](const std::unique_ptr<BasicBlock> &candidate, uint64_t entry) {
-                return candidate->end_offset() <= entry;
-              });
-          for (; block != dense_host_blocks.end() && (*block)->start_offset() < kernel_end;
-               ++block) {
-            if ((*block)->start_offset() < kernel->entry_text_offset ||
-                (*block)->end_offset() > kernel_end || (*block)->size() < kHostBytes)
-              continue;
-            const auto block_end = (*block)->instructions().end();
-            for (auto instruction_it = (*block)->instructions().begin();
-                 instruction_it != block_end; ++instruction_it) {
-              const Instruction &instruction = *instruction_it;
-              const uint64_t host_offset = instruction.src_loc();
-              if (host_offset + kHostBytes > (*block)->end_offset() ||
-                  overlaps_instrumented_site(host_offset, host_offset + kHostBytes) ||
-                  group_resource == nullptr)
-                continue;
-              RegisterSet relocated_references;
-              bool has_indirect_scalar_reference = false;
-              for (auto relocated = instruction_it;
-                   relocated != block_end && (*relocated).src_loc() < host_offset + kHostBytes;
-                   ++relocated) {
-                has_indirect_scalar_reference |= (*relocated).mnemonic().starts_with("s_movrel");
-                const InstDefUse def_use(*relocated);
-                relocated_references |= def_use.defs | def_use.uses;
-              }
-              if (has_indirect_scalar_reference ||
-                  !moi_relocatable_host_preserves_transient_sgprs(host_owner_proof, **block,
-                                                                  instruction, relocated_references,
-                                                                  host_bootstrap_ranges)) {
-                continue;
-              }
-              const uint64_t relay_offset = host_offset + sizeof(uint32_t);
-              uint64_t max_distance = 0;
-              const bool relay_reachable = std::ranges::all_of(anchors, [&](uint64_t anchor) {
-                if (!compute_sopp_branch_simm16(anchor, relay_offset))
-                  return false;
-                max_distance =
-                    std::max(max_distance,
-                             anchor < relay_offset ? relay_offset - anchor : anchor - relay_offset);
-                return true;
-              });
-              if (!relay_reachable || max_distance >= best_max_distance)
-                continue;
-
-              std::vector<uint32_t> displaced_words;
-              std::vector<std::string> decode_errors;
-              while (displaced_words.size() < kHostWords) {
-                auto decoded = decode_relocatable_entry_instruction(
-                    original_text, host_offset + displaced_words.size() * sizeof(uint32_t), arch,
-                    decode_errors, relocation_decoder.get());
-                if (!decoded) {
-                  displaced_words.clear();
-                  break;
-                }
-                displaced_words.insert(displaced_words.end(), decoded->begin(), decoded->end());
-              }
-              if (displaced_words.size() != kHostWords)
-                continue;
-              best_max_distance = max_distance;
-              best_host = DenseEntryHost{.host_offset = host_offset,
-                                         .displaced_words = std::move(displaced_words)};
-            }
-          }
+          auto best_host = find_moi_dense_relay_host(
+              resource_state, original_text,
+              {
+                  .owner_begin = kernel->entry_text_offset,
+                  .owner_end = kernel_end,
+                  .host_word_count = kHostWords,
+                  .anchors = anchors,
+                  .preapplied_reserved_ranges = options.preapplied_reserved_ranges,
+                  .owner_proof = host_owner_proof,
+                  .bootstrap_ranges = host_bootstrap_ranges,
+              },
+              overlaps_instrumented_site);
           if (best_host) {
             island = best_host->host_offset + sizeof(uint32_t);
-            dense_entry_hosts.emplace(dispatcher, std::move(*best_host));
+            dense_entry_hosts.emplace(dispatcher,
+                                      MoiDenseEntryHost{
+                                          .host_offset = best_host->host_offset,
+                                          .displaced_words = std::move(best_host->displaced_words),
+                                      });
           }
         }
       }
