@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <vector>
 
 namespace rocjitsu {
 namespace {
@@ -341,6 +342,18 @@ TEST(InstructionBuilder, BuildWaitStoresComplete) {
   EXPECT_EQ(build_wait_stores_complete(ROCJITSU_CODE_ARCH_CDNA4), 0xBF8C0000u);
   // RDNA4: s_wait_storecnt 0 (split counter, distinct from s_wait_loadcnt).
   EXPECT_EQ(build_wait_stores_complete(ROCJITSU_CODE_ARCH_RDNA4), 0xBFC10000u);
+}
+
+TEST(InstructionBuilder, BuildWaitAllLoadsComplete) {
+  // CDNA3 and CDNA4: one s_waitcnt 0 drains vmcnt+lgkmcnt (VMEM, LDS, scalar).
+  EXPECT_EQ(build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_CDNA3),
+            (std::vector<uint32_t>{0xBF8C0000u}));
+  EXPECT_EQ(build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_CDNA4),
+            (std::vector<uint32_t>{0xBF8C0000u}));
+  // RDNA4 splits the counters: s_wait_loadcnt_dscnt 0 (VMEM + LDS -> VGPRs) then
+  // s_wait_kmcnt 0 (scalar -> SGPRs).
+  EXPECT_EQ(build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_RDNA4),
+            (std::vector<uint32_t>{0xBFC80000u, 0xBFC70000u}));
 }
 
 // VCC_LO/EXEC_LO scalar-operand codes are resolved per-arch: each case returns

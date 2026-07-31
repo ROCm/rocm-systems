@@ -97,6 +97,15 @@ struct SpillBracket {
   constexpr uint16_t kUniformLane = 0; // An SGPR is uniform; one lane suffices.
   SpillBracket bracket;
 
+  // Drain any in-flight load that could still be writing a to-be-spilled register:
+  // a register live at the anchor may be the target of a pre-anchor load whose
+  // consumer wait sits after the anchor, so storing it now without this drain would
+  // spill a stale value. Emitted once, before any store.
+  if (!vgpr_spills.empty() || !sgpr_spills.empty()) {
+    const auto drain = build_wait_all_loads_complete(arch);
+    bracket.prologue.insert(bracket.prologue.end(), drain.begin(), drain.end());
+  }
+
   // VGPRs: batch stores, then batch loads + a single wait before the readlanes.
   for (const SpillSlot &slot : vgpr_spills) {
     const auto store = build_scratch_store_dword(slot.reg, slot.byte_offset, arch);
@@ -268,11 +277,14 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, ProbeCallingConven
   // the store/load, so EXEC must be saved even if the probe never touches it.
   const bool will_spill = live_at_anchor.intersects(probe_body_clobbers);
 
-  // EXEC/VCC/M0 operand codes are resolved per-arch. EXEC also rides this path
-  // when the site spills.
-  if (!reserve_special(plan.preserve_exec || will_spill, scalar_operand_exec_lo(plan.arch), 2,
-                       "EXEC") ||
-      !reserve_special(plan.preserve_vcc, scalar_operand_vcc_lo(plan.arch), 2, "VCC") ||
+  // EXEC/VCC/M0 operand codes are resolved per-arch, but only when actually
+  // reserving that register -- so a plan with no special-state saves (and no
+  // spill) stays arch-agnostic, as the resource-planning tests rely on. EXEC also
+  // rides this path when the site spills.
+  const bool save_exec = plan.preserve_exec || will_spill;
+  if (!reserve_special(save_exec, save_exec ? scalar_operand_exec_lo(plan.arch) : 0, 2, "EXEC") ||
+      !reserve_special(plan.preserve_vcc, plan.preserve_vcc ? scalar_operand_vcc_lo(plan.arch) : 0,
+                       2, "VCC") ||
       !reserve_special(plan.preserve_m0, plan.preserve_m0 ? scalar_operand_m0(plan.arch) : 0, 1,
                        "M0"))
     return false;

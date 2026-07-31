@@ -723,12 +723,16 @@ protected:
     const std::vector<uint32_t> store = build_scratch_store_dword(2, 64, a_.base.arch);
     const uint32_t toggle = build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch),
                                             scalar_inline_neg_one(a_.base.arch), a_.base.arch);
+    // Prologue order is: EXEC=-1 toggle, then the in-flight-load drain, then the
+    // store. Skip back over the drain to land on the toggle.
+    const size_t drain_words = build_wait_all_loads_complete(a_.base.arch).size();
     auto it = std::search(patched_text_.begin(), patched_text_.end(), store.begin(), store.end());
     ASSERT_NE(it, patched_text_.end()) << "spill scratch_store not found";
-    ASSERT_NE(it, patched_text_.begin());
-    const size_t toggle_idx = static_cast<size_t>(it - patched_text_.begin()) - 1;
+    const size_t store_idx = static_cast<size_t>(it - patched_text_.begin());
+    ASSERT_GE(store_idx, drain_words + 1);
+    const size_t toggle_idx = store_idx - drain_words - 1;
     ASSERT_EQ(patched_text_[toggle_idx], toggle)
-        << "word before the store should be the prologue EXEC=-1 toggle";
+        << "word before the drain should be the prologue EXEC=-1 toggle";
 
     std::vector<uint32_t> sabotaged = patched_text_;
     sabotaged[toggle_idx] = build_s_nop(0, a_.base.arch);
