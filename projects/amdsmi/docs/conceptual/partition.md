@@ -434,38 +434,6 @@ In `/dev/dri`, each XCD partition appears as a separate render device. On an MI3
 mode, render devices start at `renderD128` and go up to `renderD135` (one per XCD). The next
 physical GPU starts at `renderD136`, and so on.
 
-### Container (Docker) device passthrough
-
-When exposing partitioned GPUs to a container, device passthrough operates on the DRM
-render nodes in `/dev/dri`, not on the AMD SMI processor handles. Since ROCm 6.4.1 each
-logical partition maps to its own render minor (see above), so the node you pass determines
-exactly which partitions the container can access:
-
-- Always pass the KFD control node, `/dev/kfd`, which is shared by all GPUs and partitions.
-- Pass one `--device=/dev/dri/renderD<N>` entry for **each partition** you want visible
-  inside the container. In CPX mode an eight-XCD MI300X exposes eight render nodes per
-  physical GPU (for example `renderD128`–`renderD135`); passing all of them exposes the
-  full physical GPU, while passing a subset exposes only those partitions.
-
-```shell
-# Expose one full MI300X (all 8 CPX partitions of the first physical GPU) to a container
-docker run --device=/dev/kfd \
-  --device=/dev/dri/renderD128 --device=/dev/dri/renderD129 \
-  --device=/dev/dri/renderD130 --device=/dev/dri/renderD131 \
-  --device=/dev/dri/renderD132 --device=/dev/dri/renderD133 \
-  --device=/dev/dri/renderD134 --device=/dev/dri/renderD135 \
-  <image>
-```
-
-```{note}
-Docker `--device` maps the render node's `major:minor` into the container's cgroup device
-allowlist. Passing `/dev/dri` wholesale (or using `--group-add video`/`render` with the
-whole directory) exposes **every** partition of **every** physical GPU on the host. To scope
-a container to specific partitions, enumerate the individual `renderD<N>` nodes as shown
-above. Use `amd-smi list --enumeration` to map each logical GPU to its `drm_render` node
-before selecting the devices to pass through.
-```
-
 ## Platform support
 
 | Operation | Bare Metal / Host | Linux Guest (SR-IOV VF) |

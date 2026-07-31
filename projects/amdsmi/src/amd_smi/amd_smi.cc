@@ -3230,16 +3230,17 @@ static amdsmi_processor_handle resolve_primary_partition_handle_uncached(
 // redirect is needed (primary, single-GPU, or unpartitioned device).
 static amdsmi_processor_handle get_primary_partition_handle(
     amdsmi_processor_handle processor_handle) {
-  {
-    std::lock_guard<std::mutex> lock(primary_partition_cache_mutex);
-    auto it = primary_partition_cache.find(processor_handle);
-    if (it != primary_partition_cache.end()) {
-      return it->second;
-    }
+  // Hold the lock across the resolve so concurrent first-time callers for the same
+  // handle fill the cache once instead of each repeating the socket walk. The walk is
+  // a one-time cost per handle (partition topology is fixed for an init/shutdown
+  // lifetime) and the resolver never re-enters this mutex, so serializing it is safe.
+  std::lock_guard<std::mutex> lock(primary_partition_cache_mutex);
+  auto it = primary_partition_cache.find(processor_handle);
+  if (it != primary_partition_cache.end()) {
+    return it->second;
   }
   amdsmi_processor_handle primary_handle =
       resolve_primary_partition_handle_uncached(processor_handle);
-  std::lock_guard<std::mutex> lock(primary_partition_cache_mutex);
   primary_partition_cache[processor_handle] = primary_handle;
   return primary_handle;
 }
@@ -3922,10 +3923,14 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
   auto tmp_partition_id = uint32_t(0);
   amdsmi_status_t status = AMDSMI_STATUS_NOT_SUPPORTED;
 
-  // A sub-partition handle's partition-profile sysfs/ioctl interfaces only respond
-  // on the owning device's primary partition, so redirect the capability/profile
-  // queries there (otherwise sub-partitions report "N/A"). The reported partition_id
-  // below intentionally keeps the original handle so each partition keeps its identity.
+  // A sub-partition handle exposes none of this device's whole-GPU partition
+  // interfaces: the supported-config list, the current compute/memory partition, and
+  // the gpu_metrics / XCD-counter nodes used to derive num_partitions all only respond
+  // on the owning device's primary partition (verified on an MI300X in CPX mode, where
+  // every sub-partition with partition_id != 0 returns an error for those reads). So
+  // resolve the primary partition handle and query all of them through it; otherwise
+  // sub-partitions report "N/A". Only the reported partition_id below keeps the original
+  // handle, so each partition keeps its own identity.
   amdsmi_processor_handle query_handle = resolve_partition_query_handle(processor_handle);
 
   // TODO(amdsmi_team): should we do fallback?

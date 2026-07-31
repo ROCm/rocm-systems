@@ -214,7 +214,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `amdsmi_get_gpu_compute_partition()`, `amdsmi_get_gpu_compute_partition_mem_alloc_mode()`, `amdsmi_get_gpu_memory_partition()`, `amdsmi_get_gpu_memory_partition_config()`, and `amdsmi_get_gpu_accelerator_partition_profile()` now resolve the owning physical device and query its primary partition (`partition_id == 0`) for a secondary (sub-partition) node that does not expose the whole-GPU partition interface.
   - On an MI300X in CPX/NPS4 mode this makes `amd-smi partition` report the compute/accelerator profile and memory partition type on all 64 logical GPUs instead of only the 8 primary partitions.
   - Each partition continues to report its own `partition_id`.
-  - Documented that Docker `--device` passthrough operates on the per-partition `/dev/dri/renderD<N>` nodes (one per XCD since ROCm 6.4.1) in the [GPU partitioning guide](https://rocm.docs.amd.com/projects/amdsmi/en/latest/conceptual/partition.html).
 
 - **Fixed `amd-smi set --power-cap` rejecting the minimum allowed value**.  
   - The lower bound is now inclusive, so setting the power cap to the exact minimum of the reported range (e.g. `210` when the range is 210-300W) succeeds instead of failing validation, matching the inclusive range shown in the error message.
