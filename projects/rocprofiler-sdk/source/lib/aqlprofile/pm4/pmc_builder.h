@@ -460,7 +460,7 @@ public:
                                                Primitives::SQ_PERFCOUNTER_CTRL2_ADDR,
                                                Primitives::sq_control2_enable_value());
         }
-        if constexpr(Primitives::GFXIP_LEVEL >= 12)
+        if constexpr(Primitives::GFXIP_LEVEL == 12)
         {
             if(counters_vec.get_attr() & CounterBlockTcAttr) EnableCpPerfCounters(cmd_buffer);
         }
