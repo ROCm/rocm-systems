@@ -33,7 +33,6 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_drm.h"
-#include "amd_smi/impl/amd_smi_gpu_backend.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 
 // Forward declaration of UALoE handle type to keep ualoe_lib/ualoe_lib.h out
@@ -138,10 +137,6 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm);
   ~AMDSmiGPUDevice();
 
-  // Non-null only on non-Linux backends (e.g. WSL). amd_smi.cc checks this
-  // before falling through to the Linux rsmi/libdrm path.
-  IGPUBackend* backend() const { return backend_; }
-  void set_backend(IGPUBackend* b) { backend_ = b; }
   amdsmi_status_t get_drm_data();
   pthread_mutex_t* get_mutex();
   uint32_t get_gpu_id() const;
@@ -180,7 +175,6 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   bool device_has_ualink() const;
 
  private:
-  IGPUBackend* backend_ = nullptr;
   uint32_t gpu_id_;
   std::string path_;
   amdsmi_bdf_t bdf_;
