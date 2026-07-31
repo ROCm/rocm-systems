@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  */
+// <REVIEW> Temporary review marker: this file contains Fabio's changes above the StatCO branch.
 
 
 #include <hip_test_common.hh>
@@ -39,7 +40,9 @@ HIP_TEST_CASE(Unit_hipFreeImplicitSyncDev) {
 
   HipTest::BlockingContext b_context{nullptr};
 
-  b_context.block_stream();
+  // <REVIEW HELPER> Check callback setup so the implicit-sync assertion is
+  // meaningful even when stream callback creation fails.
+  HIP_CHECK(b_context.block_stream());
   REQUIRE(b_context.is_blocked());
 
   HIP_CHECK_ERROR(hipStreamQuery(nullptr), hipErrorNotReady);
@@ -57,7 +60,9 @@ HIP_TEST_CASE(Unit_hipFreeImplicitSyncHost) {
 
   HipTest::BlockingContext b_context{nullptr};
 
-  b_context.block_stream();
+  // <REVIEW HELPER> block_stream returns setup status after becoming
+  // failure-safe; propagate that error through the test harness.
+  HIP_CHECK(b_context.block_stream());
   REQUIRE(b_context.is_blocked());
 
   HIP_CHECK_ERROR(hipStreamQuery(nullptr), hipErrorNotReady);
@@ -120,7 +125,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeImplicitSyncArray, char, float, float2, float
   HIP_CHECK(hipMallocArray(&arrayPtr, &desc, extent.width, extent.height, hipArrayDefault));
   HipTest::BlockingContext b_context{nullptr};
 
-  b_context.block_stream();
+  // <REVIEW HELPER> Do not continue the array-free synchronization test unless
+  // the stream was actually blocked.
+  HIP_CHECK(b_context.block_stream());
   REQUIRE(b_context.is_blocked());
 
   HIP_CHECK_ERROR(hipStreamQuery(nullptr), hipErrorNotReady);

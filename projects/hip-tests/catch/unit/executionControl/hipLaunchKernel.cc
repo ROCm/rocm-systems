@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  */
+// <REVIEW> Temporary review marker: this file contains Fabio's changes above the StatCO branch.
 
 #include "execution_control_common.hh"
 
@@ -29,6 +30,26 @@ HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Basic) {
     HIP_CHECK(hipMemcpy(&result, result_dev.ptr(), sizeof(result), hipMemcpyDefault));
     REQUIRE(result == 42);
   }
+}
+
+// Verifies a kernel launch does not block the host: issued on a deliberately
+// blocked stream, it must return before the stream is unblocked.
+HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Synchronization_Behavior) {
+  HipTest::BlockingContext b_context{nullptr};
+  hipStream_t kernel_stream{nullptr};
+
+  // <REVIEW HELPER> Fail immediately if the blocking callback was not enqueued;
+  // otherwise this synchronization test could produce a false pass.
+  HIP_CHECK(b_context.block_stream());
+  REQUIRE(b_context.is_blocked());
+
+  HIP_CHECK(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, 1, 1}, nullptr,
+                            0, kernel_stream));
+
+  HIP_CHECK_ERROR(hipStreamQuery(kernel_stream), hipErrorNotReady);
+  b_context.unblock_stream();
+  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(hipStreamQuery(kernel_stream) == hipSuccess);
 }
 
 HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Parameters) {

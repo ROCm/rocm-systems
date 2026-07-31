@@ -396,6 +396,7 @@ hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
         amd::Os::releaseMemory(*pointer, managedVar->GetSize());
       }
       assert(err == hipSuccess);
+      managedVarInitialization_.sequenceNumberByVariable.erase(managedVar);
       delete managedVar;
     }
     managedVars_.erase(managedVarsIter);
@@ -475,6 +476,12 @@ void StatCO::RemoveAllFatBinaries() {
     }
   }
   managedVars_.clear();
+  managedVarInitialization_.sequenceNumberByVariable.clear();
+  managedVarInitialization_.deviceStates.clear();
+  for (auto& sequenceNumber : managedVarInitialization_.initializedUpToSequenceNumberByDevice) {
+    sequenceNumber.store(0, std::memory_order_relaxed);
+  }
+  managedVarInitialization_.lastAssignedSequenceNumber.store(0, std::memory_order_release);
 
   // Delete all registered functions and clear the container
   for (auto const& [_, func] : functions_) {
@@ -662,6 +669,11 @@ hipError_t StatCO::GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_
 hipError_t StatCO::RegisterManagedVar(Var* var) {
   std::scoped_lock lock(sclock_);
   managedVars_[var->ModuleInfo()].push_back(var);
+  const uint64_t sequenceNumber =
+      managedVarInitialization_.lastAssignedSequenceNumber.load(std::memory_order_relaxed) + 1;
+  managedVarInitialization_.sequenceNumberByVariable.emplace(var, sequenceNumber);
+  managedVarInitialization_.lastAssignedSequenceNumber.store(sequenceNumber,
+                                                             std::memory_order_release);
   return hipSuccess;
 }
 
@@ -679,51 +691,135 @@ void StatCO::ResizeForDevices(size_t device_count) {
   for (const auto& it : functions_) {
     it.second->ResizeDFunc(device_count);
   }
-  managedVarsDevicePtrInitialized_ = std::make_unique<std::atomic<bool>[]>(device_count);
-  for (size_t i = 0; i < device_count; ++i)
-    managedVarsDevicePtrInitialized_[i].store(false, std::memory_order_relaxed);
-  managedVarsDevicePtrInitializedSize_ = device_count;
+  managedVarInitialization_.InitializeDevices(device_count);
 }
 
 // ================================================================================================
-hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
+hipError_t StatCO::InitManagedVarDevicePtr(int deviceId, hip::Stream* orderStream) {
+  assert(deviceId >= 0 &&
+         static_cast<size_t>(deviceId) <
+             managedVarInitialization_.initializedUpToSequenceNumberByDevice.size());
+
   // FAST PATH (lock-free): already initialized for this device
-  if (deviceId >= 0 && static_cast<size_t>(deviceId) < managedVarsDevicePtrInitializedSize_ &&
-      managedVarsDevicePtrInitialized_[deviceId].load(std::memory_order_acquire)) {
+  const uint64_t targetSequenceNumber =
+      managedVarInitialization_.lastAssignedSequenceNumber.load(
+          std::memory_order_acquire);
+  if (managedVarInitialization_.initializedUpToSequenceNumberByDevice[deviceId].load(
+          std::memory_order_acquire) == targetSequenceNumber) {
     return hipSuccess;
   }
+
   // SLOW PATH: acquire exclusive lock, re-check, then do init work
   std::unique_lock<std::shared_mutex> lock(sclock_);
-  if (deviceId >= 0 && static_cast<size_t>(deviceId) < managedVarsDevicePtrInitializedSize_ &&
-      managedVarsDevicePtrInitialized_[deviceId].load(std::memory_order_relaxed)) {
+  // A variable can be registered while this thread waits for the lock, so the sequence number
+  // observed on the fast path is stale here and must be reloaded before comparing.
+  const uint64_t currentSequenceNumber =
+      managedVarInitialization_.lastAssignedSequenceNumber.load(
+          std::memory_order_relaxed);
+  if (managedVarInitialization_.initializedUpToSequenceNumberByDevice[deviceId].load(
+          std::memory_order_relaxed) == currentSequenceNumber) {
     return hipSuccess;
   }
-  hipError_t err = hipSuccess;
-  for (auto& vecIter : managedVars_) {
-    for (auto& var : vecIter.second) {
-      // Lazy load
-      FatBinaryInfo** module = var->ModuleInfo();
-      if (*(module) == nullptr) {
-        std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
-      }
-      hip::Stream* stream = g_devices.at(deviceId)->NullStream();
-      if (stream == nullptr) {
-        ClPrint(amd::LOG_ERROR, amd::LOG_API, "Host Queue is NULL");
-        return hipErrorInvalidResourceHandle;
-      }
-      // Allocate managed var for deferred loading
-      IHIP_RETURN_ONFAIL(var->AllocateManagedVarPtr());
-      // Copy from managed var host to device ptr
-      amd::Memory* mem = nullptr;
-      IHIP_RETURN_ONFAIL(var->GetStatDeviceVar(&mem, deviceId));
-      err = ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), var->GetManagedVarPtr(),
-                       mem->getSize(), hipMemcpyHostToDevice, *stream);
+
+  using Phase = DeferredInitManagedVarState::Phase;
+  DeferredInitManagedVarState& devInitState = managedVarInitialization_.deviceStates[deviceId];
+
+  if (devInitState.phase == Phase::Failed) {
+    return devInitState.terminalError;
+  }
+
+  if (devInitState.phase == Phase::InProgress) {
+    const int32_t completionStatus = devInitState.completion->status();
+    if (completionStatus < CL_COMPLETE) {
+      devInitState.MarkFailed(hipErrorUnknown);
+      return hipErrorUnknown;
+    }
+    if (completionStatus == CL_COMPLETE) {
+      devInitState.MarkCompleted();
     }
   }
-  if (deviceId >= 0 && static_cast<size_t>(deviceId) < managedVarsDevicePtrInitializedSize_) {
-    managedVarsDevicePtrInitialized_[deviceId].store(true, std::memory_order_release);
+
+  if (devInitState.queuedUpToSequenceNumber < currentSequenceNumber) {
+    hip::Stream* stream = g_devices.at(deviceId)->NullStream();
+    if (stream == nullptr) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_API, "Host Queue is NULL");
+      return hipErrorInvalidResourceHandle;
+    }
+
+    bool queuedWork = false;
+    for (auto& vecIter : managedVars_) {
+      for (auto& var : vecIter.second) {
+
+        const uint64_t sequenceNumber =
+            managedVarInitialization_.sequenceNumberByVariable.at(var);
+        assert(sequenceNumber <= currentSequenceNumber);
+        if (sequenceNumber <= devInitState.queuedUpToSequenceNumber) {
+          continue;
+        }
+
+        // Lazy load
+        FatBinaryInfo** module = var->ModuleInfo();
+        if (*(module) == nullptr) {
+          std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
+        }
+
+        IHIP_RETURN_ONFAIL(var->AllocateManagedVarPtr());
+
+        amd::Memory* mem = nullptr;
+        IHIP_RETURN_ONFAIL(var->GetStatDeviceVar(&mem, deviceId));
+
+        // Preserve host-asynchronous API semantics: deferred initialization must not make the
+        // calling host thread wait.
+        IHIP_RETURN_ONFAIL(
+            ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), var->GetManagedVarPtr(),
+                       mem->getSize(), hipMemcpyHostToDevice, *stream,
+                       /*isHostAsync=*/true, /*isGPUAsync=*/true));
+        queuedWork = true;
+      }
+    }
+
+    if (queuedWork) {
+      // Copies are profiled individually; keep this aggregate bookkeeping marker internal.
+      devInitState.completion.reset(new amd::Marker(*stream, /*userVisible=*/false));
+      if (devInitState.completion == nullptr) {
+        return hipErrorOutOfMemory;
+      }
+      devInitState.completion->enqueue();
+      devInitState.phase = Phase::InProgress;
+    } else if (devInitState.phase == Phase::NotStarted) {
+      // No copy was needed, so there is no completion marker to track.
+      devInitState.MarkCompleted();
+    }
+    // Every variable in this snapshot is now accounted for; the marker tracks any queued work.
+    devInitState.queuedUpToSequenceNumber = currentSequenceNumber;
+  } else if (devInitState.phase == Phase::NotStarted) {
+    devInitState.MarkCompleted();
   }
-  return err;
+
+  if (devInitState.phase == Phase::InProgress) {
+    OrderStreamAfterManagedVarInitialization(deviceId, orderStream, devInitState);
+  } else {
+    // Failed returns earlier and NotStarted transitions above, so only Completed reaches here.
+    managedVarInitialization_.initializedUpToSequenceNumberByDevice[deviceId].store(
+        devInitState.queuedUpToSequenceNumber, std::memory_order_release);
+  }
+  return hipSuccess;
+}
+
+// Nonblocking and per-thread streams do not implicitly wait for legacy null-stream work. Order
+// them explicitly so kernels cannot use a managed symbol before its device pointer is initialized.
+void StatCO::OrderStreamAfterManagedVarInitialization(int deviceId, hip::Stream* orderStream,
+                                                      const DeferredInitManagedVarState& state) {
+  if (state.completion == nullptr || orderStream == nullptr ||
+      orderStream == g_devices.at(deviceId)->GetNullStream()) {
+    return;
+  }
+
+  amd::Command::EventWaitList waitList{state.completion.get()};
+  amd::Command* waitMarker =
+      new amd::Marker(*orderStream, /*userVisible=*/false, waitList);
+  waitMarker->enqueue();
+  waitMarker->release();
 }
 
 // ================================================================================================

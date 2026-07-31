@@ -1,9 +1,36 @@
 ---
+# <REVIEW> Temporary review marker: this file contains Fabio's changes above the StatCO branch.
 TypeQualifiers:
   Unit_hipManagedKeyword_SingleGpu: *level_2
   Unit_hipManagedKeyword_MultiGpu:
     <<: *level_2
     # SWDEV-396615 mGPUs not considered correctly
     disabled: [amd_windows, amd_wsl]
+  Unit_hipManagedKeyword_hipMemcpy: *level_2
+  Unit_hipManagedKeyword_hipMemcpyHtoD: *level_2
+  Unit_hipManagedKeyword_hipMemcpyDtoH: *level_2
+  Unit_hipManagedKeyword_hipMemcpyDtoD: *level_2
+  Unit_hipManagedKeyword_hipMemcpyWithStream: *level_2
+  Unit_hipManagedKeyword_hipMemset: *level_2
+  Unit_hipManagedKeyword_hipMemcpy_MultipleSymbols: *level_2
+  Unit_hipManagedKeyword_hipMemcpy3D: *level_2
+  Unit_hipManagedKeyword_hipMemcpy3D_SyncBehavior:
+    <<: *level_2
+    disabled: [amd_wsl]
+  Unit_hipManagedKeyword_hipMemset3D: *level_2
+  Unit_hipManagedKeyword_hipLaunchKernel_SyncBehavior:
+    <<: *level_2
+    disabled: [amd_wsl]
+  Unit_hipManagedKeyword_NonBlockingStreamOrdering:
+    <<: *level_2
+    disabled: [amd_wsl]
+  Unit_hipManagedKeyword_hipMemcpyBatchAsync: *level_2
+  Unit_hipManagedKeyword_hipMemcpyPeer:
+    <<: *level_2
+    # SWDEV-396615 mGPUs not considered correctly
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipManagedKeyword_hipMemcpyAsync_CrossCurrentDeviceStream:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipManagedKeyword_hipPointerGetAttributes_BeforeKernel: *level_2
   Unit_hipManagedKeyword_hipPointerGetAttributes_AfterKernel: *level_2

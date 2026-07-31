@@ -1,4 +1,5 @@
 ---
+# <REVIEW> Temporary review marker: this file contains Fabio's changes above the StatCO branch.
 stream:
   Unit_hipStreamCreate_default:
     <<: *level_2
@@ -49,6 +50,23 @@ stream:
     <<: *level_2
     tags: [callback]
   Unit_hipStreamAddCallback_WithCreatedStream:
+    <<: *level_2
+    tags: [callback]
+  # <REVIEW HELPER> Register focused coverage for the new callback-lifetime
+  # helpers so YAML tag generation recognizes their HIP_TEST_CASE names.
+  Unit_HipTest_StreamCallbackLatch:
+    <<: *level_2
+    tags: [callback]
+  Unit_HipTest_StreamCallbackLatch_EnqueueFailure:
+    <<: *level_2
+    tags: [callback]
+  Unit_HipTest_BlockingContext_DestructorUnblocks:
+    <<: *level_2
+    tags: [callback]
+  Unit_HipTest_BlockingContext_RejectsSecondUse:
+    <<: *level_2
+    tags: [callback]
+  Unit_HipTest_BlockingContext_DoesNotBlockUnrelatedStream:
     <<: *level_2
     tags: [callback]
   Unit_hipStreamAttachMemAsync_Negative:

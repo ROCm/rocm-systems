@@ -1,4 +1,5 @@
 ---
+# <REVIEW> Temporary review marker: this file contains Fabio's changes above the StatCO branch.
 executionControl:
   Unit_hipFuncGetAttributes_Positive_Basic:
     <<: *level_2
@@ -13,6 +14,10 @@ executionControl:
     tags: [kernel, launch]
   Unit_hipLaunchKernel_Positive_Parameters:
     <<: *level_2
+    tags: [kernel, launch]
+  Unit_hipLaunchKernel_Positive_Synchronization_Behavior:
+    <<: *level_2
+    disabled: [amd_wsl]
     tags: [kernel, launch]
   Unit_hipLaunchKernel_Negative_Parameters:
     <<: *level_2

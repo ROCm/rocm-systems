@@ -1,4 +1,5 @@
 ---
+# <REVIEW> Temporary review marker: this file contains Fabio's changes above the StatCO branch.
 module:
   Unit_StatCO_ManagedVarConcurrentFirstTouch_InChildProcess:
     <<: *level_2
@@ -43,6 +44,9 @@ module:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows, amd_wsl]
+    tags: [launch]
+  Unit_hipModuleLaunchKernel_ManagedVar_Memcpy:
+    <<: *level_2
     tags: [launch]
   Unit_hipExtLaunchKernelGGL_Functional:
     <<: *level_2

@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  */
+// <REVIEW> Temporary review marker: this file contains Fabio's changes above the StatCO branch.
 
 #pragma once
 #pragma clang diagnostic ignored "-Wsign-compare"
@@ -11,10 +12,12 @@
 #include <catch2/catch_all.hpp>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <cstdlib>
 #include <iostream>
 #include <iomanip>
+#include <memory>
 #include <mutex>
 #include <cstdlib>
 #include <thread>
@@ -259,17 +262,18 @@ inline bool isQuickLevel() {
   }
 
 #if HT_NVIDIA
-#define CTX_CREATE()                                                                               \
+#define CTX_CREATE_DEV(deviceId)                                                                   \
   hipCtx_t context;                                                                                \
-  initHipCtx(&context);
+  initHipCtx(&context, deviceId);
+#define CTX_CREATE() CTX_CREATE_DEV(0)
 #define CTX_DESTROY() HIPCHECK(hipCtxDestroy(context));
 #define ARRAY_DESTROY(array) HIPCHECK(hipArrayDestroy(array));
 #define HIP_TEX_REFERENCE hipTexRef
 #define HIP_ARRAY hipArray_t
-static void initHipCtx(hipCtx_t* pcontext) {
+static void initHipCtx(hipCtx_t* pcontext, int deviceId = 0) {
   HIPCHECK(hipInit(0));
   hipDevice_t device;
-  HIPCHECK(hipDeviceGet(&device, 0));
+  HIPCHECK(hipDeviceGet(&device, deviceId));
   HIPCHECK(hipCtxCreate(pcontext, 0, device));
 }
 
@@ -280,6 +284,7 @@ static void initHipCtx(hipCtx_t* pcontext) {
 #define HIP_TEST_DRIVER_INIT() HIP_CHECK(hipInit(0))
 #else
 #define CTX_CREATE()
+#define CTX_CREATE_DEV(deviceId)
 #define CTX_DESTROY()
 #define ARRAY_DESTROY(array) HIPCHECK(hipFreeArray(array));
 #define HIP_TEX_REFERENCE textureReference*
@@ -709,51 +714,185 @@ template <> struct MemTraits<MemcpyAsync> {
   }
 };
 
-class BlockingContext {
-  std::atomic_bool blocked{true};
-  hipStream_t stream;
+// <REVIEW HELPER> A callback-safe completion primitive used by ordering tests.
+// Heap-owned shared state avoids the earlier raw pointer to a stack atomic,
+// which became dangling when a test assertion unwound before the callback ran.
+class StreamCallbackLatch {
+  struct State {
+    // <REVIEW HELPER> Callback and test threads access complete concurrently.
+    // The mutex is paired with the condition variable to make that handoff safe.
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool complete = false;
+  };
 
  public:
-  BlockingContext(hipStream_t s) : blocked(true), stream(s) {}
+  explicit StreamCallbackLatch(hipStream_t stream) : stream_(stream) {}
 
-  BlockingContext(const BlockingContext& in) {
-    blocked = in.blocked_val();
-    stream = in.stream_val();
+  StreamCallbackLatch(const StreamCallbackLatch&) = delete;
+  StreamCallbackLatch& operator=(const StreamCallbackLatch&) = delete;
+  StreamCallbackLatch(StreamCallbackLatch&&) = delete;
+  StreamCallbackLatch& operator=(StreamCallbackLatch&&) = delete;
+
+  hipError_t enqueue() {
+    // <REVIEW HELPER> The latch is intentionally single-shot: reusing one state
+    // would make it ambiguous which callback completed.
+    if (enqueued_) {
+      return hipErrorInvalidValue;
+    }
+    // <REVIEW HELPER> The callback owns this shared_ptr holder. If the latch
+    // object is destroyed first, the state remains valid until callback exit.
+    auto* holder = new std::shared_ptr<State>(state_);
+    const hipError_t status = hipStreamAddCallback(
+        stream_,
+        [](hipStream_t, hipError_t, void* data) {
+          std::unique_ptr<std::shared_ptr<State>> holder(
+              static_cast<std::shared_ptr<State>*>(data));
+          const std::shared_ptr<State>& state = *holder;
+          {
+            // <REVIEW HELPER> lock_guard is sufficient for a simple state write.
+            // An initial scoped_lock/CTAD version failed because some hip-tests
+            // include this common header while compiling as C++14.
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->complete = true;
+          }
+          // <REVIEW HELPER> Notify after dropping the mutex so a waiter can
+          // reacquire it immediately rather than wake and block on this callback.
+          state->condition.notify_all();
+        },
+        holder, 0);
+    if (status != hipSuccess) {
+      // <REVIEW HELPER> On enqueue failure no callback owns the holder, so the
+      // submitting thread must release it.
+      delete holder;
+      return status;
+    }
+    enqueued_ = true;
+    return hipSuccess;
   }
 
-  BlockingContext(const BlockingContext&& in) {
-    blocked = in.blocked_val();
-    stream = in.stream_val();
+  bool wait_for(std::chrono::milliseconds timeout) const {
+    // <REVIEW HELPER> A bounded condition-variable wait replaces a hot
+    // two-second yield loop and prevents a faulted stream from hanging CI.
+    // unique_lock is required here because condition_variable::wait_for must
+    // temporarily unlock the mutex; lock_guard/scoped_lock cannot do that.
+    std::unique_lock<std::mutex> lock(state_->mutex);
+    return state_->condition.wait_for(lock, timeout, [this]() { return state_->complete; });
   }
 
-  void reset() { blocked = true; }
-
-  BlockingContext& operator=(const BlockingContext& in) {
-    blocked = in.blocked_val();
-    stream = in.stream_val();
-    return *this;
+  bool complete() const {
+    // <REVIEW HELPER> Use lock_guard for this non-waiting read. Explicit mutex
+    // template arguments preserve compatibility with C++14 test targets.
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    return state_->complete;
   }
 
-  void block_stream() {
-    blocked = true;
-    auto blocking_callback = [](hipStream_t, hipError_t, void* data) {
-      auto blocked = reinterpret_cast<std::atomic_bool*>(data);
-      while (blocked->load()) {
-        // Yield this thread till we are waiting
-        std::this_thread::yield();
+ private:
+  hipStream_t stream_;
+  std::shared_ptr<State> state_ = std::make_shared<State>();
+  bool enqueued_ = false;
+};
+
+// <REVIEW HELPER> Blocks one stream with a callback for synchronization tests.
+// Shared state and bounded teardown make assertion-failure cleanup lifetime-safe.
+class BlockingContext {
+  struct State {
+    // <REVIEW HELPER> Both flags are shared between the test thread and the
+    // runtime callback thread; the condition variable replaces atomic spin loops.
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool blocked = true;
+    bool finished = false;
+  };
+
+ public:
+  explicit BlockingContext(hipStream_t stream) : stream_(stream) {}
+
+  ~BlockingContext() {
+    // <REVIEW HELPER> Always release the callback during stack unwinding. The
+    // old helper had no destructor and could leave a callback reading freed state.
+    unblock_stream();
+    if (callback_enqueued_) {
+      // <REVIEW HELPER> unique_lock is necessary because wait_for unlocks while
+      // the callback runs. scoped_lock would hold the mutex and deadlock it.
+      std::unique_lock<std::mutex> lock(state_->mutex);
+      if (!state_->condition.wait_for(lock, std::chrono::seconds(5),
+                                      [this]() { return state_->finished; })) {
+        // <REVIEW HELPER> Do not wait forever if callback dispatch was lost due
+        // to a stream/device fault; shared state remains alive in the callback holder.
+        WARN("BlockingContext callback did not finish; the stream may be faulted");
       }
+    }
+  }
+
+  BlockingContext(const BlockingContext&) = delete;
+  BlockingContext& operator=(const BlockingContext&) = delete;
+  BlockingContext(BlockingContext&&) = delete;
+  BlockingContext& operator=(BlockingContext&&) = delete;
+
+  hipError_t block_stream() {
+    // <REVIEW HELPER> All current users are single-shot. Rejecting reuse avoids
+    // one completion flag being shared by multiple outstanding callbacks.
+    if (callback_enqueued_) {
+      return hipErrorInvalidValue;
+    }
+    auto* holder = new std::shared_ptr<State>(state_);
+    auto blocking_callback = [](hipStream_t, hipError_t, void* data) {
+      std::unique_ptr<std::shared_ptr<State>> holder(
+          static_cast<std::shared_ptr<State>*>(data));
+      const std::shared_ptr<State>& state = *holder;
+      {
+        // <REVIEW HELPER> A condition variable replaces the previous callback
+        // spin loop, reducing CPU use while preserving stream blockage.
+        // unique_lock allows wait() to release the mutex until unblock_stream()
+        // changes blocked and notifies this callback.
+        std::unique_lock<std::mutex> lock(state->mutex);
+        state->condition.wait(lock, [&state]() { return !state->blocked; });
+        state->finished = true;
+      }
+      state->condition.notify_all();
     };
-    HIP_CHECK(hipStreamAddCallback(stream, blocking_callback, (void*)&blocked, 0));
+    // hipStreamAddCallback runs the callback only after all work already enqueued
+    // on the stream completes, and holds back any work enqueued afterwards until
+    // the callback returns. Waiting here therefore blocks the stream reliably:
+    // later operations on this stream cannot begin until unblock_stream() runs,
+    // independent of the order in which their completion signals are observed, so
+    // nothing can slip past this callback out of order.
+    const hipError_t status = hipStreamAddCallback(stream_, blocking_callback, holder, 0);
+    if (status != hipSuccess) {
+      delete holder;
+    } else {
+      callback_enqueued_ = true;
+    }
+    // <REVIEW HELPER> Return enqueue status so callers can report setup failure;
+    // silently continuing would make is_blocked() assertions misleading.
+    return status;
   }
 
   void unblock_stream() {
-    blocked = false;
+    {
+      // <REVIEW HELPER> This is a short non-waiting critical section, so
+      // lock_guard is both sufficient and C++14-compatible.
+      std::lock_guard<std::mutex> lock(state_->mutex);
+      state_->blocked = false;
+    }
+    state_->condition.notify_all();
   }
 
-  bool is_blocked() const { return hipStreamQuery(stream) == hipErrorNotReady; }
+  bool is_blocked() const {
+    const hipError_t status = hipStreamQuery(stream_);
+    if (status != hipSuccess && status != hipErrorNotReady) {
+      // <REVIEW HELPER> Distinguish a real stream fault from the expected
+      // hipErrorNotReady result instead of treating both as "not blocked".
+      WARN("hipStreamQuery failed while checking BlockingContext");
+    }
+    return status == hipErrorNotReady;
+  }
 
-  bool blocked_val() const { return blocked.load(); }
-  hipStream_t stream_val() const { return stream; }
+ private:
+  hipStream_t stream_;
+  std::shared_ptr<State> state_ = std::make_shared<State>();
+  bool callback_enqueued_ = false;
 };
 }  // namespace HipTest
 

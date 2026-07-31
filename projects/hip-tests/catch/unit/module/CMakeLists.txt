@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
 # SPDX-License-Identifier: MIT
+# <REVIEW> Temporary review marker: this file contains Fabio's changes above the StatCO branch.
 
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
@@ -382,11 +383,13 @@ target_link_libraries(hipGetFuncBySymbol_exe ${GPGPU_LINKER_LIBRARIES})
 add_dependencies(build_tests hipGetFuncBySymbol_exe)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipGetFuncBySymbol_exe)
 
-add_executable(managedFirstTouch_exe EXCLUDE_FROM_ALL managedFirstTouch_exe.cc)
-set_source_files_properties(managedFirstTouch_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
-target_link_libraries(managedFirstTouch_exe ${GPGPU_LINKER_LIBRARIES})
-add_dependencies(build_tests managedFirstTouch_exe)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS managedFirstTouch_exe)
+if(UNIX)
+  add_executable(managedFirstTouch_exe EXCLUDE_FROM_ALL managedFirstTouch_exe.cc)
+  set_source_files_properties(managedFirstTouch_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(managedFirstTouch_exe ${GPGPU_LINKER_LIBRARIES})
+  add_dependencies(build_tests managedFirstTouch_exe)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS managedFirstTouch_exe)
+endif()
 
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
@@ -394,10 +397,13 @@ set(TEST_SRC
   hipFuncGetAttributes.cc
   hipFuncSetSharedMemConfig.cc
   hipManagedKeywordBasic.cc
+  hipManagedKeywordDeferredInit.cc
   hipModule.cc
   hipModuleLoadMultProcessOnMultGPU.cc
-  managedFirstTouch.cc
 )
+if(UNIX)
+  list(APPEND TEST_SRC managedFirstTouch.cc)
+endif()
 set(AMD_TEST_SRC
     hipExtLaunchKernelGGL.cc
     hipExtLaunchMultiKernelMultiDevFunctional.cc
