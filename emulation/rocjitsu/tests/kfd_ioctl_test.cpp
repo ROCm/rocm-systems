@@ -1295,10 +1295,10 @@ TEST(RemoteDriverDbgSnapshotTest, NullSnapshotBufferIsNeverWrittenThrough) {
 
 // A zero entry_size reserves no inline tail whatever the device count is, so
 // the transmitted num_devices must survive the request clamp untouched.
-// Rewriting it to zero would turn the request SimulatedKfd rejects with -EFAULT
-// (DbgTrapDeviceSnapshotRejectsUnwritableBuffer) into the count-only probe
-// num_devices(IN) == 0, which the daemon answers with success -- daemon mode
-// would silently disagree with local mode.
+// num_devices(IN) is what the driver clamps its fill count against
+// (DbgTrapDeviceSnapshotZeroStrideReportsCountAndWritesNothing pins the local
+// verdict: report the total, write nothing), so rewriting it to zero here would
+// hand the daemon a different request than the caller made.
 TEST(RemoteDriverDbgSnapshotTest, ZeroStrideSnapshotKeepsTheRequestedDeviceCount) {
   int sv[2];
   ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
