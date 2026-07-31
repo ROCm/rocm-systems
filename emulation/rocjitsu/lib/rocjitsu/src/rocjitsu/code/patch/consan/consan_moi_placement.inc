@@ -25,10 +25,21 @@ struct MoiLocalNopIsland {
 
 constexpr uint32_t kMoiLocalIndirectIslandWords = 8u;
 constexpr uint32_t kMoiRecordReplayIndirectIslandWords = 7u;
+constexpr uint32_t kMoiDenseBarrierEntryKeyPrologueWords = 6u;
 
 [[nodiscard]] constexpr uint32_t
 moi_record_replay_entry_island_words(bool spill_backed_scalar_assignment) {
   return kMoiRecordReplayIndirectIslandWords + (spill_backed_scalar_assignment ? 1u : 0u);
+}
+
+[[nodiscard]] constexpr uint32_t
+moi_dense_barrier_entry_island_words(bool spill_backed_scalar_assignment) {
+  // Spill-backed dense barrier routers derive the dispatcher key at entry:
+  // key = call return - island offset. The prologue captures SCC itself, so
+  // the following indirect jump omits its ordinary SCC-capture word.
+  return spill_backed_scalar_assignment
+             ? kMoiDenseBarrierEntryKeyPrologueWords + (kMoiRecordReplayIndirectIslandWords - 1u)
+             : kMoiRecordReplayIndirectIslandWords;
 }
 
 class MoiLocalNopIslandAllocator {
@@ -629,8 +640,7 @@ struct MoiSgprRange {
       const uint32_t granularity = moi_descriptor_vgpr_granularity(desc, arch);
       const uint32_t new_unified_count = util::align_up(required_count, granularity);
       const uint32_t new_accvgpr_base = new_unified_count;
-      if (new_accvgpr_base > kMaxVgprs ||
-          new_accvgpr_base % kAccvgprOffsetGranularity != 0u ||
+      if (new_accvgpr_base > kMaxVgprs || new_accvgpr_base % kAccvgprOffsetGranularity != 0u ||
           new_unified_count / granularity > 64u)
         return false;
       AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,

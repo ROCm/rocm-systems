@@ -2161,6 +2161,158 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
   }
 }
 
+void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj_code_arch_t arch) {
+  SCOPED_TRACE(arch);
+  ASSERT_TRUE(arch == ROCJITSU_CODE_ARCH_GFX1250 || arch == ROCJITSU_CODE_ARCH_RDNA4);
+  constexpr uint32_t kBarrierCount = 10u;
+  constexpr uint32_t kCallReturnPairWidth = 2u;
+  constexpr uint32_t kExecSaveWindowWidth = 8u;
+  constexpr uint32_t kDenseEntryIslandWords = 12u;
+  constexpr uint32_t kKernelWordsForDenseHost = 1200u;
+  const std::array<uint16_t, 4> dead = {0u, 1u, 4u, 6u};
+  std::vector<uint32_t> words;
+  for (uint32_t index = 0u; index < kBarrierCount; ++index) {
+    words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+    words.push_back(0xBE804EC1u); // s_barrier_signal -1
+    words.push_back(0xBF94FFFFu); // s_barrier_wait -1
+  }
+  // Keep the ordinary scalar file live across every synchronization site
+  // except for the separately proven router pair/key/SCC tuple.
+  for (uint16_t sgpr = 0u; sgpr < 106u; ++sgpr) {
+    if (std::ranges::find(dead, sgpr) == dead.end())
+      words.push_back(build_s_mov_b32(/*sdst=*/0u, sgpr, arch));
+  }
+  // Leave a liveness-safe dense host after the scalar-pressure wall while
+  // keeping every barrier within direct-call reach of the shared relay.
+  words.resize(kKernelWordsForDenseHost, build_s_nop(0, arch));
+  words.push_back(build_s_endpgm(arch));
+  const std::vector<uint8_t> bytes =
+      arch == ROCJITSU_CODE_ARCH_GFX1250
+          ? make_gfx1250_code_object(words, "sampled_scalar_spill_barriers_gfx1250",
+                                     kRdna4Wave64AllVgprsGranulated, /*wave32=*/true)
+          : make_rdna4_lds_code_object(words, "sampled_scalar_spill_barriers_rdna4");
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 8u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2u * kBarrierCount);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 4u * kBarrierCount;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  ASSERT_TRUE(assignment.spill_backed);
+  ASSERT_TRUE(assignment.indirect_pc_sgpr);
+  ASSERT_TRUE(assignment.indirect_scc_sgpr);
+  ASSERT_TRUE(assignment.dispatch_key_sgpr);
+  ASSERT_TRUE(assignment.call_return_sgpr);
+  // The dense router's call-return pair must be separately proven dead and
+  // disjoint from the spill-backed EXEC/VCC save window.
+  EXPECT_TRUE(static_cast<uint32_t>(*assignment.call_return_sgpr) + kCallReturnPairWidth <=
+                  assignment.exec_save_sgpr ||
+              static_cast<uint32_t>(assignment.exec_save_sgpr) + kExecSaveWindowWidth <=
+                  *assignment.call_return_sgpr)
+      << "call_return_sgpr=" << *assignment.call_return_sgpr
+      << " exec_save_sgpr=" << assignment.exec_save_sgpr;
+  const std::optional<uint32_t> call_opcode =
+      arch == ROCJITSU_CODE_ARCH_GFX1250
+          ? instrumentation::build_s_call_i64(*assignment.call_return_sgpr, 0, arch)
+          : std::optional<uint32_t>(build_s_call_b64(*assignment.call_return_sgpr, 0, arch));
+  ASSERT_TRUE(call_opcode);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto dense_host = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size == (kDenseEntryIslandWords + 1u) * sizeof(uint32_t);
+  });
+  ASSERT_NE(dense_host, result.patches.end());
+  const uint64_t island_offset = dense_host->anchor_offset + sizeof(uint32_t);
+  const std::vector<uint32_t> entry_island =
+      text_words_at_offset(patched, island_offset, kDenseEntryIslandWords * sizeof(uint32_t));
+  ASSERT_EQ(entry_island.size(), kDenseEntryIslandWords);
+  const auto save_scc = instrumentation::build_s_cselect_b32(*assignment.indirect_scc_sgpr,
+                                                             scalar_positive_inline_u32(1),
+                                                             scalar_positive_inline_u32(0), arch);
+  const auto subtract_pc =
+      instrumentation::build_s_sub_u32(*assignment.dispatch_key_sgpr, *assignment.dispatch_key_sgpr,
+                                       *assignment.indirect_pc_sgpr, arch);
+  const auto restore_scc = instrumentation::build_s_cmp_lg_u32(*assignment.indirect_scc_sgpr,
+                                                               scalar_positive_inline_u32(0), arch);
+  ASSERT_TRUE(save_scc);
+  ASSERT_TRUE(subtract_pc);
+  ASSERT_TRUE(restore_scc);
+  EXPECT_EQ(entry_island[0], *save_scc);
+  EXPECT_EQ(entry_island[1],
+            build_s_mov_b32(*assignment.dispatch_key_sgpr, *assignment.call_return_sgpr, arch));
+  EXPECT_EQ(entry_island[2], build_s_getpc_b64(*assignment.indirect_pc_sgpr, arch));
+  EXPECT_EQ(entry_island[3], *subtract_pc);
+  EXPECT_EQ(entry_island[4],
+            build_s_add_u32(*assignment.dispatch_key_sgpr, *assignment.dispatch_key_sgpr,
+                            /*literal=*/255u, arch));
+  EXPECT_EQ(entry_island[5], 3u * sizeof(uint32_t))
+      << "the entry key must correct from PC-after-getpc back to the island base";
+  EXPECT_EQ(entry_island[10], *restore_scc);
+  EXPECT_EQ(entry_island[11], build_s_setpc_b64(*assignment.indirect_pc_sgpr, arch));
+
+  uint32_t patched_barriers = 0u;
+  std::vector<uint32_t> expected_dispatch_keys = {0u};
+  std::optional<uint64_t> first_barrier_anchor;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiSampledSyncMetadata)
+      continue;
+    const std::vector<uint32_t> anchor =
+        text_words_at_offset(patched, patch.anchor_offset, sizeof(uint32_t));
+    ASSERT_EQ(anchor.size(), 1u);
+    EXPECT_EQ(anchor.front() & 0xffff0000u, *call_opcode & 0xffff0000u);
+    expected_dispatch_keys.push_back(
+        static_cast<uint32_t>(patch.anchor_offset + sizeof(uint32_t) - island_offset));
+    if (!first_barrier_anchor)
+      first_barrier_anchor = patch.anchor_offset;
+    ++patched_barriers;
+  }
+  EXPECT_EQ(patched_barriers, kBarrierCount);
+  ASSERT_TRUE(first_barrier_anchor);
+  const auto dispatcher = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size == 0u && patch.anchor_offset == *first_barrier_anchor;
+  });
+  ASSERT_NE(dispatcher, result.patches.end());
+  const std::vector<uint32_t> dispatcher_words =
+      text_words_at_offset(patched, dispatcher->trampoline_offset, dispatcher->trampoline_size);
+  const auto compare_key =
+      instrumentation::build_s_cmp_eq_u32(*assignment.dispatch_key_sgpr, /*literal=*/255u, arch);
+  ASSERT_TRUE(compare_key);
+  std::vector<uint32_t> actual_dispatch_keys;
+  for (size_t index = 0u; index + 1u < dispatcher_words.size(); ++index) {
+    if (dispatcher_words[index] == *compare_key)
+      actual_dispatch_keys.push_back(dispatcher_words[index + 1u]);
+  }
+  std::ranges::sort(expected_dispatch_keys);
+  std::ranges::sort(actual_dispatch_keys);
+  EXPECT_EQ(actual_dispatch_keys, expected_dispatch_keys);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, Gfx1250SampledDenseBarrierRoutesThroughDeadPairUnderScalarSpill) {
+  expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(
+      ROCJITSU_CODE_ARCH_GFX1250);
+}
+
+TEST(ConSanMoi, Rdna4SampledDenseBarrierRoutesThroughDeadPairUnderScalarSpill) {
+  expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(
+      ROCJITSU_CODE_ARCH_RDNA4);
+}
+
 TEST(ConSanMoi, Rdna4SampledSpillBackedDenseHostKeepsCompleteEntryLayout) {
   constexpr uint32_t kAccessCount = 2u;
   const std::array<uint16_t, 4> dead = {0u, 1u, 4u, 6u};

@@ -1329,8 +1329,6 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   }
 
   if (!dense_fallback_indices.empty()) {
-    constexpr uint64_t kOrdinaryIslandWords = 7u;
-    constexpr uint64_t kSpillBackedIslandWords = 12u;
     constexpr uint64_t kDispatcherWordsPerSite = 20u;
 
     const auto &blocks = resource_state.blocks;
@@ -1728,8 +1726,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };
-      const uint64_t island_words_count =
-          spill_backed_router ? kSpillBackedIslandWords : kOrdinaryIslandWords;
+      const uint64_t island_words_count = moi_dense_barrier_entry_island_words(spill_backed_router);
       const uint64_t host_words_count = island_words_count + 1u;
       const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
       std::vector<uint64_t> anchors;
@@ -1889,37 +1886,19 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       append_words_bytes(new_text, host_words);
 
       const uint64_t island_offset = *host_offset + sizeof(uint32_t);
-      std::vector<uint32_t> island_words;
-      if (spill_backed_router) {
-        const auto save_scc = instrumentation::build_s_cselect_b32(
-            saved_scc_sgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
-        if (!save_scc) {
-          result.errors.emplace_back("ConSan MOI dense barrier relay could not save its entry SCC");
-          return;
-        }
-        island_words.push_back(*save_scc);
-        island_words.push_back(build_s_mov_b32(key_sgpr, call_return_sgpr, arch));
-        island_words.push_back(build_s_getpc_b64(jump_pc_sgpr, arch));
-        const auto subtract_pc =
-            instrumentation::build_s_sub_u32(key_sgpr, key_sgpr, jump_pc_sgpr, arch);
-        if (!subtract_pc) {
-          result.errors.emplace_back(
-              "ConSan MOI dense barrier relay could not encode its entry key");
-          return;
-        }
-        island_words.push_back(*subtract_pc);
-        island_words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
-        island_words.push_back(3u * sizeof(uint32_t));
-      }
-      if (!append_moi_scc_preserving_indirect_jump(island_words, island_offset, dispatcher_offset,
-                                                   jump_pc_sgpr, saved_scc_sgpr,
-                                                   /*capture_scc=*/!spill_backed_router, arch) ||
-          island_words.size() != island_words_count) {
+      const auto island_words =
+          build_moi_dense_barrier_entry_island(island_offset, dispatcher_offset,
+                                               {.jump_pc_sgpr = jump_pc_sgpr,
+                                                .saved_scc_sgpr = saved_scc_sgpr,
+                                                .key_sgpr = key_sgpr,
+                                                .call_return_sgpr = call_return_sgpr},
+                                               spill_backed_router, arch);
+      if (!island_words || island_words->size() != island_words_count) {
         result.errors.emplace_back("ConSan MOI dense barrier relay could not encode its island");
         return;
       }
-      std::memcpy(new_text.data() + island_offset, island_words.data(),
-                  island_words.size() * sizeof(uint32_t));
+      std::memcpy(new_text.data() + island_offset, island_words->data(),
+                  island_words->size() * sizeof(uint32_t));
       const auto host_call = build_direct_call(/*next instruction=*/0);
       if (!host_call) {
         result.errors.emplace_back("ConSan MOI dense barrier relay could not encode its host call");

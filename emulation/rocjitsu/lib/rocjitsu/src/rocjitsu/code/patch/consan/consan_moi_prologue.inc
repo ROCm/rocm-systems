@@ -282,6 +282,43 @@ append_cdna_full_workgroup_payload_restore(std::vector<uint32_t> &words,
   return true;
 }
 
+struct MoiDenseBarrierRouterScalarAbi {
+  uint16_t jump_pc_sgpr = 0;
+  uint16_t saved_scc_sgpr = 0;
+  uint16_t key_sgpr = 0;
+  uint16_t call_return_sgpr = 0;
+};
+
+[[nodiscard]] std::optional<std::vector<uint32_t>>
+build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispatcher_text_offset,
+                                     const MoiDenseBarrierRouterScalarAbi &abi,
+                                     bool spill_backed_scalar_assignment, rj_code_arch_t arch) {
+  std::vector<uint32_t> words;
+  if (spill_backed_scalar_assignment) {
+    const auto save_scc = instrumentation::build_s_cselect_b32(
+        abi.saved_scc_sgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
+    const auto subtract_pc =
+        instrumentation::build_s_sub_u32(abi.key_sgpr, abi.key_sgpr, abi.jump_pc_sgpr, arch);
+    if (!save_scc || !subtract_pc)
+      return std::nullopt;
+    words.push_back(*save_scc);
+    words.push_back(build_s_mov_b32(abi.key_sgpr, abi.call_return_sgpr, arch));
+    words.push_back(build_s_getpc_b64(abi.jump_pc_sgpr, arch));
+    const uint32_t pc_after_getpc_from_island =
+        static_cast<uint32_t>(words.size() * sizeof(uint32_t));
+    words.push_back(*subtract_pc);
+    words.push_back(build_s_add_u32(abi.key_sgpr, abi.key_sgpr, /*literal=*/255u, arch));
+    words.push_back(pc_after_getpc_from_island);
+  }
+  if (!append_moi_scc_preserving_indirect_jump(
+          words, island_text_offset, dispatcher_text_offset, abi.jump_pc_sgpr, abi.saved_scc_sgpr,
+          /*capture_scc=*/!spill_backed_scalar_assignment, arch) ||
+      words.size() != moi_dense_barrier_entry_island_words(spill_backed_scalar_assignment)) {
+    return std::nullopt;
+  }
+  return words;
+}
+
 [[nodiscard]] bool append_moi_direct_or_indirect_return(std::vector<uint32_t> &words,
                                                         uint64_t cave_text_offset,
                                                         uint64_t return_text_offset,

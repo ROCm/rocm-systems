@@ -1094,55 +1094,14 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
   const uint64_t original_text_size = original_code_object.text_sections().size() == 1
                                           ? original_code_object.text_sections().front()->size()
                                           : 0u;
-  constexpr uint64_t kIndirectIslandWords = 7u;
+  constexpr uint64_t kIndirectIslandWords = kMoiRecordReplayIndirectIslandWords;
   std::vector<ConSanPatchInfo> patches;
   const bool use_dense_barrier_relay = arch == ROCJITSU_CODE_ARCH_GFX1250 ||
                                        (arch == ROCJITSU_CODE_ARCH_RDNA4 && selected.size() >= 8u);
   if (use_dense_barrier_relay) {
-    const auto special_state = moi_special_state_sgprs(options);
-    if (!options.moi_exec_save_sgpr || !special_state) {
-      result.errors.emplace_back(
-          "ConSan MOI sampled dense barrier relay requires scalar special-state storage");
-      return;
-    }
-    const uint16_t base = *options.moi_exec_save_sgpr;
-    const uint16_t key_sgpr = static_cast<uint16_t>(base + 5u);
-    const uint16_t call_return_sgpr = static_cast<uint16_t>(base + 6u);
-    const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
-      if (arch == ROCJITSU_CODE_ARCH_GFX1250)
-        return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
-      if (arch == ROCJITSU_CODE_ARCH_RDNA4)
-        return build_s_call_b64(call_return_sgpr, simm16, arch);
-      return std::nullopt;
-    };
-    constexpr uint64_t kHostWords = kIndirectIslandWords + 1u;
-    constexpr uint64_t kHostBytes = kHostWords * sizeof(uint32_t);
     constexpr uint64_t kDispatcherWordsPerSite = 20u;
 
-    std::vector<uint64_t> leaders;
-    std::vector<BasicBlock::CodeRange> code_ranges;
-    for (const ConSanKernelInfo &kernel : result.kernels) {
-      if (!kernel.has_text_range)
-        continue;
-      leaders.push_back(kernel.entry_text_offset);
-      if (kernel.code_size != 0u)
-        code_ranges.push_back({.start_offset = kernel.entry_text_offset, .size = kernel.code_size});
-    }
-    for (const ConSanFunctionInfo &function : result.functions) {
-      leaders.push_back(function.entry_text_offset);
-      if (function.code_size != 0u)
-        code_ranges.push_back(
-            {.start_offset = function.entry_text_offset, .size = function.code_size});
-    }
-    std::ranges::sort(leaders);
-    leaders.erase(std::ranges::unique(leaders).begin(), leaders.end());
-    std::unique_ptr<Decoder> decoder = Decoder::create(arch);
-    if (!decoder) {
-      result.errors.emplace_back(
-          "ConSan MOI sampled dense barrier relay could not create a decoder");
-      return;
-    }
-    const auto blocks = BasicBlock::build(code_object, *decoder, arch, leaders, code_ranges);
+    const auto &blocks = resource_state.blocks;
     using ContainerKey = std::pair<bool, std::string>;
     std::map<ContainerKey, std::vector<size_t>> owner_groups;
     for (size_t index = 0; index < selected.size(); ++index) {
@@ -1240,6 +1199,49 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       }
       std::ranges::sort(group_owners);
       group_owners.erase(std::ranges::unique(group_owners).begin(), group_owners.end());
+      ConSanOptions group_options = options;
+      if (!apply_moi_transient_sgpr_assignment(group_options, group_owners)) {
+        result.warnings.emplace_back("ConSan MOI sampled barrier sync skipped dense relay in " +
+                                     std::string(container_name) +
+                                     ": owners do not share one transient scalar assignment");
+        continue;
+      }
+      const auto special_state = moi_special_state_sgprs(group_options);
+      const auto indirect_state = moi_indirect_jump_sgprs(group_options);
+      const bool spill_backed_router = group_options.automatic_moi_record_replay_sgpr_spill;
+      if ((!spill_backed_router && (!group_options.moi_exec_save_sgpr || !special_state)) ||
+          !indirect_state ||
+          (spill_backed_router && (!group_options.moi_record_replay_dispatch_key_sgpr ||
+                                   !group_options.moi_record_replay_call_return_sgpr))) {
+        result.warnings.emplace_back("ConSan MOI sampled barrier sync skipped dense relay in " +
+                                     std::string(container_name) +
+                                     ": incomplete scalar router state");
+        continue;
+      }
+      const uint16_t jump_pc_sgpr =
+          spill_backed_router ? indirect_state->pc_sgpr : *group_options.moi_exec_save_sgpr;
+      const uint16_t saved_scc_sgpr =
+          spill_backed_router ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
+      const uint16_t key_sgpr = spill_backed_router
+                                    ? *group_options.moi_record_replay_dispatch_key_sgpr
+                                    : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 5u);
+      const uint16_t call_return_sgpr =
+          spill_backed_router ? *group_options.moi_record_replay_call_return_sgpr
+                              : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 6u);
+      const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
+        if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+          return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
+        if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+          return build_s_call_b64(call_return_sgpr, simm16, arch);
+        return std::nullopt;
+      };
+      const uint64_t island_words_count = moi_dense_barrier_entry_island_words(spill_backed_router);
+      const uint64_t host_words_count = island_words_count + 1u;
+      const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
+      const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
+          group_options, MoiRelocatableHostScalarState::BarrierRouter, arch);
+      MoiDenseOwnerLivenessProof host_owner_proof =
+          resource_state.prepare_dense_liveness_for_owners(group_owners, host_bootstrap_ranges);
       std::vector<uint64_t> anchors;
       anchors.reserve(indices.size());
       for (size_t index : indices)
@@ -1254,13 +1256,30 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
                            });
       for (; block != blocks.end() && (*block)->start_offset() < container_end; ++block) {
         if ((*block)->start_offset() < container_begin || (*block)->end_offset() > container_end ||
-            (*block)->size() < kHostBytes)
+            (*block)->size() < host_bytes)
           continue;
-        for (const Instruction &instruction : (*block)->instructions()) {
+        const auto block_end = (*block)->instructions().end();
+        for (auto instruction_it = (*block)->instructions().begin(); instruction_it != block_end;
+             ++instruction_it) {
+          const Instruction &instruction = *instruction_it;
           const uint64_t candidate_host = instruction.src_loc();
-          if (candidate_host + kHostBytes > (*block)->end_offset() ||
-              overlaps_existing(candidate_host, candidate_host + kHostBytes))
+          if (candidate_host + host_bytes > (*block)->end_offset() ||
+              overlaps_existing(candidate_host, candidate_host + host_bytes))
             continue;
+          RegisterSet relocated_references;
+          bool has_indirect_scalar_reference = false;
+          for (auto relocated = instruction_it;
+               relocated != block_end && (*relocated).src_loc() < candidate_host + host_bytes;
+               ++relocated) {
+            has_indirect_scalar_reference |= (*relocated).mnemonic().starts_with("s_movrel");
+            const InstDefUse def_use(*relocated);
+            relocated_references |= def_use.defs | def_use.uses;
+          }
+          if (has_indirect_scalar_reference || !moi_relocatable_host_preserves_transient_sgprs(
+                                                   host_owner_proof, **block, instruction,
+                                                   relocated_references, host_bootstrap_ranges)) {
+            continue;
+          }
           const uint64_t relay_offset = candidate_host + sizeof(uint32_t);
           uint64_t max_distance = 0u;
           const bool reachable = std::ranges::all_of(anchors, [&](uint64_t anchor) {
@@ -1274,16 +1293,17 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
             continue;
           std::vector<uint32_t> words;
           std::vector<std::string> decode_errors;
-          while (words.size() < kHostWords) {
+          while (words.size() < host_words_count) {
             auto decoded = decode_relocatable_entry_instruction(
-                old_text, candidate_host + words.size() * sizeof(uint32_t), arch, decode_errors);
+                old_text, candidate_host + words.size() * sizeof(uint32_t), arch, decode_errors,
+                resource_state.decoder.get());
             if (!decoded) {
               words.clear();
               break;
             }
             words.insert(words.end(), decoded->begin(), decoded->end());
           }
-          if (words.size() != kHostWords)
+          if (words.size() != host_words_count)
             continue;
           host_offset = candidate_host;
           displaced_words = std::move(words);
@@ -1291,12 +1311,12 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         }
       }
       if (!host_offset) {
-        result.errors.emplace_back(
-            "ConSan MOI sampled barrier sync found no relocatable dense relay host in " +
-            std::string(container_name));
-        return;
+        result.warnings.emplace_back("ConSan MOI sampled barrier sync skipped dense relay in " +
+                                     std::string(container_name) +
+                                     ": no liveness-safe relocatable host");
+        continue;
       }
-      claimed_hosts.emplace_back(*host_offset, *host_offset + kHostBytes);
+      claimed_hosts.emplace_back(*host_offset, *host_offset + host_bytes);
 
       const uint64_t dispatcher_offset = new_text.size();
       const uint64_t dispatcher_reservation =
@@ -1346,9 +1366,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       }
       const uint64_t host_body_offset = new_text.size();
       std::vector<uint32_t> host_words = displaced_words;
-      if (!append_moi_scc_preserving_indirect_jump(
-              host_words, host_body_offset, *host_offset + kHostBytes, base,
-              special_state->scc_save_sgpr, /*capture_scc=*/true, arch)) {
+      if (!append_moi_scc_preserving_indirect_jump(host_words, host_body_offset,
+                                                   *host_offset + host_bytes, jump_pc_sgpr,
+                                                   saved_scc_sgpr, /*capture_scc=*/true, arch)) {
         result.errors.emplace_back(
             "ConSan MOI sampled dense barrier relay could not return from its host");
         return;
@@ -1356,17 +1376,20 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       append_words_bytes(new_text, host_words);
 
       const uint64_t island_offset = *host_offset + sizeof(uint32_t);
-      std::vector<uint32_t> island_words;
-      if (!append_moi_scc_preserving_indirect_jump(island_words, island_offset, dispatcher_offset,
-                                                   base, special_state->scc_save_sgpr,
-                                                   /*capture_scc=*/true, arch) ||
-          island_words.size() != kIndirectIslandWords) {
+      const auto island_words =
+          build_moi_dense_barrier_entry_island(island_offset, dispatcher_offset,
+                                               {.jump_pc_sgpr = jump_pc_sgpr,
+                                                .saved_scc_sgpr = saved_scc_sgpr,
+                                                .key_sgpr = key_sgpr,
+                                                .call_return_sgpr = call_return_sgpr},
+                                               spill_backed_router, arch);
+      if (!island_words || island_words->size() != island_words_count) {
         result.errors.emplace_back(
             "ConSan MOI sampled dense barrier relay could not encode its island");
         return;
       }
-      std::memcpy(new_text.data() + island_offset, island_words.data(),
-                  island_words.size() * sizeof(uint32_t));
+      std::memcpy(new_text.data() + island_offset, island_words->data(),
+                  island_words->size() * sizeof(uint32_t));
       const auto host_call = build_direct_call(/*next instruction=*/0);
       if (!host_call) {
         result.errors.emplace_back(
@@ -1376,13 +1399,18 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       std::memcpy(new_text.data() + *host_offset, &*host_call, sizeof(uint32_t));
 
       std::vector<uint32_t> dispatcher_words;
-      const auto subtract_pc =
-          instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, base, arch);
-      if (!subtract_pc)
-        return;
-      dispatcher_words.push_back(*subtract_pc);
-      dispatcher_words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
-      dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
+      if (!spill_backed_router) {
+        const auto subtract_pc =
+            instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
+        if (!subtract_pc) {
+          result.errors.emplace_back(
+              "ConSan MOI sampled dense barrier relay could not encode its dispatch key");
+          return;
+        }
+        dispatcher_words.push_back(*subtract_pc);
+        dispatcher_words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
+        dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
+      }
       const auto append_target = [&](uint32_t key, uint64_t target) -> bool {
         const auto compare = instrumentation::build_s_cmp_eq_u32(key_sgpr, /*literal=*/255u, arch);
         if (!compare)
@@ -1392,8 +1420,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         std::vector<uint32_t> matched_words;
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
-        if (!append_moi_scc_preserving_indirect_jump(matched_words, matched_offset, target, base,
-                                                     special_state->scc_save_sgpr,
+        if (!append_moi_scc_preserving_indirect_jump(matched_words, matched_offset, target,
+                                                     jump_pc_sgpr, saved_scc_sgpr,
                                                      /*capture_scc=*/false, arch))
           return false;
         const auto skip =
@@ -1425,7 +1453,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       ConSanPatchInfo host_info;
       host_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
       host_info.anchor_offset = *host_offset;
-      host_info.original_size = static_cast<uint32_t>(kHostBytes);
+      host_info.original_size = static_cast<uint32_t>(host_bytes);
       host_info.trampoline_offset = host_body_offset;
       host_info.trampoline_size = static_cast<uint32_t>(host_words.size() * sizeof(uint32_t));
       host_info.owner_descriptor_file_offsets = group_owners;
