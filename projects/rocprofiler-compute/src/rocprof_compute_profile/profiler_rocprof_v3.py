@@ -100,6 +100,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             "-d",
             args.output_directory,
             "-o",
+            # %pid% is expanded by rocprofiler-sdk, not by rocprof-compute.
             "%pid%_ps_file",
         ]
 

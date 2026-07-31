@@ -155,6 +155,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCPROF_KERNEL_TRACE": "1",
             "ROCPROF_OUTPUT_FORMAT": "json",
             "ROCPROF_OUTPUT_PATH": args.output_directory,
+            # %pid% is expanded by rocprofiler-sdk, not by rocprof-compute.
             "ROCPROF_OUTPUT_FILE_NAME": "%pid%_ps_file",
             "ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1",
             "ROCPROF_PC_SAMPLING_UNIT": pc_sampling_unit(method),

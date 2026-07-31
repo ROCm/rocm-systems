@@ -435,7 +435,8 @@ def test_rocprofv3_live_attach_uses_sync_output():
 def test_sdk_pc_sampling_options(
     tmp_path, native_tool_path, method, expected_unit, expected_ld_preload
 ):
-    """SDK PC sampling options request PID-prefixed JSON output."""
+    """sdk PC sampling options set the PC sampling env, PID-prefixed json
+    output, and append the native tool (when given) to the upstream LD_PRELOAD."""
     args = _make_sanitize_args(
         ["/bin/true"],
         rocprofiler_sdk_tool_path="/opt/sdk/tool.so",
