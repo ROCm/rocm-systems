@@ -2277,7 +2277,11 @@ int SimulatedKfd::debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args 
         kmd::effective_topology_for(info.gfx_target_version, info.capability, info.capability2,
                                     info.debug_prop, info.revision_id);
     e.capability = topology.capability;
-    e.debug_prop = topology.debug_prop;
+    // debug_prop is __u32 in the snapshot entry but __u64 in the sysfs node
+    // property, so a config that captured a debug_prop above 2^32 would have
+    // the two paths report different values. The derived bits all fit; make the
+    // narrowing the uapi struct imposes explicit rather than incidental.
+    e.debug_prop = static_cast<uint32_t>(topology.debug_prop);
 
     std::memcpy(out + static_cast<uint64_t>(i) * in_entry_size, &e, args.entry_size);
   }
