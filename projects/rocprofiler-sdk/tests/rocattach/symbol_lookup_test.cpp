@@ -33,6 +33,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -322,32 +323,10 @@ copy_with_flipped_build_id(const std::string& source, const std::string& destina
     }
 }
 
-// Callers fork and then run dlopen and std::filesystem in the child, which is
-// only safe from a single-threaded parent. Should a dependency ever start a
-// thread at load time, fail loudly here rather than deadlock on the loader lock.
 void
-require_single_threaded(const char* context)
+expect_pathname_lookup_validates_build_id(const loaded_library& source,
+                                          const loaded_library& no_build_id)
 {
-    auto status = std::ifstream{"/proc/self/status"};
-    auto line   = std::string{};
-    while(std::getline(status, line))
-    {
-        if(line.rfind("Threads:", 0) != 0) continue;
-        if(std::stoi(line.substr(line.find(':') + 1)) != 1)
-        {
-            std::cerr << context << " requires a single-threaded process, but " << line << '\n';
-            std::exit(1);
-        }
-        return;
-    }
-}
-
-void
-expect_root_fallback_validates_build_id(const loaded_library& source,
-                                        const loaded_library& no_build_id)
-{
-    require_single_threaded("cross-process fallback test");
-
     auto path = std::filesystem::temp_directory_path() /
                 "librocprofiler-register.so.rocattach-replaced-XXXXXX";
     auto path_buffer = path.string();
@@ -362,118 +341,112 @@ expect_root_fallback_validates_build_id(const loaded_library& source,
     std::filesystem::copy_file(
         source.path, path_buffer, std::filesystem::copy_options::overwrite_existing);
 
-    auto address_pipe = std::array<int, 2>{};
-    auto done_pipe    = std::array<int, 2>{};
-    if(pipe(address_pipe.data()) != 0 || pipe(done_pipe.data()) != 0)
+    auto mapped = load_library(path_buffer.c_str());
+    auto unload_mapped =
+        rocprofiler::common::scope_destructor{[&]() { cleanup_loaded_library(mapped); }};
+
+    auto* symbol = dlsym(mapped.handle, ATTACH_SYMBOL_NAME);
+    if(symbol == nullptr)
     {
-        std::cerr << "pipe failed for cross-process fallback test\n";
+        std::cerr << "dlsym failed for " << path_buffer << "::" << ATTACH_SYMBOL_NAME << '\n';
+        std::exit(1);
+    }
+    auto expected = reinterpret_cast<uintptr_t>(symbol);
+
+    struct stat mapped_identity
+    {};
+    if(stat(path_buffer.c_str(), &mapped_identity) != 0)
+    {
+        std::cerr << "stat failed for " << path_buffer << '\n';
+        std::exit(1);
+    }
+
+    auto done_pipe = std::array<int, 2>{};
+    if(pipe(done_pipe.data()) != 0)
+    {
+        std::cerr << "pipe failed for cross-process Build ID test\n";
         std::exit(1);
     }
 
     auto child = fork();
     if(child < 0)
     {
-        std::cerr << "fork failed for cross-process fallback test\n";
+        std::cerr << "fork failed for cross-process Build ID test\n";
         std::exit(1);
     }
     if(child == 0)
     {
-        close(address_pipe[0]);
         close(done_pipe[1]);
-
-        auto        mapped = load_library(path_buffer.c_str());
-        struct stat before
-        {};
-        if(stat(path_buffer.c_str(), &before) != 0) _exit(2);
-
-        // Keep the original inode mapped, but replace its pathname with an
-        // identical ELF on a different inode. This models the identity mismatch
-        // seen when maps exposes an OverlayFS backing file.
-        std::filesystem::remove(path_buffer);
-        std::filesystem::copy_file(source.path, path_buffer);
-
-        struct stat after
-        {};
-        if(stat(path_buffer.c_str(), &after) != 0 ||
-           (before.st_dev == after.st_dev && before.st_ino == after.st_ino))
-        {
-            _exit(3);
-        }
-
-        auto* expected = dlsym(mapped.handle, ATTACH_SYMBOL_NAME);
-        auto  address  = reinterpret_cast<uintptr_t>(expected);
-        if(expected == nullptr || write(address_pipe[1], &address, sizeof(address)) !=
-                                      static_cast<ssize_t>(sizeof(address)))
-        {
-            _exit(4);
-        }
-
         auto done = char{};
-        if(read(done_pipe[0], &done, sizeof(done)) != static_cast<ssize_t>(sizeof(done))) _exit(5);
-        cleanup_loaded_library(mapped);
+        while(read(done_pipe[0], &done, sizeof(done)) < 0 && errno == EINTR)
+        {}
         _exit(0);
     }
 
-    close(address_pipe[1]);
     close(done_pipe[0]);
-
-    auto cleanup = rocprofiler::common::scope_destructor{[&]() {
-        auto done         = char{};
-        auto write_result = write(done_pipe[1], &done, sizeof(done));
-        (void) write_result;
+    auto release_child = rocprofiler::common::scope_destructor{[&]() {
         close(done_pipe[1]);
-        close(address_pipe[0]);
-        (void) waitpid(child, nullptr, 0);
+        auto status = int{};
+        if(waitpid(child, &status, 0) != child || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        {
+            std::cerr << "cross-process Build ID child did not exit cleanly\n";
+        }
         std::error_code ec;
         std::filesystem::remove(path_buffer, ec);
         std::filesystem::remove(path_buffer + ".replacement", ec);
+        std::filesystem::remove(path_buffer + ".flipped", ec);
     }};
 
-    auto expected = uintptr_t{};
-    if(read(address_pipe[0], &expected, sizeof(expected)) != static_cast<ssize_t>(sizeof(expected)))
-    {
-        std::cerr << "child failed to prepare cross-process fallback test\n";
-        std::exit(1);
-    }
+    // Repoint the pathname at a different inode while the child keeps the
+    // original one mapped. Confirm the inode actually changed,
+    // otherwise the Build ID comparison would never be reached.
+    auto install_at_pathname = [&](const std::string& file) {
+        auto replacement = path_buffer + ".replacement";
+        std::filesystem::copy_file(
+            file, replacement, std::filesystem::copy_options::overwrite_existing);
+        std::filesystem::rename(replacement, path_buffer);
 
-    // Forces the /proc/<pid>/root fallback, which is the path a containerized
-    // target takes when /proc/<pid>/map_files is unavailable.
+        struct stat installed
+        {};
+        if(stat(path_buffer.c_str(), &installed) != 0 ||
+           (installed.st_dev == mapped_identity.st_dev &&
+            installed.st_ino == mapped_identity.st_ino))
+        {
+            std::cerr << "replacing " << path_buffer << " did not change its inode\n";
+            std::exit(1);
+        }
+    };
+
+    // Forces the /proc/<pid>/root path instead of /proc/<pid>/map_files.
     constexpr auto pathname_only = true;
 
-    void* resolved = nullptr;
-    if(!rocprofiler::rocattach::find_symbol(
-           child, resolved, path_buffer, ATTACH_SYMBOL_NAME, pathname_only) ||
-       reinterpret_cast<uintptr_t>(resolved) != expected)
-    {
-        std::cerr << "find_symbol failed cross-process Build ID fallback validation\n";
-        std::exit(1);
-    }
+    auto expect_lookup = [&](bool should_resolve, const char* description) {
+        void* resolved    = nullptr;
+        auto  did_resolve = rocprofiler::rocattach::find_symbol(
+            child, resolved, path_buffer, ATTACH_SYMBOL_NAME, pathname_only);
+        if(did_resolve != should_resolve)
+        {
+            std::cerr << description << '\n';
+            std::exit(1);
+        }
+        if(should_resolve && reinterpret_cast<uintptr_t>(resolved) != expected)
+        {
+            std::cerr << "find_symbol resolved the wrong address: " << description << '\n';
+            std::exit(1);
+        }
+    };
 
-    // A byte-identical pathname replacement that differs only in its Build ID
-    // must not be used to resolve a symbol from the still-mapped original.
-    auto replacement = path_buffer + ".replacement";
-    copy_with_flipped_build_id(source.path, replacement);
-    std::filesystem::rename(replacement, path_buffer);
+    install_at_pathname(source.path);
+    expect_lookup(true, "find_symbol rejected a pathname replacement with a matching Build ID");
 
-    resolved = nullptr;
-    if(rocprofiler::rocattach::find_symbol(
-           child, resolved, path_buffer, ATTACH_SYMBOL_NAME, pathname_only))
-    {
-        std::cerr << "find_symbol unexpectedly accepted a replacement ELF whose only difference "
-                     "is its Build ID\n";
-        std::exit(1);
-    }
+    auto flipped = path_buffer + ".flipped";
+    copy_with_flipped_build_id(source.path, flipped);
+    install_at_pathname(flipped);
+    expect_lookup(false,
+                  "find_symbol accepted a replacement whose only difference is its Build ID");
 
-    std::filesystem::copy_file(
-        no_build_id.path, replacement, std::filesystem::copy_options::overwrite_existing);
-    std::filesystem::rename(replacement, path_buffer);
-    resolved = nullptr;
-    if(rocprofiler::rocattach::find_symbol(
-           child, resolved, path_buffer, ATTACH_SYMBOL_NAME, pathname_only))
-    {
-        std::cerr << "find_symbol unexpectedly accepted a replacement ELF without a Build ID\n";
-        std::exit(1);
-    }
+    install_at_pathname(no_build_id.path);
+    expect_lookup(false, "find_symbol accepted a replacement without a Build ID");
 }
 }  // namespace
 
@@ -517,7 +490,7 @@ main(int argc, char** argv)
     }
     expect_ambiguous_basename_fails();
     expect_malformed_mapped_elf_fails();
-    expect_root_fallback_validates_build_id(libraries.at(0), libraries.at(4));
+    expect_pathname_lookup_validates_build_id(libraries.at(0), libraries.at(4));
 
     std::cout << "Test PASSED: target ELF resolver resolved exact mapped libraries and rejected "
                  "ambiguous and malformed mappings\n";
