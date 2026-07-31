@@ -32,15 +32,18 @@ std::optional<Packed16VgprSource> packed_16bit_vgpr_source(bool packed_16bit_sou
                                                            OperandType opr_type, int ev) {
   if (!packed_16bit_source || size_bits != 16)
     return std::nullopt;
-  if (opr_type == OperandType::OPR_VGPR) {
-    if (ev >= 0 && ev <= 127)
-      return Packed16VgprSource{static_cast<uint32_t>(ev), 0};
-    if (ev >= 128 && ev <= 255)
-      return Packed16VgprSource{static_cast<uint32_t>(ev - 128), 16};
+  int selector_base;
+  if (opr_type == OperandType::OPR_VGPR)
+    selector_base = 0;
+  else if (opr_type == OperandType::OPR_SRC)
+    selector_base = 256;
+  else
     return std::nullopt;
-  }
-  if (ev >= 384 && ev <= 511)
-    return Packed16VgprSource{static_cast<uint32_t>(ev - 384), 16};
+  int selector = ev - selector_base;
+  if (selector >= 0 && selector <= 127)
+    return Packed16VgprSource{static_cast<uint32_t>(selector), 0};
+  if (selector >= 128 && selector <= 255)
+    return Packed16VgprSource{static_cast<uint32_t>(selector - 128), 16};
   return std::nullopt;
 }
 
@@ -1217,6 +1220,20 @@ void Operand::simd_notify_read64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_m
                                           uint8_t byte_mask) const {
   if (decltype(ExecutionBackend::simd_notify_read64_mut) callback =
           execution_backend_ ? execution_backend_->simd_notify_read64_mut : nullptr)
+    (this->*callback)(wf, lane_mask, byte_mask);
+}
+
+void Operand::simd_notify_write_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                         uint8_t byte_mask) const {
+  if (decltype(ExecutionBackend::simd_notify_write_mut) callback =
+          execution_backend_ ? execution_backend_->simd_notify_write_mut : nullptr)
+    (this->*callback)(wf, lane_mask, byte_mask);
+}
+
+void Operand::simd_notify_write64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                           uint8_t byte_mask) const {
+  if (decltype(ExecutionBackend::simd_notify_write64_mut) callback =
+          execution_backend_ ? execution_backend_->simd_notify_write64_mut : nullptr)
     (this->*callback)(wf, lane_mask, byte_mask);
 }
 
