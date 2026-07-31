@@ -29,6 +29,8 @@
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/code/relocation_function_table.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -90,6 +92,16 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   if (!raw)
     return {};
   return {raw, raw + inst.size() / sizeof(uint32_t)};
+}
+
+void append_gfx1250_wmma_completion_wait(std::vector<uint32_t> &words) {
+  // TODO: Replace this unconditional drain with block-local S_WAIT_ALU
+  // analysis over the final translated instruction stream. It should track
+  // VA_VDST/VM_VSRC register dependencies, account for pre-existing waits,
+  // and emit a wait only immediately before a dependent instruction.
+  constexpr uint16_t kWaitVaVdstZero = 0x0f9f;
+  words.push_back(
+      gfx1250::build_sopp(gfx1250::kSWaitAluSopp, {.simm16 = kWaitVaVdstZero})[0]);
 }
 
 [[nodiscard]] uint32_t text_word_at(std::span<const uint8_t> text, uint64_t offset) {
@@ -2382,6 +2394,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
           if (expansion.status == ExpandStatus::Success) {
             std::vector<uint32_t> target_words = std::move(expansion.words);
+            if (is_gfx1250_b0_to_a0() &&
+                gfx1250_b0_to_a0_requires_wmma_completion_wait(inst)) {
+              append_gfx1250_wmma_completion_wait(target_words);
+            }
             append_words(kernel_text, target_words);
             queue_trace(pending_traces, inst, offset, leg, false, true, true, target_offset,
                         std::move(target_words));
@@ -2483,6 +2499,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // indirect transfers have already taken their relocation paths above;
         // explicit profile expansions have already continued or failed closed.
         if (guest_arch_ == host_arch_ && leg == nullptr) {
+          if (is_gfx1250_b0_to_a0() &&
+              gfx1250_b0_to_a0_requires_wmma_completion_wait(inst)) {
+            std::vector<uint32_t> target_words = raw_words_for_inst(inst);
+            append_gfx1250_wmma_completion_wait(target_words);
+            append_words(kernel_text, target_words);
+            queue_trace(pending_traces, inst, offset, leg, false, false, true, target_offset,
+                        std::move(target_words));
+            continue;
+          }
           copy_original_instruction(inst, offset, kernel_text, pending_traces);
           continue;
         }
