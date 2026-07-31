@@ -7,6 +7,7 @@
 #include "amdsmi_wrap.h"
 
 #include <cstddef>
+#include <cstring>
 #include <gtest/gtest.h>
 
 namespace RcclUnitTesting
@@ -131,6 +132,33 @@ TEST(AmdSmiFabricLayout, TrailingFieldsAreNotShifted)
     const size_t expectedAddrMode = amdSmiFabricLayoutIs8Gpu ? 204u : 236u;
     EXPECT_EQ(offsetof(amdsmi_fabric_info_v1_t, addr_mode), expectedAddrMode);
     EXPECT_EQ(offsetof(amdsmi_fabric_info_v1_t, accel_state), expectedAddrMode + sizeof(uint32_t));
+}
+
+TEST(AmdSmiFabricRuntimeLayout, DetectsEightGpuWriter)
+{
+    amdSmiFabricInfoBuffer buffer;
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    memset(buffer.bytes, 0, kAmdSmiFabricInfo8GpuSize);
+
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::EightGpu);
+}
+
+TEST(AmdSmiFabricRuntimeLayout, DetectsSixteenGpuWriter)
+{
+    amdSmiFabricInfoBuffer buffer;
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    memset(buffer.bytes, 0, kAmdSmiFabricInfo16GpuSize);
+
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::SixteenGpu);
+}
+
+TEST(AmdSmiFabricRuntimeLayout, RejectsUnknownWriter)
+{
+    amdSmiFabricInfoBuffer buffer;
+    amdSmiPrepareFabricInfoBuffer(buffer);
+    buffer.bytes[kAmdSmiFabricInfo8GpuSize] = 0;
+
+    EXPECT_EQ(amdSmiDetectFabricRuntimeLayout(buffer), amdSmiFabricRuntimeLayout::Unknown);
 }
 
 // ---------------------------------------------------------------------------

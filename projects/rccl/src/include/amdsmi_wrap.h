@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <ctime>
 #include <type_traits>
 #include <utility>
@@ -477,14 +478,21 @@ amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char**
  * AMDSMI_FABRIC_MAX_LOCAL_GPUS=8, while final ROCm 7.14 and ROCm 7.15 use 16
  * without changing the amd_smi major.
  ************************************************************************/
+constexpr size_t kAmdSmiFabricInfo8GpuSize = 288;
+constexpr size_t kAmdSmiFabricInfo16GpuSize = 320;
+constexpr size_t kAmdSmiFabricState8GpuOffset = 208;
+constexpr size_t kAmdSmiFabricState16GpuOffset = 240;
+
 constexpr bool amdSmiFabricLayoutIs8Gpu =
-  sizeof(amdsmi_fabric_info_v1_t) == 212 && sizeof(amdsmi_fabric_info_t) == 288 &&
-  offsetof(amdsmi_fabric_info_v1_t, addr_mode) == 204 && offsetof(amdsmi_fabric_info_v1_t, accel_state) == 208 &&
+  sizeof(amdsmi_fabric_info_v1_t) == 212 && sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo8GpuSize &&
+  offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState8GpuOffset - sizeof(uint32_t) &&
+  offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState8GpuOffset &&
   offsetof(amdsmi_fabric_info_t, reserved) == 224;
 
 constexpr bool amdSmiFabricLayoutIs16Gpu =
-  sizeof(amdsmi_fabric_info_v1_t) == 244 && sizeof(amdsmi_fabric_info_t) == 320 &&
-  offsetof(amdsmi_fabric_info_v1_t, addr_mode) == 236 && offsetof(amdsmi_fabric_info_v1_t, accel_state) == 240 &&
+  sizeof(amdsmi_fabric_info_v1_t) == 244 && sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo16GpuSize &&
+  offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState16GpuOffset - sizeof(uint32_t) &&
+  offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState16GpuOffset &&
   offsetof(amdsmi_fabric_info_t, reserved) == 256;
 
 static_assert(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu, "unsupported amdsmi fabric layout");
@@ -561,6 +569,43 @@ inline const amdsmi_fabric_info_v1_t* amdSmiFabricInfoV1(const FabricInfoT& info
   } else {
     return &info.fabric_info.fabric_version.v1;
   }
+}
+
+// amd_smi 26.x used both supported payload sizes under the same SONAME. Use a
+// maximum-sized canary buffer so either runtime can write safely, then identify
+// how much it wrote. Both implementations value-initialize a local struct and
+// assign the complete object, making the final 32 bytes zero only for the
+// 16-GPU runtime.
+constexpr unsigned char kAmdSmiFabricBufferCanary = 0xA5;
+
+struct alignas(amdsmi_fabric_info_t) amdSmiFabricInfoBuffer {
+  unsigned char bytes[kAmdSmiFabricInfo16GpuSize];
+};
+
+enum class amdSmiFabricRuntimeLayout {
+  EightGpu,
+  SixteenGpu,
+  Unknown,
+};
+
+inline void amdSmiPrepareFabricInfoBuffer(amdSmiFabricInfoBuffer& buffer) {
+  memset(buffer.bytes, kAmdSmiFabricBufferCanary, sizeof(buffer.bytes));
+}
+
+inline amdsmi_fabric_info_t* amdSmiFabricInfoBufferAsInfo(amdSmiFabricInfoBuffer& buffer) {
+  return reinterpret_cast<amdsmi_fabric_info_t*>(buffer.bytes);
+}
+
+inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFabricInfoBuffer& buffer) {
+  bool tailIsCanary = true;
+  bool tailIsZero = true;
+  for (size_t i = kAmdSmiFabricInfo8GpuSize; i < kAmdSmiFabricInfo16GpuSize; ++i) {
+    tailIsCanary &= buffer.bytes[i] == kAmdSmiFabricBufferCanary;
+    tailIsZero &= buffer.bytes[i] == 0;
+  }
+  if (tailIsCanary) return amdSmiFabricRuntimeLayout::EightGpu;
+  if (tailIsZero) return amdSmiFabricRuntimeLayout::SixteenGpu;
+  return amdSmiFabricRuntimeLayout::Unknown;
 }
 
 // amd_smi 27.0 also changed amdsmi_fabric_telem_id_to_string from returning the name
