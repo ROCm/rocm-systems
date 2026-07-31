@@ -322,6 +322,7 @@ jobs:
           rocm-sdk init
 
       - name: Run amdisa tests
+        if: matrix.run_corpus
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
         run: |
           uv pip install --system -e lib/python
