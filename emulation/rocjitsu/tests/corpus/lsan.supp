@@ -1,7 +1,5 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-# ROCR retains these process-lifetime resources after HIP shutdown.
-leak:rocr::AMD::hsa_amd_signal_create
-leak:rocr::AMD::AqlQueue::AqlQueue
-leak:hsaKmtCreateEventCtx
+# If there are any false positives / leaks in uninstrumented code:
+# place here.
