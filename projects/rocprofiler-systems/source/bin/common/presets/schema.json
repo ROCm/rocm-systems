@@ -395,11 +395,7 @@
                         },
                         "sample_interval": {
                             "$ref": "#/$defs/intValueField",
-                            "description": "SPM counter sampling interval"
-                        },
-                        "sample_interval_unit": {
-                            "$ref": "#/$defs/stringValueField",
-                            "description": "SPM sampling interval unit. Currently supported: sclk_cycles"
+                            "description": "SPM counter sampling interval in GPU shader-clock cycles. The interval is rounded to the nearest multiple of 32"
                         }
                     },
                     "type": "object"

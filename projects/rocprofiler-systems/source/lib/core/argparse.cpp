@@ -1248,23 +1248,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.reg.processed_environs.emplace("rocm_spm_sample_interval");
     }
 
-    if(_data.reg.environ_filter("spm_sample_interval_unit", _data))
-    {
-        _parser
-            .add_argument({ "--spm-sample-interval-unit" },
-                          "Set beta SPM counter sampling interval unit")
-            .count(1)
-            .dtype("string")
-            .choices({ std::string{ env_vars::SPM_SAMPLE_INTERVAL_UNIT_SCLK_CYCLES } })
-            .action([&](parser_t& p) {
-                update_env(_data, env_vars::ROCM_SPM_SAMPLE_INTERVAL_UNIT,
-                           p.get<std::string>("spm-sample-interval-unit"));
-            });
-
-        _data.reg.processed_environs.emplace("spm_sample_interval_unit");
-        _data.reg.processed_environs.emplace("rocm_spm_sample_interval_unit");
-    }
-
     add_group_arguments(_parser, "category", _data, true);
     add_group_arguments(_parser, "io", _data, true);
     add_group_arguments(_parser, "perfetto", _data, true);

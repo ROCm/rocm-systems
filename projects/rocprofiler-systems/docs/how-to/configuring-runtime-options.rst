@@ -308,21 +308,15 @@ SPM is configured with the following settings:
   to one GPU device, for example ``SQ_WAVES:device=0``. Setting this option
   requests SPM collection; a positive sample interval is also required.
 * ``ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL`` specifies the sampling interval for
-  SPM counter collection. It is used with
-  ``ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT`` to define how frequently counters
-  are sampled.
-* ``ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT`` specifies the unit for
-  ``ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL``. The beta implementation currently
-  supports ``sclk_cycles``. With this unit, the sample interval is rounded to
-  the nearest multiple of 32. Supported intervals are hardware-limited and can
-  be queried with ``rocprofv3-avail list --spm-config``. The examples use
-  ``8192``, an exact multiple of the 32-cycle granularity.
+  SPM counter collection in GPU shader-clock cycles. The beta implementation
+  rounds the interval to the nearest multiple of 32. Supported intervals are
+  hardware-limited and can be queried with ``rocprofv3-avail info --spm-config``.
+  The examples use ``8192``, an exact multiple of the 32-cycle granularity.
 
 The equivalent command-line options are:
 
 * ``--spm-events``
 * ``--spm-sample-interval``
-* ``--spm-sample-interval-unit``
 
 SPM collection is mutually exclusive with the existing ROCm GPU counter paths in
 this beta. Do not combine ``ROCPROFSYS_ROCM_SPM_EVENTS`` with either
@@ -342,7 +336,6 @@ running the ``transpose`` example and writes a Perfetto trace:
    ROCPROFSYS_OUTPUT_PATH=/tmp/rocprofsys-spm \
    ROCPROFSYS_ROCM_SPM_EVENTS=SQ_WAVES:device=0 \
    ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL=8192 \
-   ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT=sclk_cycles \
    rocprof-sys-run -- ./transpose
 
 You can configure the same run with command-line options:
@@ -355,7 +348,6 @@ You can configure the same run with command-line options:
    rocprof-sys-run \
       --spm-events SQ_WAVES:device=0 \
       --spm-sample-interval 8192 \
-      --spm-sample-interval-unit sclk_cycles \
       -- ./transpose
 
 Open the generated ``perfetto-trace-<pid>.proto`` file in the Perfetto UI and

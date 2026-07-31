@@ -54,9 +54,6 @@ get_events();
 
 [[nodiscard]] std::uint64_t
 get_sample_interval();
-
-[[nodiscard]] std::string
-get_sample_interval_unit();
 }  // namespace spm
 
 std::unordered_set<std::int32_t>

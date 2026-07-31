@@ -228,8 +228,6 @@ inline constexpr const char* ROCM_EVENTS               = "ROCPROFSYS_ROCM_EVENTS
 inline constexpr const char* ROCM_SPM_EVENTS           = "ROCPROFSYS_ROCM_SPM_EVENTS";
 inline constexpr const char* ROCM_SPM_SAMPLE_INTERVAL =
     "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL";
-inline constexpr const char* ROCM_SPM_SAMPLE_INTERVAL_UNIT =
-    "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT";
 inline constexpr const char* PAPI_EVENTS               = "ROCPROFSYS_PAPI_EVENTS";
 inline constexpr const char* PAPI_MULTIPLEXING_ENABLED = "ROCPROFSYS_PAPI_MULTIPLEXING";
 inline constexpr const char* PAPI_FAIL_ON_ERROR        = "ROCPROFSYS_PAPI_FAIL_ON_ERROR";
@@ -237,10 +235,6 @@ inline constexpr const char* PAPI_OVERFLOW             = "ROCPROFSYS_PAPI_OVERFL
 inline constexpr const char* PAPI_QUIET_MODE           = "ROCPROFSYS_PAPI_QUIET";
 inline constexpr const char* PAPI_THREADING            = "ROCPROFSYS_PAPI_THREADING";
 inline constexpr const char* USE_CODE_COVERAGE         = "ROCPROFSYS_USE_CODE_COVERAGE";
-
-// Supported value for ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT. This is a setting
-// value rather than a variable name, so it is kept apart from the names above.
-inline constexpr std::string_view SPM_SAMPLE_INTERVAL_UNIT_SCLK_CYCLES = "sclk_cycles";
 
 // --- MPI ---
 inline constexpr const char* MPI_INIT             = "ROCPROFSYS_MPI_INIT";

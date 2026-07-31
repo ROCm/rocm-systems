@@ -101,8 +101,7 @@ constexpr auto spm_preset_json = R"({
         "enabled": false,
         "spm": {
             "events": {"value": "SQ_WAVES:device=0"},
-            "sample_interval": {"value": 8192},
-            "sample_interval_unit": {"value": "sclk_cycles"}
+            "sample_interval": {"value": 8192}
         }
     }
 })";

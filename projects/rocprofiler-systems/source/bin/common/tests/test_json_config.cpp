@@ -186,8 +186,7 @@ TEST_F(json_config_test, resolves_spm_hardware_counters_section)
         "hardware_counters": {
             "spm": {
                 "events": {"value": ["SQ_WAVES"]},
-                "sample_interval": {"value": 4200},
-                "sample_interval_unit": {"value": "sclk_cycles"}
+                "sample_interval": {"value": 4200}
             }
         }
     })");
@@ -196,7 +195,6 @@ TEST_F(json_config_test, resolves_spm_hardware_counters_section)
 
     EXPECT_EQ(result.at(env_vars::ROCM_SPM_EVENTS), "SQ_WAVES");
     EXPECT_EQ(result.at(env_vars::ROCM_SPM_SAMPLE_INTERVAL), "4200");
-    EXPECT_EQ(result.at(env_vars::ROCM_SPM_SAMPLE_INTERVAL_UNIT), "sclk_cycles");
 }
 
 // Test new schema format - causal section

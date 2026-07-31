@@ -88,6 +88,12 @@ struct agent_config_result
     rocprofiler_counter_config_id_t config = {};
 };
 
+struct counter_config_data
+{
+    spm_counter_id_vec_t                                   counter_ids  = {};
+    std::vector<trace_cache::info::spm_counter_name_entry> name_entries = {};
+};
+
 rocprofiler_status_t
 spm_configurations_callback(const rocprofiler_spm_available_configuration_t** configs,
                             size_t num_configs, void* user_data)
@@ -131,6 +137,16 @@ parse_device_id(std::string_view value)
     return result;
 }
 
+std::string
+parse_counter_name(std::string_view event)
+{
+    constexpr auto device_qualifier = std::string_view{ ":device=" };
+
+    auto name = std::string{ event.substr(0, event.find(device_qualifier)) };
+    utility::trim_str(name);
+    return name;
+}
+
 requested_counter_vec_t
 parse_requested_counters(const request& req)
 {
@@ -144,15 +160,14 @@ parse_requested_counters(const request& req)
         utility::trim_str(trimmed_event);
         if(trimmed_event.empty()) continue;
 
-        const auto pos = trimmed_event.find(device_qualifier);
+        auto       name = parse_counter_name(trimmed_event);
+        const auto pos  = trimmed_event.find(device_qualifier);
         if(pos == std::string::npos)
         {
-            counters.push_back({ trimmed_event, std::nullopt });
+            counters.push_back({ std::move(name), std::nullopt });
             continue;
         }
 
-        auto name = trimmed_event.substr(0, pos);
-        utility::trim_str(name);
         auto device = parse_device_id(
             std::string_view{ trimmed_event }.substr(pos + device_qualifier.size()));
 
@@ -215,6 +230,31 @@ requested_counter_names(const requested_counter_vec_t& requested)
     for(const auto& itr : requested)
         requested_names.emplace(itr.name);
     return requested_names;
+}
+
+counter_config_data
+make_counter_config_data(resolved_counter_vec_t& counters)
+{
+    auto config_data = counter_config_data{};
+    config_data.counter_ids.reserve(counters.size());
+
+    const auto name_entry_count =
+        std::accumulate(counters.begin(), counters.end(), std::size_t{ 0 },
+                        [](std::size_t total, const auto& counter) {
+                            return total + counter.name_entries.size();
+                        });
+    config_data.name_entries.reserve(name_entry_count);
+
+    for(auto& counter : counters)
+    {
+        config_data.counter_ids.emplace_back(counter.id);
+        config_data.name_entries.insert(
+            config_data.name_entries.end(),
+            std::make_move_iterator(counter.name_entries.begin()),
+            std::make_move_iterator(counter.name_entries.end()));
+    }
+
+    return config_data;
 }
 
 std::string
@@ -378,35 +418,19 @@ create_agent_spm_config(rocprofiler_agent_id_t agent_id, std::uint64_t device_id
 
     if(!sample_interval_supported(agent_id, req))
     {
-        LOG_WARNING("SPM sample interval {} {} is not supported for device {} "
+        LOG_WARNING("SPM sample interval {} SCLK cycles is not supported for device {} "
                     "(agent {})",
-                    req.sample_interval, req.sample_interval_unit, device_id,
-                    agent_id.handle);
+                    req.sample_interval, device_id, agent_id.handle);
         return { agent_config_status::failed, {} };
     }
 
-    auto counter_ids  = spm_counter_id_vec_t{};
-    auto name_entries = std::vector<trace_cache::info::spm_counter_name_entry>{};
-    counter_ids.reserve(counters.counters.size());
-    const auto name_entry_count =
-        std::accumulate(counters.counters.begin(), counters.counters.end(),
-                        std::size_t{ 0 }, [](std::size_t total, const auto& counter) {
-                            return total + counter.name_entries.size();
-                        });
-    name_entries.reserve(name_entry_count);
-    for(auto& counter : counters.counters)
-    {
-        counter_ids.emplace_back(counter.id);
-        name_entries.insert(name_entries.end(),
-                            std::make_move_iterator(counter.name_entries.begin()),
-                            std::make_move_iterator(counter.name_entries.end()));
-    }
-
-    auto config = create_sdk_spm_counter_config(agent_id, device_id, req, counter_ids);
+    auto config_data = make_counter_config_data(counters.counters);
+    auto config =
+        create_sdk_spm_counter_config(agent_id, device_id, req, config_data.counter_ids);
     if(config)
     {
         trace_cache::get_metadata_registry().set_spm_counter_names(
-            static_cast<std::uint32_t>(device_id), std::move(name_entries));
+            static_cast<std::uint32_t>(device_id), std::move(config_data.name_entries));
         return { agent_config_status::configured, *config };
     }
 

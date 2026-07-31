@@ -1407,17 +1407,8 @@ perfetto_processor_t::handle([[maybe_unused]] const spm_sample& _spm)
     using counter_collection_track =
         core::perfetto::counter_track<category::rocm_counter_collection>;
 
-    std::uint32_t device_id = 0;
-    try
-    {
-        device_id = static_cast<std::uint32_t>(
-            m_agent_manager.get_agent_by_handle(_spm.agent_id_handle).device_type_index);
-    } catch(const std::exception& e)
-    {
-        LOG_WARNING("Skipping SPM Perfetto samples for unknown agent handle {}: {}",
-                    _spm.agent_id_handle, e.what());
-        return;
-    }
+    const auto device_id = static_cast<std::uint32_t>(
+        m_agent_manager.get_agent_by_handle(_spm.agent_id_handle).device_type_index);
 
     struct spm_track_info
     {

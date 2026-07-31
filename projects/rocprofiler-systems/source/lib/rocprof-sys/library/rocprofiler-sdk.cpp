@@ -2475,8 +2475,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     auto _buffered_domain  = rocprofiler_sdk::get_buffered_domains();
     auto _counter_events   = rocprofiler_sdk::get_rocm_events();
     auto _gpu_perf_events  = config::get_gpu_perf_counters();
-    auto _spm_request      = rocprofiler_sdk::spm::request::from_settings();
-    auto _version          = rocprofiler_sdk::get_version();
+    auto _spm_request      = rocprofiler_sdk::spm::request{
+        rocprofiler_sdk::spm::get_events(),
+        rocprofiler_sdk::spm::get_sample_interval(),
+    };
+    auto _version = rocprofiler_sdk::get_version();
     if(_version.formatted == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
@@ -2490,8 +2493,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     {
         return -1;
     }
-    const auto _spm_beta_enabled =
-        rocprofiler_sdk::spm::sdk_beta_opt_in_enabled(_spm_request);
     if(_spm_request.requested() && config::get_use_rocpd())
     {
         LOG_WARNING("SPM samples are not written to the RocPD database in this "
@@ -2512,6 +2513,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     // Control context for marker-based region filtering and pause/resume (always-on)
     ROCPROFILER_CALL(rocprofiler_create_context(&_data->control_ctx));
+
+    const auto _spm_beta_enabled =
+        rocprofiler_sdk::spm::beta_opt_in_satisfied(_spm_request);
 
     // SPM being unavailable on this SDK/hardware/runtime path must not abort tool
     // initialization. configure_runtime() already logged the specific reason.

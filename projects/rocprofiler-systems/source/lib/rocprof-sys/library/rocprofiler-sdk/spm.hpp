@@ -15,34 +15,36 @@ struct client_data;
 
 namespace spm
 {
-/// Captures the SPM counter collection settings resolved from Systems configuration.
+using env_bool_reader_t = bool (*)(const char*, bool);
+
+/// Plain value describing an SPM counter collection request.
 struct request
 {
-    std::vector<std::string> events               = {};
-    std::uint64_t            sample_interval      = 0;
-    std::string              sample_interval_unit = {};
+    std::vector<std::string> events          = {};
+    std::uint64_t            sample_interval = 0;
 
-    /// Returns true when SPM counters were requested.
-    [[nodiscard]] bool requested() const noexcept { return !events.empty(); }
-
-    /// Resolve an SPM collection request from the current Systems settings.
-    [[nodiscard]] static request from_settings();
+    /// Returns true when the user requested SPM counter collection.
+    [[nodiscard]] bool requested() const noexcept;
 };
 
 /// Validate SPM collection request constraints.
 ///
-/// Returns true when SPM is not requested. If SPM is requested, validates the required
-/// sample interval settings and mutual exclusion with ROCPROFSYS_ROCM_EVENTS and
-/// ROCPROFSYS_GPU_PERF_COUNTERS.
+/// Returns true when SPM is not requested because there is no SPM configuration to
+/// reject. If SPM is requested, validates the required sample interval settings and
+/// mutual exclusion with ROCPROFSYS_ROCM_EVENTS and ROCPROFSYS_GPU_PERF_COUNTERS.
 [[nodiscard]]
 bool
 is_config_valid(const request&                  req,
                 const std::vector<std::string>& dispatch_counter_events,
                 const std::string&              device_counter_events);
 
-/// Returns true when the SDK beta SPM opt-in is explicitly enabled.
+/// Returns true when the SDK beta SPM opt-in condition does not block runtime setup.
 [[nodiscard]] bool
-sdk_beta_opt_in_enabled(const request& req);
+beta_opt_in_satisfied(const request& req, env_bool_reader_t read_env);
+
+/// Returns true when the SDK beta SPM opt-in condition does not block runtime setup.
+[[nodiscard]] bool
+beta_opt_in_satisfied(const request& req);
 
 /// Configure the SDK SPM runtime service on the dedicated Systems SPM context.
 [[nodiscard]] bool

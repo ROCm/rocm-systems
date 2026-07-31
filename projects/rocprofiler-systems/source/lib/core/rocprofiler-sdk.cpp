@@ -359,17 +359,11 @@ config_settings(const std::shared_ptr<settings>& _config)
 
     ROCPROFSYS_CONFIG_SETTING(
         std::uint64_t, env_vars::ROCM_SPM_SAMPLE_INTERVAL,
-        "ROCm SPM sampling interval, interpreted in the configured SPM sample interval "
-        "unit. Required when SPM events are set; the default of 0 means unset and is "
-        "rejected. Supported intervals are hardware-limited and can be queried with "
-        "'rocprofv3-avail list --spm-config'",
+        "ROCm SPM sampling interval in GPU shader-clock cycles. Required when SPM "
+        "events are set; the default of 0 means unset and is rejected. The interval "
+        "is rounded to the nearest multiple of 32. Supported intervals are "
+        "hardware-limited and can be queried with 'rocprofv3-avail info --spm-config'",
         std::uint64_t{ 0 }, "rocm", "hardware_counters", "spm", "beta");
-
-    ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::ROCM_SPM_SAMPLE_INTERVAL_UNIT,
-                              "ROCm SPM sample interval unit",
-                              env_vars::SPM_SAMPLE_INTERVAL_UNIT_SCLK_CYCLES, "rocm",
-                              "hardware_counters", "spm", "beta")
-        ->set_choices({ std::string{ env_vars::SPM_SAMPLE_INTERVAL_UNIT_SCLK_CYCLES } });
 
     _skip_domains.emplace("kernel_dispatch");
     _skip_domains.emplace("page_migration");
@@ -701,7 +695,7 @@ namespace spm
 [[nodiscard]] std::vector<std::string>
 get_events()
 {
-    return tim::delimit(
+    return rocprofsys::delimit(
         get_setting_value<std::string>(std::string{ env_vars::ROCM_SPM_EVENTS })
             .value_or(std::string{}),
         " ,;\t\n");
@@ -713,14 +707,6 @@ get_sample_interval()
     return get_setting_value<std::uint64_t>(
                std::string{ env_vars::ROCM_SPM_SAMPLE_INTERVAL })
         .value_or(0);
-}
-
-[[nodiscard]] std::string
-get_sample_interval_unit()
-{
-    return get_setting_value<std::string>(
-               std::string{ env_vars::ROCM_SPM_SAMPLE_INTERVAL_UNIT })
-        .value_or(std::string{ env_vars::SPM_SAMPLE_INTERVAL_UNIT_SCLK_CYCLES });
 }
 }  // namespace spm
 

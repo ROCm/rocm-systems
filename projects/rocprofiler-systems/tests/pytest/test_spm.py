@@ -31,7 +31,6 @@ def spm_perfetto_env() -> dict[str, str]:
         # Matches the documented example interval and is an exact multiple of
         # the 32-cycle hardware granularity.
         "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL": "8192",
-        "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT": "sclk_cycles",
     }
 
 
