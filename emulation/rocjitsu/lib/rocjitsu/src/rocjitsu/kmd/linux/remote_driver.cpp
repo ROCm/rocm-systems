@@ -112,6 +112,14 @@ Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
   return gpu;
 }
 
+/// @brief Ceiling on the device count a snapshot request may reserve room for.
+///
+/// @details Two orders of magnitude above anything a KFD enumerates (the
+/// driver's own MAX_GPU_INSTANCE and libhsakmt's NUM_OF_SUPPORTED_GPUS are both
+/// 64), so it can never truncate a real answer, while keeping the reserved tail
+/// at half a megabyte instead of the whole payload budget.
+inline constexpr uint32_t kMaxSnapshotDevices = 4096;
+
 /// @brief Clamp a DBG_TRAP device-snapshot request to a transmittable size.
 ///
 /// @details The snapshot buffer is pure ioctl output, so the request carries an
@@ -126,10 +134,15 @@ Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
 ///
 /// Clamping the transmitted count keeps the ioctl's semantics rather than
 /// failing a request the kernel would have served: the daemon still reports the
-/// true device total in num_devices(OUT), and the ceiling is the transport's
-/// own capacity, so it cannot drop an entry the daemon could have returned —
-/// a reply for more devices than this would exceed @ref kMaxPayloadBytes and be
-/// rejected regardless.
+/// true device total in num_devices(OUT), and the ceiling is far above any
+/// device count a KFD can enumerate, so it cannot drop an entry the daemon
+/// could have returned.
+///
+/// The ceiling is @ref kMaxSnapshotDevices rather than the transport's raw
+/// capacity. Filling the whole payload budget would be correct but ruinous: at
+/// 128 B/entry it reserves ~16 MiB of zeros in the request and makes the daemon
+/// echo ~16 MiB back (rj_daemon replies with the buffer it received), i.e. ~32
+/// MiB moved under rpc_mutex_ on every debugger attach to describe one GPU.
 ///
 /// A zero return for a non-zero @p num_devices means not even one entry fits;
 /// the caller must fail the ioctl rather than transmit the count, because
@@ -148,7 +161,8 @@ uint32_t clamp_snapshot_devices(uint32_t num_devices, uint32_t entry_size, size_
   const size_t overhead = sizeof(RpcIoctlRequest) + arg_size;
   if (overhead >= kMaxPayloadBytes)
     return 0;
-  const size_t max_entries = (kMaxPayloadBytes - overhead) / entry_size;
+  const size_t max_entries =
+      std::min<size_t>(kMaxSnapshotDevices, (kMaxPayloadBytes - overhead) / entry_size);
   return static_cast<uint32_t>(std::min<size_t>(num_devices, max_entries));
 }
 
