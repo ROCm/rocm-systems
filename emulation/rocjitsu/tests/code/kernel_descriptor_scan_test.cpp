@@ -73,6 +73,14 @@ TEST(KernelDescriptorScan, TooSmallImageReturnsEmpty) {
   EXPECT_TRUE(scan_kernel_descriptors({tiny.data(), tiny.size()}, 0x100, 0x8).empty());
 }
 
+// A descriptor symbol whose name runs to the end of its string table with no
+// in-bounds NUL terminator is rejected, not read past the table boundary.
+TEST(KernelDescriptorScan, UnterminatedDescriptorNameIsRejected) {
+  const auto image =
+      make_gfx950_unterminated_kd_name_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+  EXPECT_TRUE(scan_via_text_section(image).empty());
+}
+
 // When no section matches the requested (text_offset, text_size), the walk cannot
 // resolve .text's base address and returns nothing.
 TEST(KernelDescriptorScan, NoMatchingTextSectionReturnsEmpty) {

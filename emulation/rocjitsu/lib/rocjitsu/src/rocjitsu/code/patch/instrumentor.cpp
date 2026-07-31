@@ -709,10 +709,22 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     if (site.is_probe_call()) {
       const ProbeCallable &probe = resolved.probes[*site.probe_index];
 
+      // A probe call selects temp SGPRs (link/target/SCC/special-state) bounded by
+      // the kernel's own allocation. Without a discovered descriptor that bound is
+      // unknown, so a temp could land past the kernel's .sgpr_count; fail closed
+      // rather than fall back to the device-wide default (growing the allocation is
+      // deferred).
+      if (!kernel_sgpr_count) {
+        result.errors.push_back("probe call at anchor_offset " +
+                                std::to_string(site.anchor_offset) +
+                                " requires a discovered kernel descriptor to bound SGPR "
+                                "selection, but none was found");
+        continue;
+      }
+
       // The kernel must own the fixed return-link pair.
       if (const std::optional<uint16_t> link_base = link_pair_for(probe.cc);
-          link_base && kernel_sgpr_count &&
-          !probe_link_pair_fits_in_kernel(*kernel_sgpr_count, *link_base)) {
+          link_base && !probe_link_pair_fits_in_kernel(*kernel_sgpr_count, *link_base)) {
         result.errors.push_back(
             "probe call needs the return-link pair s[" + std::to_string(*link_base) + ":" +
             std::to_string(*link_base + 1) + "] but the kernel allocates only " +
@@ -761,10 +773,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       plan.preserve_vcc = true;
       plan.preserve_m0 = summary->touches_m0;
       // Cap envelope/temp SGPR selection at the kernel's own allocation so a temp
-      // never lands past its .sgpr_count. Unknown count -> leave the conservative
-      // default (the cross-ISA allocatable bound).
-      if (kernel_sgpr_count)
-        plan.kernel_sgpr_count = *kernel_sgpr_count;
+      // never lands past its .sgpr_count
+      plan.kernel_sgpr_count = *kernel_sgpr_count;
       // Given liveness, clobbers, and calling convention, select registers
       // for trampoline and determine how big the trampoline will be
       if (!TrampolineBuilder::plan_probe_call(plan, probe.cc, live, summary->ordinary_clobbers,

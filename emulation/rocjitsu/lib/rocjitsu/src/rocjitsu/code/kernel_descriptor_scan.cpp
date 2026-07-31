@@ -39,7 +39,12 @@ kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t s
     return std::nullopt;
 
   const char *name = strtab + sym.st_name;
-  const size_t len = strnlen(name, strtab_size - sym.st_name);
+  const size_t avail = strtab_size - sym.st_name;
+  const size_t len = strnlen(name, avail);
+  // No NUL within bounds: the name is unterminated, so the strcmp below would read
+  // past the table (the image span is arbitrary). Reject before the suffix check.
+  if (len == avail)
+    return std::nullopt;
   if (len <= 3 || std::strcmp(name + len - 3, ".kd") != 0)
     return std::nullopt;
   return std::string(name, len - 3);
