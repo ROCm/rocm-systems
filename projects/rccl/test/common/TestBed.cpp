@@ -483,9 +483,11 @@ namespace RcclUnitTesting
     }
 
     // Wait for child acknowledgement
-    for (int childId = 0; childId < this->numActiveChildren; ++childId)
-    {
-      if ((currentRanks.size() == 0) || (ranksPerChild[childId].size() > 0)) PIPE_CHECK(childId);
+    for (auto currGroup : groupList) {
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      {
+        if ((currentRanks.size() == 0) || (ranksPerChild[childId].size() > 0)) PIPE_CHECK(childId);
+      }
     }
 
     InteractiveWait("Finishing ExecuteCollectives");

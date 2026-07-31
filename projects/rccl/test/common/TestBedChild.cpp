@@ -669,25 +669,7 @@ namespace RcclUnitTesting
         CHECK_HIP_RANK(errCode, hipSetDevice(this->deviceIds[localRank]));
 
         CollectiveArgs& collArg = this->collArgs[groupId][localRank][collId];
-
-        // if (this->printValues && !useHipGraph)
-        // {
-        //   int const numInputElementsToPrint = (this->printValues < 0 ? collArg.numInputElements : this->printValues);
-        //   PtrUnion inputCpu;
-        //   size_t const numInputBytes = numInputElementsToPrint * DataTypeToBytes(collArg.dataType);
-        //   inputCpu.AllocateCpuMem(numInputBytes);
-        //   CHECK_HIP_RANK(errCode, hipMemcpy(inputCpu.ptr, collArg.inputGpu.ptr, numInputBytes, hipMemcpyDeviceToHost));
-        //   printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Input",
-        //          inputCpu.ToString(collArg.dataType, numInputElementsToPrint).c_str());
-        //   inputCpu.FreeCpuMem();
-
-        //   int const numOutputElementsToPrint = (this->printValues < 0 ? collArg.numOutputElements : this->printValues);
-        //   size_t const numOutputBytes = numOutputElementsToPrint * DataTypeToBytes(collArg.dataType);
-        //   CHECK_HIP_RANK(errCode, hipMemcpy(collArg.outputCpu.ptr, collArg.outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
-        //   printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Pre-Output",
-        //          collArg.outputCpu.ToString(collArg.dataType, numOutputElementsToPrint).c_str());
-        // }
-
+        
         switch (collArg.funcType)
         {
         case ncclCollBroadcast:
