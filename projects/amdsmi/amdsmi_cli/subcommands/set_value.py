@@ -1254,7 +1254,9 @@ class SetValueCommands:
                     memory_partition = amdsmi_interface.AmdSmiMemoryPartitionType[
                         args.memory_partition
                     ]
-                    amdsmi_interface.amdsmi_set_gpu_memory_partition(args.gpu, memory_partition)
+                    amdsmi_interface.amdsmi_set_gpu_memory_partition_mode(
+                        args.gpu, memory_partition
+                    )
                     out = f"Successfully set memory partition to {args.memory_partition}, use `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to reload driver"
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     out = f"[{e.get_error_info(detailed=False)}] Unable to set memory partition to {args.memory_partition}"
@@ -1805,34 +1807,34 @@ class SetValueCommands:
 
         if getattr(args, "compute_partition_mem_alloc_mode", None):
             try:
-                mode = amdsmi_interface.AmdSmiComputePartitionMemAllocModeType[
+                mode = amdsmi_interface.AmdSmiAcceleratorPartitionMemAllocModeType[
                     args.compute_partition_mem_alloc_mode
                 ]
-                amdsmi_interface.amdsmi_set_gpu_compute_partition_mem_alloc_mode(args.gpu, mode)
-                out = f"Successfully set compute partition memory allocation mode to {args.compute_partition_mem_alloc_mode}"
+                amdsmi_interface.amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(args.gpu, mode)
+                out = f"Successfully set accelerator partition memory allocation mode to {args.compute_partition_mem_alloc_mode}"
             except KeyError:
                 out = (
-                    "Invalid compute partition memory allocation mode "
+                    "Invalid accelerator partition memory allocation mode "
                     f"{args.compute_partition_mem_alloc_mode}"
                 )
-                self.logger.store_output(args.gpu, "compute_partition_mem_alloc_mode", out)
+                self.logger.store_output(args.gpu, "accelerator_partition_mem_alloc_mode", out)
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
                 return
             except amdsmi_exception.AmdSmiLibraryException as e:
-                out = f"[{e.get_error_info(detailed=False)}] Unable to set compute partition memory allocation mode to {args.compute_partition_mem_alloc_mode}"
+                out = f"[{e.get_error_info(detailed=False)}] Unable to set accelerator partition memory allocation mode to {args.compute_partition_mem_alloc_mode}"
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                     out = "[AMDSMI_STATUS_NO_PERM] Command requires elevation"
-                    self.logger.store_output(args.gpu, "compute_partition_mem_alloc_mode", out)
+                    self.logger.store_output(args.gpu, "accelerator_partition_mem_alloc_mode", out)
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     raise PermissionError("Command requires elevation") from e
                 else:
-                    self.logger.store_output(args.gpu, "compute_partition_mem_alloc_mode", out)
+                    self.logger.store_output(args.gpu, "accelerator_partition_mem_alloc_mode", out)
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return
-            self.logger.store_output(args.gpu, "compute_partition_mem_alloc_mode", out)
+            self.logger.store_output(args.gpu, "accelerator_partition_mem_alloc_mode", out)
             self.logger.print_output()
             self.logger.clear_multiple_devices_output()
             return

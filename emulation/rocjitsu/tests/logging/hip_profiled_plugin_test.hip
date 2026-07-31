@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 //
 // End-to-end test for ProfiledExecutionPluginGroup.
-// Launches a kernel with RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP=1 and
-// verifies that profile output contains hook timing data.
+// Runs under a config with "profiled": true and verifies that profile
+// output contains hook timing data.
 //
 // The profiled group writes HOOK_PROFILE lines to stderr by default.
 // This test captures stderr by redirecting it to a temporary file.

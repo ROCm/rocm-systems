@@ -16,12 +16,7 @@ from amdisa.codegen.execute.vop3_modifiers import (
 
 def _write_explicit_lane_mask(dst: str, value: str) -> list[str]:
     """Emit a write to an explicit SGPR lane-mask destination."""
-    return [
-        '  if (wf.wf_size() <= 32)',
-        f'    amdgpu::RegisterAccess(wf).write_scalar({dst}, static_cast<uint32_t>({value}));',
-        '  else',
-        f'    amdgpu::RegisterAccess(wf).write_scalar64({dst}, {value});',
-    ]
+    return [f'  amdgpu::write_wave_mask_scalar({dst}, wf, {value});']
 
 
 def gen_vector_cmp_class(

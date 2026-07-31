@@ -1912,6 +1912,41 @@ class _DsAtomic(_ScalarDeriver):
         return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
 
+@_register('ds_atomic2')
+class _DsAtomic2(_ScalarDeriver):
+    @staticmethod
+    def derive(sem: InstructionSemantics) -> SemaBlock:
+        elem_ty = _elem_type(sem.elem_size)
+        op = sem.operation or 'swap'
+        addr0 = _addr_call(
+            'CalcDsAddr', _cast(_src(0), SemaType.U32), _id('OFFSET0', SemaType.U32)
+        )
+        addr1 = _addr_call(
+            'CalcDsAddr', _cast(_src(0), SemaType.U32), _id('OFFSET1', SemaType.U32)
+        )
+
+        def atomic_swap(addr_name: str, source_index: int) -> SemaNode:
+            return SemaNode(
+                SemaNodeKind.CALL,
+                ty=elem_ty,
+                call_name=f'atomic_{op}',
+                children=(
+                    _id(f'atomic_{op}'),
+                    _id(addr_name, SemaType.U32),
+                    _cast(_src(source_index), elem_ty),
+                ),
+            )
+
+        stmts = [
+            _assign(_id('addr0', SemaType.U32), addr0),
+            _assign(_id('addr1', SemaType.U32), addr1),
+            _assign(_cast(_dst(0), elem_ty), atomic_swap('addr0', 1)),
+            _assign(_cast(_dst(1), elem_ty), atomic_swap('addr1', 2)),
+        ]
+        body = SemaNode(SemaNodeKind.SEQ, children=tuple(stmts))
+        return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+
 @_register('ds_read_addtid')
 class _DsReadAddtid(_ScalarDeriver):
     @staticmethod
@@ -2099,6 +2134,7 @@ class _VectorDot2cBf16(_ScalarDeriver):
 
 for _dot_cls in (
     'dot2_f32_f16',
+    'dot2_f32_bf16',
     'dot2_i32_i16',
     'dot2_u32_u16',
     'dot4_i32_i8',

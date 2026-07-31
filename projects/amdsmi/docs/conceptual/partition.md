@@ -123,7 +123,13 @@ their own resources.
   `renderD128/device/gpu_metrics`), so only the primary partition can report whole-GPU
   values such as board power. **Secondary partitions** expose only their own `xcp_metrics`
   (e.g. `renderD129/device/xcp/xcp_metrics`) and therefore report metrics scoped to that
-  partition — the device-wide set is not present on their node.
+  partition — the device-wide set is not present on their node. For example, VCN (Video
+  Core Next) utilization on MI-series GPUs is available per partition via the
+  `xcp_stats.vcn_busy` field in
+  [`gpu_metrics`](/reference/amdsmi-py-api.md#amdsmi_get_gpu_metrics); on
+  Navi/RDNA GPUs, which have no partition model, only the device-wide
+  [`vcn_busy_percent`](/reference/amdsmi-py-api.md#amdsmi_get_vcn_busy_percent)
+  applies.
 - On a bare-metal system `amdsmi_get_socket_handles()` returns one handle per physical
   GPU. On a hypervisor host the socket model reflects the physical topology. Inside an
   SR-IOV guest, each assigned VF appears as a separate processor handle, but the socket
@@ -454,8 +460,6 @@ Changing partition settings has strict requirements:
   sudo modprobe -r amdgpu && sudo modprobe amdgpu
   ```
 
-  Alternatively, call `amdsmi_gpu_driver_reload()` from the library.
-
 - A driver reload affects **all GPUs in the hive** -- every GPU in the system is reconfigured
   to the new memory partition configuration at once.
 
@@ -469,7 +473,7 @@ set API automatically triggered an immediate driver reload on invocation; the CL
 reloaded after the user explicitly requested the partition change. The API-level reload was
 separated to give applications control over when the disruptive reload occurs. Additionally,
 as of [**ROCm 7.13.0**](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/CHANGELOG.md#amd_smi_lib-for-rocm-7130), `amd-smi reset -r` is no longer available for driver reloading — use
-`sudo modprobe -r amdgpu && sudo modprobe amdgpu` or `amdsmi_gpu_driver_reload()` instead.
+`sudo modprobe -r amdgpu && sudo modprobe amdgpu` instead.
 ```
 
 ## Workload isolation and assignment
@@ -689,7 +693,8 @@ int main() {
 
     // Step 4: Reload the driver -- required to apply the memory partition change.
     // Stop all GPU workloads first. The reload may reset the accelerator partition.
-    amdsmi_gpu_driver_reload();
+    // The reload needs to occur out of band via calls to `modprobe -r amdgpu` and
+    // then `modprobe amdgpu`
 
     // Step 5: Re-initialize to pull in the updated topology (new device count/handles)
     amdsmi_shut_down();
@@ -725,7 +730,6 @@ APIs, see
   index (obtained from {c:func}`amdsmi_get_gpu_accelerator_partition_profile_config`).
 - {c:func}`amdsmi_get_gpu_memory_partition_config` -- Query the current NPS mode and supported NPS modes.
 - {c:func}`amdsmi_set_gpu_memory_partition_mode` -- Set the NPS memory partition mode.
-- {c:func}`amdsmi_gpu_driver_reload` -- Reload the amdgpu driver to apply memory partition changes.
 
 **Bare metal only:**
 - {c:func}`amdsmi_get_gpu_compute_partition` -- Query the current compute partition setting as a string.
@@ -763,7 +767,8 @@ amdsmi.amdsmi_set_gpu_memory_partition_mode(gpu, amdsmi.AmdSmiMemoryPartitionTyp
 
 # Step 4: Reload the driver -- required to apply the memory partition change.
 # Stop all GPU workloads first. The reload may reset the accelerator partition.
-amdsmi.amdsmi_gpu_driver_reload()
+# The reload needs to occur out of band via calls to `modprobe -r amdgpu` and
+# then `modprobe amdgpu`
 
 # Step 5: Re-initialize to pull in the updated topology (new device count/handles)
 amdsmi.amdsmi_shut_down()

@@ -32,7 +32,6 @@ jobs:
       id-token: write
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:a382085df3ba2419b58aa9051350883a0d0b732a4bc0a4ef60458f8161bb08c6 # 2026-06-11
-      options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: true
     env:
@@ -40,7 +39,6 @@ jobs:
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       TEATIME_FORCE_INTERACTIVE: 0
-      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
     steps:
       - name: "Checking out repository for rocm-systems"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -50,7 +48,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
+          ref: 2e7c190b99caa226a8644eda6eca720b3db102d5 # 2026-07-22
 
       - name: Install python deps
         run: |
