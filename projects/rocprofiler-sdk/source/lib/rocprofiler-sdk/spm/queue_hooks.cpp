@@ -78,7 +78,14 @@ signal_completion_hook(const hsa::Queue& /*queue*/,
 {
     // Route by packet provenance, not current activeness: post_kernel_call self-filters via
     // packet_return_map, so in-flight dispatches still complete after stop_context removes the
-    // context from the active list.
+    // context from the active list. Without this, a dispatch in flight at stop skips the
+    // DISPATCH_END record, kfd_stop() and the barrier-signal cleanup, and leaks its map entry.
+    //
+    // Iterating registered contexts widens the candidate set, but routing stays per-origin because
+    // each context's post_kernel_call only claims packets present in its own packet_return_map.
+    // That matters because there is no conflict guard rejecting a second concurrent dispatch_spm
+    // context, unlike dispatch_counter_collection, so more than one SPM context can be registered
+    // at once.
     auto contexts = context::get_registered_contexts(spm_contexts_filter());
     for(const auto* ctx : contexts)
     {

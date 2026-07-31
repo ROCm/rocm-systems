@@ -298,6 +298,15 @@ stop_context(const context::context* ctx)
         // transition nor anything else in this function requires an idle GPU:
         // profiler_serializer::disable() pushes an hsa_barrier carrying the previous state, so
         // in-flight serialized dispatches are reconciled GPU-side.
+        //
+        // This is a deliberate divergence from one review of #8887, which asked instead for the
+        // sync to be kept and the service held visible to the enter hook through an explicit
+        // "draining" state until sync and disable_serialization complete. The serialization window
+        // that state would protect is closed differently here: context::stop_context now runs this
+        // function before clearing the active slot, so disable_serialization happens while the
+        // enter hook can still see the context, and no dispatch is submitted unserialized while the
+        // serializer is enabled. Recorded here because the two approaches are not obviously
+        // equivalent and the choice should be revisited if that ordering changes.
         controller->disable_serialization();
         // No per-queue callback to remove; spm::write_hook no-ops once dispatch_spm is
         // disabled above.
