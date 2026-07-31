@@ -17,7 +17,7 @@ inputs:
   fallback-gfx950-runner:
     description: Runner label for gfx950 if the shared CI config cannot be loaded
     required: false
-    default: linux-mi355-1gpu-ossci-rocm
+    default: linux-gfx950-1gpu-ccs-ossci-rocm
   fallback-gfx90a-runner:
     description: Runner label for gfx90a if the shared CI config cannot be loaded
     required: false
