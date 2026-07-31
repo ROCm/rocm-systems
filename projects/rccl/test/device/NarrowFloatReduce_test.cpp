@@ -15,28 +15,41 @@
 // in the low byte). Depending on the target they take either the packed
 // conversion path (gfx942/gfx950/gfx12xx) or a per-element fallback.
 //
-// Two invariants are checked.
+// Two independent invariants are checked.
 //
 // First, the 2-wide packed result is bit-identical to applying the same
 // operation one element at a time via the expressions reduce_kernel.h uses for
 // EltPerPack=1. That is what makes the EltPerPack=2 specializations a pure
 // vectorization: a reduction result cannot depend on whether a given element
-// happened to land in an aligned pair. This is not circular even though both
-// widths share rccl_narrow_sat_f32, because the packed path clamps two lanes at
-// once and converts with the hardware pack, while the scalar path clamps one
-// lane and converts through the HIP fp8 constructor.
+// happened to land in an aligned pair. For Prod and PreMulSum this is not
+// circular even though both widths share rccl_narrow_sat_f32, because the packed
+// path clamps two lanes at once and converts with the hardware pack, while the
+// scalar path clamps one lane and converts through the HIP fp8 constructor. For
+// Sum the two widths do share one path -- the 1-wide hadd is the 2-wide pack with
+// its high lane dropped -- so for Sum this check only establishes that the lane
+// dropping is right, and the second invariant is what pins the behavior down.
 //
-// Second, saturation is checked directly rather than against a reference: with
-// RCCL_NARROW_FP_SATURATE_INF set, no product may come back as Inf, and NaN must
-// stay NaN.
+// Second, the result is checked against the semantics the reduce ops promise,
+// without reference to how they are implemented:
+//   - finite operands give a finite result within +/-max_finite, and one that has
+//     saturated exactly to +/-max_finite whenever the exact result is out of
+//     range. Neither Inf nor NaN may appear, which is what would happen if a
+//     clamp were missing before the pack, or if the intermediate were f16.
+//   - an Inf operand gives Inf (or NaN, where the exact result is NaN or the
+//     destination has no Inf encoding). Under RCCL_NARROW_FP_SATURATE_INF the
+//     expectation is instead +/-max_finite.
+//   - a NaN operand gives NaN.
+//   - Min and Max return one of their two operands unchanged, bit for bit.
+// This is what catches a wrong answer that both widths agree on.
 //
-// The oracle runs on the device, not the host, because the fp8 encoding is not
-// portable: gfx942 uses the fnuz variants (e4m3 max 240) while gfx950 and
-// gfx12xx use OCP (e4m3 max 448), so a host-computed reference would disagree
-// with the device for reasons unrelated to the helpers. Both the helper result
-// and the oracle come back as raw bytes and are compared bit-for-bit; decoded
-// floats come back too, only to make failures readable and to tell a genuine
-// numeric difference apart from a NaN that is merely encoded differently.
+// The first invariant's oracle runs on the device, not the host, because the fp8
+// encoding is not portable: gfx942 uses the fnuz variants (e4m3 max 240) while
+// gfx950 and gfx12xx use OCP (e4m3 max 448), so a host-computed reference would
+// disagree with the device for reasons unrelated to the helpers. Both the helper
+// result and the oracle come back as raw bytes and are compared bit-for-bit.
+// Decoded floats come back too, both to drive the second invariant on the host
+// and to make failures readable, telling a genuine numeric difference apart from
+// a NaN that is merely encoded differently.
 
 #include "DeviceTestBase.hpp"
 
@@ -96,7 +109,9 @@ __global__ void kNarrowReduce(const fp8x2_storage_t* __restrict__ X,
                               fp8x2_storage_t* __restrict__ packedRaw,
                               fp8x2_storage_t* __restrict__ refRaw,
                               float* __restrict__ packedF,
-                              float* __restrict__ refF, int n) {
+                              float* __restrict__ refF,
+                              float* __restrict__ aF,
+                              float* __restrict__ bF, int n) {
   using elem_t = typename NarrowTraits<IsBf8>::elem_t;
   constexpr float kMax = NarrowTraits<IsBf8>::kMaxFinite;
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -137,6 +152,15 @@ __global__ void kNarrowReduce(const fp8x2_storage_t* __restrict__ X,
   refRaw[i]    = uw.s;
   decode2<IsBf8>(packed, packedF[2 * i], packedF[2 * i + 1]);
   decode2<IsBf8>(uw.s, refF[2 * i], refF[2 * i + 1]);
+  // The operands go back as floats decoded by the device, so that the host side
+  // never has to know which fp8 encoding this target uses.
+  decode2<IsBf8>(x, aF[2 * i], aF[2 * i + 1]);
+  if (op == OP_PREMUL) {
+    bF[2 * i]     = scalar;
+    bF[2 * i + 1] = scalar;
+  } else {
+    decode2<IsBf8>(y, bF[2 * i], bF[2 * i + 1]);
+  }
 }
 
 class NarrowFloatReduceTest : public DeviceTestBase {
@@ -186,20 +210,104 @@ protected:
                        << " lanes are NaN in both but with different encodings";
   }
 
-  // Saturation checked on its own terms rather than against a reference: with
-  // RCCL_NARROW_FP_SATURATE_INF nothing may come back as Inf, and every finite
-  // result must be within range. NaN is allowed through unchanged.
-  static void expectSaturated(const std::vector<float>& out, float maxFinite, const char* name) {
-    int infs = 0, oor = 0;
-    for (float v : out) {
-      if (std::isnan(v)) continue;
-      if (std::isinf(v)) ++infs;
-      else if (std::fabs(v) > maxFinite) ++oor;
-    }
+  // The promised semantics, checked without reference to the implementation. The
+  // exact result is computed in double, which is exact for these operands: every
+  // fp8/bf8 value and every sum or product of two of them is representable there,
+  // so the only rounding in play is the one the pack itself performs.
+  static void expectRule(const std::vector<float>& aF, const std::vector<float>& bF,
+                         const std::vector<float>& rF, int op, float maxFinite,
+                         const char* name) {
+    int badFinite = 0, badSpecial = 0, badSat = 0, reported = 0;
+    for (size_t k = 0; k < rF.size(); ++k) {
+      const double a = aF[k], b = bF[k], r = rF[k];
+      const double exact = (op == OP_ADD) ? a + b : a * b;
+
+      if (std::isnan(a) || std::isnan(b) || std::isnan(exact)) {
+        // NaN in, NaN out; nothing else is a defensible answer.
+        if (!std::isnan(r) && reported++ < 10)
+          ADD_FAILURE() << name << ": lane " << k << " " << a << " op " << b << " = " << r
+                        << ", expected NaN";
+        if (!std::isnan(r)) ++badSpecial;
+        continue;
+      }
+
+      if (std::isinf(a) || std::isinf(b)) {
 #if RCCL_NARROW_FP_SATURATE_INF
-    EXPECT_EQ(infs, 0) << name << ": " << infs << " results are Inf despite saturation being on";
+        const bool ok = (r == std::copysign(maxFinite, exact));
+        const char* want = "+/-max_finite";
+#else
+        // Inf is expected, but e4m3 has no Inf encoding, so NaN is the only thing
+        // the destination can hold there and is accepted as well.
+        const bool ok = (std::isinf(r) && std::signbit(r) == std::signbit(exact)) || std::isnan(r);
+        const char* want = "Inf of the same sign, or NaN";
 #endif
-    EXPECT_EQ(oor, 0) << name << ": " << oor << " finite results exceed " << maxFinite;
+        if (!ok) {
+          if (reported++ < 10)
+            ADD_FAILURE() << name << ": lane " << k << " " << a << " op " << b << " = " << r
+                          << ", expected " << want;
+          ++badSpecial;
+        }
+        continue;
+      }
+
+      // Both operands finite: the result must be finite and in range, whatever
+      // the exact value was.
+      if (!std::isfinite(r) || std::fabs(r) > maxFinite) {
+        if (reported++ < 10)
+          ADD_FAILURE() << name << ": lane " << k << " " << a << " op " << b << " = " << exact
+                        << " came back as " << r << ", expected a finite value within +/-"
+                        << maxFinite;
+        ++badFinite;
+        continue;
+      }
+      // And out-of-range exact results must have landed on the limit itself.
+      if (std::fabs(exact) > maxFinite && r != std::copysign(maxFinite, exact)) {
+        if (reported++ < 10)
+          ADD_FAILURE() << name << ": lane " << k << " " << a << " op " << b << " = " << exact
+                        << " came back as " << r << ", expected " << std::copysign(maxFinite, exact);
+        ++badSat;
+      }
+    }
+    EXPECT_EQ(badFinite, 0) << name << ": " << badFinite << " lanes left the finite range";
+    EXPECT_EQ(badSat, 0) << name << ": " << badSat << " lanes did not saturate to the limit";
+    EXPECT_EQ(badSpecial, 0) << name << ": " << badSpecial << " lanes mishandled an Inf or NaN operand";
+  }
+
+  // Min and Max select, they do not compute: every result byte has to be one of
+  // the two operand bytes. Checked on the raw bytes so that it also covers the
+  // signed zeros. The exception is a NaN result, which the round trip through
+  // fminf/fmaxf and the pack is free to return with a different payload or sign
+  // than the NaN that went in; all that is required of it is that a NaN came in
+  // at all.
+  static void expectSelectsAnOperand(const std::vector<fp8x2_storage_t>& raw,
+                                     const std::vector<fp8x2_storage_t>& hx,
+                                     const std::vector<fp8x2_storage_t>& hy,
+                                     const std::vector<float>& rF, const std::vector<float>& aF,
+                                     const std::vector<float>& bF, const char* name) {
+    int bad = 0, reported = 0;
+    for (size_t i = 0; i < raw.size(); ++i) {
+      for (int l = 0; l < 2; ++l) {
+        const uint8_t r = static_cast<uint8_t>((raw[i] >> (8 * l)) & 0xFF);
+        const uint8_t a = static_cast<uint8_t>((hx[i] >> (8 * l)) & 0xFF);
+        const uint8_t b = static_cast<uint8_t>((hy[i] >> (8 * l)) & 0xFF);
+        if (r == a || r == b) continue;
+        const size_t k = 2 * i + l;
+        if (std::isnan(rF[k])) {
+          if (std::isnan(aF[k]) || std::isnan(bF[k])) continue;
+          if (reported++ < 10)
+            ADD_FAILURE() << name << ": pair " << i << " lane " << l << " returned NaN for finite "
+                          << aF[k] << ", " << bF[k];
+          ++bad;
+          continue;
+        }
+        if (reported++ < 10)
+          ADD_FAILURE() << name << ": pair " << i << " lane " << l << " returned 0x" << std::hex
+                        << unsigned(r) << " which is neither operand (0x" << unsigned(a) << ", 0x"
+                        << unsigned(b) << ")" << std::dec;
+        ++bad;
+      }
+    }
+    EXPECT_EQ(bad, 0) << name << ": " << bad << " lanes returned something other than an operand";
   }
 
   // Every ordered pair of fp8 bytes. Lane 0 carries (a,b) and lane 1 the
@@ -218,18 +326,22 @@ protected:
     DeviceBuffer<fp8x2_storage_t> dx(N), dy(N), dpr(N), drr(N);
     dx.copyFrom(hx);
     dy.copyFrom(hy);
-    DeviceBuffer<float> dpf(2 * N), drf(2 * N);
+    DeviceBuffer<float> dpf(2 * N), drf(2 * N), daf(2 * N), dbf(2 * N);
 
     kNarrowReduce<IsBf8><<<gridFor(N), kDefaultBlockSize>>>(
-        dx.ptr, dy.ptr, 0.0f, op, dpr.ptr, drr.ptr, dpf.ptr, drf.ptr, N);
+        dx.ptr, dy.ptr, 0.0f, op, dpr.ptr, drr.ptr, dpf.ptr, drf.ptr, daf.ptr, dbf.ptr, N);
     syncAndCheck();
+    std::vector<fp8x2_storage_t> packedRaw = dpr.copyTo();
     std::vector<float> packedF = dpf.copyTo();
-    expectBitMatch(dpr.copyTo(), drr.copyTo(), packedF, drf.copyTo(), name, 0.0f, false);
-    if (op == OP_MUL) expectSaturated(packedF, deviceMaxFinite<IsBf8>(), name);
+    std::vector<float> aF = daf.copyTo(), bF = dbf.copyTo();
+    expectBitMatch(packedRaw, drr.copyTo(), packedF, drf.copyTo(), name, 0.0f, false);
+    if (op == OP_MIN || op == OP_MAX)
+      expectSelectsAnOperand(packedRaw, hx, hy, packedF, aF, bF, name);
+    else
+      expectRule(aF, bF, packedF, op, deviceMaxFinite<IsBf8>(), name);
   }
 
-  // Every fp8 byte in both lanes, against scalars that cover zero, negative,
-  // fractional, and magnitudes large enough to force saturation.
+  // Every fp8 byte in both lanes, against a spread of premul scalars.
   template<bool IsBf8>
   void runPreMul(const char* name) {
     const int N = 256 * 256;
@@ -241,17 +353,21 @@ protected:
     }
     DeviceBuffer<fp8x2_storage_t> dx(N), dpr(N), drr(N);
     dx.copyFrom(hx);
-    DeviceBuffer<float> dpf(2 * N), drf(2 * N);
+    DeviceBuffer<float> dpf(2 * N), drf(2 * N), daf(2 * N), dbf(2 * N);
 
     const float maxFinite = deviceMaxFinite<IsBf8>();
-    const float scalars[] = {0.0f, -0.0f, 0.5f, 1.0f, 2.0f, -1.0f, -3.5f, 100.0f, 1e30f, -1e30f};
+    // Zero, negative, fractional, magnitudes large enough to force saturation,
+    // and the non-finite scalars a caller can legally pass as opArg.
+    const float scalars[] = {0.0f,   -0.0f,  0.5f,        1.0f,         2.0f,
+                             -1.0f,  -3.5f,  100.0f,      1e30f,        -1e30f,
+                             HUGE_VALF, -HUGE_VALF, NAN};
     for (float s : scalars) {
       kNarrowReduce<IsBf8><<<gridFor(N), kDefaultBlockSize>>>(
-          dx.ptr, nullptr, s, OP_PREMUL, dpr.ptr, drr.ptr, dpf.ptr, drf.ptr, N);
+          dx.ptr, nullptr, s, OP_PREMUL, dpr.ptr, drr.ptr, dpf.ptr, drf.ptr, daf.ptr, dbf.ptr, N);
       syncAndCheck();
       std::vector<float> packedF = dpf.copyTo();
       expectBitMatch(dpr.copyTo(), drr.copyTo(), packedF, drf.copyTo(), name, s, true);
-      expectSaturated(packedF, maxFinite, name);
+      expectRule(daf.copyTo(), dbf.copyTo(), packedF, OP_PREMUL, maxFinite, name);
     }
   }
 };

@@ -30,18 +30,23 @@ typedef uint16_t fp8x2_storage_t;
 
 // Inf handling on the narrow-float downconvert.
 //
-// The default saturates +/-Inf to +/-max_finite, which is what both AMD
-// (MODE.FP16_OVFL=1) and NVIDIA (.satfinite) do in their saturating conversion
-// modes. Setting this to 0 restores the older behavior of clamping only finite
-// values and letting Inf reach the convert unchanged, which yields NaN for fp8
-// (no Inf encoding) and Inf for bf8; it is kept switchable so the two can be
-// compared on hardware. Finite inputs are unaffected either way.
+// The reduce operations produce an Inf result only when one of their operands is
+// Inf; an out-of-range result computed from finite operands saturates to
+// +/-max_finite instead. That is the default (0) here, and it matches what the
+// hip_fp8 constructors do in __HIP_SATFINITE mode, where the clamp is skipped
+// for inputs whose exponent field is all ones.
+//
+// Setting this to 1 also folds +/-Inf onto +/-max_finite, the way AMD's
+// MODE.FP16_OVFL=1 and NVIDIA's .satfinite conversions do. It is kept
+// switchable so the two conventions can be compared on hardware; note that it
+// makes an Inf operand indistinguishable from an overflow. Finite operands whose
+// result is in range are unaffected either way.
 //
 // Whichever setting is in force applies to both the 1-wide and 2-wide reduce
 // paths, so a reduction result never depends on how the data happened to be
 // aligned.
 #ifndef RCCL_NARROW_FP_SATURATE_INF
-#define RCCL_NARROW_FP_SATURATE_INF 1
+#define RCCL_NARROW_FP_SATURATE_INF 0
 #endif
 
 // Largest finite magnitude of the fp8/bf8 encodings in force for this
@@ -59,22 +64,28 @@ typedef uint16_t fp8x2_storage_t;
 #define RCCL_BF8_MAX_FINITE 57344.0f
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-// Clamp into the destination's range. Used by the 1-wide reduce specializations
-// and, in its two-lane form further down, by the packed helpers.
+// Clamp into the destination's range, leaving Inf and NaN alone. Used by the
+// 1-wide reduce specializations and, in its two-lane form further down, by the
+// packed helpers. Every narrow-float result the reduce ops produce goes through
+// here, so it is the single place where the range of the destination encoding is
+// enforced.
 //
-// In the saturating case, elementwise_minimum/maximum are the IEEE-754-2019
-// minimum/maximum operations, which propagate NaN, rather than minNum/maxNum,
-// which return the non-NaN operand. That is what makes a separate NaN guard
-// unnecessary: NaN survives the clamp on its own. gfx950 lowers this to
-// v_maximum3_f32 plus v_minimum3_f32 and gfx1250 to v_maximum_f32 plus
-// v_minimum_f32, two VALU ops per lane; gfx942 has no NaN-propagating min/max
-// and lowers it to a compare and select.
+// fminf/fmaxf return the non-NaN operand, so a NaN would come back clamped
+// rather than propagated; Inf would be folded onto maxFinite. Both are excluded
+// explicitly by the finite test. gfx950 lowers the whole thing to three VALU ops
+// per lane: v_med3_f32 for the clamp, then v_cmp_nlg_f32 against Inf with the abs
+// modifier and a v_cndmask_b32 to put the excluded values back.
+//
+// The RCCL_NARROW_FP_SATURATE_INF case needs no such guard: elementwise_minimum
+// and elementwise_maximum are the IEEE-754-2019 minimum/maximum operations,
+// which propagate NaN, so NaN survives the clamp on its own while Inf saturates.
+// gfx950 lowers that to v_maximum3_f32 plus v_minimum3_f32 and gfx1250 to
+// v_maximum_f32 plus v_minimum_f32, two VALU ops per lane; gfx942 has no
+// NaN-propagating min/max and lowers it to a compare and select.
 inline __host__ __device__ float rccl_narrow_sat_f32(float v, float maxFinite) {
 #if RCCL_NARROW_FP_SATURATE_INF
   return __builtin_elementwise_minimum(__builtin_elementwise_maximum(v, -maxFinite), maxFinite);
 #else
-  // fminf/fmaxf return the non-NaN operand and would also clamp Inf, so both
-  // have to be excluded explicitly here.
   bool finite = (v == v) && (v < __builtin_huge_valf()) && (v > -__builtin_huge_valf());
   return finite ? __builtin_fminf(__builtin_fmaxf(v, -maxFinite), maxFinite) : v;
 #endif
@@ -113,155 +124,26 @@ typedef short shortx2_t __attribute__((ext_vector_type(2)));
 typedef short __attribute__((ext_vector_type(2))) __amd_shortx2_storage_t;
 typedef float float2_t __attribute__((ext_vector_type(2)));
 
-inline __device__ rccl_float8 hadd(rccl_float8 x, rccl_float8 y) {
-#if __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
-  half2_t v1;
-  asm volatile("v_pk_add_f16 %0, %1, %2"
-               : "=v"(v1)
-               : "v"(__builtin_amdgcn_cvt_scalef32_pk_f16_fp8(x.__x, 1.f, 0)),
-                 "v"(__builtin_amdgcn_cvt_scalef32_pk_f16_fp8(y.__x, 1.f, 0)));
-  union {
-    shortx2_t i16_vec;
-    rccl_float8 fp8[4];
-  } u{0};
-  u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_fp8_f16(v1, v1, /* scale */ 1.f, 0);
-  return u.fp8[0];
-#elif __HIP_DEVICE_COMPILE__ && defined(__gfx942__)
-
-  float2_t v;
-  uint32_t ival = 0;
-  asm volatile("v_pk_add_f32 %0, %1, %2"
-               : "=v"(v)
-               : "v"(__builtin_amdgcn_cvt_pk_f32_fp8(x.__x, 0)), "v"(__builtin_amdgcn_cvt_pk_f32_fp8(y.__x, 0)));
-  // The builtin returns the packed fp8 bytes in an int. Returning that int
-  // directly would select rccl_float8's numeric int constructor, which converts
-  // the bit pattern as a value, so reinterpret it as raw storage instead.
-  union {
-    fp8x2_storage_t fp8x2;
-    rccl_float8 fp8[2];
-  } u{0};
-  u.fp8x2 = (fp8x2_storage_t)__builtin_amdgcn_cvt_pk_fp8_f32(v[0], v[0], ival, false);
-  return u.fp8[0];
-#else
-  return rccl_float8(float(x) + float(y));
-#endif
-}
-
-inline __device__ rccl_bfloat8 hadd_b(rccl_bfloat8 x, rccl_bfloat8 y) {
-#if __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
-  half2_t v1;
-  asm volatile("v_pk_add_f16 %0, %1, %2"
-               : "=v"(v1)
-               : "v"(__builtin_amdgcn_cvt_scalef32_pk_f16_bf8(x.__x, 1.f, 0)),
-                 "v"(__builtin_amdgcn_cvt_scalef32_pk_f16_bf8(y.__x, 1.f, 0)));
-  union {
-    shortx2_t i16_vec;
-    rccl_bfloat8 fp8[4];
-  } u1{0};
-  u1.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_bf8_f16(v1, v1, /* scale */ 1.f, 0);
-  return u1.fp8[0];
-#elif __HIP_DEVICE_COMPILE__ && defined(__gfx942__)
-
-  float2_t v;
-  uint32_t ival = 0;
-  asm volatile("v_pk_add_f32 %0, %1, %2"
-               : "=v"(v)
-               : "v"(__builtin_amdgcn_cvt_pk_f32_bf8(x.__x, 0)), "v"(__builtin_amdgcn_cvt_pk_f32_bf8(y.__x, 0)));
-  // See hadd: reinterpret the packed bytes rather than letting the int
-  // constructor convert them numerically.
-  union {
-    fp8x2_storage_t bfp8x2;
-    rccl_bfloat8 bfp8[2];
-  } u{0};
-  u.bfp8x2 = (fp8x2_storage_t)__builtin_amdgcn_cvt_pk_bf8_f32(v[0], v[0], ival, false);
-  return u.bfp8[0];
-#else
-  return rccl_bfloat8(float(x) + float(y));
-#endif
-}
-
-inline __device__ fp8x2_storage_t hadd2(fp8x2_storage_t x, fp8x2_storage_t y) {
-#if __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
-  half2_t v1;
-  asm volatile("v_pk_add_f16 %0, %1, %2"
-               : "=v"(v1)
-               : "v"(__builtin_amdgcn_cvt_scalef32_pk_f16_fp8(x, 1.f, 0)),
-                 "v"(__builtin_amdgcn_cvt_scalef32_pk_f16_fp8(y, 1.f, 0)));
-  union {
-    shortx2_t i16_vec;
-    fp8x2_storage_t fp8;
-  } u{0};
-  u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_fp8_f16(v1, v1, /* scale */ 1.f, 0);
-  return u.fp8;
-#elif __HIP_DEVICE_COMPILE__ && defined(__gfx942__)
-  float2_t v;
-  uint32_t ival = 0;
-  asm volatile("v_pk_add_f32 %0, %1, %2"
-               : "=v"(v)
-               : "v"(__builtin_amdgcn_cvt_pk_f32_fp8(x, 0)), "v"(__builtin_amdgcn_cvt_pk_f32_fp8(y, 0)));
-  return __builtin_amdgcn_cvt_pk_fp8_f32(v[0], v[1], ival, false);
-#else
-  union {
-    rccl_float8 fp8[2];
-    fp8x2_storage_t fp8x2;
-  } u, v, w;
-  u.fp8x2 = x;
-  v.fp8x2 = y;
-  w.fp8[0] = hadd(u.fp8[0], v.fp8[0]);
-  w.fp8[1] = hadd(u.fp8[1], v.fp8[1]);
-  return w.fp8x2;
-#endif
-}
-
-inline __device__ fp8x2_storage_t hadd2_b(fp8x2_storage_t x, fp8x2_storage_t y) {
-#if __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
-  half2_t v1;
-  asm volatile("v_pk_add_f16 %0, %1, %2"
-               : "=v"(v1)
-               : "v"(__builtin_amdgcn_cvt_scalef32_pk_f16_bf8(x, 1.f, 0)),
-                 "v"(__builtin_amdgcn_cvt_scalef32_pk_f16_bf8(y, 1.f, 0)));
-  union {
-    shortx2_t i16_vec;
-    fp8x2_storage_t fp8;
-  } u{0};
-  u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_bf8_f16(v1, v1, /* scale */ 1.f, 0);
-  return u.fp8;
-#elif __HIP_DEVICE_COMPILE__ && defined(__gfx942__)
-  float2_t v;
-  uint32_t ival = 0;
-  asm volatile("v_pk_add_f32 %0, %1, %2"
-               : "=v"(v)
-               : "v"(__builtin_amdgcn_cvt_pk_f32_bf8(x, 0)), "v"(__builtin_amdgcn_cvt_pk_f32_bf8(y, 0)));
-  return __builtin_amdgcn_cvt_pk_bf8_f32(v[0], v[1], ival, false);
-#else
-  union {
-    rccl_bfloat8 bfp8[2];
-    fp8x2_storage_t bfp8x2;
-  } u, v, w;
-  u.bfp8x2 = x;
-  v.bfp8x2 = y;
-  w.bfp8[0] = hadd_b(u.bfp8[0], v.bfp8[0]);
-  w.bfp8[1] = hadd_b(u.bfp8[1], v.bfp8[1]);
-  return w.bfp8x2;
-#endif
-}
-
 // ---------------------------------------------------------------------------
-// Packed 2-wide fp8/bf8 reduce helpers: Prod, MinMax and PreMulSum's premul.
+// fp8/bf8 reduce helpers, 1-wide and 2-wide: Sum, Prod, MinMax and PreMulSum's
+// premul.
 //
-// Each is bit-identical to the per-element expression the 1-wide reduce
-// specializations use. Two properties are needed for that, and neither comes for
-// free:
+// Every 2-wide helper is bit-identical to the per-element expression its 1-wide
+// counterpart uses, so a reduction result never depends on how the data happened
+// to be aligned. Two properties are needed for that, and neither comes for free:
 //
-//  1. An f32 intermediate. f32 represents every sum and product of two fp8/bf8
-//     values exactly. f16 does not: e4m3 448*448 = 200704 exceeds f16's 65504
-//     and becomes Inf, which then packs to fp8 NaN instead of saturating. This
-//     is why the packed paths do not use the f16 converts even on the targets
-//     that have them.
-//  2. Clamping before the pack. v_cvt_pk_{fp8,bf8}_f32 sends out-of-range values
-//     to NaN/Inf, so rccl_narrow_sat_f32 has to run first. MinMax is the
-//     exception: its result is always one of its inputs and so is already
-//     representable, and it uses the unclamped pack.
+//  1. An intermediate that rounds to the same result the exact one would. f32
+//     always does. f16 does for Sum: e4m3 sums stay inside it outright, reaching
+//     at most 448+448 = 896, and e5m2 sums round the same way there even though
+//     114688 overflows it, for the reason rccl_add_pack2_bf8_f16 gives. Prod
+//     needs f32 -- e4m3 alone reaches 200704 -- as does PreMulSum's premul, whose
+//     scalar is arbitrary. So Sum takes the cheap f16 converts where the target
+//     has them, and everything else goes through f32.
+//  2. Clamping before the pack. The packs round rather than saturate, so they
+//     send out-of-range values to Inf (bf8) or NaN (e4m3, which has no Inf) and
+//     the clamp has to run first. MinMax is the exception: its result is always
+//     one of its inputs and so is already representable, and it uses the
+//     unclamped pack.
 //
 // gfx1250 (MI4xx) can instead saturate in hardware via MODE.FP16_OVFL (bit 23).
 // That is not used here because it is wave-level state that also redirects
@@ -313,6 +195,163 @@ inline __device__ fp8x2_storage_t rccl_sat_pack2_bf8_f32(float2_t v) {
   return rccl_pack2_bf8_f32(rccl_narrow_sat2_f32(v, RCCL_BF8_MAX_FINITE));
 }
 #endif
+
+// The f16 route for Sum. Only gfx950 has the f16 forms of the fp8 converts.
+#if __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
+#define RCCL_FP8_F16_CVT 1
+#endif
+
+#ifdef RCCL_FP8_F16_CVT
+inline __device__ half2_t rccl_unpack2_f16_fp8(fp8x2_storage_t x) {
+  return __builtin_amdgcn_cvt_scalef32_pk_f16_fp8(x, 1.f, 0);
+}
+
+inline __device__ half2_t rccl_unpack2_f16_bf8(fp8x2_storage_t x) {
+  return __builtin_amdgcn_cvt_scalef32_pk_f16_bf8(x, 1.f, 0);
+}
+
+// Unlike rccl_narrow_sat_f32 this needs no finite test, because Inf cannot reach
+// it: e4m3 has no Inf encoding, so both operands are finite, and their sum cannot
+// leave f16's range. NaN can arrive, and the IEEE-754-2019 minimum/maximum
+// operations propagate it rather than returning the other operand. gfx950 lowers
+// the pair to v_pk_maximum3_f16 and v_pk_minimum3_f16, two VALU ops for both
+// lanes together.
+inline __device__ fp8x2_storage_t rccl_clamp_pack2_fp8_f16(half2_t v) {
+  const half2_t hi = {(half_t)RCCL_FP8_MAX_FINITE, (half_t)RCCL_FP8_MAX_FINITE};
+  const half2_t lo = {(half_t)-RCCL_FP8_MAX_FINITE, (half_t)-RCCL_FP8_MAX_FINITE};
+  v = __builtin_elementwise_minimum(__builtin_elementwise_maximum(v, lo), hi);
+  union {
+    shortx2_t i16x2;
+    fp8x2_storage_t fp8x2;
+  } u{0};
+  u.i16x2 = __builtin_amdgcn_cvt_scalef32_pk_fp8_f16(v, v, /* scale */ 1.f, 0);
+  return u.fp8x2;
+}
+
+// e5m2 Sum in f16. e5m2 shares f16's exponent range and has fewer mantissa bits,
+// so the unpack is exact, but unlike e4m3 the sum can leave f16: 57344+57344 is
+// 114688 and f16 stops at 65504. An operand that is Inf produces the same Inf the
+// overflow does, and the two have to end up in different places -- max_finite for
+// the overflow, Inf for the Inf -- so the sum alone cannot decide it.
+//
+// The operands can. No finite e5m2 value exceeds max_finite, so raising the clamp
+// bound to max(|x|, |y|, max_finite) leaves it at max_finite for finite operands
+// and lifts it to Inf exactly when one is Inf, which is when the clamp has to stop
+// clamping. A NaN operand makes the bound NaN, and the clamp then propagates that
+// NaN, which is the wanted answer anyway since the sum is NaN too.
+//
+// gfx950 spends three VALU ops on the bound: the two abs become one v_and_b32
+// each, and the three-way max is a single v_pk_maximum3_f16 against an inline
+// constant. The clamp is the same two ops e4m3 uses.
+//
+// Adding in f16 rather than f32 does not change any result: for the sum of two
+// e5m2 values to round differently in the two widths, the second operand would
+// have to sit within f16's 11 bits of a rounding boundary of the first and still
+// be an e5m2 value, and 3 significant bits cannot do that. The exhaustive
+// NarrowFloatGolden sweep confirms it over all 65536 pairs.
+inline __device__ fp8x2_storage_t rccl_add_pack2_bf8_f16(fp8x2_storage_t x,
+                                                         fp8x2_storage_t y) {
+  const half2_t maxFinite = {(half_t)RCCL_BF8_MAX_FINITE, (half_t)RCCL_BF8_MAX_FINITE};
+  half2_t a = rccl_unpack2_f16_bf8(x);
+  half2_t b = rccl_unpack2_f16_bf8(y);
+#if RCCL_NARROW_FP_SATURATE_INF
+  half2_t bound = maxFinite;
+#else
+  half2_t bound = __builtin_elementwise_maximum(
+      __builtin_elementwise_maximum(__builtin_elementwise_abs(a), __builtin_elementwise_abs(b)),
+      maxFinite);
+#endif
+  half2_t v = a + b;
+  v = __builtin_elementwise_minimum(__builtin_elementwise_maximum(v, -bound), bound);
+  union {
+    shortx2_t i16x2;
+    fp8x2_storage_t bfp8x2;
+  } u{0};
+  u.i16x2 = __builtin_amdgcn_cvt_scalef32_pk_bf8_f16(v, v, /* scale */ 1.f, 0);
+  return u.bfp8x2;
+}
+#endif
+
+// Add. The 1-wide form is the 2-wide pack with its high lane discarded: the byte
+// goes in as the low half of a pair whose high half the unpack reads as +0.0.
+// Sharing the pack is what makes the two widths agree by construction rather than
+// by a matching pair of expressions that could drift apart.
+inline __device__ rccl_float8 hadd(rccl_float8 x, rccl_float8 y) {
+#ifdef RCCL_FP8_PACKED_CVT
+  // The pack returns the fp8 bytes in an int. Handing that to rccl_float8 would
+  // select its numeric int constructor, which converts the bit pattern as a
+  // value, so reinterpret it as raw storage instead.
+  union {
+    fp8x2_storage_t fp8x2;
+    rccl_float8 fp8[2];
+  } u{0};
+#ifdef RCCL_FP8_F16_CVT
+  u.fp8x2 = rccl_clamp_pack2_fp8_f16(rccl_unpack2_f16_fp8(x.__x) + rccl_unpack2_f16_fp8(y.__x));
+#else
+  u.fp8x2 = rccl_sat_pack2_fp8_f32(rccl_unpack2_f32_fp8(x.__x) + rccl_unpack2_f32_fp8(y.__x));
+#endif
+  return u.fp8[0];
+#else
+  return rccl_float8(float(x) + float(y));
+#endif
+}
+
+inline __device__ rccl_bfloat8 hadd_b(rccl_bfloat8 x, rccl_bfloat8 y) {
+#ifdef RCCL_FP8_PACKED_CVT
+  // See hadd: reinterpret the packed bytes rather than letting the int
+  // constructor convert them numerically.
+  union {
+    fp8x2_storage_t bfp8x2;
+    rccl_bfloat8 bfp8[2];
+  } u{0};
+#ifdef RCCL_FP8_F16_CVT
+  u.bfp8x2 = rccl_add_pack2_bf8_f16(x.__x, y.__x);
+#else
+  u.bfp8x2 = rccl_sat_pack2_bf8_f32(rccl_unpack2_f32_bf8(x.__x) + rccl_unpack2_f32_bf8(y.__x));
+#endif
+  return u.bfp8[0];
+#else
+  return rccl_bfloat8(float(x) + float(y));
+#endif
+}
+
+// Packed add. Both lanes go through one v_pk_add_f16 and one clamped packed
+// convert, on the targets that have the f16 converts; elsewhere the same in f32.
+inline __device__ fp8x2_storage_t hadd2(fp8x2_storage_t x, fp8x2_storage_t y) {
+#ifdef RCCL_FP8_F16_CVT
+  return rccl_clamp_pack2_fp8_f16(rccl_unpack2_f16_fp8(x) + rccl_unpack2_f16_fp8(y));
+#elif defined(RCCL_FP8_PACKED_CVT)
+  return rccl_sat_pack2_fp8_f32(rccl_unpack2_f32_fp8(x) + rccl_unpack2_f32_fp8(y));
+#else
+  union {
+    rccl_float8 fp8[2];
+    fp8x2_storage_t fp8x2;
+  } u, v, w;
+  u.fp8x2 = x;
+  v.fp8x2 = y;
+  w.fp8[0] = hadd(u.fp8[0], v.fp8[0]);
+  w.fp8[1] = hadd(u.fp8[1], v.fp8[1]);
+  return w.fp8x2;
+#endif
+}
+
+inline __device__ fp8x2_storage_t hadd2_b(fp8x2_storage_t x, fp8x2_storage_t y) {
+#ifdef RCCL_FP8_F16_CVT
+  return rccl_add_pack2_bf8_f16(x, y);
+#elif defined(RCCL_FP8_PACKED_CVT)
+  return rccl_sat_pack2_bf8_f32(rccl_unpack2_f32_bf8(x) + rccl_unpack2_f32_bf8(y));
+#else
+  union {
+    rccl_bfloat8 bfp8[2];
+    fp8x2_storage_t bfp8x2;
+  } u, v, w;
+  u.bfp8x2 = x;
+  v.bfp8x2 = y;
+  w.bfp8[0] = hadd_b(u.bfp8[0], v.bfp8[0]);
+  w.bfp8[1] = hadd_b(u.bfp8[1], v.bfp8[1]);
+  return w.bfp8x2;
+#endif
+}
 
 // Packed multiply. Both lanes go through one v_pk_mul_f32 and one packed
 // saturating convert.

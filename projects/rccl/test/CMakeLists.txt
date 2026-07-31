@@ -288,6 +288,20 @@ if(BUILD_TESTS)
       ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
     )
 
+    # Golden-data generator for the narrow float (fp8/bf8) reduce paths. Not a
+    # test: it is run by hand on a reference commit to capture the answers that
+    # later changes must reproduce. Header-only against the device sources, so it
+    # links no rccl library and can be built from any tree.
+    add_executable(rccl-narrow-fp-golden EXCLUDE_FROM_ALL device/NarrowFloatGolden_gen.cpp)
+    add_dependencies(rccl-narrow-fp-golden hipify_all copy_nccl_device_headers)
+    target_link_libraries(rccl-narrow-fp-golden PRIVATE hip::host hip::device)
+    target_include_directories(rccl-narrow-fp-golden PRIVATE
+      ${PROJECT_BINARY_DIR}/hipify/src/device
+      ${PROJECT_BINARY_DIR}/hipify/src/include
+      ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
+      ${PROJECT_BINARY_DIR}/include   # generated nccl.h, pulled in by device.h
+    )
+
   if(ENABLE_ROCSHMEM_GIN)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM_GIN)
   endif()
