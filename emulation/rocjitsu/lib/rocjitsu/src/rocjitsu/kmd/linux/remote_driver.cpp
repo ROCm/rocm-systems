@@ -131,6 +131,10 @@ Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
 /// a reply for more devices than this would exceed @ref kMaxPayloadBytes and be
 /// rejected regardless.
 ///
+/// A zero return for a non-zero @p num_devices means not even one entry fits;
+/// the caller must fail the ioctl rather than transmit the count, because
+/// num_devices(IN) == 0 is the count-only probe the daemon answers with success.
+///
 /// @returns the device count to transmit, whose tail is guaranteed to fit
 /// within @ref kMaxPayloadBytes alongside @p arg_size bytes of ioctl args.
 uint32_t clamp_snapshot_devices(uint32_t num_devices, uint32_t entry_size, size_t arg_size) {
@@ -502,8 +506,15 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         // payload does not match it exactly (validate_ioctl_payload). Only the
         // serialized copy is edited — the caller's args keep the original
         // request until the reply overwrites them with the true device total.
-        const uint32_t devices = clamp_snapshot_devices(dbg->device_snapshot.num_devices,
-                                                        dbg->device_snapshot.entry_size, arg_size);
+        const uint32_t requested = dbg->device_snapshot.num_devices;
+        const uint32_t devices =
+            clamp_snapshot_devices(requested, dbg->device_snapshot.entry_size, arg_size);
+        // Not even one entry fits: the caller's stride alone exceeds the
+        // transport's capacity. Transmitting devices == 0 would turn a fill
+        // request into the count-only probe the daemon answers with success,
+        // leaving the caller's buffer untouched behind a zero return.
+        if (devices == 0 && requested != 0 && dbg->device_snapshot.entry_size != 0)
+          return -ENOMEM;
         dbg->device_snapshot.num_devices = devices;
         inline_size = static_cast<size_t>(devices) * dbg->device_snapshot.entry_size;
         break;
@@ -569,8 +580,17 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // enforces it on receive. Enforce it here too so a desynced or corrupted
   // reply header cannot make an interposed ioctl() attempt a multi-GiB
   // allocation and throw std::bad_alloc out of a C entry point.
-  if (resp->payload_bytes > kMaxPayloadBytes)
-    return -1;
+  //
+  // The declared payload is left unread, so the stream is now misaligned:
+  // the next reply header would be parsed out of this one's body, silently
+  // returning a bogus result and copying stale bytes into caller memory. Kill
+  // the connection instead of returning a recoverable-looking error. shutdown()
+  // (rather than close()) keeps the fd number reserved, so the concurrent
+  // readers of sock_ that rpc_mutex_ does not cover cannot land on a reused fd.
+  if (resp->payload_bytes > kMaxPayloadBytes) {
+    syscall(SYS_shutdown, sock_, SHUT_RDWR);
+    return -EPROTO;
+  }
 
   if (resp->payload_bytes > 0) {
     std::vector<uint8_t> payload(resp->payload_bytes);
@@ -682,7 +702,13 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           const uint32_t entries =
               std::min(saved_dbg_snapshot_devices, dbg->device_snapshot.num_devices);
           const size_t stride = saved_dbg_snapshot_stride;
-          const size_t written = std::min<size_t>(dbg->device_snapshot.entry_size, stride);
+          // entry_size(OUT) is the daemon's word, not ours. The local path
+          // clamps it to the struct it actually fills, so apply the same bound
+          // here: an inflated value would pull the neighbouring entries' bytes
+          // into the padding the caller's wider stride leaves between entries.
+          const size_t written = std::min<size_t>(
+              std::min<size_t>(dbg->device_snapshot.entry_size, sizeof(kfd_dbg_device_info_entry)),
+              stride);
           auto *snapshot_out = reinterpret_cast<uint8_t *>(saved_dbg_snapshot_ptr);
           for (uint32_t i = 0; i < entries; ++i) {
             const size_t offset = static_cast<size_t>(i) * stride;
