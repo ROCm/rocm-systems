@@ -2728,7 +2728,23 @@ TEST(LivenessAnalysis, UnavailableQueriesFailClosed) {
   const TestInstruction instruction("query");
   const LivenessAnalysis liveness = LivenessAnalysis::unavailable();
 
+  EXPECT_THROW((void)liveness.has_live_before(instruction), std::logic_error);
   EXPECT_THROW((void)liveness.live_before(instruction), std::logic_error);
+}
+
+TEST(LivenessAnalysis, ReportsWhetherLiveBeforeSnapshotWasMaterialized) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  const Instruction &use = *blocks.front()->instructions().begin();
+  const TestInstruction outside_scope("outside_scope");
+  const LivenessAnalysis liveness = analyze_scope(blocks);
+
+  EXPECT_TRUE(liveness.has_live_before(use));
+  EXPECT_FALSE(liveness.has_live_before(outside_scope));
+  EXPECT_TRUE(liveness.is_live_before(use, {RegClass::SGPR, 4, 1}))
+      << "the materialized snapshot must contain the register used here";
+  EXPECT_FALSE(liveness.is_live_before(outside_scope, {RegClass::SGPR, 4, 1}))
+      << "a missing snapshot reads as nothing-live, so callers must check "
+         "has_live_before first";
 }
 
 TEST(LivenessAnalysis, ExecMaskedVgprDefDoesNotKillInactiveLaneValue) {

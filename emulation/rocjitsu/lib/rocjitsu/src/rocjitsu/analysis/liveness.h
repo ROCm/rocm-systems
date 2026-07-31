@@ -152,6 +152,12 @@ public:
   /// @brief Block liveness by block object.
   [[nodiscard]] const BlockLiveness &block_liveness(const BasicBlock &block) const;
 
+  /// @brief Whether a live-before snapshot was materialized for @p inst.
+  /// @details Returns false when @p inst was not part of the analyzed scope.
+  ///          Throws std::logic_error when the analysis is unavailable,
+  ///          matching live_before().
+  [[nodiscard]] bool has_live_before(const Instruction &inst) const;
+
   /// @brief Registers live immediately before @p inst executes.
   [[nodiscard]] const RegisterSet &live_before(const Instruction &inst) const;
 
