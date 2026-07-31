@@ -70,12 +70,16 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace {
 
+using test::kMovS8Zero;
+using test::kMovS9Zero;
 using test::kMovV2Zero;
 using test::kMovV3S8;
 using test::kMovV3V2;
+using test::kMovV4S9;
 
 constexpr uint32_t kWaveSize = 64;
-constexpr uint32_t kSentinel = 7; // Inline-const value placed into v2 (1..64).
+constexpr uint32_t kSentinel = 7;  // Inline-const value placed into the spilled reg (1..64).
+constexpr uint32_t kSentinel2 = 9; // Distinct value for a second reg, to catch swapped restores.
 
 // Minimal single-CU simulator (CDNA4 or RDNA4, selected by the constructor arch)
 // that lays out a kernel descriptor + code in GPU memory (AMDHSA ABI), dispatches
@@ -439,6 +443,108 @@ TEST_F(DbiRdna4SgprSpillSimFixture, SpilledSgprSurvivesClobberingProbe) {
 }
 TEST_F(DbiRdna4SgprSpillSimFixture, MissingReadlaneLeavesSgprClobbered) {
   expect_missing_readlane_clobbers_sgpr();
+}
+
+//==============================================================================
+// Two live+clobbered SGPRs spilled through one shared bridge VGPR, on CDNA3/CDNA4/
+// RDNA4. Runtime counterpart of the static SpillsMultipleLiveClobberedSgprs: it
+// asserts both restored scalar values survive, not just that the words were emitted.
+//==============================================================================
+
+constexpr uint16_t kSpilledSgprHi = 9;
+
+class DbiTwoSgprSpillSimBase : public ::testing::Test {
+protected:
+  explicit DbiTwoSgprSpillSimBase(const SpillSimArch &a) : a_(a) {}
+
+  void SetUp() override {
+    const uint32_t endpgm = build_s_endpgm(a_.arch);
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    const uint32_t mov_s8_k =
+        build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel), a_.arch);
+    const uint32_t mov_s9_k =
+        build_s_mov_b32(kSpilledSgprHi, static_cast<uint16_t>(128 + kSentinel2), a_.arch);
+    // s_mov s8,K1 ; s_mov s9,K2 ; v_mov v3,s8 (ANCHOR at offset 8: reads s8, s9 read
+    // next -> both live) ; v_mov v4,s9 ; s_endpgm.
+    auto target = test::make_amdgpu_kernel_elf({mov_s8_k, mov_s9_k, kMovV3S8, kMovV4S9, endpgm},
+                                               /*private_bytes=*/64, /*granulated_sgpr_count=*/3,
+                                               a_.e_flags);
+    auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {kMovS8Zero, kMovS9Zero, setpc},
+                                             a_.e_flags);
+
+    AmdGpuCodeObject obj(target.data(), target.size());
+    AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+    ASSERT_TRUE(obj.is_valid());
+    ASSERT_TRUE(probe_obj.is_valid());
+
+    Instrumentor instr(obj, a_.arch);
+    InstrumentationPoint pt;
+    pt.anchor_offset = 8; // v_mov v3, s8 -> reads s8; v_mov v4, s9 next -> s9 also live.
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    instr.add_point(pt);
+
+    auto result = instr.patch_with_debug_summaries();
+    ASSERT_TRUE(result.errors.empty())
+        << (result.errors.empty() ? std::string{} : result.errors.front());
+    ASSERT_EQ(result.patches.size(), 1u);
+    ASSERT_TRUE(result.patches[0].is_probe_call);
+
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    patched_text_ = test::section_words(patched, ".text");
+    ASSERT_FALSE(patched_text_.empty());
+    patched_scratch_ = test::patched_private_segment_size(patched);
+  }
+
+  // Both SGPRs survive the clobbering probe through the one shared bridge: v3
+  // (restored s8) reads kSentinel and v4 (restored s9) reads kSentinel2 on every
+  // lane; the distinct sentinels also catch a swapped restore. v3 and v4 come from
+  // two deterministic runs (identical code -> identical register file), mirroring the
+  // two-instance pattern the controls above use.
+  void expect_both_sgprs_survive() {
+    EXPECT_EQ(patched_scratch_, 72u) << "descriptor scratch must grow to cover both spill slots";
+
+    DbiSim sim_s8(a_.sim_arch, a_.wave_size);
+    const std::vector<uint32_t> v3 =
+        sim_s8.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
+    DbiSim sim_s9(a_.sim_arch, a_.wave_size);
+    const std::vector<uint32_t> v4 =
+        sim_s9.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/4);
+    ASSERT_EQ(v3.size(), a_.wave_size) << "kernel did not run to completion (no dispatched wave)";
+    ASSERT_EQ(v4.size(), a_.wave_size);
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
+      EXPECT_EQ(v3[lane], kSentinel) << "lane " << lane << ": s8 was not restored";
+      EXPECT_EQ(v4[lane], kSentinel2) << "lane " << lane << ": s9 was not restored";
+    }
+  }
+
+  SpillSimArch a_;
+  std::vector<uint32_t> patched_text_;
+  uint32_t patched_scratch_ = 0;
+};
+
+class DbiCdna3TwoSgprSpillSimFixture : public DbiTwoSgprSpillSimBase {
+protected:
+  DbiCdna3TwoSgprSpillSimFixture() : DbiTwoSgprSpillSimBase(kCdna3SpillArch) {}
+};
+class DbiCdna4TwoSgprSpillSimFixture : public DbiTwoSgprSpillSimBase {
+protected:
+  DbiCdna4TwoSgprSpillSimFixture() : DbiTwoSgprSpillSimBase(kCdna4SpillArch) {}
+};
+class DbiRdna4TwoSgprSpillSimFixture : public DbiTwoSgprSpillSimBase {
+protected:
+  DbiRdna4TwoSgprSpillSimFixture() : DbiTwoSgprSpillSimBase(kRdna4SpillArch) {}
+};
+
+TEST_F(DbiCdna3TwoSgprSpillSimFixture, BothSpilledSgprsSurviveClobberingProbe) {
+  expect_both_sgprs_survive();
+}
+TEST_F(DbiCdna4TwoSgprSpillSimFixture, BothSpilledSgprsSurviveClobberingProbe) {
+  expect_both_sgprs_survive();
+}
+TEST_F(DbiRdna4TwoSgprSpillSimFixture, BothSpilledSgprsSurviveClobberingProbe) {
+  expect_both_sgprs_survive();
 }
 
 //==============================================================================
