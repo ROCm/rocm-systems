@@ -75,6 +75,22 @@ pub fn build_specs(
             ))
         })?;
 
+    // Which nodes this exec actually starts processes on. `--node N`
+    // narrows it to one; the rank variables below are still computed
+    // against the *session's* full size, so a process started that way
+    // sees exactly what its neighbours see.
+    let nodes: Vec<u32> = match def.node {
+        Some(node) if node >= node_count => {
+            return Err(MirageError::other(format!(
+                "this session has {node_count} node(s), so there is no node {node} \
+                 (they are numbered 0..{})",
+                node_count - 1
+            )));
+        }
+        Some(node) => vec![node],
+        None => (0..node_count).collect(),
+    };
+
     // Materialise the directory the containers write their pid files
     // into. The bind mount is read-write but the container cannot create
     // the path itself: `sh` would have to `mkdir -p` before redirecting,
@@ -85,8 +101,13 @@ pub fn build_specs(
         std::fs::create_dir_all(&dir).map_err(|e| MirageError::io(dir, e))?;
     }
 
-    let mut specs = Vec::with_capacity(world_size as usize);
-    for node in 0..node_count {
+    // One process gets the terminal; several share none of it. Decided
+    // once, from the size of *this* exec, so every rank agrees — see
+    // [`StdioMode::for_exec`].
+    let stdio = StdioMode::for_exec(nodes.len() * nproc as usize);
+
+    let mut specs = Vec::with_capacity(nodes.len() * nproc as usize);
+    for node in nodes {
         for local in 0..nproc {
             let global = node * nproc + local;
             let args = if node == 0 {
@@ -95,7 +116,6 @@ pub fn build_specs(
                 def.worker_exec.as_ref().unwrap_or(&def.exec)
             };
             let env = process_env(desc, args, global, node, local, world_size);
-            let stdio = StdioMode::for_rank(global, def.capture_all);
 
             specs.push(match &desc.containers {
                 // Containerised: run the workload inside the node's
@@ -308,7 +328,7 @@ mod tests {
         }
     }
 
-    fn exec_def(nproc: u32, capture_all: bool) -> ExecDef {
+    fn exec_def(nproc: u32, node: Option<u32>) -> ExecDef {
         ExecDef {
             timestamp: chrono::Utc::now(),
             session: SessionId::new("s").unwrap(),
@@ -320,7 +340,7 @@ mod tests {
             },
             worker_exec: None,
             nproc_per_node: nproc,
-            capture_all,
+            node,
             clear_env: false,
         }
     }
@@ -330,26 +350,67 @@ mod tests {
     }
 
     #[test]
-    fn only_rank_zero_inherits_stdin() {
-        // Two processes cannot both read one terminal; giving stdin to
-        // more than one rank means keystrokes go to whichever happens to
-        // read first.
-        let specs = build_specs(&desc(3), &exec_def(1, false), &id()).unwrap();
-        assert_eq!(specs.len(), 3);
+    fn a_single_process_job_gets_the_terminal_whole() {
+        // The interactive case: `mirage run -- bash` on a one-node
+        // session. Its streams are the caller's own, unmediated, which is
+        // the only way a shell prints a prompt and reads a keystroke.
+        let specs = build_specs(&desc(1), &exec_def(1, None), &id()).unwrap();
+        assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].stdio, StdioMode::Inherit { stdin: true });
-        assert_eq!(specs[1].stdio, StdioMode::Inherit { stdin: false });
-        assert_eq!(specs[2].stdio, StdioMode::Inherit { stdin: false });
     }
 
     #[test]
-    fn capture_all_captures_every_rank_and_gives_none_of_them_stdin() {
-        let specs = build_specs(&desc(2), &exec_def(1, true), &id()).unwrap();
+    fn a_multi_node_job_labels_every_rank_and_gives_none_of_them_stdin() {
+        // Several writers on one terminal are unreadable without labels,
+        // and one terminal cannot be shared between readers — so mirage
+        // takes the output to prefix it and offers stdin to nobody,
+        // rather than picking a rank to receive it silently.
+        let specs = build_specs(&desc(3), &exec_def(1, None), &id()).unwrap();
+        assert_eq!(specs.len(), 3);
         assert!(specs.iter().all(|s| s.stdio == StdioMode::Capture));
     }
 
     #[test]
+    fn several_processes_on_one_node_are_still_multi_process() {
+        // The rule is about how many processes share the terminal, not
+        // how many nodes there are.
+        let specs = build_specs(&desc(1), &exec_def(4, None), &id()).unwrap();
+        assert_eq!(specs.len(), 4);
+        assert!(specs.iter().all(|s| s.stdio == StdioMode::Capture));
+    }
+
+    #[test]
+    fn naming_one_node_makes_the_exec_interactive() {
+        // The escape hatch for a multi-node session: one node, one
+        // process, so it takes the single-process branch and gets the
+        // terminal. This is what `mirage exec --node 2 -- bash` is for.
+        let specs = build_specs(&desc(4), &exec_def(1, Some(2)), &id()).unwrap();
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].stdio, StdioMode::Inherit { stdin: true });
+    }
+
+    #[test]
+    fn a_named_node_keeps_the_rank_identity_of_that_node() {
+        // The process has to believe it *is* node 2, or a workload
+        // started this way sees a different world from its neighbours:
+        // wrong rank, wrong world size, wrong rendezvous.
+        let specs = build_specs(&desc(4), &exec_def(1, Some(2)), &id()).unwrap();
+        let at = |k: &str| specs[0].env.get(k).cloned().unwrap_or_default();
+        assert_eq!(at("MIRAGE_RANK"), "2");
+        assert_eq!(at("RANK"), "2");
+        assert_eq!(at("WORLD_SIZE"), "4", "the session's size, not this exec's");
+        assert_eq!(at("MASTER_ADDR"), "mirage-s-node-0");
+    }
+
+    #[test]
+    fn a_node_outside_the_topology_is_refused() {
+        let err = build_specs(&desc(2), &exec_def(1, Some(7)), &id()).unwrap_err();
+        assert!(err.to_string().contains("no node 7"), "{err}");
+    }
+
+    #[test]
     fn the_emulator_interposer_is_prepended_to_a_user_preload() {
-        let mut def = exec_def(1, false);
+        let mut def = exec_def(1, None);
         def.exec
             .env
             .insert("LD_PRELOAD".to_string(), "/user/mine.so".to_string());
@@ -364,7 +425,7 @@ mod tests {
     fn rank_variables_win_over_a_user_supplied_rank() {
         // A workload exporting RANK would otherwise break its own
         // rendezvous.
-        let mut def = exec_def(1, false);
+        let mut def = exec_def(1, None);
         def.exec
             .env
             .insert("RANK".to_string(), "99".to_string());
@@ -374,7 +435,7 @@ mod tests {
 
     #[test]
     fn local_and_global_ranks_are_distinct_with_several_procs_per_node() {
-        let specs = build_specs(&desc(2), &exec_def(2, false), &id()).unwrap();
+        let specs = build_specs(&desc(2), &exec_def(2, None), &id()).unwrap();
         assert_eq!(specs.len(), 4);
         let at = |i: usize, k: &str| specs[i].env.get(k).cloned().unwrap_or_default();
         assert_eq!(at(3, "RANK"), "3");
@@ -385,7 +446,7 @@ mod tests {
 
     #[test]
     fn the_head_node_uses_loopback_and_workers_use_the_head_address() {
-        let specs = build_specs(&desc(2), &exec_def(1, false), &id()).unwrap();
+        let specs = build_specs(&desc(2), &exec_def(1, None), &id()).unwrap();
         assert_eq!(
             specs[0].env.get("MASTER_ADDR").map(String::as_str),
             Some("localhost")
@@ -398,7 +459,7 @@ mod tests {
 
     #[test]
     fn an_impossible_world_size_is_refused_rather_than_forked() {
-        let err = build_specs(&desc(2), &exec_def(u32::MAX, false), &id()).unwrap_err();
+        let err = build_specs(&desc(2), &exec_def(u32::MAX, None), &id()).unwrap_err();
         assert!(err.to_string().contains("more than the"), "{err}");
     }
 
@@ -411,7 +472,7 @@ mod tests {
             names: vec!["mirage-s-node-0".to_string(), "mirage-s-node-1".to_string()],
             scratch: scratch.path().to_path_buf(),
         });
-        let specs = build_specs(&d, &exec_def(1, false), &id()).unwrap();
+        let specs = build_specs(&d, &exec_def(1, None), &id()).unwrap();
 
         assert_eq!(specs[1].command, "podman");
         assert_eq!(specs[1].args[0], "exec");
@@ -433,13 +494,13 @@ mod tests {
         // Mirage's parent is the terminal the user typed in, so what they
         // exported there — a token, a PYTHONPATH, a proxy — they meant
         // for the workload.
-        let specs = build_specs(&desc(1), &exec_def(1, false), &id()).unwrap();
+        let specs = build_specs(&desc(1), &exec_def(1, None), &id()).unwrap();
         assert!(specs[0].inherit_env);
     }
 
     #[test]
     fn clear_env_asks_for_an_almost_empty_environment() {
-        let mut def = exec_def(1, false);
+        let mut def = exec_def(1, None);
         def.clear_env = true;
         let specs = build_specs(&desc(1), &def, &id()).unwrap();
         assert!(!specs[0].inherit_env);
@@ -462,7 +523,7 @@ mod tests {
             names: vec!["mirage-s-node-0".to_string()],
             scratch: scratch.path().to_path_buf(),
         });
-        let mut def = exec_def(1, false);
+        let mut def = exec_def(1, None);
         def.clear_env = true;
         let specs = build_specs(&d, &def, &id()).unwrap();
         assert!(specs[0].inherit_env);

@@ -257,17 +257,29 @@ impl Default for StdioMode {
 }
 
 impl StdioMode {
-    /// The mode for `rank` under a given capture setting.
+    /// The mode for an exec that starts `processes` of them.
     ///
-    /// Rank 0 is the one that gets the terminal's input: it is the rank a
-    /// user talks to, and the only one an interactive program is started
-    /// on.
+    /// One process gets the terminal, whole and unmediated: its stdin,
+    /// stdout and stderr are the caller's own, which is what makes
+    /// `mirage run -- bash` an ordinary interactive shell.
+    ///
+    /// More than one and every process is captured, so mirage can label
+    /// each line with the rank that wrote it — the same bargain
+    /// `docker compose up` makes, and for the same reason: several
+    /// writers on one terminal are unreadable without labels. Nobody gets
+    /// stdin, because a single terminal cannot be shared between readers
+    /// and picking one rank to receive it silently is worse than not
+    /// offering it at all.
+    ///
+    /// To get a terminal on one node of a multi-node job, start a second
+    /// one there: `mirage exec --node 2 -- bash`. That is a single-process
+    /// exec, so it takes this branch.
     #[must_use]
-    pub fn for_rank(rank: u32, capture_all: bool) -> Self {
-        if capture_all {
-            Self::Capture
+    pub fn for_exec(processes: usize) -> Self {
+        if processes <= 1 {
+            Self::Inherit { stdin: true }
         } else {
-            Self::Inherit { stdin: rank == 0 }
+            Self::Capture
         }
     }
 

@@ -156,13 +156,13 @@ async fn start(nodes: u32) -> Arc<Run> {
     run
 }
 
-fn def_env(run: &Run, script: &str, capture_all: bool, clear_env: bool) -> ExecDef {
-    let mut d = def(run, script, capture_all);
+fn def_env(run: &Run, script: &str, node: Option<u32>, clear_env: bool) -> ExecDef {
+    let mut d = def(run, script, node);
     d.clear_env = clear_env;
     d
 }
 
-fn def(run: &Run, script: &str, capture_all: bool) -> ExecDef {
+fn def(run: &Run, script: &str, node: Option<u32>) -> ExecDef {
     ExecDef {
         timestamp: chrono::Utc::now(),
         session: run.id().clone(),
@@ -174,14 +174,14 @@ fn def(run: &Run, script: &str, capture_all: bool) -> ExecDef {
         },
         worker_exec: None,
         nproc_per_node: 1,
-        capture_all,
+        node,
         clear_env: false,
     }
 }
 
 /// Run `script` in `run` and return its exit code, draining output.
 async fn run_to_completion(run: &Run, script: &str) -> i32 {
-    let (exec, mut output) = run.exec(&def(run, script, true)).await.expect("exec starts");
+    let (exec, mut output) = run.exec(&def(run, script, None)).await.expect("exec starts");
     let drain = tokio::spawn(async move { while output.recv().await.is_some() {} });
     tokio::time::timeout(Duration::from_secs(30), exec.wait_finished())
         .await
@@ -223,7 +223,7 @@ async fn the_emulator_injection_reaches_the_workload() {
 async fn every_node_gets_a_process_with_its_own_rank() {
     let run = start(3).await;
     let (exec, mut output) = run
-        .exec(&def(&run, "test \"$RANK\" = \"$MIRAGE_RANK\"", true))
+        .exec(&def(&run, "test \"$RANK\" = \"$MIRAGE_RANK\"", None))
         .await
         .expect("exec starts");
     let drain = tokio::spawn(async move { while output.recv().await.is_some() {} });
@@ -243,7 +243,7 @@ async fn destroying_a_run_reaps_a_long_running_workload() {
     // The whole reason this design exists: nothing may outlive the run.
     let run = start(1).await;
     let (exec, _output) = run
-        .exec(&def(&run, "sleep 600", false))
+        .exec(&def(&run, "sleep 600", None))
         .await
         .expect("exec starts");
     let pids = exec.live_pids();
@@ -271,7 +271,7 @@ async fn a_workload_that_forks_has_its_whole_tree_reaped() {
         "sh -c 'while true; do echo x >> {}; sleep 0.1; done' & sleep 600",
         marker.display()
     );
-    let (exec, _output) = run.exec(&def(&run, &script, false)).await.expect("starts");
+    let (exec, _output) = run.exec(&def(&run, &script, None)).await.expect("starts");
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(marker.exists(), "the grandchild must actually be running");
 
@@ -301,7 +301,7 @@ async fn a_description_lets_another_process_build_the_same_processes() {
 
     let id = ExecId::new("x-1").unwrap();
     let specs =
-        mirage_supervisor::build_specs(&desc, &def(&run, "exit 0", true), &id).expect("specs");
+        mirage_supervisor::build_specs(&desc, &def(&run, "exit 0", None), &id).expect("specs");
     assert_eq!(specs.len(), 2);
     assert_eq!(specs[0].env.get("RANK").map(String::as_str), Some("0"));
     assert_eq!(specs[1].env.get("RANK").map(String::as_str), Some("1"));
@@ -315,7 +315,7 @@ async fn an_exec_built_from_a_description_runs_like_one_built_by_the_run() {
     // The equivalence `mirage exec` depends on, asserted directly.
     let run = start(1).await;
     let desc = run.describe().unwrap();
-    let d = def(&run, &format!("test -n \"${STUB_ENV}\""), true);
+    let d = def(&run, &format!("test -n \"${STUB_ENV}\""), None);
 
     let id = ExecId::new("x-2").unwrap();
     let specs = mirage_supervisor::build_specs(&desc, &d, &id).unwrap();
@@ -358,7 +358,7 @@ async fn a_concurrent_destroy_waits_for_the_one_already_running() {
     // its grace period when the second one starts.
     let run = start(1).await;
     let (_exec, output) = run
-        .exec(&def(&run, "trap '' TERM; while true; do sleep 1; done", true))
+        .exec(&def(&run, "trap '' TERM; while true; do sleep 1; done", None))
         .await
         .expect("exec starts");
     let drain = tokio::spawn(async move {
@@ -397,7 +397,7 @@ async fn an_exec_cannot_start_in_a_destroyed_session() {
     // list of things to kill, and would survive it.
     let run = start(1).await;
     run.destroy().await;
-    let started = run.exec(&def(&run, "sleep 600", false)).await;
+    let started = run.exec(&def(&run, "sleep 600", None)).await;
     assert!(
         started.is_err(),
         "a destroyed session must refuse new work, not start it"
@@ -460,7 +460,7 @@ async fn clear_env_vars_drops_the_callers_environment() {
     let (key, _) = ambient_variable();
     let run = start(1).await;
     let (exec, mut output) = run
-        .exec(&def_env(&run, &format!("test -z \"${key}\""), true, true))
+        .exec(&def_env(&run, &format!("test -z \"${key}\""), None, true))
         .await
         .expect("exec starts");
     let drain = tokio::spawn(async move { while output.recv().await.is_some() {} });
@@ -483,7 +483,7 @@ async fn clearing_the_environment_keeps_what_a_process_needs() {
     // empty", not "empty".
     let run = start(1).await;
     let (exec, mut output) = run
-        .exec(&def_env(&run, "test -n \"$PATH\" && test -n \"$HOME\"", true, true))
+        .exec(&def_env(&run, "test -n \"$PATH\" && test -n \"$HOME\"", None, true))
         .await
         .expect("exec starts");
     let drain = tokio::spawn(async move { while output.recv().await.is_some() {} });
@@ -502,12 +502,7 @@ async fn the_emulator_injection_survives_clear_env_vars() {
     // unemulated on whatever hardware is present and still exit 0.
     let run = start(1).await;
     let (exec, mut output) = run
-        .exec(&def_env(
-            &run,
-            &format!("test -n \"${STUB_ENV}\""),
-            true,
-            true,
-        ))
+        .exec(&def_env(&run, &format!("test -n \"${STUB_ENV}\""), None, true))
         .await
         .expect("exec starts");
     let drain = tokio::spawn(async move { while output.recv().await.is_some() {} });
@@ -538,9 +533,50 @@ async fn every_description_of_a_session_names_the_same_rendezvous() {
 
     // And the specs built from them agree, which is what the workload
     // actually sees.
-    let a = mirage_supervisor::build_specs(&first, &def(&run, "true", true), &ExecId::new("x-a").unwrap()).unwrap();
-    let b = mirage_supervisor::build_specs(&second, &def(&run, "true", true), &ExecId::new("x-b").unwrap()).unwrap();
+    let a = mirage_supervisor::build_specs(&first, &def(&run, "true", None), &ExecId::new("x-a").unwrap()).unwrap();
+    let b = mirage_supervisor::build_specs(&second, &def(&run, "true", None), &ExecId::new("x-b").unwrap()).unwrap();
     assert_eq!(a[1].env.get("MASTER_PORT"), b[1].env.get("MASTER_PORT"));
+    run.destroy().await;
+}
+
+#[tokio::test]
+async fn naming_a_node_runs_there_and_only_there() {
+    // The interactive escape hatch for a multi-node session. One process
+    // means it gets the terminal, and it has to land on the node the user
+    // named — a shell that silently opened on node 0 while they asked for
+    // node 2 would be worse than an error.
+    let run = start(4).await;
+    let (exec, mut output) = run
+        .exec(&def(&run, "echo \"on $MIRAGE_RANK\"", Some(2)))
+        .await
+        .expect("exec starts");
+    let collected = tokio::spawn(async move {
+        let mut seen = Vec::new();
+        while let Some(chunk) = output.recv().await {
+            seen.push((chunk.node, String::from_utf8_lossy(&chunk.data).into_owned()));
+        }
+        seen
+    });
+    tokio::time::timeout(Duration::from_secs(30), exec.wait_finished())
+        .await
+        .expect("exec finishes");
+    let _ = collected.await;
+
+    let status = exec.status();
+    assert_eq!(status.nodes.len(), 1, "only the named node runs");
+    assert!(status.nodes.contains_key(&2), "and it is node 2: {status:?}");
+    assert_eq!(status.exit_code, Some(0));
+    run.destroy().await;
+}
+
+#[tokio::test]
+async fn naming_a_node_that_does_not_exist_is_refused() {
+    let run = start(2).await;
+    let err = run
+        .exec(&def(&run, "true", Some(9)))
+        .await
+        .expect_err("a node outside the topology must be refused");
+    assert!(err.to_string().contains("no node 9"), "{err}");
     run.destroy().await;
 }
 
@@ -554,13 +590,13 @@ fn process_alive(pid: u32) -> bool {
 }
 
 #[tokio::test]
-async fn capture_all_labels_every_ranks_output_with_its_rank() {
-    // The point of the flag: with three nodes writing to one terminal,
-    // unlabelled output is unreadable. Assert the labelling on the real
+async fn a_multi_node_exec_labels_every_ranks_output_with_its_rank() {
+    // Automatic for a multi-node job: with three nodes writing to one
+    // terminal, unlabelled output is unreadable. Asserted on the real
     // chunk stream, which is exactly what the CLI's printer consumes.
     let run = start(3).await;
     let (exec, mut output) = run
-        .exec(&def(&run, "echo \"line from $MIRAGE_RANK\"", true))
+        .exec(&def(&run, "echo \"line from $MIRAGE_RANK\"", None))
         .await
         .expect("exec starts");
 
@@ -591,15 +627,15 @@ async fn capture_all_labels_every_ranks_output_with_its_rank() {
 }
 
 #[tokio::test]
-async fn without_capture_all_mirage_never_sees_the_output() {
-    // The default is that the workload writes to the terminal directly,
-    // with mirage out of the way entirely. If anything arrived on this
-    // channel, output would be passing through mirage when it should not
-    // — which is how stdout/stderr separation and byte-exactness get
-    // lost.
+async fn a_single_process_exec_writes_straight_to_the_terminal() {
+    // A one-process job writes to the terminal directly, with mirage out
+    // of the way entirely. If anything arrived on this channel, output
+    // would be passing through mirage when it should not — which is how
+    // stdout/stderr separation and byte-exactness get lost, and how an
+    // interactive shell stops being interactive.
     let run = start(1).await;
     let (exec, mut output) = run
-        .exec(&def(&run, "echo straight-to-the-terminal", false))
+        .exec(&def(&run, "echo straight-to-the-terminal", None))
         .await
         .expect("exec starts");
     tokio::time::timeout(Duration::from_secs(30), exec.wait_finished())

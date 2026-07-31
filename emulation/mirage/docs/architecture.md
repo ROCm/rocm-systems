@@ -219,18 +219,34 @@ stdin *is* the terminal, not because mirage emulated one. `mirage attach`,
 them: there is no stream to attach to and no buffer to tail, because the
 bytes never pass through mirage at all.
 
-The one exception is `--capture-all`, on both `run` and `exec`, and it
-exists for one reason: several ranks writing to one terminal are
-unreadable without labels. Capturing puts mirage back in the middle so it
-can prefix every line with the rank that produced it. The price is stdin,
-which no rank gets.
+The one exception is a job with more than one process, and it exists for
+one reason: several ranks writing to one terminal are unreadable without
+labels. Mirage goes back in the middle so it can prefix every line with
+the rank that produced it — the bargain `docker compose up` makes. The
+price is stdin, which no rank gets.
 
-The default is the other half of that trade: every rank writes straight to
-the terminal, and rank 0 additionally inherits stdin — it is the rank a
-user talks to, and the only one an interactive program is started on.
-Other ranks read `/dev/null`. Rank 0 also stays in the caller's process
-group rather than leading its own, because a background process group that
-reads the controlling terminal is stopped with `SIGTTIN`.
+Which side of that a job lands on is decided by its shape, not by a flag.
+There was a `--capture-all` flag; it was removed once the rule became
+automatic, because it could then only ask for the behaviour that already
+applied.
+
+* **One process** — the interactive case — gets the terminal whole.
+* **More than one** is captured and labelled, and nobody gets stdin. One
+  terminal cannot be shared between readers, and quietly handing it to
+  rank 0 sends keystrokes somewhere the user cannot see.
+
+That leaves a real gap: there is no way to be interactive *with* a
+multi-node job. `mirage exec --node N` fills it. Naming one node makes
+the exec a single-process job, so it takes the first branch and gets the
+terminal, while still receiving that node's rank variables and the
+session's `WORLD_SIZE` — a shell inside the job rather than beside it.
+
+A process that owns the terminal is also made the terminal's foreground
+process group, because a background group that reads its controlling
+terminal is stopped with `SIGTTIN`. That handoff is taken *only* for a
+single-process job: the tty driver delivers Ctrl-C to the foreground
+group alone, so doing it on a grid would kill one rank and leave mirage
+unable to hear the interrupt at all.
 
 Capturing is line-oriented, not chunk-oriented. A chunk is whatever one
 `read` returned, so a single line can arrive in three pieces and three
@@ -238,7 +254,7 @@ lines in one; prefixing per chunk produces labels mid-line and lines with
 no label. Each rank's stream is buffered until it holds a complete line,
 and the tail — a prompt, a progress bar — is flushed when the stream ends
 so nothing is silently dropped. stdout and stderr stay separate all the
-way out, so redirecting one of them still works under `--capture-all`.
+way out, so redirecting one of them still works.
 
 ## Why containers are foreground and `--rm`
 

@@ -459,7 +459,6 @@ fn output_is_not_lost_under_churn() {
             "exec",
             "-s",
             &id,
-            "--capture-all",
             "--",
             "/bin/sh",
             "-c",

@@ -368,7 +368,7 @@ flowchart TB
 ```console
 $ mirage profile create super --emulator rocjitsu --agent MI350X \
       --num-nodes 32 --gpus-per-node 8
-$ mirage run --profile super --capture-all -- ./all_reduce_perf -b 8 -e 1G
+$ mirage run --profile super -- ./all_reduce_perf -b 8 -e 1G
 ```
 
 > The bring-up pattern is identical to one node, just replicated per rank —
@@ -545,7 +545,7 @@ $ mirage profile create cluster --emulator rocjitsu --agent MI450X \
       --num-nodes 2 --gpus-per-node 2
 created profile cluster
 
-$ mirage run --profile cluster --capture-all -- ./all_reduce_perf -b 8 -e 128M
+$ mirage run --profile cluster -- ./all_reduce_perf -b 8 -e 128M
 mirage: session s-20260616-193312-3b41-0
 [0] #                                          out-of-place
 [0] #       size      count   type    time   algbw   busbw
@@ -557,7 +557,7 @@ mirage: session s-20260616-193312-3b41-0
 Two **emulated** nodes, a real collective, ranks coordinated through the head
 node — all on one machine.
 
-`--capture-all` is the one thing worth knowing here: with several nodes writing
+The `[rank]` labelling is the one thing worth knowing here: with several nodes writing
 to one terminal, unlabelled output says nothing about who wrote what. Capturing
 prefixes every line with its rank — at the cost of stdin, which is closed for
 all ranks.
@@ -622,7 +622,7 @@ mismatch. Re-run instantly — no cluster queue, no post-mortem archaeology.
 # DEMO 6 — interrupting a long job
 
 ```console
-$ mirage run --profile cluster --capture-all -- python3 long_train.py
+$ mirage run --profile cluster -- python3 long_train.py
 mirage: session s-20260616-203901-3b41-0
 [0] epoch 3/100  loss=2.14
 [1] epoch 3/100  loss=2.16
@@ -767,7 +767,8 @@ flowchart LR
   with it. `mirage exec` borrows it from another terminal.
 - **Topology** models the rack; **containers** isolate each node; **rank + head**
   wiring (`MIRAGE_RANK`, `MASTER_ADDR/PORT`, `WORLD_SIZE`) comes for free.
-- **`--capture-all`** when you need to know which rank said what.
+- **`[rank]` labels** appear automatically once a job has more than one
+  process, so you always know which rank said what.
 
 ```console
 $ mirage profile create cdna4 --emulator rocjitsu --agent MI450X --num-nodes 2

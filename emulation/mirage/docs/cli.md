@@ -52,7 +52,7 @@ mirage run [--profile NAME] [--emulator NAME]
            [--container-provider PROV] [--hack HACK]...
            [--exec-mode functional|clocked] [-o|--option KEY=VALUE]...
            [--plugin NAME]... [--config PATH]
-           [--daemon | --in-process] [--capture-all] [--clear-env-vars]
+           [--daemon | --in-process] [--clear-env-vars]
            -- <cmd> [args...]
 ```
 
@@ -180,16 +180,22 @@ Rank 0 also stays in mirage's process group for that reason — a
 background process group reading the controlling terminal is stopped with
 `SIGTTIN`.
 
-### `--capture-all`
+### Output, and who gets the terminal
 
-By default, every rank writes to your terminal directly and mirage is not
-in the middle. That is what keeps `bash` interactive and redirection
-byte-exact, but with several nodes writing at once the lines interleave
-with nothing to say which rank wrote what.
+The shape of the job decides this. There is no flag, because a flag could
+only ever ask for the behaviour that already applies.
 
-`--capture-all` pipes every rank's stdout and stderr through mirage,
-which prints them line by line, prefixed with the rank that produced
-them:
+**A single-process job** gets your terminal whole: its stdin, stdout and
+stderr *are* yours. That is what makes `mirage run -- bash` an ordinary
+interactive shell — prompt, echo, line editing, job control — and what
+keeps redirection byte-exact with stdout and stderr distinct. Mirage is
+not in the middle.
+
+**A multi-process job** — more than one node, or `--nproc-per-node`
+above one — has every rank's stdout and stderr piped through mirage,
+which prints them a line at a time prefixed with the rank that wrote
+them. This is what `docker compose up` does with a multi-container
+project, and for the same reason:
 
 ```sh
 $ mirage run --profile mi350x --num-nodes 2 -- sh -c 'echo hello from $MIRAGE_RANK'
@@ -204,10 +210,14 @@ Details worth knowing:
   holds a complete line, so a line split across three reads is still
   printed once, with one prefix. A trailing partial line — a prompt, a
   progress bar — is flushed when the stream ends rather than dropped.
+  A stream that never sends a newline is flushed at 1 MiB rather than
+  buffered without bound.
 * stdout and stderr stay separate all the way out, so redirecting one of
-  them still works under `--capture-all`.
-* **No rank gets stdin.** Capturing costs you interactivity; that is the
-  trade. Do not use it for `bash`.
+  them still works.
+* **No rank gets stdin.** One terminal cannot be shared between readers,
+  and quietly giving it to rank 0 would send keystrokes somewhere you
+  cannot see. For a terminal on a multi-node job, use
+  `mirage exec --node N` — see below.
 
 ### The workload's environment
 
@@ -255,7 +265,7 @@ what mirage passes it with `-e`, and nothing else.
 ## `mirage exec`
 
 ```text
-mirage exec [-s|--session ID] [--nproc-per-node N] [--capture-all]
+mirage exec [-s|--session ID] [-n|--node N] [--nproc-per-node N]
             [--clear-env-vars] [--env KEY=VALUE]... [--workdir DIR]
             -- <cmd> [args...]
 ```
@@ -292,9 +302,23 @@ and no stdin relay.
   than a positional because everything after `--` belongs to the command:
   with both positional, `mirage exec -- bash` could equally mean "session
   `bash`".
-* `--nproc-per-node N`, `--capture-all`, `--env KEY=VALUE` and
-  `--workdir DIR` mean exactly what they mean on `run`, including the
-  `[<rank>] ` prefixes and the loss of stdin under `--capture-all`.
+* `-n`/`--node N` runs on that node **only**, instead of on every node
+  in the session. This is how you get an interactive shell on a
+  multi-node job: naming one node makes the exec a single-process job,
+  and a single-process job gets the terminal.
+
+  ```sh
+  $ mirage exec --node 2 -- bash
+  ```
+
+  The process still believes it is that node — it gets rank 2's
+  variables and the session's `WORLD_SIZE`, and points at the same
+  rendezvous — so it is a shell *inside* the job rather than beside it.
+  Naming a node the session does not have is an error, not a silent
+  fallback to node 0.
+* `--nproc-per-node N`, `--env KEY=VALUE`, `--clear-env-vars` and
+  `--workdir DIR` mean exactly what they mean on `run`, including which
+  jobs get the terminal and which get `[<rank>] ` prefixes.
 * The exec's processes die with this command, and this command exits with
   the workload's exit code. Ctrl-C is forwarded, then escalates, exactly
   as in `run`.

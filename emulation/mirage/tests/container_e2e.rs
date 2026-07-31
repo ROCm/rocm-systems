@@ -613,7 +613,6 @@ fn a_multi_node_containerised_session_launches_one_container_per_node() {
         "cp",
         "--num-nodes",
         "3",
-        "--capture-all",
         "--",
         "/bin/sh",
         "-c",

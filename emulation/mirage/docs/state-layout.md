@@ -177,7 +177,7 @@ existence is its socket:
 | Where do run sockets live? | `mirage paths` (the `runs:` line) |
 | Which sessions are live? | the `.sock` files in that directory |
 | How do I start something in one? | `mirage exec -- <command>`, or `mirage exec -s <id> -- <command>` when several runs are up |
-| What did it print? | the terminal its `mirage run` is in; add `--capture-all` to label every rank's lines |
+| What did it print? | the terminal its `mirage run` is in; a multi-node job labels every rank's lines automatically |
 
 `mirage exec` may omit `--session` because the common case is one run in
 one terminal and an exec in another; when the guess would be ambiguous it

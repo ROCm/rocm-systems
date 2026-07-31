@@ -135,33 +135,32 @@ fn run_streams_output_and_propagates_the_exit_code() {
     assert!(stdout.contains("to-stdout"), "stdout was: {stdout}");
     assert!(!stdout.contains("to-stderr"), "stderr leaked into stdout: {stdout}");
     assert!(stderr.contains("to-stderr"), "stderr was: {stderr}");
-    // And byte-exact: without `--capture-all` the workload's streams *are*
-    // this command's, so mirage never sees the bytes and cannot decorate
-    // them.
+    // And byte-exact: a single-process job's streams *are* this
+    // command's, so mirage never sees the bytes and cannot decorate them.
     assert!(
         !stdout.contains("[0]"),
-        "output was labelled without --capture-all: {stdout}"
+        "a single-process job's output must not be labelled: {stdout}"
     );
 }
 
 #[test]
-fn capture_all_labels_every_rank() {
+fn a_multi_node_run_labels_every_rank_without_being_asked() {
     let env = Env::new();
     if skip_without_emulator() {
         return;
     }
     env.create_profile("p");
 
-    // The point of capturing: with several nodes writing to one terminal
+    // Automatic, not a flag: with several nodes writing to one terminal
     // at once, unlabelled output says nothing about which rank produced
-    // which line.
+    // which line, so there is no version of this a user would want. The
+    // shape of the job decides, the way `docker compose up` does.
     let out = env.ok(&[
         "run",
         "--profile",
         "p",
         "--num-nodes",
         "2",
-        "--capture-all",
         "--",
         "/bin/sh",
         "-c",
@@ -188,7 +187,6 @@ fn captured_output_is_complete_for_a_process_that_writes_and_exits_immediately()
             "run",
             "--profile",
             "p",
-            "--capture-all",
             "--",
             "/bin/sh",
             "-c",
@@ -325,7 +323,6 @@ fn exec_builds_the_same_process_grid_as_the_run() {
 
     let out = env.ok(&[
         "exec",
-        "--capture-all",
         "--",
         "/bin/sh",
         "-c",

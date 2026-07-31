@@ -142,20 +142,21 @@ pub struct ExecDef {
 
     /// Run the workload on a pseudo-terminal instead of pipes.
     ///
-    /// Send every rank's output to this terminal, prefixed with the rank
-    /// that produced it, instead of letting the ranks write to it
-    /// directly.
+    /// Run only on this node, instead of on every node in the session.
     ///
-    /// Without this each process inherits the caller's own stdout and
-    /// stderr, which is what makes an interactive `bash` work and what
-    /// keeps output byte-exact under redirection. That does not scale
-    /// past one node: several ranks writing to one terminal interleave
-    /// with nothing to say which wrote what. Capturing puts mirage back
-    /// in the middle so it can label each line — at the cost of stdin,
-    /// which cannot be meaningfully shared between ranks and is
-    /// therefore closed for all of them.
-    #[serde(default)]
-    pub capture_all: bool,
+    /// The reason this exists is terminals. A job spanning several nodes
+    /// has every rank's output multiplexed and nobody's stdin connected,
+    /// because one terminal cannot be shared between readers — so there
+    /// is no way to be *interactive* with such a job. Naming a single
+    /// node makes the exec a one-process job, which does get the
+    /// terminal: `mirage exec --node 2 -- bash` is a shell on node 2 of a
+    /// running four-node session.
+    ///
+    /// The process still believes it is that node: it gets the rank
+    /// variables of rank `node`, and the session's `WORLD_SIZE`, so a
+    /// workload started this way sees exactly what its neighbours see.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<u32>,
 
     /// Start the workload with an almost-empty environment instead of
     /// the caller's.
@@ -267,19 +268,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn capture_defaults_to_off_for_documents_that_omit_it() {
-        // Inheriting the caller's streams is the default, and it is the
-        // one that has to be safe to fall into: it keeps output
-        // byte-exact, keeps stdout and stderr distinct, and is what makes
-        // an interactive shell interactive. Capturing is the opt-in,
-        // because it costs stdin.
+    fn a_document_that_omits_the_node_runs_on_all_of_them() {
+        // Running everywhere is the default, and it has to be the safe
+        // one to fall into: an exec that silently ran on one node of a
+        // four-node job would look like it worked and produce a quarter
+        // of the work.
         let json = r#"{
             "timestamp": "2026-01-01T00:00:00Z",
             "session": "s",
             "exec": {"command": "/bin/true"}
         }"#;
         let def: ExecDef = serde_json::from_str(json).unwrap();
-        assert!(!def.capture_all);
+        assert_eq!(def.node, None);
         assert_eq!(def.nproc_per_node, 1);
     }
 

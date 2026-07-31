@@ -150,7 +150,9 @@ async fn run_owned(
         },
         worker_exec: None,
         nproc_per_node: a.nproc_per_node.unwrap_or(1).max(1),
-        capture_all: a.capture_all,
+        // `run` starts the whole job; `exec --node N` is how you reach
+        // one node of it.
+        node: None,
         clear_env: a.clear_env_vars,
     };
 
@@ -160,7 +162,7 @@ async fn run_owned(
     // than a spawned task so the server stops when the workload does,
     // without a second thing to cancel.
     tokio::select! {
-        code = supervise_locally(exec, output, !def.capture_all, interrupts) => code,
+        code = supervise_locally(exec, output, interrupts) => code,
         () = &mut serving => unreachable!("the control socket serves until dropped"),
     }
 }
@@ -187,7 +189,9 @@ pub async fn exec_cmd(a: ExecArgsCli) -> anyhow::Result<ExitCode> {
         },
         worker_exec: None,
         nproc_per_node: a.nproc_per_node.unwrap_or(1).max(1),
-        capture_all: a.capture_all,
+        // `run` starts the whole job; `exec --node N` is how you reach
+        // one node of it.
+        node: None,
         clear_env: a.clear_env_vars,
     };
 
@@ -205,10 +209,9 @@ pub async fn exec_cmd(a: ExecArgsCli) -> anyhow::Result<ExitCode> {
     let id = ExecId::new(format!("x-{}-{started}", std::process::id()))
         .map_err(|e| anyhow::anyhow!("could not build an exec id: {e}"))?;
     let specs = mirage_supervisor::build_specs(&desc, &def, &id)?;
-    let capture_all = def.capture_all;
     let (exec, output) = Exec::start(id, def, specs);
 
-    supervise_locally(exec, output, !capture_all, &mut interrupts).await
+    supervise_locally(exec, output, &mut interrupts).await
 }
 
 /// Run an exec to completion in this terminal, printing captured output
@@ -218,30 +221,30 @@ pub async fn exec_cmd(a: ExecArgsCli) -> anyhow::Result<ExitCode> {
 async fn supervise_locally(
     exec: Arc<Exec>,
     output: mpsc::Receiver<mirage_supervisor::OutputChunk>,
-    owns_terminal: bool,
     interrupts: &mut Interrupts,
 ) -> anyhow::Result<ExitCode> {
-    // Always drain the channel. Under `--capture-all` this is what prints
-    // the labelled output; otherwise it is empty and finishes at once,
-    // because nothing was piped.
+    // Always drain the channel. For a multi-process exec this is what
+    // prints the labelled output; for a single-process one it is empty
+    // and finishes at once, because nothing was piped.
     let printer = tokio::spawn(mirage_supervisor::output::print_labelled(output));
 
-    // Put rank 0 in the foreground, so an interactive program can read
-    // the terminal at all. Dropped — and so given back — on every exit
-    // path below, including the interrupted one.
+    // Hand the terminal to a single-process exec, so an interactive
+    // program can read it at all. Dropped — and so given back — on every
+    // exit path below, including the interrupted one.
     //
-    // Only for a single-process job. Handing the terminal over makes rank
-    // 0's process group the terminal's *foreground* group, and the tty
-    // driver then delivers Ctrl-C to that group alone: not to mirage, and
-    // not to the other ranks. On a grid that means Ctrl-C kills rank 0,
-    // leaves ranks 1..N running, and never wakes the interrupt handling
-    // below — so `wait_finished` never resolves and a second Ctrl-C goes
-    // to a group that no longer exists. Keeping the terminal for a
-    // multi-process job costs nothing (a grid is not an interactive
-    // program) and makes Ctrl-C reach mirage, which forwards it to every
-    // rank.
+    // Single-process only, and that is not a nicety. Handing the terminal
+    // over makes the workload's process group the terminal's *foreground*
+    // group, and the tty driver then delivers Ctrl-C to that group alone:
+    // not to mirage, and not to any other rank. On a grid that would mean
+    // Ctrl-C killing one rank, leaving the rest running, and never waking
+    // the interrupt handling below — so `wait_finished` never resolves
+    // and a second Ctrl-C goes to a group that no longer exists.
+    //
+    // It costs a grid nothing, because a grid is not an interactive
+    // program: it has no stdin either way. `mirage exec --node N` is how
+    // you get a terminal on one node of one.
     let single_process = exec.live_pids().len() <= 1;
-    let _terminal = (owns_terminal && single_process)
+    let _terminal = single_process
         .then(|| exec.rank_zero_pid().map(TerminalHandoff::give_to))
         .flatten()
         .flatten();

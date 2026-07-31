@@ -370,10 +370,20 @@ pub struct ExecArgsCli {
     #[arg(long, visible_alias = "nproc_per_node")]
     pub nproc_per_node: Option<u32>,
 
-    /// Send every rank's output to this terminal, prefixed with `[rank]`.
-    /// Implies no stdin.
-    #[arg(long)]
-    pub capture_all: bool,
+    /// Run on this node only, instead of on every node in the session.
+    ///
+    /// This is how you get an interactive shell on a multi-node job. A
+    /// job spanning several nodes has every rank's output multiplexed
+    /// and nobody's stdin connected, because one terminal cannot be
+    /// shared between readers. Naming one node makes this a
+    /// single-process exec, which does get the terminal:
+    ///
+    ///     mirage exec --node 2 -- bash
+    ///
+    /// The process still believes it is that node: same rank variables,
+    /// same `WORLD_SIZE`, same rendezvous as its neighbours.
+    #[arg(long, short = 'n')]
+    pub node: Option<u32>,
 
     /// Start the workload with an almost-empty environment instead of
     /// inheriting this terminal's.
@@ -520,16 +530,12 @@ pub struct RunArgs {
     /// daemon (the default).
     #[arg(long = "in-process")]
     in_process: bool,
-    /// Send every rank's output to this terminal, prefixed with the
-    /// rank that produced it.
-    ///
-    /// Without this each process writes to the terminal directly, which
-    /// is what keeps an interactive `bash` interactive and output
-    /// byte-exact under redirection — but several nodes writing at once
-    /// interleave with nothing to say which wrote what. Capturing labels
-    /// every line, at the cost of stdin, which is closed for all ranks.
-    #[arg(long)]
-    capture_all: bool,
+    // No `--capture-all`. Whether output is multiplexed is decided by
+    // the shape of the job, not by a flag: one process gets the terminal
+    // and its stdin, several get their output labelled and none of them
+    // get stdin. A flag could only ever ask for the behaviour that
+    // already applies. Use `mirage exec --node N` for a terminal on one
+    // node of a multi-node run.
     /// Start the workload with an almost-empty environment instead of
     /// inheriting this terminal's.
     ///

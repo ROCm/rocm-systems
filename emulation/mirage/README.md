@@ -118,16 +118,23 @@ and `WORLD_SIZE` becomes `num_nodes * nproc_per_node`, so
 `torch.distributed` runs without a separate launcher:
 
 ```sh
-mirage run --profile cdna4 --num-nodes 2 --nproc-per-node 4 \
-    --capture-all -- python train.py
+mirage run --profile cdna4 --num-nodes 2 --nproc-per-node 4 -- python train.py
 ```
 
-`--capture-all` is what makes that readable. By default every rank writes
-straight to your terminal, which is what keeps a single interactive run
-interactive and its output byte-exact — but several ranks writing at once
-interleave with nothing to say which wrote what. With `--capture-all`
-every rank's output is piped through mirage and printed a line at a time,
-prefixed with `[<rank>] `:
+### One process gets a terminal; many get labels
+
+The shape of the job decides how output works — there is no flag,
+because there is no version of this you would want the other way.
+
+**One process** — `mirage run -- bash` on a one-node profile — gets your
+terminal whole. Its stdin, stdout and stderr *are* yours, so a shell
+prints a prompt, echoes what you type and edits its line; redirection is
+byte-exact and stdout stays separate from stderr. Mirage is not in the
+middle at all.
+
+**More than one** and every rank's output is piped through mirage and
+printed a line at a time, prefixed with the rank that wrote it — the same
+thing `docker compose up` does, for the same reason:
 
 ```
 [0] step 10 loss=6.812
@@ -135,9 +142,23 @@ prefixed with `[<rank>] `:
 [0] step 20 loss=6.114
 ```
 
-The cost is stdin: under `--capture-all` no rank gets one. Without it,
-rank 0 inherits your stdin and the other ranks get `/dev/null`.
-`--capture-all` is accepted by both `mirage run` and `mirage exec`.
+No rank gets stdin in that mode. One terminal cannot be shared between
+readers, and quietly handing it to rank 0 would mean keystrokes going
+somewhere you cannot see.
+
+### A terminal on one node of a multi-node job
+
+Start a second one there:
+
+```sh
+mirage exec --node 2 -- bash
+```
+
+That is a single-process exec, so it takes the first branch: a real
+interactive shell, in the window you ran it from, on node 2 of the
+running session. The process still believes it is that node — same rank
+variables, same `WORLD_SIZE`, same rendezvous as its neighbours — so it
+is a shell *inside* the job rather than beside it.
 
 ## Where things live
 

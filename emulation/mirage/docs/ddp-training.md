@@ -144,8 +144,8 @@ interactive shell.
 That is the right default here: `torchrun` is what forks the ranks, so
 mirage is supervising a single process, and the fixture tags its own
 lines with `[rank N]`. As soon as *mirage* is the thing launching several
-ranks — the multi-node case below — add `--capture-all` and let mirage do
-the labelling.
+ranks — the multi-node case below — mirage labels every rank's lines
+itself.
 
 Each rank logs the loss it started and ended with, and rank 0 confirms
 that every replica converged to identical weights before printing
@@ -197,7 +197,7 @@ you can run the workload **directly**, with no `torchrun` launcher: each
 node runs `python ddp_mlp.py` once and rendezvouses through `env://`.
 
 ```sh
-mirage run --profile mi350x --num-nodes 2 --gpus-per-node 2 --capture-all \
+mirage run --profile mi350x --num-nodes 2 --gpus-per-node 2 \
   --env NCCL_P2P_DISABLE=1 --env NCCL_SHM_DISABLE=1 --env NCCL_SOCKET_IFNAME=lo \
   -- .venv-mi350/bin/python3 tests/fixtures/ml/ddp_mlp.py
 ```
@@ -206,12 +206,12 @@ mirage run --profile mi350x --num-nodes 2 --gpus-per-node 2 --capture-all \
   per rank, with distinct `RANK`s.
 - `--gpus-per-node 2` exposes two GPUs so each rank can pin to a distinct
   device (`rank % device_count`).
-- `--capture-all` pipes every rank's output through mirage and prefixes
+- Every rank's output is piped through mirage, which prefixes
   each line with the rank that wrote it.
 - The `NCCL_*` variables force RCCL onto its loopback socket transport,
   which is what the shared emulator supports.
 
-### Why `--capture-all` here
+### Why the output is labelled here
 
 Without it, every rank writes straight to the terminal. That is what
 keeps output byte-exact and a shell interactive, but two ranks writing at
@@ -238,7 +238,8 @@ Two properties are worth knowing before you reach for it:
   through and written back to the stream they came from, so `2>` still
   splits them.
 - **No rank gets stdin.** Capturing costs you the terminal, so
-  `--capture-all` is not the flag to pair with an interactive workload.
+  a multi-rank job is not something you can be interactive with — use
+  `mirage exec --node N -- bash` for a terminal on one of its nodes.
 
 Increase `--nproc-per-node` and the labels keep counting globally:
 `--num-nodes 2 --nproc-per-node 2` gives `WORLD_SIZE == 4` and ranks
@@ -254,7 +255,7 @@ does a single `all_reduce` and prints `dist_smoke_ok`. It is heavily
 logged with timestamps so any stall is easy to localize:
 
 ```sh
-mirage run --profile mi350x --num-nodes 2 --gpus-per-node 2 --capture-all \
+mirage run --profile mi350x --num-nodes 2 --gpus-per-node 2 \
   --env NCCL_P2P_DISABLE=1 --env NCCL_SHM_DISABLE=1 --env NCCL_SOCKET_IFNAME=lo \
   -- .venv-mi350/bin/python3 tests/fixtures/ml/dist_smoke.py
 ```
@@ -278,7 +279,7 @@ as long as one is up, another terminal can start a process inside it:
 
 ```sh
 # terminal 1: owns the session for the length of the training run
-mirage run --profile mi350x --num-nodes 2 --gpus-per-node 2 --capture-all \
+mirage run --profile mi350x --num-nodes 2 --gpus-per-node 2 \
   -- .venv-mi350/bin/python3 tests/fixtures/ml/ddp_mlp.py
 
 # terminal 2: joins it while it runs
@@ -288,7 +289,7 @@ mirage exec -- .venv-mi350/bin/python3 -c \
 
 `mirage exec` needs no session id while exactly one run is live; name one
 with `-s <id>` (the id `mirage run` printed) when several are. It takes
-the same `--capture-all`, `--env`, `--nproc-per-node` and `--workdir`
+the same `--node`, `--env`, `--nproc-per-node` and `--workdir`
 flags as `run`, and the process it starts is a child of *terminal 2*, on
 terminal 2's streams — so `mirage exec -- bash` really is an interactive
 shell inside the emulated node. When the training in terminal 1 exits,
@@ -304,7 +305,7 @@ the session goes with it and further execs fail.
   emulator and cannot share GPU memory. Drop `--in-process` so the
   default shared, out-of-process emulator is used.
 - **Several ranks' lines are interleaved and you cannot tell them
-  apart.** Add `--capture-all`, which labels every line with the rank
+  apart.** A multi-rank job labels every line with the rank
   that wrote it. Remove it again when you want a rank to have stdin.
 - **`Duplicate GPU detected` / `ncclInvalidUsage` at the first
   collective.** Two ranks pinned to the same emulated GPU. Give the
@@ -315,7 +316,7 @@ the session goes with it and further execs fail.
   limitation: RCCL initializes and a single collective completes (the
   `dist_smoke.py` smoke test passes), but DDP's repeated, bucketed
   collectives stall on a later one over the shared emulator. Single-rank
-  runs train end to end. Re-run with `--capture-all` to see which rank
+  runs train end to end. The `[rank]` labels show which rank
   stopped first.
 - **`no mirage run is running` from `mirage exec`.** Nothing owns a
   session: there is no background service to fall back on, so a run has
