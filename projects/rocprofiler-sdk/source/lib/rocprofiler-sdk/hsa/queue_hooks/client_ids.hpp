@@ -39,6 +39,14 @@ namespace queue_hooks
 // tag is stored in inst_pkt_t. The enum is deliberately unscoped rather than an
 // enum class: unscoped keeps the implicit conversion to ClientID, so the emplace
 // sites need no cast, while still grouping the values under one type.
+//
+// These values numerically overlap the per-queue registry's auto-incrementing
+// ClientID, which also starts at 1 and is still in use by the services that have
+// not been migrated yet. That is inert only because no consumer routes on the tag:
+// counters' completed_cb and thread trace's post_kernel_call both identify their
+// own packets by pointer lookup or dynamic_cast. Before adding a consumer that
+// dispatches on these values, either finish migrating the remaining services off
+// the registry or move this enum to a range the registry cannot produce.
 enum client_id : int64_t
 {
     COUNTERS_CLIENT_ID     = 1,
