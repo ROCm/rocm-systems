@@ -427,6 +427,50 @@ SPECIALIZE_REDUCE(FuncMinMax, double, 1, double, fn.isMinNotMax ? fmin(x, y) : f
 
 SPECIALIZE_REDUCE(FuncMinMax, half, 1, half, fn.isMinNotMax ? __hmin(x, y) : __hmax(x, y))
 
+#if defined(__HIP_PLATFORM_AMD__)
+// ---------------------------------------------------------------------------
+// 2-wide f16 min/max.
+//
+// __hmin and __hmax classify their operands before comparing them, open-coding
+// four integer compares per element to find out whether either is NaN. That
+// bookkeeping, not the comparison, is what makes the f16 MinMax kernels the most
+// expensive 16-bit reduce kernels there are: 9881 VALU ops in
+// ReduceScatter_RING_SIMPLE, against 5212 for the bf16 kernel of the same shape.
+// The hardware's packed min and max already enforce the rule the checks exist to
+// enforce -- between a NaN and a number, the number wins -- and do it for both
+// lanes in one instruction.
+//
+// This does not follow __hmin on two inputs out of the 2^32, and on the NaN
+// payloads. Given +0 and -0, __hmin returns whichever came first, so its answer
+// already depends on the order the reduction visited the ranks in, while the
+// instruction returns -0 for min and +0 for max whatever the order. Given two
+// NaNs, __hmin returns a canonical NaN and the instruction returns one of the two
+// payloads; which NaN reaches a given lane is likewise already a function of rank
+// count and tree shape. SixteenBitReduce_test sweeps all 2^32 input pairs and
+// holds the two widths to bit equality everywhere else.
+// ---------------------------------------------------------------------------
+typedef _Float16 rccl_f16x2_t __attribute__((ext_vector_type(2)));
+
+__device__ __forceinline__ uint32_t hminmax2_f16(uint32_t x, uint32_t y, bool isMin) {
+  union {
+    uint32_t storage;
+    rccl_f16x2_t f16x2;
+  } a, b, r;
+  a.storage = x;
+  b.storage = y;
+#if __has_builtin(__builtin_elementwise_minnum)
+  r.f16x2 = isMin ? __builtin_elementwise_minnum(a.f16x2, b.f16x2)
+                  : __builtin_elementwise_maxnum(a.f16x2, b.f16x2);
+#else
+  r.f16x2 = isMin ? __builtin_elementwise_min(a.f16x2, b.f16x2)
+                  : __builtin_elementwise_max(a.f16x2, b.f16x2);
+#endif
+  return r.storage;
+}
+
+SPECIALIZE_REDUCE(FuncMinMax, half, 2, uint32_t, hminmax2_f16(x, y, fn.isMinNotMax))
+#endif
+
 #if defined(RCCL_BFLOAT16)
 #if __CUDA_ARCH__ >= 800
 SPECIALIZE_REDUCE(FuncSum, __nv_bfloat16, 1, __nv_bfloat16, __hadd(x, y))
@@ -443,6 +487,91 @@ SPECIALIZE_REDUCE(FuncSum, hip_bfloat16, 1, hip_bfloat16, (hip_bfloat16)((float)
 SPECIALIZE_REDUCE(FuncProd, hip_bfloat16, 1, hip_bfloat16, (hip_bfloat16)((float)(x) * (float)(y)))
 SPECIALIZE_REDUCE(FuncMinMax, hip_bfloat16, 1, hip_bfloat16,
                   (hip_bfloat16)(fn.isMinNotMax ? fminf((float)(x), (float)(y)) : fmaxf((float)(x), (float)(y))))
+
+// ---------------------------------------------------------------------------
+// 2-wide bf16.
+//
+// These compute exactly what the 1-wide expressions above do, elementwise: widen
+// to f32, apply the operation there, narrow back.
+//
+// What the pair buys is not the arithmetic but the scaffolding around it: one
+// v_cvt_pk_bf16_f32 narrows both lanes where the 1-wide path converts and
+// reinserts one element at a time. Narrowing is most of the bf16 reduce cost, and
+// halving it takes 9% off the VALU count of the bf16 MinMax kernels.
+// ---------------------------------------------------------------------------
+typedef uint32_t bf16x2_storage_t;
+typedef float rccl_f32x2_t __attribute__((ext_vector_type(2)));
+typedef __bf16 rccl_bf16x2_t __attribute__((ext_vector_type(2)));
+
+// hip_bfloat16's operator float is a static_cast from __bf16 and its constructor
+// a static_cast to it, so converting the vector the same way gives the 1-wide
+// conversions elementwise, exactly: the widening is lossless and the narrowing is
+// the same round-to-nearest-even.
+//
+// Below there are two spellings of that widening. They produce the same bits and
+// the same two shift instructions, but the compiler reasons about them
+// differently, and each spelling is worth a few percent of the VALU count in the
+// kernels that use it, so both are kept:
+//
+//   - _cvt (this one) tells it the results are canonical floats, so fminf/fmaxf
+//     need no v_max_f32 x, x, x to quiet their operands first;
+//   - _bitcast lets it pair the lanes into one v_pk_add_f32 / v_pk_mul_f32, which
+//     it will not do for the values the convert produces.
+__device__ __forceinline__ rccl_f32x2_t rccl_widen2_f32_bf16_cvt(bf16x2_storage_t x) {
+  union {
+    bf16x2_storage_t storage;
+    rccl_bf16x2_t bf16x2;
+  } u;
+  u.storage = x;
+  return __builtin_convertvector(u.bf16x2, rccl_f32x2_t);
+}
+
+// A bf16 is the top half of the f32 with the same value, so this is the same
+// lossless widening, by hand.
+__device__ __forceinline__ rccl_f32x2_t rccl_widen2_f32_bf16_bitcast(bf16x2_storage_t x) {
+  union {
+    uint32_t u;
+    float f;
+  } lo, hi;
+  lo.u = x << 16;
+  hi.u = x & 0xFFFF0000u;
+  rccl_f32x2_t v = {lo.f, hi.f};
+  return v;
+}
+
+__device__ __forceinline__ bf16x2_storage_t rccl_narrow2_bf16_f32(rccl_f32x2_t v) {
+  union {
+    rccl_bf16x2_t bf16x2;
+    bf16x2_storage_t storage;
+  } u;
+  u.bf16x2 = __builtin_convertvector(v, rccl_bf16x2_t);
+  return u.storage;
+}
+
+__device__ __forceinline__ bf16x2_storage_t hadd2_bf16(bf16x2_storage_t x, bf16x2_storage_t y) {
+  return rccl_narrow2_bf16_f32(rccl_widen2_f32_bf16_bitcast(x) + rccl_widen2_f32_bf16_bitcast(y));
+}
+
+__device__ __forceinline__ bf16x2_storage_t hmul2_bf16(bf16x2_storage_t x, bf16x2_storage_t y) {
+  return rccl_narrow2_bf16_f32(rccl_widen2_f32_bf16_bitcast(x) * rccl_widen2_f32_bf16_bitcast(y));
+}
+
+// The result is one of the operands, so the narrowing is exact whatever it
+// selects. fminf/fmaxf rather than a NaN-propagating min/max, to match the 1-wide
+// expression's choice of returning the non-NaN operand.
+__device__ __forceinline__ bf16x2_storage_t hminmax2_bf16(bf16x2_storage_t x, bf16x2_storage_t y,
+                                                          bool isMin) {
+  rccl_f32x2_t a = rccl_widen2_f32_bf16_cvt(x);
+  rccl_f32x2_t b = rccl_widen2_f32_bf16_cvt(y);
+  rccl_f32x2_t r = {isMin ? fminf(a[0], b[0]) : fmaxf(a[0], b[0]),
+                    isMin ? fminf(a[1], b[1]) : fmaxf(a[1], b[1])};
+  return rccl_narrow2_bf16_f32(r);
+}
+
+SPECIALIZE_REDUCE(FuncSum, hip_bfloat16, 2, bf16x2_storage_t, hadd2_bf16(x, y))
+SPECIALIZE_REDUCE(FuncProd, hip_bfloat16, 2, bf16x2_storage_t, hmul2_bf16(x, y))
+SPECIALIZE_REDUCE(FuncMinMax, hip_bfloat16, 2, bf16x2_storage_t,
+                  hminmax2_bf16(x, y, fn.isMinNotMax))
 #endif
 #endif
 

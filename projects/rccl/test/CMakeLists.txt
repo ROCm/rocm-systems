@@ -257,6 +257,7 @@ if(BUILD_TESTS)
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/NarrowFloatReduce_test.cpp
+      device/SixteenBitReduce_test.cpp
       device/GinDeviceTests.cpp
       device/GinAnvilIpcDevice_test.cpp
       DeviceApiTests.cpp
