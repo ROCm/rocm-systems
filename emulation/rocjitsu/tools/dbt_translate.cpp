@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/code_object_identity.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/isa/decoder.h"
@@ -475,6 +476,8 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
     add_error(output, kInputError, error.empty() ? "failed to load input" : error);
     return output;
   }
+  output.value.source_code_object_id =
+      stable_code_object_id(input.code_object->image_data(), input.code_object->image_size());
 
   const bool need_report = options.collect_diagnostics;
   const bool need_source_disassembly = options.disassembly == DisassemblyMode::Source ||
