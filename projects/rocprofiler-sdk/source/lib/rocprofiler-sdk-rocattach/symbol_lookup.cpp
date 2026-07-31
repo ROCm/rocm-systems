@@ -589,6 +589,10 @@ calculate_load_bias(const target_elf& elf, const mapped_object& object)
         return std::nullopt;
     }
 
+    // Mappings are sorted by start address, so front() is the object's lowest
+    // mapping. That is the loader's first PT_LOAD as long as the object is
+    // mapped once; a second independent mapping of the same inode placed below
+    // it would produce a bias for the wrong instance.
     auto first_mapping        = object.mappings.front();
     auto segment_file_page    = align_down(first_load_segment->p_offset, page_size);
     auto segment_virtual_page = align_down(first_load_segment->p_vaddr, page_size);

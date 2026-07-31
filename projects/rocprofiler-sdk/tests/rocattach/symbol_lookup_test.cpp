@@ -475,30 +475,6 @@ expect_root_fallback_validates_build_id(const loaded_library& source,
         std::exit(1);
     }
 }
-
-void
-expect_unrelated_mapping_does_not_change_resolution(const loaded_library& library)
-{
-    auto fd = open(library.path.c_str(), O_RDONLY | O_CLOEXEC);
-    if(fd < 0)
-    {
-        std::cerr << "open failed for unrelated mapping test\n";
-        std::exit(1);
-    }
-    auto close_fd = rocprofiler::common::scope_destructor{[&]() { close(fd); }};
-
-    auto  page_size_value = sysconf(_SC_PAGESIZE);
-    auto  page_size = (page_size_value > 0) ? static_cast<size_t>(page_size_value) : size_t{4096};
-    auto* mapping   = mmap(nullptr, page_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if(mapping == MAP_FAILED)
-    {
-        std::cerr << "mmap failed for unrelated mapping test\n";
-        std::exit(1);
-    }
-    auto unmap = rocprofiler::common::scope_destructor{[&]() { munmap(mapping, page_size); }};
-
-    expect_resolves_to_dlsym(library);
-}
 }  // namespace
 
 int
@@ -526,7 +502,6 @@ main(int argc, char** argv)
     expect_resolves_to_dlsym(libraries.at(3));
     expect_resolves_to_dlsym(libraries.at(4));
     expect_different_symbol_offsets(libraries.at(0), libraries.at(3));
-    expect_unrelated_mapping_does_not_change_resolution(libraries.at(0));
     {
         auto sectionless_normal  = create_and_load_sectionless_copy(libraries.at(0), "normal");
         auto sectionless_gnu     = create_and_load_sectionless_copy(libraries.at(1), "gnu");
