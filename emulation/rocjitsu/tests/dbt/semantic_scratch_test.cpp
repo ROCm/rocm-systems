@@ -2,20 +2,62 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_scratch.h"
 #include "rocjitsu/code/dbt/semantic_scratch.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 namespace rocjitsu {
 namespace {
+
+// TODO: Consolidate this in-memory code-object fixture with the equivalent
+// liveness and spill-manager test scaffolding.
+class ScratchTestTextSection : public Section {
+public:
+  ScratchTestTextSection(std::unique_ptr<char[]> data, std::size_t size)
+      : Section(".text", std::move(data)), size_(size) {}
+
+  std::size_t size() const override { return size_; }
+  uint32_t sectionHeaderNameIdx() const override { return 0; }
+  uint64_t sectionOffset() const override { return 0; }
+
+private:
+  std::size_t size_;
+};
+
+class ScratchTestCodeObject : public CodeObject {
+public:
+  explicit ScratchTestCodeObject(std::vector<uint32_t> words) {
+    const auto byte_size = words.size() * sizeof(uint32_t);
+    image_.resize(byte_size);
+    std::memcpy(image_.data(), words.data(), byte_size);
+
+    auto data = std::make_unique<char[]>(byte_size);
+    std::memcpy(data.get(), words.data(), byte_size);
+    sections_.push_back(std::make_unique<ScratchTestTextSection>(std::move(data), byte_size));
+    text_sections_.push_back(sections_.back().get());
+  }
+};
+
+std::vector<std::unique_ptr<BasicBlock>> build_scratch_test_blocks() {
+  constexpr auto endpgm = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  ScratchTestCodeObject object({endpgm[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  return BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+}
 
 TEST(SemanticSpillFrame, SeparatesPersistentAndTransientRanges) {
   TranslationContext context(/*vgprs=*/8, /*agprs=*/0, /*accum_base=*/0,
@@ -111,6 +153,52 @@ TEST(SemanticScratchAllocator, ReportsTargetSpillOffsetLimit) {
 
   EXPECT_FALSE(result);
   EXPECT_EQ(result.failure, SemanticScratchFailure::SpillOffsetUnencodable);
+  EXPECT_EQ(context.required_private_segment_fixed_size, 32u);
+}
+
+TEST(SemanticScratchAllocator, RejectsSpillVictimInDynamicStackKernel) {
+  Instruction inst("scratch_test", nullptr);
+  std::vector<BasicBlock *> blocks;
+  LivenessAnalysis liveness(blocks);
+  // With no live-before snapshot, no register window is proven free, so the
+  // allocator must borrow a victim and exercise the spill policy.
+  ASSERT_FALSE(liveness.has_live_before(inst));
+  TranslationContext context(/*vgprs=*/8, /*agprs=*/0, /*accum_base=*/0,
+                             /*sgprs=*/8, /*private_bytes=*/32);
+  context.uses_dynamic_stack = true;
+  SemanticScratchAllocator allocator(
+      inst, liveness, context, SemanticScratchPolicy{.max_vgprs = 8, .max_spill_dword_offset = 0});
+
+  SemanticScratchRequest request;
+  request.count = 1;
+  const SemanticScratchResult result = allocator.acquire_vgprs(request);
+
+  EXPECT_FALSE(result);
+  EXPECT_EQ(result.failure, SemanticScratchFailure::DynamicStackUnsupported);
+  EXPECT_EQ(context.required_private_segment_fixed_size, 32u);
+}
+
+TEST(SemanticScratchAllocator, AllowsFreeWindowInDynamicStackKernel) {
+  auto blocks = build_scratch_test_blocks();
+  std::vector<BasicBlock *> scope;
+  for (const auto &block : blocks)
+    scope.push_back(block.get());
+  const Instruction &inst = *blocks.front()->instructions().begin();
+  LivenessAnalysis liveness(scope);
+  TranslationContext context(/*vgprs=*/8, /*agprs=*/0, /*accum_base=*/0,
+                             /*sgprs=*/8, /*private_bytes=*/32);
+  context.uses_dynamic_stack = true;
+  SemanticScratchAllocator allocator(
+      inst, liveness, context, SemanticScratchPolicy{.max_vgprs = 8, .max_spill_dword_offset = 0});
+
+  SemanticScratchRequest request;
+  request.count = 1;
+  const SemanticScratchResult result = allocator.acquire_vgprs(request);
+
+  ASSERT_TRUE(result);
+  EXPECT_EQ(result.failure, SemanticScratchFailure::None);
+  EXPECT_FALSE(result.lease->spilled);
+  EXPECT_EQ(result.lease->base, 0u);
   EXPECT_EQ(context.required_private_segment_fixed_size, 32u);
 }
 

@@ -4,6 +4,7 @@
 /// @file semantic/gfx1250_b0_to_a0.cpp
 /// @brief Handwritten semantic expansions for gfx1250 B0-to-A0 translation.
 
+#include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/dbt/semantic_scratch.h"
@@ -17,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -45,6 +47,7 @@ constexpr uint8_t kGfx1250M0 = 125;
 constexpr uint16_t kWmmaScaleSrc2PrefixOp = 0x35;
 constexpr uint16_t kWmmaScale16PrefixOp = 0x3a;
 constexpr uint16_t kGfx1250InlineZero = 128;
+constexpr uint32_t kGfx1250ScratchMaxDwordOffset = 0x7ffffcu;
 
 /// @brief Diagnose control fields that are invalid for floating-point WMMA.
 ///
@@ -98,6 +101,278 @@ void append_gfx1250_vgpr_msb_transition(std::vector<uint32_t> &words, uint8_t &c
       static_cast<uint16_t>(new_mode) | (static_cast<uint16_t>(current_mode) << 8);
   append_words(words, gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = immediate}));
   current_mode = new_mode;
+}
+
+[[nodiscard]] std::optional<uint8_t> gfx1250_vgpr_mode_before(const Instruction &inst,
+                                                              const LivenessAnalysis &liveness) {
+  const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
+  const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
+  const auto src2_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
+  const auto dst_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
+  if (!src0_bank || !src1_bank || !src2_bank || !dst_bank)
+    return std::nullopt;
+  return static_cast<uint8_t>(*src0_bank | (*src1_bank << 2) | (*src2_bank << 4) |
+                              (*dst_bank << 6));
+}
+
+/// @brief Save or restore one spill-backed low-bank VGPR lease through scratch ST mode.
+///
+/// @details VSCRATCH ST mode uses NULL SADDR, SVE=0, and a signed 24-bit
+/// immediate. Semantic spill storage is non-negative and dword aligned, so the
+/// largest usable dword offset is 0x7ffffc. The caller selects VGPR-MSB mode
+/// zero before using this helper.
+[[nodiscard]] bool append_gfx1250_scratch_preservation(std::vector<uint32_t> &words,
+                                                       const SemanticScratchLease &lease,
+                                                       bool restore) {
+  if (!lease.spilled)
+    return true;
+  if (lease.reg_class != RegClass::VGPR || lease.count == 0 ||
+      static_cast<uint32_t>(lease.base) + lease.count > 256u ||
+      lease.spill_offset + (static_cast<uint32_t>(lease.count) - 1u) * sizeof(uint32_t) >
+          kGfx1250ScratchMaxDwordOffset) {
+    return false;
+  }
+
+  for (uint16_t i = 0; i < lease.count; ++i) {
+    const uint8_t vgpr = static_cast<uint8_t>(lease.base + i);
+    const uint32_t byte_offset = lease.spill_offset + static_cast<uint32_t>(i) * sizeof(uint32_t);
+    append_words(words, gfx1250::build_vscratch(restore ? gfx1250::kScratchLoadB32Vscratch
+                                                        : gfx1250::kScratchStoreB32Vscratch,
+                                                {.saddr = kGfx1250Null,
+                                                 .vdst = restore ? vgpr : uint8_t{0},
+                                                 .vsrc = restore ? uint8_t{0} : vgpr,
+                                                 .ioffset = byte_offset}));
+  }
+  append_words(
+      words, gfx1250::build_sopp(restore ? gfx1250::kSWaitLoadcntSopp : gfx1250::kSWaitStorecntSopp,
+                                 {.simm16 = 0}));
+  return true;
+}
+
+/// @brief Drain outstanding source operations before generated scratch writes.
+///
+/// @details Liveness does not model asynchronous completion. A register can be
+/// selected as scratch while an earlier memory operation still owns a pending
+/// write to it, allowing a late completion to corrupt the replacement.
+///
+/// TODO: Split SGPR-only paths to KMCNT and VGPR paths to their producer
+/// counters. Per-register producer tracking is still needed to preserve
+/// nonzero guest wait counts instead of draining each selected counter to zero.
+void append_gfx1250_scratch_dependency_barrier(std::vector<uint32_t> &words) {
+  append_words(words, gfx1250::build_sopp(gfx1250::kSWaitIdleSopp));
+}
+
+/// @brief How a live SGPR window is carried through low-bank VGPRs.
+enum class Gfx1250SgprCarrierMode : uint8_t {
+  None,       ///< Borrow only dead SGPRs; do not fall back to a carrier.
+  ExecMasked, ///< Broadcast through active lanes and allow spill-backed carriers.
+  LaneZero,   ///< Use EXEC-independent lane-zero operations without carrier spills.
+};
+
+/// @brief Ordinary SGPRs borrowed by one replacement sequence.
+///
+/// @details When the SGPR window is live, `carrier` holds its wave-uniform
+/// values in low-bank VGPRs. The ordinary semantic scratch allocator may in
+/// turn preserve EXEC-masked carrier VGPRs through private memory.
+struct Gfx1250SgprScratchLease {
+  uint16_t base = 0;
+  uint16_t count = 0;
+  std::optional<SemanticScratchLease> carrier;
+  Gfx1250SgprCarrierMode carrier_mode = Gfx1250SgprCarrierMode::None;
+
+  [[nodiscard]] bool has_carrier() const { return carrier.has_value(); }
+};
+
+/// @brief Constraints for one gfx1250 SGPR scratch allocation.
+///
+/// @details Current users request independent Wave32 masks or individual SGPRs,
+/// so none requires tuple alignment. Add an explicit alignment constraint if a
+/// future rule borrows an architectural SGPR tuple.
+struct Gfx1250SgprScratchRequest {
+  uint16_t count = 0;
+  RegisterSet forbidden;
+  Gfx1250SgprCarrierMode carrier_mode = Gfx1250SgprCarrierMode::None;
+};
+
+constexpr uint16_t kGfx1250MaxScratchSgprs =
+    static_cast<uint16_t>(amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF);
+constexpr uint16_t kGfx1250ScratchBaseSgprBegin = 102;
+constexpr uint16_t kGfx1250ScratchBaseSgprEnd = 104;
+
+/// @brief Registers whose source value or destination result must survive a rule.
+///
+/// @details InstDefUse reports encoded VGPR indices without VGPR-MSB state.
+/// Every allocator receiving this set is capped at the low 256-register bank
+/// and generated carrier code explicitly selects that bank, so an encoded
+/// high-bank operand conservatively forbids its low-bank alias. Supporting
+/// high-bank scratch requires physicalizing this set first.
+[[nodiscard]] RegisterSet gfx1250_instruction_registers(const Instruction &inst) {
+  const InstDefUse def_use(inst);
+  return def_use.uses | def_use.defs;
+}
+
+/// @brief Whether an ordinary SGPR window satisfies one scratch request.
+///
+/// @details gfx1250 provides 106 ordinary SGPRs, so this target-specific
+/// allocator deliberately extends beyond the generic 102-SGPR ceiling and can
+/// use s104/s105. It excludes s102/s103 because a write to either register
+/// requires a dependency wait before a later `src_flat_scratch_base` read,
+/// which a local replacement cannot place in downstream guest code.
+[[nodiscard]] bool gfx1250_sgpr_window_allowed(uint16_t base,
+                                               const Gfx1250SgprScratchRequest &request) {
+  const uint32_t end = static_cast<uint32_t>(base) + request.count;
+  if (request.count == 0 || end > kGfx1250MaxScratchSgprs) {
+    return false;
+  }
+  if (base < kGfx1250ScratchBaseSgprEnd && end > kGfx1250ScratchBaseSgprBegin) {
+    return false;
+  }
+
+  RegisterSet candidate;
+  candidate.expand({RegClass::SGPR, base, static_cast<uint8_t>(request.count)});
+  return !candidate.intersects(request.forbidden);
+}
+
+/// @brief Prefer dead SGPRs, then preserve a live SGPR window through VGPRs.
+///
+/// @details SGPR values cannot be preserved directly by
+/// SemanticScratchAllocator, whose leases are low-bank VGPRs. When
+/// `carrier_mode` is not None, `allocator` supplies those VGPR carriers;
+/// passing a null allocator deliberately disables carrier fallback.
+[[nodiscard]] std::optional<Gfx1250SgprScratchLease>
+acquire_gfx1250_sgprs(const Instruction &inst, const LivenessAnalysis &liveness,
+                      TranslationContext &context, SemanticScratchAllocator *allocator,
+                      const Gfx1250SgprScratchRequest &request) {
+  if (request.count == 0 || request.count > kGfx1250MaxScratchSgprs ||
+      !liveness.has_live_before(inst))
+    return std::nullopt;
+
+  const RegisterSet &live = liveness.live_before(inst);
+  for (uint16_t base = 0; static_cast<uint32_t>(base) + request.count <= kGfx1250MaxScratchSgprs;
+       ++base) {
+    if (!gfx1250_sgpr_window_allowed(base, request))
+      continue;
+    RegisterSet candidate;
+    candidate.expand({RegClass::SGPR, base, static_cast<uint8_t>(request.count)});
+    if (!candidate.intersects(live)) {
+      context.require_sgprs(static_cast<uint32_t>(base) + request.count);
+      return Gfx1250SgprScratchLease{.base = base,
+                                     .count = request.count,
+                                     .carrier = std::nullopt,
+                                     .carrier_mode = Gfx1250SgprCarrierMode::None};
+    }
+  }
+
+  if (request.carrier_mode == Gfx1250SgprCarrierMode::None || allocator == nullptr)
+    return std::nullopt;
+
+  std::optional<uint16_t> victim;
+  for (uint16_t base = 0; static_cast<uint32_t>(base) + request.count <= kGfx1250MaxScratchSgprs;
+       ++base) {
+    if (gfx1250_sgpr_window_allowed(base, request)) {
+      victim = base;
+      break;
+    }
+  }
+  if (!victim)
+    return std::nullopt;
+
+  SemanticScratchRequest carrier_request;
+  carrier_request.count = request.count;
+  carrier_request.forbidden = request.forbidden;
+  // Lane-zero carriers must remain EXEC-independent, while private-memory
+  // spill/fill instructions are EXEC-masked.
+  // TODO: Support simultaneous SGPR/VGPR pressure without suppressing the
+  // guest instruction's memory-counter contribution.
+  carrier_request.allow_spill = request.carrier_mode == Gfx1250SgprCarrierMode::ExecMasked;
+  const SemanticScratchResult carrier = allocator->acquire_vgprs(carrier_request);
+  // TODO: Return the carrier failure alongside the lease so a rejected
+  // dynamic-stack spill can retain its actionable rule-specific diagnostic.
+  if (!carrier)
+    return std::nullopt;
+
+  context.require_sgprs(static_cast<uint32_t>(*victim) + request.count);
+  return Gfx1250SgprScratchLease{.base = *victim,
+                                 .count = request.count,
+                                 .carrier = *carrier.lease,
+                                 .carrier_mode = request.carrier_mode};
+}
+
+/// @brief Save or restore a live SGPR lease through its low-bank VGPR carriers.
+///
+/// @details The caller must select VGPR-MSB mode zero. ExecMasked carriers
+/// broadcast through active lanes and require a forward EXEC-zero guard around
+/// the complete replacement. LaneZero carriers use EXEC-independent lane
+/// operations and cannot themselves be spill-backed.
+[[nodiscard]] bool append_gfx1250_sgpr_preservation(std::vector<uint32_t> &words,
+                                                    const Gfx1250SgprScratchLease &lease,
+                                                    bool restore) {
+  if (!lease.has_carrier())
+    return true;
+  const SemanticScratchLease &carrier = *lease.carrier;
+  if (carrier.reg_class != RegClass::VGPR || carrier.count != lease.count ||
+      static_cast<uint32_t>(carrier.base) + carrier.count > 256u)
+    return false;
+
+  if (lease.carrier_mode == Gfx1250SgprCarrierMode::LaneZero) {
+    if (carrier.spilled)
+      return false;
+    for (uint16_t i = 0; i < lease.count; ++i) {
+      if (restore) {
+        append_words(words,
+                     gfx1250::build_vop3(gfx1250::kVReadlaneB32Vop3,
+                                         {.vdst = static_cast<uint8_t>(lease.base + i),
+                                          .src0 = static_cast<uint16_t>(256u + carrier.base + i),
+                                          .src1 = kGfx1250InlineZero}));
+      } else {
+        append_words(words, gfx1250::build_vop3(gfx1250::kVWritelaneB32Vop3,
+                                                {.vdst = static_cast<uint8_t>(carrier.base + i),
+                                                 .src0 = static_cast<uint16_t>(lease.base + i),
+                                                 .src1 = kGfx1250InlineZero}));
+      }
+    }
+    return true;
+  }
+  if (lease.carrier_mode != Gfx1250SgprCarrierMode::ExecMasked)
+    return false;
+
+  if (!restore) {
+    if (!append_gfx1250_scratch_preservation(words, carrier, false))
+      return false;
+    for (uint16_t i = 0; i < lease.count; ++i) {
+      append_words(words, gfx1250::build_vop1(gfx1250::kVMovB32Vop1,
+                                              {.src0 = static_cast<uint16_t>(lease.base + i),
+                                               .vdst = static_cast<uint8_t>(carrier.base + i)}));
+    }
+    return true;
+  }
+
+  for (uint16_t i = 0; i < lease.count; ++i) {
+    append_words(words, gfx1250::build_vop1(gfx1250::kVReadfirstlaneB32Vop1,
+                                            {.src0 = static_cast<uint16_t>(256u + carrier.base + i),
+                                             .vdst = static_cast<uint8_t>(lease.base + i)}));
+  }
+  return append_gfx1250_scratch_preservation(words, carrier, true);
+}
+
+/// @brief Skip an EXEC-masked vector replacement when EXEC has no active lane.
+///
+/// @details The caller must prove that the guest instruction and every generated
+/// effect are inactive under EXEC=0. Call only after the replacement word list
+/// is final so its PC-relative target remains the first following instruction.
+///
+/// TODO: Share the branch-distance check with the CDNA EXECZ guards after the
+/// architecture-specific SOPP builders have a common callback-based emitter.
+[[nodiscard]] bool prepend_gfx1250_execz_guard_for_masked_replacement(std::vector<uint32_t> &words,
+                                                                      bool required) {
+  if (!required)
+    return true;
+  if (words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max()))
+    return false;
+  words.insert(words.begin(),
+               gfx1250::build_sopp(gfx1250::kSCbranchExeczSopp,
+                                   {.simm16 = static_cast<uint16_t>(words.size())})[0]);
+  return true;
 }
 
 /// @brief Conservatively remove one hard-clause scheduling directive.
@@ -369,7 +644,7 @@ struct TensorMaskWrapper {
 ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t, uint64_t,
                                                std::span<const uint8_t>,
                                                const LivenessAnalysis &liveness,
-                                               TranslationContext &, const LaneLayout *,
+                                               TranslationContext &context, const LaneLayout *,
                                                const LaneLayout *) {
   if (inst.mnemonic() != "tensor_load_to_lds" ||
       inst.size() != static_cast<int>(sizeof(gfx1250::VimageMachineInst)) ||
@@ -393,17 +668,21 @@ ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t
         inst.raw_encoding() + sizeof(gfx1250::VimageMachineInst) / sizeof(uint32_t)));
   }
 
-  const std::optional<uint16_t> scratch = liveness.find_free_sgpr(&inst);
-  if (!scratch || *scratch > kLastOrdinarySgpr) {
-    return ExpandResult::failed(
-        "gfx1250 tensor-load mask rule could not allocate a dead scratch SGPR",
-        {"Provide one dead ordinary SGPR to preserve the descriptor mask word."});
+  Gfx1250SgprScratchRequest scratch_request;
+  scratch_request.count = 1;
+  scratch_request.forbidden = gfx1250_instruction_registers(inst);
+  const auto scratch = acquire_gfx1250_sgprs(inst, liveness, context, nullptr, scratch_request);
+  if (!scratch || scratch->base > kLastOrdinarySgpr) {
+    return ExpandResult::failed("gfx1250 tensor-load mask rule could not allocate scalar scratch",
+                                {"Provide one dead ordinary SGPR."});
   }
 
   std::vector<uint32_t> words;
   words.reserve(6);
+  append_gfx1250_scratch_dependency_barrier(words);
+
   const TensorMaskWrapper wrapper =
-      build_tensor_mask_wrapper(descriptor_base, static_cast<uint8_t>(*scratch));
+      build_tensor_mask_wrapper(descriptor_base, static_cast<uint8_t>(scratch->base));
   words.push_back(wrapper.save);
   // PACK_HH forms {SRC1[31:16], SRC0[31:16]}. Inline zero as SRC0 clears
   // D1[15:0] while preserving all descriptor fields in D1[31:16].
@@ -411,6 +690,7 @@ ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t
   words.insert(words.end(), inst.raw_encoding(),
                inst.raw_encoding() + sizeof(gfx1250::VimageMachineInst) / sizeof(uint32_t));
   words.push_back(wrapper.restore);
+
   return ExpandResult::success(std::move(words));
 }
 
@@ -793,8 +1073,12 @@ ExpandResult expand_gfx1250_wmma_iu8_spacing(const Instruction &inst, uint32_t, 
 ///
 /// @details Every cluster-load form (both SADDR and off/NULL-saddr, all widths)
 /// is left as a cluster load and wrapped so it executes with M0 forced to zero:
-/// save M0 to a dead SGPR, set M0 = 0, run the load, then restore M0. The opcode
+/// save M0 to a scratch SGPR, set M0 = 0, run the load, then restore M0. The opcode
 /// is not changed.
+///
+/// Under full SGPR pressure, EXEC-independent lane-zero operations carry one
+/// live SGPR through a dead low-bank VGPR. This keeps the guest cluster load
+/// itself unconditional and therefore preserves its wait-counter contribution.
 ///
 /// A second translation preserves the load when its immediately preceding
 /// decoded instruction in the same basic block is the canonical M0 clear. This
@@ -803,7 +1087,7 @@ ExpandResult expand_gfx1250_wmma_iu8_spacing(const Instruction &inst, uint32_t, 
 /// condition must be revisited if such a rule is added.
 ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint64_t,
                                          std::span<const uint8_t>, const LivenessAnalysis &liveness,
-                                         TranslationContext &, const LaneLayout *,
+                                         TranslationContext &context, const LaneLayout *,
                                          const LaneLayout *) {
   if (!is_gfx1250_cluster_load(inst.opcode()) ||
       inst.size() != 3 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr) {
@@ -815,10 +1099,18 @@ ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint
         std::vector<uint32_t>(inst.raw_encoding(), inst.raw_encoding() + 3));
   }
 
-  const std::optional<uint16_t> scratch = liveness.find_free_sgpr(&inst);
-  if (!scratch || *scratch > 105) {
+  SemanticScratchAllocator allocator(
+      inst, liveness, context,
+      SemanticScratchPolicy{.max_vgprs = 256,
+                            .max_spill_dword_offset = kGfx1250ScratchMaxDwordOffset});
+  Gfx1250SgprScratchRequest scratch_request;
+  scratch_request.count = 1;
+  scratch_request.forbidden = gfx1250_instruction_registers(inst);
+  scratch_request.carrier_mode = Gfx1250SgprCarrierMode::LaneZero;
+  const auto scratch = acquire_gfx1250_sgprs(inst, liveness, context, &allocator, scratch_request);
+  if (!scratch || scratch->base > 105) {
     return ExpandResult::failed(
-        "gfx1250 cluster load could not allocate a dead SGPR for M0 preservation");
+        "gfx1250 cluster load could not allocate scalar scratch for M0 preservation");
   }
 
   // Save M0 to scratch, set M0 = 0, run the load, then restore M0. A binary
@@ -829,15 +1121,35 @@ ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint
   // MUST use kGfx1250M0 (125): on gfx1250 M0 encodes as 125 and NULL as 124 (the
   // inverse of CDNA), so a write to 124 would be a discarded NULL write.
   std::vector<uint32_t> words;
-  words.reserve(6);
-  append_words(words,
-               gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
-                                   {.ssrc0 = kGfx1250M0, .sdst = static_cast<uint8_t>(*scratch)}));
+  words.reserve(18);
+  append_gfx1250_scratch_dependency_barrier(words);
+  uint8_t current_mode = 0;
+  std::optional<uint8_t> original_mode;
+  if (scratch->has_carrier()) {
+    original_mode = gfx1250_vgpr_mode_before(inst, liveness);
+    if (!original_mode)
+      return ExpandResult::failed(
+          "gfx1250 cluster-load SGPR carrier cannot prove the VGPR-MSB mode");
+    current_mode = *original_mode;
+    append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
+    if (!append_gfx1250_sgpr_preservation(words, *scratch, false))
+      return ExpandResult::failed("gfx1250 cluster load could not preserve scalar scratch");
+    append_gfx1250_vgpr_msb_transition(words, current_mode, *original_mode);
+  }
+  append_words(words, gfx1250::build_sop1(
+                          gfx1250::kSMovB32Sop1,
+                          {.ssrc0 = kGfx1250M0, .sdst = static_cast<uint8_t>(scratch->base)}));
   words.push_back(build_cluster_m0_clear());
   words.insert(words.end(), inst.raw_encoding(), inst.raw_encoding() + 3);
-  append_words(words,
-               gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
-                                   {.ssrc0 = static_cast<uint8_t>(*scratch), .sdst = kGfx1250M0}));
+  append_words(words, gfx1250::build_sop1(
+                          gfx1250::kSMovB32Sop1,
+                          {.ssrc0 = static_cast<uint8_t>(scratch->base), .sdst = kGfx1250M0}));
+  if (scratch->has_carrier()) {
+    append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
+    if (!append_gfx1250_sgpr_preservation(words, *scratch, true))
+      return ExpandResult::failed("gfx1250 cluster load could not restore scalar scratch");
+    append_gfx1250_vgpr_msb_transition(words, current_mode, *original_mode);
+  }
   return ExpandResult::success(std::move(words));
 }
 
@@ -868,22 +1180,6 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
 
   gfx1250::VdsMachineInst source{};
   std::memcpy(&source, inst.raw_encoding(), sizeof(source));
-  uint16_t temp = source.vdst;
-  std::optional<SemanticScratchResult> store_scratch;
-  if (is_store) {
-    SemanticScratchAllocator allocator(
-        inst, liveness, context,
-        SemanticScratchPolicy{.max_vgprs = 256, .max_spill_dword_offset = 0});
-    SemanticScratchRequest request;
-    request.count = 1;
-    request.allow_spill = false;
-    store_scratch = allocator.acquire_vgprs(request);
-    if (!*store_scratch) {
-      return ExpandResult::failed(
-          "gfx1250 DS store ADDTID could not allocate a dead low-bank scratch VGPR");
-    }
-    temp = (*store_scratch).lease->base;
-  }
 
   const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
   const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
@@ -894,14 +1190,42 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
   }
   const uint8_t original_mode =
       static_cast<uint8_t>(*src0_bank | (*src1_bank << 2) | (*src2_bank << 4) | (*dst_bank << 6));
+
+  uint16_t temp = source.vdst;
+  std::optional<SemanticScratchLease> store_scratch;
+  if (is_store) {
+    SemanticScratchAllocator allocator(
+        inst, liveness, context,
+        SemanticScratchPolicy{.max_vgprs = 256,
+                              .max_spill_dword_offset = kGfx1250ScratchMaxDwordOffset});
+    SemanticScratchRequest request;
+    request.count = 1;
+    request.forbidden = gfx1250_instruction_registers(inst);
+    request.allow_spill = true;
+    const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
+    if (!scratch) {
+      if (scratch.failure == SemanticScratchFailure::DynamicStackUnsupported) {
+        return ExpandResult::failed(
+            "gfx1250 DS store ADDTID cannot use private-memory spills in a dynamic-stack kernel");
+      }
+      return ExpandResult::failed("gfx1250 DS store ADDTID could not allocate low-bank scratch");
+    }
+    store_scratch = *scratch.lease;
+    temp = store_scratch->base;
+  }
   const uint8_t compute_bank = is_load ? *dst_bank : 0;
   const uint8_t compute_mode = static_cast<uint8_t>(compute_bank | (compute_bank << 2) |
                                                     (compute_bank << 4) | (compute_bank << 6));
 
   std::vector<uint32_t> words;
-  words.reserve(18);
+  words.reserve(26);
+  append_gfx1250_scratch_dependency_barrier(words);
   uint8_t current_mode = original_mode;
   append_gfx1250_vgpr_msb_transition(words, current_mode, compute_mode);
+  if (store_scratch && store_scratch->spilled &&
+      !append_gfx1250_scratch_preservation(words, *store_scratch, false)) {
+    return ExpandResult::failed("gfx1250 DS store ADDTID could not preserve low-bank scratch");
+  }
   append_words(
       words, gfx1250::build_vop3(gfx1250::kVMbcntLoU32B32Vop3, {.vdst = static_cast<uint8_t>(temp),
                                                                 .src0 = 193, // inline -1
@@ -936,6 +1260,13 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
                                             .offset1 = static_cast<uint8_t>(source.offset1),
                                             .addr = static_cast<uint8_t>(temp),
                                             .data0 = static_cast<uint8_t>(source.data0)}));
+    if (store_scratch && store_scratch->spilled) {
+      append_words(words, gfx1250::build_sopp(gfx1250::kSWaitDscntSopp, {.simm16 = 0}));
+      append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
+      if (!append_gfx1250_scratch_preservation(words, *store_scratch, true)) {
+        return ExpandResult::failed("gfx1250 DS store ADDTID could not restore low-bank scratch");
+      }
+    }
     append_gfx1250_vgpr_msb_transition(words, current_mode, original_mode);
   } else {
     append_words(words, gfx1250::build_vds(gfx1250::kDsLoadB32Vds,
@@ -969,26 +1300,37 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
 
   SemanticScratchAllocator allocator(
       inst, liveness, context,
-      SemanticScratchPolicy{.max_vgprs = 256, .max_spill_dword_offset = 0});
+      SemanticScratchPolicy{.max_vgprs = 256,
+                            .max_spill_dword_offset = kGfx1250ScratchMaxDwordOffset});
   SemanticScratchRequest request;
   request.count = 2;
-  request.allow_spill = false;
+  request.forbidden = gfx1250_instruction_registers(inst);
+  request.allow_spill = true;
   const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
   if (!scratch) {
+    if (scratch.failure == SemanticScratchFailure::DynamicStackUnsupported) {
+      return ExpandResult::failed(
+          "gfx1250 E5M3 unpack cannot use private-memory spills in a dynamic-stack kernel");
+    }
     return ExpandResult::failed("gfx1250 E5M3 unpack could not allocate two scratch VGPRs");
   }
   const uint16_t out = scratch.lease->base;
   const uint16_t temp = static_cast<uint16_t>(out + 1u);
 
-  const std::optional<uint16_t> nan_mask = liveness.find_free_sgpr(&inst);
-  const std::optional<uint16_t> exp31_mask =
-      nan_mask ? liveness.find_free_sgpr(&inst, static_cast<uint16_t>(*nan_mask + 1u))
-               : std::nullopt;
-  // The allocator searches only REGISTER_SET_ALLOCATABLE_SGPRS, so successful
-  // results are already ordinary encodable SGPRs.
-  if (!nan_mask || !exp31_mask) {
-    return ExpandResult::failed("gfx1250 E5M3 unpack could not allocate two dead SGPR masks");
+  Gfx1250SgprScratchRequest mask_request;
+  mask_request.count = 2;
+  mask_request.forbidden = request.forbidden;
+  mask_request.forbidden.expand(scratch.lease->registers());
+  // The conversion, both generated compares, and scratch memory are inactive
+  // under EXEC=0. The compare masks and their carrier save/restore are skipped
+  // as one region, so the borrowed SGPR window remains untouched.
+  mask_request.carrier_mode = Gfx1250SgprCarrierMode::ExecMasked;
+  const auto masks = acquire_gfx1250_sgprs(inst, liveness, context, &allocator, mask_request);
+  if (!masks) {
+    return ExpandResult::failed("gfx1250 E5M3 unpack could not allocate two SGPR masks");
   }
+  const uint16_t nan_mask = masks->base;
+  const uint16_t exp31_mask = static_cast<uint16_t>(masks->base + 1u);
 
   const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
   const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
@@ -1019,8 +1361,18 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   const uint8_t byte_sel =
       static_cast<uint8_t>(((source.opsel & 1u) << 1u) | ((source.opsel & 2u) >> 1u));
   std::vector<uint32_t> words;
-  words.reserve(40);
+  words.reserve(64);
+  append_gfx1250_scratch_dependency_barrier(words);
   uint8_t current_mode = original_mode;
+  if (scratch.lease->spilled || masks->has_carrier()) {
+    append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
+    if (!append_gfx1250_scratch_preservation(words, *scratch.lease, false)) {
+      return ExpandResult::failed("gfx1250 E5M3 unpack could not preserve its scratch VGPRs");
+    }
+    if (!append_gfx1250_sgpr_preservation(words, *masks, false)) {
+      return ExpandResult::failed("gfx1250 E5M3 unpack could not preserve its SGPR masks");
+    }
+  }
   append_gfx1250_vgpr_msb_transition(words, current_mode, extract_mode);
   append_words(
       words, gfx1250::build_vop3(gfx1250::kVBfeU32Vop3,
@@ -1030,9 +1382,9 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
                                   .src2 = gfx1250_inline_u32(8)}));
   append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
 
-  append_compare_literal(words, gfx1250::kVCmpEqU32Vop3, static_cast<uint8_t>(*nan_mask),
+  append_compare_literal(words, gfx1250::kVCmpEqU32Vop3, static_cast<uint8_t>(nan_mask),
                          gfx1250_vgpr_src(out), 0xffu);
-  append_compare_literal(words, gfx1250::kVCmpLtU32Vop3, static_cast<uint8_t>(*exp31_mask),
+  append_compare_literal(words, gfx1250::kVCmpLtU32Vop3, static_cast<uint8_t>(exp31_mask),
                          gfx1250_vgpr_src(out), 0xf7u);
   append_words(words,
                gfx1250::build_vop3(gfx1250::kVAndB32Vop3, {.vdst = static_cast<uint8_t>(temp),
@@ -1057,7 +1409,7 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
                gfx1250::build_vop3(gfx1250::kVCndmaskB32Vop3, {.vdst = static_cast<uint8_t>(out),
                                                                .src0 = gfx1250_vgpr_src(out),
                                                                .src1 = gfx1250_vgpr_src(temp),
-                                                               .src2 = *exp31_mask}));
+                                                               .src2 = exp31_mask}));
   append_vop3_literal(words, gfx1250::kVMovB32Vop3,
                       {.vdst = static_cast<uint8_t>(temp), .src0 = 255}, 0x7fa3d000u);
 
@@ -1067,8 +1419,19 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
                                           {.vdst = static_cast<uint8_t>(source.vdst),
                                            .src0 = gfx1250_vgpr_src(out),
                                            .src1 = gfx1250_vgpr_src(temp),
-                                           .src2 = *nan_mask}));
+                                           .src2 = nan_mask}));
+  if (scratch.lease->spilled || masks->has_carrier()) {
+    append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
+    if (!append_gfx1250_sgpr_preservation(words, *masks, true)) {
+      return ExpandResult::failed("gfx1250 E5M3 unpack could not restore its SGPR masks");
+    }
+    if (!append_gfx1250_scratch_preservation(words, *scratch.lease, true)) {
+      return ExpandResult::failed("gfx1250 E5M3 unpack could not restore its scratch VGPRs");
+    }
+  }
   append_gfx1250_vgpr_msb_transition(words, current_mode, original_mode);
+  if (!prepend_gfx1250_execz_guard_for_masked_replacement(words, masks->has_carrier()))
+    return ExpandResult::failed("gfx1250 E5M3 unpack SGPR-carrier guard is too large");
   return ExpandResult::success(std::move(words));
 }
 
