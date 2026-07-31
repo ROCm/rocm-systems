@@ -2454,51 +2454,51 @@ void expect_special_preserved(const std::vector<uint32_t> &cave, uint32_t mov_op
 // (width hardcoded to 2); EXEC_LO round-trips correctly.
 TEST(InstrumentorProbeSpill, Cdna3PreservesClobberedExec) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
-  const uint32_t clobber = build_s_mov_b32(kScalarOperandExecLo, /*inline 0=*/128, kArch);
+  const uint32_t clobber = build_s_mov_b32(scalar_operand_exec_lo(kArch), /*inline 0=*/128, kArch);
   const std::vector<uint32_t> cave = patch_probe_clobbering(clobber, kArch);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_exec_lo(kArch));
 }
 
 TEST(InstrumentorProbeSpill, Cdna4PreservesClobberedExec) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
-  const uint32_t clobber = build_s_mov_b32(kScalarOperandExecLo, /*inline 0=*/128, kArch);
+  const uint32_t clobber = build_s_mov_b32(scalar_operand_exec_lo(kArch), /*inline 0=*/128, kArch);
   const std::vector<uint32_t> cave = patch_probe_clobbering(clobber, kArch);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_exec_lo(kArch));
 }
 
 TEST(InstrumentorProbeSpill, Rdna4PreservesClobberedExec) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
-  const uint32_t clobber = build_s_mov_b32(kScalarOperandExecLo, /*inline 0=*/128, kArch);
+  const uint32_t clobber = build_s_mov_b32(scalar_operand_exec_lo(kArch), /*inline 0=*/128, kArch);
   const std::vector<uint32_t> cave = patch_probe_clobbering(clobber, kArch);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_exec_lo(kArch));
 }
 
 // VCC is preserved the same way (64-bit pair).
 TEST(InstrumentorProbeSpill, Cdna3PreservesClobberedVcc) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
-  const uint32_t clobber = build_s_mov_b32(kScalarOperandVccLo, /*inline 0=*/128, kArch);
+  const uint32_t clobber = build_s_mov_b32(scalar_operand_vcc_lo(kArch), /*inline 0=*/128, kArch);
   const std::vector<uint32_t> cave = patch_probe_clobbering(clobber, kArch);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_vcc_lo(kArch));
 }
 
 TEST(InstrumentorProbeSpill, Cdna4PreservesClobberedVcc) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
-  const uint32_t clobber = build_s_mov_b32(kScalarOperandVccLo, /*inline 0=*/128, kArch);
+  const uint32_t clobber = build_s_mov_b32(scalar_operand_vcc_lo(kArch), /*inline 0=*/128, kArch);
   const std::vector<uint32_t> cave = patch_probe_clobbering(clobber, kArch);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_vcc_lo(kArch));
 }
 
 TEST(InstrumentorProbeSpill, Rdna4PreservesClobberedVcc) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
-  const uint32_t clobber = build_s_mov_b32(kScalarOperandVccLo, /*inline 0=*/128, kArch);
+  const uint32_t clobber = build_s_mov_b32(scalar_operand_vcc_lo(kArch), /*inline 0=*/128, kArch);
   const std::vector<uint32_t> cave = patch_probe_clobbering(clobber, kArch);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_vcc_lo(kArch));
 }
 
 // M0 is preserved with a single 32-bit s_mov (m0 = 124 on CDNA4, 125 on RDNA4).
@@ -2537,24 +2537,24 @@ TEST(InstrumentorProbeSpill, Cdna3PreservesExecAndVccUnconditionally) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
   const std::vector<uint32_t> cave = patch_probe_clobbering(build_s_nop(0, kArch), kArch);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_exec_lo(kArch));
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_vcc_lo(kArch));
 }
 
 TEST(InstrumentorProbeSpill, Cdna4PreservesExecAndVccUnconditionally) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const std::vector<uint32_t> cave = patch_probe_clobbering(build_s_nop(0, kArch), kArch);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_exec_lo(kArch));
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_vcc_lo(kArch));
 }
 
 TEST(InstrumentorProbeSpill, Rdna4PreservesExecAndVccUnconditionally) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   const std::vector<uint32_t> cave = patch_probe_clobbering(build_s_nop(0, kArch), kArch);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_exec_lo(kArch));
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_vcc_lo(kArch));
 }
 
 // Compare-based coverage: v_cmp writes VCC and v_cmpx writes EXEC. The always-on
@@ -2565,42 +2565,42 @@ TEST(InstrumentorProbeSpill, Cdna3PreservesVccFromImplicitCompare) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
   const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmp_eq_u32=*/0x7D940000u, kArch);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_vcc_lo(kArch));
 }
 
 TEST(InstrumentorProbeSpill, Cdna3PreservesExecFromImplicitCmpx) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
   const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32=*/0x7DB40000u, kArch);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_exec_lo(kArch));
 }
 
 TEST(InstrumentorProbeSpill, Cdna4PreservesVccFromImplicitCompare) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmp_eq_u32=*/0x7D940000u, kArch);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_vcc_lo(kArch));
 }
 
 TEST(InstrumentorProbeSpill, Cdna4PreservesExecFromImplicitCmpx) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32=*/0x7DB40000u, kArch);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_exec_lo(kArch));
 }
 
 TEST(InstrumentorProbeSpill, Rdna4PreservesVccFromImplicitCompare) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmp_eq_u32=*/0x7C940000u, kArch);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_vcc_lo(kArch));
 }
 
 TEST(InstrumentorProbeSpill, Rdna4PreservesExecFromImplicitCmpx) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32=*/0x7D940000u, kArch);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandExecLo);
+  expect_special_preserved(cave, sop1_op_mov_b64(kArch), scalar_operand_exec_lo(kArch));
 }
 
 // FLAT_SCRATCH stays rejected (the spill store/load depend on it), failing closed.
