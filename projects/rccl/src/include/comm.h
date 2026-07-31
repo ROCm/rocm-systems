@@ -648,8 +648,6 @@ struct ncclComm {
   // Dedicated small epoch array for the LL AllReduce tier (kDdaFabricLLArMaxBlocks
   // cells, seeded to a disjoint high flag namespace). Keeps that latency-bound
   // tier's per-launch epoch reset cheap without the shared 256-wide array's cost.
-  uint32_t* ddaLLArEpochDev;
-  int ddaLLArEpochLen;
 
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;
