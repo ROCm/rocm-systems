@@ -66,16 +66,18 @@ std::string canonical_existing_path(const std::filesystem::path &path) {
 #if !defined(RJ_EXPECT_SHARED_ASAN_RUNTIME) && !defined(RJ_EXPECT_SHARED_TSAN_RUNTIME)
 void expect_no_sanitizer_preload_order() {
   const std::string interposer = "/tmp/librocjitsu.so";
+  const std::string extra = "/tmp/libextra.so";
   const std::string existing = "/tmp/libexisting.so";
   rocjitsu::cli::LaunchEnvironment environment;
   environment.set("LD_PRELOAD", existing);
+  environment.set("RJ_LAUNCH_PRELOAD", extra);
 
   ASSERT_TRUE(rocjitsu::cli::find_loaded_asan_runtime().empty());
   ASSERT_TRUE(rocjitsu::cli::find_loaded_tsan_runtime().empty());
 
   rocjitsu::cli::prepend_launch_preloads(environment, interposer);
 
-  expect_ld_preload_eq(environment, interposer + ":" + existing);
+  expect_ld_preload_eq(environment, interposer + ":" + extra + ":" + existing);
 }
 #endif
 
@@ -185,17 +187,20 @@ TEST(LaunchPreloadTest, SharedAsanPrependsAsanBeforeInterposerAndExistingPreload
   GTEST_SKIP() << "requires a shared-ASan build";
 #else
   const std::string interposer = "/tmp/librocjitsu.so";
+  const std::string extra = "/tmp/libextra.so";
   const std::string existing = "/tmp/libexisting.so";
   const std::string expected_asan = canonical_existing_path(RJ_EXPECTED_SHARED_ASAN_RUNTIME);
   rocjitsu::cli::LaunchEnvironment environment;
   environment.set("LD_PRELOAD", existing);
+  environment.set("RJ_LAUNCH_PRELOAD", extra);
 
   ASSERT_FALSE(expected_asan.empty()) << RJ_EXPECTED_SHARED_ASAN_RUNTIME;
   EXPECT_EQ(expected_asan, rocjitsu::cli::find_loaded_asan_runtime());
 
   rocjitsu::cli::prepend_launch_preloads(environment, interposer);
 
-  expect_ld_preload_eq(environment, expected_asan + ":" + interposer + ":" + existing);
+  expect_ld_preload_eq(environment,
+                       expected_asan + ":" + interposer + ":" + extra + ":" + existing);
 #endif
 }
 
@@ -204,16 +209,19 @@ TEST(LaunchPreloadTest, SharedTsanPrependsTsanBeforeInterposerAndExistingPreload
   GTEST_SKIP() << "requires a shared-TSan build";
 #else
   const std::string interposer = "/tmp/librocjitsu.so";
+  const std::string extra = "/tmp/libextra.so";
   const std::string existing = "/tmp/libexisting.so";
   const std::string expected_tsan = canonical_existing_path(RJ_EXPECTED_SHARED_TSAN_RUNTIME);
   rocjitsu::cli::LaunchEnvironment environment;
   environment.set("LD_PRELOAD", existing);
+  environment.set("RJ_LAUNCH_PRELOAD", extra);
 
   ASSERT_FALSE(expected_tsan.empty()) << RJ_EXPECTED_SHARED_TSAN_RUNTIME;
   EXPECT_EQ(expected_tsan, rocjitsu::cli::find_loaded_tsan_runtime());
 
   rocjitsu::cli::prepend_launch_preloads(environment, interposer);
 
-  expect_ld_preload_eq(environment, expected_tsan + ":" + interposer + ":" + existing);
+  expect_ld_preload_eq(environment,
+                       expected_tsan + ":" + interposer + ":" + extra + ":" + existing);
 #endif
 }
