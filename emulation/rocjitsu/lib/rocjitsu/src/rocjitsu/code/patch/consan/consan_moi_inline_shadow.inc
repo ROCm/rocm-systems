@@ -194,14 +194,14 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   std::unordered_map<uint64_t, std::optional<ConSanMoiWorkgroupSources>>
       direct_workgroup_sources_by_descriptor;
   bool warned_dynamic_lds_external_shadow = false;
-  const bool has_branch_only_dynamic_assignment =
+  const bool has_branch_only_scalar_assignment =
       std::ranges::any_of(options.moi_transient_sgpr_assignments,
                           [](const ConSanMoiTransientSgprAssignment &assignment) {
-                            return assignment.dynamic_stack_borrowed_sgpr.has_value();
+                            return assignment.branch_only_scalar_spill;
                           });
   const bool use_indirect_appended =
       options.moi_exec_save_sgpr.has_value() &&
-      (candidates.size() >= 8u || has_function_candidate || has_branch_only_dynamic_assignment);
+      (candidates.size() >= 8u || has_function_candidate || has_branch_only_scalar_assignment);
   uint64_t reserved_barrier_island_count = 0u;
   if (use_indirect_appended && options.moi_track_barriers) {
     for (const ConSanKernelInfo &kernel : result.kernels)
@@ -517,7 +517,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     }
   }
   BranchOnlyDirectRelayReservoirSet direct_branch_reservoirs;
-  if (has_branch_only_dynamic_assignment && use_indirect_appended && !original_text.empty()) {
+  if (has_branch_only_scalar_assignment && use_indirect_appended && !original_text.empty()) {
     std::vector<std::pair<uint64_t, uint64_t>> protected_ranges = synchronization_ranges;
     protected_ranges.reserve(protected_ranges.size() + candidates.size() + result.kernels.size() +
                              options.preapplied_reserved_ranges.size() + dense_entry_hosts.size());
@@ -570,18 +570,18 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         (void)branch_router.offer(offset, BranchOnlyRelayProvenance::OwnedAnchor);
     }
   };
-  const auto uses_branch_only_dynamic_stack = [&](const ConSanMoiCandidate *candidate) {
+  const auto uses_branch_only_scalar_spill = [&](const ConSanMoiCandidate *candidate) {
     const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, *candidate);
     if (plan == nullptr || plan->owner_descriptor_file_offsets.empty())
       return false;
     return std::ranges::all_of(
         plan->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
           const auto *assignment = find_moi_transient_sgpr_assignment(options, descriptor_offset);
-          return assignment != nullptr && assignment->dynamic_stack_borrowed_sgpr.has_value();
+          return assignment != nullptr && assignment->branch_only_scalar_spill;
         });
   };
   std::vector<const ConSanMoiCandidate *> planning_candidates = candidates;
-  if (has_branch_only_dynamic_assignment && options.max_patches >= candidates.size()) {
+  if (has_branch_only_scalar_assignment && options.max_patches >= candidates.size()) {
     // Plan branch-only sites nearest appended text first. Their unconditional
     // source branch makes every remaining original-instruction word a proven
     // capacity-one relay host. Publishing those hosts before planning earlier
@@ -589,14 +589,24 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     // preserving ordinary candidate order when a caller requests a subset.
     std::ranges::stable_sort(planning_candidates,
                              [&](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
-                               const bool lhs_branch_only = uses_branch_only_dynamic_stack(lhs);
-                               const bool rhs_branch_only = uses_branch_only_dynamic_stack(rhs);
+                               const bool lhs_branch_only = uses_branch_only_scalar_spill(lhs);
+                               const bool rhs_branch_only = uses_branch_only_scalar_spill(rhs);
                                if (lhs_branch_only != rhs_branch_only)
                                  return lhs_branch_only;
                                if (lhs_branch_only)
                                  return lhs->text_offset > rhs->text_offset;
                                return lhs->text_offset < rhs->text_offset;
                              });
+  }
+  std::unordered_map<const ConSanMoiCandidate *, uint64_t> branch_only_frontier_pair_counts;
+  uint64_t remaining_branch_only_pairs =
+      static_cast<uint64_t>(std::ranges::count_if(planning_candidates,
+                                                  uses_branch_only_scalar_spill));
+  for (const ConSanMoiCandidate *candidate : planning_candidates) {
+    if (!uses_branch_only_scalar_spill(candidate))
+      continue;
+    branch_only_frontier_pair_counts.emplace(candidate, remaining_branch_only_pairs);
+    --remaining_branch_only_pairs;
   }
   for (const ConSanMoiCandidate *candidate_ptr : planning_candidates) {
     const ConSanMoiCandidate &candidate = *candidate_ptr;
@@ -891,51 +901,97 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     std::optional<BranchOnlyRelayRoute> branch_only_route;
     uint32_t displaced_original_size = candidate.size;
     bool placed_through_indirect_island = false;
-    if (use_indirect_appended && candidate_options.moi_inline_dynamic_stack_borrowed_sgpr) {
+    if (use_indirect_appended && candidate_options.moi_inline_branch_only_scalar_spill) {
       const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t)) +
                                    spill_bytes + scalar_spill_bytes + vgpr_msb_bytes +
                                    sizeof(uint32_t);
-      DbiPatchPlacementPlanner tentative_planner = placement_planner;
-      const auto reservation = tentative_planner.plan_indirect_appended(
-          candidate.text_offset, candidate.size, patch_bytes + sizeof(uint32_t));
-      if (reservation) {
-        std::string relay_error;
-        BranchOnlyRelayPlanOutcome relay_outcome;
-        branch_only_route = branch_router.plan_pair(
-            tentative_planner, candidate.text_offset, reservation->body_offset,
-            reservation->body_offset + patch_bytes, candidate.text_offset + candidate.size,
-            &relay_error, &relay_outcome);
-        ConSanBranchOnlyRoutingTelemetry &routing = result.moi_branch_only_routing_telemetry;
-        const std::array pair_strategies = {relay_outcome.strategy};
-        record_branch_only_relay_plan(routing, relay_outcome, pair_strategies);
-        if (!branch_only_route) {
-          record_branch_only_relay_failure(routing, relay_outcome.failure);
-        } else if (!branch_router.commit(*branch_only_route, &relay_error)) {
-          record_branch_only_relay_failure(routing, BranchOnlyRelayPlanFailure::Reservation);
-          branch_only_route.reset();
-        } else {
-          for (const BranchOnlyRelayClaim &claim : branch_only_route->claims) {
-            if (local_entry_islands && claim.provenance == BranchOnlyRelayProvenance::PristineNop)
-              local_entry_islands->reserve(claim.offset, 1u);
-          }
-          if (!direct_branch_reservoirs.mark_claims_used(branch_only_route->claims, &relay_error)) {
-            result.errors.emplace_back("ConSan MOI inline-shadow probe " + relay_error);
-            return;
-          }
-          placement_planner = std::move(tentative_planner);
-          placement = *reservation;
-          placement->body_size = patch_bytes;
-          placement->return_target = candidate.text_offset + candidate.size;
-          placed_through_indirect_island = true;
-        }
-      } else {
+      // Each generated frontier must retain one forward and one return slot
+      // for every pair that may cross it later. Reserving exactly two words
+      // per remaining pair supplies that complete capacity while shrinking
+      // monotonically as sites are placed; it depends only on route topology,
+      // not on a workload-specific bank size.
+      const uint64_t remaining_pair_count = branch_only_frontier_pair_counts.at(candidate_ptr);
+      if (remaining_pair_count > std::numeric_limits<uint64_t>::max() / 2u) {
         ++result.moi_branch_only_placement_failure_count;
+      } else {
+        const uint64_t relay_bank_words = remaining_pair_count * 2u;
+        DbiPatchPlacementPlanner tentative_planner = placement_planner;
+        BranchOnlyRelayRouter tentative_router = branch_router;
+        const uint64_t relay_bank_offset = tentative_planner.appended_end();
+        std::string relay_error;
+        const bool reserved_relay_bank =
+            relay_bank_words <= std::numeric_limits<uint64_t>::max() / sizeof(uint32_t) &&
+            tentative_planner.reserve_appended_prefix(
+                relay_bank_words * sizeof(uint32_t), &relay_error);
+        if (reserved_relay_bank) {
+          for (uint64_t word = 0; word < relay_bank_words; ++word) {
+            (void)tentative_router.offer(relay_bank_offset + word * sizeof(uint32_t),
+                                         BranchOnlyRelayProvenance::GeneratedBank);
+          }
+        }
+        const auto reservation =
+            reserved_relay_bank
+                ? tentative_planner.plan_indirect_appended(
+                      candidate.text_offset, candidate.size, patch_bytes + sizeof(uint32_t))
+                : std::nullopt;
+        if (!reservation) {
+          ++result.moi_branch_only_placement_failure_count;
+        } else {
+          BranchOnlyRelayPlanOutcome relay_outcome;
+          BranchOnlyRelaySearchLimits relay_limits;
+          const size_t relay_count = tentative_router.available_count();
+          const size_t complete_greedy_pair_work =
+              relay_count > (std::numeric_limits<size_t>::max() - 2u) / 2u
+                  ? std::numeric_limits<size_t>::max()
+                  : relay_count * 2u + 2u;
+          relay_limits.pair_greedy_work =
+              std::max(relay_limits.pair_greedy_work, complete_greedy_pair_work);
+          const size_t fallback_setup_per_relay =
+              std::max<size_t>(std::bit_width(relay_count) + 1u, 1u);
+          const size_t complete_fallback_setup_work =
+              relay_count > std::numeric_limits<size_t>::max() / fallback_setup_per_relay
+                  ? std::numeric_limits<size_t>::max()
+                  : relay_count * fallback_setup_per_relay;
+          relay_limits.batch_fallback_setup_work =
+              std::max(relay_limits.batch_fallback_setup_work, complete_fallback_setup_work);
+          branch_only_route = tentative_router.plan_pair(
+              tentative_planner, candidate.text_offset, reservation->body_offset,
+              reservation->body_offset + patch_bytes, candidate.text_offset + candidate.size,
+              &relay_error, &relay_outcome, relay_limits);
+          ConSanBranchOnlyRoutingTelemetry &routing = result.moi_branch_only_routing_telemetry;
+          const std::array pair_strategies = {relay_outcome.strategy};
+          record_branch_only_relay_plan(routing, relay_outcome, pair_strategies);
+          if (!branch_only_route) {
+            record_branch_only_relay_failure(routing, relay_outcome.failure);
+          } else if (!tentative_router.commit(*branch_only_route, &relay_error)) {
+            record_branch_only_relay_failure(routing, BranchOnlyRelayPlanFailure::Reservation);
+            branch_only_route.reset();
+          } else {
+            for (const BranchOnlyRelayClaim &claim : branch_only_route->claims) {
+              if (local_entry_islands &&
+                  claim.provenance == BranchOnlyRelayProvenance::PristineNop) {
+                local_entry_islands->reserve(claim.offset, 1u);
+              }
+            }
+            if (!direct_branch_reservoirs.mark_claims_used(branch_only_route->claims,
+                                                           &relay_error)) {
+              result.errors.emplace_back("ConSan MOI inline-shadow probe " + relay_error);
+              return;
+            }
+            branch_router = std::move(tentative_router);
+            placement_planner = std::move(tentative_planner);
+            placement = *reservation;
+            placement->body_size = patch_bytes;
+            placement->return_target = candidate.text_offset + candidate.size;
+            placed_through_indirect_island = true;
+          }
+        }
       }
     }
     if (use_indirect_appended && !placed_through_indirect_island) {
-      if (candidate_options.moi_inline_dynamic_stack_borrowed_sgpr) {
+      if (candidate_options.moi_inline_branch_only_scalar_spill) {
         result.warnings.emplace_back(
-            "ConSan MOI inline-shadow probe could not route its branch-only dynamic-stack body");
+            "ConSan MOI inline-shadow probe could not route its branch-only scalar-spill body");
         continue;
       }
       std::optional<uint64_t> candidate_entry_island_offset;
@@ -1532,6 +1588,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
 
       if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
         const uint64_t cave_text_offset = planned_patch.placement.body_offset;
+        if (planned_patch.branch_only_route) {
+          while (new_text.size() < cave_text_offset)
+            append_word_bytes(new_text, build_s_nop(0, arch));
+        }
         if (new_text.size() != cave_text_offset) {
           result.errors.emplace_back(
               "ConSan MOI inline-shadow probe emitted a stale appended-cave mapping: expected " +
@@ -1617,7 +1677,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           cave_words->erase(displaced_begin, cave_words->end());
         }
         if (planned_patch.branch_only_route) {
-          if (!candidate_options.moi_inline_dynamic_stack_borrowed_sgpr ||
+          if (!candidate_options.moi_inline_branch_only_scalar_spill ||
               planned_patch.entry_island_offset || planned_patch.dense_call_anchor ||
               !planned_patch.displaced_tail_words.empty()) {
             result.errors.emplace_back(
@@ -1626,14 +1686,14 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           }
           if (cave_words->empty()) {
             result.errors.emplace_back(
-                "ConSan MOI inline-shadow dynamic-stack body lost its guard slot");
+                "ConSan MOI inline-shadow branch-only body lost its guard slot");
             return;
           }
           const uint64_t guarded_word_count =
               cave_words->size() - 1u + deferred_guest_words.size() + displaced_tail_words.size();
           if (guarded_word_count > std::numeric_limits<int16_t>::max()) {
             result.errors.emplace_back(
-                "ConSan MOI inline-shadow dynamic-stack guard exceeds conditional-branch range");
+                "ConSan MOI inline-shadow branch-only guard exceeds conditional-branch range");
             return;
           }
           const auto skip_empty_wave = instrumentation::build_s_cbranch_execz(

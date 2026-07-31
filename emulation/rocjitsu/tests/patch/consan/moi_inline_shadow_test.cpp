@@ -2278,6 +2278,7 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
   const ConSanMoiTransientSgprAssignment &assignment =
       result.resolved_moi_transient_sgpr_assignments.front();
   ASSERT_TRUE(assignment.spill_backed);
+  ASSERT_TRUE(assignment.branch_only_scalar_spill);
   ASSERT_TRUE(assignment.dynamic_stack_borrowed_sgpr);
   EXPECT_FALSE(assignment.indirect_pc_sgpr);
   EXPECT_FALSE(assignment.indirect_scc_sgpr);
@@ -2362,6 +2363,84 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
   EXPECT_TRUE(std::ranges::any_of(resource_errors, [](const std::string &error) {
     return error.find("invalid entry scalar backup resources") != std::string::npos;
   })) << testing::PrintToString(resource_errors);
+}
+
+TEST(ConSanMoi, Rdna4InlineBranchOnlyFixedStackPreservesEntryScalarInputs) {
+  std::vector<uint32_t> text_words(800u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  size_t cursor = 0u;
+  text_words[cursor++] = 0xD8340000u;
+  text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0
+  text_words[cursor++] = build_s_mov_b32(105u, 105u, ROCJITSU_CODE_ARCH_RDNA4);
+  for (uint16_t sgpr = 0u; sgpr < 105u; ++sgpr)
+    text_words[cursor++] = build_s_mov_b32(105u, sgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "inline_branch_only_fixed_stack",
+                                 kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
+                                 /*uses_dynamic_stack=*/false);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u)
+      << testing::PrintToString(result.warnings);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  ASSERT_TRUE(assignment.spill_backed);
+  ASSERT_TRUE(assignment.branch_only_scalar_spill);
+  EXPECT_FALSE(assignment.dynamic_stack_borrowed_sgpr);
+  EXPECT_FALSE(assignment.indirect_pc_sgpr);
+  EXPECT_FALSE(assignment.indirect_scc_sgpr);
+  EXPECT_FALSE(assignment.dispatch_key_sgpr);
+  EXPECT_FALSE(assignment.call_return_sgpr);
+
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  ASSERT_TRUE(prologue->entry_scalar_backup_vgpr);
+  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_base, assignment.exec_save_sgpr);
+  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kConSanMoiInlineExecSaveSgprCount);
+  const auto branch_only =
+      std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
+  ASSERT_NE(branch_only, result.patches.end());
+  EXPECT_EQ(branch_only->branch_only_entry_prologue_offset, prologue->trampoline_offset);
+  EXPECT_EQ(prologue->entry_prologue_chained_trampoline_offset, branch_only->trampoline_offset);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> prologue_words =
+      text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+  const auto first_save = instrumentation::build_v_writelane_b32(
+      *prologue->entry_scalar_backup_vgpr, assignment.exec_save_sgpr, /*lane=*/0u,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto last_save = instrumentation::build_v_writelane_b32(
+      *prologue->entry_scalar_backup_vgpr,
+      static_cast<uint16_t>(assignment.exec_save_sgpr + kConSanMoiInlineExecSaveSgprCount - 1u),
+      kConSanMoiInlineExecSaveSgprCount - 1u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto first_restore = instrumentation::build_v_readlane_b32(
+      assignment.exec_save_sgpr, *prologue->entry_scalar_backup_vgpr, /*lane=*/0u,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto last_restore = instrumentation::build_v_readlane_b32(
+      static_cast<uint16_t>(assignment.exec_save_sgpr + kConSanMoiInlineExecSaveSgprCount - 1u),
+      *prologue->entry_scalar_backup_vgpr, kConSanMoiInlineExecSaveSgprCount - 1u,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(first_save);
+  ASSERT_TRUE(last_save);
+  ASSERT_TRUE(first_restore);
+  ASSERT_TRUE(last_restore);
+  ASSERT_GE(prologue_words.size(), first_save->size());
+  EXPECT_TRUE(std::ranges::equal(std::span(prologue_words).first<2>(), *first_save));
+  EXPECT_TRUE(contains_subsequence(prologue_words, *last_save));
+  EXPECT_TRUE(contains_subsequence(prologue_words, *first_restore));
+  EXPECT_TRUE(contains_subsequence(prologue_words, *last_restore));
 }
 
 TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRoutesThroughIsolatedNopWords) {
@@ -2514,7 +2593,7 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackFailsClosedWithoutAdmissibleReservoir
   EXPECT_EQ(std::ranges::find(rejected.patches, true, &ConSanPatchInfo::branch_only_continuation),
             rejected.patches.end());
   EXPECT_TRUE(std::ranges::any_of(rejected.warnings, [](const std::string &warning) {
-    return warning.find("could not route its branch-only dynamic-stack body") != std::string::npos;
+    return warning.find("could not route its branch-only scalar-spill body") != std::string::npos;
   })) << testing::PrintToString(rejected.warnings);
 }
 

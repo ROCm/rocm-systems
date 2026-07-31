@@ -343,6 +343,11 @@ struct ConSanMoiTransientSgprAssignment {
   std::optional<uint16_t> dispatch_key_sgpr;
   std::optional<uint16_t> call_return_sgpr;
   std::optional<uint16_t> visible_evidence_sgpr;
+  /// The complete scalar window is preserved in private memory and control
+  /// reaches the appended body through branch-only relays. This avoids any
+  /// scalar value that would otherwise have to remain live from the guest
+  /// anchor through the router.
+  bool branch_only_scalar_spill = false;
   /// Live ordinary pair preserved through the dynamic-stack VGPR bootstrap.
   /// Present only when branch-only routing avoids every live-through router
   /// register.
@@ -531,6 +536,9 @@ struct ConSanOptions {
   std::optional<uint16_t> moi_inline_dispatch_key_sgpr;
   std::optional<uint16_t> moi_inline_indirect_scc_sgpr;
   std::optional<uint16_t> moi_inline_visible_evidence_sgpr;
+  /// Internal proof marker for an Inline component whose saved scalar window
+  /// is reached through branch-only relays instead of live-through SGPR state.
+  bool moi_inline_branch_only_scalar_spill = false;
   /// Component-local live pair used only while a spill-backed Inline body
   /// establishes and releases its runtime-sized private frame.
   std::optional<uint16_t> moi_inline_dynamic_stack_borrowed_sgpr;

@@ -2082,27 +2082,31 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       }
     }
     std::optional<MoiEntryScalarBackup> entry_scalar_backup;
+    const bool needs_branch_only_scalar_backup =
+        kernel_options.moi_inline_branch_only_scalar_spill;
     const bool needs_dynamic_stack_scalar_backup =
         kernel_options.moi_inline_dynamic_stack_borrowed_sgpr.has_value();
+    const bool needs_full_entry_scalar_backup =
+        needs_branch_only_scalar_backup || needs_dynamic_stack_scalar_backup;
     const bool needs_automatic_owner_scalar_backup =
         kernel_options.automatic_moi_owner_sgpr &&
         kernel_options.moi_owner_source == ConSanMoiOwnerSource::HwId &&
         kernel_options.moi_owner_sgpr.has_value();
-    if (needs_dynamic_stack_scalar_backup || needs_automatic_owner_scalar_backup) {
+    if (needs_full_entry_scalar_backup || needs_automatic_owner_scalar_backup) {
       if (!is_rdna4_family_arch(arch) || !kernel_options.moi_exec_save_sgpr ||
           !kernel_options.automatic_moi_inline_sgpr_spill ||
-          !kernel_options.moi_dynamic_stack_spill) {
-        if (needs_dynamic_stack_scalar_backup) {
+          (needs_dynamic_stack_scalar_backup && !kernel_options.moi_dynamic_stack_spill)) {
+        if (needs_full_entry_scalar_backup) {
           result.errors.emplace_back(
-              "ConSan MOI dynamic-stack entry scalar backup has no valid Inline spill contract");
+              "ConSan MOI branch-only entry scalar backup has no valid Inline spill contract");
           return;
         }
       }
-      const uint16_t sgpr_base = needs_dynamic_stack_scalar_backup
+      const uint16_t sgpr_base = needs_full_entry_scalar_backup
                                      ? *kernel_options.moi_exec_save_sgpr
                                      : *kernel_options.moi_owner_sgpr;
       const uint16_t sgpr_count =
-          needs_dynamic_stack_scalar_backup ? moi_exec_save_sgpr_count(kernel_options, arch) : 1u;
+          needs_full_entry_scalar_backup ? moi_exec_save_sgpr_count(kernel_options, arch) : 1u;
       if (sgpr_count == 0u || !moi_entry_scalar_backup_preserves_persistent_outputs(
                                   kernel_options, sgpr_base, sgpr_count)) {
         result.errors.emplace_back(

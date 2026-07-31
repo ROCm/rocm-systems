@@ -781,10 +781,11 @@ struct MoiSgprRange {
     return true;
   if (options.automatic_moi_inline_sgpr_spill && options.moi_inline_access_present &&
       ((!options.moi_inline_call_return_sgpr || !options.moi_inline_dispatch_key_sgpr) &&
+       !options.moi_inline_branch_only_scalar_spill &&
        !options.moi_inline_dynamic_stack_borrowed_sgpr)) {
     errors.emplace_back(
-        "ConSan MOI spill-backed inline-shadow probes require a dense router or dynamic-stack "
-        "bootstrap");
+        "ConSan MOI spill-backed inline-shadow probes require a dense router or branch-only "
+        "scalar spill");
     return false;
   }
   // Diagnostics use s[base:base+10]. Atomic publication and causal-token
@@ -1117,6 +1118,7 @@ apply_moi_transient_sgpr_assignment(ConSanOptions &options,
          selected->dispatch_key_sgpr != assignment->dispatch_key_sgpr ||
          selected->call_return_sgpr != assignment->call_return_sgpr ||
          selected->visible_evidence_sgpr != assignment->visible_evidence_sgpr ||
+         selected->branch_only_scalar_spill != assignment->branch_only_scalar_spill ||
          selected->dynamic_stack_borrowed_sgpr != assignment->dynamic_stack_borrowed_sgpr))
       return false;
     selected = assignment;
@@ -1127,6 +1129,7 @@ apply_moi_transient_sgpr_assignment(ConSanOptions &options,
             options.automatic_moi_inline_sgpr_spill &&
             ((options.moi_inline_indirect_pc_sgpr && options.moi_inline_indirect_scc_sgpr &&
               options.moi_inline_dispatch_key_sgpr && options.moi_inline_call_return_sgpr) ||
+             options.moi_inline_branch_only_scalar_spill ||
              options.moi_inline_dynamic_stack_borrowed_sgpr));
   }
   if (saw_unassigned_owner)
@@ -1148,9 +1151,11 @@ apply_moi_transient_sgpr_assignment(ConSanOptions &options,
     options.moi_inline_dispatch_key_sgpr = selected->dispatch_key_sgpr;
     options.moi_inline_call_return_sgpr = selected->call_return_sgpr;
     options.moi_inline_visible_evidence_sgpr = selected->visible_evidence_sgpr;
+    options.moi_inline_branch_only_scalar_spill = selected->branch_only_scalar_spill;
     options.moi_inline_dynamic_stack_borrowed_sgpr = selected->dynamic_stack_borrowed_sgpr;
   } else {
     options.automatic_moi_inline_sgpr_spill = false;
+    options.moi_inline_branch_only_scalar_spill = false;
     options.moi_inline_dynamic_stack_borrowed_sgpr.reset();
     options.automatic_moi_record_replay_sgpr_spill = selected->spill_backed;
     options.moi_record_replay_dispatch_key_sgpr = selected->dispatch_key_sgpr;
@@ -1916,7 +1921,7 @@ moi_inline_dense_router_scalar_abi(const ConSanOptions &options, rj_code_arch_t 
       (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250)) {
     return std::nullopt;
   }
-  if (options.moi_inline_dynamic_stack_borrowed_sgpr)
+  if (options.moi_inline_branch_only_scalar_spill)
     return std::nullopt;
   const auto indirect_jump = moi_indirect_jump_sgprs(options);
   if (!indirect_jump)
@@ -2989,6 +2994,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     std::optional<uint16_t> spill_scc;
     std::optional<uint16_t> spill_key;
     std::optional<uint16_t> spill_visible;
+    bool branch_only_scalar_spill = false;
     std::optional<uint16_t> dynamic_stack_borrowed_sgpr;
     if (options.moi_engine == ConSanMoiEngine::RecordReplay || component_local_sampled) {
       for (uint32_t base = util::align_up(liveness_search_floor, 2u); base + count <= limit;
@@ -3139,12 +3145,13 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         else
           spill_visible = spill_pc = spill_scc = spill_key = std::nullopt;
       }
-      // A full-pressure dynamic-stack owner may have no scalar register that
-      // remains dead from an access anchor through an appended router. Route
-      // with branch-only hops instead, then preserve both the complete Inline
-      // window and one ordinary bootstrap pair before either is clobbered.
-      // Every choice stays inside every owner's existing allocation and is
-      // derived from descriptor/runtime ABI state rather than a fixed range.
+      // A full-pressure owner may have no scalar register that remains dead
+      // from an access anchor through an appended router. Route with
+      // branch-only hops instead and preserve the complete Inline window
+      // before using it. Dynamic-stack owners additionally need one ordinary
+      // bootstrap pair while establishing their private frame. Every choice
+      // stays inside every owner's existing allocation and is derived from
+      // descriptor/runtime ABI state rather than a fixed range.
       const bool all_owners_use_dynamic_stack =
           is_rdna4_family_arch(arch) && !owners.empty() &&
           std::ranges::all_of(owners, [&](uint64_t descriptor_offset) {
@@ -3152,7 +3159,15 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
                                                   &ConSanKernelInfo::descriptor_file_offset);
             return kernel != result.kernels.end() && kernel->uses_dynamic_stack.value_or(false);
           });
-      if (!selected && all_owners_use_dynamic_stack) {
+      const bool all_owners_use_fixed_stack =
+          is_rdna4_family_arch(arch) && !owners.empty() &&
+          std::ranges::all_of(owners, [&](uint64_t descriptor_offset) {
+            const auto kernel = std::ranges::find(result.kernels, descriptor_offset,
+                                                  &ConSanKernelInfo::descriptor_file_offset);
+            return kernel != result.kernels.end() &&
+                   !kernel->uses_dynamic_stack.value_or(false);
+          });
+      if (!selected && (all_owners_use_dynamic_stack || all_owners_use_fixed_stack)) {
         uint16_t allocated_limit = limit;
         for (const auto &summary : component_contexts->summaries)
           allocated_limit = std::min(allocated_limit, summary.current_sgpr_count);
@@ -3189,6 +3204,11 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
               conflicts_with_cdna_vcc(scalar_window)) {
             continue;
           }
+          if (all_owners_use_fixed_stack) {
+            selected = candidate;
+            branch_only_scalar_spill = true;
+            break;
+          }
           for (uint32_t pair = 0; pair + 2u <= allocated_limit; pair += 2u) {
             const uint16_t borrowed = static_cast<uint16_t>(pair);
             const std::array combined_ranges{
@@ -3201,6 +3221,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
               continue;
             }
             selected = candidate;
+            branch_only_scalar_spill = true;
             dynamic_stack_borrowed_sgpr = borrowed;
             break;
           }
@@ -3293,6 +3314,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       continue;
     }
     const bool spill_backed = (spill_pc && spill_scc && spill_key && spill_call_return) ||
+                              branch_only_scalar_spill ||
                               dynamic_stack_borrowed_sgpr.has_value();
     const std::optional<uint16_t> dispatch_id_sgpr =
         options.moi_dispatch_id_sgpr &&
@@ -3315,6 +3337,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
            .dispatch_key_sgpr = spill_key,
            .call_return_sgpr = spill_call_return,
            .visible_evidence_sgpr = spill_visible,
+           .branch_only_scalar_spill = branch_only_scalar_spill,
            .dynamic_stack_borrowed_sgpr = dynamic_stack_borrowed_sgpr});
     }
     assigned_any = true;
@@ -4228,6 +4251,13 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
        *options.moi_record_replay_dispatch_key_sgpr >= limit) ||
       (options.moi_record_replay_call_return_sgpr &&
        static_cast<uint32_t>(*options.moi_record_replay_call_return_sgpr) + 2u > limit);
+  const bool branch_only_scalar_invalid =
+      options.moi_inline_branch_only_scalar_spill &&
+      (options.moi_engine != ConSanMoiEngine::InlineShadow ||
+       !options.automatic_moi_inline_sgpr_spill || !is_rdna4_family_arch(arch) ||
+       !options.moi_exec_save_sgpr || options.moi_inline_indirect_pc_sgpr ||
+       options.moi_inline_indirect_scc_sgpr || options.moi_inline_dispatch_key_sgpr ||
+       options.moi_inline_call_return_sgpr);
   const bool dynamic_bootstrap_invalid = [&] {
     if (!options.moi_inline_dynamic_stack_borrowed_sgpr)
       return false;
@@ -4247,7 +4277,8 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
       overlaps_workgroup_tuple |= reg && range_overlaps(base, 2u, *reg, 1u);
     }
     return options.moi_engine != ConSanMoiEngine::InlineShadow ||
-           !options.automatic_moi_inline_sgpr_spill || !options.moi_dynamic_stack_spill ||
+           !options.automatic_moi_inline_sgpr_spill ||
+           !options.moi_inline_branch_only_scalar_spill || !options.moi_dynamic_stack_spill ||
            !is_rdna4_family_arch(arch) || base % 2u != 0u ||
            static_cast<uint32_t>(base) + 2u > limit ||
            moi_sgpr_range_overlaps_dynamic_stack_state(base, 2u) ||
@@ -4259,7 +4290,7 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
            overlaps_persistent || overlaps_workgroup_tuple;
   }();
   if (!exec_invalid && !owner_invalid && !persistent_invalid && !inline_external_invalid &&
-      !dynamic_bootstrap_invalid)
+      !branch_only_scalar_invalid && !dynamic_bootstrap_invalid)
     return true;
   result.outcome = ConSanTransformOutcome::Unsupported;
   result.warnings.emplace_back(
