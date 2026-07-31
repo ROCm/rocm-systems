@@ -28,6 +28,21 @@ inline bool hrr_replayed_h2d_needs_drain(bool in_graph_capture) {
     return !in_graph_capture;
 }
 
+// Whether the zero-init injected after a host-synchronous replay allocation
+// (hipMalloc / hipMallocManaged / hipExtMallocWithFlags) must be drained before
+// the allocation handler returns. hipMemset on a fresh, non-offset device
+// allocation is promoted to asynchronous by ihipMemset(), so it is only
+// enqueued on the null stream; a recorded hipStreamNonBlocking stream never
+// synchronizes with the null stream, leaving the zero-init unordered against
+// every later replayed event. Skipped while a stream graph capture is active,
+// where the zero-init is not issued at all. Kept as a small pure predicate so
+// the guard is unit-testable without a GPU. See hrr_zero_init_alloc() in
+// hip_playback.cpp.
+inline bool hrr_zero_init_needs_drain(bool zero_init_enabled,
+                                      bool in_graph_capture) {
+    return zero_init_enabled && !in_graph_capture;
+}
+
 // ---------------------------------------------------------------------------
 // PlaybackContext — central replay state
 // ---------------------------------------------------------------------------
