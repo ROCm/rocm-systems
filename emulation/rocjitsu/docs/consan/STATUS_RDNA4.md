@@ -7,18 +7,14 @@ focused kernels are retained as compact regression discriminators.
 
 The executable authority is
 [`consan_validation.py`](../../tests/dbi/consan/consan_validation.py), and
-[VALIDATION.md](VALIDATION.md) defines the experiment contract.  The latest
-Record/Replay checkpoint is `5af82ade33`, using hook SHA-256
-`0edfe1985a2ee4512b65185a6ad625fe1160e0d080be5edd160d2a12b75dd82b`.
-Individual cells may cite another retained current-tip checkpoint in their
-artifact provenance.  A bounded 4-dispatch × 4-owner capture candidate has
-since passed five clean and five reviewed-fault D128-pressure trials with hook
-SHA-256
-`07bba71e8826d33fa6328b2e79268df926f7d8b2e189bb2a0cf6e95635fc0839`.
-The current Inline Shadow ownership checkpoint uses hook SHA-256
-`74cf5fcdbeb87b56ce6f257e4965a47c047ca655e51828cee8f880e828fe26b3`.
-It is not yet a frozen release checkpoint: TP2 is unavailable in this workspace
-and source-matched overhead and memory requalification remain.
+[VALIDATION.md](VALIDATION.md) defines the experiment contract. Individual
+cells cite their retained artifact provenance. The current large-object
+SuperCollider, Sampled, and Inline Shadow paired rows use hook SHA-256
+`2113c773bdcac837e58cbd0cc0e784d7d99d971de3a8e08c377743cd245f8e6e`;
+the separately retained Record/Replay row uses the immediately preceding hook
+build and is unaffected by the Sampled-only scalar-layout refactor. This is not
+yet a frozen release checkpoint because the larger nightly top-k object's
+reviewed-fault and containment gates remain to be refreshed.
 
 ## Status legend
 
@@ -63,7 +59,7 @@ ConSan model false positive.
 | **P1 PyTorch collision-heavy scatter-reduce** | 🟩 Exact BF16/FP32 oracle; clean-complete 27/27 LDS accesses; exact global-atomic scope weakening is a precommitted qualified miss; overhead 1.010x | 🟩 Exact oracle; clean-complete 27/27 accesses; exact scope weakening is a precommitted qualified miss; overhead 1.006x (0.996x BF16) | 🟩 Exact oracle; clean-complete 27/27 accesses; exact scope weakening is a precommitted qualified miss; overhead 0.993x | 🟩 Exact oracle; clean-complete 27/27 accesses; exact scope weakening is a precommitted qualified miss; overhead 1.031x |
 | **P2 PyTorch/Inductor compiled softmax** | 🟩 Exact oracle; clean 4/4; exact third barrier drop is a precommitted qualified miss; overhead 0.960x | 🟩 Exact oracle; clean 4/4 + 3/3; exact drop emits an attributed replay diagnostic; overhead 1.065x | 🟩 Exact oracle; clean 4/4 + 6/6 barrier members; exact drop emits a causal diagnostic; overhead 1.204x | 🟩 Exact oracle; clean 4/4 + 3/3; exact drop emits attributed diagnostics; overhead 0.937x |
 | **P2 PyTorch split online softmax** | 🟩 Exact CPU-derived BF16 oracle; clean 8/8 across two stages; exact drop is a precommitted qualified miss; overhead 0.977x | 🟩 Exact oracle; clean 8/8 + 6/6; exact drop is a qualified replay miss; overhead 0.982x | 🟩 Exact oracle; clean 8/8 + 12/12 barrier members; exact drop emits a causal diagnostic; overhead 1.257x | 🟩 Exact oracle; clean 8/8 + 6/6; independently confirmed exact drop emits diagnostics; overhead 4.012x |
-| **P2 PyTorch Qwen-vocabulary top-k** | 🟥 Exact oracle and typed verdict in 54.00 seconds, but only 2,039/63,474 supported accesses patch on the retained historical object | 🟩 Current nightly exact oracle and complete 418,292/418,292 accesses + 50,458/50,458 barriers; four physical runs completed in 71.53–76.36 seconds with zero diagnostics, including a final current-source strict run with exact entry-captured x/y/z identity; the former coverage-output exception is retired | 🟧 Exact oracle and clean execution on the retained historical object; 57,153/63,474 accesses + 12,978/14,200 barrier members in 102.05 seconds; overhead and fault pending | 🟥 Current nightly objects fail strict placement before any probe; the default numeric run is uninstrumented and `applicable=false` |
+| **P2 PyTorch Qwen-vocabulary top-k** | 🟨 Current exact clean and paired rows are complete at 58,992/58,992 accesses; clean execution takes 98.587 seconds and cold first-operation slowdown is 448.435x; current reviewed-fault refresh pending | 🟨 Current exact clean and paired rows are complete at 418,292/418,292 accesses plus 100,916/100,916 barriers with zero diagnostics; clean execution takes 108.626 seconds and cold first-operation slowdown is 433.798x; current reviewed-fault refresh pending | 🟨 Current exact clean and paired rows are complete at 418,292/418,292 accesses plus 100,916/100,916 barrier members; clean execution takes 96.725 seconds and cold first-operation slowdown is 416.660x; current reviewed-fault refresh pending | 🟨 Current exact clean and paired rows are complete at 418,292/418,292 accesses plus 50,458/50,458 barriers with zero incomplete state; clean execution takes 146.873 seconds and cold first-operation slowdown is 461.646x; current reviewed-fault refresh pending |
 | **P2 PyTorch causal SDPA** | 🟩 Independent CPU oracle; clean 158/158; exact barrier drop emits an attributed diagnostic and breaks the oracle; overhead 1.946x | 🟨 Independent CPU oracle; clean-complete 158/158 accesses + 22/22 barriers + 2/2 atomics + 2/2 fences; overhead 7.894x; reviewed drops cause unattributed traps | 🟥 The attention kernel lacks safe transient scalar probe/router state; only the separate 27/27-access fill object patches | 🟥 The attention kernel lacks a common dead scalar pair for its indirect router; 131 accesses + 22 barriers + 2 atomics remain unpatched |
 | **P2 llama.cpp quantized matvec** | 🟩 Independent CPU oracle; clean-complete 462/462 accesses; reviewed exact drop is a qualified miss; overhead 19.225x | 🟩 Independent CPU oracle; clean-complete 462/462 accesses + 44/44 barriers + 63/63 atomics + 72/72 fences; reviewed drop breaks the oracle; overhead 14.493x | 🟩 Independent CPU oracle; clean-complete 462/462 accesses + 88/88 barrier members; reviewed drop breaks the oracle; overhead 17.548x | 🟧 Exact oracle and zero diagnostics; 81/462 accesses + 44/44 barriers, but 49,152 unsupported dynamic events reject strict execution |
 | **P2 Sharktank TP2 family** | 🟩 Exact oracle; clean 2,976/2,976; exact drop is a precommitted qualified miss; overhead 1.28x | 🟨 Exact oracle; five clean-complete trials at 2,976/2,976 + 228/228 with no diagnostics; exact drop detected in 3/5 contained trials; overhead 1.806x prefill / 1.319x combined / 1.270x decode | 🟩 Exact oracle; clean 2,976/2,976 + 420/420; exact drop is a precommitted qualified miss; overhead 1.24x | 🟩 Exact oracle; clean 2,976/2,976 + 228/228; exact drop detected 16/16; overhead 2.17x |
@@ -107,43 +103,35 @@ below.
 
 ### PyTorch Qwen-vocabulary top-k
 
-- **SuperCollider:** the two 23 MiB and 40 MiB rocPRIM objects expose 63,474
-  supported accesses, but only 2,039 patch.  The next task is scalable far-relay
-  placement for SuperCollider, not another clean retry.
-- **Record/Replay:** the current nightly reaches complete 418,292/418,292
-  access and 50,458/50,458 barrier coverage with an exact sorted value/index
-  oracle. The former adjacent rocPRIM write/write reports were a ConSan false
-  positive: automatic banked replay read launch TTMP workgroup coordinates
-  after arbitrary guest code, collapsing distinct physical workgroups onto one
-  recorded LDS identity. Access probes now consume the exact entry-captured
-  32-bit `(workgroup_x, workgroup_y, workgroup_z)` tuple from persistent state;
-  Record/Replay no longer inherits Inline Shadow's compact-key grid bounds.
-  Three retirement runs of the pinned `fnv1a64:3833562345afa454` object
-  completed in 75.40, 75.26, and 71.53 seconds with the exact oracle, full
-  access/barrier coverage, zero diagnostics, and no incomplete state. Artifacts:
-  `consan-validation-gfx1201-topk-workgroup-key-final-run1-20260727` and
-  `consan-validation-gfx1201-topk-workgroup-key-final-run2-20260727`, followed
-  by the strict-clean
-  `consan-validation-gfx1201-topk-workgroup-key-final-strict-20260727`.
-  After review strengthened the persistent representation from a packed key to
-  the exact x/y/z tuple, a current-source strict requalification repeated the
-  same complete clean result in 76.36 seconds with hook SHA-256
-  `43a13035f925ddb4486bfdeb55e2ce2b39d2bac08f38a5d188aeb7d1019d1446`.
-  Artifact:
-  `consan-validation-gfx1201-topk-exact-tuple-strict-20260727`.
-  The workload is again a strict clean gate with no diagnostic exception or
-  Record/Replay fault-qualification withholding.
-- **Sampled:** the 23 MiB object is complete, while the 40 MiB object reaches
-  36,331/42,652 accesses and 8,778/10,000 barrier members.  Close its remaining
-  placement/lowering gaps before collecting overhead and reviewed-fault
-  evidence.  Artifact: `rdna4-topk-sampled-relay-scaled-final-20260722`.
-- **Inline Shadow:** `rdna4-topk-inline-indexed-final-20260722` reaches a typed
-  historical verdict with about 60% of accesses and 49% of barriers.  With the
-  current PyTorch nightly, both large bundled objects fail strict transform
-  placement before any probes are applied.  A default run still passes its
-  numeric oracle, but reports `applicable=false` and therefore is not ConSan
-  evidence.  Close the large-object access/relay placement gap before retrying
-  ownership, overhead, or fault acceptance on this workload.
+- **Current clean gate:**
+  `consan-validation-large-objects-gfx1201-topk-clean-0bf1d17-20260731`
+  passes the exact sorted value/index oracle in every engine. SuperCollider
+  patches 58,992/58,992 accesses. Record/Replay and Sampled each patch
+  418,292/418,292 accesses plus 100,916/100,916 barriers; Inline Shadow patches
+  418,292/418,292 accesses plus 50,458/50,458 barriers. Every row is statically,
+  dynamically, and analytically complete.
+- **Cold paired gate:** each physical profile uses ten fresh one-repetition
+  processes so a sample has one bounded report-buffer lifetime. The retained
+  artifacts are
+  `consan-validation-large-objects-gfx1201-topk-sc-overhead-cold-final-0bf1d17-20260731`,
+  `consan-validation-large-objects-gfx1201-topk-rr-overhead-isolated-v2-0bf1d17-20260731`,
+  `consan-validation-large-objects-gfx1201-topk-sampled-overhead-cold-final-0bf1d17-20260731`,
+  and
+  `consan-validation-large-objects-gfx1201-topk-inline-overhead-cold-final-0bf1d17-20260731`.
+  All 40 instrumented processes pass their exact oracle and strict coverage
+  contract. The reported 448.435x, 433.798x, 416.660x, and 461.646x slowdowns
+  are cold end-to-end first-operation ratios and include object transformation.
+- **Sampled state preservation:** the selected sampled access body restores
+  SCC from its planner-owned post-body snapshot rather than the publication
+  EXEC scratch. Compact physical regressions cover both the expanded return
+  shapes and an SCC-dependent branch after a staged LDS completion sequence.
+  The exact-site artifact
+  `consan-validation-topk-sampled-scc-fix-0bf1d17-20260731` and the standard
+  clean/paired artifacts above pass without workload-specific placement or
+  result exceptions.
+- **Remaining maturity gate:** current reviewed-fault and containment evidence
+  has not been refreshed for this larger nightly object, so all four cells stay
+  yellow rather than inheriting green from older denominators.
 
 ### PyTorch causal SDPA
 

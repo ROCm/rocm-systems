@@ -46,7 +46,7 @@ preserve an earlier green claim.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | 🟧 Current full-object run transforms 1402/1402 accesses and the mandatory gfx1250 rewrite succeeds; execution reaches the 600-second simulator bound before an oracle or teardown verdict, so there is no accepted overhead | 🟩 Current paired 5.33x; exact oracle and 1000/1000 accesses, and 46/46 barriers | 🟧 Full-object isolated run signals at ~255 seconds and the independent software-GPU path has no verdict through 600 seconds; a diagnostic restricted to the final 151,936-workgroup initializer is exact and complete at 3/3 accesses plus 4/4 barrier members, localizing the blocker to cumulative full-object cost; no accepted overhead | 🟧 Current isolated run signals at the final large-output dispatch after 552 seconds; no verdict or accepted overhead |
+| **P0 Qwen3-0.6B prefill** | 🟧 Current full-object run transforms 1402/1402 accesses into a 394,104-byte object; standalone B0-to-A0 translation succeeds, but end-to-end execution has no oracle or teardown verdict within 600 seconds, so there is no accepted overhead | 🟧 Current instrumentation is complete at 1402/1402 accesses plus 104/104 barriers and emits a 4,043,640-byte object; the end-to-end run has no verdict within 600 seconds after replacement, while the newer standalone translator diagnoses 17 unrecovered generated long-return targets. The older paired 5.33x result covered only 1000/1000 accesses and 46/46 barriers and is not current acceptance evidence | 🟧 Current instrumentation is complete at 1402/1402 accesses plus 102/102 barriers and emits a 3,396,472-byte object; loader admission fails before execution, and standalone translation diagnoses the same 17 generated long-return targets; no oracle or accepted overhead | 🟧 Current instrumentation is complete at 1402/1402 accesses plus 52/52 barriers and emits a 4,666,232-byte object; the installed runtime translator accepts it and execution begins but has no oracle within 60 seconds, while the newer standalone translator diagnoses the same 17 generated long-return targets; no accepted overhead |
 | **P1 Sharktank TP1 prefill** | 🟩 Exact prefill oracle; 352/352 accesses; current paired 1.17x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 1.25x | 🟩 Exact prefill oracle; 352/352 accesses, 64/64 applicable barriers; current paired 1.51x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 2.11x |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟧 Compute-active through 600 seconds; no verdict or accepted overhead |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
@@ -64,6 +64,33 @@ inference, and a single-executor baseline reaches inference but remains too
 slow for useful iteration.  Existing static gfx1250 qualification evidence is
 not sufficient for promotion; CLIP remains outside the matrix denominator
 until baseline execution becomes suitable for end-to-end validation.
+
+### Current large Qwen translation boundary
+
+The current selected-object evidence at `0bf1d17c7d` replaces the earlier
+claim that every replacement reached workload execution.  SuperCollider's
+394,104-byte expanded object passes the newer standalone B0-to-A0 translator,
+but its end-to-end artifact
+`consan-validation-large-objects-gfx1250-qwen-sim-sc-v6-20260731` has no oracle
+within 600 seconds.  Record/Replay's 4,043,640-byte replacement is statically
+complete in
+`consan-validation-large-objects-gfx1250-qwen-sim-rr-0bf1d17-20260731`, but
+the end-to-end run stops at its 600-second bound after replacement rather than
+proving workload execution.
+
+The current Sampled artifact
+`consan-validation-large-objects-gfx1250-qwen-sim-sampled-clean-v2-0bf1d17-20260731`
+fails loader admission before execution.  Its 3,396,472-byte object and the
+Record/Replay object independently reproduce 17 unrecovered generated
+long-return targets in the newer standalone revision translator.  Inline
+Shadow's 4,666,232-byte object in
+`consan-validation-large-objects-gfx1250-qwen-sim-inline-diagnostic-0bf1d17-20260731`
+is accepted by the installed runtime translator and begins execution, but has
+no oracle within its 60-second diagnostic bound; the newer standalone
+translator reports the same 17 return-target gaps.  This version-sensitive
+post-instrumentation translation gap is tracked by `bd-1w9.6.26`; no workload
+PC, kernel name, register exception, or result exception is an acceptable
+solution.
 
 ## RocJITsu test-corpus expansion
 

@@ -487,6 +487,14 @@ rows use fresh processes as declared by the manifest. Raw samples, commands,
 complete controlled environment, hook hash, source revisions, and unrounded
 ratios remain in the artifact tree.
 
+Physical `gfx1201` PyTorch overhead rows collect ten fresh one-repetition
+processes and aggregate their reported medians. This keeps every timing sample
+within one bounded report-buffer lifetime; repeated dispatches in one process
+are a state-capacity stress test, not an independent overhead sample. These
+rows report cold end-to-end first-operation latency, including code-object
+transformation, because a warm second dispatch can exceed the bounded report
+capacity on large Record/Replay objects.
+
 ## Fault inventory and reviewed specs
 
 Fault identities contain code-object hashes, kernel names, PCs, mnemonics, and

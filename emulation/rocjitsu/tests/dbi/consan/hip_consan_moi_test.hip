@@ -904,6 +904,71 @@ __global__ __launch_bounds__(64) void moi_two_wave_lds_accesses_with_barrier(uin
   }
 }
 
+__global__
+__launch_bounds__(64) void moi_repeated_dispatch_saturation_preserves_output_for_instrumentation(
+    uint32_t *out, uint32_t output_index, uint32_t expected) {
+  __shared__ uint32_t lds[1];
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xFFFFu);
+
+  if (tid == 0) {
+    asm volatile("ds_store_b32 %0, %1\n\t" RJ_CONSAN_MOI_RECORD_NOP_CAVE
+                 :
+                 : "v"(lds_addr), "v"(expected)
+                 : "memory");
+  }
+  __syncthreads();
+  if (tid == 32) {
+    uint32_t loaded = 0;
+    asm volatile("ds_load_b32 %0, %1\n\t" RJ_CONSAN_MOI_RECORD_NOP_CAVE "s_wait_loadcnt 0\n\t"
+                 : "=v"(loaded)
+                 : "v"(lds_addr)
+                 : "memory");
+    out[output_index] = loaded;
+  }
+}
+
+#if defined(RJ_CONSAN_ENABLE_STAGED_DSCNT_TEST)
+__global__ __launch_bounds__(64) void moi_staged_dscnt_load_preserves_output_for_instrumentation(
+    uint32_t *out) {
+  __shared__ uint32_t lds[64];
+  constexpr uint32_t kLdsValue = 0x10203040u;
+  lds[threadIdx.x] = kLdsValue;
+  __syncthreads();
+
+  const auto lds_addr =
+      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[threadIdx.x]) & 0xFFFFu);
+  uint32_t sum = 0;
+  // Keep three addtid loads outstanding ahead of one ordinary LDS load, then
+  // consume the four results with descending counter waits. ConSan only
+  // supports the ordinary load, but relocating it must preserve its position
+  // in the shared DS completion stream.
+  asm volatile("s_mov_b32 m0, 0x10000\n\t"
+               "v_mov_b32 v8, %1\n\t"
+               "ds_load_addtid_b32 v0\n\t"
+               "ds_load_addtid_b32 v1\n\t"
+               "ds_load_addtid_b32 v2\n\t"
+               "s_cmp_eq_u32 0, 0\n\t"
+               "ds_load_b32 v3, v8\n\t"
+               "s_wait_dscnt 3\n\t"
+               "v_mov_b32 v5, v0\n\t"
+               "s_wait_dscnt 2\n\t"
+               "v_add_nc_u32 v5, v1, v5\n\t"
+               "s_wait_dscnt 1\n\t"
+               "v_add_nc_u32 v5, v2, v5\n\t"
+               "s_wait_dscnt 0\n\t"
+               "v_add_nc_u32 v5, v3, v5\n\t"
+               "s_cbranch_scc1 1f\n\t"
+               "v_mov_b32 v5, 0\n\t"
+               "1:\n\t"
+               "v_mov_b32 %0, v5\n\t"
+               : "=v"(sum)
+               : "v"(lds_addr)
+               : "v0", "v1", "v2", "v3", "v5", "v8", "memory");
+  out[threadIdx.x] = sum;
+}
+#endif
+
 __global__ __launch_bounds__(64) void moi_flat_atomic_add_record(uint32_t *out) {
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
   if (tid == 0) {
@@ -1522,6 +1587,48 @@ TEST(ConSanMoiHipTest, RepeatedDispatchesRetainAutomaticRecords) {
 
   free_device_ptr(d_out);
 }
+
+TEST(ConSanMoiHipTest, SampledSaturationPreservesRepeatedDispatchOutput) {
+  constexpr uint32_t kDispatchCount = 10u;
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, kDispatchCount * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(d_out, 0, kDispatchCount * sizeof(uint32_t)));
+
+  for (uint32_t dispatch = 0; dispatch < kDispatchCount; ++dispatch) {
+    const uint32_t expected = 0x5A170000u ^ dispatch;
+    moi_repeated_dispatch_saturation_preserves_output_for_instrumentation<<<1, 64>>>(
+        d_out, dispatch, expected);
+    HIP_ASSERT(hipGetLastError());
+    const hipError_t sync = hipDeviceSynchronize();
+    ASSERT_EQ(sync, hipSuccess) << "dispatch " << dispatch
+                                << " HIP error: " << hipGetErrorString(sync);
+  }
+
+  std::array<uint32_t, kDispatchCount> out{};
+  HIP_ASSERT(hipMemcpy(out.data(), d_out, sizeof(out), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+  for (uint32_t dispatch = 0; dispatch < kDispatchCount; ++dispatch)
+    EXPECT_EQ(out[dispatch], 0x5A170000u ^ dispatch) << "dispatch=" << dispatch;
+}
+
+#if defined(RJ_CONSAN_ENABLE_STAGED_DSCNT_TEST)
+TEST(ConSanMoiHipTest, StagedDscntLoadPreservesOutput) {
+  constexpr uint32_t kExpected = 4u * 0x10203040u;
+  std::array<uint32_t, 64> out{};
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, out.size() * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(d_out, 0, out.size() * sizeof(uint32_t)));
+
+  moi_staged_dscnt_load_preserves_output_for_instrumentation<<<1, out.size()>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  HIP_ASSERT(hipMemcpy(out.data(), d_out, out.size() * sizeof(uint32_t), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+
+  for (uint32_t lane = 0; lane < out.size(); ++lane)
+    EXPECT_EQ(out[lane], kExpected) << "lane=" << lane;
+}
+#endif
 
 TEST(ConSanMoiHipTest, SampledBackendWritesDirectEntries) {
   constexpr uint32_t kSampledSlots = 2;

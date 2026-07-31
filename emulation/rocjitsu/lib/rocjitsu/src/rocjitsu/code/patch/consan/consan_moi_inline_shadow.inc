@@ -2372,12 +2372,15 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
           static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), 0u, arch));
   }
 
-  const uint16_t original_exec_save_sgpr = *options.moi_exec_save_sgpr;
-  const uint16_t selection_vcc_save_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u);
-  const uint16_t publication_exec_save_sgpr =
-      static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u);
-  const uint16_t publication_scc_save_sgpr =
-      static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
+  const auto publication_state = moi_sampled_publication_state_sgprs(options);
+  if (!publication_state) {
+    errors.emplace_back("ConSan MOI sampled probe has no scalar publication-state layout");
+    return std::nullopt;
+  }
+  const uint16_t original_exec_save_sgpr = publication_state->original_exec_save_sgpr;
+  const uint16_t selection_vcc_save_sgpr = publication_state->selection_vcc_save_sgpr;
+  const uint16_t publication_exec_save_sgpr = publication_state->publication_exec_save_sgpr;
+  const uint16_t publication_scc_save_sgpr = publication_state->guest_scc_snapshot_sgpr;
   const auto save_scc =
       instrumentation::build_s_cselect_b32(publication_scc_save_sgpr, scalar_positive_inline_u32(1),
                                            scalar_positive_inline_u32(0), arch);

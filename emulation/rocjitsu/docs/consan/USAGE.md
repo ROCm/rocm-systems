@@ -256,14 +256,16 @@ engine:
   ordering regions.
 
 The automatic allocator requests the exact planned bytes. It never silently
-shrinks site coverage or disables an event kind to fit. The hard ceilings are
-128 MiB per automatic buffer and 256 MiB live automatic-report memory per
-process. Arithmetic overflow, a ceiling violation, or allocation failure is a
-typed incomplete outcome.
+shrinks site coverage or disables an event kind to fit. Sampled and Inline
+Shadow retain a 128 MiB per-buffer ceiling. Record/Replay permits up to 512 MiB
+per buffer so generated libraries retain bounded dispatch and owner diversity
+across benchmark loops; aggregate live automatic-report memory remains bounded
+at 1 GiB per process. Arithmetic overflow, a ceiling violation, or allocation
+failure is a typed incomplete outcome.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=N` | 128 MiB ceiling | Expert cap for HSA-tool-owned allocation; ordinary inventory still requests exact bytes below the cap. `0` disables automatic allocation. Dynamic access append requires an explicit finite cap. |
+| `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=N` | Engine ceiling (512 MiB for Record/Replay; 128 MiB otherwise) | Expert cap for HSA-tool-owned allocation; ordinary inventory still requests exact bytes below the cap. `0` disables automatic allocation. Dynamic access append requires an explicit finite cap. |
 | `RJ_CONSAN_MOI_REPORT_BUFFER=0xADDR` | unset | Caller-owned device-visible report buffer. |
 | `RJ_CONSAN_MOI_REPORT_BUFFER_SIZE=N` | `0` | Size of the caller-owned buffer; layout requirements depend on the engine and enabled event families. |
 | `RJ_CONSAN_MOI_REQUIRE_RECORDS=0|1` | `0` | At unload, require some visible auto-buffer access, synchronization, shadow, or sampled evidence. |

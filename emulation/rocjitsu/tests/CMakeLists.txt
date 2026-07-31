@@ -2043,7 +2043,7 @@ if(RJ_ENABLE_HIP_TESTS)
             ARG
             ""
             "ARCH;SOURCE"
-            "EXTRA_LIBS;EXTRA_DEPENDS;INCLUDE_DIRS"
+            "EXTRA_LIBS;EXTRA_DEPENDS;INCLUDE_DIRS;COMPILE_DEFINITIONS"
             ${ARGN}
         )
         if(NOT ARG_ARCH)
@@ -2059,6 +2059,10 @@ if(RJ_ENABLE_HIP_TESTS)
         foreach(_rj_include_dir IN LISTS ARG_INCLUDE_DIRS)
             list(APPEND HIP_INCLUDE_FLAGS -I${_rj_include_dir})
         endforeach()
+        set(HIP_DEFINITION_FLAGS)
+        foreach(_rj_definition IN LISTS ARG_COMPILE_DEFINITIONS)
+            list(APPEND HIP_DEFINITION_FLAGS -D${_rj_definition})
+        endforeach()
         set(HIP_EXTRA_LIBS)
         if(ARG_EXTRA_LIBS)
             set(HIP_EXTRA_LIBS -x none ${ARG_EXTRA_LIBS})
@@ -2069,10 +2073,11 @@ if(RJ_ENABLE_HIP_TESTS)
                 ${AMDCXX} -x hip --offload-arch=${ARG_ARCH}
                 --rocm-path=${ROCM_PATH} -std=c++20 -O2
                 ${RJ_HIP_SANITIZER_FLAGS} -isystem ${GTEST_INC}
-                -I${CMAKE_CURRENT_SOURCE_DIR} ${HIP_INCLUDE_FLAGS} -o
-                ${HIP_TEST_BIN} ${HIP_TEST_SRC} ${HIP_EXTRA_LIBS}
-                -L${GTEST_LIB_DIR} -lgtest -lpthread -Wl,-rpath,${GTEST_LIB_DIR}
-                -Wl,-rpath,${RJ_HSA_LIBRARY_DIR} ${RJ_HIP_SANITIZER_LINK_FLAGS}
+                -I${CMAKE_CURRENT_SOURCE_DIR} ${HIP_INCLUDE_FLAGS}
+                ${HIP_DEFINITION_FLAGS} -o ${HIP_TEST_BIN} ${HIP_TEST_SRC}
+                ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest -lpthread
+                -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
+                ${RJ_HIP_SANITIZER_LINK_FLAGS}
             DEPENDS
                 ${HIP_TEST_SRC}
                 ${ARG_EXTRA_DEPENDS}

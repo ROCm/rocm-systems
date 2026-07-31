@@ -2236,6 +2236,37 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
 
+    def test_pytorch_native_overhead_isolates_repetitions_by_process(self) -> None:
+        workloads = tuple(
+            workload
+            for workload in validation.WORKLOADS
+            if workload.kind == "pytorch"
+            and workload.targets is not None
+            and "gfx1201" in workload.targets
+        )
+        self.assertTrue(workloads)
+        for workload in workloads:
+            with self.subTest(workload=workload.id):
+                self.assertEqual(
+                    validation._outer_repetitions("gfx1201", "overhead", workload),
+                    validation.PYTORCH_OVERHEAD_PROCESSES,
+                )
+                command = validation._workload_command(
+                    Path("/workspace"),
+                    "gfx1201",
+                    workload,
+                    "overhead",
+                    Path("/unused"),
+                )
+                self.assertEqual(
+                    command[command.index("--repetitions") + 1],
+                    "1",
+                )
+                self.assertEqual(
+                    validation._outer_repetitions("gfx1201", "clean", workload),
+                    1,
+                )
+
     def test_topk_record_replay_is_a_strict_clean_and_overhead_gate(
         self,
     ) -> None:
@@ -2329,10 +2360,23 @@ class ConSanValidationTest(unittest.TestCase):
                 )
 
         self.assertTrue(result["accepted"])
-        coverage_summary.assert_called_once_with(
-            "runtime output",
-            profile="record-replay",
-            coverage_output_contract=contract,
+        self.assertEqual(
+            len(result["coverage_runs"]),
+            validation.PYTORCH_OVERHEAD_PROCESSES,
+        )
+        self.assertEqual(
+            coverage_summary.call_count,
+            validation.PYTORCH_OVERHEAD_PROCESSES,
+        )
+        coverage_summary.assert_has_calls(
+            [
+                mock.call(
+                    "runtime output",
+                    profile="record-replay",
+                    coverage_output_contract=contract,
+                )
+            ]
+            * validation.PYTORCH_OVERHEAD_PROCESSES
         )
 
     def test_gtest_run_rejects_zero_or_unreported_test_count(self) -> None:

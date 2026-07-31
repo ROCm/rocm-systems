@@ -47,6 +47,7 @@ PROCESS_TERMINATION_GRACE_SECONDS = 5
 NATIVE_CDNA_TARGETS = frozenset(("gfx942", "gfx950"))
 SINGLE_REPETITION_TARGETS = frozenset(("gfx942", "gfx950", "gfx1250"))
 QWEN_OVERHEAD_REPETITIONS = {target: 1 for target in SINGLE_REPETITION_TARGETS}
+PYTORCH_OVERHEAD_PROCESSES = 10
 STREAMK_WORKLOAD_IDS = ("streamk-arrival", "tree-atomic-or")
 STREAMK_FAULT_FAMILIES = ("atomic-weaken-order", "atomic-weaken-scope")
 CONTROLLED_ENV_PREFIX = "RJ_CONSAN_"
@@ -514,7 +515,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=1,
+        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
         fault_families=("barrier-drop",),
         targets=("gfx1250",),
     ),
@@ -530,7 +531,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=1,
+        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
         fault_families=("barrier-drop",),
         targets=("gfx1250",),
     ),
@@ -546,7 +547,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=1,
+        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
         fault_families=("barrier-drop",),
         targets=("gfx950", "gfx1250", "gfx1201"),
         # This row proves the large object fits the ordinary bound even if the
@@ -565,7 +566,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=1,
+        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
         fault_families=("barrier-drop",),
         targets=("gfx950", "gfx1250"),
     ),
@@ -581,7 +582,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=1,
+        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
         fault_families=("barrier-drop",),
         targets=("gfx950", "gfx1250"),
     ),
@@ -597,7 +598,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=False,
         tracks_atomics=True,
-        overhead_processes=1,
+        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
         fault_families=("atomic-weaken-order", "atomic-weaken-scope"),
         targets=("gfx950", "gfx1250", "gfx1201"),
         moi_record_evidence_expected=False,
@@ -614,7 +615,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=True,
-        overhead_processes=1,
+        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
         fault_families=("barrier-drop", "atomic-weaken-order", "atomic-weaken-scope"),
         # This ordinary upstream operation is selected independently by each
         # installed wheel.  The gfx1201 wheel chooses a native histogram
@@ -634,7 +635,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=1,
+        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
         fault_families=("barrier-drop",),
         targets=("gfx950", "gfx1250"),
     ),
@@ -650,7 +651,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=1,
+        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
         fault_families=("barrier-drop",),
         targets=("gfx1201",),
     ),
@@ -666,7 +667,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=1,
+        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
         fault_families=("barrier-drop",),
         targets=("gfx1201",),
     ),
@@ -682,7 +683,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=1,
+        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
         fault_families=("barrier-drop",),
         targets=("gfx1201",),
         run_timeout_seconds=120,
@@ -699,7 +700,7 @@ WORKLOADS = (
         sharktank_mode=None,
         tracks_barriers=True,
         tracks_atomics=False,
-        overhead_processes=1,
+        overhead_processes=PYTORCH_OVERHEAD_PROCESSES,
         fault_families=("barrier-drop",),
         targets=("gfx1201",),
     ),
@@ -1984,17 +1985,22 @@ def _workload_command(
             f"{workload.id}-{phase}",
         ]
     if workload.kind == "pytorch":
+        # Repeated instrumented dispatches accumulate bounded report state in a
+        # single process. Native overhead measurements therefore collect one
+        # sample per process and aggregate those independent samples outside
+        # the workload client. Simulator targets remain single-shot.
+        repetitions = (
+            1
+            if target in SINGLE_REPETITION_TARGETS or workload.overhead_processes > 1
+            else (10 if overhead else 1)
+        )
         return [
             str(_pytorch_python(workspace)),
             str(Path(__file__).with_name(workload.relative_path)),
             "--workload",
             workload.id.removeprefix("pytorch-"),
             "--repetitions",
-            (
-                "1"
-                if target in SINGLE_REPETITION_TARGETS
-                else ("10" if overhead else "1")
-            ),
+            str(repetitions),
             "--label",
             f"{workload.id}-{phase}",
         ]

@@ -3037,6 +3037,26 @@ struct MoiSpecialStateSgprs {
   uint16_t scc_save_sgpr = 0;
 };
 
+struct MoiSampledPublicationStateSgprs {
+  uint16_t original_exec_save_sgpr = 0;
+  uint16_t selection_vcc_save_sgpr = 0;
+  uint16_t publication_exec_save_sgpr = 0;
+  uint16_t guest_scc_snapshot_sgpr = 0;
+};
+
+[[nodiscard]] std::optional<MoiSampledPublicationStateSgprs>
+moi_sampled_publication_state_sgprs(const ConSanOptions &options) {
+  if (options.moi_engine != ConSanMoiEngine::Sampled || !options.moi_exec_save_sgpr)
+    return std::nullopt;
+  const uint16_t base = *options.moi_exec_save_sgpr;
+  return MoiSampledPublicationStateSgprs{
+      .original_exec_save_sgpr = base,
+      .selection_vcc_save_sgpr = static_cast<uint16_t>(base + 2u),
+      .publication_exec_save_sgpr = static_cast<uint16_t>(base + 4u),
+      .guest_scc_snapshot_sgpr = static_cast<uint16_t>(base + 6u),
+  };
+}
+
 [[nodiscard]] std::optional<MoiSpecialStateSgprs>
 moi_special_state_sgprs(const ConSanOptions &options) {
   if (!options.moi_exec_save_sgpr)
@@ -3049,6 +3069,24 @@ moi_special_state_sgprs(const ConSanOptions &options) {
               ? *options.moi_inline_indirect_scc_sgpr
               : static_cast<uint16_t>(*options.moi_exec_save_sgpr + vcc_offset + 2u),
   };
+}
+
+/// Returns the SCC snapshot that remains valid after a sampled access body.
+///
+/// Fixed layouts return after the sampled body has overwritten the runtime
+/// gate's residue field with the guest SCC snapshot. Spill-backed layouts
+/// restore the complete transient window before returning, so their separately
+/// allocated indirect-jump SCC register remains the stable snapshot.
+[[nodiscard]] std::optional<uint16_t>
+moi_sampled_access_return_scc_sgpr(const ConSanOptions &options) {
+  if (options.moi_engine != ConSanMoiEngine::Sampled || !options.moi_exec_save_sgpr)
+    return std::nullopt;
+  if (options.automatic_moi_record_replay_sgpr_spill) {
+    const auto indirect = moi_indirect_jump_sgprs(options);
+    return indirect ? std::optional<uint16_t>(indirect->scc_save_sgpr) : std::nullopt;
+  }
+  const auto publication = moi_sampled_publication_state_sgprs(options);
+  return publication ? std::optional<uint16_t>(publication->guest_scc_snapshot_sgpr) : std::nullopt;
 }
 
 [[nodiscard]] std::optional<MoiIndirectJumpSgprs>

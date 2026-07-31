@@ -3980,6 +3980,23 @@ TEST(ConSanMoi, SampledRuntimeGateUsesExpandedBranchIslands) {
   ASSERT_NE(access_patch, result.patches.end());
   ASSERT_TRUE(access_patch->scratch_vgpr);
   EXPECT_EQ(access_patch->sampled_window_bank_count, 2u);
+  const auto return_restore_scc =
+      instrumentation::build_s_cmp_lg_u32(static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u),
+                                          scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto mutable_exec_restore_scc =
+      instrumentation::build_s_cmp_lg_u32(static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u),
+                                          scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(return_restore_scc);
+  ASSERT_TRUE(mutable_exec_restore_scc);
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
+      continue;
+    const std::vector<uint32_t> trampoline =
+        text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+    ASSERT_GE(trampoline.size(), 2u);
+    EXPECT_EQ(trampoline[trampoline.size() - 2u], *return_restore_scc);
+    EXPECT_NE(trampoline[trampoline.size() - 2u], *mutable_exec_restore_scc);
+  }
   std::vector<uint32_t> patched_words(patched.text_sections().front()->size() / sizeof(uint32_t));
   std::memcpy(patched_words.data(), patched.text_sections().front()->data(),
               patched_words.size() * sizeof(uint32_t));
@@ -4911,6 +4928,25 @@ TEST(ConSanMoi, Rdna4DenseSampledAccessesShareExplicitKeyRelay) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
             2u); // One local relay plus one appended explicit-key dispatcher.
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto restore_guest_scc =
+      instrumentation::build_s_cmp_lg_u32(static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u),
+                                          scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_from_publication_exec =
+      instrumentation::build_s_cmp_lg_u32(static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u),
+                                          scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(restore_guest_scc);
+  ASSERT_TRUE(restore_from_publication_exec);
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
+      continue;
+    const std::vector<uint32_t> trampoline =
+        text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+    ASSERT_GE(trampoline.size(), 2u);
+    EXPECT_EQ(trampoline[trampoline.size() - 2u], *restore_guest_scc);
+    EXPECT_NE(trampoline[trampoline.size() - 2u], *restore_from_publication_exec);
+  }
   EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("inside a relocated prefix") != std::string::npos;
   }));

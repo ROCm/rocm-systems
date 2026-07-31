@@ -1247,12 +1247,16 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                                      result.errors, body_options);
         if (!cave_words)
           return;
+        const auto return_scc_sgpr = moi_sampled_access_return_scc_sgpr(candidate_options);
+        if (!return_scc_sgpr) {
+          result.errors.emplace_back("ConSan MOI sampled probe has no stable return SCC snapshot");
+          return;
+        }
         if (planned_patch.dense_call_anchor) {
-          const MoiSpecialStateSgprs special_state = *moi_special_state_sgprs(candidate_options);
           const size_t return_begin = cave_words->size();
           if (!append_moi_scc_preserving_indirect_jump(
                   *cave_words, cave_text_offset, planned_patch.placement.return_target,
-                  moi_indirect_jump_sgprs(candidate_options)->pc_sgpr, special_state.scc_save_sgpr,
+                  moi_indirect_jump_sgprs(candidate_options)->pc_sgpr, *return_scc_sgpr,
                   /*capture_scc=*/candidate_options.automatic_moi_record_replay_sgpr_spill, arch)) {
             result.errors.emplace_back(
                 "ConSan MOI sampled probe could not encode its dense long return");
@@ -1262,10 +1266,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             while (cave_words->size() < return_begin + kIndirectIslandWords)
               cave_words->push_back(build_s_nop(0, arch));
         } else if (planned_patch.entry_island_offset) {
-          const MoiSpecialStateSgprs special_state = *moi_special_state_sgprs(candidate_options);
           if (!append_moi_scc_preserving_indirect_jump(
                   *cave_words, cave_text_offset, planned_patch.placement.return_target,
-                  moi_indirect_jump_sgprs(candidate_options)->pc_sgpr, special_state.scc_save_sgpr,
+                  moi_indirect_jump_sgprs(candidate_options)->pc_sgpr, *return_scc_sgpr,
                   /*capture_scc=*/false, arch)) {
             result.errors.emplace_back("ConSan MOI sampled probe could not encode its long return");
             return;

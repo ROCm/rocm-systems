@@ -204,6 +204,7 @@ public:
                                        direct_sampled,
                                        inline_shadow,
                                        search.fine_grained,
+                                       {},
                                        {}};
     }
     *address = reinterpret_cast<uint64_t>(ptr);
@@ -258,10 +259,27 @@ public:
       return;
 
     entry->input_fingerprint = result.input_fingerprint;
+    entry->sampled_patch_mappings.clear();
     auto *mappings = reinterpret_cast<rocjitsu::ConSanMoiCompactDiagnosticTokenMapping *>(
         static_cast<uint8_t *>(entry->ptr) + entry->layout.inline_compact_token_mappings_offset);
     size_t compact_patch_count = 0;
     for (const rocjitsu::ConSanPatchInfo &patch : result.patches) {
+      if (patch.sampled_access_range_count != 0u && patch.sampled_window_bank_count != 0u) {
+        const uint64_t slot_count = static_cast<uint64_t>(patch.sampled_access_range_count) *
+                                    patch.sampled_window_bank_count;
+        if (patch.sampled_first_slot <= entry->layout.sampled_watchpoint_capacity &&
+            slot_count <= entry->layout.sampled_watchpoint_capacity - patch.sampled_first_slot) {
+          entry->sampled_patch_mappings.push_back({
+              .first_slot = patch.sampled_first_slot,
+              .range_count = patch.sampled_access_range_count,
+              .bank_count = patch.sampled_window_bank_count,
+              .instruction_offset = patch.anchor_offset,
+              .trampoline_offset = patch.trampoline_offset,
+              .relocated_guest_offset = patch.relocated_guest_instruction_offset.value_or(0u),
+              .scratch_vgpr = patch.scratch_vgpr,
+          });
+        }
+      }
       if (!patch.workgroup_shadow_compact || patch.workgroup_shadow_compact_token == 0u)
         continue;
       ++compact_patch_count;
@@ -425,6 +443,16 @@ private:
   };
 
   struct Entry {
+    struct SampledPatchMapping {
+      uint32_t first_slot = 0;
+      uint32_t range_count = 0;
+      uint32_t bank_count = 0;
+      uint64_t instruction_offset = 0;
+      uint64_t trampoline_offset = 0;
+      uint64_t relocated_guest_offset = 0;
+      std::optional<uint16_t> scratch_vgpr;
+    };
+
     uint64_t reader = 0;
     void *ptr = nullptr;
     size_t size = 0;
@@ -445,6 +473,7 @@ private:
     bool inline_shadow = false;
     bool fine_grained = false;
     std::string input_fingerprint;
+    std::vector<SampledPatchMapping> sampled_patch_mappings;
     uint32_t compact_token_mapping_count = 0;
     bool compact_token_mapping_malformed = false;
   };
@@ -817,6 +846,7 @@ private:
       uint32_t index = 0;
       rocjitsu::ConSanMoiSampledWatchpointEntry entry;
       rocjitsu::ConSanMoiSampledSyncDecodeResult sync;
+      uint64_t dispatch_id = 0;
       uint32_t workgroup_x = 0;
       uint32_t workgroup_y = 0;
       uint32_t workgroup_z = 0;
@@ -995,8 +1025,8 @@ private:
           ++visible_sampled_sync_metadata;
         visible_sampled.push_back(
             {i, snapshot.entry,
-             sync_snapshot_usable ? sync : rocjitsu::ConSanMoiSampledSyncDecodeResult{}, window_x,
-             window_y, window_z, window_epoch});
+             sync_snapshot_usable ? sync : rocjitsu::ConSanMoiSampledSyncDecodeResult{},
+             window_dispatch_id, window_x, window_y, window_z, window_epoch});
         break;
       case rocjitsu::ConSanMoiSampledSnapshotState::StaleGeneration:
         ++summary.sampled_stale_snapshot_count;
@@ -1519,18 +1549,55 @@ private:
                   shadow_entry.byte_provenance.representative_lane,
                   static_cast<unsigned long long>(shadow_entry.dispatch_id), shadow_entry.version);
     }
-    for (uint32_t i = 0; i < std::min<size_t>(visible_sampled.size(), 4u); ++i) {
+    constexpr size_t kSampledLogLimit = 64u;
+    for (uint32_t i = 0; i < std::min(visible_sampled.size(), kSampledLogLimit); ++i) {
       const SampledEntry &sampled_entry = visible_sampled[i];
+      const auto mapping = std::ranges::find_if(
+          entry.sampled_patch_mappings, [&](const Entry::SampledPatchMapping &candidate) {
+            if (sampled_entry.index < candidate.first_slot)
+              return false;
+            const uint64_t relative = sampled_entry.index - candidate.first_slot;
+            return relative < static_cast<uint64_t>(candidate.range_count) * candidate.bank_count;
+          });
+      const uint64_t instruction_offset =
+          mapping != entry.sampled_patch_mappings.end() ? mapping->instruction_offset : 0u;
+      const uint32_t relative_slot = mapping != entry.sampled_patch_mappings.end()
+                                         ? sampled_entry.index - mapping->first_slot
+                                         : 0u;
+      const uint32_t range =
+          mapping != entry.sampled_patch_mappings.end() ? relative_slot / mapping->bank_count : 0u;
+      const uint32_t bank =
+          mapping != entry.sampled_patch_mappings.end() ? relative_slot % mapping->bank_count : 0u;
+      const uint64_t trampoline_offset =
+          mapping != entry.sampled_patch_mappings.end() ? mapping->trampoline_offset : 0u;
+      const uint64_t relocated_guest_offset =
+          mapping != entry.sampled_patch_mappings.end() ? mapping->relocated_guest_offset : 0u;
+      const uint16_t scratch_vgpr =
+          mapping != entry.sampled_patch_mappings.end()
+              ? mapping->scratch_vgpr.value_or(std::numeric_limits<uint16_t>::max())
+              : std::numeric_limits<uint16_t>::max();
       log_message(kLogInfo,
                   "ConSan MOI auto sampled reader=%llu index=%u kind=%u owner=%u epoch=%u "
-                  "generation=%u cells=[%u,%u) consumed=%s",
+                  "generation=%u cells=[%u,%u) consumed=%s dispatch=0x%llx "
+                  "workgroup=(%u,%u,%u) instruction=0x%llx trampoline=0x%llx "
+                  "relocated_guest=0x%llx scratch_vgpr=%u range=%u bank=%u mapped=%s",
                   static_cast<unsigned long long>(entry.reader), sampled_entry.index,
                   static_cast<uint32_t>(sampled_entry.entry.kind), sampled_entry.entry.owner_id,
                   sampled_entry.entry.epoch, sampled_entry.entry.generation,
                   sampled_entry.entry.start_cell,
                   sampled_entry.entry.start_cell + sampled_entry.entry.cell_count,
-                  sampled_entry.entry.consumed ? "true" : "false");
+                  sampled_entry.entry.consumed ? "true" : "false",
+                  static_cast<unsigned long long>(sampled_entry.dispatch_id),
+                  sampled_entry.workgroup_x, sampled_entry.workgroup_y, sampled_entry.workgroup_z,
+                  static_cast<unsigned long long>(instruction_offset),
+                  static_cast<unsigned long long>(trampoline_offset),
+                  static_cast<unsigned long long>(relocated_guest_offset), scratch_vgpr, range,
+                  bank, mapping != entry.sampled_patch_mappings.end() ? "true" : "false");
     }
+    if (visible_sampled.size() > kSampledLogLimit)
+      log_message(kLogInfo, "ConSan MOI auto sampled reader=%llu omitted=%zu after log limit=%zu",
+                  static_cast<unsigned long long>(entry.reader),
+                  visible_sampled.size() - kSampledLogLimit, kSampledLogLimit);
     if (first_sampled_conflict) {
       const SampledEntry &first = first_sampled_conflict->first;
       const SampledEntry &second = first_sampled_conflict->second;

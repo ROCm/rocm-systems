@@ -49,7 +49,7 @@ scratch before promotion.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | 🟩 accepted clean and paired rows after the wave64-VCC fix: exact oracle, complete 658/658 access coverage, clean provenance, and 3.33x paired slowdown; the exact final-output barrier mutation applies once with its prospective pass/no-diagnosis outcome and healthy containment | 🟩 accepted clean and paired rows with complete 658/658 accesses plus 46/46 barriers, clean provenance, and 12.57x paired slowdown; the exact final-output barrier mutation applies once and completes within healthy before/after containment | 🟥 current planner rejects persistent state below a connected CDNA4 AccVGPR boundary before installing the instrumented object | 🟥 current one-core host planning reaches the 300-second bound without an analysis verdict or workload execution |
+| **P0 Qwen3-0.6B prefill** | 🟨 Current exact clean and paired rows are complete at 628/628 accesses; clean execution takes 182.176 seconds and paired slowdown is 1.34x; current reviewed-fault and containment refresh pending | 🟨 Current exact clean and paired rows are complete at 628/628 accesses plus 52/52 barriers with zero diagnostics; clean execution takes 214.580 seconds and paired slowdown is 1.25x; current reviewed-fault and containment refresh pending | 🟨 Current exact clean and paired rows are complete at 628/628 accesses plus 51/51 barrier members; clean execution takes 583.067 seconds and paired slowdown is 1.70x; current reviewed-fault and containment refresh pending | 🟨 Current exact clean and paired rows are complete at 628/628 accesses plus 52/52 barriers with zero incomplete state; clean execution takes 2364.519 seconds and paired slowdown is 21.75x; current reviewed-fault and containment refresh pending |
 | **P1 Sharktank TP1 prefill** | 🟩 current accepted bundle: exact clean and paired oracle, complete 120/120 access coverage, 1.13x paired slowdown, reviewed exact-one attention publish/read barrier fault with one instability diagnosis, bounded execution, cleanup, health, and clean provenance | 🟩 current accepted bundle: exact clean and paired oracle, complete 120/120 accesses plus 31/31 barriers, 1.29x paired slowdown, reviewed exact-one detected/pass fault, containment, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟩 current VCC-safe spill-backed bundle: exact clean and paired oracle, complete 120/120 accesses plus 31/31 barriers, 243.9x paired slowdown, reviewed exact-one pass/no-diagnosis fault, containment, health, and clean provenance |
 | **P1 Sharktank TP1 decode/combined** | 🟩 current accepted bundle: both exact clean and paired oracles, complete 240/240 access coverage, 1.33x maximum paired slowdown, reviewed exact-one DPP-phase qualified miss, bounded execution, cleanup, health, and clean provenance | 🟩 current accepted bundle: both exact clean and paired oracles, complete 240/240 accesses plus 62/62 barriers, 1.41x maximum paired slowdown, reviewed exact-one DPP-phase qualified miss with complete 240/240 plus 61/61 surviving coverage, bounded execution, cleanup, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟩 current VCC-safe spill-backed bundle: both exact clean and paired oracles, complete 240/240 accesses plus 62/62 barriers, 31.2x maximum slowdown, reviewed exact-one pass/no-diagnosis fault, containment, health, and clean provenance |
 | **P2 Sharktank TP2 family** | 🟩 current accepted bundle: all three exact clean and paired oracles, complete 936/936 access coverage, reviewed exact-one attention publish/read barrier fault with one instability diagnosis, bounded execution, cleanup, health, and clean provenance | 🟩 current accepted bundle: all three exact clean and paired oracles, complete 936/936 accesses plus 168/168 barriers, 1.57x combined paired slowdown, reviewed exact-one DPP-phase qualified miss, bounded execution, cleanup, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟩 current VCC-safe spill-backed bundle: all three exact clean and paired oracles, complete 936/936 accesses plus 168/168 barriers, 167.0x maximum slowdown, reviewed exact-one fail/no-diagnosis fault, containment, health, and clean provenance |
@@ -626,6 +626,23 @@ trap, crash, output mismatch, or GPU reset is an execution outcome rather than
 a ConSan detection.
 
 ## Progress log
+
+- 2026-07-31: Requalified the selected large Qwen object at `0bf1d17c7d`
+  after the shared planning and routing fixes.  All four standard profiles pass
+  the exact oracle with complete static and dynamic coverage: SuperCollider
+  628/628 accesses, Record/Replay 628/628 accesses plus 52/52 barriers,
+  Sampled 628/628 accesses plus 51/51 barrier members, and Inline Shadow
+  628/628 accesses plus 52/52 barriers.  The retained clean artifacts are
+  `consan-validation-large-objects-gfx950-qwen-sim-sc-selfpin-20260731`,
+  `consan-validation-large-objects-gfx950-qwen-sim-rr-gated-v2-20260731`,
+  `consan-validation-large-objects-gfx950-qwen-sim-sampled-standard256-20260731`,
+  and
+  `consan-validation-large-objects-gfx950-qwen-sim-inline-0bf1d17-2400s-20260731`.
+  The single-shot paired campaign
+  `consan-validation-large-objects-gfx950-qwen-sim-overhead-all-final-v2-0bf1d17-20260731`
+  passes baseline-before and baseline-after and records 1.34x, 1.25x, 1.70x,
+  and 21.75x slowdowns respectively.  The cells remain yellow until their
+  current reviewed-fault and containment bundles are refreshed.
 
 - 2026-07-25: Completed the current-producer `bd-1w9.42` qualification for
   Record/Replay, Sampled, and Inline Shadow.  One shared target-native

@@ -1575,6 +1575,9 @@ function(rj_add_consan_hip_tests)
             ARCH gfx1201
             SOURCE dbi/consan/hip_consan_moi_test.hip
             INCLUDE_DIRS "${_rj_consan_include_dir}"
+            # This physical gfx1201 fixture uses a staged DS-counter sequence
+            # that is not part of the registered gfx1250 simulator matrix.
+            COMPILE_DEFINITIONS RJ_CONSAN_ENABLE_STAGED_DSCNT_TEST=1
             EXTRA_DEPENDS "${_rj_consan_moi_hip_fixture_headers}"
     )
     add_dependencies(hip_consan_moi_test_target rocjitsu_dbi_hooks)
@@ -1696,6 +1699,12 @@ function(rj_add_consan_hip_tests)
         )
         set(RJ_CONSAN_LDS_MOI_AUTO_REPEATED_DISPATCH_TEST
             "ConSanMoiHipTest.RepeatedDispatchesRetainAutomaticRecords"
+        )
+        set(RJ_CONSAN_LDS_MOI_SAMPLED_SATURATION_OUTPUT_TEST
+            "ConSanMoiHipTest.SampledSaturationPreservesRepeatedDispatchOutput"
+        )
+        set(RJ_CONSAN_LDS_MOI_STAGED_DSCNT_TEST
+            "ConSanMoiHipTest.StagedDscntLoadPreservesOutput"
         )
         set(RJ_CONSAN_LDS_MOI_WORKGROUP_RECORD_TEST
             "ConSanMoiHipTest.EquivalentAccessesInDifferentWorkgroupsDoNotConflict"
@@ -2693,6 +2702,43 @@ function(rj_add_consan_hip_tests)
                 PASS_REGULAR_EXPRESSION
                     "committed_records=8.*dispatch_tokens=4/2048.*record_replay_flags=0x0"
                 FAIL_REGULAR_EXPRESSION "record_replay_bank_saturated=true"
+        )
+        rj_add_consan_hip_case(
+                NAME "ConSanMoiHipTest.DbiSampledSaturationPreservesRepeatedDispatchOutput"
+                TARGET hip_consan_moi_test
+                FILTER "${RJ_CONSAN_LDS_MOI_SAMPLED_SATURATION_OUTPUT_TEST}"
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_MODE=sampled"
+                    "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_repeated_dispatch_saturation_preserves_output_for_instrumentation"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_MAX_PATCHES=4"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiHipTest.DbiSampledSaturationPreservesRepeatedDispatchOutput"
+            PROPERTIES PASS_REGULAR_EXPRESSION "sampled_saturated_windows=[1-9]"
+        )
+        rj_add_consan_hip_case(
+                NAME "ConSanMoiHipTest.DbiSampledStagedDscntLoadPreservesOutput"
+                TARGET hip_consan_moi_test
+                FILTER "${RJ_CONSAN_LDS_MOI_STAGED_DSCNT_TEST}"
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_MODE=sampled"
+                    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=2"
+                    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET=0"
+                    "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_staged_dscnt_load_preserves_output_for_instrumentation"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_MAX_PATCHES=2"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
         )
         rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.DbiOverflowIsVisible"
