@@ -318,11 +318,10 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
         core::g_use_interrupt_wait = false;
 
       if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
-        core::Runtime::runtime_singleton_->flag().disable_image(true);
-#if defined(_WIN32)
-        core::Runtime::runtime_singleton_->flag().disable_image(false);
+        bool disable_image = core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg();
+        core::Runtime::runtime_singleton_->flag().disable_image(disable_image);
+
         if (node_prop.Capability2.ui32.AqlEmulationPm4_)
-#endif
         {
           core::g_use_interrupt_wait = false;
           core::Runtime::runtime_singleton_->flag().disable_scratch();
