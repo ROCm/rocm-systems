@@ -45,7 +45,6 @@ enum class AMDGpuVerbTypes_t : AMDGpuVerbId_t {
   kSetGpuPciBandwidth,
   kSetPowerCap,
   kSetGpuPowerProfile,
-  kSetGpuClkRange,
   kSetGpuOdClkInfo,
   kSetGpuOdVoltInfo,
   kSetGpuPerfLevelV1,

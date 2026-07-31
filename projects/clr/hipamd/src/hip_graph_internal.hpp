@@ -1422,6 +1422,7 @@ class GraphKernelNode : public GraphNode {
   int globalWorkSizeY_remainder_;
   int globalWorkSizeZ_remainder_;
   dim3 clusterDim_;                    //!< Cluster dimensions for cluster launch
+  uint32_t launchFlags_;               //!< Ext launch flags (e.g. hipExtAnyOrderLaunch)
   hipFunction_t resolvedFunc_ = nullptr;  //!< Cached resolved function to avoid redundant lookups
 
  protected:
@@ -1434,6 +1435,7 @@ class GraphKernelNode : public GraphNode {
     globalWorkSizeY_remainder_ = rhs.globalWorkSizeY_remainder_;
     globalWorkSizeZ_remainder_ = rhs.globalWorkSizeZ_remainder_;
     clusterDim_ = rhs.clusterDim_;
+    launchFlags_ = rhs.launchFlags_;
     hipError_t status = copyParams(&rhs.kernelParams_);
     if (status != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to allocate memory to copy params");
@@ -1655,7 +1657,8 @@ class GraphKernelNode : public GraphNode {
                   int globalWorkSizeX_remainder = 0,
                   int globalWorkSizeY_remainder = 0,
                   int globalWorkSizeZ_remainder = 0,
-                  dim3 clusterDim = {1, 1, 1})
+                  dim3 clusterDim = {1, 1, 1},
+                  uint32_t launchFlags = 0)
       : GraphNode(hipGraphNodeTypeKernel, "bold", "octagon", "KERNEL") {
     kernelEvents_ = {0};
     if (pEvents != nullptr) {
@@ -1672,6 +1675,7 @@ class GraphKernelNode : public GraphNode {
     globalWorkSizeY_remainder_ = globalWorkSizeY_remainder;
     globalWorkSizeZ_remainder_ = globalWorkSizeZ_remainder;
     clusterDim_ = clusterDim;
+    launchFlags_ = launchFlags;
   }
 
   ~GraphKernelNode() { freeParams(); }
@@ -1734,17 +1738,8 @@ class GraphKernelNode : public GraphNode {
     }
     commands_.reserve(1);
     amd::Command* command;
-    uint32_t flags = 0;
-    if (DEBUG_HIP_FORCE_ASYNC_QUEUE) {
-      // If there is one dependency, but many edges, then execute this node in any order
-      if (((dependencies_.size() == 1) && (dependencies_[0]->GetEdges().size() > 1) &&
-           (DEBUG_HIP_FORCE_GRAPH_QUEUES == 1))) {
-        // Makes sure the first node in the edges will have a barrier always
-        if (dependencies_[0]->GetEdges()[0] != this) {
-          flags = hipExtAnyOrderLaunch;
-        }
-      }
-    }
+    // Honor ext launch flags captured at graph-build time (e.g. hipExtAnyOrderLaunch).
+    uint32_t flags = launchFlags_;
 
     const amd::Device* device = g_devices[dev_id_]->devices()[0];
     amd::HIPLaunchParams launch_params(kernelParams_.gridDim.x, kernelParams_.gridDim.y,

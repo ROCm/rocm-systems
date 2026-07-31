@@ -7,6 +7,7 @@
 #include "rocjitsu/code/dbt/legalization/gfx1250_b0_to_a0.h"
 
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
+#include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
 #include "rocjitsu/isa/instruction.h"
@@ -33,9 +34,10 @@ namespace {
 ///   * v_cvt_pk_fp8_f32, v_cvt_sr_fp8_f32 (only when CLAMP selects the B0-only
 ///     mode; the ordinary form stays on the copy path),
 ///   * v_wmma_scale / v_wmma_scale16 forms without an implemented rule,
-///   * integer IU8/IU4 WMMA/SWMMAC.
-/// Separately, a 64-bit source using FLAT_SCRATCH_BASE_HI is classified via
-/// operand inspection (see uses_flat_scratch_base_hi_64bit_source), and the
+///   * integer IU4 and IU8 WMMA/SWMMAC forms without an implemented spacing
+///     rule.
+/// Separately, a 64-bit source reading FLAT_SCRATCH_BASE is classified via
+/// operand inspection (see gfx1250_reads_flat_scratch_base_64bit), and the
 /// barrier-state and sleep/monitor families are DEFERRED with a pass-through
 /// warning rather than fail-closed (see is_deferred_gfx1250_family).
 /// Classifying the fail-closed cases keeps the failure explicit and located; add
@@ -87,9 +89,11 @@ inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemoni
     return true;
 
   // The eight K=128 FP8/BF8 forms and the standalone 32x16 FP4 WMMA exist on B0
-  // but not A0, so they require semantic expansion. The f32 K=128 family has an
-  // exact neutral regular-Scale lowering; f16 and standalone 32x16 FP4 still fail
-  // closed in their semantic rules.
+  // but not A0, so they require semantic expansion. The common f32 K=128 forms
+  // use one neutral regular-Scale mixed-format operation. Source fields with no
+  // meaning for these opcodes are discarded while constructing the target.
+  // The standalone 32x16 FP4 form splits into two scaled M=16 halves; the f16
+  // K=128 forms still fail closed in their semantic rule.
   const bool is_k128_fp8_bf8 = (mnemonic.starts_with("v_wmma_f16_16x16x128_") ||
                                 mnemonic.starts_with("v_wmma_f32_16x16x128_")) &&
                                (mnemonic.ends_with("_fp8_fp8") || mnemonic.ends_with("_fp8_bf8") ||
@@ -99,17 +103,17 @@ inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemoni
 
   // A0 trap/CWSR recovery requires every low-precision F8F6F4 WMMA to carry its
   // load-scale prefix, even when the requested scale is 1.0. Standalone input
-  // is therefore wrapped with inline-zero neutral E8M0 scales. Scale16,
-  // regular Scale, and B0-only M=32 forms have separate encoding and
-  // scale-source translations.
+  // is therefore wrapped with inline-zero neutral E8M0 scales. Native M=16
+  // Scale16 is retained with its unused prefix field normalized. B0-only M=32
+  // scaled forms split into two native M=16 operations.
   if (mnemonic == "v_wmma_f32_16x16x128_f8f6f4" || mnemonic.starts_with("v_wmma_scale"))
     return true;
 
   // K=64 FP8/BF8 WMMA is present on A0 and retains its architectural encoding.
-  // It stays on the ordinary copy path. K=128 F8F6F4 is also present on A0, but
-  // the A0 profile uses its scaled wrapper in software-visible code. Semantic
-  // lowerings may still use it as the matrix body of that atomic four-DWORD
-  // wrapper.
+  // It stays on the ordinary copy path. It is distinct from the scale-capable
+  // K=128 F8F6F4 matrix body: only that body consumes an immediately preceding
+  // LD_SCALE. The A0 profile therefore wraps bare F8F6F4 input in the scaled
+  // four-DWORD form, while native K=64 FP8/BF8 remains unscaled.
   //
   // FP8/BF8 SWMMAC is present on both A0 and B0. Unlike dense K=128 WMMA,
   // the gfx1250 A0-to-B0 change table does not classify these sparse forms as
@@ -117,9 +121,10 @@ inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemoni
   // opcode field. They therefore stay on the same-stepping byte-copy path.
 
   // The A0 co-execution distance exceeds B0 only for integer IU8/IU4 WMMA or
-  // SWMMAC. FP16/BF16 need four spacing slots on both steppings, while floating
-  // FP8 forms need no additional A0 padding. The integer forms remain
-  // fail-closed until a CFG-aware spacing pass can inspect following VALU.
+  // SWMMAC. FP16/BF16 need four spacing slots on both revisions, while floating
+  // FP8 forms need no additional A0 padding. The implemented long-K IU8 forms
+  // use conservative fixed padding; other integer forms fail closed pending a
+  // CFG-aware spacing pass that can inspect following instructions.
   const bool is_wmma_like = mnemonic.starts_with("v_wmma_") || mnemonic.starts_with("v_swmmac_");
   return is_wmma_like && (mnemonic.find("_iu8") != std::string_view::npos ||
                           mnemonic.find("_iu4") != std::string_view::npos);
@@ -147,25 +152,6 @@ inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemoni
   return encoding.clamp != 0;
 }
 
-/// @brief True when any source operand uses the special FLAT_SCRATCH_BASE_HI
-/// value in a 64-bit source position.
-/// @details This special scalar source is not usable in a 64-bit source position
-/// on this target, but the restriction is operand-sensitive rather than tied to a
-/// mnemonic family, so it needs per-operand inspection. A 32-bit use of the same
-/// value is unaffected. Encoding value 231 identifies the special source (see
-/// gfx1250/operand_types.h).
-[[nodiscard]] bool uses_flat_scratch_base_hi_64bit_source(const Instruction &inst) {
-  constexpr int kFlatScratchBaseHiEncoding = 231;
-  constexpr int k64BitOperand = 64;
-  for (int i = 0; i < inst.num_src_operands(); ++i) {
-    const Operand *op = inst.src_operand(i);
-    if (op != nullptr && op->size_bits() == k64BitOperand &&
-        op->encoding_value() == kFlatScratchBaseHiEncoding)
-      return true;
-  }
-  return false;
-}
-
 /// @brief True for instruction families whose A0 handling is deferred pending
 /// confirmation of the exact translated set.
 /// @details The barrier-state query and the sleep/monitor families may need
@@ -191,8 +177,10 @@ const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &
   if (fp8_clamp_family && !requires_fp8_clamp_emulation(inst))
     return nullptr;
 
+  // Reading FLAT_SCRATCH_BASE through a 64-bit source position is a property of
+  // the operand rather than the mnemonic, so it is classified separately.
   if (!requires_b0_to_a0_expansion(inst.mnemonic()) &&
-      !uses_flat_scratch_base_hi_64bit_source(inst)) {
+      !gfx1250_reads_flat_scratch_base_64bit(inst)) {
     // Deferred families pass through unchanged but warn, so the not-yet-handled
     // case is visible rather than silent. See is_deferred_gfx1250_family.
     if (is_deferred_gfx1250_family(mnemonic))
