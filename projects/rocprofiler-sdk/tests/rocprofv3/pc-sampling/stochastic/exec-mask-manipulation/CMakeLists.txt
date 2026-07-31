@@ -38,6 +38,12 @@ rocprofiler_sdk_pc_sampling_stochastic_disabled(IS_PC_SAMPLING_STOCHASTIC_DISABL
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
+rocprofiler_add_integration_cleanup_test(
+    rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-output
+    ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input
+    ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input
+    ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input)
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-cmd
     COMMAND
@@ -51,6 +57,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${PRELOAD_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-cmd
+    FIXTURES_REQUIRED rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-output
     DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
 rocprofiler_add_integration_validate_test(
@@ -88,6 +95,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${PRELOAD_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-json
+    FIXTURES_REQUIRED rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-output
     DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
 rocprofiler_add_integration_validate_test(
@@ -124,6 +132,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${PRELOAD_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-yaml
+    FIXTURES_REQUIRED rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-output
     DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
 rocprofiler_add_integration_validate_test(

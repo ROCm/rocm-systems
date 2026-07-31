@@ -190,6 +190,21 @@ function(rocprofiler_set_integration_test_name _VAR _BASE _CATEGORY)
         PARENT_SCOPE)
 endfunction()
 
+# Registers a test that erases the directories in ARGN and publishes itself as the fixture
+# NAME. Execute tests that write into those directories should require the fixture so
+# every run starts from an empty output directory. The validators treat a missing input
+# file as "the execute did not produce this" and skip, so without the wipe a skipped or
+# failed execute leaves the previous run's output in place and the validators pass against
+# data the run never produced.
+function(rocprofiler_add_integration_cleanup_test NAME)
+    rocprofiler_set_integration_test_name(_TEST_NAME "${NAME}" "cleanup")
+
+    add_test(NAME "${_TEST_NAME}" COMMAND ${CMAKE_COMMAND} -E rm -rf ${ARGN})
+
+    set_tests_properties("${_TEST_NAME}" PROPERTIES FIXTURES_SETUP "${NAME}" TIMEOUT 60
+                                                    LABELS "integration-tests")
+endfunction()
+
 function(rocprofiler_add_integration_execute_test NAME)
     set(_FLAG_OPTS
         "WILL_FAIL" # failure is expected in order for test to pass

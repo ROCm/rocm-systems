@@ -40,6 +40,10 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 
 set(roctx-pause-resume-env "${PRELOAD_ENV}")
 
+rocprofiler_add_integration_cleanup_test(
+    rocprofv3-test-roctx-pause-resume-pc-sampling-output
+    ${CMAKE_CURRENT_BINARY_DIR}/roctx-pause-resume-pc-sampling)
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-roctx-pause-resume-pc-sampling
     COMMAND
@@ -53,7 +57,8 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${roctx-pause-resume-env}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     DISABLED "${IS_PC_SAMPLING_DISABLED}"
-    FIXTURES_SETUP rocprofv3-test-roctx-pause-resume-pc-sampling)
+    FIXTURES_SETUP rocprofv3-test-roctx-pause-resume-pc-sampling
+    FIXTURES_REQUIRED rocprofv3-test-roctx-pause-resume-pc-sampling-output)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-roctx-pause-resume-pc-sampling
