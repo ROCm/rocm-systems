@@ -53,13 +53,7 @@ set(buffered-api-tracing-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
 # these workloads run slower in practice and need more timeout headroom (root cause TBD),
 # so scale the timeout only there. Non-WSL keeps the develop baseline (45); WSL scales it
 # up.
-rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
-if(NOT _KFD_AVAILABLE)
-    set(_WSL_TIMEOUT_SCALE 4)
-else()
-    set(_WSL_TIMEOUT_SCALE 1)
-endif()
-math(EXPR _BUFFERED_API_TRACING_TIMEOUT "45 * ${_WSL_TIMEOUT_SCALE}")
+rocprofiler_sdk_wsl_timeout_scale(_BUFFERED_API_TRACING_TIMEOUT BASE 45)
 
 add_test(NAME buffered-api-tracing COMMAND $<TARGET_FILE:buffered-api-tracing>)
 

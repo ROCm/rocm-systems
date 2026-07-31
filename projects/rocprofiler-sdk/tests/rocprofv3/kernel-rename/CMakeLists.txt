@@ -25,14 +25,8 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/input-kernel-rename.yml.in
 # WSL2/DXG has no /dev/kfd and schedules GPU work through the dxg path. Under WSL2/DXG
 # these workloads run slower in practice and need more timeout headroom (root cause TBD),
 # so scale the timeout only there for the kernel-rename workloads.
-rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
-if(NOT _KFD_AVAILABLE)
-    set(_WSL_TIMEOUT_SCALE 4)
-else()
-    set(_WSL_TIMEOUT_SCALE 1)
-endif()
-math(EXPR _KERNEL_RENAME_YAML_TIMEOUT "45 * ${_WSL_TIMEOUT_SCALE}")
-math(EXPR _KERNEL_RENAME_CMD_TIMEOUT "45 * ${_WSL_TIMEOUT_SCALE}")
+rocprofiler_sdk_wsl_timeout_scale(_KERNEL_RENAME_YAML_TIMEOUT BASE 45)
+rocprofiler_sdk_wsl_timeout_scale(_KERNEL_RENAME_CMD_TIMEOUT BASE 45)
 
 ##########################################################################################
 #

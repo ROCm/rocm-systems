@@ -59,13 +59,7 @@ set(external-correlation-id-request-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
 # these workloads run slower in practice and need more timeout headroom (root cause TBD),
 # so scale the timeout only there. Non-WSL keeps the develop baseline (45); WSL scales it
 # up.
-rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
-if(NOT _KFD_AVAILABLE)
-    set(_WSL_TIMEOUT_SCALE 4)
-else()
-    set(_WSL_TIMEOUT_SCALE 1)
-endif()
-math(EXPR _EXTERNAL_CORRELATION_ID_TIMEOUT "45 * ${_WSL_TIMEOUT_SCALE}")
+rocprofiler_sdk_wsl_timeout_scale(_EXTERNAL_CORRELATION_ID_TIMEOUT BASE 45)
 
 add_test(NAME external-correlation-id-request
          COMMAND $<TARGET_FILE:external-correlation-id-request>)

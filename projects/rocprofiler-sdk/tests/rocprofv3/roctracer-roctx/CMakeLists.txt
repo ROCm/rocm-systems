@@ -28,13 +28,7 @@ endif()
 # these workloads run slower in practice and need more timeout headroom (root cause TBD),
 # so scale timeouts only there for the transpose workload. Non-WSL keeps the develop
 # baseline (45); WSL scales it up.
-rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
-if(NOT _KFD_AVAILABLE)
-    set(_WSL_TIMEOUT_SCALE 4)
-else()
-    set(_WSL_TIMEOUT_SCALE 1)
-endif()
-math(EXPR _ROCTRACER_ROCTX_TIMEOUT "45 * ${_WSL_TIMEOUT_SCALE}")
+rocprofiler_sdk_wsl_timeout_scale(_ROCTRACER_ROCTX_TIMEOUT BASE 45)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-roctracer-roctx-trace

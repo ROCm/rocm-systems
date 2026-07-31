@@ -21,14 +21,8 @@ endif()
 # WSL2/DXG has no /dev/kfd and schedules GPU work through the dxg path. Under WSL2/DXG
 # these workloads run slower in practice and need more timeout headroom (root cause TBD),
 # so scale the timeout only there for these trace workloads.
-rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
-if(NOT _KFD_AVAILABLE)
-    set(_WSL_TIMEOUT_SCALE 4)
-else()
-    set(_WSL_TIMEOUT_SCALE 1)
-endif()
-math(EXPR _TRACE_HIP_IN_LIBRARIES_TIMEOUT "120 * ${_WSL_TIMEOUT_SCALE}")
-math(EXPR _TRACE_HIP_IN_LIBRARIES_VALIDATE_TIMEOUT "45 * ${_WSL_TIMEOUT_SCALE}")
+rocprofiler_sdk_wsl_timeout_scale(_TRACE_HIP_IN_LIBRARIES_TIMEOUT BASE 120)
+rocprofiler_sdk_wsl_timeout_scale(_TRACE_HIP_IN_LIBRARIES_VALIDATE_TIMEOUT BASE 45)
 
 foreach(_OUTPUT_FORMAT csv json pftrace otf2)
     rocprofiler_add_integration_execute_test(

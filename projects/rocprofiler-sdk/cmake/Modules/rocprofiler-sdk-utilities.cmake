@@ -81,6 +81,27 @@ function(rocprofiler_sdk_kfd_available _VAR)
         PARENT_SCOPE)
 endfunction()
 
+# Scale a ctest TIMEOUT for WSL2/DXG. Absence of /dev/kfd indicates a WSL2/DXG (or no-KFD)
+# environment (see rocprofiler_sdk_kfd_available), where GPU work is scheduled through the
+# dxg path and these workloads run slower in practice, needing more timeout headroom (root
+# cause TBD). Returns BASE * 4 when /dev/kfd is absent and BASE unchanged otherwise
+# (default BASE=45). Usage: rocprofiler_sdk_wsl_timeout_scale(<out_var> BASE <seconds>)
+function(rocprofiler_sdk_wsl_timeout_scale _VAR)
+    cmake_parse_arguments(ARG "" "BASE" "" ${ARGN})
+    if(NOT DEFINED ARG_BASE)
+        set(ARG_BASE 45)
+    endif()
+    rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
+    if(NOT _KFD_AVAILABLE)
+        math(EXPR _WSL_SCALED_TIMEOUT "${ARG_BASE} * 4")
+    else()
+        set(_WSL_SCALED_TIMEOUT "${ARG_BASE}")
+    endif()
+    set(${_VAR}
+        "${_WSL_SCALED_TIMEOUT}"
+        PARENT_SCOPE)
+endfunction()
+
 # In case the underlying architecture does not support PC sampling, this function will
 # tell us whether the PC sampling is disabled
 function(rocprofiler_sdk_pc_sampling_disabled _VAR)

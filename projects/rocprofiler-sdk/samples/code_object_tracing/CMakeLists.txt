@@ -47,13 +47,7 @@ target_link_libraries(
 # these workloads run slower in practice and need more timeout headroom (root cause TBD),
 # so scale the timeout only there. Non-WSL keeps the develop baseline (45); WSL scales it
 # up.
-rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
-if(NOT _KFD_AVAILABLE)
-    set(_WSL_TIMEOUT_SCALE 4)
-else()
-    set(_WSL_TIMEOUT_SCALE 1)
-endif()
-math(EXPR _CODE_OBJECT_TRACING_TIMEOUT "45 * ${_WSL_TIMEOUT_SCALE}")
+rocprofiler_sdk_wsl_timeout_scale(_CODE_OBJECT_TRACING_TIMEOUT BASE 45)
 
 add_test(NAME code-object-tracing COMMAND $<TARGET_FILE:code-object-tracing>)
 
