@@ -37,7 +37,6 @@ else()
   set(HSAKMT_STATIC_DRM_TARGET "${HSAKMT_TARGET}-staticdrm")
 
   project ( ${HSAKMT_TARGET} VERSION 1.9.0)
-  set(BUILD_SHARED_LIBS ON FORCE)
 
   # Optionally, build HSAKMT with ccache.
   set(ROCM_CCACHE_BUILD OFF CACHE BOOL "Set to ON for a ccache enabled build")
