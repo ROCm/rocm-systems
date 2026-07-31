@@ -124,6 +124,34 @@ automatically based on the services your tool enables.
         path (counter collection, ATT, or PC sampling) is registered, the SDK
         logs a warning and falls back to the legacy path anyway.
 
+Kernel dispatch timestamp source
+--------------------------------
+
+.. list-table::
+    :header-rows: 1
+    :widths: 30 15 55
+
+    * - Variable
+      - Default
+      - Description
+    * - ``ROCPROFILER_KFD_DISPATCH_LOG``
+      - ``true``
+      - Boolean (``true``/``false``). When enabled (the default), the SDK probes
+        the KFD dispatch-log interface at startup and, on GPUs that support it,
+        reports kernel dispatch ``start_timestamp``/``end_timestamp`` from the
+        firmware dispatch log instead of
+        ``hsa_amd_profiling_get_dispatch_time``. Firmware timestamps are taken at
+        the true hardware dispatch boundaries, so the reported interval is
+        tighter than the HSA signal-based one.
+
+        The probe is best effort and silent: if the kernel, the GPU, or an
+        individual dispatch cannot supply a firmware record, that dispatch falls
+        back to the HSA timestamps. Firmware timestamps also require inline queue
+        interposition, so enabling a service that only the legacy interception
+        path supports (counter collection, advanced thread trace, or PC sampling)
+        puts every dispatch on the HSA timestamps regardless of this variable.
+        Set to ``false`` to force the HSA source for every dispatch.
+
 Beta-feature opt-in
 -------------------
 
