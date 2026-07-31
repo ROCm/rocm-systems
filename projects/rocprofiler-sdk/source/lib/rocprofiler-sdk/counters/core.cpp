@@ -182,17 +182,26 @@ stop_context(const context::context* ctx)
 
     if(controller)
     {
-        // No GPU drain here. In-flight dispatches are handled by kernel_dispatch_phase_exit_hook
-        // routing over registered rather than active contexts; the serializer transition is
-        // reconciled GPU-side by the hsa_barrier that profiler_serializer::disable() pushes.
+        // Drain in-flight dispatches before anything else is torn down. The review of #8891
+        // accepted provenance-based completion routing on the condition that the callback thread
+        // and the counter_callback_info objects stay alive until in-flight dispatches drain, so the
+        // drain is what makes that condition hold literally rather than by argument.
+        //
+        // context::stop_context calls this function while the context is still in the active list,
+        // which is what keeps the service visible for the duration of the drain: the enter hook
+        // still reaches queue_cb, and queue_cb's disabled path returns serialize=true so the
+        // serialized->unserialized transition stays coordinated until disable_serialization() runs
+        // below. That ordering is why no separate "draining" flag is needed -- but it only works
+        // because the drain happens here, before the slot is cleared.
+        hsa::queue_controller_sync();
         controller->disable_serialization();
         // No per-queue callback to remove; counters::kernel_dispatch_phase_enter_hook no-ops once
         // dispatch_counter_collection is disabled above.
     }
 
-    // Safe with completions still outstanding: consumer_thread_t::exit() waits until the queue is
-    // empty before joining, and consumer_thread_t::add() consumes inline once the thread is gone,
-    // so a completion arriving after this point is still processed on the async handler thread.
+    // After the drain. consumer_thread_t::exit() also waits until its queue is empty before
+    // joining, and add() consumes inline once the thread is gone, so a late completion is still
+    // processed -- but that is a backstop, not the guarantee the review asked for.
     callback_thread_stop();
 }
 
