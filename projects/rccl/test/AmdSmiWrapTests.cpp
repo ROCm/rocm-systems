@@ -19,15 +19,53 @@
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 #include <cerrno>
+#include <cstdlib>
 #include <cstdint>
 #include <cstring>
+#include <dlfcn.h>
 #include <gtest/gtest.h>
+#include <string>
+#include <thread>
+#include <vector>
 
 namespace RcclUnitTesting
 {
 
 namespace
 {
+
+using StubCounterFn = unsigned (*)();
+
+std::string lifecycleStubLibraryPath()
+{
+    std::string path = AMDSMI_TEST_STUB_DIR;
+    if(const char* inheritedPath = std::getenv("LD_LIBRARY_PATH"))
+        path += ":" + std::string(inheritedPath);
+    return path;
+}
+
+unsigned lifecycleStubCounter(const char* symbol)
+{
+    void* handle = dlopen(AMDSMI_TEST_STUB_SONAME, RTLD_NOW | RTLD_NOLOAD);
+    if(handle == nullptr)
+    {
+        ADD_FAILURE() << "lifecycle stub is not loaded: " << dlerror();
+        return 0;
+    }
+
+    dlerror();
+    auto counter = reinterpret_cast<StubCounterFn>(dlsym(handle, symbol));
+    if(const char* error = dlerror())
+    {
+        ADD_FAILURE() << "failed to resolve " << symbol << ": " << error;
+        dlclose(handle);
+        return 0;
+    }
+
+    const unsigned value = counter();
+    dlclose(handle);
+    return value;
+}
 
 // amd_smi_init() succeeds on the sysfs fallback path too, so a failure here
 // means neither backend is usable and there is nothing to assert against.
@@ -79,6 +117,64 @@ TEST(AmdSmiWrapLifecycle, InitIsRepeatable)
 
     EXPECT_EQ(amd_smi_init(), ncclSuccess);
     EXPECT_EQ(amd_smi_shutdown(), ncclSuccess);
+}
+
+TEST(AmdSmiWrapLifecycle, ConcurrentCallersReceiveCachedFailure)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "ConcurrentCallersReceiveCachedFailure",
+        []() {
+            constexpr size_t kThreadCount = 16;
+            std::vector<ncclResult_t> results(kThreadCount, ncclSuccess);
+            std::vector<std::thread>  threads;
+            threads.reserve(kThreadCount);
+
+            for(size_t i = 0; i < kThreadCount; ++i)
+                threads.emplace_back([&, i]() { results[i] = amd_smi_init(); });
+            for(auto& thread : threads)
+                thread.join();
+
+            for(size_t i = 0; i < results.size(); ++i)
+                EXPECT_EQ(results[i], ncclInternalError) << "caller " << i;
+
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_init_count"), 1u);
+            EXPECT_EQ(amd_smi_init(), ncclInternalError);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_init_count"), 1u);
+            EXPECT_EQ(amd_smi_shutdown(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_shutdown_count"), 0u);
+        },
+        {{"RCCL_USE_AMD_SMI_LIB", "1"},
+         {"RCCL_AMDSMI_TEST_DELAY_INIT", "1"},
+         {"RCCL_AMDSMI_TEST_FAIL_INIT", "1"},
+         {"LD_LIBRARY_PATH", lifecycleStubLibraryPath()}}
+    );
+}
+
+TEST(AmdSmiWrapLifecycle, ShutdownCleansUpAfterVersionFailure)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "ShutdownCleansUpAfterVersionFailure",
+        []() {
+            EXPECT_EQ(amd_smi_init(), ncclInternalError);
+            EXPECT_EQ(amd_smi_init(), ncclInternalError);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_init_count"), 1u);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_version_count"), 1u);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_shutdown_count"), 0u);
+
+            EXPECT_EQ(amd_smi_shutdown(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_shutdown_count"), 1u);
+
+            // Shutdown clears the cached failure and permits a fresh attempt.
+            EXPECT_EQ(amd_smi_init(), ncclInternalError);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_init_count"), 2u);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_version_count"), 2u);
+            EXPECT_EQ(amd_smi_shutdown(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_shutdown_count"), 2u);
+        },
+        {{"RCCL_USE_AMD_SMI_LIB", "1"},
+         {"RCCL_AMDSMI_TEST_FAIL_VERSION", "1"},
+         {"LD_LIBRARY_PATH", lifecycleStubLibraryPath()}}
+    );
 }
 
 TEST_F(AmdSmiWrapTest, PciBusIdIsPopulatedForEveryDevice)

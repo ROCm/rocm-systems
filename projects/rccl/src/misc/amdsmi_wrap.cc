@@ -132,8 +132,10 @@ std::mutex fabricLock; // Thread safety for fabric operations
 bool fabricInitialized = false;
 thread_local bool threadFabricInitialized = false;
 ncclResult_t fabricInitResult = ncclSuccess;
+std::mutex amdSmiInitLock;
 ncclResult_t amdSmiInitResult = ncclSuccess;
-std::atomic<bool> amdSmiInitCalled{false}; // Track if amd_smi_init has been called
+bool amdSmiInitCalled = false;
+bool amdSmiLibInitialized = false;
 
 // Major version of the loaded amd_smi, as it reports itself. Selects the telemetry
 // name call convention; see amdSmiTelemIdUsesOutParam().
@@ -186,10 +188,7 @@ static bool amd_smi_FabricFunctionsLoaded() {
  * Existing AMD SMI Wrapper Functions
  ************************************************************************/
 
-ncclResult_t amd_smi_init() {
-  // Ensure we only initialize once
-  if (amdSmiInitCalled.exchange(true)) return amdSmiInitResult;
-
+static ncclResult_t amd_smi_init_impl() {
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE) == -1)
     __atomic_store_n(&is_wsl2, (access("/dev/dxg", F_OK) == -1) ? 0 : 1, __ATOMIC_RELEASE);
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) {
@@ -204,7 +203,6 @@ ncclResult_t amd_smi_init() {
       static void* libhandle = dlopen(RCCL_AMDSMI_LIBNAME, RTLD_NOW);
       if (libhandle == nullptr) {
         WARN("Failed to open %s: %s", RCCL_AMDSMI_LIBNAME, dlerror());
-        amdSmiInitResult = ncclInternalError;
         return ncclInternalError;
       }
 
@@ -242,6 +240,7 @@ ncclResult_t amd_smi_init() {
 
     // initialize amd-smi for AMD GPUs
     AMDSMITRY(amdsmi_init, AMDSMI_INIT_AMD_GPUS);
+    amdSmiLibInitialized = true;
 
     // get amd-smi version
     amdsmi_version_t version;
@@ -262,15 +261,30 @@ ncclResult_t amd_smi_init() {
   return ncclSuccess;
 }
 
-ncclResult_t amd_smi_shutdown() {
-  // Only shutdown if we actually initialized with amd_smi_lib
-  if (!rcclParamUseAmdSmiLib() || pfn_amdsmi_shut_down == nullptr) {
-    return ncclSuccess;
-  }
-  amdSmiInitCalled.store(false);
-  amdSmiInitResult = ncclSuccess;
+ncclResult_t amd_smi_init() {
+  std::lock_guard<std::mutex> lock(amdSmiInitLock);
+  if (amdSmiInitCalled) return amdSmiInitResult;
 
-  AMDSMITRY(amdsmi_shut_down);
+  // Cache failures too; shutdown explicitly resets this state for a retry.
+  amdSmiInitResult = amd_smi_init_impl();
+  amdSmiInitCalled = true;
+  return amdSmiInitResult;
+}
+
+ncclResult_t amd_smi_shutdown() {
+  std::lock_guard<std::mutex> lock(amdSmiInitLock);
+
+  if (!amdSmiInitCalled) return ncclSuccess;
+
+  // The backend may be initialized even if a later version query failed.
+  if (amdSmiLibInitialized) {
+    AMDSMITRY(amdsmi_shut_down);
+    amdSmiLibInitialized = false;
+  }
+
+  amdSmiLibMajor.store(kAmdSmiLibVersionUnknown, std::memory_order_release);
+  amdSmiInitResult = ncclSuccess;
+  amdSmiInitCalled = false;
   return ncclSuccess;
 }
 

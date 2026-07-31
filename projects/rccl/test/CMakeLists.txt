@@ -451,9 +451,45 @@ if(BUILD_TESTS)
         AmdSmiWrapTests.cpp
         common/ProcessIsolatedTestRunner.cpp
       )
+
+      # Loaded only by isolated lifecycle tests, never by the normal test process.
+      add_library(rccl-AmdSmiLifecycleStub SHARED AmdSmiLifecycleStub.cpp)
+      set_target_properties(rccl-AmdSmiLifecycleStub PROPERTIES
+        OUTPUT_NAME "amd_smi"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/amdsmi_lifecycle_stub"
+      )
+
+      # Match the versioned name used by amdsmi_wrap when headers are present.
+      # Older ROCm configurations may not define SMI_INCLUDE_DIR, so also check
+      # ROCM_PATH; without either header amdsmi_wrap uses the unversioned name.
+      if(EXISTS "${SMI_INCLUDE_DIR}/amd_smi/amdsmi.h")
+        set(AMDSMI_TEST_HEADER "${SMI_INCLUDE_DIR}/amd_smi/amdsmi.h")
+      elseif(EXISTS "${ROCM_PATH}/include/amd_smi/amdsmi.h")
+        set(AMDSMI_TEST_HEADER "${ROCM_PATH}/include/amd_smi/amdsmi.h")
+      endif()
+      if(AMDSMI_TEST_HEADER)
+        file(STRINGS "${AMDSMI_TEST_HEADER}" AMDSMI_VERSION_MAJOR_LINE
+          REGEX "^#define AMDSMI_LIB_VERSION_MAJOR [0-9]+"
+          LIMIT_COUNT 1
+        )
+        string(REGEX REPLACE ".* ([0-9]+)$" "\\1"
+          AMDSMI_TEST_SOVERSION "${AMDSMI_VERSION_MAJOR_LINE}"
+        )
+        set_target_properties(rccl-AmdSmiLifecycleStub PROPERTIES
+          SOVERSION "${AMDSMI_TEST_SOVERSION}"
+        )
+      endif()
     endif()
 
     add_executable(rccl-UnitTestsAmdSmi ${TEST_AMDSMI_SOURCE_FILES})
+
+    if(CMAKE_BUILD_TYPE MATCHES "Debug")
+      add_dependencies(rccl-UnitTestsAmdSmi rccl-AmdSmiLifecycleStub)
+      target_compile_definitions(rccl-UnitTestsAmdSmi PRIVATE
+        AMDSMI_TEST_STUB_DIR="$<TARGET_FILE_DIR:rccl-AmdSmiLifecycleStub>"
+        AMDSMI_TEST_STUB_SONAME="$<TARGET_SONAME_FILE_NAME:rccl-AmdSmiLifecycleStub>"
+      )
+    endif()
 
     # amdsmi_wrap.h needs both halves of this pairing: the include path so its
     # __has_include finds amdsmi, and AMDSMI_FABRIC_DIRECT, which is PRIVATE to the
