@@ -2193,8 +2193,9 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
   if (status == RSMI_STATUS_PERMISSION) {
     std::string sysfs_path = dev->get_sys_file_path_by_type(dev_type, true);
     bool read_only = false;
-    amd::smi::isReadOnlyForAll(sysfs_path, &read_only);
-    if (read_only) {
+    // Only upgrade PERMISSION -> NOT_SUPPORTED when the probe succeeds; if it
+    // fails, keep the real write result (PERMISSION).
+    if (amd::smi::isReadOnlyForAll(sysfs_path, &read_only) == 0 && read_only) {
       return RSMI_STATUS_NOT_SUPPORTED;
     }
   }

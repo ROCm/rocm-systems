@@ -5390,7 +5390,7 @@ amdsmi_status_t amdsmi_set_gpu_overdrive_level(amdsmi_processor_handle processor
  *  @platform{gpu_bm_linux}
  *
  *  @details Given a processor handle @p processor_handle, this
- *  function will restricts clock @p clk_type to the frequencies
+ *  function restricts clock @p clk_type to the frequencies
  *  selected in @p freq_bitmask. Bit N maps to DPM level N in the
  *  order returned by amdsmi_get_clk_freq(). Set a bit to 1 to
  *  enable and 0 to disable that level.
