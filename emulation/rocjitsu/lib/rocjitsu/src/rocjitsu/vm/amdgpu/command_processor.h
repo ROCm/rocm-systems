@@ -292,8 +292,7 @@ private:
            sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
   }
 
-  // gfx1250 widens the GCR packet to 6 dwords; gfx11/12 keep the 5-dword layout.
-  bool uses_gfx1250_gcr_packet() const {
+  bool uses_gfx1250_sdma_packets() const {
     return sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
   }
 

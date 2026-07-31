@@ -2004,7 +2004,14 @@ constexpr uint32_t GCR_GFX1250_CONTROL_DW = 3;
 constexpr uint32_t GCR_GFX1250_GL2_DISCARD_BIT = 1u << 13;
 constexpr uint32_t GCR_GFX1250_GL2_INV_BIT = 1u << 14;
 constexpr uint32_t GCR_GFX1250_GL2_WB_BIT = 1u << 15;
-constexpr uint32_t COPY_LINEAR_WAITSIGNAL_GFX11_PLUS_SIZE = 19;
+constexpr uint32_t COPY_LINEAR_WAIT_DWORDS = 7;
+constexpr uint32_t COPY_LINEAR_BODY_DWORDS = 6;
+constexpr uint32_t COPY_LINEAR_SIGNAL_DWORDS = 5;
+constexpr uint32_t COPY_LINEAR_FIXED_DWORDS =
+    1 + COPY_LINEAR_WAIT_DWORDS + COPY_LINEAR_BODY_DWORDS + COPY_LINEAR_SIGNAL_DWORDS;
+static_assert(COPY_LINEAR_FIXED_DWORDS == 19);
+constexpr uint32_t COPY_LINEAR_INDIRECT_SRC_FLAG = 1u << 20;
+constexpr uint32_t COPY_LINEAR_INDIRECT_DST_FLAG = 1u << 21;
 constexpr uint32_t FENCE_64B_GFX11_PLUS_SIZE = 5;
 constexpr uint32_t POLL_MEM_64B_GFX11_PLUS_SIZE = 8;
 constexpr uint32_t COPY_LINEAR_BROADCAST_FLAG = 1u << 27;
@@ -2123,16 +2130,28 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
     }
     case sdma::OP_COPY: {
       if (uses_gfx11_plus_sdma_packets() && sub_op == sdma::SUBOP_COPY_LINEAR &&
-          (header & ((1u << 30) | (1u << 31)))) {
-        if (rpos + sdma::COPY_LINEAR_WAITSIGNAL_GFX11_PLUS_SIZE > wpos) {
+          ((header & ((1u << 30) | (1u << 31))) ||
+           (uses_gfx1250_sdma_packets() && (header & (sdma::COPY_LINEAR_INDIRECT_SRC_FLAG |
+                                                      sdma::COPY_LINEAR_INDIRECT_DST_FLAG))))) {
+        const bool gfx1250_layout = uses_gfx1250_sdma_packets();
+        const bool has_wait = (header & (1u << 30)) != 0;
+        const bool has_signal = (header & (1u << 31)) != 0;
+        // projects/rocr-runtime/runtime/hsa-runtime/core/inc/sdma_registers.h
+        // defines the gfx1250 packet as a maximum-size layout and explicitly
+        // states that disabled WAIT/SIGNAL blocks are absent. Its
+        // BuildWaitSignalCopyCommand producer emits the same compact framing.
+        // Preserve the existing fixed 19-DWORD contract for other gfx11+
+        // dialects, where disabled blocks retain their slots.
+        const uint32_t copy_base =
+            1 + ((gfx1250_layout && !has_wait) ? 0 : sdma::COPY_LINEAR_WAIT_DWORDS);
+        const uint32_t signal_base = copy_base + sdma::COPY_LINEAR_BODY_DWORDS;
+        const uint32_t packet_dwords =
+            gfx1250_layout ? signal_base + (has_signal ? sdma::COPY_LINEAR_SIGNAL_DWORDS : 0)
+                           : sdma::COPY_LINEAR_FIXED_DWORDS;
+        if (rpos + packet_dwords > wpos) {
           rpos = wpos;
           continue;
         }
-
-        constexpr uint32_t COPY_BASE = 8;
-        constexpr uint32_t SIGNAL_BASE = 14;
-        bool has_wait = (header & (1u << 30)) != 0;
-        bool has_signal = (header & (1u << 31)) != 0;
 
         if (has_wait) {
           uint32_t wait_func = dw(1) & 0x7;
@@ -2158,11 +2177,11 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         uint64_t signal_data = 0;
         bool signal_decrement = false;
         if (has_signal) {
-          uint32_t signal_op = dw(SIGNAL_BASE) & 0x7F;
-          signal_addr = (static_cast<uint64_t>(dw(SIGNAL_BASE + 1) & ~0x7u)) |
-                        (static_cast<uint64_t>(dw(SIGNAL_BASE + 2)) << 32);
-          signal_data = static_cast<uint64_t>(dw(SIGNAL_BASE + 3)) |
-                        (static_cast<uint64_t>(dw(SIGNAL_BASE + 4)) << 32);
+          uint32_t signal_op = dw(signal_base) & 0x7F;
+          signal_addr = (static_cast<uint64_t>(dw(signal_base + 1) & ~0x7u)) |
+                        (static_cast<uint64_t>(dw(signal_base + 2)) << 32);
+          signal_data = static_cast<uint64_t>(dw(signal_base + 3)) |
+                        (static_cast<uint64_t>(dw(signal_base + 4)) << 32);
 
           if (signal_addr > 0x1000 && signal_op == 0x70) {
             signal_ptr = static_cast<int64_t *>(resolve(signal_addr));
@@ -2173,13 +2192,27 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           }
         }
 
-        uint32_t count = (dw(COPY_BASE) & 0x3FFFFFFF) + 1;
-        uint64_t src_va = static_cast<uint64_t>(dw(COPY_BASE + 2)) |
-                          (static_cast<uint64_t>(dw(COPY_BASE + 3)) << 32);
-        uint64_t dst_va = static_cast<uint64_t>(dw(COPY_BASE + 4)) |
-                          (static_cast<uint64_t>(dw(COPY_BASE + 5)) << 32);
-        auto *src_ptr = resolve(src_va);
-        auto *dst_ptr = resolve(dst_va);
+        uint32_t count = (dw(copy_base) & 0x3FFFFFFF) + 1;
+        uint64_t src_va = static_cast<uint64_t>(dw(copy_base + 2)) |
+                          (static_cast<uint64_t>(dw(copy_base + 3)) << 32);
+        uint64_t dst_va = static_cast<uint64_t>(dw(copy_base + 4)) |
+                          (static_cast<uint64_t>(dw(copy_base + 5)) << 32);
+        // gfx1250 uses the same packet framing for its indirect form. Header
+        // bits 20/21 change the corresponding address field from a buffer VA
+        // to the VA of a 64-bit buffer pointer.
+        auto resolve_copy_address = [&](uint64_t packet_va, bool indirect) -> void * {
+          if (!indirect)
+            return resolve(packet_va);
+          if (!resolve(packet_va) || !resolve(packet_va + sizeof(uint64_t) - 1))
+            return nullptr;
+          return resolve(read_gpu_u64(packet_va, queue.process_id));
+        };
+        const bool indirect_src =
+            gfx1250_layout && (header & sdma::COPY_LINEAR_INDIRECT_SRC_FLAG) != 0;
+        const bool indirect_dst =
+            gfx1250_layout && (header & sdma::COPY_LINEAR_INDIRECT_DST_FLAG) != 0;
+        auto *src_ptr = resolve_copy_address(src_va, indirect_src);
+        auto *dst_ptr = resolve_copy_address(dst_va, indirect_dst);
         if (!src_ptr || !dst_ptr) {
           return stop_and_retry_current_packet();
         }
@@ -2201,7 +2234,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
               .fetch_sub(static_cast<int64_t>(signal_data), std::memory_order_release);
         }
 
-        pkt_dwords = sdma::COPY_LINEAR_WAITSIGNAL_GFX11_PLUS_SIZE;
+        pkt_dwords = packet_dwords;
         break;
       }
 
@@ -2230,7 +2263,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         if (!dst2_ptr) {
           return stop_and_retry_current_packet();
         }
-        // Flush before the direct write (see COPY_LINEAR_WAITSIGNAL above): a
+        // Flush before the direct write (see the wait/signal COPY branch above): a
         // destination-overlapping dirty L2 line must be written back first so
         // the SDMA write supersedes it rather than being clobbered afterward.
         flush_gpu_caches();
@@ -2433,7 +2466,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       // dirty L2 lines to backing (flush), while invalidate/discard drop them.
       // Treating every GCR as an invalidate would silently lose simulator data
       // that a writeback-only packet was meant to publish.
-      const bool gfx1250 = uses_gfx1250_gcr_packet();
+      const bool gfx1250 = uses_gfx1250_sdma_packets();
       const uint32_t control =
           gfx1250 ? dw(sdma::GCR_GFX1250_CONTROL_DW) : dw(sdma::GCR_LEGACY_CONTROL_DW);
       const uint32_t wb_bit = gfx1250 ? sdma::GCR_GFX1250_GL2_WB_BIT : sdma::GCR_LEGACY_GL2_WB_BIT;
