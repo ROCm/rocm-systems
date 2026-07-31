@@ -31,6 +31,13 @@ struct IsaExecutionBackend;
 /// (e.g., the ComputeUnit simulation loop).
 class Decoder {
 public:
+  /// @brief Maximum encoded instruction length accepted by any decoder.
+  ///
+  /// @details GFX1250 scaled WMMA instructions pair two VOP3P encodings and
+  /// occupy four dwords. Decode windows must provide this many readable words,
+  /// zero-padding words beyond the available instruction stream.
+  static constexpr size_t kMaximumInstructionWords = 4;
+
   virtual ~Decoder();
 
   /// @brief Decode a binary instruction.
