@@ -404,38 +404,59 @@ pub fn kmd_preload() -> Option<PathBuf> {
         .find_map(|dir| find_lib_in(dir, LIB_NAME))
 }
 
+/// Sub-paths, relative to a project directory, that a rocjitsu build
+/// leaves `librocjitsu.so` in.
+///
+/// `build/` is a plain in-tree `cmake -B build`; `dist/lib` and
+/// `stage/lib` are what a superproject build stages into. Listing the
+/// shapes rather than one blessed layout is what lets mirage find a
+/// freshly built emulator without being told where it is.
+const ROCJITSU_BUILD_SHAPES: &[&str] = &["build", "dist/lib", "stage/lib", "lib"];
+
 /// Directories searched for the KMD interposer, in priority order:
-/// the in-tree monorepo build output (relative to the mirage binary),
-/// `$ROCM_HOME/lib`, the ROCm SDK install root reported by `rocm-sdk
-/// path --root` (`<root>/lib`), and the in-container mount directory.
+/// a rocjitsu build in or beside this checkout, an install layout next to
+/// the `mirage` binary, `$ROCM_HOME/lib`, the ROCm SDK root reported by
+/// `rocm-sdk path --root`, and the in-container mount directory.
+///
+/// The first of those is the one that matters day to day, and it is
+/// deliberately generous. A developer who has just built rocjitsu should
+/// not then have to tell mirage where it went — the failure mode when
+/// they are not told is silent and expensive, because every session test
+/// skips and a skipped test still reports `ok`.
+///
+/// Note the limit: this can only find a build that shares an ancestor
+/// with the mirage binary. A build directory somewhere else entirely
+/// still needs `$ROCM_HOME`.
 fn kmd_search_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
-    // rocjitsu's in-tree build output, relative to the mirage binary, so
-    // a monorepo build finds a fresh `librocjitsu.so` without extra
-    // configuration.
+
     if let Ok(exe) = std::env::current_exe()
         && let Some(exe_dir) = exe.parent()
     {
-        // Up to four levels, not three. Three is what `target/<profile>/
-        // mirage` needs, but an integration-test binary lives one
-        // directory deeper, in `target/<profile>/deps/` — so with three
-        // the library was discoverable by the `mirage` binary and *not*
-        // by the test binaries that link a backend directly. That is not
-        // a cosmetic difference: every test in `supervisor/tests` gates
-        // itself on the backend being installed, so they all skipped, and
-        // a skipped Rust test still reports `ok`.
-        dirs.extend((0..=4).map(|levels| {
-            exe_dir
-                .iter()
-                .chain(std::iter::repeat_n("..".as_ref(), levels))
-                .chain(std::iter::once("rocjitsu/build".as_ref()))
-                .collect::<PathBuf>()
-        }));
+        // Walk up from the binary, trying each ancestor as a possible
+        // repository root. `target/<profile>/mirage` is three levels
+        // down; an integration-test binary in `target/<profile>/deps/` is
+        // four; a superproject build directory beside the checkout is
+        // further still. Walking rather than counting means none of those
+        // has to be enumerated correctly, and a layout nobody anticipated
+        // still works.
+        const MAX_ANCESTORS: usize = 8;
+        for root in exe_dir.ancestors().take(MAX_ANCESTORS) {
+            for project in rocjitsu_project_dirs(root) {
+                dirs.extend(
+                    ROCJITSU_BUILD_SHAPES
+                        .iter()
+                        .map(|shape| project.join(shape)),
+                );
+            }
+        }
+
         // Install layout: a `<prefix>/bin/mirage` finds its sibling
         // `<prefix>/lib/librocjitsu.so` (e.g. both installed to /opt/rocm
         // by scripts/mirage-docker-build.sh).
         dirs.push(exe_dir.join("..").join("lib"));
     }
+
     // ROCm install root.
     if let Some(root) = std::env::var_os("ROCM_HOME").filter(|v| !v.is_empty()) {
         dirs.push(PathBuf::from(root).join("lib"));
@@ -446,10 +467,24 @@ fn kmd_search_dirs() -> Vec<PathBuf> {
         dirs.push(root.join("lib"));
     }
     // In-container mount: for a containerised session the host libraries
-    // are bind-mounted here (see `injection_def`), and the in-container
-    // host re-resolves discovery against this directory.
+    // are bind-mounted here (see `injection_def`).
     dirs.push(PathBuf::from(CONTAINER_LIB_DIR));
     dirs
+}
+
+/// Places a rocjitsu *project* could sit relative to `root`.
+///
+/// Both the sibling-checkout shape (`<root>/rocjitsu`, reached when
+/// `root` is `emulation/`) and the superproject shape
+/// (`<root>/build/emulation/rocjitsu`, reached when `root` is the
+/// repository or its parent), because a CMake build directory is
+/// conventionally either inside the checkout or immediately beside it.
+fn rocjitsu_project_dirs(root: &std::path::Path) -> Vec<PathBuf> {
+    vec![
+        root.join("rocjitsu"),
+        root.join("emulation").join("rocjitsu"),
+        root.join("build").join("emulation").join("rocjitsu"),
+    ]
 }
 
 /// First existing entry named `name` inside `dir`, if any.
