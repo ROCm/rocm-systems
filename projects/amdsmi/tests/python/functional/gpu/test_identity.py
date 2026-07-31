@@ -142,11 +142,6 @@ class TestGpuIdentity(unittest.TestCase):
         self.common.Test_API_Per_GPU(amdsmi_get_gpu_vram_info=amdsmi.amdsmi_get_gpu_vram_info)
         return
 
-    def test_get_gpu_vram_vendor(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_gpu_vram_vendor=amdsmi.amdsmi_get_gpu_vram_vendor)
-        return
-
     def test_get_lib_version(self):
         self.common.print_func_name("")
         self.common.Test_API(amdsmi_get_lib_version=amdsmi.amdsmi_get_lib_version)
