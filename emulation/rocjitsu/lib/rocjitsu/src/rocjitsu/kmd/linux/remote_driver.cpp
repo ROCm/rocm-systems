@@ -593,8 +593,30 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   size_t num_fds = 1;
   auto bytes =
       rpc_recv_msg(sock_, resp_header_buf, sizeof(resp_header_buf), received_fds, &num_fds);
+
+  // Every reply byte we decline to read leaves the stream misaligned: the next
+  // call would parse its header out of this one's remains, silently returning a
+  // bogus result and copying stale bytes into caller memory. Kill the
+  // connection instead of returning a recoverable-looking error. shutdown()
+  // (rather than close()) keeps the fd number reserved, so the concurrent
+  // readers of sock_ that rpc_mutex_ does not cover cannot land on a reused fd.
+  // Any descriptor that rode in on the doomed reply is dropped here — nothing
+  // downstream runs to adopt it.
+  auto poison_stream = [&] {
+    if (num_fds > 0 && received_fds[0] >= 0)
+      syscall(SYS_close, received_fds[0]);
+    protocol_failed_.store(true, std::memory_order_release);
+    syscall(SYS_shutdown, sock_, SHUT_RDWR);
+    return -EPROTO;
+  };
+
   if (bytes <= 0)
     return -1;
+  // rpc_recv_msg asks for MSG_WAITALL but can still come back short (a signal
+  // interrupts the wait), which would leave the rest of the header in the
+  // socket and decode result/payload_bytes out of uninitialized stack.
+  if (static_cast<size_t>(bytes) != sizeof(RpcHeader))
+    return poison_stream();
 
   auto *resp = reinterpret_cast<RpcHeader *>(resp_header_buf);
 
@@ -602,23 +624,15 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // enforces it on receive. Enforce it here too so a desynced or corrupted
   // reply header cannot make an interposed ioctl() attempt a multi-GiB
   // allocation and throw std::bad_alloc out of a C entry point.
-  //
-  // The declared payload is left unread, so the stream is now misaligned:
-  // the next reply header would be parsed out of this one's body, silently
-  // returning a bogus result and copying stale bytes into caller memory. Kill
-  // the connection instead of returning a recoverable-looking error. shutdown()
-  // (rather than close()) keeps the fd number reserved, so the concurrent
-  // readers of sock_ that rpc_mutex_ does not cover cannot land on a reused fd.
-  if (resp->payload_bytes > kMaxPayloadBytes) {
-    protocol_failed_.store(true, std::memory_order_release);
-    syscall(SYS_shutdown, sock_, SHUT_RDWR);
-    return -EPROTO;
-  }
+  if (resp->payload_bytes > kMaxPayloadBytes)
+    return poison_stream();
 
   if (resp->payload_bytes > 0) {
     std::vector<uint8_t> payload(resp->payload_bytes);
+    // A partial read consumes part of the declared payload and abandons the
+    // rest, which is the same misalignment as refusing it outright.
     if (!rpc_recv_exact(sock_, payload.data(), resp->payload_bytes))
-      return -1;
+      return poison_stream();
 
     size_t copy_size = std::min(arg_size, static_cast<size_t>(resp->payload_bytes));
     std::memcpy(arg, payload.data(), copy_size);
