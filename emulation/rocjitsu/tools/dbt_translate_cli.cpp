@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "dbt_translate.h"
+#include "dbt_translate_cli.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -336,6 +336,10 @@ struct ReportTotals {
     return "expand-missing";
   case DiagnosticKind::ExpandFailed:
     return "expand-failed";
+  case DiagnosticKind::DataOnly:
+    return "data-only";
+  case DiagnosticKind::NothingToTranslate:
+    return "nothing-to-translate";
   case DiagnosticKind::ResourceLimit:
     return "resource-limit";
   case DiagnosticKind::KernelSkipped:
@@ -518,6 +522,8 @@ void print_text_report(std::ostream &os, const CliOptions &options,
   os << "rj_dbt_translate: " << (result.ok() ? "ok" : "failed") << "\n";
   os << "input: " << options.translate.input_path << "\n";
   os << "input_target: " << options.input_target_name << "\n";
+  os << "source_code_object_id: fnv1a64:" << std::hex << std::setfill('0') << std::setw(16)
+     << output.source_code_object_id << std::dec << std::setfill(' ') << "\n";
   if (options.saw_input_revision)
     os << "input_revision: " << revision_name(output.input_revision) << "\n";
   os << "output_target: " << options.output_target_name << "\n";
@@ -579,7 +585,8 @@ int list_code_objects(const CliOptions &options) {
 
 } // namespace
 
-int main(int argc, char **argv) {
+int rocjitsu::tools::detail::run_dbt_translate_cli(int argc, char **argv,
+                                                   TranslateCodeObjectFn translate) {
   CliOptions options;
   if (!parse_args(argc, argv, options)) {
     print_help();
@@ -616,7 +623,7 @@ int main(int argc, char **argv) {
                                       ? DisassemblyMode::Translated
                                       : DisassemblyMode::None;
 
-  auto result = translate_code_object(options.translate);
+  auto result = translate(options.translate);
 
   for (const auto &diagnostic : result.value.diagnostics)
     print_diagnostic(std::cerr, diagnostic);
