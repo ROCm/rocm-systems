@@ -557,8 +557,14 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
   if (options.verify_idempotence) {
     output.value.idempotence_checked = true;
     try {
+      auto verifier_options = make_binary_translator_options(options);
+      // The first translation already audited the authoritative output. The
+      // idempotence pass only needs to prove that translating those bytes again
+      // does not change them; auditing its temporary output would duplicate the
+      // final-stream scan and raise peak memory on large code objects.
+      verifier_options.verify_rewrite_discharge = false;
       BinaryTranslator verifier(options.guest_arch, options.host_arch, options.target_mach,
-                                make_binary_translator_options(options));
+                                verifier_options);
       TranslatedCodeObject second = verifier.translate(translated_obj);
       const bool second_ok = second.ok();
       output.value.idempotence_diagnostics = std::move(second.diagnostics);
