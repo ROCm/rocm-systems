@@ -277,8 +277,11 @@ TEST(BinaryTranslatorE2E, BuildsCfgForRealMultiKernelIndirectBranches) {
 
   std::vector<uint64_t> kernel_entries;
   kernel_entries.reserve(source_kernels.size());
-  for (const auto &kernel : source_kernels)
+  std::unordered_set<uint64_t> entries;
+  for (const auto &kernel : source_kernels) {
     kernel_entries.push_back(kernel.entry_text_offset);
+    entries.insert(kernel.entry_text_offset);
+  }
 
   auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
@@ -322,13 +325,27 @@ TEST(BinaryTranslatorE2E, BuildsCfgForRealMultiKernelIndirectBranches) {
     }
   }
 
+  const auto *scall_kernel =
+      kernel_translation_by_name(source_kernels, *co, "multikernel_indirect_branch_scall");
+  ASSERT_NE(scall_kernel, nullptr);
+  const auto *scall_entry = block_starting_at(blocks, scall_kernel->entry_text_offset);
+  ASSERT_NE(scall_entry, nullptr);
+  const auto scall_blocks = reachable_kernel_blocks(blocks, *scall_entry, entries);
+  const size_t scall_local_scall_blocks = static_cast<size_t>(
+      std::ranges::count_if(scall_blocks, [](const rocjitsu::BasicBlock *block) {
+        const auto *term = block->terminator();
+        return term != nullptr && term->mnemonic() == "s_call_b64";
+      }));
+
   EXPECT_GE(recovered_swappc_blocks, 6u);
-  EXPECT_GE(recovered_setpc_blocks, 3u);
-  // The fixture's three RJ_STATIC_SCALL_ISLAND sites are inline asm, so the
-  // count is fixed by the source while their .text offsets move with the device
-  // compiler. Each target jumps to the join instead of returning, so its
-  // syntactic s_branch continuation is dead.
-  EXPECT_EQ(direct_scall_blocks, 3u);
+  // The fixture also emits a fourth `s_setpc_b64` for the shared-helper return,
+  // which must stay unrecovered rather than resolve to a static branch.
+  EXPECT_EQ(recovered_setpc_blocks, 3u);
+  // Every `s_call_b64` in the object must surface as a block terminator, and the
+  // fixture's RJ_STATIC_SCALL_ISLAND sites must all stay local to the scall
+  // kernel.
+  EXPECT_EQ(direct_scall_blocks, count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_call_b64"));
+  EXPECT_EQ(scall_local_scall_blocks, 3u);
 }
 
 TEST(BinaryTranslatorE2E, CountsRealMultiKernelIndirectBranchCfgBlocksPerKernel) {
