@@ -894,8 +894,7 @@ set(TIMEMORY_BUILD_PORTABLE
     "Disable arch flags which may cause portability issues (e.g. AVX-512)"
     FORCE
 )
-# End users configure this via ROCPROFSYS_BUILD_PORTABLE; hide the internal
-# timemory-prefixed variable to avoid confusion in ccmake / cmake-gui.
+# End users configure this via ROCPROFSYS_BUILD_PORTABLE.
 mark_as_advanced(TIMEMORY_BUILD_PORTABLE)
 message(STATUS "Portable setting ROCPROFSYS_BUILD_PORTABLE: ${ROCPROFSYS_BUILD_PORTABLE}")
 set(TIMEMORY_TLS_MODEL "global-dynamic" CACHE STRING "Thread-local static model" FORCE)
