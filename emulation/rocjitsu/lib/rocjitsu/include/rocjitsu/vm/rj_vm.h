@@ -206,11 +206,15 @@ RJ_API_EXPORT void rj_vm_destroy(rj_vm_t *vm);
 /// @brief Step the entire VM by one tick.
 ///
 /// @details Processes all simulation events at the next timestamp, advancing the
-/// simulation by one tick.
+/// simulation by one tick. Stepping is supported only for single-partition VMs;
+/// use rj_vm_run() when the configuration has multiple engine partitions.
 /// @param[in] vm VM handle.
-/// @param[out] active Non-zero if any wavefront is still executing.
+/// @param[out] active Non-zero if any wavefront is still executing. Written only
+/// on success.
 /// @retval ROCJITSU_STATUS_SUCCESS Step completed successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT @p vm is NULL.
+/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC.
+/// @retval ROCJITSU_STATUS_UNSUPPORTED The VM has multiple engine partitions.
 RJ_API_EXPORT rj_status_t rj_vm_step(rj_vm_t *vm, int *active);
 
 /// @brief Run the VM to completion or until max_ticks is reached.

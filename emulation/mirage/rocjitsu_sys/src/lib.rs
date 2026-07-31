@@ -40,6 +40,8 @@ pub const ROCJITSU_STATUS_OUT_OF_RESOURCES: RjStatus = 3;
 pub const ROCJITSU_STATUS_INVALID_CODE_OBJECT: RjStatus = 4;
 /// A required file could not be opened or read.
 pub const ROCJITSU_STATUS_INVALID_FILE: RjStatus = 5;
+/// The requested operation is not supported by this configuration.
+pub const ROCJITSU_STATUS_UNSUPPORTED: RjStatus = 6;
 
 /// Platform-specific handle type (`rj_handle_t`); an fd on Linux.
 pub type RjHandle = c_int;
@@ -616,6 +618,31 @@ mod tests {
         assert_eq!(RjDaemonStatus::Stopped as i32, 0);
         assert_eq!(RjDaemonStatus::Running as i32, 2);
         assert_eq!(RjDaemonStatus::Error as i32, 4);
+    }
+
+    #[test]
+    fn status_codes_match_c_api() {
+        const C_STATUS_HEADER: &str = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../rocjitsu/lib/rocjitsu/include/rocjitsu/base/rj_status.h"
+        ));
+        let c_statuses: Vec<String> = C_STATUS_HEADER
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("ROCJITSU_STATUS_"))
+            .map(|line| line.trim_end_matches(',').to_owned())
+            .collect();
+        let rust_statuses = vec![
+            format!("ROCJITSU_STATUS_SUCCESS = {ROCJITSU_STATUS_SUCCESS}"),
+            format!("ROCJITSU_STATUS_ERROR = {ROCJITSU_STATUS_ERROR}"),
+            format!("ROCJITSU_STATUS_INVALID_ARGUMENT = {ROCJITSU_STATUS_INVALID_ARGUMENT}"),
+            format!("ROCJITSU_STATUS_OUT_OF_RESOURCES = {ROCJITSU_STATUS_OUT_OF_RESOURCES}"),
+            format!("ROCJITSU_STATUS_INVALID_CODE_OBJECT = {ROCJITSU_STATUS_INVALID_CODE_OBJECT}"),
+            format!("ROCJITSU_STATUS_INVALID_FILE = {ROCJITSU_STATUS_INVALID_FILE}"),
+            format!("ROCJITSU_STATUS_UNSUPPORTED = {ROCJITSU_STATUS_UNSUPPORTED}"),
+        ];
+
+        assert_eq!(c_statuses, rust_statuses);
     }
 
     #[test]
