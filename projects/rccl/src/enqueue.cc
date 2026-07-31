@@ -1033,8 +1033,31 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
     plan->threadPerBlock = std::max(plan->threadPerBlock, 192 /* 3*WARP_SIZE */);
 #endif
     if (!plan->kernelSpecialized) {
-      plan->kernelFn = ncclKerns[ncclGetKernelIndex(comm)].kernelFn;
-      plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
+      int kernelIndex = ncclGetKernelIndex(comm);
+      if (IsArchMatch(comm->archName, "gfx1250") && task->protocol == NCCL_PROTO_LL) {
+        if (getenv("RCCL_UNROLL_FACTOR") != nullptr) {
+          if (kernelIndex == NCCL_UNROLL_32) {
+            static bool warnedLlUnroll32 = false;
+            if (!warnedLlUnroll32) {
+              WARN("RCCL_UNROLL_FACTOR=5 (unroll 32) may cause issues with LL protocol on gfx1250; "
+                   "consider RCCL_UNROLL_FACTOR=3 (unroll 8) for LL protocol collectives.");
+              warnedLlUnroll32 = true;
+            }
+          }
+        } else if (ncclDevFuncUnrollGenerated[NCCL_UNROLL_8]) {
+          if (kernelIndex != NCCL_UNROLL_8) {
+            static bool loggedLlUnrollClamp = false;
+            if (!loggedLlUnrollClamp) {
+              INFO(NCCL_INIT, "Using unroll 8 for LL protocol on gfx1250 (default unroll %d)",
+                   (int)(pow(2.0, (double)kernelIndex)));
+              loggedLlUnrollClamp = true;
+            }
+          }
+          kernelIndex = NCCL_UNROLL_8;
+        }
+      }
+      plan->kernelFn = ncclKerns[kernelIndex].kernelFn;
+      plan->kernelSpecialized = ncclKerns[kernelIndex].specialized;
     }
     // Profiler
     plan->groupApiEventHandle = task->groupApiEventHandle;
