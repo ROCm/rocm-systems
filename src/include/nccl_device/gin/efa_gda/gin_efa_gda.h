@@ -105,7 +105,8 @@ template <ncclGinResourceSharingMode mode>
 NCCL_DEVICE_INLINE static void ringDoorbell(efa_cuda_qp* qp, uint64_t* submitted_count_ptr,
                                             cuda::atomic_ref<uint32_t, ncclGinScope<mode>>& dbrung_ref,
                                             uint32_t db_rung, uint32_t target) {
-  *qp->sq.wq.db = target;
+  uint64_t dbAddr = (uint64_t)__cvta_generic_to_global(qp->sq.wq.db);
+  asm volatile("st.mmio.relaxed.sys.global.b32 [%0], %1;" : : "l"(dbAddr), "r"(target) : "memory");
   /* Order the doorbell MMIO write. Use acq_rel (MEMBAR.ALL.SYS) instead of
    * __threadfence_system (MEMBAR.SC.SYS). */
   cuda::atomic_thread_fence(cuda::memory_order_acq_rel, cuda::thread_scope_system);
@@ -285,7 +286,17 @@ NCCL_DEVICE_INLINE static void postRdmaWrite(nccl_ofi_gin_gdaki_dev_endpoint_han
       EFA_SET(&wr.meta.ctrl2, EFA_IO_TX_META_DESC_PHASE, wqe_phase);
       uint64_t* src = (uint64_t*)&wr;
       uint64_t* dst = (uint64_t*)(qp->sq.wq.buf + sq_idx * sizeof(efa_io_tx_wqe));
-      for (int i = 0; i < 8; i++) dst[i] = src[i];
+      /* One final system-scope fence publishes the complete WQE after these
+       * relaxed MMIO stores. */
+      uint64_t dstAddr = (uint64_t)__cvta_generic_to_global(dst);
+#pragma unroll
+      for (int i = 0; i < 8; i++) {
+        uint64_t value = src[i];
+        asm volatile("st.mmio.relaxed.sys.global.b64 [%0], %1;"
+                     :
+                     : "l"(dstAddr + i * sizeof(uint64_t)), "l"(value)
+                     : "memory");
+      }
       /* Publish this group's WQE writes to system scope so they are visible
        * to the NIC whenever any doorbell rings a slot in this range. */
       cuda::atomic_thread_fence(cuda::memory_order_acq_rel, cuda::thread_scope_system);
