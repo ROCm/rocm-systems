@@ -254,7 +254,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     const LocalNopCave *local_cave = nullptr;
     const LocalNopCave *entry_island = nullptr;
     bool entry_island_is_appended = false;
-    uint64_t kernel_entry_text_offset = 0;
+    uint64_t container_entry_text_offset = 0;
     uint64_t descriptor_file_offset = 0;
     uint64_t appended_cave_text_offset = 0;
     uint16_t scratch_vgpr = 0;
@@ -290,7 +290,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   };
 
   struct ScDenseCallGroup {
-    uint64_t kernel_entry_text_offset = 0;
     uint64_t descriptor_file_offset = 0;
     uint64_t entry_host_offset = 0;
     std::vector<uint32_t> displaced_host_words;
@@ -1444,10 +1443,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   const bool is_large_majority_stranded =
       indirect_island_unreachable_site_count >= kDenseCallMinimumStrandedSites &&
       indirect_island_unreachable_site_count > supported_candidate_count / 2u;
-  if (is_rdna4_family_arch(arch) && local_nop_caves.empty() &&
+  if (is_rdna4_family_arch(arch) &&
       (exceeds_absolute_relay_bound || is_large_majority_stranded)) {
     struct DenseSeedGroup {
-      uint64_t kernel_entry_text_offset = 0;
+      uint64_t container_entry_text_offset = 0;
       uint64_t descriptor_file_offset = 0;
       uint16_t jump_pc_sgpr = 0;
       uint16_t saved_scc_sgpr = 0;
@@ -1458,13 +1457,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       if (!candidate.indirect_pc_sgpr || !candidate.indirect_scc_save_sgpr)
         continue;
       auto group = std::ranges::find_if(seed_groups, [&](const DenseSeedGroup &entry) {
-        return entry.kernel_entry_text_offset == candidate.kernel_entry_text_offset &&
+        return entry.container_entry_text_offset == candidate.container_entry_text_offset &&
                entry.descriptor_file_offset == candidate.descriptor_file_offset &&
                entry.jump_pc_sgpr == *candidate.indirect_pc_sgpr &&
                entry.saved_scc_sgpr == *candidate.indirect_scc_save_sgpr;
       });
       if (group == seed_groups.end()) {
-        seed_groups.push_back({candidate.kernel_entry_text_offset,
+        seed_groups.push_back({candidate.container_entry_text_offset,
                                candidate.descriptor_file_offset,
                                *candidate.indirect_pc_sgpr,
                                *candidate.indirect_scc_save_sgpr,
@@ -1494,7 +1493,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
       for (const LdsCheckTrapCandidate &candidate : seed_group.candidates) {
         auto subgroup = std::ranges::find_if(normalized_seed_groups, [&](const auto &entry) {
-          return entry.kernel_entry_text_offset == seed_group.kernel_entry_text_offset &&
+          return entry.container_entry_text_offset == seed_group.container_entry_text_offset &&
                  entry.descriptor_file_offset == seed_group.descriptor_file_offset &&
                  entry.jump_pc_sgpr == seed_group.jump_pc_sgpr &&
                  entry.saved_scc_sgpr == seed_group.saved_scc_sgpr && !entry.candidates.empty() &&
@@ -1502,7 +1501,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                  entry.candidates.size() < kDenseExplicitKeyMaximumSites;
         });
         if (subgroup == normalized_seed_groups.end()) {
-          normalized_seed_groups.push_back({seed_group.kernel_entry_text_offset,
+          normalized_seed_groups.push_back({seed_group.container_entry_text_offset,
                                             seed_group.descriptor_file_offset,
                                             seed_group.jump_pc_sgpr,
                                             seed_group.saved_scc_sgpr,
@@ -1520,7 +1519,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     constexpr uint32_t kDenseDispatcherSiteWords = 10u;
     size_t dense_seed_group_count = 0;
     size_t dense_selected_group_count = 0;
-    size_t dense_missing_kernel_count = 0;
+    size_t dense_missing_container_count = 0;
     size_t dense_missing_host_count = 0;
     size_t dense_missing_owner_context_count = 0;
     size_t dense_missing_call_sgpr_count = 0;
@@ -1531,10 +1530,22 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       if (seed_group.candidates.empty())
         continue;
       ++dense_seed_group_count;
-      const auto kernel = std::ranges::find(result.kernels, seed_group.kernel_entry_text_offset,
-                                            &ConSanKernelInfo::entry_text_offset);
-      if (kernel == result.kernels.end() || !kernel->has_text_range) {
-        ++dense_missing_kernel_count;
+      uint64_t container_begin = 0;
+      uint64_t container_size = 0;
+      const auto kernel =
+          std::ranges::find(result.kernels, seed_group.container_entry_text_offset,
+                            &ConSanKernelInfo::entry_text_offset);
+      const auto function =
+          std::ranges::find(result.functions, seed_group.container_entry_text_offset,
+                            &ConSanFunctionInfo::entry_text_offset);
+      if (kernel != result.kernels.end() && kernel->has_text_range) {
+        container_begin = kernel->entry_text_offset;
+        container_size = kernel->code_size;
+      } else if (function != result.functions.end()) {
+        container_begin = function->entry_text_offset;
+        container_size = function->code_size;
+      } else {
+        ++dense_missing_container_count;
         continue;
       }
       uint16_t highest_instrumentation_sgpr = std::max<uint16_t>(
@@ -1617,7 +1628,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         return true;
       };
 
-      const uint64_t kernel_end = kernel->entry_text_offset + kernel->code_size;
+      const uint64_t container_end = container_begin + container_size;
       std::optional<uint64_t> best_host_offset;
       std::vector<uint32_t> best_displaced_words;
       uint64_t best_max_distance = std::numeric_limits<uint64_t>::max();
@@ -1627,8 +1638,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           continue;
         const uint64_t host_offset = instruction->src_loc();
         const uint64_t host_bytes = kDenseEntryHostWords * sizeof(uint32_t);
-        if (host_offset < kernel->entry_text_offset || host_offset > kernel_end ||
-            host_bytes > kernel_end - host_offset ||
+        if (host_offset < container_begin || host_offset > container_end ||
+            host_bytes > container_end - host_offset ||
             std::ranges::any_of(dense_reserved_host_ranges,
                                 [&](const auto &range) {
                                   return host_offset < range.second &&
@@ -1761,7 +1772,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         continue;
 
       ScDenseCallGroup group;
-      group.kernel_entry_text_offset = seed_group.kernel_entry_text_offset;
       group.descriptor_file_offset = seed_group.descriptor_file_offset;
       group.entry_host_offset = *best_host_offset;
       group.displaced_host_words = std::move(best_displaced_words);
@@ -1792,7 +1802,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           "ConSan LDS check/trap dense-call planning selected " +
           std::to_string(dense_selected_group_count) + "/" +
           std::to_string(dense_seed_group_count) +
-          " groups; missing_kernel=" + std::to_string(dense_missing_kernel_count) +
+          " groups; missing_container=" + std::to_string(dense_missing_container_count) +
           " missing_host=" + std::to_string(dense_missing_host_count) +
           " missing_owner_context=" + std::to_string(dense_missing_owner_context_count) +
           " missing_call_sgpr=" + std::to_string(dense_missing_call_sgpr_count) +
@@ -2543,7 +2553,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
             .text_offset = generated_island_cursor,
             .file_offset = 0,
             .word_count = static_cast<uint32_t>(kLdsCheckTrapIndirectJumpWords),
-            .owner_entry_text_offset = candidate.kernel_entry_text_offset,
+            .owner_entry_text_offset = candidate.container_entry_text_offset,
         });
         generated_island_cursor += kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t);
       }
@@ -2575,7 +2585,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           .text_offset = generated_island_cursor,
           .file_offset = 0,
           .word_count = static_cast<uint32_t>(kLdsCheckTrapIndirectJumpWords),
-          .owner_entry_text_offset = candidate.kernel_entry_text_offset,
+          .owner_entry_text_offset = candidate.container_entry_text_offset,
       });
       candidate.entry_island = &generated_entry_islands.back();
       generated_island_candidates.push_back(candidate);

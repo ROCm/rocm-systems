@@ -5659,6 +5659,58 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
   EXPECT_NE(block_exit_replacement_host->anchor_offset, first_host->anchor_offset);
 }
 
+TEST(ConSan, Rdna4DenseCheckTrapUsesCalledLocalFunctionHost) {
+  constexpr size_t kSiteCount = 1025u;
+  constexpr size_t kKernelWords = 8u;
+  constexpr size_t kTailWords = 33000u;
+  constexpr size_t kUnreachableNopCaveWords = 8u;
+  constexpr size_t kMovableHostWords = 160u;
+  constexpr uint16_t kReturnSgpr = 30u;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+
+  std::vector<uint32_t> kernel_words(kKernelWords, build_s_mov_b32(105u, 105u, kArch));
+  std::fill_n(kernel_words.begin(), kUnreachableNopCaveWords, build_s_nop(0u, kArch));
+  const size_t call_word = kernel_words.size();
+  kernel_words.push_back(0u);
+  kernel_words.push_back(build_s_endpgm(kArch));
+  const size_t function_entry_word = kernel_words.size();
+  kernel_words[call_word] = build_s_call_b64(
+      kReturnSgpr, static_cast<int16_t>(function_entry_word - (call_word + 1u)), kArch);
+
+  std::vector<uint32_t> function_words;
+  function_words.reserve(kMovableHostWords + 2u * kSiteCount + 1u);
+  function_words.resize(kMovableHostWords, build_s_mov_b32(105u, 105u, kArch));
+  for (size_t site = 0; site < kSiteCount; ++site) {
+    function_words.push_back(0xD8D80000u);
+    function_words.push_back(0x01000002u); // ds_load_b32 v1, v2
+  }
+  function_words.push_back(build_s_setpc_b64(kReturnSgpr, kArch));
+  const std::vector<uint32_t> tail_words(kTailWords, build_s_mov_b32(105u, 105u, kArch));
+
+  const std::vector<uint8_t> bytes =
+      make_rdna4_code_object_with_local_function(kernel_words, function_words, tail_words);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 3u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_TRUE(result.sc_access_coverage_resolved);
+  ASSERT_EQ(result.sc_access_coverage_sites.size(), kSiteCount);
+  EXPECT_TRUE(
+      std::ranges::all_of(result.sc_access_coverage_sites, &ConSanScAccessCoverageSite::supported));
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
+                               &ConSanPatchInfo::kind),
+            kSiteCount);
+  EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::TrampolineScDenseCallDispatcher,
+                              &ConSanPatchInfo::kind),
+            result.patches.end());
+}
+
 TEST(ConSan, Gfx1250DenseCheckTrapUsesExplicitKeysAtScalarLimit) {
   constexpr size_t kSiteCount = 1025u;
   constexpr size_t kTextWords = 66000u;

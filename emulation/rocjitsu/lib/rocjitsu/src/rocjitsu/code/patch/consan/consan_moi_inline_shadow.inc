@@ -362,36 +362,34 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       auto island = local_entry_islands->claim_reachable_from_all(anchors);
       if (island)
         retire_branch_relay_range(*island, kIndirectIslandWords);
-      if (!island && key.first && group_resource != nullptr) {
-        const auto kernel = std::ranges::find(result.kernels, key.second, &ConSanKernelInfo::name);
-        if (kernel != result.kernels.end()) {
-          const std::vector<MoiSgprRange> host_bootstrap_ranges =
-              moi_relocatable_host_scalar_ranges(group_options,
-                                                 MoiRelocatableHostScalarState::AccessRouter, arch);
-          MoiDenseOwnerLivenessProof host_owner_proof =
-              resource_state.prepare_dense_liveness_for_owners(
-                  group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
-          constexpr size_t kHostWords = kIndirectIslandWords + 1u;
-          const uint64_t kernel_end = kernel->entry_text_offset + kernel->code_size;
+      if (!island && group_resource != nullptr) {
+        const std::vector<MoiSgprRange> host_bootstrap_ranges =
+            moi_relocatable_host_scalar_ranges(group_options,
+                                               MoiRelocatableHostScalarState::AccessRouter, arch);
+        MoiDenseOwnerLivenessProof host_owner_proof =
+            resource_state.prepare_dense_liveness_for_owners(
+                group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
+        constexpr size_t kHostWords = kIndirectIslandWords + 1u;
+        const auto find_container_host = [&](const auto &container) {
           std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
-          occupied_ranges.reserve(candidates.size() + kernel->barrier_sites.size() +
-                                  kernel->fence_sites.size() + kernel->atomic_sites.size());
+          occupied_ranges.reserve(candidates.size() + container.barrier_sites.size() +
+                                  container.fence_sites.size() + container.atomic_sites.size());
           const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
             if (size != 0u)
               occupied_ranges.emplace_back(begin, begin + size);
           };
-          // A kernel can be split into several relay groups. A host for one
+          // A container can be split into several relay groups. A host for one
           // group must not consume an access anchor owned by another group.
           const auto owner_candidates = owner_groups.find(key);
           if (owner_candidates != owner_groups.end()) {
             for (const ConSanMoiCandidate *candidate : owner_candidates->second)
               append_occupied_range(candidate->text_offset, candidate->size);
           }
-          for (const ConSanBarrierSite &site : kernel->barrier_sites)
+          for (const ConSanBarrierSite &site : container.barrier_sites)
             append_occupied_range(site.text_offset, site.size);
-          for (const ConSanFenceSite &site : kernel->fence_sites)
+          for (const ConSanFenceSite &site : container.fence_sites)
             append_occupied_range(site.text_offset, site.size);
-          for (const ConSanAtomicSite &site : kernel->atomic_sites)
+          for (const ConSanAtomicSite &site : container.atomic_sites)
             append_occupied_range(site.text_offset, site.size);
           std::ranges::sort(occupied_ranges);
           size_t merged_range_count = 0u;
@@ -411,11 +409,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             return after != occupied_ranges.begin() && std::prev(after)->second > begin;
           };
 
-          auto best_host = find_moi_dense_relay_host(
+          return find_moi_dense_relay_host(
               resource_state, original_text,
               {
-                  .owner_begin = kernel->entry_text_offset,
-                  .owner_end = kernel_end,
+                  .owner_begin = container.entry_text_offset,
+                  .owner_end = container.entry_text_offset + container.code_size,
                   .host_word_count = kHostWords,
                   .anchors = anchors,
                   .preapplied_reserved_ranges = options.preapplied_reserved_ranges,
@@ -423,14 +421,27 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                   .bootstrap_ranges = host_bootstrap_ranges,
               },
               overlaps_instrumented_site);
-          if (best_host) {
-            island = best_host->host_offset + sizeof(uint32_t);
-            dense_entry_hosts.emplace(dispatcher,
-                                      MoiDenseEntryHost{
-                                          .host_offset = best_host->host_offset,
-                                          .displaced_words = std::move(best_host->displaced_words),
-                                      });
-          }
+        };
+        std::optional<MoiDenseRelayHost> best_host;
+        if (key.first) {
+          const auto kernel =
+              std::ranges::find(result.kernels, key.second, &ConSanKernelInfo::name);
+          if (kernel != result.kernels.end())
+            best_host = find_container_host(*kernel);
+        } else {
+          const auto function =
+              std::ranges::find(result.functions, key.second, &ConSanFunctionInfo::name);
+          if (function != result.functions.end())
+            best_host = find_container_host(*function);
+        }
+        if (best_host) {
+          island = best_host->host_offset + sizeof(uint32_t);
+          dense_entry_hosts.emplace(
+              dispatcher,
+              MoiDenseEntryHost{
+                  .host_offset = best_host->host_offset,
+                  .displaced_words = std::move(best_host->displaced_words),
+              });
         }
       }
       if (!island)

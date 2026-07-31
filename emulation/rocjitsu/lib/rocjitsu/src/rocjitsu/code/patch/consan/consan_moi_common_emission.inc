@@ -1151,8 +1151,13 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       (automatic_banked_capture &&
        (layout.record_replay_logical_access_range_count == 0u ||
         static_cast<uint64_t>(layout.record_replay_logical_access_range_count) * access_bank_count *
-                kConSanMoiRecordReplayMaximumAddressGroupsPerWave >
+                layout.record_replay_address_group_headroom >
             access_record_capacity ||
+        layout.record_replay_address_group_headroom == 0u ||
+        layout.record_replay_address_group_headroom >
+            kConSanMoiRecordReplayMaximumAddressGroupsPerWave ||
+        (layout.record_replay_address_group_headroom &
+         (layout.record_replay_address_group_headroom - 1u)) != 0u ||
         (access_record_capacity & (access_record_capacity - 1u)) != 0u ||
         layout.record_replay_dispatch_token_capacity >
             kConSanMoiRecordReplayMaximumDispatchTokenCount ||
@@ -1220,7 +1225,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   const auto materialize_banked_record_address = [&](uint64_t first_address) {
     if (!record.materialize_address(first_address))
       return false;
-    if (access_bank_count == 1u)
+    if (!automatic_banked_capture)
       return true;
     const auto scale_bank = instrumentation::build_v_mul_lo_u32_literal(
         record_value_vgpr, record_value_high_vgpr, sizeof(ConSanMoiAccessRecord), owner_bank_vgpr,

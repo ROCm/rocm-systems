@@ -4792,6 +4792,57 @@ TEST(ConSanMoi, Rdna4DenseInlineShadowAccessesShareExplicitKeyRelay) {
   }));
 }
 
+TEST(ConSanMoi, Rdna4DenseInlineShadowAccessesUseCalledFunctionHost) {
+  constexpr uint32_t kAccessCount = 9u;
+  constexpr uint16_t kReturnSgpr = 30u;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+
+  std::vector<uint32_t> kernel_words(8u, build_s_nop(0u, kArch));
+  const size_t call_word = kernel_words.size();
+  kernel_words.push_back(0u);
+  kernel_words.push_back(build_s_endpgm(kArch));
+  const size_t function_entry_word = kernel_words.size();
+  kernel_words[call_word] = build_s_call_b64(
+      kReturnSgpr, static_cast<int16_t>(function_entry_word - (call_word + 1u)), kArch);
+
+  std::vector<uint32_t> function_words(16u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, kArch));
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    function_words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    function_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+  }
+  function_words.push_back(build_s_setpc_b64(kReturnSgpr, kArch));
+  const std::vector<uint32_t> tail_words(33'000u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, kArch));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.scratch_vgpr = 82u;
+  options.moi_owner_vgpr = 80u;
+  options.moi_epoch_vgpr = 81u;
+  options.moi_exec_save_sgpr = 60u;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_rdna4_code_object_with_local_function(kernel_words, function_words, tail_words),
+      options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            2u); // One called-function host relay and one appended dispatcher.
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+    return warning.find("inside a relocated prefix") != std::string::npos ||
+           warning.find("entry island is unreachable") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+}
+
 TEST(ConSanMoi, Rdna4LargeInlineShadowCompositionUsesGeneralDenseRouting) {
   constexpr uint32_t kAccessCount = 136u;
   std::vector<uint32_t> text_words(

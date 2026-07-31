@@ -161,7 +161,7 @@ TEST(ConSanMoiAutoReportPlan, RecordReplayAccessTableMakesTheSizingIncreaseExpli
             sizeof(ConSanMoiReportHeader) +
                 kConSanMoiRecordReplayMaximumDispatchTokenCount * sizeof(uint64_t) +
                 expected_access_capacity * sizeof(ConSanMoiAccessRecord));
-  EXPECT_GT(plan.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
+  EXPECT_GT(plan.required_bytes, kConSanMoiRecordReplayAutoReportBufferCeilingBytes);
 }
 
 TEST(ConSanMoiAutoReportPlan, RecordReplayOverrideRoundTripsIdentityTableLayout) {
@@ -454,8 +454,8 @@ TEST(ConSanMoiAutoReportPlan, PerBufferCeilingIsInclusiveAndRetainsRequiredBytes
   uint64_t diagnostic_count = 0;
   for (uint64_t candidate_fences = 0; candidate_fences < 20u; ++candidate_fences) {
     const uint64_t fence_bytes = candidate_fences * sizeof(ConSanMoiFenceRecord);
-    const uint64_t remaining =
-        kConSanMoiAutoReportBufferCeilingBytes - sizeof(ConSanMoiReportHeader) - fence_bytes;
+    const uint64_t remaining = kConSanMoiRecordReplayAutoReportBufferCeilingBytes -
+                               sizeof(ConSanMoiReportHeader) - fence_bytes;
     if (remaining % sizeof(ConSanMoiDiagnosticRecord) == 0u) {
       fence_count = candidate_fences;
       diagnostic_count = remaining / sizeof(ConSanMoiDiagnosticRecord);
@@ -470,7 +470,7 @@ TEST(ConSanMoiAutoReportPlan, PerBufferCeilingIsInclusiveAndRetainsRequiredBytes
   };
   const auto accepted = plan_consan_moi_auto_report(fitting);
   ASSERT_TRUE(accepted.complete());
-  EXPECT_EQ(accepted.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
+  EXPECT_EQ(accepted.required_bytes, kConSanMoiRecordReplayAutoReportBufferCeilingBytes);
 
   auto too_large = fitting;
   ++too_large.diagnostic_count;
@@ -478,10 +478,10 @@ TEST(ConSanMoiAutoReportPlan, PerBufferCeilingIsInclusiveAndRetainsRequiredBytes
   EXPECT_FALSE(rejected.complete());
   EXPECT_EQ(rejected.outcome, ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity);
   EXPECT_EQ(rejected.reason, ConSanMoiAutoReportPlanReason::PerBufferCeiling);
-  EXPECT_GT(rejected.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
+  EXPECT_GT(rejected.required_bytes, kConSanMoiRecordReplayAutoReportBufferCeilingBytes);
   EXPECT_FALSE(rejected.layout.valid);
   EXPECT_EQ(rejected.required_bytes,
-            kConSanMoiAutoReportBufferCeilingBytes + sizeof(ConSanMoiDiagnosticRecord));
+            kConSanMoiRecordReplayAutoReportBufferCeilingBytes + sizeof(ConSanMoiDiagnosticRecord));
   EXPECT_EQ(consan_moi_auto_report_plan_outcome_name(rejected.outcome),
             "insufficient_report_capacity");
 }
@@ -607,8 +607,16 @@ TEST(ConSanMoiAutoReportPlan, RepresentableHugeCountsAreCapacityInsufficientNotO
 
 TEST(ConSanMoiAutoReportPlan, FrozenSafetyCeilingsRemainDistinct) {
   EXPECT_EQ(kConSanMoiAutoReportBufferCeilingBytes, 128u * 1024u * 1024u);
-  EXPECT_EQ(kConSanMoiAutoReportProcessCeilingBytes, 256u * 1024u * 1024u);
-  EXPECT_GT(kConSanMoiAutoReportProcessCeilingBytes, kConSanMoiAutoReportBufferCeilingBytes);
+  EXPECT_EQ(kConSanMoiRecordReplayAutoReportBufferCeilingBytes, 512u * 1024u * 1024u);
+  EXPECT_EQ(kConSanMoiAutoReportProcessCeilingBytes, 1024u * 1024u * 1024u);
+  EXPECT_EQ(consan_moi_auto_report_buffer_ceiling_bytes(ConSanMoiEngine::Sampled),
+            kConSanMoiAutoReportBufferCeilingBytes);
+  EXPECT_EQ(consan_moi_auto_report_buffer_ceiling_bytes(ConSanMoiEngine::InlineShadow),
+            kConSanMoiAutoReportBufferCeilingBytes);
+  EXPECT_EQ(consan_moi_auto_report_buffer_ceiling_bytes(ConSanMoiEngine::RecordReplay),
+            kConSanMoiRecordReplayAutoReportBufferCeilingBytes);
+  EXPECT_GT(kConSanMoiAutoReportProcessCeilingBytes,
+            kConSanMoiRecordReplayAutoReportBufferCeilingBytes);
   EXPECT_EQ(
       consan_moi_auto_report_plan_reason_name(ConSanMoiAutoReportPlanReason::PerBufferCeiling),
       "per_buffer_ceiling");

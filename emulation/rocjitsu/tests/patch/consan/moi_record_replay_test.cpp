@@ -849,6 +849,62 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
   EXPECT_EQ(report_plan.layout.access_record_capacity, 65536u);
 }
 
+TEST(ConSanMoi, AutoRecordReplayOneByOneHeadroomStillAddressesTheHashedSlot) {
+  const std::array<uint32_t, 4> text_words = {
+      0xD8340000u, 0x00000000u, // ds_store_b32
+      0xBFC60000u,              // s_wait_dscnt
+      0xBFB00000u,              // s_endpgm
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "record_replay_one_by_one_headroom", kRdna4Wave64AllVgprsGranulated,
+      /*wave32=*/false, /*uses_dynamic_stack=*/false,
+      /*workgroup_id_dimension_mask=*/7u);
+  ConSanMoiAutoReportInventory inventory;
+  inventory.engine = ConSanMoiEngine::RecordReplay;
+  inventory.access_range_count = 1u;
+  inventory.diagnostic_count = 1u;
+  inventory.record_replay_access_dispatch_bank_count = 1u;
+  inventory.record_replay_access_owner_bank_count = 1u;
+  inventory.record_replay_address_group_headroom = 1u;
+  const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(inventory);
+  ASSERT_TRUE(report_plan.complete());
+  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
+  ASSERT_TRUE(layout_override);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = report_plan.required_bytes;
+  options.moi_report_layout = *layout_override;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  });
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_TRUE(access->scratch_vgpr);
+  const uint16_t scratch = *access->scratch_vgpr;
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> access_words =
+      access->kind == ConSanPatchKind::InlineMoiAccessRecordStore
+          ? patched_words_at_file_offset(result, 0x100 + access->anchor_offset,
+                                         access->original_size)
+          : text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
+  const auto scale_slot = instrumentation::build_v_mul_lo_u32_literal(
+      static_cast<uint16_t>(scratch + 2u), static_cast<uint16_t>(scratch + 3u),
+      sizeof(ConSanMoiAccessRecord), static_cast<uint16_t>(scratch + 7u), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto add_slot = instrumentation::build_v_add_u64_vgpr_offset(
+      scratch, static_cast<uint16_t>(scratch + 2u), ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(scale_slot && add_slot);
+  EXPECT_TRUE(contains_subsequence(access_words, *scale_slot));
+  EXPECT_TRUE(contains_subsequence(access_words, *add_slot));
+}
+
 TEST(ConSanMoi, AutoRecordReplayCapturesDispatchIdentityInPersistentVgprsAtScalarPressure) {
   std::vector<uint32_t> text_words = {
       0xD8340000u,
@@ -4069,7 +4125,10 @@ TEST(ConSanMoi, AutoReportInventoryAdaptsRecordReplayGridAndEventHeadroomForFatO
   const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(fitted);
 
   ASSERT_TRUE(plan.complete());
-  EXPECT_EQ(fitted.barrier_event_count, 10000u * 128u);
+  ASSERT_EQ(fitted.barrier_event_count % 10000u, 0u);
+  const uint64_t fitted_event_headroom = fitted.barrier_event_count / 10000u;
+  EXPECT_GE(fitted_event_headroom, 1u);
+  EXPECT_EQ(fitted_event_headroom & (fitted_event_headroom - 1u), 0u);
   EXPECT_LT(fitted.barrier_event_count, 10000u * kConSanMoiRecordReplayDynamicEventHeadroom);
   EXPECT_LT(fitted.record_replay_access_dispatch_bank_count,
             inventory.record_replay_access_dispatch_bank_count);
@@ -4080,8 +4139,8 @@ TEST(ConSanMoi, AutoReportInventoryAdaptsRecordReplayGridAndEventHeadroomForFatO
   EXPECT_EQ(fitted.diagnostic_count, fitted.access_range_count *
                                          fitted.record_replay_access_dispatch_bank_count *
                                          fitted.record_replay_access_owner_bank_count *
-                                         kConSanMoiRecordReplayMaximumAddressGroupsPerWave);
-  EXPECT_LE(plan.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
+                                         fitted.record_replay_address_group_headroom);
+  EXPECT_LE(plan.required_bytes, kConSanMoiRecordReplayAutoReportBufferCeilingBytes);
 
   auto exact = inventory;
   exact.record_replay_bank_count_adaptive = false;
@@ -4093,6 +4152,32 @@ TEST(ConSanMoi, AutoReportInventoryAdaptsRecordReplayGridAndEventHeadroomForFatO
             exact.record_replay_access_owner_bank_count);
   EXPECT_EQ(plan_consan_moi_auto_report(unfitted).outcome,
             ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity);
+}
+
+TEST(ConSanMoi, AutoReportInventoryAdaptsAddressGroupHeadroomForVeryLargeObjects) {
+  ConSanMoiAutoReportInventory inventory;
+  inventory.engine = ConSanMoiEngine::RecordReplay;
+  inventory.access_range_count = 50000u;
+  inventory.diagnostic_count = inventory.access_range_count;
+  inventory.barrier_event_count = 65000u;
+  inventory.record_replay_bank_count_adaptive = true;
+
+  const ConSanMoiAutoReportInventory fitted =
+      fit_consan_moi_record_replay_auto_report_inventory(inventory);
+  const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(fitted);
+
+  ASSERT_TRUE(plan.complete());
+  EXPECT_EQ(fitted.access_range_count, inventory.access_range_count);
+  EXPECT_EQ(fitted.record_replay_access_dispatch_bank_count, 1u);
+  EXPECT_EQ(fitted.record_replay_access_owner_bank_count, 1u);
+  EXPECT_LT(fitted.record_replay_address_group_headroom,
+            kConSanMoiRecordReplayMaximumAddressGroupsPerWave);
+  EXPECT_GE(fitted.record_replay_address_group_headroom, 1u);
+  EXPECT_EQ(fitted.diagnostic_count,
+            fitted.access_range_count * fitted.record_replay_address_group_headroom);
+  EXPECT_GE(plan.layout.access_record_capacity,
+            fitted.access_range_count * fitted.record_replay_address_group_headroom);
+  EXPECT_LE(plan.required_bytes, kConSanMoiRecordReplayAutoReportBufferCeilingBytes);
 }
 
 TEST(ConSanMoi, FirstLightProbeAddsNativeLdsImmediateOffset) {

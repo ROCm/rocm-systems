@@ -1978,6 +1978,8 @@ public:
     const bool moi_forbid_diagnostics = moi_forbid_diagnostics_;
     const bool moi_require_replay_conflict = moi_require_replay_conflict_;
     const bool moi_forbid_overflow = moi_forbid_overflow_;
+    const rocjitsu::ConSanMoiEngine moi_engine =
+        config_ ? config_->moi_engine : rocjitsu::ConSanMoiEngine::RecordReplay;
     const std::optional<rocjitsu::ConSanFaultLoadSelector> fault_load_selector =
         fault_load_selector_;
     CodeObjectReaderRegistry::instance().clear();
@@ -2035,7 +2037,8 @@ public:
         static_cast<unsigned long long>(moi_report_summary.current_live_report_bytes),
         static_cast<unsigned long long>(moi_report_summary.current_live_report_bytes_after_cleanup),
         static_cast<unsigned long long>(moi_report_summary.peak_live_report_bytes),
-        static_cast<unsigned long long>(rocjitsu::kConSanMoiAutoReportBufferCeilingBytes),
+        static_cast<unsigned long long>(
+            rocjitsu::consan_moi_auto_report_buffer_ceiling_bytes(moi_engine)),
         static_cast<unsigned long long>(rocjitsu::kConSanMoiAutoReportProcessCeilingBytes),
         static_cast<unsigned long long>(moi_report_summary.allocation_failure_count),
         static_cast<unsigned long long>(moi_report_summary.capacity_failure_count),
@@ -3395,7 +3398,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             "ConSan MOI auto report plan reader=%llu outcome=%s reason=%s "
             "required_bytes=%llu cap_bytes=%llu per_buffer_ceiling=%llu "
             "process_ceiling=%llu access_ranges=%llu barriers=%llu atomics=%llu fences=%llu "
-            "dispatch_banks=%llu owner_banks=%llu "
+            "dispatch_banks=%llu owner_banks=%llu address_group_headroom=%llu "
             "diagnostics=%llu sampled_banks=%llu sampled_watchpoints=%llu inline_lds_bytes=%llu "
             "inline_releases=%llu inline_snapshots=%llu inline_tokens=%llu",
             static_cast<unsigned long long>(code_object_reader.handle),
@@ -3403,7 +3406,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             rocjitsu::consan_moi_auto_report_plan_reason_name(report_plan.reason).data(),
             static_cast<unsigned long long>(report_plan.required_bytes),
             static_cast<unsigned long long>(config->moi_auto_report_buffer_size),
-            static_cast<unsigned long long>(rocjitsu::kConSanMoiAutoReportBufferCeilingBytes),
+            static_cast<unsigned long long>(report_plan.ceiling_bytes),
             static_cast<unsigned long long>(rocjitsu::kConSanMoiAutoReportProcessCeilingBytes),
             static_cast<unsigned long long>(report_inventory.access_range_count),
             static_cast<unsigned long long>(report_inventory.barrier_event_count),
@@ -3412,6 +3415,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             static_cast<unsigned long long>(
                 report_inventory.record_replay_access_dispatch_bank_count),
             static_cast<unsigned long long>(report_inventory.record_replay_access_owner_bank_count),
+            static_cast<unsigned long long>(report_inventory.record_replay_address_group_headroom),
             static_cast<unsigned long long>(report_inventory.diagnostic_count),
             static_cast<unsigned long long>(report_inventory.sampled_range_bank_count),
             static_cast<unsigned long long>(report_inventory.sampled_watchpoint_count),

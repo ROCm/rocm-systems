@@ -329,31 +329,29 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           access_island_begin + group.first_candidate_index * access_relay_words * sizeof(uint32_t);
       auto island =
           local_entry_islands->claim_reachable_from_all(anchors, group_entry_island_words);
-      if (!island && key.first && group_resource != nullptr) {
-        const auto kernel = std::ranges::find(result.kernels, key.second, &ConSanKernelInfo::name);
-        if (kernel != result.kernels.end()) {
-          const std::vector<MoiSgprRange> host_bootstrap_ranges =
-              moi_relocatable_host_scalar_ranges(group_options,
-                                                 MoiRelocatableHostScalarState::AccessRouter, arch);
-          MoiDenseOwnerLivenessProof host_owner_proof =
-              resource_state.prepare_dense_liveness_for_owners(
-                  group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
-          const size_t host_words_count = group_entry_island_words + 1u;
-          const uint64_t kernel_end = kernel->entry_text_offset + kernel->code_size;
+      if (!island && group_resource != nullptr) {
+        const std::vector<MoiSgprRange> host_bootstrap_ranges =
+            moi_relocatable_host_scalar_ranges(group_options,
+                                               MoiRelocatableHostScalarState::AccessRouter, arch);
+        MoiDenseOwnerLivenessProof host_owner_proof =
+            resource_state.prepare_dense_liveness_for_owners(
+                group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
+        const size_t host_words_count = group_entry_island_words + 1u;
+        const auto find_container_host = [&](const auto &container) {
           std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
-          occupied_ranges.reserve(group.candidates.size() + kernel->barrier_sites.size() +
-                                  kernel->fence_sites.size() + kernel->atomic_sites.size());
+          occupied_ranges.reserve(group.candidates.size() + container.barrier_sites.size() +
+                                  container.fence_sites.size() + container.atomic_sites.size());
           const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
             if (size != 0u)
               occupied_ranges.emplace_back(begin, begin + size);
           };
           for (const ConSanMoiCandidate *candidate : group.candidates)
             append_occupied_range(candidate->text_offset, candidate->size);
-          for (const ConSanBarrierSite &site : kernel->barrier_sites)
+          for (const ConSanBarrierSite &site : container.barrier_sites)
             append_occupied_range(site.text_offset, site.size);
-          for (const ConSanFenceSite &site : kernel->fence_sites)
+          for (const ConSanFenceSite &site : container.fence_sites)
             append_occupied_range(site.text_offset, site.size);
-          for (const ConSanAtomicSite &site : kernel->atomic_sites)
+          for (const ConSanAtomicSite &site : container.atomic_sites)
             append_occupied_range(site.text_offset, site.size);
           std::ranges::sort(occupied_ranges);
           size_t merged_range_count = 0u;
@@ -372,11 +370,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                 occupied_ranges, end, {}, [](const auto &range) { return range.first; });
             return after != occupied_ranges.begin() && std::prev(after)->second > begin;
           };
-          auto best_host = find_moi_dense_relay_host(
+          return find_moi_dense_relay_host(
               resource_state, original_text,
               {
-                  .owner_begin = kernel->entry_text_offset,
-                  .owner_end = kernel_end,
+                  .owner_begin = container.entry_text_offset,
+                  .owner_end = container.entry_text_offset + container.code_size,
                   .host_word_count = host_words_count,
                   .anchors = anchors,
                   .preapplied_reserved_ranges = options.preapplied_reserved_ranges,
@@ -384,14 +382,27 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                   .bootstrap_ranges = host_bootstrap_ranges,
               },
               overlaps_instrumented_site);
-          if (best_host) {
-            island = best_host->host_offset + sizeof(uint32_t);
-            dense_entry_hosts.emplace(dispatcher,
-                                      MoiDenseEntryHost{
-                                          .host_offset = best_host->host_offset,
-                                          .displaced_words = std::move(best_host->displaced_words),
-                                      });
-          }
+        };
+        std::optional<MoiDenseRelayHost> best_host;
+        if (key.first) {
+          const auto kernel =
+              std::ranges::find(result.kernels, key.second, &ConSanKernelInfo::name);
+          if (kernel != result.kernels.end())
+            best_host = find_container_host(*kernel);
+        } else {
+          const auto function =
+              std::ranges::find(result.functions, key.second, &ConSanFunctionInfo::name);
+          if (function != result.functions.end())
+            best_host = find_container_host(*function);
+        }
+        if (best_host) {
+          island = best_host->host_offset + sizeof(uint32_t);
+          dense_entry_hosts.emplace(
+              dispatcher,
+              MoiDenseEntryHost{
+                  .host_offset = best_host->host_offset,
+                  .displaced_words = std::move(best_host->displaced_words),
+              });
         }
       }
       if (!island)

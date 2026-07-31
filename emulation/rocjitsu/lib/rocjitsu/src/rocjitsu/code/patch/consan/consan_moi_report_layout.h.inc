@@ -48,6 +48,7 @@ struct ConSanMoiReportBufferLayout {
   uint32_t record_replay_dispatch_token_capacity = 0;
   uint32_t record_replay_access_dispatch_bank_count = 1;
   uint32_t record_replay_access_owner_bank_count = 1;
+  uint32_t record_replay_address_group_headroom = 1;
   uint32_t barrier_record_capacity = 0;
   uint32_t atomic_record_capacity = 0;
   uint32_t fence_record_capacity = 0;
@@ -119,9 +120,9 @@ make_consan_moi_report_header_for_layout(uint64_t generation, uint64_t dispatch_
 /// open-addressing headroom, rounds the total table to a power of two, and the
 /// device probes by static range + dispatch + workgroup + wave + dynamic LDS
 /// address. Hot sites can therefore borrow unused capacity from cold sites
-/// without workload-specific sizing. Large code objects halve the dispatch and
-/// owner factors under the existing per-buffer ceiling; direct layouts keep
-/// their historical 1x1 contract.
+/// without workload-specific sizing. Large code objects halve the dispatch,
+/// owner, and address-group factors under the existing per-buffer ceiling;
+/// direct layouts keep their historical single-identity contract.
 inline constexpr uint32_t kConSanMoiRecordReplayMaximumDispatchBankCount = 16u;
 inline constexpr uint32_t kConSanMoiRecordReplayMaximumOwnerBankCount = 16u;
 inline constexpr uint32_t kConSanMoiRecordReplayMaximumAddressGroupsPerWave = 64u;
@@ -133,8 +134,9 @@ inline constexpr uint32_t kConSanMoiRecordReplayIdentityHashMultiplier = 0x9e377
 /// Device-side open-addressing must have a practical bound independent of the
 /// report allocation size. Exhaustion sets the typed saturation flag; later
 /// probes observe that flag and bypass capture instead of repeatedly walking a
-/// full table.
-inline constexpr uint32_t kConSanMoiRecordReplayProbeLimit = 256u;
+/// full table. Large admitted inventories can legitimately drive the bounded
+/// table above half occupancy, so retain a finite 1,024-step collision budget.
+inline constexpr uint32_t kConSanMoiRecordReplayProbeLimit = 1024u;
 [[nodiscard]] constexpr uint32_t consan_moi_record_replay_fold_dispatch_token(uint64_t token) {
   return static_cast<uint32_t>(token) ^ static_cast<uint32_t>(token >> 32u);
 }
@@ -177,15 +179,19 @@ struct ConSanMoiAutoReportInventory {
   uint64_t fence_event_count = 0;
   uint64_t diagnostic_count = 0;
 
-  /// Automatic static capture starts with bounded dispatch/owner diversity
-  /// factors used only to size the report-wide access-identity table. The
-  /// fitter reduces both factors together when a large object would exceed the
-  /// ordinary report ceiling. Its separate dispatch directory retains the full
-  /// lifetime bound while access storage adapts. Explicit plans remain exact.
+  /// Automatic static capture starts with bounded dispatch, owner, and
+  /// address-group diversity factors used only to size the report-wide
+  /// access-identity table. The fitter first reduces dispatch and owner
+  /// together, then address-group headroom when a very large object would
+  /// otherwise exceed the ordinary report ceiling. Its separate dispatch
+  /// directory retains the full lifetime bound while access storage adapts.
+  /// Explicit plans remain exact.
   uint64_t record_replay_dispatch_token_capacity = kConSanMoiRecordReplayMaximumDispatchTokenCount;
   uint64_t record_replay_access_dispatch_bank_count =
       kConSanMoiRecordReplayMaximumDispatchBankCount;
   uint64_t record_replay_access_owner_bank_count = kConSanMoiRecordReplayMaximumOwnerBankCount;
+  uint64_t record_replay_address_group_headroom =
+      kConSanMoiRecordReplayMaximumAddressGroupsPerWave;
   bool record_replay_bank_count_adaptive = false;
 
   /// Total immutable banks across admitted Sampled logical ranges. One causal
@@ -215,7 +221,7 @@ using ConSanMoiAutoReportCapacityMember = uint64_t ConSanMoiAutoReportInventory:
 /// Canonical projection of every numeric report-capacity dimension. Keep
 /// capacity comparisons expressed through this list so a dimension cannot
 /// acquire a separate, silently incomplete comparison path.
-inline constexpr std::array<ConSanMoiAutoReportCapacityMember, 15>
+inline constexpr std::array<ConSanMoiAutoReportCapacityMember, 16>
     kConSanMoiAutoReportCapacityMembers = {
         &ConSanMoiAutoReportInventory::access_range_count,
         &ConSanMoiAutoReportInventory::barrier_event_count,
@@ -225,6 +231,7 @@ inline constexpr std::array<ConSanMoiAutoReportCapacityMember, 15>
         &ConSanMoiAutoReportInventory::record_replay_dispatch_token_capacity,
         &ConSanMoiAutoReportInventory::record_replay_access_dispatch_bank_count,
         &ConSanMoiAutoReportInventory::record_replay_access_owner_bank_count,
+        &ConSanMoiAutoReportInventory::record_replay_address_group_headroom,
         &ConSanMoiAutoReportInventory::sampled_range_bank_count,
         &ConSanMoiAutoReportInventory::sampled_watchpoint_count,
         &ConSanMoiAutoReportInventory::inline_lds_bytes,
@@ -314,16 +321,17 @@ consan_moi_auto_report_plan_reason_name(ConSanMoiAutoReportPlanReason reason) {
 
 /// Computes an exact ABI layout from explicit inventory without allocating,
 /// reading code-object bytes, or consulting environment state. Counts that do
-/// not fit the ABI produce `overflow`; a representable plan above 16 MiB
-/// produces `insufficient_report_capacity` while retaining required bytes and
-/// capacities for telemetry.
+/// not fit the ABI produce `overflow`; a representable plan above the ordinary
+/// per-buffer ceiling produces `insufficient_report_capacity` while retaining
+/// required bytes and capacities for telemetry.
 [[nodiscard]] ConSanMoiAutoReportPlan
 plan_consan_moi_auto_report(const ConSanMoiAutoReportInventory &inventory);
 
 /// Expands static Record/Replay synchronization counts by the largest
 /// power-of-two dynamic headroom that fits the ordinary per-buffer ceiling.
-/// Small objects retain the standard headroom; fat objects retain every static
-/// site with a smaller, still fail-closed dynamic capacity.
+/// Small objects retain the standard headroom; large objects retain every
+/// static site with smaller dispatch, owner, address-group, and event
+/// headroom. Runtime saturation remains explicit and fail-closed.
 [[nodiscard]] ConSanMoiAutoReportInventory
 fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory inventory);
 

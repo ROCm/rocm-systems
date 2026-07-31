@@ -4978,7 +4978,8 @@ TEST(HsaHooksUnitTest, ConSanAutoReportUsesExactLayoutAcrossTwoLiveCodeObjectsAn
     EXPECT_EQ(g_core_memory_free_calls, 0);
     for (size_t size : g_core_memory_allocation_sizes) {
       EXPECT_GE(size, sizeof(rocjitsu::ConSanMoiReportHeader));
-      EXPECT_LE(size, static_cast<size_t>(rocjitsu::kConSanMoiAutoReportBufferCeilingBytes));
+      EXPECT_LE(size,
+                static_cast<size_t>(rocjitsu::kConSanMoiRecordReplayAutoReportBufferCeilingBytes));
     }
     ASSERT_EQ(g_transform_override_report_sizes.size(), 4u);
     ASSERT_EQ(g_transform_override_report_layouts.size(), 4u);

@@ -360,10 +360,21 @@ consan_moi_inline_atomic_support_name(ConSanMoiInlineAtomicSupport support) {
 inline constexpr uint64_t kConSanMoiRecordReplayDefaultReportBufferBytes = 64u * 1024u;
 inline constexpr uint64_t kConSanMoiSampledDefaultReportBufferBytes = 64u * 1024u;
 inline constexpr uint64_t kConSanMoiInlineShadowDefaultReportBufferBytes = 512u * 1024u;
-/// Hard ordinary/expert safety bounds. G6B3 owns aggregate reservation against
-/// the process ceiling; this pure planner enforces the per-buffer ceiling.
+/// Hard ordinary/expert safety bounds. Record/Replay retains full 80-byte
+/// identities in a power-of-two hash table and therefore needs the larger
+/// per-buffer tier for qualified generated libraries. Sampled and Inline keep
+/// the original tier. G6B3 owns aggregate reservation against the process
+/// ceiling; the pure planner enforces the engine-specific per-buffer ceiling.
 inline constexpr uint64_t kConSanMoiAutoReportBufferCeilingBytes = 128u * 1024u * 1024u;
-inline constexpr uint64_t kConSanMoiAutoReportProcessCeilingBytes = 256u * 1024u * 1024u;
+inline constexpr uint64_t kConSanMoiRecordReplayAutoReportBufferCeilingBytes =
+    512u * 1024u * 1024u;
+inline constexpr uint64_t kConSanMoiAutoReportProcessCeilingBytes = 1024u * 1024u * 1024u;
+[[nodiscard]] constexpr uint64_t
+consan_moi_auto_report_buffer_ceiling_bytes(ConSanMoiEngine engine) {
+  return engine == ConSanMoiEngine::RecordReplay
+             ? kConSanMoiRecordReplayAutoReportBufferCeilingBytes
+             : kConSanMoiAutoReportBufferCeilingBytes;
+}
 // Record/replay synchronization probes can execute many times per static site,
 // and a code-object-scoped report remains live across repeated dispatches. Keep
 // enough bounded dynamic headroom for ordinary validation and benchmark loops

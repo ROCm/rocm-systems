@@ -2,9 +2,10 @@ namespace rocjitsu {
 
 /// Default maximum additional ELF storage one ConSan transformation may
 /// materialize, including alignment padding. Dense production code objects can
-/// require one out-of-line body per admitted access, so retain the established
-/// 192 MiB default until workload data supports changing it.
-inline constexpr uint64_t kConSanDefaultMaxPatchedImageGrowthBytes = uint64_t{192} * 1024 * 1024;
+/// require one out-of-line body per admitted access. Complete Inline coverage
+/// of qualified generated operator libraries requires about 376 MiB, so retain
+/// a bounded 384 MiB default while leaving process-wide ceilings independent.
+inline constexpr uint64_t kConSanDefaultMaxPatchedImageGrowthBytes = uint64_t{384} * 1024 * 1024;
 
 enum class ConSanPatchedImageGrowthLimitKind : uint8_t {
   AbsoluteBytes,
@@ -240,6 +241,7 @@ struct ConSanMoiReportLayoutOverride {
   uint32_t record_replay_dispatch_token_capacity = 0;
   uint32_t record_replay_access_dispatch_bank_count = 1;
   uint32_t record_replay_access_owner_bank_count = 1;
+  uint32_t record_replay_address_group_headroom = 1;
   uint32_t barrier_record_capacity = 0;
   uint32_t atomic_record_capacity = 0;
   uint32_t fence_record_capacity = 0;

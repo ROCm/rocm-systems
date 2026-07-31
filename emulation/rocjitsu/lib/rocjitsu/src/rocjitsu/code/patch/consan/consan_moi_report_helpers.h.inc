@@ -539,7 +539,7 @@ consan_moi_report_layout_has_required_capacities(const ConSanMoiReportBufferLayo
       static_cast<uint64_t>(layout.record_replay_logical_access_range_count) *
       layout.record_replay_access_dispatch_bank_count *
       layout.record_replay_access_owner_bank_count *
-      kConSanMoiRecordReplayMaximumAddressGroupsPerWave;
+      layout.record_replay_address_group_headroom;
   const bool access_table_valid =
       layout.record_replay_dispatch_token_capacity == 0u ||
       (layout.record_replay_logical_access_range_count != 0u &&
@@ -552,6 +552,11 @@ consan_moi_report_layout_has_required_capacities(const ConSanMoiReportBufferLayo
          layout.record_replay_access_owner_bank_count != 0 &&
          (layout.record_replay_access_owner_bank_count &
           (layout.record_replay_access_owner_bank_count - 1u)) == 0u &&
+         layout.record_replay_address_group_headroom != 0 &&
+         layout.record_replay_address_group_headroom <=
+             kConSanMoiRecordReplayMaximumAddressGroupsPerWave &&
+         (layout.record_replay_address_group_headroom &
+          (layout.record_replay_address_group_headroom - 1u)) == 0u &&
          (!track_barriers || layout.barrier_record_capacity != 0) &&
          (!track_atomics || layout.atomic_record_capacity != 0);
 }

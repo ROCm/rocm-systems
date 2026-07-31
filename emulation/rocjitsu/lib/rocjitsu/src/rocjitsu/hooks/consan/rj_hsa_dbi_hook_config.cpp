@@ -1167,7 +1167,7 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   } else {
     config->moi_auto_report_buffer_size =
         config->flavor == rocjitsu::ConSanFlavor::Moi && !config->moi_report_buffer_address
-            ? rocjitsu::kConSanMoiAutoReportBufferCeilingBytes
+            ? rocjitsu::consan_moi_auto_report_buffer_ceiling_bytes(config->moi_engine)
             : 0;
   }
   if (config->moi_auto_report_buffer_size != 0 &&
@@ -1180,12 +1180,14 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
                  rocjitsu::consan_moi_report_buffer_min_bytes(1, 0, 0, 0));
     return false;
   }
-  if (config->moi_auto_report_buffer_size > rocjitsu::kConSanMoiAutoReportBufferCeilingBytes) {
+  const uint64_t auto_report_buffer_ceiling =
+      rocjitsu::consan_moi_auto_report_buffer_ceiling_bytes(config->moi_engine);
+  if (config->moi_auto_report_buffer_size > auto_report_buffer_ceiling) {
     std::fprintf(stderr,
                  "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE='%s'; "
                  "maximum auto-report cap is %llu bytes\n",
                  std::getenv("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE"),
-                 static_cast<unsigned long long>(rocjitsu::kConSanMoiAutoReportBufferCeilingBytes));
+                 static_cast<unsigned long long>(auto_report_buffer_ceiling));
     return false;
   }
 

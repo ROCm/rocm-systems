@@ -60,6 +60,7 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
       .record_replay_dispatch_token_capacity = layout.record_replay_dispatch_token_capacity,
       .record_replay_access_dispatch_bank_count = layout.record_replay_access_dispatch_bank_count,
       .record_replay_access_owner_bank_count = layout.record_replay_access_owner_bank_count,
+      .record_replay_address_group_headroom = layout.record_replay_address_group_headroom,
       .barrier_record_capacity = layout.barrier_record_capacity,
       .atomic_record_capacity = layout.atomic_record_capacity,
       .fence_record_capacity = layout.fence_record_capacity,
@@ -105,6 +106,8 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
              expected.record_replay_access_dispatch_bank_count &&
          override_layout.record_replay_access_owner_bank_count ==
              expected.record_replay_access_owner_bank_count &&
+         override_layout.record_replay_address_group_headroom ==
+             expected.record_replay_address_group_headroom &&
          override_layout.barrier_record_capacity == expected.barrier_record_capacity &&
          override_layout.atomic_record_capacity == expected.atomic_record_capacity &&
          override_layout.fence_record_capacity == expected.fence_record_capacity &&
@@ -181,6 +184,7 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
   if (inventory.access_range_count == 0u) {
     layout.record_replay_access_dispatch_bank_count = 1u;
     layout.record_replay_access_owner_bank_count = 1u;
+    layout.record_replay_address_group_headroom = 1u;
   } else {
     if (inventory.record_replay_dispatch_token_capacity == 0u ||
         inventory.record_replay_dispatch_token_capacity >
@@ -196,7 +200,12 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
         inventory.record_replay_access_owner_bank_count >
             kConSanMoiRecordReplayMaximumOwnerBankCount ||
         (inventory.record_replay_access_owner_bank_count &
-         (inventory.record_replay_access_owner_bank_count - 1u)) != 0u) {
+         (inventory.record_replay_access_owner_bank_count - 1u)) != 0u ||
+        inventory.record_replay_address_group_headroom == 0u ||
+        inventory.record_replay_address_group_headroom >
+            kConSanMoiRecordReplayMaximumAddressGroupsPerWave ||
+        (inventory.record_replay_address_group_headroom &
+         (inventory.record_replay_address_group_headroom - 1u)) != 0u) {
       plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
       return false;
     }
@@ -205,7 +214,9 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
         !checked_capacity(inventory.record_replay_access_dispatch_bank_count,
                           layout.record_replay_access_dispatch_bank_count) ||
         !checked_capacity(inventory.record_replay_access_owner_bank_count,
-                          layout.record_replay_access_owner_bank_count)) {
+                          layout.record_replay_access_owner_bank_count) ||
+        !checked_capacity(inventory.record_replay_address_group_headroom,
+                          layout.record_replay_address_group_headroom)) {
       plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
       return false;
     }
@@ -220,9 +231,9 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
                               static_cast<uint64_t>(layout.record_replay_access_owner_bank_count))
           : std::nullopt;
   const auto address_group_records =
-      owner_records ? util::checked_mul(*owner_records,
-                                        uint64_t{kConSanMoiRecordReplayMaximumAddressGroupsPerWave})
-                    : std::nullopt;
+      owner_records
+          ? util::checked_mul(*owner_records, inventory.record_replay_address_group_headroom)
+          : std::nullopt;
   const auto hash_records =
       address_group_records ? util::checked_mul(*address_group_records,
                                                 uint64_t{kConSanMoiRecordReplayHashTableHeadroom})
@@ -363,6 +374,7 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
 ConSanMoiAutoReportPlan plan_consan_moi_auto_report(const ConSanMoiAutoReportInventory &inventory) {
   ConSanMoiAutoReportPlan plan;
   plan.engine = inventory.engine;
+  plan.ceiling_bytes = consan_moi_auto_report_buffer_ceiling_bytes(inventory.engine);
   alias_unused_regions(plan.layout, sizeof(ConSanMoiReportHeader));
   uint64_t cursor = sizeof(ConSanMoiReportHeader);
 
@@ -445,8 +457,8 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
           candidate.access_range_count, candidate.record_replay_access_dispatch_bank_count);
       diagnostic_count =
           util::saturating_mul(diagnostic_count, candidate.record_replay_access_owner_bank_count);
-      diagnostic_count = util::saturating_mul(
-          diagnostic_count, uint64_t{kConSanMoiRecordReplayMaximumAddressGroupsPerWave});
+      diagnostic_count =
+          util::saturating_mul(diagnostic_count, candidate.record_replay_address_group_headroom);
       candidate.diagnostic_count = std::max(static_diagnostics, diagnostic_count);
     }
     return candidate;
@@ -468,15 +480,23 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
       headroom = std::max<uint64_t>(headroom / 2u, 1u);
     }
 
-    if (!inventory.record_replay_bank_count_adaptive ||
-        (inventory.record_replay_access_dispatch_bank_count == 1u &&
-         inventory.record_replay_access_owner_bank_count == 1u)) {
+    if (!inventory.record_replay_bank_count_adaptive) {
       return expanded_candidate(1u);
     }
-    inventory.record_replay_access_dispatch_bank_count =
-        std::max<uint64_t>(inventory.record_replay_access_dispatch_bank_count / 2u, 1u);
-    inventory.record_replay_access_owner_bank_count =
-        std::max<uint64_t>(inventory.record_replay_access_owner_bank_count / 2u, 1u);
+    if (inventory.record_replay_access_dispatch_bank_count != 1u ||
+        inventory.record_replay_access_owner_bank_count != 1u) {
+      inventory.record_replay_access_dispatch_bank_count =
+          std::max<uint64_t>(inventory.record_replay_access_dispatch_bank_count / 2u, 1u);
+      inventory.record_replay_access_owner_bank_count =
+          std::max<uint64_t>(inventory.record_replay_access_owner_bank_count / 2u, 1u);
+      continue;
+    }
+    if (inventory.record_replay_address_group_headroom != 1u) {
+      inventory.record_replay_address_group_headroom =
+          std::max<uint64_t>(inventory.record_replay_address_group_headroom / 2u, 1u);
+      continue;
+    }
+    return expanded_candidate(1u);
   }
 }
 
@@ -529,7 +549,8 @@ consan_moi_report_layout_from_override(const ConSanMoiReportLayoutOverride &over
         override_layout.record_replay_logical_access_range_count == 0u &&
         override_layout.record_replay_dispatch_token_capacity == 0u &&
         override_layout.record_replay_access_dispatch_bank_count == 1u &&
-        override_layout.record_replay_access_owner_bank_count == 1u;
+        override_layout.record_replay_access_owner_bank_count == 1u &&
+        override_layout.record_replay_address_group_headroom == 1u;
     if ((!empty_access_layout &&
          (override_layout.record_replay_dispatch_token_capacity == 0u ||
           override_layout.record_replay_dispatch_token_capacity >
@@ -545,7 +566,12 @@ consan_moi_report_layout_from_override(const ConSanMoiReportLayoutOverride &over
         override_layout.record_replay_access_owner_bank_count >
             kConSanMoiRecordReplayMaximumOwnerBankCount ||
         (override_layout.record_replay_access_owner_bank_count &
-         (override_layout.record_replay_access_owner_bank_count - 1u)) != 0u) {
+         (override_layout.record_replay_access_owner_bank_count - 1u)) != 0u ||
+        override_layout.record_replay_address_group_headroom == 0u ||
+        override_layout.record_replay_address_group_headroom >
+            kConSanMoiRecordReplayMaximumAddressGroupsPerWave ||
+        (override_layout.record_replay_address_group_headroom &
+         (override_layout.record_replay_address_group_headroom - 1u)) != 0u) {
       return {};
     }
     const uint64_t bank_count =
@@ -556,8 +582,9 @@ consan_moi_report_layout_from_override(const ConSanMoiReportLayoutOverride &over
         bank_count);
     const auto grouped_access_capacity =
         minimum_access_capacity
-            ? util::checked_mul(*minimum_access_capacity,
-                                uint64_t{kConSanMoiRecordReplayMaximumAddressGroupsPerWave})
+            ? util::checked_mul(
+                  *minimum_access_capacity,
+                  static_cast<uint64_t>(override_layout.record_replay_address_group_headroom))
             : std::nullopt;
     if (!grouped_access_capacity ||
         *grouped_access_capacity > override_layout.access_record_capacity)
@@ -569,6 +596,8 @@ consan_moi_report_layout_from_override(const ConSanMoiReportLayoutOverride &over
         override_layout.record_replay_access_dispatch_bank_count;
     inventory.record_replay_access_owner_bank_count =
         override_layout.record_replay_access_owner_bank_count;
+    inventory.record_replay_address_group_headroom =
+        override_layout.record_replay_address_group_headroom;
     inventory.barrier_event_count = override_layout.barrier_record_capacity;
     inventory.atomic_event_count = override_layout.atomic_record_capacity;
     inventory.fence_event_count = override_layout.fence_record_capacity;

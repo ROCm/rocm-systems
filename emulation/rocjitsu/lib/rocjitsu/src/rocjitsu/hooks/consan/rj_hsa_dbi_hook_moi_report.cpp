@@ -51,17 +51,18 @@ public:
     record_allocation_attempt(required_size);
     const bool direct_sampled = engine == rocjitsu::ConSanMoiEngine::Sampled;
     const bool inline_shadow = engine == rocjitsu::ConSanMoiEngine::InlineShadow;
+    const uint64_t engine_ceiling = rocjitsu::consan_moi_auto_report_buffer_ceiling_bytes(engine);
     if (required_size > configured_cap || requested_size > configured_cap ||
-        requested_size > rocjitsu::kConSanMoiAutoReportBufferCeilingBytes) {
+        requested_size > engine_ceiling) {
       record_allocation_failure(required_size, /*capacity_failure=*/true);
-      log_message(
-          kLogInfo,
-          "ConSan MOI auto report allocation reader=%llu outcome="
-          "insufficient_report_capacity required_bytes=%llu cap_bytes=%llu "
-          "per_buffer_ceiling=%llu",
-          static_cast<unsigned long long>(reader), static_cast<unsigned long long>(required_size),
-          static_cast<unsigned long long>(configured_cap),
-          static_cast<unsigned long long>(rocjitsu::kConSanMoiAutoReportBufferCeilingBytes));
+      log_message(kLogInfo,
+                  "ConSan MOI auto report allocation reader=%llu outcome="
+                  "insufficient_report_capacity required_bytes=%llu cap_bytes=%llu "
+                  "per_buffer_ceiling=%llu",
+                  static_cast<unsigned long long>(reader),
+                  static_cast<unsigned long long>(required_size),
+                  static_cast<unsigned long long>(configured_cap),
+                  static_cast<unsigned long long>(engine_ceiling));
       return false;
     }
     if (core == nullptr || core->hsa_agent_iterate_regions_fn == nullptr ||
@@ -209,37 +210,38 @@ public:
     *registered_size = requested;
     if (registered_generation != nullptr)
       *registered_generation = generation;
-    log_message(kLogInfo,
-                "ConSan MOI auto report buffer reader=%llu addr=0x%llx bytes=%zu "
-                "required_bytes=%llu cap_bytes=%llu process_current_bytes=%llu "
-                "process_peak_bytes=%llu process_ceiling_bytes=%llu allocation_outcome=allocated "
-                "dispatch_token_capacity=%u dispatch_banks=%u owner_banks=%u "
-                "access_record_capacity=%u barrier_record_capacity=%u atomic_record_capacity=%u "
-                "fence_record_capacity=%u "
-                "diagnostic_capacity=%u exact_shadow_entry_capacity=%u "
-                "inline_atomic_release_capacity=%u "
-                "inline_acquired_epoch_token_capacity=%u "
-                "inline_causal_snapshot_capacity=%u "
-                "sampled_watchpoint_capacity=%u sampled_causal_window_capacity=%u "
-                "sampled_sync_metadata_capacity=%u sampled_pending_acquire_capacity=%u "
-                "generation=%llu fine_grained=%s",
-                static_cast<unsigned long long>(reader), static_cast<unsigned long long>(*address),
-                requested, static_cast<unsigned long long>(required_size),
-                static_cast<unsigned long long>(configured_cap),
-                static_cast<unsigned long long>(current_live_bytes()),
-                static_cast<unsigned long long>(peak_live_bytes()),
-                static_cast<unsigned long long>(rocjitsu::kConSanMoiAutoReportProcessCeilingBytes),
-                layout.record_replay_dispatch_token_capacity,
-                layout.record_replay_access_dispatch_bank_count,
-                layout.record_replay_access_owner_bank_count, layout.access_record_capacity,
-                layout.barrier_record_capacity, layout.atomic_record_capacity,
-                layout.fence_record_capacity, layout.diagnostic_capacity,
-                layout.exact_shadow_entry_capacity, layout.inline_atomic_release_capacity,
-                layout.inline_acquired_epoch_token_capacity, layout.inline_causal_snapshot_capacity,
-                layout.sampled_watchpoint_capacity, layout.sampled_causal_window_capacity,
-                layout.sampled_sync_metadata_capacity, layout.sampled_pending_acquire_capacity,
-                static_cast<unsigned long long>(generation),
-                search.fine_grained ? "true" : "false");
+    log_message(
+        kLogInfo,
+        "ConSan MOI auto report buffer reader=%llu addr=0x%llx bytes=%zu "
+        "required_bytes=%llu cap_bytes=%llu process_current_bytes=%llu "
+        "process_peak_bytes=%llu process_ceiling_bytes=%llu allocation_outcome=allocated "
+        "dispatch_token_capacity=%u dispatch_banks=%u owner_banks=%u "
+        "address_group_headroom=%u "
+        "access_record_capacity=%u barrier_record_capacity=%u atomic_record_capacity=%u "
+        "fence_record_capacity=%u "
+        "diagnostic_capacity=%u exact_shadow_entry_capacity=%u "
+        "inline_atomic_release_capacity=%u "
+        "inline_acquired_epoch_token_capacity=%u "
+        "inline_causal_snapshot_capacity=%u "
+        "sampled_watchpoint_capacity=%u sampled_causal_window_capacity=%u "
+        "sampled_sync_metadata_capacity=%u sampled_pending_acquire_capacity=%u "
+        "generation=%llu fine_grained=%s",
+        static_cast<unsigned long long>(reader), static_cast<unsigned long long>(*address),
+        requested, static_cast<unsigned long long>(required_size),
+        static_cast<unsigned long long>(configured_cap),
+        static_cast<unsigned long long>(current_live_bytes()),
+        static_cast<unsigned long long>(peak_live_bytes()),
+        static_cast<unsigned long long>(rocjitsu::kConSanMoiAutoReportProcessCeilingBytes),
+        layout.record_replay_dispatch_token_capacity,
+        layout.record_replay_access_dispatch_bank_count,
+        layout.record_replay_access_owner_bank_count, layout.record_replay_address_group_headroom,
+        layout.access_record_capacity, layout.barrier_record_capacity,
+        layout.atomic_record_capacity, layout.fence_record_capacity, layout.diagnostic_capacity,
+        layout.exact_shadow_entry_capacity, layout.inline_atomic_release_capacity,
+        layout.inline_acquired_epoch_token_capacity, layout.inline_causal_snapshot_capacity,
+        layout.sampled_watchpoint_capacity, layout.sampled_causal_window_capacity,
+        layout.sampled_sync_metadata_capacity, layout.sampled_pending_acquire_capacity,
+        static_cast<unsigned long long>(generation), search.fine_grained ? "true" : "false");
     return true;
   }
 
