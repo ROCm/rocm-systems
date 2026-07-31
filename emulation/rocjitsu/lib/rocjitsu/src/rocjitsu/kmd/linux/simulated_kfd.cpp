@@ -2271,7 +2271,7 @@ int SimulatedKfd::debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args 
     // array_count * num_xcc / simd_arrays_per_engine. Normalize the XCC count
     // the same way sysfs does so that quotient cannot come out zero.
     e.array_count = info.array_count_per_xcc();
-    e.simd_arrays_per_engine = info.num_shader_arrays_per_engine;
+    e.simd_arrays_per_engine = info.effective_arrays_per_engine();
     e.num_xcc = info.effective_num_xcc();
     const kmd::DebugTopology topology =
         kmd::effective_topology_for(info.gfx_target_version, info.capability, info.capability2,

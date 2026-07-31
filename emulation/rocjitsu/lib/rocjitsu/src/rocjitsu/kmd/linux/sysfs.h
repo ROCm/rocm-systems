@@ -92,6 +92,17 @@ public:
     /// normalize through here rather than each applying its own floor.
     uint32_t effective_num_xcc() const { return num_xcc == 0 ? 1u : num_xcc; }
 
+    /// @brief Shader arrays per engine with a floor of one.
+    /// @details This is the divisor libhsakmt and rocdbgapi apply to
+    /// array_count to recover the shader-engine count, so a node that publishes
+    /// a non-zero array_count next to "simd_arrays_per_engine 0" makes them
+    /// divide by zero. array_count_per_xcc() already floors it on the dividend
+    /// side; every publisher of the divisor goes through here so the two halves
+    /// of the quotient cannot be normalized differently.
+    uint32_t effective_arrays_per_engine() const {
+      return num_shader_arrays_per_engine == 0 ? 1u : num_shader_arrays_per_engine;
+    }
+
     /// @brief Shader arrays per XCC -- KFD's node_props.array_count.
     ///
     /// @details The driver reports shader *arrays*, not engines: libhsakmt
@@ -102,8 +113,7 @@ public:
     /// configs stating the geometry they model -- an MI350X XCD has four
     /// shader engines of two arrays, so num_shader_engines is 4, not 8.
     uint32_t array_count_per_xcc() const {
-      return num_shader_engines *
-             (num_shader_arrays_per_engine == 0 ? 1u : num_shader_arrays_per_engine);
+      return num_shader_engines * effective_arrays_per_engine();
     }
   };
 
