@@ -1,16 +1,17 @@
 # rccl-PureUnitTests — CPU-Only Test Binary
 
-**Date:** 2026-07-28
-**Compiler:** g++ 13.3.0 + hipcc --offload-host-only (optional)
-**GTest:** 1.14.0 (system)
-**Result:** 285 tests across 41 suites; all pass
+**Date:** 2026-07-31
+**Compiler:** hipcc --offload-host-only (mandatory)
+**GTest:** 1.14.0 (system, RCCL-vendored, or FetchContent)
+**Result:** 272 tests pass, 0 failures, 7 disabled
 
 ## What This Is
 
-A standalone test binary that compiles with g++ and hipcc `--offload-host-only`
-(no GPU codegen) and runs on CPU-only nodes. It contains functional tests that
-compile and call real RCCL production source, migrated from GPU-dependent test
-binaries where they were trapped behind `hip::device` link dependencies.
+A standalone test binary that compiles with hipcc `--offload-host-only`
+(no GPU codegen) against real hipified RCCL headers and runs on CPU-only
+nodes. It contains functional tests that compile and call real RCCL
+production source, migrated from GPU-dependent test binaries where they
+were trapped behind `hip::device` link dependencies.
 
 ## Runtime Dependencies
 
@@ -21,55 +22,55 @@ libstdc++.so.6, libm.so.6, libgcc_s.so.1, libc.so.6
 
 ## Test Suites
 
-### Compiling real RCCL `.cc` source (142 tests)
+### Compiling real RCCL `.cc` source (150 active tests)
 
 | Source File | Suite | Tests | Real RCCL source compiled |
 |-------------|-------|-------|---------------------------|
-| AltRsmiTests.cpp | AltRsmiTest | 44 | alt_rsmi.cc (g++) |
-| MemManagerTests.cpp | MemManager* | 68 | mem_manager.cc (hipcc) |
-| VersionInfoTests.cpp | VersionInfoTests | 7 | kernel_config.cc (g++) |
-| NullParentTests.cpp | NullParentTest | 6 | paths.cc, search.cc (hipcc) |
-| EnqueueCountTests.cpp | EnqueueCountTests | 4 | kernel_config.cc (g++) |
-| RomeTopoConsensusTests.cpp | RomeTopoConsensus | 4 | rome_topo_consensus.cc (g++) |
-| IommuPassthrough_test.cpp | IommuPassthroughTest | 6 | kernel_config.cc (shared) |
+| MemManagerTests.cpp | MemManager* | 61 | mem_manager.cc |
+| AltRsmiTests.cpp | AltRsmiTest | 44 | alt_rsmi.cc |
+| BootstrapBidirTests.cpp | BootstrapBidir | 16 | bootstrap.cc (via bootstrap_wrapper.cc) |
+| TimeoutTests.cpp | TimeoutTests | 8 | init_stubs.cpp (real RCCL types) |
+| VersionInfoTests.cpp | VersionInfoTests | 7 | kernel_config.cc |
+| IommuPassthrough_test.cpp | IommuPassthroughTest | 6 | kernel_config.cc |
+| EnqueueCountTests.cpp | EnqueueCountTests | 4 | kernel_config.cc |
+| RomeTopoConsensusTests.cpp | RomeTopoConsensus | 4 | rome_topo_consensus.cc |
 
-### Header-only, no real `.cc` source (143 tests)
+### Header-only, no real `.cc` source (122 tests)
 
 These test files existed in `rccl-UnitTestsFixtures` / `rccl-UnitTestsFixturesDebug`
 but were trapped behind `hip::device` link dependencies. They only `#include`
-RCCL headers (inline, constexpr, template functions) resolved via stub headers.
+RCCL headers (inline, constexpr, template functions).
 
 | Source File | Suite | Tests | Headers tested |
 |-------------|-------|-------|----------------|
-| BitOpsTests.cpp | BitOps* | 106 | bitops.h |
-| BootstrapBidirTests.cpp | BootstrapBidir | 16 | bootstrap.h (via hand-rolled stub) |
-| TimeoutTests.cpp | TimeoutTests | 8 | comm.h |
+| BitOpsTests.cpp | BitOps* | 115 | bitops.h |
 | DdaCollCommonTests.cpp | DdaCollCommon | 6 | CollCommon.h |
 | MiscTests.cpp | MiscTests | 1 | comm.h |
 
+### Disabled tests (7)
+
+Seven `MemManagerRealMem` tests are disabled (`DISABLED_` prefix). They call
+real HIP allocation APIs that require GPU hardware. Will be re-enabled once
+a HIP mock layer is available.
+
 ## How It Works
 
-The binary avoids HIP/ROCm dependencies through two mechanisms:
+All files compile with **hipcc `--offload-host-only`** against real hipified
+RCCL headers from the build tree. No stub headers, no g++ fallback. The
+linker flag `-no-hip-rt` prevents linking the HIP runtime.
 
-1. **Stub headers** in `test/pure/stubs/` shadow the real HIP/HSA/NCCL headers
-   (placed first in the include path via `-iquote`). They provide type
-   definitions and no-op API functions.
-
-2. **hipcc `--offload-host-only`** compiles real RCCL source files (hipified)
-   with full header resolution but no GPU code. Used for tests that need real
-   RCCL struct layouts (NullParentTests, MemManagerTests).
-
-RCCL source files compiled directly into the binary:
-- Via g++: `kernel_config.cc`, `alt_rsmi.cc`, `rome_topo_consensus.cc`
-- Via hipcc: `paths.cc`, `search.cc`, `mem_manager.cc` (through wrapper files)
+RCCL source files compiled into the binary:
+- Directly: `kernel_config.cc`, `alt_rsmi.cc`, `rome_topo_consensus.cc`
+- Via wrapper files: `mem_manager.cc`, `bootstrap.cc` (through `rccl-source-wrappers` static library)
 
 ## Build
 
 ```bash
 cd projects/rccl/test/pure
-cmake -B build -DCMAKE_BUILD_TYPE=Debug
+cmake -B build -DCMAKE_BUILD_TYPE=Debug -DROCM_PATH=/path/to/rocm
 cmake --build build -j$(nproc)
 ./build/rccl-PureUnitTests
 ```
 
-hipcc wrapper tests auto-disable if hipcc or hipified sources are not found.
+Prerequisite: hipified sources must exist at `../../build/hipify/`. Generate
+them by running the main RCCL build or `cmake --build build --target hipify_all`.

@@ -63,13 +63,17 @@ if(NOT GTest_FOUND)
   endif()
 endif()
 
-# --- Fetch fmt (header-only) ---
-FetchContent_Declare(fmt
-  GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-  GIT_TAG        10.2.1
-  GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(fmt)
+# --- Resolve fmt: system -> FetchContent fallback ---
+find_package(fmt QUIET)
+if(NOT fmt_FOUND)
+  message(STATUS "Downloading fmt via FetchContent")
+  FetchContent_Declare(fmt
+    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+    GIT_TAG        10.2.1
+    GIT_SHALLOW    TRUE
+  )
+  FetchContent_MakeAvailable(fmt)
+endif()
 
 # --- Resolve RCCL build directory ---
 set(RCCL_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../build" CACHE PATH

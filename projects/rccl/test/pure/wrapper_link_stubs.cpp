@@ -24,12 +24,15 @@ enum ncclTopoGdrMode : int;
 enum netDevsPolicy : int;
 using ncclResult_t = int;
 static constexpr int ncclSuccess = 0;
+typedef enum { NCCL_LOG_NONE=0, NCCL_LOG_ERROR=1, NCCL_LOG_VERSION=2,
+               NCCL_LOG_WARN=3, NCCL_LOG_INFO=4, NCCL_LOG_ABORT=5,
+               NCCL_LOG_TRACE=6 } ncclDebugLogLevel;
 
 // --- debug.cc ---
 int ncclDebugLevel = 3;  // NCCL_LOG_WARN
 uint64_t ncclDebugMask = 0x7fffffffffffffffULL;
 
-void ncclDebugLog(int level, unsigned long flags,
+void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags,
                   const char* filefunc, int line, const char* fmt, ...) {
     if (level > ncclDebugLevel) return;
     va_list args;
