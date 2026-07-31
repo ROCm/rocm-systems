@@ -77,16 +77,11 @@ struct fake_ring
     }
 };
 
-// Recording sinks: capture the callback stream so tests can assert on it.
+// Recording sink: capture the pair callback stream so tests can assert on it.
 struct recorder
 {
-    std::vector<std::pair<uint32_t, uint32_t>>                             records;  // (db, disp)
     std::map<std::pair<uint32_t, uint32_t>, std::pair<uint64_t, uint64_t>> pairs;  // -> (start,end)
 
-    auto on_record()
-    {
-        return [this](uint32_t db, uint32_t disp) { records.emplace_back(db, disp); };
-    }
     auto on_pair()
     {
         return [this](uint32_t db, uint32_t disp, uint64_t start, uint64_t end) {
@@ -106,27 +101,30 @@ run_drain(fake_ring& ring, drain_state& st, recorder& rec, uint64_t now_ns = 100
                        ring.rptr.data(),
                        st,
                        now_ns,
-                       rec.on_record(),
                        rec.on_pair());
 }
 }  // namespace
 
-// First drain only syncs cursors to wptr; it must report nothing and set rptr=wptr
-// so pre-existing records are never replayed.
-TEST(dlog_drain, first_drain_syncs_and_reports_nothing)
+// First drain starts each pipe at the ring origin: the session buffer is freshly
+// allocated, so records already present belong to this session and must be
+// consumed, not skipped. rptr ends up synced to wptr.
+TEST(dlog_drain, first_drain_consumes_from_origin)
 {
     fake_ring   ring(2, 2048);
     drain_state st;
     recorder    rec;
 
-    ring.put(0, 0, kRecStart, 7, 4100, 111);
-    ring.wptr[0] = 1;  // pretend a record predates our attach
+    const uint32_t db = 4100;
+    ring.put(0, 0, kRecStart, 7, db, 111);
+    ring.put(0, 1, kRecEop, 7, db, 222);
+    ring.wptr[0] = 2;
 
     uint64_t pairs = run_drain(ring, st, rec);
 
-    EXPECT_EQ(pairs, 0u);
-    EXPECT_TRUE(rec.records.empty());
-    EXPECT_EQ(ring.rptr[0], 1u);  // cursor synced forward
+    EXPECT_EQ(pairs, 1u);
+    ASSERT_EQ(rec.pairs.count(std::make_pair(db, 7u)), 1u);
+    EXPECT_EQ(rec.pairs[std::make_pair(db, 7u)].first, 111u);
+    EXPECT_EQ(ring.rptr[0], 2u);  // cursor advanced to the producer
     EXPECT_TRUE(st.rptr_init);
 }
 
@@ -136,7 +134,7 @@ TEST(dlog_drain, single_pipe_pairs_all)
     fake_ring   ring(2, 2048);
     drain_state st;
     recorder    rec0;
-    run_drain(ring, st, rec0);  // sync
+    run_drain(ring, st, rec0);  // first drain (empty ring)
 
     const uint32_t db = 4100;
     for(uint32_t i = 0; i < 40; ++i)
@@ -168,7 +166,7 @@ TEST(dlog_drain, two_pipes_asymmetric_capture_both)
     fake_ring   ring(2, 2048);
     drain_state st;
     recorder    rec0;
-    run_drain(ring, st, rec0);  // sync
+    run_drain(ring, st, rec0);  // first drain (empty ring)
 
     const uint32_t dbA = 4100, dbB = 4102;
     // region 0: 20 pairs (doorbell A) at slots 0..39
@@ -210,7 +208,7 @@ TEST(dlog_drain, padding_slots_skipped)
     fake_ring   ring(2, 2048);
     drain_state st;
     recorder    rec0;
-    run_drain(ring, st, rec0);  // sync
+    run_drain(ring, st, rec0);  // first drain (empty ring)
 
     const uint32_t db = 4100;
     ring.put(0, 0, kRecStart, 5, db, 10);
@@ -294,21 +292,11 @@ TEST(dlog_drain, invalid_geometry_rejected)
     recorder    rec;
 
     // num_regions == 0 -> reject.
-    EXPECT_EQ(
-        drain_pipes(nullptr, 0, 2048, nullptr, nullptr, st, 1000, rec.on_record(), rec.on_pair()),
-        0u);
+    EXPECT_EQ(drain_pipes(nullptr, 0, 2048, nullptr, nullptr, st, 1000, rec.on_pair()), 0u);
 
     // num_regions beyond kMaxRegions (cursor storage) -> reject.
-    EXPECT_EQ(drain_pipes(nullptr,
-                          kMaxRegions + 1,
-                          2048,
-                          nullptr,
-                          nullptr,
-                          st,
-                          1000,
-                          rec.on_record(),
-                          rec.on_pair()),
-              0u);
+    EXPECT_EQ(
+        drain_pipes(nullptr, kMaxRegions + 1, 2048, nullptr, nullptr, st, 1000, rec.on_pair()), 0u);
 
     // region_record_count not a power of two (3000) -> reject.
     fake_ring ring(2, 3000);
@@ -325,7 +313,7 @@ TEST(dlog_drain, overrun_recovery)
     fake_ring   ring(2, 2048);  // 2048 slots per region
     drain_state st;
     recorder    rec0;
-    run_drain(ring, st, rec0);  // first-drain sync -> rptr[*]=0
+    run_drain(ring, st, rec0);  // first drain (empty ring) -> rptr[*]=0
 
     const uint32_t db = 4100;
     // Producer has run far ahead: 10000 records written to region 0 (>> 2048 slots),
@@ -354,7 +342,7 @@ TEST(dlog_drain, ring_wrap_pairs_across_boundary)
     fake_ring   ring(2, 2048);  // 2048 slots per region
     drain_state st;
     recorder    rec_sync;
-    run_drain(ring, st, rec_sync);  // first-drain sync at 0
+    run_drain(ring, st, rec_sync);  // first drain (empty ring)
     // Prime rptr to just before the power-of-two wrap so we drain [2047, 2049).
     st.rptr[0] = 2047;
 

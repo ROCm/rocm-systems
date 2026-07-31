@@ -56,37 +56,41 @@ TEST(correlation_key, equality_and_hash)
 }
 
 // ---------------------------------------------------------------------------
+// kfd_time_is_sane: the KFD-result-vs-HSA-fallback decision in get_dispatch_time
+// ---------------------------------------------------------------------------
+TEST(kfd_time_is_sane, accepts_interval_inside_the_dispatch_window)
+{
+    EXPECT_TRUE(kfd_time_is_sane(/*start*/ 150, /*end*/ 250, /*enqueue*/ 100, /*now*/ 300));
+    // Exactly on both bounds is still inside the window.
+    EXPECT_TRUE(kfd_time_is_sane(100, 300, 100, 300));
+}
+
+TEST(kfd_time_is_sane, rejects_records_outside_the_dispatch_window)
+{
+    EXPECT_FALSE(kfd_time_is_sane(99, 250, 100, 300));   // starts before enqueue
+    EXPECT_FALSE(kfd_time_is_sane(150, 301, 100, 300));  // ends after now
+    EXPECT_FALSE(kfd_time_is_sane(250, 150, 100, 300));  // inverted interval
+    EXPECT_FALSE(kfd_time_is_sane(150, 150, 100, 300));  // zero-length interval
+}
+
+// ---------------------------------------------------------------------------
 // DoorbellMap
 // ---------------------------------------------------------------------------
 TEST(DoorbellMap, bind_and_lookup)
 {
-    auto m = DoorbellMap{};
-    m.bind_and_resolve(qid(42), /*doorbell_off=*/7);
-
-    auto e = m.get_by_queue(qid(42));
-    ASSERT_TRUE(e.has_value());
-    EXPECT_EQ(e->doorbell_off, 7u);
-    EXPECT_EQ(e->generation, 0u);
-    EXPECT_TRUE(m.is_generation_certain(7));
-    EXPECT_EQ(m.get_generation(7), 0u);
+    auto e = DoorbellMap{}.bind_and_resolve(qid(42), /*doorbell_off=*/7);
+    EXPECT_EQ(e.doorbell_off, 7u);
+    EXPECT_EQ(e.generation, 0u);
 }
 
-TEST(DoorbellMap, unknown_queue_returns_nullopt)
-{
-    auto m = DoorbellMap{};
-    EXPECT_FALSE(m.get_by_queue(qid(999)).has_value());
-}
-
-TEST(DoorbellMap, destroy_bumps_generation_and_marks_uncertain)
+TEST(DoorbellMap, destroy_bumps_generation)
 {
     auto m = DoorbellMap{};
     m.bind_and_resolve(qid(42), 7);
 
     m.on_queue_destroyed(qid(42));
 
-    EXPECT_EQ(m.get_generation(7), 1u);                 // bumped
-    EXPECT_FALSE(m.get_by_queue(qid(42)).has_value());  // mapping removed
-    EXPECT_FALSE(m.is_generation_certain(7));           // uncertain until rebind
+    EXPECT_EQ(m.get_generation(7), 1u);  // bumped
 }
 
 TEST(DoorbellMap, doorbell_reuse_gets_new_generation)
@@ -99,12 +103,9 @@ TEST(DoorbellMap, doorbell_reuse_gets_new_generation)
 
     // a new queue 43 reuses doorbell 7 -> must carry the bumped generation,
     // so records from the old queue can never be attributed to the new one.
-    m.bind_and_resolve(qid(43), 7);
-    auto e = m.get_by_queue(qid(43));
-    ASSERT_TRUE(e.has_value());
-    EXPECT_EQ(e->doorbell_off, 7u);
-    EXPECT_EQ(e->generation, 1u);
-    EXPECT_TRUE(m.is_generation_certain(7));  // rebind clears uncertainty
+    auto e = m.bind_and_resolve(qid(43), 7);
+    EXPECT_EQ(e.doorbell_off, 7u);
+    EXPECT_EQ(e.generation, 1u);
 }
 
 TEST(DoorbellMap, destroy_unknown_queue_is_noop)
@@ -114,34 +115,17 @@ TEST(DoorbellMap, destroy_unknown_queue_is_noop)
     EXPECT_EQ(m.get_generation(7), 0u);
 }
 
-// Binding is an upsert (map[key]=), not insert-if-absent: re-binding the SAME
-// queue to a NEW doorbell must update its entry (kept []= rather than emplace).
-TEST(DoorbellMap, rebind_same_queue_updates_doorbell)
-{
-    auto m = DoorbellMap{};
-    m.bind_and_resolve(qid(42), 7);
-    m.bind_and_resolve(qid(42), 9);  // same queue, new doorbell -> must overwrite
-
-    auto e = m.get_by_queue(qid(42));
-    ASSERT_TRUE(e.has_value());
-    EXPECT_EQ(e->doorbell_off, 9u);  // updated, not stuck at 7
-}
-
 // Two distinct queues binding the same doorbell (degenerate, should not happen
 // without an intervening destroy) each resolve via the forward map, and the
 // shared doorbell generation is preserved (0 here, never bumped without destroy).
 TEST(DoorbellMap, two_queues_same_doorbell_forward_resolves)
 {
     auto m = DoorbellMap{};
-    m.bind_and_resolve(qid(42), 7);
-    m.bind_and_resolve(qid(43), 7);
+    auto a = m.bind_and_resolve(qid(42), 7);
+    auto b = m.bind_and_resolve(qid(43), 7);
 
-    auto a = m.get_by_queue(qid(42));
-    auto b = m.get_by_queue(qid(43));
-    ASSERT_TRUE(a.has_value());
-    ASSERT_TRUE(b.has_value());
-    EXPECT_EQ(a->doorbell_off, 7u);
-    EXPECT_EQ(b->doorbell_off, 7u);
+    EXPECT_EQ(a.doorbell_off, 7u);
+    EXPECT_EQ(b.doorbell_off, 7u);
     EXPECT_EQ(m.get_generation(7), 0u);  // no destroy -> generation unchanged
 }
 
@@ -179,43 +163,35 @@ TEST(DoorbellMap, bind_and_resolve_binds_then_caches)
     auto e2 = m.bind_and_resolve(qid(42), 4u);
     EXPECT_EQ(e2.doorbell_off, 4u);
     EXPECT_EQ(e2.generation, 0u);
-
-    // Equivalent to what get_by_queue reports.
-    auto snap = m.get_by_queue(qid(42));
-    ASSERT_TRUE(snap.has_value());
-    EXPECT_EQ(snap->doorbell_off, 4u);
-    EXPECT_EQ(snap->generation, 0u);
 }
 
 // After a queue is destroyed and its doorbell reused by a new queue,
-// bind_and_resolve must rebind (clearing the uncertain mark) and report the
-// bumped generation -- never the stale one.
+// bind_and_resolve must rebind and report the bumped generation -- never the
+// stale one.
 TEST(DoorbellMap, bind_and_resolve_rebinds_on_doorbell_reuse)
 {
     auto m = DoorbellMap{};
 
     m.bind_and_resolve(qid(1), 4u);  // gen 0
-    m.on_queue_destroyed(qid(1));    // doorbell 4 -> uncertain, gen bumped to 1
-    EXPECT_FALSE(m.is_generation_certain(4u));
+    m.on_queue_destroyed(qid(1));    // doorbell 4 -> gen bumped to 1
 
     // New queue reuses doorbell 4: the FIRST resolve rebinds via the slow
     // (write-lock) path because qid(2) is absent from by_queue -- hand back the
-    // bumped gen 1, certain.
+    // bumped gen 1.
     auto e = m.bind_and_resolve(qid(2), 4u);
     EXPECT_EQ(e.doorbell_off, 4u);
     EXPECT_EQ(e.generation, 1u);
-    EXPECT_TRUE(m.is_generation_certain(4u));
 
-    // A SECOND resolve on the reused queue now takes the fast (read-lock) path
-    // (qid(2) bound, doorbell certain). It must still report the bumped gen 1,
-    // never a stale 0 -- guards against the fast path serving pre-reuse state.
+    // A SECOND resolve on the reused queue now takes the fast (read-lock) path.
+    // It must still report the bumped gen 1, never a stale 0 -- guards against
+    // the fast path serving pre-reuse state.
     auto e2 = m.bind_and_resolve(qid(2), 4u);
     EXPECT_EQ(e2.doorbell_off, 4u);
     EXPECT_EQ(e2.generation, 1u);
 }
 
-// A queue that migrates to a different doorbell_off must resolve to the new slot,
-// not the cached old one.
+// Binding is an upsert: a queue that migrates to a different doorbell_off must
+// resolve to the new slot, not the cached old one.
 TEST(DoorbellMap, bind_and_resolve_follows_queue_to_new_doorbell)
 {
     auto m = DoorbellMap{};
@@ -225,10 +201,6 @@ TEST(DoorbellMap, bind_and_resolve_follows_queue_to_new_doorbell)
 
     auto b = m.bind_and_resolve(qid(7), 8u);  // same queue, different doorbell
     EXPECT_EQ(b.doorbell_off, 8u);
-
-    auto snap = m.get_by_queue(qid(7));
-    ASSERT_TRUE(snap.has_value());
-    EXPECT_EQ(snap->doorbell_off, 8u);
 }
 
 // ---------------------------------------------------------------------------
@@ -244,7 +216,12 @@ TEST(ResultsMap, deposit_take_roundtrip)
     ASSERT_TRUE(r.has_value());
     EXPECT_EQ(r->start_gpu_ticks, 1000u);
     EXPECT_EQ(r->end_gpu_ticks, 2000u);
+    EXPECT_EQ(m.stats().hits, 1u);
+    EXPECT_EQ(m.stats().misses, 0u);
+
     EXPECT_FALSE(m.take(key).has_value());  // take erased it
+    EXPECT_EQ(m.stats().hits, 1u);
+    EXPECT_EQ(m.stats().misses, 1u);  // the failed take is the HSA-fallback signal
 }
 
 // deposit() uses emplace (insert-if-absent): a duplicate key keeps the FIRST
@@ -271,7 +248,6 @@ TEST(ResultsMap, evict_stale_removes_old_keeps_fresh)
     // entry at t=9000 is 1000ns old (keep).
     auto evicted = m.evict_stale(/*now_ns=*/10'000, /*max_age_ns=*/5'000);
     EXPECT_EQ(evicted, 1u);
-    EXPECT_EQ(m.size(), 1u);
     EXPECT_FALSE(m.take(correlation_key{7, 1, 0}).has_value());
     EXPECT_TRUE(m.take(correlation_key{7, 2, 0}).has_value());
 }
@@ -283,5 +259,5 @@ TEST(ResultsMap, evict_stale_tolerates_future_timestamp)
     m.deposit(correlation_key{7, 1, 0}, kfd_timing_result{1, 2, /*deposited_at_ns*/ 20'000});
     auto evicted = m.evict_stale(/*now_ns=*/10'000, /*max_age_ns=*/5'000);
     EXPECT_EQ(evicted, 0u);
-    EXPECT_EQ(m.size(), 1u);
+    EXPECT_TRUE(m.take(correlation_key{7, 1, 0}).has_value());  // still retained
 }
