@@ -20,7 +20,7 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-unit time
-        --pc-sampling-method host_trap --pc-sampling-interval 1 -d
+        --pc-sampling-method host_trap --pc-sampling-interval 512 -d
         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input -o out --output-format csv json
         -- $<TARGET_FILE:exec-mask-manipulation>
     DEPENDS exec-mask-manipulation

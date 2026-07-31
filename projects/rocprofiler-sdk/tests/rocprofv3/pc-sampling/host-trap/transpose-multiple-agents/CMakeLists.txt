@@ -26,7 +26,7 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-cmd
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kernel-trace --pc-sampling-unit time
-        --pc-sampling-method host_trap --pc-sampling-interval 1 --agent-index absolute -d
+        --pc-sampling-method host_trap --pc-sampling-interval 512 --agent-index absolute -d
         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input -o out --output-format csv --
         $<TARGET_FILE:transpose> ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS}
     DEPENDS transpose
