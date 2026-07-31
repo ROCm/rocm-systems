@@ -35,7 +35,11 @@ namespace hipfile
 static_assert(HIPFILE_RUNTIME_API_TABLE_MAJOR_VERSION == 0,
               "Major version updated for hipFILE dispatch table");
 
+#if HIPFILE_RUNTIME_API_TABLE_STEP_VERSION >= 1
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::hipFileDispatchTable, 34)
+#else
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::hipFileDispatchTable, 31)
+#endif
 
 ROCP_SDK_ENFORCE_ABI(::hipFileDispatchTable, pfn_hipfile_get_op_error_string, 0)
 ROCP_SDK_ENFORCE_ABI(::hipFileDispatchTable, pfn_hipfile_handle_register, 1)
@@ -68,6 +72,12 @@ ROCP_SDK_ENFORCE_ABI(::hipFileDispatchTable, pfn_hipfile_get_parameter_string, 2
 ROCP_SDK_ENFORCE_ABI(::hipFileDispatchTable, pfn_hipfile_set_parameter_size_t, 28)
 ROCP_SDK_ENFORCE_ABI(::hipFileDispatchTable, pfn_hipfile_set_parameter_bool, 29)
 ROCP_SDK_ENFORCE_ABI(::hipFileDispatchTable, pfn_hipfile_set_parameter_string, 30)
+
+#if HIPFILE_RUNTIME_API_TABLE_STEP_VERSION >= 1
+ROCP_SDK_ENFORCE_ABI(::hipFileDispatchTable, pfn_hipfile_get_stats_l1, 31)
+ROCP_SDK_ENFORCE_ABI(::hipFileDispatchTable, pfn_hipfile_get_stats_l2, 32)
+ROCP_SDK_ENFORCE_ABI(::hipFileDispatchTable, pfn_hipfile_get_stats_l3, 33)
+#endif
 
 }  // namespace hipfile
 }  // namespace rocprofiler
