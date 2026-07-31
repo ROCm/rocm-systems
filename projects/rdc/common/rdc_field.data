@@ -161,6 +161,9 @@ FLD_DESC_ENT(RDC_FI_ECC_IH_DE,           "IH Deferred Error",                   
 FLD_DESC_ENT(RDC_FI_ECC_MPIO_DE,         "MPIO Deferred Error",                         "ECC_MPIO_DE",      true)
 FLD_DESC_ENT(RDC_FI_ECC_DEFERRED_TOTAL,  "Total Accumulated Deferred ECC Errors",       "ECC_DEFER_TOTAL",  true)
 
+// RAS CPER AFID
+FLD_DESC_ENT(RDC_FI_AFID,                "Decoded AFID(s) and severity from CPER",      "AFID",             true)
+
 // XGMI
 FLD_DESC_ENT(RDC_FI_XGMI_0_READ_KB,      "XGMI0 accumulated data read size (KB)",       "XGMI_0_READ",      true)
 FLD_DESC_ENT(RDC_FI_XGMI_1_READ_KB,      "XGMI1 accumulated data read size (KB)",       "XGMI_1_READ",      true)
