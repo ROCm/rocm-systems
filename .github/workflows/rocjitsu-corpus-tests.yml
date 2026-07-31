@@ -152,7 +152,6 @@ jobs:
             shared/machine-readable-isa/isa
 
       - name: Checkout rocjitsu corpus
-        if: matrix.name == 'release'
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
@@ -299,7 +298,6 @@ jobs:
             --output-on-failure
 
       - name: Install corpus test dependencies
-        if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         run: |
           uv pip install --system -r requirements.txt
@@ -310,14 +308,12 @@ jobs:
           rocm-sdk init
 
       - name: Run amdisa tests
-        if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
         run: |
           uv pip install --system -e lib/python
           python -m pytest lib/python/amdisa/tests
 
       - name: Run corpus tests
-        if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         env:
