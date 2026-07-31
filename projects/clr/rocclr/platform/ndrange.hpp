@@ -120,6 +120,10 @@ struct LaunchParams {
       validConfig_ = false;
     }
 
+    if (!NDRange16::CanSafelyNarrow(localX, localY, localZ)) {
+      validConfig_ = false;
+    }
+
     if (hipParams_) {
       // Check that the size_t globals fit in uint32_t before the narrowing cast above.
       if (!NDRange32::CanSafelyNarrow(globalX, globalY, globalZ)) {
