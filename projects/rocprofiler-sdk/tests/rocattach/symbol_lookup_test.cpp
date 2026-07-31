@@ -323,7 +323,7 @@ copy_with_flipped_build_id(const std::string& source, const std::string& destina
     }
 }
 
-void
+bool
 expect_pathname_lookup_validates_build_id(const loaded_library& source,
                                           const loaded_library& no_build_id)
 {
@@ -334,7 +334,7 @@ expect_pathname_lookup_validates_build_id(const loaded_library& source,
     if(fd < 0)
     {
         std::cerr << "mkstemp failed for replaced ELF fixture\n";
-        std::exit(1);
+        return false;
     }
     close(fd);
 
@@ -349,7 +349,7 @@ expect_pathname_lookup_validates_build_id(const loaded_library& source,
     if(symbol == nullptr)
     {
         std::cerr << "dlsym failed for " << path_buffer << "::" << ATTACH_SYMBOL_NAME << '\n';
-        std::exit(1);
+        return false;
     }
     auto expected = reinterpret_cast<uintptr_t>(symbol);
 
@@ -358,21 +358,21 @@ expect_pathname_lookup_validates_build_id(const loaded_library& source,
     if(stat(path_buffer.c_str(), &mapped_identity) != 0)
     {
         std::cerr << "stat failed for " << path_buffer << '\n';
-        std::exit(1);
+        return false;
     }
 
     auto done_pipe = std::array<int, 2>{};
     if(pipe(done_pipe.data()) != 0)
     {
         std::cerr << "pipe failed for cross-process Build ID test\n";
-        std::exit(1);
+        return false;
     }
 
     auto child = fork();
     if(child < 0)
     {
         std::cerr << "fork failed for cross-process Build ID test\n";
-        std::exit(1);
+        return false;
     }
     if(child == 0)
     {
@@ -413,8 +413,9 @@ expect_pathname_lookup_validates_build_id(const loaded_library& source,
             installed.st_ino == mapped_identity.st_ino))
         {
             std::cerr << "replacing " << path_buffer << " did not change its inode\n";
-            std::exit(1);
+            return false;
         }
+        return true;
     };
 
     // Forces the /proc/<pid>/root path instead of /proc/<pid>/map_files.
@@ -427,26 +428,37 @@ expect_pathname_lookup_validates_build_id(const loaded_library& source,
         if(did_resolve != should_resolve)
         {
             std::cerr << description << '\n';
-            std::exit(1);
+            return false;
         }
         if(should_resolve && reinterpret_cast<uintptr_t>(resolved) != expected)
         {
             std::cerr << "find_symbol resolved the wrong address: " << description << '\n';
-            std::exit(1);
+            return false;
         }
+        return true;
     };
 
-    install_at_pathname(source.path);
-    expect_lookup(true, "find_symbol rejected a pathname replacement with a matching Build ID");
+    if(!install_at_pathname(source.path)) return false;
+    if(!expect_lookup(true, "find_symbol rejected a pathname replacement with a matching Build ID"))
+    {
+        return false;
+    }
 
     auto flipped = path_buffer + ".flipped";
     copy_with_flipped_build_id(source.path, flipped);
-    install_at_pathname(flipped);
-    expect_lookup(false,
-                  "find_symbol accepted a replacement whose only difference is its Build ID");
+    if(!install_at_pathname(flipped)) return false;
+    if(!expect_lookup(false,
+                      "find_symbol accepted a replacement whose only difference is its Build ID"))
+    {
+        return false;
+    }
 
-    install_at_pathname(no_build_id.path);
-    expect_lookup(false, "find_symbol accepted a replacement without a Build ID");
+    if(!install_at_pathname(no_build_id.path)) return false;
+    if(!expect_lookup(false, "find_symbol accepted a replacement without a Build ID"))
+    {
+        return false;
+    }
+    return true;
 }
 }  // namespace
 
@@ -490,7 +502,7 @@ main(int argc, char** argv)
     }
     expect_ambiguous_basename_fails();
     expect_malformed_mapped_elf_fails();
-    expect_pathname_lookup_validates_build_id(libraries.at(0), libraries.at(4));
+    if(!expect_pathname_lookup_validates_build_id(libraries.at(0), libraries.at(4))) return 1;
 
     std::cout << "Test PASSED: target ELF resolver resolved exact mapped libraries and rejected "
                  "ambiguous and malformed mappings\n";
