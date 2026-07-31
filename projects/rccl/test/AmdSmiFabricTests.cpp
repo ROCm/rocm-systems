@@ -115,21 +115,22 @@ TEST(AmdSmiFabricState, PayloadFromSysfsBackedDeviceIsUsable)
 //
 // The library writes these structs through dlopen using its own layout, so a
 // declaration that disagrees overflows the caller's object and shifts the
-// fields we read. amdsmi_wrap.h pins this at compile time; assert the field
-// offsets too, since those are what a short local_accelerators[] would move.
+// fields we read. amdsmi_wrap.h accepts the coherent 8-GPU layout used by some
+// pre-release ROCm 7.14 snapshots and the 16-GPU layout used by final ROCm 7.14
+// and ROCm 7.15, but rejects any other combination.
 // ---------------------------------------------------------------------------
 
 TEST(AmdSmiFabricLayout, MatchesShippedLibraryAbi)
 {
-    EXPECT_EQ(sizeof(amdsmi_fabric_info_v1_t), 244u);
-    EXPECT_EQ(sizeof(amdsmi_fabric_info_t), 320u);
-    EXPECT_EQ(offsetof(amdsmi_fabric_info_t, reserved), 256u);
+    EXPECT_TRUE(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu);
+    EXPECT_NE(amdSmiFabricLayoutIs8Gpu, amdSmiFabricLayoutIs16Gpu);
 }
 
 TEST(AmdSmiFabricLayout, TrailingFieldsAreNotShifted)
 {
-    EXPECT_EQ(offsetof(amdsmi_fabric_info_v1_t, addr_mode), 236u);
-    EXPECT_EQ(offsetof(amdsmi_fabric_info_v1_t, accel_state), 240u);
+    const size_t expectedAddrMode = amdSmiFabricLayoutIs8Gpu ? 204u : 236u;
+    EXPECT_EQ(offsetof(amdsmi_fabric_info_v1_t, addr_mode), expectedAddrMode);
+    EXPECT_EQ(offsetof(amdsmi_fabric_info_v1_t, accel_state), expectedAddrMode + sizeof(uint32_t));
 }
 
 // ---------------------------------------------------------------------------

@@ -472,12 +472,22 @@ amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char**
  * struct using the shipped library's layout, not ours. If our declaration is
  * smaller the library writes past the end of the caller's object, and any
  * shift moves the fields we read. Neither shows up as a compiler diagnostic,
- * so pin the layout here: a mismatch must be a deliberate update, not a
- * silent memory bug. Values measured against amdsmi 26.5.0 (ROCm 7.15).
+ * so recognize the two shipped layouts here: a mismatch must be a deliberate
+ * update, not a silent memory bug. Some pre-release ROCm 7.14 snapshots used
+ * AMDSMI_FABRIC_MAX_LOCAL_GPUS=8, while final ROCm 7.14 and ROCm 7.15 use 16
+ * without changing the amd_smi major.
  ************************************************************************/
-static_assert(sizeof(amdsmi_fabric_info_v1_t) == 244, "amdsmi fabric v1 payload layout changed");
-static_assert(sizeof(amdsmi_fabric_info_t) == 320, "amdsmi fabric info struct size changed");
-static_assert(offsetof(amdsmi_fabric_info_t, reserved) == 256, "amdsmi fabric payload region moved");
+constexpr bool amdSmiFabricLayoutIs8Gpu =
+  sizeof(amdsmi_fabric_info_v1_t) == 212 && sizeof(amdsmi_fabric_info_t) == 288 &&
+  offsetof(amdsmi_fabric_info_v1_t, addr_mode) == 204 && offsetof(amdsmi_fabric_info_v1_t, accel_state) == 208 &&
+  offsetof(amdsmi_fabric_info_t, reserved) == 224;
+
+constexpr bool amdSmiFabricLayoutIs16Gpu =
+  sizeof(amdsmi_fabric_info_v1_t) == 244 && sizeof(amdsmi_fabric_info_t) == 320 &&
+  offsetof(amdsmi_fabric_info_v1_t, addr_mode) == 236 && offsetof(amdsmi_fabric_info_v1_t, accel_state) == 240 &&
+  offsetof(amdsmi_fabric_info_t, reserved) == 256;
+
+static_assert(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu, "unsupported amdsmi fabric layout");
 
 /*************************************************************************
  * AMD SMI Fabric Info Cache
@@ -517,9 +527,9 @@ inline bool amdSmiFabricStateUsable(amdsmi_fabric_type_t type, amdsmi_fabric_acc
  * amd_smi 27.0 flattened this struct. The version moved from a nested
  * fabric_info.version to a top-level fabric_version, and the payload from
  * fabric_info.fabric_version.v1 to fabric_info.v1 -- note that fabric_version
- * names different things either side of the change. Field offsets did not move
- * (version at byte 8, v1 at 12), so this is a source-level rename only and the
- * ABI guard above holds for both.
+ * names different things either side of the change. The version and payload
+ * offsets did not move (bytes 8 and 12), so the shape change itself is only a
+ * source-level rename; the ABI guard above handles payload capacity separately.
  *
  * Detect the shape rather than test a version macro, so a header that carries
  * the change under any version still resolves correctly. Only the flattened
