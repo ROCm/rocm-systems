@@ -23,6 +23,7 @@
 #include <optional>
 #include <span>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
@@ -71,7 +72,7 @@ struct LivenessAnalysisOptions {
   /// @brief Kernel entry block where architectural VGPR_MSB state is zero.
   BasicBlock *entry_block = nullptr;
 
-  /// @brief Lowest VGPR index that find_free_run() may return.
+  /// @brief Lowest VGPR index that a VGPR scratch query may return.
   ///
   /// @details This is a debug-oriented allocation floor, not a dataflow fact.
   /// The computed live-before sets remain the normal kernel liveness result,
@@ -79,7 +80,7 @@ struct LivenessAnalysisOptions {
   /// range to test whether semantic lowerings clobber guest registers.
   uint16_t min_free_vgpr = 0;
 
-  /// @brief Exclusive destination-ISA limit for VGPR scratch allocation.
+  /// @brief Exclusive destination-ISA limit for all VGPR scratch queries.
   ///
   /// @details RegisterSet may track more VGPR indices than a particular
   /// destination encoding can name. Keeping this allocation ceiling separate
@@ -89,9 +90,10 @@ struct LivenessAnalysisOptions {
 
   /// @brief Restrict instruction-level live-before materialization to selected instructions.
   ///
-  /// @details Block-level dataflow still analyzes every instruction in the
-  /// kernel scope. This option only controls which per-instruction RegisterSet
-  /// snapshots are stored for live_before()/find_free_*() queries.
+  /// @details When a query first requests CFG liveness, block-level dataflow
+  /// analyzes every instruction in the kernel scope. This option only controls
+  /// which per-instruction RegisterSet snapshots are then stored for
+  /// live_before()/find_free_*() queries.
   bool restrict_live_before_to_instructions = false;
 
   /// @brief Instruction pointers that need live-before snapshots when filtering is enabled.
@@ -122,15 +124,22 @@ struct LivenessAnalysisOptions {
 /// walking into other decoded code.
 [[nodiscard]] std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks);
 
-/// @brief Backward SGPR/VGPR/ACC_VGPR liveness over one decoded kernel CFG scope.
+/// @brief Kernel-global register usage plus deferred backward CFG liveness.
+///
+/// @details Construction eagerly resolves gfx1250 VGPR banks and scans global
+/// register usage. The backward CFG fixed point and live-before snapshots are
+/// materialized on the first query that needs them. Queries on one analysis
+/// object are not thread-safe because const query methods may populate that
+/// deferred cache.
 class LivenessAnalysis {
 public:
-  /// @brief Compute liveness for one kernel's block set.
+  /// @brief Prepare register analysis for one kernel's block set.
   ///
   /// @details Successor/predecessor edges that leave @p blocks are ignored.
   /// DBT callers must pass only the blocks reachable from the kernel descriptor
   /// entry being translated, not every block decoded from the containing code
-  /// object.
+  /// object. The pointed-to BasicBlocks and their Instructions must outlive this
+  /// analysis because deferred CFG queries retain and later dereference them.
   /// @param blocks Blocks in one kernel CFG scope.
   LivenessAnalysis(KernelBlockScope blocks, LivenessAnalysisOptions options = {},
                    std::span<const ScopedCfgEdge> extra_edges = {});
@@ -148,6 +157,12 @@ public:
   /// std::logic_error so an incorrectly classified rule cannot silently use
   /// missing liveness data.
   [[nodiscard]] static LivenessAnalysis unavailable();
+
+  /// @brief Whether a query has materialized the deferred backward CFG state.
+  ///
+  /// @details This is useful for qualification and tests that must verify the
+  /// kernel-unused allocation path did not force the expensive fixed point.
+  [[nodiscard]] bool has_materialized_cfg_liveness() const { return analyzed_; }
 
   /// @brief Block liveness by block object.
   [[nodiscard]] const BlockLiveness &block_liveness(const BasicBlock &block) const;
@@ -168,6 +183,28 @@ public:
   /// @returns nullopt when this is not a gfx1250 analysis or the state is ambiguous.
   [[nodiscard]] std::optional<uint8_t> vgpr_msb_bank_before(const Instruction &inst,
                                                             amdgpu::VgprMsbRole role) const;
+
+  /// @brief Find a VGPR tuple that no instruction in the kernel reads or writes.
+  ///
+  /// @details This query is cheaper and stronger than point liveness: the
+  /// selected tuple is unused everywhere, so it is dead at every instruction
+  /// in the decoded source scope. It does not force the deferred CFG
+  /// live-before computation. This conclusion requires a complete decoded
+  /// kernel scope, including reachable callees supplied through scoped edges.
+  /// Scopes with relative or GPR-indexed VGPR access fail closed because encoded
+  /// operands do not identify every physical register they may touch.
+  ///
+  /// @param inst Instruction that will use the tuple. It must belong to the
+  ///        analyzed scope.
+  /// @param count Number of consecutive VGPRs required.
+  /// @param search_start Lowest candidate base requested by the caller.
+  /// @param base_alignment Required tuple-base alignment.
+  /// @param available_count Exclusive upper bound imposed by the current
+  ///        descriptor allocation.
+  [[nodiscard]] std::optional<uint16_t> find_globally_unused_vgpr_run(
+      const Instruction *inst, uint16_t count, uint16_t search_start = 0,
+      uint16_t base_alignment = 1,
+      uint16_t available_count = static_cast<uint16_t>(REGISTER_SET_MAX_VGPRS)) const;
 
   /// @brief Find N consecutive dead VGPRs immediately before an instruction.
   ///
@@ -204,16 +241,31 @@ private:
   /// @throws std::logic_error if liveness data was intentionally not built.
   void require_available() const;
 
-  void analyze(KernelBlockScope blocks, const LivenessAnalysisOptions &options,
-               std::span<const ScopedCfgEdge> extra_edges);
+  /// @brief Materialize CFG live-before state on the first query that needs it.
+  void ensure_analyzed() const;
+
+  /// @brief Collect whole-kernel register use without running backward dataflow.
+  void collect_global_register_usage(KernelBlockScope blocks, std::span<const uint8_t> text);
+
+  void analyze(KernelBlockScope blocks, bool restrict_live_before_to_instructions,
+               std::span<const Instruction *const> live_before_instructions,
+               std::span<const ScopedCfgEdge> extra_edges) const;
 
   bool available_ = true;
+  mutable bool analyzed_ = false;
+  bool global_vgpr_usage_is_complete_ = true;
   uint16_t min_free_vgpr_ = 0;
   uint16_t max_free_vgpr_ = 0;
   std::unique_ptr<Gfx1250VgprMsbAnalysis> gfx1250_vgpr_msb_;
-  std::vector<BlockLiveness> liveness_;
-  std::unordered_map<const BasicBlock *, size_t> block_index_;
-  std::unordered_map<const Instruction *, RegisterSet> live_before_;
+  RegisterSet globally_used_registers_;
+  std::vector<BasicBlock *> deferred_blocks_;
+  std::unordered_set<const BasicBlock *> scoped_blocks_;
+  bool deferred_restrict_live_before_to_instructions_ = false;
+  std::vector<const Instruction *> deferred_live_before_instructions_;
+  std::vector<ScopedCfgEdge> deferred_extra_edges_;
+  mutable std::vector<BlockLiveness> liveness_;
+  mutable std::unordered_map<const BasicBlock *, size_t> block_index_;
+  mutable std::unordered_map<const Instruction *, RegisterSet> live_before_;
   static constexpr RegisterSet empty_{};
 };
 

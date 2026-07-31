@@ -58,6 +58,27 @@ SemanticScratchAllocator::acquire_vgprs(const SemanticScratchRequest &request) {
     return {.lease = std::nullopt, .failure = SemanticScratchFailure::InvalidRequest};
   }
 
+  // A register unused by the decoded kernel is stronger than a point-liveness
+  // result: it is dead at every source rewrite boundary. Prefer such a tuple
+  // inside the descriptor allocation so the common case avoids CFG live-before
+  // computation and descriptor growth.
+  const uint16_t allocated_vgprs =
+      static_cast<uint16_t>(std::min<uint32_t>(context_.num_vgprs, policy_.max_vgprs));
+  uint16_t unused_search_start = 0;
+  while (auto unused = liveness_.find_globally_unused_vgpr_run(
+             &inst_, request.count, unused_search_start, request.alignment, allocated_vgprs)) {
+    if (window_is_allowed(*unused, request, allocated_vgprs)) {
+      context_.require_vgprs(static_cast<uint32_t>(*unused) + request.count);
+      return {.lease = SemanticScratchLease{.reg_class = RegClass::VGPR,
+                                            .base = *unused,
+                                            .count = request.count,
+                                            .spilled = false,
+                                            .spill_offset = 0},
+              .failure = SemanticScratchFailure::None};
+    }
+    unused_search_start = static_cast<uint16_t>(*unused + request.alignment);
+  }
+
   uint16_t search_start = 0;
   while (auto free =
              liveness_.find_free_run(&inst_, request.count, search_start, request.alignment)) {
@@ -78,8 +99,6 @@ SemanticScratchAllocator::acquire_vgprs(const SemanticScratchRequest &request) {
   if (!request.allow_spill)
     return {.lease = std::nullopt, .failure = SemanticScratchFailure::NoRegisterWindow};
 
-  const uint16_t allocated_vgprs =
-      static_cast<uint16_t>(std::min<uint32_t>(context_.num_vgprs, policy_.max_vgprs));
   std::optional<uint16_t> victim;
   if (request.preferred_victim_base &&
       window_is_allowed(*request.preferred_victim_base, request, allocated_vgprs)) {
