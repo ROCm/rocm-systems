@@ -80,6 +80,7 @@ extern const char* HipExtraSourceCodeNoGWS;
 
 namespace amd::roc {
 bool roc::Device::isHsaInitialized_ = false;
+bool roc::Device::hostVmemSupported_ = false;
 std::vector<hsa_agent_t> roc::Device::gpu_agents_;
 std::vector<AgentInfo> roc::Device::cpu_agents_;
 
@@ -156,6 +157,20 @@ Device::Device(hsa_agent_t bkendDevice)
   prefetch_signal_.handle = 0;
   isXgmi_ = false;
   cache_state_ = Device::CacheState::kCacheStateInvalid;
+}
+
+int Device::agentGlobalIndex(hsa_agent_t agent) {
+  for (size_t gpu_idx = 0; gpu_idx < gpu_agents_.size(); ++gpu_idx) {
+    if (gpu_agents_[gpu_idx].handle == agent.handle) {
+      return static_cast<int>(gpu_idx);
+    }
+  }
+  for (size_t cpu_idx = 0; cpu_idx < cpu_agents_.size(); ++cpu_idx) {
+    if (cpu_agents_[cpu_idx].agent.handle == agent.handle) {
+      return static_cast<int>(gpu_agents_.size() + cpu_idx);
+    }
+  }
+  return -1;
 }
 
 void Device::setupCpuAgent() {
@@ -390,6 +405,10 @@ bool Device::init() {
     LogPrintfError("hsa_iterate_agents failed with %x", status);
     return false;
   }
+
+  bool vmem_supported = false;
+  Hsa::system_get_info(HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED, &vmem_supported);
+  hostVmemSupported_ = !cpu_agents_.empty() && vmem_supported;
 
   std::string ordinals =
       amd::IS_HIP ? ((HIP_VISIBLE_DEVICES[0] != '\0') ? HIP_VISIBLE_DEVICES : CUDA_VISIBLE_DEVICES)
@@ -2362,27 +2381,12 @@ void Device::deviceVmemRelease(uint64_t mem_handle) const {
   }
 }
 
-bool Device::hostVmemSupported(int numaNode) const {
-  if (cpu_agents_.empty()) {
-    return false;
-  }
-  int node = numaNode;
-  if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
-    node = static_cast<int>(numa::getCurrentNumaNode());
-  }
-  hsa_agent_t cpu = getCpuAgent(node);
-  bool supported = false;
-  hsa_status_t hsa_status = Hsa::agent_get_info(
-      cpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED),
-      &supported);
-  if (hsa_status != HSA_STATUS_SUCCESS) {
-    // Older ROCr predates this query: treat host-NUMA VMM as unsupported.
-    return false;
-  }
-  return supported;
-}
-
 uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const {
+  if (!hostVmemSupported_) {
+    LogError("hostVmemAlloc: host memory VMM not supported on this system");
+    return 0;
+  }
+
   // numaNode < 0 (HostNumaCurrent) resolves to the calling thread's current node.
   int node = numaNode;
   if (node < 0) {
@@ -2391,11 +2395,6 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
   if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
     LogPrintfError("hostVmemAlloc: invalid NUMA node %d (cpu agents: %zu)", numaNode,
                    cpu_agents_.size());
-    return 0;
-  }
-
-  if (!hostVmemSupported(node)) {
-    LogError("hostVmemAlloc: host memory VMM not supported on this CPU agent");
     return 0;
   }
 

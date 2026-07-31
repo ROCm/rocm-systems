@@ -63,8 +63,7 @@ rocprof-sys-run -- ./transferBench
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace |
 
 ```bash
-rocprof-sys-run \
-    -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy \
-    -e ROCPROFSYS_TRACE=true \
-    -- ./transferBench
+ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy \
+ROCPROFSYS_TRACE=true \
+rocprof-sys-run -- ./transferBench
 ```
