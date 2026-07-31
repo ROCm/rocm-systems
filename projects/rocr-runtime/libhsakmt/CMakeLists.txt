@@ -37,7 +37,7 @@ else()
   set(HSAKMT_STATIC_DRM_TARGET "${HSAKMT_TARGET}-staticdrm")
 
   project ( ${HSAKMT_TARGET} VERSION 1.9.0)
-
+  set(BUILD_SHARED_LIBS ON FORCE)
 
   # Optionally, build HSAKMT with ccache.
   set(ROCM_CCACHE_BUILD OFF CACHE BOOL "Set to ON for a ccache enabled build")
@@ -127,16 +127,14 @@ else()
     endif()
   endif()
 
-  if (CMAKE_SYSTEM_NAME MATCHES "Linux")
-    set(CMAKE_CXX_STANDARD 17)
-    set(CMAKE_CXX_STANDARD_REQUIRED ON)
-  endif()
-
   if (WIN32)
     if (EXISTS "${CMAKE_CURRENT_BINARY_DIR}../inc/shared")
       # Include UVD IP interface file. It's public as the file is in the PAL interface.
       target_include_directories(${HSAKMT_TARGET} PUBLIC ${CMAKE_CURRENT_BINARY_DIR}../inc/shared)
     endif()
+
+    set(CMAKE_CXX_STANDARD 20)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
     ## Source files
     set ( HSAKMT_SRC "src/dxg/ais.cpp"
                      "src/dxg/debug.cpp"
