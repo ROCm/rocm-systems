@@ -416,8 +416,8 @@ def load_pc_sampling_data(
     if len(detected_pc_sampling_methods) > 1:
         conflicting_methods = ", ".join(sorted(detected_pc_sampling_methods))
         console_error(
-            "PC sampling: conflicting sampling methods "
-            f"({conflicting_methods}) found for {file_prefix}",
+            f"PC sampling: conflicting sampling methods ({conflicting_methods}) "
+            "found across result files",
             exit=False,
         )
         return pd.DataFrame()

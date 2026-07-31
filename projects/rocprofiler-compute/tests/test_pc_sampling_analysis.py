@@ -638,7 +638,6 @@ def test_load_pc_sampling_data_filtered_schema_and_sort(
     tool_data = setup_pc_sampling_data(method=method)
     df = load_pc_sampling_data(
         make_pc_sampling_workload(),
-        "ps_file",
         sorting_type,
         [tool_data],
     )
@@ -668,7 +667,6 @@ def test_load_pc_sampling_data_filtered_offset_sort_is_numeric() -> None:
     )
     df = load_pc_sampling_data(
         make_pc_sampling_workload(),
-        "ps_file",
         "offset",
         [tool_data],
     )
@@ -684,7 +682,6 @@ def test_load_pc_sampling_data_filtered_num_rows_limit(
     """num_rows caps the table after sorting; 0 or None keeps every row."""
     df = load_pc_sampling_data(
         make_pc_sampling_workload(),
-        "ps_file",
         "count",
         [setup_pc_sampling_data()],
         num_rows=num_rows,
@@ -755,7 +752,6 @@ def test_load_pc_sampling_data_filtered_out_of_range_index_guards(
     tool_data = make_pc_sampling_guard_data(instructions, comments, indices)
     df = load_pc_sampling_data(
         make_pc_sampling_workload(),
-        "ps_file",
         "offset",
         [tool_data],
     )
@@ -780,7 +776,6 @@ def test_load_pc_sampling_data_filtered_empty_string_table_warns_and_skips(
     with patch("utils.parser.console_warning") as console_warning_mock:
         df = load_pc_sampling_data(
             make_pc_sampling_workload(),
-            "ps_file",
             "offset",
             [tool_data],
         )
@@ -839,7 +834,6 @@ def test_load_pc_sampling_data_filtered_multi_dispatch_groupby() -> None:
     )
     df = load_pc_sampling_data(
         make_pc_sampling_workload(),
-        "ps_file",
         "count",
         [tool_data],
     )
@@ -862,7 +856,6 @@ def test_load_pc_sampling_data_filtered_kernel_not_found() -> None:
     tool_data = setup_pc_sampling_data()
     df = load_pc_sampling_data(
         make_pc_sampling_workload("nonexistent"),
-        "ps_file",
         "offset",
         [tool_data],
     )
@@ -928,7 +921,6 @@ def test_load_pc_sampling_data_aggregates_rows_within_single_record(
 
     df = load_pc_sampling_data(
         schema.Workload(),
-        "ps_file",
         "offset",
         [tool_data],
     )
@@ -1071,13 +1063,11 @@ def test_load_pc_sampling_data_detects_method_after_empty_record() -> None:
 
     expected = load_pc_sampling_data(
         schema.Workload(),
-        "ps_file",
         "count",
         [sampled_tool_data],
     )
     actual = load_pc_sampling_data(
         schema.Workload(),
-        "ps_file",
         "count",
         [empty_tool_data, sampled_tool_data],
     )
@@ -1093,7 +1083,6 @@ def test_load_pc_sampling_data_rejects_conflicting_methods() -> None:
     with patch("utils.parser.console_error") as console_error_mock:
         df = load_pc_sampling_data(
             schema.Workload(),
-            "ps_file",
             "count",
             [host_trap_tool_data, stochastic_tool_data],
         )
@@ -1188,7 +1177,6 @@ def test_load_pc_sampling_data_preserves_display_identity_boundaries() -> None:
 
     df = load_pc_sampling_data(
         schema.Workload(),
-        "ps_file",
         "offset",
         tool_data_records,
     )
@@ -1229,7 +1217,6 @@ def test_load_pc_sampling_data_retains_missing_instruction_metadata() -> None:
 
     df = load_pc_sampling_data(
         schema.Workload(),
-        "ps_file",
         "count",
         tool_data_records,
     )
@@ -1301,7 +1288,6 @@ def test_load_pc_sampling_data_stitches_multi_process_rows() -> None:
 
     df = load_pc_sampling_data(
         schema.Workload(),
-        "ps_file",
         "count",
         [first_tool_data, second_tool_data],
     )
@@ -1352,7 +1338,6 @@ def test_load_pc_sampling_data_applies_top_n_after_global_aggregation() -> None:
 
     df = load_pc_sampling_data(
         schema.Workload(),
-        "ps_file",
         "count",
         [first_tool_data, second_tool_data],
         num_rows=1,
