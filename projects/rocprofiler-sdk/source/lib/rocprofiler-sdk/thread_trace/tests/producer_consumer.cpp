@@ -33,7 +33,6 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/tests/arch_support.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
 
 #include <gtest/gtest.h>
@@ -47,11 +46,11 @@ namespace thread_trace
 {
 HsaApiTable table{};
 
-bool
+void
 test_init()
 {
-    static bool run_once = []() -> bool {
-        if(hsa_init() != HSA_STATUS_SUCCESS) return false;
+    auto init = []() -> bool {
+        if(hsa_init() != HSA_STATUS_SUCCESS) abort();
 
         table.amd_ext_ = &counters::test_constants::get_ext_table();
         table.core_    = &counters::test_constants::get_api_table();
@@ -65,18 +64,8 @@ test_init()
         registration::set_init_status(-1);
 
         return true;
-    }();
-    return run_once;
-}
-
-/// Brings up the runtime and returns the agent the suite will drive, or nullptr
-/// when this machine cannot run the multi-buffer path. Every test starts here so
-/// the whole suite skips instead of aborting on an unsupported architecture.
-const hsa::AgentCache*
-setup()
-{
-    if(!test_init()) return nullptr;
-    return test::find_multi_buffer_agent();
+    };
+    [[maybe_unused]] static bool run_once = init();
 }
 
 constexpr size_t MOCK_BUFFER_SIZE = 1u << 20;
@@ -129,13 +118,29 @@ struct consumer_producer_t
 };
 
 consumer_producer_t
-start_threads(const hsa::AgentCache&                          agent,
-              rocprofiler_thread_trace_shader_data_callback_t cb_fn,
+start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
               query_status_t                                  query_fn,
               rocprofiler_user_data_t                         userdata)
 {
     // Build a synthetic queue + packet stack that mimics the runtime so we can
     // exercise the producer/consumer pairing without a real GPU.
+    const hsa::AgentCache* agent = nullptr;
+    {
+        auto& agents = hsa::get_queue_controller()->get_supported_agents();
+
+        for(const auto& [_, _agent] : agents)
+        {
+            auto* rocp = _agent.get_rocp_agent();
+            if(rocp && rocp->type == ROCPROFILER_AGENT_TYPE_GPU &&
+               rocp->runtime_visibility.hsa != 0)
+            {
+                agent = &_agent;
+                break;
+            }
+        }
+    }
+    if(agent == nullptr) abort();
+
     auto running_flag = std::make_shared<std::atomic<int>>(WORKER_FLAG_RUNNING);
 
     auto params              = thread_trace_parameter_pack{};
@@ -145,7 +150,7 @@ start_threads(const hsa::AgentCache&                          agent,
     params.callback_userdata = userdata;
 
     auto factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(
-        agent, params, *table.core_, *table.amd_ext_);
+        *agent, params, *table.core_, *table.amd_ext_);
     auto control_packet = factory->construct_control_packet();
     // Mirror ThreadTracerAgent::start_thread_trace: the producer loop submits the
     // start packets (before_krn_pkt) and, on stop, after_krn_pkt.at(0). Those
@@ -155,7 +160,7 @@ start_threads(const hsa::AgentCache&                          agent,
     control_packet->populate_after();
     auto buffer_packet = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn);
 
-    auto mock_queue          = make_mock_queue(agent);
+    auto mock_queue          = make_mock_queue(*agent);
     auto worker_data         = std::make_shared<triple_buffer_shared_data_t>();
     worker_data->queue       = mock_queue.get();
     worker_data->num_buffers = MOCK_NUM_BUFFERS;
@@ -203,8 +208,7 @@ start_threads(const hsa::AgentCache&                          agent,
 
 TEST(thread_trace, init_shutdown)
 {
-    const auto* agent = rocprofiler::thread_trace::setup();
-    if(agent == nullptr) GTEST_SKIP() << rocprofiler::thread_trace::test::SKIP_MESSAGE;
+    rocprofiler::thread_trace::test_init();
 
     // Sanity check: threads should spin and exit cleanly when the running flag flips.
     auto empty_cb = [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {};
@@ -212,16 +216,14 @@ TEST(thread_trace, init_shutdown)
     auto always_null = []() { return std::nullopt; };
 
     auto userdata = rocprofiler_user_data_t{};
-    auto threads =
-        rocprofiler::thread_trace::start_threads(*agent, empty_cb, always_null, userdata);
+    auto threads  = rocprofiler::thread_trace::start_threads(empty_cb, always_null, userdata);
     threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
     threads.join_all();
 }
 
 TEST(thread_trace, status_query)
 {
-    const auto* agent = rocprofiler::thread_trace::setup();
-    if(agent == nullptr) GTEST_SKIP() << rocprofiler::thread_trace::test::SKIP_MESSAGE;
+    rocprofiler::thread_trace::test_init();
 
     // Ensure the producer polls even when the GPU reports "nothing to copy".
     auto empty_cb = [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {};
@@ -233,8 +235,7 @@ TEST(thread_trace, status_query)
     };
 
     auto userdata = rocprofiler_user_data_t{};
-    auto threads =
-        rocprofiler::thread_trace::start_threads(*agent, empty_cb, always_null, userdata);
+    auto threads  = rocprofiler::thread_trace::start_threads(empty_cb, always_null, userdata);
 
     while(!status_called)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -245,9 +246,7 @@ TEST(thread_trace, status_query)
 
 TEST(thread_trace, multiple_calls)
 {
-    const auto* agent = rocprofiler::thread_trace::setup();
-    if(agent == nullptr) GTEST_SKIP() << rocprofiler::thread_trace::test::SKIP_MESSAGE;
-
+    rocprofiler::thread_trace::test_init();
     const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
 
     auto data_received = std::atomic<size_t>{0};
@@ -275,8 +274,7 @@ TEST(thread_trace, multiple_calls)
     };
 
     auto userdata = rocprofiler_user_data_t{.ptr = &data_received};
-    auto threads =
-        rocprofiler::thread_trace::start_threads(*agent, fetch_cb, return_synced, userdata);
+    auto threads  = rocprofiler::thread_trace::start_threads(fetch_cb, return_synced, userdata);
 
     while(status_called < 1000)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -292,9 +290,7 @@ TEST(thread_trace, multiple_calls)
 
 TEST(thread_trace, read_offset)
 {
-    const auto* agent = rocprofiler::thread_trace::setup();
-    if(agent == nullptr) GTEST_SKIP() << rocprofiler::thread_trace::test::SKIP_MESSAGE;
-
+    rocprofiler::thread_trace::test_init();
     const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
 
     constexpr uint64_t EXPECTED_READ_OFFSET = 128;
@@ -321,7 +317,7 @@ TEST(thread_trace, read_offset)
 
     auto userdata = rocprofiler_user_data_t{.ptr = &read_offset_received};
     auto threads =
-        rocprofiler::thread_trace::start_threads(*agent, fetch_cb, return_offset_status, userdata);
+        rocprofiler::thread_trace::start_threads(fetch_cb, return_offset_status, userdata);
 
     while(read_offset_received.load() == 0)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -345,9 +341,7 @@ TEST(thread_trace, data_integrity)
         std::map<uint64_t, std::vector<size_t>> chunks;
     };
 
-    const auto* agent = rocprofiler::thread_trace::setup();
-    if(agent == nullptr) GTEST_SKIP() << rocprofiler::thread_trace::test::SKIP_MESSAGE;
-
+    rocprofiler::thread_trace::test_init();
     const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
 
     auto state = state_t{};
@@ -383,8 +377,7 @@ TEST(thread_trace, data_integrity)
     };
 
     auto userdata = rocprofiler_user_data_t{.ptr = &state};
-    auto threads =
-        rocprofiler::thread_trace::start_threads(*agent, fetch_cb, return_synced, userdata);
+    auto threads  = rocprofiler::thread_trace::start_threads(fetch_cb, return_synced, userdata);
 
     while(status_called < 100)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -421,9 +414,7 @@ TEST(thread_trace, data_integrity)
 
 TEST(thread_trace, slow_cpu)
 {
-    const auto* agent = rocprofiler::thread_trace::setup();
-    if(agent == nullptr) GTEST_SKIP() << rocprofiler::thread_trace::test::SKIP_MESSAGE;
-
+    rocprofiler::thread_trace::test_init();
     const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
 
     auto interrupt_received = std::atomic<bool>{false};
@@ -451,8 +442,7 @@ TEST(thread_trace, slow_cpu)
     };
 
     auto userdata = rocprofiler_user_data_t{.ptr = &interrupt_received};
-    auto threads =
-        rocprofiler::thread_trace::start_threads(*agent, fetch_cb, return_synced, userdata);
+    auto threads  = rocprofiler::thread_trace::start_threads(fetch_cb, return_synced, userdata);
 
     while(!interrupt_received)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -465,9 +455,7 @@ TEST(thread_trace, slow_cpu)
 
 TEST(thread_trace, slow_gpu)
 {
-    const auto* agent = rocprofiler::thread_trace::setup();
-    if(agent == nullptr) GTEST_SKIP() << rocprofiler::thread_trace::test::SKIP_MESSAGE;
-
+    rocprofiler::thread_trace::test_init();
     const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
 
     auto interrupt_received = std::atomic<bool>{false};
@@ -495,8 +483,7 @@ TEST(thread_trace, slow_gpu)
     };
 
     auto userdata = rocprofiler_user_data_t{.ptr = &interrupt_received};
-    auto threads =
-        rocprofiler::thread_trace::start_threads(*agent, fetch_cb, return_synced, userdata);
+    auto threads  = rocprofiler::thread_trace::start_threads(fetch_cb, return_synced, userdata);
 
     while(!interrupt_received)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -509,9 +496,7 @@ TEST(thread_trace, slow_gpu)
 
 TEST(thread_trace, restart_after_overflow)
 {
-    const auto* agent = rocprofiler::thread_trace::setup();
-    if(agent == nullptr) GTEST_SKIP() << rocprofiler::thread_trace::test::SKIP_MESSAGE;
-
+    rocprofiler::thread_trace::test_init();
     const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
 
     struct callback_state_t
@@ -565,8 +550,7 @@ TEST(thread_trace, restart_after_overflow)
     };
 
     auto userdata = rocprofiler_user_data_t{.ptr = state.get()};
-    auto threads =
-        rocprofiler::thread_trace::start_threads(*agent, fetch_cb, return_synced, userdata);
+    auto threads  = rocprofiler::thread_trace::start_threads(fetch_cb, return_synced, userdata);
 
     // Wait for overflow to occur and then for normal callbacks to resume
     while(!state->seen_normal_after_overflow.load())
@@ -589,9 +573,7 @@ TEST(thread_trace, restart_after_overflow)
 
 TEST(thread_trace, buffer_alternation)
 {
-    const auto* agent = rocprofiler::thread_trace::setup();
-    if(agent == nullptr) GTEST_SKIP() << rocprofiler::thread_trace::test::SKIP_MESSAGE;
-
+    rocprofiler::thread_trace::test_init();
     const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
 
     struct callback_state_t
@@ -632,8 +614,7 @@ TEST(thread_trace, buffer_alternation)
     };
 
     auto userdata = rocprofiler_user_data_t{.ptr = &callback_state};
-    auto threads =
-        rocprofiler::thread_trace::start_threads(*agent, fetch_cb, return_synced, userdata);
+    auto threads  = rocprofiler::thread_trace::start_threads(fetch_cb, return_synced, userdata);
 
     // Let enough buffers through to establish a pattern
     while(callback_state.callback_count < 20)
