@@ -338,6 +338,11 @@ void demonstrate_reading_resources()
     {
         std::cout << "Work queue configuration query is not supported on this runtime ("
                   << hipGetErrorString(wq_status) << ").\n";
+
+        // A failed call leaves its error in the thread's sticky last-error state.
+        // Clear it with hipGetLastError so a later hipGetLastError check does not
+        // misattribute this error to an unrelated, successful launch.
+        (void)hipGetLastError();
     }
     // [read-wq-config-end]
 }
