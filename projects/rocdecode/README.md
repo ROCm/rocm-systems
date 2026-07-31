@@ -22,15 +22,26 @@ access the video decoding features available on your GPU.
 > [!IMPORTANT]
 > `gfx908` or higher GPU required
 
-### ROCm via TheRock
+### ROCm
 
-rocDecode is built and installed as part of [TheRock](https://github.com/ROCm/TheRock). All core dependencies are provided by the TheRock build, including:
+Install ROCm using the package manager for your distribution by following the
+official [Install AMD ROCm](https://rocm.docs.amd.com/en/latest/install/rocm.html)
+guide. Use the selector on that page to choose your GPU, operating system, and
+install method. This is the recommended way to obtain ROCm and rocDecode for most
+users.
+
+The ROCm package repositories provide all of rocDecode's core dependencies,
+including:
 
 * HIP runtime and development libraries
 * AMD Clang++ compiler (C++17 required)
 * Libva and VA-API drivers
 * Libdrm (amdgpu)
 * CMake and pkg-config
+
+rocDecode is also built and installed as part of
+[TheRock](https://github.com/ROCm/TheRock), which is the recommended path for
+source builds and nightly/CI artifacts.
 
 ### FFmpeg (required for samples and tests)
 
@@ -40,7 +51,48 @@ rocDecode is built and installed as part of [TheRock](https://github.com/ROCm/Th
   sudo apt install libavcodec-dev libavformat-dev libavutil-dev
   ```
 
-## Build and install
+## Install
+
+### Install with the package manager (recommended)
+
+rocDecode is included with the ROCm Core SDK on Linux. A standard ROCm
+installation using the `amdrocm-core-sdk` meta package installs the rocDecode
+runtime library and development headers by default. Follow the official
+[Install AMD ROCm](https://rocm.docs.amd.com/en/latest/install/rocm.html) guide
+and use the selector to choose your GPU, operating system, and install method.
+
+If you only want the ROCm video decode components without the rest of the Core
+SDK, the following standalone rocDecode packages are also available:
+
+> [!NOTE]
+> The `amdrocm-decode` package names apply to ROCm 7.13 and later. Earlier ROCm
+> releases use different package naming.
+
+| Package | apt name (Debian/Ubuntu) | dnf/zypper name (RHEL/SLES) | Contents |
+|---------|--------------------------|-----------------------------|----------|
+| Runtime | `amdrocm-decode` | `amdrocm-decode` | Runtime library |
+| Development | `amdrocm-decode-dev` | `amdrocm-decode-devel` | Library, headers, and CMake helper modules (`share/rocdecode/cmake/`) |
+| Test | `amdrocm-decode-test` | `amdrocm-decode-test` | CTest verification, utility sources (`utils/`), samples, and test media |
+
+> [!IMPORTANT]
+> The rocDecode library, headers, and the CMake helper modules
+> (`/opt/rocm/share/rocdecode/cmake/`) come with a standard ROCm Core SDK install
+> and the development package. However, the `utils/` utility sources, the
+> `samples/` sources, and the test media under `/opt/rocm/share/rocdecode/` do
+> **not** ship with the Core SDK or the development package. These are required to
+> build applications against rocDecode and to build or run the samples and CTests,
+> and are provided by the `amdrocm-decode-test` package. Install it if you build
+> against rocDecode (for example, when building rocAL):
+>
+>   ```shell
+>   # Debian / Ubuntu
+>   sudo apt install amdrocm-decode-test
+>
+>   # RHEL / SLES
+>   sudo dnf install amdrocm-decode-test
+>   ```
+
+### Build and install from source
 
 rocDecode is built as part of [TheRock](https://github.com/ROCm/TheRock). To build standalone from source:
 
@@ -70,8 +122,35 @@ After installation, the following files are available:
 
 * Libraries in `/opt/rocm/lib`
 * Header files in `/opt/rocm/include/rocdecode`
-* Samples in `/opt/rocm/share/rocdecode`
+* CMake helper modules in `/opt/rocm/share/rocdecode/cmake`
+* Utility sources, samples, and test media in `/opt/rocm/share/rocdecode` (from the test package)
 * Documents in `/opt/rocm/share/doc/rocdecode`
+
+  > [!NOTE]
+  > The `utils/` and `samples/` sources and the test media under
+  > `/opt/rocm/share/rocdecode/` are provided by the `amdrocm-decode-test` package
+  > (the CMake helper modules in `share/rocdecode/cmake/` ship with the development
+  > package). Install `amdrocm-decode-test` (see [Install](#install)) if you build
+  > against rocDecode or run the samples and CTests.
+
+If you obtain rocDecode from [TheRock](https://github.com/ROCm/TheRock)'s generic
+(`.tar.zst`) artifacts instead of distribution packages, the `utils/`, `samples/`,
+and test media under `share/rocdecode/` ship in the `rocdecode-test` artifact (for
+example, `rocdecode_test_generic`) rather than `rocdecode-dev`. Install it with
+TheRock's `install_rocm_from_artifacts.py` helper by adding `--tests` together with
+`--rocdecode`:
+
+  ```shell
+  python build_tools/install_rocm_from_artifacts.py \
+      --latest-release \
+      --amdgpu-family gfx110X-all \
+      --rocdecode \
+      --tests
+  ```
+
+See TheRock's
+[Installing artifacts](https://github.com/ROCm/TheRock/blob/main/docs/development/installing_artifacts.md)
+guide for other options.
 
 ### Using sample application
 

@@ -80,6 +80,7 @@ extern const char* HipExtraSourceCodeNoGWS;
 
 namespace amd::roc {
 bool roc::Device::isHsaInitialized_ = false;
+bool roc::Device::hostVmemSupported_ = false;
 std::vector<hsa_agent_t> roc::Device::gpu_agents_;
 std::vector<AgentInfo> roc::Device::cpu_agents_;
 
@@ -156,6 +157,20 @@ Device::Device(hsa_agent_t bkendDevice)
   prefetch_signal_.handle = 0;
   isXgmi_ = false;
   cache_state_ = Device::CacheState::kCacheStateInvalid;
+}
+
+int Device::agentGlobalIndex(hsa_agent_t agent) {
+  for (size_t gpu_idx = 0; gpu_idx < gpu_agents_.size(); ++gpu_idx) {
+    if (gpu_agents_[gpu_idx].handle == agent.handle) {
+      return static_cast<int>(gpu_idx);
+    }
+  }
+  for (size_t cpu_idx = 0; cpu_idx < cpu_agents_.size(); ++cpu_idx) {
+    if (cpu_agents_[cpu_idx].agent.handle == agent.handle) {
+      return static_cast<int>(gpu_agents_.size() + cpu_idx);
+    }
+  }
+  return -1;
 }
 
 void Device::setupCpuAgent() {
@@ -390,6 +405,10 @@ bool Device::init() {
     LogPrintfError("hsa_iterate_agents failed with %x", status);
     return false;
   }
+
+  bool vmem_supported = false;
+  Hsa::system_get_info(HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED, &vmem_supported);
+  hostVmemSupported_ = !cpu_agents_.empty() && vmem_supported;
 
   std::string ordinals =
       amd::IS_HIP ? ((HIP_VISIBLE_DEVICES[0] != '\0') ? HIP_VISIBLE_DEVICES : CUDA_VISIBLE_DEVICES)
@@ -2362,27 +2381,12 @@ void Device::deviceVmemRelease(uint64_t mem_handle) const {
   }
 }
 
-bool Device::hostVmemSupported(int numaNode) const {
-  if (cpu_agents_.empty()) {
-    return false;
-  }
-  int node = numaNode;
-  if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
-    node = static_cast<int>(numa::getCurrentNumaNode());
-  }
-  hsa_agent_t cpu = getCpuAgent(node);
-  bool supported = false;
-  hsa_status_t hsa_status = Hsa::agent_get_info(
-      cpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED),
-      &supported);
-  if (hsa_status != HSA_STATUS_SUCCESS) {
-    // Older ROCr predates this query: treat host-NUMA VMM as unsupported.
-    return false;
-  }
-  return supported;
-}
-
 uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const {
+  if (!hostVmemSupported_) {
+    LogError("hostVmemAlloc: host memory VMM not supported on this system");
+    return 0;
+  }
+
   // numaNode < 0 (HostNumaCurrent) resolves to the calling thread's current node.
   int node = numaNode;
   if (node < 0) {
@@ -2391,11 +2395,6 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
   if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
     LogPrintfError("hostVmemAlloc: invalid NUMA node %d (cpu agents: %zu)", numaNode,
                    cpu_agents_.size());
-    return 0;
-  }
-
-  if (!hostVmemSupported(node)) {
-    LogError("hostVmemAlloc: host memory VMM not supported on this CPU agent");
     return 0;
   }
 
@@ -3266,28 +3265,44 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
 
     lowest = std::min_element(
         queuePool_[qIndex].begin(), queuePool_[qIndex].end(),
-        [mode, pipe_dist, num_pipes, excluded_ids](PoolRef A, PoolRef B) {
+        [mode, pipe_dist, num_pipes, excluded_ids](PoolRef first_candidate,
+                                                   PoolRef second_candidate) {
           // Exclusion filtering: prefer non-excluded queues over excluded ones
-          bool a_excluded = excluded_ids && excluded_ids->count(A.first->id) > 0;
-          bool b_excluded = excluded_ids && excluded_ids->count(B.first->id) > 0;
-          if (a_excluded != b_excluded) return b_excluded;
+          bool first_is_excluded =
+              excluded_ids && excluded_ids->count(first_candidate.first->id) > 0;
+          bool second_is_excluded =
+              excluded_ids && excluded_ids->count(second_candidate.first->id) > 0;
+          if (first_is_excluded != second_is_excluded) return second_is_excluded;
+
+          // Always use an unshared regular queue before sharing an active queue. On devices
+          // with coarse-grained read pointer updates, an idle queue can retain a nonzero
+          // apparent depth and must not lose to a blocked queue with a smaller reported depth.
+          bool first_is_unshared =
+              first_candidate.second.refCount == 0 &&
+              !first_candidate.second.hasDedicatedQueue_;
+          bool second_is_unshared =
+              second_candidate.second.refCount == 0 &&
+              !second_candidate.second.hasDedicatedQueue_;
+          if (first_is_unshared != second_is_unshared) return first_is_unshared;
 
           if (mode >= 1) {
             // Mode 1+: Advanced weighted metric with dedicated queue penalty
             // Metric = dedicated_queue_penalty + (depth << 4) + refCount
-            uint64_t metricA = A.second.GetLoadMetric(A.first, mode);
-            uint64_t metricB = B.second.GetLoadMetric(B.first, mode);
+            uint64_t first_metric =
+                first_candidate.second.GetLoadMetric(first_candidate.first, mode);
+            uint64_t second_metric =
+                second_candidate.second.GetLoadMetric(second_candidate.first, mode);
 
-            if (metricA == metricB && pipe_dist) {
+            if (first_metric == second_metric && pipe_dist) {
               // gfx9XX pipe distribution: prefer lower pipe IDs for consistent distribution
-              uint64_t pipeA = A.first->id % num_pipes;
-              uint64_t pipeB = B.first->id % num_pipes;
-              return pipeA < pipeB;
+              uint64_t first_pipe = first_candidate.first->id % num_pipes;
+              uint64_t second_pipe = second_candidate.first->id % num_pipes;
+              return first_pipe < second_pipe;
             }
-            return metricA < metricB;
+            return first_metric < second_metric;
           } else {
             // Mode 0: Simple refCount-based selection
-            return A.second.refCount < B.second.refCount;
+            return first_candidate.second.refCount < second_candidate.second.refCount;
           }
         });
 
