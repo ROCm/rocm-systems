@@ -381,24 +381,24 @@ bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_a
     return false;
   }
 
-  // Bridge = lowest VGPR neither live at the anchor nor already a spilled VGPR,
-  // within the kernel's allocated VGPR count (never pick an unallocated index).
-  // Dead-at-anchor suffices: written before the call, reloaded after.
+  // Bridge, within the kernel's allocated VGPR count (never an unallocated index).
+  // Prefer a dead VGPR; else reuse a spilled VGPR, whose value is already on scratch
+  // (build_spill_bracket orders its store/reload around the bridge use). A spilled
+  // VGPR is live at the anchor, so the dead scan never returns one.
   const uint16_t vgpr_bound =
       static_cast<uint16_t>(std::min<uint32_t>(kernel_vgpr_count, REGISTER_SET_MAX_VGPRS));
   std::optional<uint16_t> bridge;
   for (uint16_t v = 0; v < vgpr_bound; ++v) {
-    if (live_at_anchor.contains(RegisterRef{RegClass::VGPR, v, 1}))
-      continue;
-    if (std::any_of(vgpr_spills.begin(), vgpr_spills.end(),
-                    [v](const SpillSlot &s) { return s.reg == v; }))
-      continue;
-    bridge = v;
-    break;
+    if (!live_at_anchor.contains(RegisterRef{RegClass::VGPR, v, 1})) {
+      bridge = v;
+      break;
+    }
   }
+  if (!bridge && !vgpr_spills.empty())
+    bridge = vgpr_spills.front().reg; // allocated by construction, so in bounds
   if (!bridge) {
-    report(error_out, "probe-call SGPR spill needs a free bridge VGPR, but none is dead within the "
-                      "kernel's allocated VGPRs");
+    report(error_out, "probe-call SGPR spill needs a bridge VGPR, but none is dead or already "
+                      "spilled within the kernel's allocated VGPRs");
     return false;
   }
 

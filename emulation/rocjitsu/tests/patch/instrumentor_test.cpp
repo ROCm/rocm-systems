@@ -1663,8 +1663,9 @@ TEST(InstrumentorSpill, PlanSgprSpillsPicksLowestDeadBridge) {
   std::vector<SpillSlot> out;
   uint16_t bridge = 0xFFFF;
   std::string err;
-  // v0,v1 live; v2 already a VGPR spill -> bridge must be v3.
-  const RegisterSet live = make_vgpr_set({0, 1});
+  // v0,v1,v2 live (v2 is also a VGPR spill -- a spilled reg is always live) -> the
+  // lowest dead bridge is v3.
+  const RegisterSet live = make_vgpr_set({0, 1, 2});
   const std::vector<SpillSlot> vgpr_spills{SpillSlot{RegClass::VGPR, 2, 0}};
   ASSERT_TRUE(plan_sgpr_spills(make_sgpr_set({7}), live, vgpr_spills, /*kernel_vgpr_count=*/8,
                                spills, ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err))
@@ -1673,6 +1674,25 @@ TEST(InstrumentorSpill, PlanSgprSpillsPicksLowestDeadBridge) {
   EXPECT_EQ(out[0].reg, 7u);
   EXPECT_EQ(out[0].byte_offset, 64u);
   EXPECT_EQ(bridge, 3u);
+}
+
+// When no VGPR is dead within the kernel's allocation, the bridge falls back to a
+// spilled VGPR: its value is already saved to scratch, so it can be clobbered by the
+// writelane and its own reload restores it.
+TEST(InstrumentorSpill, PlanSgprSpillsReusesSpilledBridgeWhenNoneDead) {
+  SpillManager spills(/*original_private_bytes=*/64, /*per_lane_scratch_limit=*/4096);
+  std::vector<SpillSlot> out;
+  uint16_t bridge = 0xFFFF;
+  std::string err;
+  // v0,v1 both live (no dead VGPR in [0,2)); v1 is a spill -> bridge reuses v1.
+  const RegisterSet live = make_vgpr_set({0, 1});
+  const std::vector<SpillSlot> vgpr_spills{SpillSlot{RegClass::VGPR, 1, 0}};
+  ASSERT_TRUE(plan_sgpr_spills(make_sgpr_set({7}), live, vgpr_spills, /*kernel_vgpr_count=*/2,
+                               spills, ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err))
+      << err;
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_EQ(out[0].reg, 7u);
+  EXPECT_EQ(bridge, 1u);
 }
 
 // The bridge search is bounded by the kernel's allocated VGPR count: if every

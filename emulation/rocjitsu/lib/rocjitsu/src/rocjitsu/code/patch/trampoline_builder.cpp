@@ -97,43 +97,57 @@ struct SpillBracket {
   constexpr uint16_t kUniformLane = 0; // An SGPR is uniform; one lane suffices.
   SpillBracket bracket;
 
+  const bool has_vgpr = !vgpr_spills.empty();
+  const bool has_sgpr = !sgpr_spills.empty();
+
   // Drain any in-flight load that could still be writing a to-be-spilled register:
   // a register live at the anchor may be the target of a pre-anchor load whose
   // consumer wait sits after the anchor, so storing it now without this drain would
   // spill a stale value. Emitted once, before any store.
-  if (!vgpr_spills.empty() || !sgpr_spills.empty()) {
+  if (has_vgpr || has_sgpr) {
     const auto drain = build_wait_all_loads_complete(arch);
     bracket.prologue.insert(bracket.prologue.end(), drain.begin(), drain.end());
   }
 
-  // VGPRs: batch stores, then batch loads + a single wait before the readlanes.
+  // VGPRs: batch stores in the prologue.
   for (const SpillSlot &slot : vgpr_spills) {
     const auto store = build_scratch_store_dword(slot.reg, slot.byte_offset, arch);
     bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
-    const auto load = build_scratch_load_dword(slot.reg, slot.byte_offset, arch);
-    bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
   }
-  if (!vgpr_spills.empty())
-    bracket.epilogue.push_back(build_wait_loads_complete(arch));
 
-  // SGPRs: writelane into the bridge then store; restore is load/wait/readlane.
+  // Drain the VGPR stores before the writelane phase whenever both classes spill --
+  // the only time the bridge could be a just-stored VGPR (WAR, see above).
+  if (has_vgpr && has_sgpr)
+    bracket.prologue.push_back(build_wait_stores_complete(arch));
+
+  // SGPRs: writelane into the bridge then store.
   for (const SpillSlot &slot : sgpr_spills) {
     const auto wl = build_v_writelane_b32(bridge_vgpr, slot.reg, kUniformLane, arch);
     bracket.prologue.insert(bracket.prologue.end(), wl.begin(), wl.end());
     const auto store = build_scratch_store_dword(bridge_vgpr, slot.byte_offset, arch);
     bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
+  }
 
+  // Epilogue: restore SGPRs first (load/wait/readlane each, since the single bridge
+  // is reused), then the VGPRs, so a reused bridge's reload lands last (see above).
+  for (const SpillSlot &slot : sgpr_spills) {
     const auto load = build_scratch_load_dword(bridge_vgpr, slot.byte_offset, arch);
     bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
     bracket.epilogue.push_back(build_wait_loads_complete(arch));
     const auto rl = build_v_readlane_b32(slot.reg, bridge_vgpr, kUniformLane, arch);
     bracket.epilogue.insert(bracket.epilogue.end(), rl.begin(), rl.end());
   }
+  for (const SpillSlot &slot : vgpr_spills) {
+    const auto load = build_scratch_load_dword(slot.reg, slot.byte_offset, arch);
+    bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
+  }
+  if (has_vgpr)
+    bracket.epilogue.push_back(build_wait_loads_complete(arch));
 
   // Drain all scratch stores before the call: the store's async read of the source
   // register must finish before the probe clobbers it, which also orders each store
   // ahead of its reload. RDNA4 stores live on STORECNT, which s_wait_loadcnt misses.
-  if (!vgpr_spills.empty() || !sgpr_spills.empty())
+  if (has_vgpr || has_sgpr)
     bracket.prologue.push_back(build_wait_stores_complete(arch));
 
   return bracket;
@@ -346,9 +360,20 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // SGPR pair holding the saved anchor EXEC (populated by the save loop below).
   // Reused to restore the anchor mask before the call; always present when spilling.
   uint16_t exec_temp = 0;
+  bool exec_temp_found = false;
   for (const SpecialStateSlot &s : plan.special_state_saves)
-    if (s.operand == scalar_operand_exec_lo(plan.arch))
+    if (s.operand == scalar_operand_exec_lo(plan.arch)) {
       exec_temp = s.temp_base;
+      exec_temp_found = true;
+    }
+  // full_mask_exec implies will_spill implies save_exec, so plan_probe_call must
+  // have reserved an EXEC temp for any spilling site. Verify rather than trust the
+  // default. Fail closed instead.
+  if (full_mask_exec && !exec_temp_found) {
+    report(error_out, "emit_probe_call: spilling site has no saved EXEC temp to restore the anchor "
+                      "mask; plan_probe_call must reserve one when spilling");
+    return std::nullopt;
+  }
 
   // Special-state saves: copy each preserved EXEC/VCC/M0 into its dead temp. Before
   // the stores so EXEC is captured before we force it to -1. Plain s_mov, SCC-safe.
