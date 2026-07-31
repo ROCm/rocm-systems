@@ -13,7 +13,6 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <string_view>
 #include <vector>
 
 namespace rocjitsu {
@@ -45,47 +44,10 @@ void note_special_state(ProbeClobberSummary &summary, RegClass cls) {
   }
 }
 
-// Special-state detection by operand display name.
-//
-// The generated Operand::to_register_ref() currently returns nullopt for the
-// special-state operand forms this gate exists to catch (OPR_SDST_EXEC,
-// OPR_SDST_M0, OPR_FLAT_SCRATCH, OPR_VCC, OPR_SSRC_SPECIAL_SCC), so the
-// ref-based path below is blind to them even though the operand itself is
-// present. We map the display name ("exec_lo", "m0", "vcc", ...), until
-// operands expose their special RegClass structurally.
-//
-// NOTE: this only sees *explicit* operands. Implicit special-state writes (e.g.
-// SCC from scalar ALU, VCC from v_cmp, EXEC from v_cmpx) have no operand and are
-// not modeled by the decoder, so they remain invisible here. SCC is exempt from
-// concern because the trampoline envelope always save/restores it.
-// TODO: drop this name fallback once the operand-type modeling work lands.
-std::optional<RegClass> special_class_from_name(std::string_view name) {
-  auto starts_with = [&](std::string_view prefix) {
-    return name.substr(0, prefix.size()) == prefix;
-  };
-  if (starts_with("exec"))
-    return RegClass::EXEC; // exec, exec_lo, exec_hi
-  if (starts_with("vcc"))
-    return RegClass::VCC; // vcc, vcc_lo, vcc_hi
-  if (starts_with("flat_scratch"))
-    return RegClass::FLAT_SCRATCH; // flat_scratch_lo/hi/all
-  if (name == "m0")
-    return RegClass::M0;
-  if (name == "scc" || name == "src_scc")
-    return RegClass::SCC;
-  return std::nullopt;
-}
-
-// Flag the special-state class an operand names. Prefers the precise ref-based
-// class; falls back to the display name for the special forms to_register_ref()
-// does not map (see special_class_from_name).
+// Flag the special-state class named by the generated structural operand ref.
 void note_operand(const Operand &op, ProbeClobberSummary &summary) {
-  if (auto ref = op.to_register_ref()) {
+  if (auto ref = op.to_register_ref())
     note_special_state(summary, ref->cls);
-    return;
-  }
-  if (auto cls = special_class_from_name(op.name()))
-    note_special_state(summary, *cls);
 }
 
 // Scan every explicit operand and flag special-state register classes. This is

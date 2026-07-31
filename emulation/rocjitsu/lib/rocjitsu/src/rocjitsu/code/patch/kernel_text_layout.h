@@ -54,14 +54,17 @@ struct BranchFixup {
 /// `s_setpc_b64` or `s_swappc_b64` consumer. The translated block reserves a fixed
 /// worst-case window at the consumer site; after all blocks have final target
 /// offsets, the patch layer rewrites that window to either a direct control
-/// transfer or a canonical long getpc/add/setpc-or-swappc sequence.
+/// transfer or a canonical long getpc/add/setpc-or-swappc sequence. Special
+/// carriers remain untouched by the long form; it uses an ordinary reserved
+/// scratch pair or a branch-island chain so the source carrier residue is stable.
 struct RecoveredIndirectFixup {
   uint64_t source_call_offset = 0;   ///< Original .text offset of setpc/swappc.
   uint64_t source_target_offset = 0; ///< Recovered original .text target offset.
   uint64_t target_window_offset = 0; ///< New .text offset of the reserved window.
-  uint16_t target_sreg = 0;          ///< Low SGPR pair used for the rebuilt target PC.
-  uint16_t return_sreg = 0;          ///< Low SGPR pair receiving return PC for calls.
-  bool is_call = false;              ///< True for swappc-like calls, false for setpc jumps.
+  uint16_t target_selector = 0;      ///< Raw SOP1 selector consumed by the source transfer.
+  RegisterRef target_carrier{RegClass::SGPR, 0, 2}; ///< Architectural source pair identity.
+  uint16_t return_selector = 0; ///< Raw SOP1 selector receiving return PC for calls.
+  bool is_call = false;         ///< True for swappc-like calls, false for setpc jumps.
 };
 
 /// @brief Stable failure category returned across the text-layout boundary.
@@ -226,12 +229,13 @@ append_relocated_kernel_text(std::vector<uint8_t> &translated_text, KernelTextLa
 /// @brief Patch all direct PC-relative branches recorded in @p layout.
 [[nodiscard]] TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
                                                               const KernelTextLayout &layout,
-                                                              rj_code_arch_t arch);
+                                                              rj_code_arch_t arch,
+                                                              std::vector<uint8_t> &island_used);
 
 /// @brief Patch all recovered indirect branch/call windows recorded in @p layout.
-[[nodiscard]] TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
-                                                                   const KernelTextLayout &layout,
-                                                                   rj_code_arch_t arch);
+[[nodiscard]] TextRelocationResult
+patch_recovered_indirect_fixups(std::vector<uint8_t> &text, const KernelTextLayout &layout,
+                                rj_code_arch_t arch, std::vector<uint8_t> &island_used);
 
 /// @brief Patch recovered source-side PC builders for multi-target consumers.
 [[nodiscard]] TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,

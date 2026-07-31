@@ -9098,8 +9098,40 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 return 'RegClass::VGPR'
             case 'acc':
                 return 'RegClass::ACC_VGPR'
+            case 'ttmp':
+                return 'RegClass::TTMP'
             case _:
                 return None
+
+    @staticmethod
+    def _special_reg_ref_for_name(name: str) -> tuple[str, int] | None:
+        """Map a named architectural register to its structural reference.
+
+        This runs at generation time, while the operand selector metadata is
+        still typed. Generated analysis code must not recover register identity
+        by parsing the display string returned by ``Operand::name()``.
+        """
+        normalized = name.lower()
+        if normalized.startswith('src_'):
+            normalized = normalized[4:]
+        for prefixes, reg_class in (
+            (('exec',), 'RegClass::EXEC'),
+            (('vcc',), 'RegClass::VCC'),
+            (('flat_scratch', 'flat_scratch_base'), 'RegClass::FLAT_SCRATCH'),
+        ):
+            for prefix in prefixes:
+                if normalized in (prefix, f'{prefix}_all', f'{prefix}_lo'):
+                    return reg_class, 0
+                if normalized == f'{prefix}_hi':
+                    return reg_class, 1
+
+        if normalized.startswith('ttmp') and normalized[4:].isdigit():
+            return 'RegClass::TTMP', int(normalized[4:])
+        if normalized == 'm0':
+            return 'RegClass::M0', 0
+        if normalized == 'scc':
+            return 'RegClass::SCC', 0
+        return None
 
     @staticmethod
     def _instruction_has_implicit_register_operand(inst: Instruction) -> bool:
@@ -9155,9 +9187,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         f'encoding_value_ - {opsel_name}::{pattern.min_enum}, size_bits_);'
                     )
                     reg_class = self._reg_class_for_prefix(pattern.prefix)
-                    # Only register-file prefixes tracked by RegisterSet become
-                    # register refs. Named special registers remain nullopt
-                    # until a consumer needs special-register liveness.
+                    # Every architectural register range receives a structural
+                    # ref. RegisterSet decides independently which classes it
+                    # tracks for liveness.
                     if reg_class is not None:
                         ref_case_lines.append(
                             f'if (encoding_value_ >= {opsel_name}::{pattern.min_enum} && '
@@ -9199,6 +9231,15 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                             f'if (encoding_value_ == {opsel_name}::{pattern.enum_name}) '
                             f'return true;'
                         )
+                        special_ref = self._special_reg_ref_for_name(
+                            pattern.operand_name
+                        )
+                        if special_ref is not None:
+                            reg_class, reg_index = special_ref
+                            ref_case_lines.append(
+                                f'if (encoding_value_ == {opsel_name}::{pattern.enum_name}) '
+                                f'return RegisterRef{{{reg_class}, {reg_index}, reg_width}};'
+                            )
                 elif pattern.kind == OperandNamePattern.LITERAL:
                     case_lines.append(
                         f'if (encoding_value_ == {opsel_name}::{pattern.enum_name}) '

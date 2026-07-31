@@ -7616,6 +7616,78 @@ TEST(BinaryTranslatorE2E, PatchesRecoveredSetpcTargetAfterRelocation) {
   EXPECT_EQ(target_words[10], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
 }
 
+TEST(KernelTextLayout, LongRecoveredSpecialCarrierUsesBranchIslandsWithoutClobberingCarrier) {
+  constexpr uint64_t kWindowOffset = 0;
+  constexpr uint64_t kIslandOffset = 70'000;
+  constexpr uint64_t kTargetOffset = 140'000;
+  constexpr uint64_t kSourceTargetOffset = 64;
+  constexpr uint16_t kVccLo = 106;
+  std::vector<uint8_t> text(kTargetOffset + sizeof(uint32_t), 0);
+  rocjitsu::KernelTextLayout layout;
+  layout.blocks.push_back({.source_start = kSourceTargetOffset,
+                           .source_end = kSourceTargetOffset + sizeof(uint32_t),
+                           .target_start = kTargetOffset,
+                           .target_end = kTargetOffset + sizeof(uint32_t)});
+  layout.branch_island_slots.push_back(kIslandOffset);
+  layout.recovered_indirect_fixups.push_back({.source_call_offset = 0,
+                                              .source_target_offset = kSourceTargetOffset,
+                                              .target_window_offset = kWindowOffset,
+                                              .target_selector = kVccLo,
+                                              .target_carrier = {rocjitsu::RegClass::VCC, 0, 2}});
+  std::vector<uint8_t> island_used(1, 0);
+
+  const auto result = rocjitsu::patch_recovered_indirect_fixups(
+      text, layout, ROCJITSU_CODE_ARCH_GFX1250, island_used);
+  ASSERT_TRUE(result.ok) << result.message;
+  EXPECT_EQ(island_used, (std::vector<uint8_t>{1}));
+
+  uint32_t window_word = 0;
+  uint32_t island_word = 0;
+  std::memcpy(&window_word, text.data() + kWindowOffset, sizeof(window_word));
+  std::memcpy(&island_word, text.data() + kIslandOffset, sizeof(island_word));
+  EXPECT_EQ(window_word, rocjitsu::build_s_branch(17'499, ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ(island_word, rocjitsu::build_s_branch(17'499, ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_NE(window_word, rocjitsu::build_s_getpc_b64(kVccLo, ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_NE(window_word, rocjitsu::build_s_setpc_b64(kVccLo, ROCJITSU_CODE_ARCH_GFX1250));
+}
+
+TEST(KernelTextLayout, LongRecoveredSpecialCarrierUsesReservedOrdinaryScratchPair) {
+  constexpr uint64_t kTargetOffset = 140'000;
+  constexpr uint64_t kSourceTargetOffset = 64;
+  constexpr uint16_t kVccLo = 106;
+  constexpr uint16_t kScratchPair = 20;
+  std::vector<uint8_t> text(kTargetOffset + sizeof(uint32_t), 0);
+  rocjitsu::KernelTextLayout layout;
+  layout.long_branch_sgpr = kScratchPair;
+  layout.blocks.push_back({.source_start = kSourceTargetOffset,
+                           .source_end = kSourceTargetOffset + sizeof(uint32_t),
+                           .target_start = kTargetOffset,
+                           .target_end = kTargetOffset + sizeof(uint32_t)});
+  layout.recovered_indirect_fixups.push_back({.source_call_offset = 0,
+                                              .source_target_offset = kSourceTargetOffset,
+                                              .target_window_offset = 0,
+                                              .target_selector = kVccLo,
+                                              .target_carrier = {rocjitsu::RegClass::VCC, 0, 2}});
+  std::vector<uint8_t> island_used;
+
+  const auto result = rocjitsu::patch_recovered_indirect_fixups(
+      text, layout, ROCJITSU_CODE_ARCH_GFX1250, island_used);
+  ASSERT_TRUE(result.ok) << result.message;
+
+  std::array<uint32_t, rocjitsu::kMaxRecoveredIndirectTransferWords> words{};
+  std::memcpy(words.data(), text.data(), sizeof(words));
+  EXPECT_EQ(words.front(), rocjitsu::build_s_getpc_b64(kScratchPair, ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_NE(std::ranges::find(
+                words, rocjitsu::build_s_setpc_b64(kScratchPair, ROCJITSU_CODE_ARCH_GFX1250)),
+            words.end());
+  EXPECT_EQ(
+      std::ranges::find(words, rocjitsu::build_s_getpc_b64(kVccLo, ROCJITSU_CODE_ARCH_GFX1250)),
+      words.end());
+  EXPECT_EQ(
+      std::ranges::find(words, rocjitsu::build_s_setpc_b64(kVccLo, ROCJITSU_CODE_ARCH_GFX1250)),
+      words.end());
+}
+
 TEST(BinaryTranslatorE2E, PatchesRecoveredSwappcTargetAfterRelocation) {
   constexpr uint16_t kPcSreg = 10;
   constexpr uint16_t kReturnSreg = 20;

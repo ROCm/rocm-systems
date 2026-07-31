@@ -1109,9 +1109,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       const IndirectCallFixup &first = consumer.fixups.front();
       bool single_effective_target = true;
       for (const IndirectCallFixup &fixup : consumer.fixups) {
-        if (fixup.source_call_sreg != first.source_call_sreg ||
+        if (fixup.source_call_selector != first.source_call_selector ||
+            fixup.source_call_carrier != first.source_call_carrier ||
             fixup.source_is_call != first.source_is_call ||
-            fixup.source_return_sreg != first.source_return_sreg) {
+            fixup.source_return_selector != first.source_return_selector) {
           auto failure =
               make_kernel_failure(DiagnosticKind::Legalization,
                                   "recovered indirect branch has inconsistent consumer metadata",
@@ -1284,8 +1285,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
               {.source_call_offset = source_fixup.source_call_offset,
                .source_target_offset = source_fixup.source_target_offset,
                .target_window_offset = target_offset,
-               .target_sreg = source_fixup.source_call_sreg,
-               .return_sreg = source_fixup.source_return_sreg,
+               .target_selector = source_fixup.source_call_selector,
+               .target_carrier = source_fixup.source_call_carrier,
+               .return_selector = source_fixup.source_return_selector,
                .is_call = source_fixup.source_is_call});
           append_nop_padding(kernel_text, kMaxRecoveredIndirectTransferWords * sizeof(uint32_t),
                              host_arch_);
@@ -1497,12 +1499,16 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     // Phase 5: now that every emitted source block has a final target offset,
     // patch explicit direct branches, recovered source-side builders, and
     // recovered indirect transfer windows.
-    auto patched_direct_branches = patch_direct_branch_fixups(translated_text, layout, host_arch_);
+    std::vector<uint8_t> branch_island_used(layout.branch_island_slots.size(), 0);
+    auto patched_direct_branches =
+        patch_direct_branch_fixups(translated_text, layout, host_arch_, branch_island_used);
     if (!patched_direct_branches.ok &&
         patched_direct_branches.reason == TextLayoutFailureReason::BranchOutOfRange) {
       if (auto sgpr = reserve_long_branch_sgpr_pair(kernel_context)) {
         layout.long_branch_sgpr = *sgpr;
-        patched_direct_branches = patch_direct_branch_fixups(translated_text, layout, host_arch_);
+        std::ranges::fill(branch_island_used, 0);
+        patched_direct_branches =
+            patch_direct_branch_fixups(translated_text, layout, host_arch_, branch_island_used);
       }
     }
     if (!patched_direct_branches.ok) {
@@ -1523,10 +1529,21 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       return leave_unchanged();
     }
 
-    if (auto patched = patch_recovered_indirect_fixups(translated_text, layout, host_arch_);
-        !patched.ok) {
-      auto failure = make_kernel_failure(relocation_diagnostic_kind(patched), patched.message,
-                                         patched.source_offset, "indirect branch");
+    auto patched_recovered =
+        patch_recovered_indirect_fixups(translated_text, layout, host_arch_, branch_island_used);
+    if (!patched_recovered.ok &&
+        patched_recovered.reason == TextLayoutFailureReason::BranchOutOfRange &&
+        !layout.long_branch_sgpr) {
+      if (auto sgpr = reserve_long_branch_sgpr_pair(kernel_context)) {
+        layout.long_branch_sgpr = *sgpr;
+        patched_recovered = patch_recovered_indirect_fixups(translated_text, layout, host_arch_,
+                                                            branch_island_used);
+      }
+    }
+    if (!patched_recovered.ok) {
+      auto failure = make_kernel_failure(relocation_diagnostic_kind(patched_recovered),
+                                         patched_recovered.message, patched_recovered.source_offset,
+                                         "indirect branch");
       if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot))
         continue;
       return leave_unchanged();

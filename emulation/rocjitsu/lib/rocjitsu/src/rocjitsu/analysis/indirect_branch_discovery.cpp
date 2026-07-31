@@ -17,6 +17,7 @@
 #include <deque>
 #include <optional>
 #include <set>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -154,6 +155,19 @@ enum class ScalarPcOp {
   GetPc64,
   SetPc64,
   SwapPc64,
+};
+
+/// @brief A scalar register pair accepted by a canonical scalar PC operation.
+///
+/// @details `selector` is the raw SOP1 operand selector needed by relocation.
+/// `ref` is the architectural register identity used to prove that the getpc
+/// destination and setpc source name the same pair. General SGPR pairs use the
+/// ordinary bounded dataflow; special architectural pairs are handled only by
+/// a closed straight-line template so their values never enter the allocatable
+/// SGPR lattice.
+struct ScalarPcCarrier {
+  uint16_t selector = 0;
+  RegisterRef ref{};
 };
 
 [[nodiscard]] std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word);
@@ -595,8 +609,42 @@ private:
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<uint16_t> scalar_pc_sreg(rj_code_arch_t arch, const Instruction &inst,
-                                                     uint32_t word, ScalarPcOp op) {
+[[nodiscard]] std::optional<RegisterRef> scalar_register_pair_ref(const Operand &operand) {
+  if (operand.size_bits() != 64 || !operand.is_register())
+    return std::nullopt;
+  auto ref = operand.to_register_ref();
+  return ref && ref->width == 2 ? ref : std::nullopt;
+}
+
+[[nodiscard]] bool is_supported_special_pc_carrier(RegisterRef ref) {
+  if (ref.cls == RegClass::VCC)
+    return ref.index == 0 && ref.width == 2;
+  if (ref.cls == RegClass::TTMP)
+    return ref.width == 2 && ref.index % 2 == 0 && ref.index + ref.width <= 16;
+  return false;
+}
+
+[[nodiscard]] uint16_t ordinary_sgpr_limit(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return static_cast<uint16_t>(amdgpu::CdnaIsaBase::MAX_SGPRS_PER_WF);
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return static_cast<uint16_t>(amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF);
+  default:
+    return 0;
+  }
+}
+
+[[nodiscard]] std::optional<ScalarPcCarrier>
+scalar_pc_carrier(rj_code_arch_t arch, const Instruction &inst, uint32_t word, ScalarPcOp op) {
   // This function intentionally recognizes only the canonical 32-bit SOP1
   // encoding. If the instruction is not exactly the scalar PC form, returning
   // nullopt is safer than trying to recover from the generic Instruction API:
@@ -610,13 +658,22 @@ private:
     return std::nullopt;
   const uint16_t pair_lo = op == ScalarPcOp::GetPc64 ? static_cast<uint16_t>((word >> 16) & 0x7fu)
                                                      : static_cast<uint16_t>(word & 0xffu);
-  // SOP1 source fields also encode inline constants and special registers.
-  // Only a complete pair in the tracked general-purpose SGPR file can carry a
-  // PC. Reject other selectors at the decoding boundary so no later analysis
-  // can accidentally use the raw selector as an array index.
-  if (pair_lo >= kMaxTrackedSgprPair)
+  const Operand *operand = op == ScalarPcOp::GetPc64 ? inst.dst_operand(0) : inst.src_operand(0);
+  if (operand == nullptr)
     return std::nullopt;
-  return pair_lo;
+  auto ref = scalar_register_pair_ref(*operand);
+  if (!ref)
+    return std::nullopt;
+  return ScalarPcCarrier{.selector = pair_lo, .ref = *ref};
+}
+
+[[nodiscard]] std::optional<uint16_t> scalar_pc_sreg(rj_code_arch_t arch, const Instruction &inst,
+                                                     uint32_t word, ScalarPcOp op) {
+  auto carrier = scalar_pc_carrier(arch, inst, word, op);
+  if (!carrier || carrier->ref.cls != RegClass::SGPR ||
+      static_cast<uint32_t>(carrier->ref.index) + carrier->ref.width > ordinary_sgpr_limit(arch))
+    return std::nullopt;
+  return carrier->selector;
 }
 
 [[nodiscard]] bool sop2_literal_to_sreg(const Instruction &inst, uint32_t word,
@@ -815,6 +872,12 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   const uint32_t low_word = ctx.facts[index + 1].word;
   const uint32_t high_word = ctx.facts[index + 2].word;
   const auto temp_sdst = static_cast<uint16_t>((temp_word >> 16) & 0x7fu);
+  const Operand *temp_dst = temp_inst.dst_operand(0);
+  const auto temp_ref =
+      temp_dst == nullptr ? std::optional<RegisterRef>{} : temp_dst->to_register_ref();
+  if (!temp_ref || temp_ref->cls != RegClass::SGPR || temp_ref->index != temp_sdst ||
+      temp_ref->width != 1 || temp_sdst == pair_lo || temp_sdst == pair_lo + 1)
+    return std::nullopt;
 
   uint32_t literal = 0;
   if (!sop2_literal_inline_to_sreg(temp_inst, temp_word,
@@ -863,6 +926,12 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   const Instruction &high_inst = *ctx.insts[index + 3];
   const uint32_t temp_word = ctx.facts[index].word;
   const auto temp_sdst = static_cast<uint16_t>((temp_word >> 16) & 0x7fu);
+  const Operand *temp_dst = temp_inst.dst_operand(0);
+  const auto temp_ref =
+      temp_dst == nullptr ? std::optional<RegisterRef>{} : temp_dst->to_register_ref();
+  if (!temp_ref || temp_ref->cls != RegClass::SGPR || temp_ref->index != temp_sdst ||
+      temp_ref->width != 1 || temp_sdst == pair_lo || temp_sdst == pair_lo + 1)
+    return std::nullopt;
 
   uint32_t literal = 0;
   if (!sop2_literal_inline_to_sreg(temp_inst, temp_word,
@@ -984,7 +1053,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   return false;
 }
 
-[[nodiscard]] bool apply_pair_literal64_update(const Instruction &inst, uint16_t pair_lo,
+[[nodiscard]] bool apply_pair_literal64_update(const Instruction &inst, RegisterRef pair_ref,
                                                PcValue &value) {
   const std::string_view mnemonic = inst.mnemonic();
   if (mnemonic != "s_add_nc_u64" && mnemonic != "s_sub_nc_u64")
@@ -996,9 +1065,9 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   if (dst == nullptr || src0 == nullptr || src1 == nullptr)
     return false;
 
-  const auto is_tracked_pair = [pair_lo](const Operand &operand) {
-    const auto ref = operand.to_register_ref();
-    return ref && ref->cls == RegClass::SGPR && ref->index == pair_lo && ref->width == 2;
+  const auto is_tracked_pair = [pair_ref](const Operand &operand) {
+    const auto ref = scalar_register_pair_ref(operand);
+    return ref && *ref == pair_ref;
   };
   if (!is_tracked_pair(*dst))
     return false;
@@ -1025,10 +1094,9 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   return true;
 }
 
-[[nodiscard]] std::optional<IndirectCallFixup> fixup_for_value(const AnalysisContext &ctx,
-                                                               size_t inst_index, uint16_t pair_lo,
-                                                               const PcValue &value,
-                                                               bool targets_exhaustive) {
+[[nodiscard]] std::optional<IndirectCallFixup>
+fixup_for_value(const AnalysisContext &ctx, size_t inst_index, uint16_t pair_lo,
+                RegisterRef carrier_ref, const PcValue &value, bool targets_exhaustive) {
   // A recovered target outside the current text section cannot become a local
   // BasicBlock successor. Drop it here rather than forcing the caller to filter
   // impossible leaders.
@@ -1041,10 +1109,11 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
       .source_recovery_end_offset = value.source_recovery_end_offset,
       .source_call_offset = ctx.insts[inst_index]->src_loc(),
       .source_target_offset = static_cast<uint64_t>(value.offset),
-      .source_call_sreg = pair_lo,
+      .source_call_selector = pair_lo,
+      .source_call_carrier = carrier_ref,
       .source_is_call = ctx.facts[inst_index].swappc_sdst.has_value(),
       .source_targets_exhaustive = targets_exhaustive,
-      .source_return_sreg = ctx.facts[inst_index].swappc_sdst.value_or(0),
+      .source_return_selector = ctx.facts[inst_index].swappc_sdst.value_or(0),
   };
 }
 
@@ -1052,7 +1121,8 @@ bool append_unique(std::vector<IndirectCallFixup> &out, IndirectCallFixup fixup)
   const auto duplicate = std::ranges::find_if(out, [&](const IndirectCallFixup &existing) {
     return existing.source_call_offset == fixup.source_call_offset &&
            existing.source_target_offset == fixup.source_target_offset &&
-           existing.source_call_sreg == fixup.source_call_sreg;
+           existing.source_call_selector == fixup.source_call_selector &&
+           existing.source_call_carrier == fixup.source_call_carrier;
   });
   if (duplicate != out.end()) {
     // Discovery only adds CFG edges between iterations. A later pass can
@@ -1406,7 +1476,7 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
     const Instruction &inst = *ctx.insts[index];
     const uint32_t word = ctx.facts[index].word;
     if (!apply_high_pc_canonicalization(inst, word, pair_lo, updated) &&
-        !apply_pair_literal64_update(inst, pair_lo, updated) &&
+        !apply_pair_literal64_update(inst, RegisterRef{RegClass::SGPR, pair_lo, 2}, updated) &&
         !apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
         !apply_high_carry_update(inst, word, ctx.text, ctx.arch, pair_lo, updated))
       continue;
@@ -1434,7 +1504,9 @@ void emit_fixups_for_values(const AnalysisContext &ctx, size_t inst_index, uint1
         return value.offset >= 0 && static_cast<uint64_t>(value.offset) < ctx.text.size();
       });
   for (const PcValue &value : values) {
-    if (auto fixup = fixup_for_value(ctx, inst_index, pair_lo, value, targets_exhaustive))
+    if (auto fixup =
+            fixup_for_value(ctx, inst_index, pair_lo, RegisterRef{RegClass::SGPR, pair_lo, 2},
+                            value, targets_exhaustive))
       append_unique(recovered, *fixup);
   }
 }
@@ -2047,11 +2119,11 @@ callee_preserves_vgpr_lanes(AnalysisContext &ctx, const std::vector<AnalysisBloc
           return false;
         for (const IndirectCallFixup &fixup : recovered) {
           if (fixup.source_call_offset != term.src_loc() || !fixup.source_is_call ||
-              fixup.source_return_sreg != *facts.swappc_sdst)
+              fixup.source_return_selector != *facts.swappc_sdst)
             continue;
           found_target = true;
           if (!callee_preserves_vgpr_lanes(ctx, blocks, block_by_offset, recovered,
-                                           fixup.source_target_offset, fixup.source_return_sreg,
+                                           fixup.source_target_offset, fixup.source_return_selector,
                                            *protected_lanes, active_callees)) {
             return false;
           }
@@ -2204,7 +2276,8 @@ void recover_lane_saved_call_targets(AnalysisContext &ctx, const std::vector<Ana
     std::optional<size_t> origin_call_index;
     uint64_t origin_call_offset = 0;
     for (const IndirectCallFixup &fixup : known_recovered) {
-      if (!fixup.source_is_call || fixup.source_call_sreg != saved_sgprs[0])
+      if (!fixup.source_is_call || fixup.source_call_selector != saved_sgprs[0] ||
+          fixup.source_call_carrier != RegisterRef{RegClass::SGPR, saved_sgprs[0], 2})
         continue;
       const auto call_index = instruction_index_for_offset(ctx.insts, fixup.source_call_offset);
       if (!call_index || *call_index <= last_save || *call_index >= consumer_index)
@@ -2226,7 +2299,8 @@ void recover_lane_saved_call_targets(AnalysisContext &ctx, const std::vector<Ana
     std::vector<const IndirectCallFixup *> origin_fixups;
     for (const IndirectCallFixup &fixup : known_recovered) {
       if (fixup.source_call_offset == origin_call_offset && fixup.source_is_call &&
-          fixup.source_call_sreg == saved_sgprs[0])
+          fixup.source_call_selector == saved_sgprs[0] &&
+          fixup.source_call_carrier == RegisterRef{RegClass::SGPR, saved_sgprs[0], 2})
         origin_fixups.push_back(&fixup);
     }
     if (origin_fixups.empty())
@@ -2270,12 +2344,12 @@ void recover_lane_saved_call_targets(AnalysisContext &ctx, const std::vector<Ana
         bool found_target = false;
         for (const IndirectCallFixup &fixup : known_recovered) {
           if (fixup.source_call_offset != inst.src_loc() || !fixup.source_is_call ||
-              fixup.source_return_sreg != *facts.swappc_sdst)
+              fixup.source_return_selector != *facts.swappc_sdst)
             continue;
           found_target = true;
           std::vector<std::pair<uint64_t, uint16_t>> active_callees;
           if (!callee_preserves_vgpr_lanes(ctx, blocks, block_by_offset, known_recovered,
-                                           fixup.source_target_offset, fixup.source_return_sreg,
+                                           fixup.source_target_offset, fixup.source_return_selector,
                                            lanes, active_callees)) {
             path_preserves = false;
             break;
@@ -2308,9 +2382,10 @@ void recover_lane_saved_call_targets(AnalysisContext &ctx, const std::vector<Ana
     for (const IndirectCallFixup *fixup : origin_fixups) {
       IndirectCallFixup restored = *fixup;
       restored.source_call_offset = consumer_offset;
-      restored.source_call_sreg = *consumer_facts.swappc_ssrc;
+      restored.source_call_selector = *consumer_facts.swappc_ssrc;
+      restored.source_call_carrier = RegisterRef{RegClass::SGPR, *consumer_facts.swappc_ssrc, 2};
       restored.source_is_call = true;
-      restored.source_return_sreg = *consumer_facts.swappc_sdst;
+      restored.source_return_selector = *consumer_facts.swappc_sdst;
       append_unique(recovered, restored);
     }
   }
@@ -2403,12 +2478,95 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
         .source_recovery_end_offset = sub_consumer->second,
     };
 
-    if (auto fixup = fixup_for_value(ctx, sub_consumer->first, *pair_lo, value,
+    if (auto fixup = fixup_for_value(ctx, sub_consumer->first, *pair_lo,
+                                     RegisterRef{RegClass::SGPR, *pair_lo, 2}, value,
                                      /*targets_exhaustive=*/true))
       append_unique(recovered, *fixup);
-    if (auto fixup = fixup_for_value(ctx, *add_consumer, *pair_lo, value,
+    if (auto fixup = fixup_for_value(ctx, *add_consumer, *pair_lo,
+                                     RegisterRef{RegClass::SGPR, *pair_lo, 2}, value,
                                      /*targets_exhaustive=*/true))
       append_unique(recovered, *fixup);
+  }
+}
+
+[[nodiscard]] bool is_pc_dependency_wait(const Instruction &inst) {
+  const std::string_view mnemonic = inst.mnemonic();
+  return mnemonic == "s_wait_alu" || mnemonic == "s_delay_alu" || mnemonic == "s_nop";
+}
+
+void recover_special_pair_pc_templates(const AnalysisContext &ctx,
+                                       const std::vector<AnalysisBlock> &blocks,
+                                       std::vector<IndirectCallFixup> &recovered) {
+  // A canonical scalar PC builder may use an architectural scalar pair outside
+  // the allocatable SGPR file. Such a pair must not be added to BlockState: it
+  // has separate hardware semantics and arbitrary instructions can overwrite
+  // it implicitly. Instead, prove only a closed straight-line template:
+  //
+  //   s_getpc_b64 special_pair
+  //   recognized PC-relative pair updates
+  //   optional scalar dependency waits
+  //   s_setpc_b64 special_pair
+  //
+  // Any other instruction terminates the proof. VCC and aligned TTMP pairs are
+  // the only special carriers accepted: EXEC and FLAT_SCRATCH have additional
+  // architectural semantics, while an odd TTMP selector does not identify a
+  // declared pair. Special state never enters the allocatable SGPR lattice.
+  for (const AnalysisBlock &block : blocks) {
+    for (size_t getpc_index = block.first_index; getpc_index <= block.last_index; ++getpc_index) {
+      const Instruction &getpc_inst = *ctx.insts[getpc_index];
+      auto carrier =
+          scalar_pc_carrier(ctx.arch, getpc_inst, ctx.facts[getpc_index].word, ScalarPcOp::GetPc64);
+      if (!carrier || carrier->ref.cls == RegClass::SGPR ||
+          !is_supported_special_pc_carrier(carrier->ref))
+        continue;
+
+      const uint64_t getpc_next = getpc_inst.src_loc() + static_cast<uint64_t>(getpc_inst.size());
+      PcValue value{
+          .offset = static_cast<int64_t>(getpc_next),
+          .source_getpc_offset = getpc_inst.src_loc(),
+          .source_recovery_begin_offset = getpc_next,
+          .source_recovery_end_offset = getpc_next,
+      };
+
+      for (size_t index = getpc_index + 1; index <= block.last_index; ++index) {
+        const Instruction &inst = *ctx.insts[index];
+        auto consumer =
+            scalar_pc_carrier(ctx.arch, inst, ctx.facts[index].word, ScalarPcOp::SetPc64);
+        if (consumer) {
+          if (consumer->selector == carrier->selector && consumer->ref == carrier->ref) {
+            if (auto fixup = fixup_for_value(ctx, index, carrier->selector, carrier->ref, value,
+                                             /*targets_exhaustive=*/true))
+              append_unique(recovered, *fixup);
+          }
+          break;
+        }
+
+        if (auto pattern =
+                match_temp_add_pattern(ctx, index, block.last_index, carrier->selector)) {
+          value.offset += pattern->delta;
+          value.source_recovery_end_offset = pattern->end_offset;
+          index += pattern->instruction_count - 1;
+          continue;
+        }
+        if (auto pattern =
+                match_temp_sub_pattern(ctx, index, block.last_index, carrier->selector)) {
+          value.offset += pattern->delta;
+          value.source_recovery_end_offset = pattern->end_offset;
+          index += pattern->instruction_count - 1;
+          continue;
+        }
+        if (apply_high_pc_canonicalization(inst, ctx.facts[index].word, carrier->selector, value) ||
+            apply_pair_literal64_update(inst, carrier->ref, value) ||
+            apply_low_literal_update(inst, ctx.facts[index].word, ctx.text, ctx.arch,
+                                     carrier->selector, value) ||
+            apply_high_carry_update(inst, ctx.facts[index].word, ctx.text, ctx.arch,
+                                    carrier->selector, value) ||
+            is_pc_dependency_wait(inst))
+          continue;
+
+        break;
+      }
+    }
   }
 }
 
@@ -2448,6 +2606,7 @@ discover_indirect_branch_edges(std::span<const Instruction *const> insts,
     for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
       scan_block(ctx, block_index, blocks, pending_consumers, iteration_recovered);
     recover_signed_delta_templates(ctx, blocks, block_by_offset, iteration_recovered);
+    recover_special_pair_pc_templates(ctx, blocks, iteration_recovered);
     std::vector<IndirectCallFixup> known_recovered = recovered;
     for (const IndirectCallFixup &fixup : iteration_recovered)
       append_unique(known_recovered, fixup);

@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/register_set.h"
 
 #include <cstdint>
 #include <span>
@@ -31,10 +32,11 @@ struct IndirectCallFixup {
   uint64_t source_recovery_end_offset = 0;   ///< One-past-end source byte of builder code.
   uint64_t source_call_offset = 0;           ///< Source offset of the setpc/swappc consumer.
   uint64_t source_target_offset = 0;         ///< Recovered source branch target offset.
-  uint16_t source_call_sreg = 0;             ///< Low SGPR of the recovered PC pair.
+  uint16_t source_call_selector = 0;         ///< Raw SOP1 selector of the recovered PC pair.
+  RegisterRef source_call_carrier{RegClass::SGPR, 0, 2}; ///< Architectural pair identity.
   bool source_is_call = false;               ///< Whether the consumer is a call-like swappc.
   bool source_targets_exhaustive = false;    ///< Whether every runtime target is represented.
-  uint16_t source_return_sreg = 0;           ///< Low SGPR receiving the return PC for calls.
+  uint16_t source_return_selector = 0;       ///< Raw SOP1 selector receiving return PC for calls.
   uint64_t target_getpc_offset = 0;          ///< Relocated offset of the s_getpc_b64 producer.
   uint64_t target_recovery_begin_offset = 0; ///< Relocated first byte of replaceable builder code.
   uint64_t target_recovery_end_offset = 0;   ///< Relocated one-past-end byte of builder code.
@@ -45,7 +47,7 @@ struct IndirectCallFixup {
 /// @details This pass runs before BasicBlock storage is finalized because any
 /// recovered target must become a block leader. The pass is deliberately
 /// conservative: it only records a target when an s_setpc_b64/s_swappc_b64
-/// source SGPR pair can be proven to hold one or more bounded, concrete
+/// source scalar pair can be proven to hold one or more bounded, concrete
 /// s_getpc_b64-relative text offsets. If the target set reaches the cap, the
 /// consumer is left unresolved rather than creating a partial edge set. If
 /// path-insensitive joins leave the lattice incomplete but still expose a small
@@ -56,7 +58,7 @@ struct IndirectCallFixup {
 /// partial edge sets.
 ///
 /// The implementation first builds a direct-CFG block skeleton, scans each
-/// block once to summarize writes to PC-builder SGPR pairs, runs bounded
+/// block once to summarize writes to ordinary PC-builder SGPR pairs, runs bounded
 /// forward dataflow over those block summaries, and finally emits fixups for
 /// direct intra-block consumers plus deferred inter-block consumers with bounded
 /// concrete entry values. Newly recovered edges are fed back into the temporary

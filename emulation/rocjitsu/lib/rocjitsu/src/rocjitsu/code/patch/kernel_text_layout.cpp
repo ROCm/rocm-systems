@@ -337,38 +337,6 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
   return offset <= text.size() && size <= text.size() - offset;
 }
 
-[[nodiscard]] bool append_recovered_indirect_sequence(std::vector<uint32_t> &words,
-                                                      const RecoveredIndirectFixup &fixup,
-                                                      uint64_t target_offset, rj_code_arch_t arch) {
-  if (const auto direct_simm =
-          compute_sopp_branch_simm16(fixup.target_window_offset, target_offset)) {
-    if (fixup.is_call)
-      words.push_back(build_s_call_b64(fixup.return_sreg, *direct_simm, arch));
-    else
-      words.push_back(build_s_branch(*direct_simm, arch));
-    return true;
-  }
-
-  constexpr uint64_t kMaxSigned = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
-  if (fixup.target_window_offset > kMaxSigned - sizeof(uint32_t) || target_offset > kMaxSigned)
-    return false;
-
-  // The long form intentionally rebuilds the final translated target in the same
-  // SGPR pair consumed by the original setpc/swappc. The preceding source-side
-  // address builder may still execute, but this sequence overwrites the pair
-  // immediately before the actual control transfer.
-  words.push_back(build_s_getpc_b64(fixup.target_sreg, arch));
-  const int64_t base = static_cast<int64_t>(fixup.target_window_offset + sizeof(uint32_t));
-  const int64_t delta = static_cast<int64_t>(target_offset) - base;
-  if (!append_pc_delta_builder(words, arch, fixup.target_sreg, delta))
-    return false;
-  if (fixup.is_call)
-    words.push_back(build_s_swappc_b64(fixup.return_sreg, fixup.target_sreg, arch));
-  else
-    words.push_back(build_s_setpc_b64(fixup.target_sreg, arch));
-  return words.size() <= kMaxRecoveredIndirectTransferWords;
-}
-
 [[nodiscard]] bool append_long_pc_transfer(std::vector<uint32_t> &words, rj_code_arch_t arch,
                                            uint16_t pc_sreg, uint64_t sequence_offset,
                                            uint64_t target_offset,
@@ -634,10 +602,10 @@ allocate_branch_island_chain(uint64_t branch_pc, uint64_t target_offset,
 }
 
 TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
-                                                const KernelTextLayout &layout,
-                                                rj_code_arch_t arch) {
-  std::vector<uint8_t> branch_island_used(layout.branch_island_slots.size(), 0);
-
+                                                const KernelTextLayout &layout, rj_code_arch_t arch,
+                                                std::vector<uint8_t> &branch_island_used) {
+  if (branch_island_used.size() != layout.branch_island_slots.size())
+    return relocation_error(0, "branch-island allocator does not match the text layout");
   for (const BranchFixup &fixup : layout.branch_fixups) {
     auto target_target = target_for_source_offset(layout, fixup.source_target_offset);
     if (!target_target) {
@@ -707,7 +675,11 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
 
 TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
                                                      const KernelTextLayout &layout,
-                                                     rj_code_arch_t arch) {
+                                                     rj_code_arch_t arch,
+                                                     std::vector<uint8_t> &branch_island_used) {
+  if (branch_island_used.size() != layout.branch_island_slots.size())
+    return relocation_error(0, "branch-island allocator does not match the text layout");
+
   std::unordered_map<uint64_t, uint64_t> patched_windows;
   for (const RecoveredIndirectFixup &fixup : layout.recovered_indirect_fixups) {
     auto target_target = target_for_source_offset(layout, fixup.source_target_offset);
@@ -735,11 +707,61 @@ TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
     }
 
     std::vector<uint32_t> words;
-    if (!append_recovered_indirect_sequence(words, fixup, *target_target, arch)) {
-      return relocation_error(
-          fixup.source_call_offset,
-          "target ISA cannot encode canonical recovered indirect branch sequence",
-          TextLayoutFailureCategory::ResourceLimit);
+    if (const auto direct_simm =
+            compute_sopp_branch_simm16(fixup.target_window_offset, *target_target)) {
+      if (fixup.is_call)
+        words.push_back(build_s_call_b64(fixup.return_selector, *direct_simm, arch));
+      else
+        words.push_back(build_s_branch(*direct_simm, arch));
+    } else if (fixup.target_carrier.cls == RegClass::SGPR) {
+      const auto return_sgpr =
+          fixup.is_call ? std::optional<uint16_t>{fixup.return_selector} : std::nullopt;
+      if (!append_long_pc_transfer(words, arch, fixup.target_selector, fixup.target_window_offset,
+                                   *target_target, return_sgpr)) {
+        return relocation_error(
+            fixup.source_call_offset,
+            "target ISA cannot encode canonical recovered indirect branch sequence",
+            TextLayoutFailureCategory::ResourceLimit);
+      }
+    } else if (layout.long_branch_sgpr) {
+      const auto return_sgpr =
+          fixup.is_call ? std::optional<uint16_t>{fixup.return_selector} : std::nullopt;
+      if (!append_long_pc_transfer(words, arch, *layout.long_branch_sgpr,
+                                   fixup.target_window_offset, *target_target, return_sgpr)) {
+        return relocation_error(
+            fixup.source_call_offset,
+            "target ISA cannot encode carrier-preserving recovered indirect branch sequence",
+            TextLayoutFailureCategory::ResourceLimit);
+      }
+    } else {
+      // A branch-island chain is the only SGPR-free long form. It preserves the
+      // architectural residue of VCC/TTMP carriers because the original PC
+      // builder executes unchanged and the transfer window writes no scalar
+      // register. Call-like consumers cannot use an unconditional island chain.
+      auto chain =
+          fixup.is_call
+              ? std::optional<std::vector<uint64_t>>{}
+              : allocate_branch_island_chain(fixup.target_window_offset, *target_target,
+                                             layout.branch_island_slots, branch_island_used);
+      if (!chain || chain->empty()) {
+        return relocation_error(fixup.source_call_offset,
+                                "special-carrier recovered branch is out of range and has no "
+                                "scratch pair or island chain",
+                                TextLayoutFailureCategory::ResourceLimit,
+                                TextLayoutFailureReason::BranchOutOfRange);
+      }
+      const auto first_simm =
+          compute_sopp_branch_simm16(fixup.target_window_offset, chain->front());
+      if (!first_simm)
+        return relocation_error(fixup.source_call_offset,
+                                "recovered indirect branch island chain is malformed");
+      words.push_back(build_s_branch(*first_simm, arch));
+      for (size_t i = 0; i < chain->size(); ++i) {
+        const uint64_t next = i + 1 < chain->size() ? (*chain)[i + 1] : *target_target;
+        if (!patch_branch_word(text, (*chain)[i], next, arch))
+          return relocation_error(fixup.source_call_offset,
+                                  "recovered indirect branch island chain is malformed");
+      }
     }
     if (words.size() > kMaxRecoveredIndirectTransferWords) {
       return relocation_error(fixup.source_call_offset,
@@ -809,7 +831,7 @@ TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
     const int64_t base = static_cast<int64_t>(fixup.target_getpc_offset + sizeof(uint32_t));
     const int64_t delta = static_cast<int64_t>(*target_target) - base;
     std::vector<uint32_t> replacement_words;
-    if (!append_pc_delta_builder(replacement_words, arch, fixup.source_call_sreg, delta)) {
+    if (!append_pc_delta_builder(replacement_words, arch, fixup.source_call_selector, delta)) {
       return relocation_error(
           fixup.source_call_offset,
           "target ISA cannot encode canonical recovered indirect branch builder",

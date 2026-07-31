@@ -387,7 +387,7 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
                                              .target = target,
                                              .continuation = continuation,
                                              .source_call_offset = fixup.source_call_offset,
-                                             .return_sreg = fixup.source_return_sreg});
+                                             .return_sreg = fixup.source_return_selector});
         } else {
           // Non-call recovered setpc targets are ordinary local CFG edges. If a
           // swappc has no statically-known continuation, keep the old
@@ -597,8 +597,9 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch
       const auto same_fixup = [](const IndirectCallFixup &left, const IndirectCallFixup &right) {
         return left.source_call_offset == right.source_call_offset &&
                left.source_target_offset == right.source_target_offset &&
-               left.source_call_sreg == right.source_call_sreg &&
-               left.source_return_sreg == right.source_return_sreg;
+               left.source_call_selector == right.source_call_selector &&
+               left.source_call_carrier == right.source_call_carrier &&
+               left.source_return_selector == right.source_return_selector;
       };
       // The decoded graph only grows. If rediscovery no longer emits a
       // previously recovered source/target observation, retain the target for
@@ -695,7 +696,7 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch
                                            .target = target,
                                            .continuation = continuation,
                                            .source_call_offset = fixup.source_call_offset,
-                                           .return_sreg = fixup.source_return_sreg});
+                                           .return_sreg = fixup.source_return_selector});
       } else {
         source->add_successor(*target);
       }
