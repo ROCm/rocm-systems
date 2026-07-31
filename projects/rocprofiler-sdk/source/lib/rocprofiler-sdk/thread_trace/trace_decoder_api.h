@@ -115,6 +115,16 @@ rocprof_trace_decoder_get_info_string(rocprofiler_thread_trace_decoder_info_t in
 const char*
 rocprof_trace_decoder_get_status_string(rocprofiler_thread_trace_decoder_status_t status);
 
+/**
+ * @brief Returns the version of the decoder library.
+ * Absent from decoders older than the release that introduced it.
+ * @param[out] major Major version.
+ * @param[out] minor Minor version.
+ * @param[out] patch Patch version.
+ */
+rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch);
+
 typedef void (*rocprofiler_thread_trace_decoder_debug_callback_t)(int64_t     time,
                                                                   const char* type,
                                                                   const char* info,

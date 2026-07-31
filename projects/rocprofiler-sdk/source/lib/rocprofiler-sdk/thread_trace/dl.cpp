@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
+#include "lib/common/defines.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
@@ -47,6 +48,30 @@ DL::DL(const char* libpath)
     att_info_fn = reinterpret_cast<InfoFn*>(dlsym(handle, "rocprof_trace_decoder_get_info_string"));
     att_status_fn =
         reinterpret_cast<StatusFn*>(dlsym(handle, "rocprof_trace_decoder_get_status_string"));
+
+    // 0.2 is the first decoder that emits the EVENT and DISPATCH records the occupancy
+    // event timeline is built from. Decoders predating rocprof_trace_decoder_get_version
+    // are identified by rocprof_trace_decoder_create_handle, which 0.2 also added.
+    // Everything else the decoder produces stays valid, so warn rather than fail.
+    auto* version_fn = reinterpret_cast<decltype(&rocprof_trace_decoder_get_version)>(
+        dlsym(handle, "rocprof_trace_decoder_get_version"));
+
+    bool     emits_events = false;
+    uint32_t major = 0, minor = 0, patch = 0;
+
+    if(version_fn != nullptr &&
+       version_fn(&major, &minor, &patch) == ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
+        emits_events = ROCPROFILER_COMPUTE_VERSION(major, minor, patch) >=
+                       ROCPROFILER_COMPUTE_VERSION(0, 2, 0);
+    else
+        emits_events = dlsym(handle, "rocprof_trace_decoder_create_handle") != nullptr;
+
+    if(!emits_events)
+        ROCP_WARNING << path.string()
+                     << ": decoder is older than 0.2 and cannot emit ATT event or dispatch "
+                        "records. Event and dispatch timelines will be empty. Check for a "
+                        "standalone rocprof-trace-decoder package shadowing the one shipped "
+                        "with ROCm.";
 };
 
 DL::~DL()
