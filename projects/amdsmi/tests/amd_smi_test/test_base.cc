@@ -49,6 +49,33 @@ static bool CheckModule(const std::string& fileName, const std::string& cond) {
   return (false);
 }
 
+static std::string get_perf_level_string(amdsmi_dev_perf_level_t level) {
+  switch (level) {
+    case AMDSMI_DEV_PERF_LEVEL_AUTO:
+      return "AUTO";
+    case AMDSMI_DEV_PERF_LEVEL_LOW:
+      return "LOW";
+    case AMDSMI_DEV_PERF_LEVEL_HIGH:
+      return "HIGH";
+    case AMDSMI_DEV_PERF_LEVEL_MANUAL:
+      return "MANUAL";
+    case AMDSMI_DEV_PERF_LEVEL_STABLE_STD:
+      return "STABLE_STD";
+    case AMDSMI_DEV_PERF_LEVEL_STABLE_PEAK:
+      return "STABLE_PEAK";
+    case AMDSMI_DEV_PERF_LEVEL_STABLE_MIN_MCLK:
+      return "STABLE_MIN_MCLK";
+    case AMDSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK:
+      return "STABLE_MIN_SCLK";
+    case AMDSMI_DEV_PERF_LEVEL_DETERMINISM:
+      return "DETERMINISM";
+    case AMDSMI_DEV_PERF_LEVEL_UNKNOWN:
+      return "UNKNOWN";
+    default:
+      return "UNDEFINED_PERF_LEVEL";
+  }
+}
+
 TestBase::TestBase() : setup_failed_(false) {}
 TestBase::~TestBase() = default;
 
@@ -303,6 +330,45 @@ void TestBase::Close(void) {
   }
   amdsmi_status_t err = amdsmi_shut_down();
   ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
+}
+
+void TestBase::SavePerfLevels(void) {
+  for (uint32_t i = 0; i < num_monitor_devs_; ++i) {
+    amdsmi_dev_perf_level_t lvl;
+    amdsmi_status_t err = amdsmi_get_gpu_perf_level(processor_handles_[i], &lvl);
+    if (err == AMDSMI_STATUS_SUCCESS) {
+      saved_perf_level_[i] = lvl;
+      saved_perf_level_valid_[i] = true;
+      IF_VERB(STANDARD) {
+        std::cout << "Saved original performance level for device " << i << ": "
+                  << get_perf_level_string(lvl) << std::endl;
+      }
+    } else {
+      // Device does not expose a settable performance level; skip it so a
+      // later restore does not attempt an unsupported write.
+      saved_perf_level_valid_[i] = false;
+    }
+  }
+}
+
+void TestBase::RestorePerfLevels(void) {
+  for (uint32_t i = 0; i < num_monitor_devs_; ++i) {
+    if (!saved_perf_level_valid_[i]) {
+      continue;  // Original level was never captured for this device.
+    }
+    // Best-effort: intentionally ignore the return so that a restore failure on
+    // one device neither aborts the test nor masks the actual test outcome.
+    amdsmi_status_t err = amdsmi_set_gpu_perf_level(processor_handles_[i], saved_perf_level_[i]);
+    IF_VERB(STANDARD) {
+      if (err == AMDSMI_STATUS_SUCCESS) {
+        std::cout << "Restored perf level dev[" << i
+                  << "]: " << get_perf_level_string(saved_perf_level_[i]) << std::endl;
+      } else {
+        std::cout << "Failed to restore perf level dev[" << i
+                  << "]: " << get_perf_level_string(saved_perf_level_[i]) << std::endl;
+      }
+    }
+  }
 }
 
 void TestBase::DisplayResults(void) const {

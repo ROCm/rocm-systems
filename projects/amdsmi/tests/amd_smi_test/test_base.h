@@ -132,6 +132,11 @@ class TestBase {
   uint32_t socket_count_;                      ///< socket count
   std::vector<amdsmi_socket_handle> sockets_;  ///< sockets
 
+  void SavePerfLevels(void);
+  void RestorePerfLevels(void);
+  amdsmi_dev_perf_level_t saved_perf_level_[MAX_MONITOR_DEVICES];  ///< Restore original perf levels
+  bool saved_perf_level_valid_[MAX_MONITOR_DEVICES] = {false};     ///< Does perf need restoring?
+
  private:
   std::string description_;
   std::string title_;      ///< Displayed title of test

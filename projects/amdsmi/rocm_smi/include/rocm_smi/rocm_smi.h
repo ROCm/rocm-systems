@@ -4027,29 +4027,30 @@ rsmi_status_t rsmi_dev_overdrive_level_set_v1(uint32_t dv_ind, uint32_t od);
  * @brief Control the set of allowed frequencies that can be used for the
  * specified clock.
  *
- * @details Given a device index @p dv_ind, a clock type @p clk_type, and a
- * 64 bit bitmask @p freq_bitmask, this function will limit the set of
- * allowable frequencies. If a bit in @p freq_bitmask has a value of 1, then
- * the frequency (as ordered in an ::rsmi_frequencies_t returned by
- * rsmi_dev_gpu_clk_freq_get()) corresponding to that bit index will be
- * allowed.
+ * @details Given a device index @p dv_ind, this function will restrict clock
+ * @p clk_type to the frequencies selected in @p freq_bitmask. Bit N maps to
+ * DPM level N in the order returned by rsmi_dev_gpu_clk_freq_get(). Set a bit
+ * to 1 to enable and 0 to disable that level.
  *
- * This function will change the performance level to
- * ::RSMI_DEV_PERF_LEVEL_MANUAL in order to modify the set of allowable
- * frequencies. Caller will need to set to ::RSMI_DEV_PERF_LEVEL_AUTO in order
- * to get back to default state.
+ * Only settable DPM levels can be enabled. Bits outside the settable range are
+ * ignored, and the remaining in-range bits are still applied (matching driver
+ * behavior). The deep-sleep frequency (see ::rsmi_frequencies_t::has_deep_sleep)
+ * is not settable, so when it is present the settable level count is
+ * ::rsmi_frequencies_t::num_supported minus one. Without a deep-sleep
+ * frequency, all ::rsmi_frequencies_t::num_supported levels (0 to
+ * num_supported - 1) are settable. The call returns ::RSMI_STATUS_INVALID_ARGS
+ * if no bit selects a settable level.
  *
- * All bits with indices greater than or equal to
- * ::rsmi_frequencies_t::num_supported will be ignored.
+ * This call sets the performance level to ::RSMI_DEV_PERF_LEVEL_MANUAL. Set it
+ * back to ::RSMI_DEV_PERF_LEVEL_AUTO to restore the default behavior.
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[in] clk_type the type of clock for which the set of frequencies
- *  will be modified
+ *  @param[in] clk_type the type of clock to modify
  *
- *  @param[in] freq_bitmask A bitmask indicating the indices of the
- *  frequencies that are to be enabled (1) and disabled (0). Only the lowest
- *  ::rsmi_frequencies_t.num_supported bits of this mask are relevant.
+ *  @param[in] freq_bitmask Bitmask selecting which DPM levels to allow, where
+ *  bit N enables (1) or disables (0) DPM level N. Bits above the highest settable
+ *  level are ignored. See notes above on settable levels.
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not

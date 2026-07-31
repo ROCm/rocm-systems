@@ -41,7 +41,9 @@ TestPowerReadWrite::~TestPowerReadWrite(void) {}
 
 void TestPowerReadWrite::SetUp(void) {
   TestBase::SetUp();
-
+  // Capture the per-device performance level so Close() can restore it and
+  // avoid leaking a forced 'manual' perf state to later tests.
+  SavePerfLevels();
   return;
 }
 
@@ -53,6 +55,10 @@ void TestPowerReadWrite::DisplayResults(void) const {
 }
 
 void TestPowerReadWrite::Close() {
+  // Restore the performance level captured in SetUp() before amdsmi is shut
+  // down. Runs even if Run() aborted on a failed assertion, so this test cannot
+  // leak a forced 'manual' state to subsequent tests.
+  RestorePerfLevels();
   // This will close handles opened within amdsmitst utility calls and call
   // amdsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
