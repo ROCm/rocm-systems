@@ -118,6 +118,7 @@ struct MoiAppendedBodyOptions {
   size_t trailing_guest_word_count = 0u;
   std::span<const uint32_t> entry_prefix_words = {};
   std::optional<uint32_t> probe_guest_instruction_offset = std::nullopt;
+  std::optional<size_t> guest_instruction_word_count = std::nullopt;
   uint32_t *body_guest_instruction_offset = nullptr;
   bool restore_vgpr_spill_before_trailing_guest = false;
   bool wrap_embedded_guest_vgpr_bank = false;
@@ -213,7 +214,8 @@ assemble_moi_appended_body(const PlannedPatch &planned_patch, std::span<const ui
       return std::nullopt;
     }
     guest_word = *options.probe_guest_instruction_offset / sizeof(uint32_t);
-    guest_word_count = planned_patch.candidate->size / sizeof(uint32_t);
+    guest_word_count = options.guest_instruction_word_count.value_or(planned_patch.candidate->size /
+                                                                     sizeof(uint32_t));
     if (*guest_word >= probe_words.size() || guest_word_count == 0u ||
         guest_word_count > probe_words.size() - *guest_word) {
       errors.emplace_back("ConSan MOI " + std::string(probe_name) +

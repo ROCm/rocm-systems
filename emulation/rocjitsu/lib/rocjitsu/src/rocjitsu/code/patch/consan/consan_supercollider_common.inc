@@ -193,8 +193,7 @@ void publish_sc_access_coverage_support(ConSanResult &result, ConSanScAccessCove
       std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
     return std::nullopt;
   const uint16_t width = sc_vcc_save_sgpr_width(arch);
-  const uint16_t limit =
-      std::min<uint16_t>(selection_limit, REGISTER_SET_ALLOCATABLE_SGPRS);
+  const uint16_t limit = std::min<uint16_t>(selection_limit, REGISTER_SET_ALLOCATABLE_SGPRS);
   const auto find_free = [&](uint16_t start, uint16_t end) -> std::optional<uint16_t> {
     if (width == 2u && (start & 1u) != 0u)
       ++start;
@@ -352,9 +351,7 @@ struct Gfx1250TwoAddressExpansionPlan {
            static_cast<uint16_t>(offsets.second > UINT16_MAX);
   }
 
-  [[nodiscard]] uint32_t access_word_count() const {
-    return 4u + 2u * large_offset_count();
-  }
+  [[nodiscard]] uint32_t access_word_count() const { return 4u + 2u * large_offset_count(); }
 
   [[nodiscard]] uint32_t total_additional_word_count() const {
     // The baseline sequence replays one two-word instruction before and after
@@ -372,8 +369,7 @@ gfx1250_two_address_expansion_plan(std::span<const uint8_t> original_bytes,
     return std::nullopt;
   const auto width_bits = two_address_lds_element_width_bits(site);
   std::array<uint32_t, 1> words{};
-  if (!width_bits ||
-      !read_words_at(original_bytes, site.file_offset, std::span<uint32_t>(words)))
+  if (!width_bits || !read_words_at(original_bytes, site.file_offset, std::span<uint32_t>(words)))
     return std::nullopt;
   const auto offsets = two_address_lds_byte_offsets(site, words.front());
   if (!offsets)
@@ -523,8 +519,7 @@ append_lds_check_trap_indirect_return(std::vector<uint32_t> &words, uint64_t wor
   return true;
 }
 
-[[nodiscard]] std::optional<uint16_t>
-choose_lds_check_trap_indirect_pc_sgpr(
+[[nodiscard]] std::optional<uint16_t> choose_lds_check_trap_indirect_pc_sgpr(
     const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
     uint16_t excluded_vcc_sgpr, uint16_t excluded_vcc_width, uint16_t search_start = 0) {
   if (inst == nullptr || owner_liveness.empty() ||
@@ -580,10 +575,9 @@ struct LdsCheckTrapIndirectScalarScratch {
 };
 
 [[nodiscard]] std::optional<LdsCheckTrapIndirectScalarScratch>
-choose_lds_check_trap_indirect_scalar_scratch(const Instruction *inst,
-                                              std::span<const LivenessAnalysis *const> owner_liveness,
-                                              std::optional<uint16_t> min_preferred_vcc_save,
-                                              rj_code_arch_t arch) {
+choose_lds_check_trap_indirect_scalar_scratch(
+    const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
+    std::optional<uint16_t> min_preferred_vcc_save, rj_code_arch_t arch) {
   if (inst == nullptr || owner_liveness.empty() ||
       std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
     return std::nullopt;
@@ -636,8 +630,7 @@ choose_lds_check_trap_indirect_scalar_scratch(const Instruction *inst,
       vcc_save = find_disjoint_vcc(0);
     if (vcc_save) {
       const auto scc_save = choose_lds_check_trap_indirect_scc_save_sgpr(
-          inst, owner_liveness, *vcc_save, vcc_width, *pair,
-          min_preferred_vcc_save.value_or(0));
+          inst, owner_liveness, *vcc_save, vcc_width, *pair, min_preferred_vcc_save.value_or(0));
       if (scc_save)
         return LdsCheckTrapIndirectScalarScratch{*vcc_save, *pair, *scc_save};
     }
@@ -724,20 +717,16 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_gfx1250_single_address_lds_pair(
-    const Gfx1250TwoAddressExpansionPlan &plan, uint16_t address_vgpr,
-    uint16_t first_data_vgpr, uint16_t second_data_vgpr, uint16_t adjusted_address_vgpr,
-    bool load) {
+    const Gfx1250TwoAddressExpansionPlan &plan, uint16_t address_vgpr, uint16_t first_data_vgpr,
+    uint16_t second_data_vgpr, uint16_t adjusted_address_vgpr, bool load) {
   if (address_vgpr > 255u || adjusted_address_vgpr > 255u || first_data_vgpr > 255u ||
       second_data_vgpr > 255u ||
-      (plan.element_dwords == 2u &&
-       (first_data_vgpr > 254u || second_data_vgpr > 254u || first_data_vgpr % 2u != 0u ||
-        second_data_vgpr % 2u != 0u)))
+      (plan.element_dwords == 2u && (first_data_vgpr > 254u || second_data_vgpr > 254u)))
     return std::nullopt;
 
-  const uint16_t op = load ? (plan.element_dwords == 1u ? gfx1250::kDsLoadB32Vds
-                                                        : gfx1250::kDsLoadB64Vds)
-                           : (plan.element_dwords == 1u ? gfx1250::kDsStoreB32Vds
-                                                        : gfx1250::kDsStoreB64Vds);
+  const uint16_t op =
+      load ? (plan.element_dwords == 1u ? gfx1250::kDsLoadB32Vds : gfx1250::kDsLoadB64Vds)
+           : (plan.element_dwords == 1u ? gfx1250::kDsStoreB32Vds : gfx1250::kDsStoreB64Vds);
   std::vector<uint32_t> words;
   words.reserve(plan.access_word_count());
   const auto append_access = [&](uint32_t byte_offset, uint16_t data_vgpr) -> bool {
@@ -793,15 +782,12 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
 
   std::array<uint32_t, 2> duplicate_load = original_access;
   const bool preserve_address = lds_load_clobbers_address(site);
-  const auto gfx1250_two_address =
-      gfx1250_two_address_expansion_plan(original_bytes, site, arch);
+  const auto gfx1250_two_address = gfx1250_two_address_expansion_plan(original_bytes, site, arch);
   const uint16_t compare_scratch_vgpr =
       static_cast<uint16_t>(scratch_vgpr + static_cast<uint16_t>(*required_vgprs));
-  uint16_t report_scratch_vgpr =
-      static_cast<uint16_t>(compare_scratch_vgpr +
-                            lds_check_trap_extra_scratch_vgprs(site, gfx1250_two_address));
-  if (options.report_buffer_address &&
-      consan_arch_requires_even_vgpr_tuples(arch) &&
+  uint16_t report_scratch_vgpr = static_cast<uint16_t>(
+      compare_scratch_vgpr + lds_check_trap_extra_scratch_vgprs(site, gfx1250_two_address));
+  if (options.report_buffer_address && consan_arch_requires_even_vgpr_tuples(arch) &&
       report_scratch_vgpr % 2u != 0)
     ++report_scratch_vgpr;
   const uint16_t saved_address_vgpr = static_cast<uint16_t>(
@@ -927,23 +913,21 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
   }
   if (gfx1250_two_address) {
     const uint16_t replay_address_vgpr = preserve_address ? saved_address_vgpr : *site.addr_vgpr;
-    const std::optional<uint16_t> first_data_vgpr = site.kind == ConSanLdsAccessKind::Read
-                                                        ? site.dst_vgpr
-                                                        : site.data_vgpr;
+    const std::optional<uint16_t> first_data_vgpr =
+        site.kind == ConSanLdsAccessKind::Read ? site.dst_vgpr : site.data_vgpr;
     const std::optional<uint16_t> second_data_vgpr =
         site.kind == ConSanLdsAccessKind::Read && first_data_vgpr
             ? std::optional<uint16_t>(
                   static_cast<uint16_t>(*first_data_vgpr + gfx1250_two_address->element_dwords))
             : site.second_data_vgpr;
-    const auto split = first_data_vgpr && second_data_vgpr
-                           ? build_gfx1250_single_address_lds_pair(
-                                 *gfx1250_two_address, replay_address_vgpr, *first_data_vgpr,
-                                 *second_data_vgpr, compare_scratch_vgpr,
-                                 site.kind == ConSanLdsAccessKind::Read)
-                           : std::nullopt;
+    const auto split =
+        first_data_vgpr && second_data_vgpr
+            ? build_gfx1250_single_address_lds_pair(
+                  *gfx1250_two_address, replay_address_vgpr, *first_data_vgpr, *second_data_vgpr,
+                  compare_scratch_vgpr, site.kind == ConSanLdsAccessKind::Read)
+            : std::nullopt;
     if (!split) {
-      errors.emplace_back(
-          "ConSan LDS check/trap proof could not split gfx1250 two-address access");
+      errors.emplace_back("ConSan LDS check/trap proof could not split gfx1250 two-address access");
       return std::nullopt;
     }
     words.insert(words.end(), split->begin(), split->end());

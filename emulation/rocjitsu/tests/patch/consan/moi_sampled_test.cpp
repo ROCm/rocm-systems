@@ -649,6 +649,57 @@ TEST(ConSanMoi, DirectSampledProbeRequiresCapacityForEveryLdsAccessRange) {
   }));
 }
 
+TEST(ConSanMoi, DirectSampledSplitsLargeGfx1250TwoAddressGuestAccess) {
+  constexpr auto store =
+      gfx1250::build_vds(gfx1250::kDsStore2addrStride64B64Vds,
+                         {.offset0 = 1u, .offset1 = 255u, .addr = 0u, .data0 = 2u, .data1 = 4u});
+  const std::array<uint32_t, 3> text_words = {
+      store[0],
+      store[1],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "large_two_address_sampled");
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 20;
+  options.moi_exec_save_sgpr = 60;
+  options.moi_owner_vgpr = 50;
+  options.moi_epoch_vgpr = 51;
+  options.max_patches = 2;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+  });
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_TRUE(access->scratch_vgpr);
+  const auto plan = std::ranges::find_if(result.resource_plans, [](const auto &resource_plan) {
+    return resource_plan.site_kind == ConSanResourceSiteKind::Access;
+  });
+  ASSERT_NE(plan, result.resource_plans.end());
+  const uint16_t adjusted_address =
+      static_cast<uint16_t>(*access->scratch_vgpr + plan->scratch_vgpr_count - 1u);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> body =
+      text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
+  const auto first =
+      gfx1250::build_vds(gfx1250::kDsStoreB64Vds, {.offset1 = 2u, .addr = 0u, .data0 = 2u});
+  const auto second = gfx1250::build_vds(
+      gfx1250::kDsStoreB64Vds, {.addr = static_cast<uint8_t>(adjusted_address), .data0 = 4u});
+  EXPECT_TRUE(contains_subsequence(body, first));
+  EXPECT_TRUE(contains_subsequence(body, second));
+  EXPECT_FALSE(contains_subsequence(body, store));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, SampledAtomicTrackingPublishesQualifiedTypedMetadata) {
   const std::vector<uint8_t> bytes = make_rdna4_sampled_lds_and_ordered_flat_atomic_code_object();
   ASSERT_FALSE(bytes.empty());

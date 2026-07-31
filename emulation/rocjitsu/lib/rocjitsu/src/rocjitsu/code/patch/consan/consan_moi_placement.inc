@@ -617,9 +617,9 @@ struct MoiSgprRange {
   return moi_descriptor_owner_shift(image, kernel.descriptor_file_offset, errors);
 }
 
-[[nodiscard]] bool grow_moi_descriptor_vgpr_allocation(
-    KD &desc, uint32_t required_count, rj_code_arch_t arch,
-    bool proven_empty_accumulator_bank = false) {
+[[nodiscard]] bool grow_moi_descriptor_vgpr_allocation(KD &desc, uint32_t required_count,
+                                                       rj_code_arch_t arch,
+                                                       bool proven_empty_accumulator_bank = false) {
   if (required_count == 0 || required_count > kMaxVgprs)
     return false;
 
@@ -703,8 +703,7 @@ struct MoiSgprRange {
 
   KD desc{};
   std::memcpy(&desc, image.data() + kernel.descriptor_file_offset, sizeof(desc));
-  if (!grow_moi_descriptor_vgpr_allocation(desc, required_count, arch,
-                                           kernel.agpr_count == 0u)) {
+  if (!grow_moi_descriptor_vgpr_allocation(desc, required_count, arch, kernel.agpr_count == 0u)) {
     errors.emplace_back("ConSan MOI could not grow descriptor VGPR allocation");
     return false;
   }
@@ -930,10 +929,15 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
       is_rdna4_family_arch(arch) && options.moi_dynamic_stack_spill
           ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
           : 0u;
+  const uint16_t two_address_replay_count =
+      arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+              two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u
+          ? 1u
+          : 0u;
   return static_cast<uint16_t>(
       inline_shadow_scratch_count(options) + inline_shadow_loop_scratch_count(options, candidate) +
       (moi_load_clobbers_address(candidate) && flat_offset_address_count == 0u ? 1u : 0u) +
-      flat_offset_address_count + dynamic_stack_reservoir_count);
+      flat_offset_address_count + dynamic_stack_reservoir_count + two_address_replay_count);
 }
 
 [[nodiscard]] uint16_t inline_shadow_spill_backed_scratch_count(const ConSanOptions &options,
@@ -953,8 +957,14 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
 }
 
 [[nodiscard]] uint16_t direct_sampled_scratch_count(const ConSanOptions &options,
-                                                    const ConSanMoiCandidate &candidate) {
+                                                    const ConSanMoiCandidate &candidate,
+                                                    rj_code_arch_t arch) {
   const uint16_t base_scratch_count = options.moi_sampled_check ? 7u : 5u;
+  const uint16_t two_address_replay_count =
+      arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+              two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u
+          ? 1u
+          : 0u;
   return static_cast<uint16_t>(
       base_scratch_count + (options.moi_runtime_sample_stride > 1 ? 1u : 0u) +
       (candidate_requires_gfx1250_flat_offset_materialization(candidate) ? 2u
@@ -963,17 +973,18 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
       (options.automatic_moi_private_epoch
            ? (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId ? 2u : 1u)
        : moi_uses_scalar_persistent_state(options) ? 2u
-                                                   : 0u));
+                                                   : 0u) +
+      two_address_replay_count);
 }
 
-[[nodiscard]] uint16_t
-sampled_spill_backed_scratch_count(const ConSanOptions &options,
-                                   const ConSanMoiCandidate &candidate) {
+[[nodiscard]] uint16_t sampled_spill_backed_scratch_count(const ConSanOptions &options,
+                                                          const ConSanMoiCandidate &candidate,
+                                                          rj_code_arch_t arch) {
   // The publication phases recover an overlapping address into an ordinary
   // temporary only while that phase consumes it. This keeps the fallback
   // within the same scratch budget instead of requiring a ninth live value at
   // full-pressure eight-register Sampled sites.
-  return direct_sampled_scratch_count(options, candidate);
+  return direct_sampled_scratch_count(options, candidate, arch);
 }
 
 struct SampledAtomicScratchLayout {
@@ -1427,15 +1438,19 @@ struct MoiOwnerRegisterReferenceSummary {
                                                      rj_code_arch_t arch) {
   switch (options.moi_engine) {
   case ConSanMoiEngine::RecordReplay:
-    return static_cast<uint16_t>((record_replay_uses_automatic_banked_capture(options) ? 10u : 6u) +
-                                 (candidate_requires_gfx1250_flat_offset_materialization(candidate)
-                                      ? 2u
-                                  : moi_load_clobbers_address(candidate) ? 1u
-                                                                         : 0u));
+    return static_cast<uint16_t>(
+        (record_replay_uses_automatic_banked_capture(options) ? 10u : 6u) +
+        (candidate_requires_gfx1250_flat_offset_materialization(candidate) ? 2u
+         : moi_load_clobbers_address(candidate)                            ? 1u
+                                                                           : 0u) +
+        (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+                 two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u
+             ? 1u
+             : 0u));
   case ConSanMoiEngine::InlineShadow:
     return inline_shadow_scratch_count(options, candidate, arch);
   case ConSanMoiEngine::Sampled:
-    return direct_sampled_scratch_count(options, candidate);
+    return direct_sampled_scratch_count(options, candidate, arch);
   }
   return 0;
 }
@@ -1636,8 +1651,7 @@ struct MoiResourcePlanningState {
           const uint32_t unified_vgpr_count =
               moi_descriptor_unified_vgpr_allocation_count(descriptor, arch);
           stored.ordinary_vgpr_limit = static_cast<uint16_t>(accvgpr_base);
-          stored.cdna_accvgpr_boundary_is_allocation_tail =
-              unified_vgpr_count <= accvgpr_base;
+          stored.cdna_accvgpr_boundary_is_allocation_tail = unified_vgpr_count <= accvgpr_base;
           stored.can_move_empty_cdna_accvgpr_boundary =
               stored.cdna_accvgpr_boundary_is_allocation_tail || kernel.agpr_count == 0u;
         }
@@ -1912,9 +1926,8 @@ plan_moi_scalar_prologue_scratch(const MoiResourcePlanningState &state,
     // compiler's rounded ordinary boundary. Descriptor mutation repeats that
     // proof before moving ACCUM_OFFSET. Without it, remain below the original
     // boundary even though the pair is dead before the first guest instruction.
-    const uint16_t scratch_limit = context->can_move_empty_cdna_accvgpr_boundary
-                                       ? kMaxVgprs
-                                       : context->ordinary_vgpr_limit;
+    const uint16_t scratch_limit =
+        context->can_move_empty_cdna_accvgpr_boundary ? kMaxVgprs : context->ordinary_vgpr_limit;
     std::optional<uint16_t> scratch;
     for (uint16_t candidate = 0; candidate + 2u <= scratch_limit; ++candidate) {
       if (!unavailable_vgprs.contains({RegClass::VGPR, candidate, 1u}) &&
@@ -2361,8 +2374,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   request.current_allocation_count = std::min(plan.current_vgpr_count, plan.ordinary_vgpr_limit);
   request.max_referenced_count = plan.max_referenced_vgpr_count;
   request.architecture_limit =
-      every_owner_cdna_accvgpr_boundary_is_allocation_tail ? kMaxVgprs
-                                                           : plan.ordinary_vgpr_limit;
+      every_owner_cdna_accvgpr_boundary_is_allocation_tail ? kMaxVgprs : plan.ordinary_vgpr_limit;
   request.explicit_base = options.scratch_vgpr;
   request.force_spill = options.force_vgpr_spill || require_spill;
   request.forbidden = anchor_def_use.defs | anchor_def_use.uses;
@@ -2467,15 +2479,19 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
                        : ConSanResourcePlanAlternativeOutcome::Rejected,
     });
   }
+  const bool guest_replay_needs_disjoint_address_scratch =
+      access_candidate != nullptr && state.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      two_address_native_lds_offset_scale(access_candidate->mnemonic).value_or(0u) > 8u;
   const bool supports_access_operand_overlap_spill =
-      options.moi_engine == ConSanMoiEngine::InlineShadow ||
+      (options.moi_engine == ConSanMoiEngine::InlineShadow &&
+       !guest_replay_needs_disjoint_address_scratch) ||
       ((is_rdna4_family_arch(state.arch) || instrumentation::is_cdna_family_arch(state.arch)) &&
        ((options.moi_engine == ConSanMoiEngine::RecordReplay &&
-         !options.moi_dynamic_access_records) ||
-        (access_candidate != nullptr &&
+         !options.moi_dynamic_access_records && !guest_replay_needs_disjoint_address_scratch) ||
+        (access_candidate != nullptr && !guest_replay_needs_disjoint_address_scratch &&
          (sampled_access_can_plan_spill_over_guest_operands(options, *access_candidate) ||
           sampled_access_supports_spill_backed_operand_recovery(options, *access_candidate,
-                                                                 state.arch)))));
+                                                                state.arch)))));
   const bool supports_sampled_atomic_operand_overlap_spill =
       (is_rdna4_family_arch(state.arch) || instrumentation::is_cdna_family_arch(state.arch)) &&
       options.moi_engine == ConSanMoiEngine::Sampled && site_kind == ConSanResourceSiteKind::Atomic;
@@ -2531,7 +2547,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
     }
     if (options.moi_engine == ConSanMoiEngine::Sampled && access_candidate != nullptr &&
         sampled_access_supports_spill_backed_operand_recovery(options, *access_candidate,
-                                                               state.arch) &&
+                                                              state.arch) &&
         access_candidate->dst_vgpr) {
       spill_request.forbidden.expand(
           {RegClass::VGPR, *access_candidate->dst_vgpr,
@@ -2596,7 +2612,7 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpti
           plan.reason == ConSanRegisterPlanReason::NoLegalWindow) ||
          initial_sampled_spill_overlaps_guest)) {
       const uint16_t spill_scratch_count =
-          sampled_spill_backed_scratch_count(options, candidate);
+          sampled_spill_backed_scratch_count(options, candidate, state.arch);
       ConSanCandidateResourcePlan spill_plan = plan_moi_resource_site(
           state, options, ConSanResourceSiteKind::Access, candidate_index, candidate.text_offset,
           candidate.kernel_descriptor_file_offset, spill_scratch_count, &candidate,
@@ -2916,9 +2932,8 @@ moi_dynamic_stack_exec_save_sgpr_count(ConSanMoiEngine engine) {
   // One EXEC-save pair, one VCC-save pair, and one SCC snapshot. Barrier-dense
   // RDNA-family objects additionally reserve a dispatch key and an aligned
   // call-return pair for the relocated router.
-  return options.moi_report_buffer_address
-             ? std::max<uint16_t>(5u, runtime_workgroup_gate_count)
-             : 0u;
+  return options.moi_report_buffer_address ? std::max<uint16_t>(5u, runtime_workgroup_gate_count)
+                                           : 0u;
 }
 
 [[nodiscard]] std::optional<uint16_t>
@@ -5205,8 +5220,8 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
         scalar_persistence_failure = "could not resolve every scalar-state owner descriptor";
         return false;
       }
-      auto prologue_scratch = plan_moi_scalar_prologue_scratch(
-          state, *resolved_contexts, /*needs_entry_vgpr_pair=*/true);
+      auto prologue_scratch = plan_moi_scalar_prologue_scratch(state, *resolved_contexts,
+                                                               /*needs_entry_vgpr_pair=*/true);
       if (!prologue_scratch) {
         scalar_persistence_failure =
             "could not place entry-local VGPR scratch for scalar persistent state";
@@ -5231,8 +5246,8 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
             moi_sgpr_range_overlaps_dynamic_stack_state(base, scalar_count)) {
           return true;
         }
-        return moi_scalar_contexts_conflict_with_physical_vcc(
-            resolved_contexts->summaries, base, scalar_count, arch);
+        return moi_scalar_contexts_conflict_with_physical_vcc(resolved_contexts->summaries, base,
+                                                              scalar_count, arch);
       };
       for (uint32_t base = first; base + scalar_count <= scalar_limit; ++base) {
         if (unavailable(static_cast<uint16_t>(base)))
@@ -5249,12 +5264,12 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
         result.moi_persistent_sgprs_automatic = true;
         result.resolved_moi_prologue_scratch_vgpr_assignments =
             options.moi_prologue_scratch_vgpr_assignments;
-        result.warnings.emplace_back(
-            "ConSan MOI assigned persistent scalar owner/epoch" +
-            std::string(needs_workgroup_key ? "/workgroup-key" : "") + " state s" +
-            std::to_string(base) + ":s" + std::to_string(base + scalar_count - 1u) +
-            " below a full CDNA ordinary VGPR bank for " +
-            consan_moi_engine_name(options.moi_engine));
+        result.warnings.emplace_back("ConSan MOI assigned persistent scalar owner/epoch" +
+                                     std::string(needs_workgroup_key ? "/workgroup-key" : "") +
+                                     " state s" + std::to_string(base) + ":s" +
+                                     std::to_string(base + scalar_count - 1u) +
+                                     " below a full CDNA ordinary VGPR bank for " +
+                                     consan_moi_engine_name(options.moi_engine));
         return true;
       }
       scalar_persistence_failure =
@@ -5296,8 +5311,7 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
             has_dynamic_stack_owner) {
           result.outcome = ConSanTransformOutcome::Unsupported;
           result.warnings.emplace_back(
-              "ConSan MOI cannot place persistent scalar state (" +
-              scalar_persistence_failure +
+              "ConSan MOI cannot place persistent scalar state (" + scalar_persistence_failure +
               ") for a dynamic-stack CDNA owner with a full ordinary VGPR bank");
           return false;
         }
@@ -5314,11 +5328,9 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
           return true;
         }
         result.outcome = ConSanTransformOutcome::Unsupported;
-        if (options.moi_engine == ConSanMoiEngine::Sampled &&
-            !scalar_persistence_failure.empty()) {
+        if (options.moi_engine == ConSanMoiEngine::Sampled && !scalar_persistence_failure.empty()) {
           result.warnings.emplace_back(
-              "ConSan MOI cannot place persistent scalar state (" +
-              scalar_persistence_failure +
+              "ConSan MOI cannot place persistent scalar state (" + scalar_persistence_failure +
               ") or persistent VGPR state below a connected CDNA AccVGPR boundary");
         } else {
           result.warnings.emplace_back(

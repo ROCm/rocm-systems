@@ -735,13 +735,98 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   return sequence.emit_all(mov_offset, add_offset);
 }
 
+[[nodiscard]] std::optional<std::vector<uint32_t>> build_moi_relocated_guest_access_words(
+    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate, rj_code_arch_t arch,
+    uint16_t replay_address_vgpr, std::optional<uint16_t> adjusted_address_vgpr,
+    std::vector<std::string> &errors) {
+  const auto copy_original = [&]() -> std::optional<std::vector<uint32_t>> {
+    if (candidate.size == 0u || candidate.size % sizeof(uint32_t) != 0u ||
+        candidate.file_offset > bytes.size() ||
+        candidate.size > bytes.size() - candidate.file_offset) {
+      errors.emplace_back("ConSan MOI relocated guest access exceeds the code object");
+      return std::nullopt;
+    }
+    std::vector<uint32_t> words(candidate.size / sizeof(uint32_t));
+    std::memcpy(words.data(), bytes.data() + candidate.file_offset, candidate.size);
+    return words;
+  };
+
+  const auto two_address_scale = two_address_native_lds_offset_scale(candidate.mnemonic);
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || !two_address_scale)
+    return copy_original();
+
+  const auto ranges = candidate_access_ranges(bytes, candidate, arch);
+  const uint16_t element_dwords = static_cast<uint16_t>(candidate.width_bits / 32u);
+  if (!ranges || ranges->size() != 2u ||
+      (candidate.kind != ConSanLdsAccessKind::Read &&
+       candidate.kind != ConSanLdsAccessKind::Write) ||
+      (element_dwords != 1u && element_dwords != 2u) || replay_address_vgpr > 255u) {
+    errors.emplace_back("ConSan MOI could not normalize a gfx1250 two-address guest access");
+    return std::nullopt;
+  }
+
+  const bool load = candidate.kind == ConSanLdsAccessKind::Read;
+  const std::optional<uint16_t> first_data_vgpr = load ? candidate.dst_vgpr : candidate.data_vgpr;
+  const std::optional<uint16_t> second_data_vgpr =
+      load && first_data_vgpr
+          ? std::optional<uint16_t>(static_cast<uint16_t>(*first_data_vgpr + element_dwords))
+          : candidate.second_data_vgpr;
+  if (!first_data_vgpr || !second_data_vgpr || *first_data_vgpr > 255u ||
+      *second_data_vgpr > 255u ||
+      (element_dwords == 2u && (*first_data_vgpr > 254u || *second_data_vgpr > 254u))) {
+    errors.emplace_back("ConSan MOI gfx1250 two-address guest access has invalid data operands");
+    return std::nullopt;
+  }
+
+  const uint16_t op =
+      load ? (element_dwords == 1u ? gfx1250::kDsLoadB32Vds : gfx1250::kDsLoadB64Vds)
+           : (element_dwords == 1u ? gfx1250::kDsStoreB32Vds : gfx1250::kDsStoreB64Vds);
+  std::vector<uint32_t> words;
+  const auto append_access = [&](const ConSanMoiAccessRange &range, uint16_t data_vgpr) {
+    uint16_t address_vgpr = replay_address_vgpr;
+    uint16_t immediate = 0u;
+    if (range.static_byte_offset > UINT16_MAX) {
+      if (!adjusted_address_vgpr || *adjusted_address_vgpr > 255u)
+        return false;
+      const auto adjust = instrumentation::build_v_add_u32_literal(
+          *adjusted_address_vgpr, *adjusted_address_vgpr, range.static_byte_offset,
+          replay_address_vgpr, arch);
+      if (!adjust)
+        return false;
+      words.insert(words.end(), adjust->begin(), adjust->end());
+      address_vgpr = *adjusted_address_vgpr;
+    } else {
+      immediate = static_cast<uint16_t>(range.static_byte_offset);
+    }
+    gfx1250::VdsBuilderFields fields{
+        .offset0 = static_cast<uint8_t>(immediate),
+        .offset1 = static_cast<uint8_t>(immediate >> 8u),
+        .addr = static_cast<uint8_t>(address_vgpr),
+    };
+    if (load)
+      fields.vdst = static_cast<uint8_t>(data_vgpr);
+    else
+      fields.data0 = static_cast<uint8_t>(data_vgpr);
+    const auto access = gfx1250::build_vds(op, fields);
+    words.insert(words.end(), access.begin(), access.end());
+    return true;
+  };
+  if (!append_access((*ranges)[0], *first_data_vgpr) ||
+      !append_access((*ranges)[1], *second_data_vgpr)) {
+    errors.emplace_back("ConSan MOI could not split a gfx1250 two-address guest access");
+    return std::nullopt;
+  }
+  return words;
+}
+
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_first_light_access_record_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanOptions &options, rj_code_arch_t arch, uint32_t record_index, uint32_t record_count,
     uint32_t logical_range_index, const ConSanMoiReportBufferLayout &layout,
     const VgprSpillSequence *spill, std::optional<uint32_t> private_epoch_offset,
     std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr) {
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
+    uint32_t *guest_instruction_word_count = nullptr) {
   const auto fail = [&](const char *message) -> std::optional<std::vector<uint32_t>> {
     errors.emplace_back(message);
     return std::nullopt;
@@ -756,8 +841,12 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   const bool materialize_flat_offset =
       candidate_requires_gfx1250_flat_offset_materialization(candidate);
   const bool save_clobbered_address = moi_load_clobbers_address(candidate);
+  const bool reserve_two_address_replay_scratch =
+      arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
   const uint16_t address_scratch_count =
-      materialize_flat_offset ? 2u : (save_clobbered_address ? 1u : 0u);
+      static_cast<uint16_t>((materialize_flat_offset ? 2u : (save_clobbered_address ? 1u : 0u)) +
+                            (reserve_two_address_replay_scratch ? 1u : 0u));
   const uint16_t scratch_count = static_cast<uint16_t>(base_scratch_count + address_scratch_count);
   if (static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count > 256u) {
     errors.emplace_back(options.moi_dynamic_access_records
@@ -911,14 +1000,22 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   const auto append_guest_access = [&] {
     if (guest_instruction_offset)
       *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
-    for (uint64_t offset = 0; offset < candidate.size; offset += sizeof(uint32_t)) {
-      uint32_t word = 0;
-      std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
-      words.push_back(word);
-    }
+    const auto guest_words = build_moi_relocated_guest_access_words(
+        bytes, candidate, arch, *lds_byte_offset_vgpr,
+        reserve_two_address_replay_scratch ? std::optional<uint16_t>(static_cast<uint16_t>(
+                                                 *options.scratch_vgpr + scratch_count - 1u))
+                                           : std::nullopt,
+        errors);
+    if (!guest_words)
+      return false;
+    if (guest_instruction_word_count)
+      *guest_instruction_word_count = static_cast<uint32_t>(guest_words->size());
+    words.insert(words.end(), guest_words->begin(), guest_words->end());
+    return true;
   };
   if (options.moi_dynamic_access_records) {
-    append_guest_access();
+    if (!append_guest_access())
+      return std::nullopt;
     if (!append_moi_lds_wait(words, arch))
       return fail("ConSan MOI dynamic access-record probe could not encode its LDS wait");
   }
@@ -2279,8 +2376,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   // before a load so that the record scratch window may overlap its destination
   // VGPRs. When the load also overwrites its address VGPR, the saved address
   // above remains outside that window until the displaced instruction executes.
-  if (!options.moi_dynamic_access_records)
-    append_guest_access();
+  if (!options.moi_dynamic_access_records && !append_guest_access())
+    return std::nullopt;
 
   if (!sequence.resolve_branches(arch)) {
     errors.emplace_back("ConSan MOI first-light local branch is out of reach");
@@ -2371,8 +2468,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       return false;
     }
     if (options.automatic_moi_owner_sgpr) {
-      const auto save = instrumentation::build_v_writelane_b32(
-          owner_backup_vgpr, *options.moi_owner_sgpr, 0u, arch);
+      const auto save = instrumentation::build_v_writelane_b32(owner_backup_vgpr,
+                                                               *options.moi_owner_sgpr, 0u, arch);
       if (!save) {
         errors.emplace_back(
             "ConSan MOI inline-shadow probe could not save its borrowed owner scalar");
@@ -2388,8 +2485,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     }
     words.push_back(build_v_mov_b32_e32(tmp_vgpr, *options.moi_owner_sgpr, arch));
     if (options.automatic_moi_owner_sgpr) {
-      const auto restore = instrumentation::build_v_readlane_b32(
-          *options.moi_owner_sgpr, owner_backup_vgpr, 0u, arch);
+      const auto restore = instrumentation::build_v_readlane_b32(*options.moi_owner_sgpr,
+                                                                 owner_backup_vgpr, 0u, arch);
       const auto wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
       if (!restore || !wait) {
         errors.emplace_back(

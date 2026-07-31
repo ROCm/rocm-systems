@@ -1462,9 +1462,8 @@
 [[nodiscard]] bool append_exact_byte_cell_provenance_base(
     std::vector<uint32_t> &words, rj_code_arch_t arch, uint16_t base_offset_vgpr,
     uint32_t static_byte_offset, uint32_t relative_cell_index,
-    std::optional<uint16_t> relative_cell_index_vgpr, uint32_t byte_count,
-    uint16_t provenance_vgpr, uint16_t mask_vgpr, uint16_t high_vgpr,
-    uint16_t temporary_vgpr) {
+    std::optional<uint16_t> relative_cell_index_vgpr, uint32_t byte_count, uint16_t provenance_vgpr,
+    uint16_t mask_vgpr, uint16_t high_vgpr, uint16_t temporary_vgpr) {
   if (byte_count == 0u)
     return false;
 
@@ -1542,8 +1541,7 @@
     words.push_back(*clamped_cell_bytes);
     words.insert(words.end(), negative_cell_bytes->begin(), negative_cell_bytes->end());
     words.insert(words.end(), remaining->begin(), remaining->end());
-    words.push_back(
-        build_v_mov_b32_e32(temporary_vgpr, scalar_positive_inline_u32(0u), arch));
+    words.push_back(build_v_mov_b32_e32(temporary_vgpr, scalar_positive_inline_u32(0u), arch));
   } else {
     words.push_back(build_v_mov_b32_e32(temporary_vgpr, vector_source_vgpr(mask_vgpr), arch));
   }
@@ -1763,11 +1761,10 @@
   words.push_back(*high_mask_equal);
   const size_t high_value_fallback_branch = words.size();
   words.push_back(0);
-  if (!append_exact_byte_cell_provenance_base(words, arch, lds_byte_offset_vgpr, static_byte_offset,
-                                              relative_cell_index, relative_cell_index_vgpr,
-                                              byte_count,
-                                              current_low_vgpr, lane_rank_vgpr, current_high_vgpr,
-                                              static_cast<uint16_t>(*options.scratch_vgpr + 4u))) {
+  if (!append_exact_byte_cell_provenance_base(
+          words, arch, lds_byte_offset_vgpr, static_byte_offset, relative_cell_index,
+          relative_cell_index_vgpr, byte_count, current_low_vgpr, lane_rank_vgpr, current_high_vgpr,
+          static_cast<uint16_t>(*options.scratch_vgpr + 4u))) {
     errors.emplace_back(
         "ConSan MOI inline-shadow probe could not encode exact byte-cell provenance");
     return false;
@@ -1832,11 +1829,10 @@
 
   const size_t fallback = words.size();
   words.push_back(*restore_group_exec);
-  if (!append_exact_byte_cell_provenance_base(words, arch, lds_byte_offset_vgpr, static_byte_offset,
-                                              relative_cell_index, relative_cell_index_vgpr,
-                                              byte_count,
-                                              current_low_vgpr, lane_rank_vgpr, current_high_vgpr,
-                                              static_cast<uint16_t>(*options.scratch_vgpr + 4u))) {
+  if (!append_exact_byte_cell_provenance_base(
+          words, arch, lds_byte_offset_vgpr, static_byte_offset, relative_cell_index,
+          relative_cell_index_vgpr, byte_count, current_low_vgpr, lane_rank_vgpr, current_high_vgpr,
+          static_cast<uint16_t>(*options.scratch_vgpr + 4u))) {
     errors.emplace_back(
         "ConSan MOI inline-shadow fallback could not encode exact byte-cell provenance");
     return false;
@@ -2199,8 +2195,8 @@
   words.push_back(
       build_v_mov_b32_e32(saved_current_high_vgpr, vector_source_vgpr(current_high_vgpr), arch));
   if (!append_exact_byte_cell_provenance_base(
-          words, arch, diagnostic_lds_byte_offset_vgpr, diagnostic_static_byte_offset,
-          cell_index, relative_cell_index_vgpr, byte_count, current_low_vgpr, current_high_vgpr,
+          words, arch, diagnostic_lds_byte_offset_vgpr, diagnostic_static_byte_offset, cell_index,
+          relative_cell_index_vgpr, byte_count, current_low_vgpr, current_high_vgpr,
           provenance_temporary_vgpr, temporary_vgpr)) {
     errors.emplace_back("ConSan MOI local publish could not encode exact byte-cell provenance");
     return false;
@@ -2381,7 +2377,8 @@
     std::optional<uint32_t> private_epoch_offset, std::optional<uint32_t> private_owner_offset,
     std::optional<uint16_t> private_owner_shift,
     std::optional<uint32_t> private_workgroup_key_offset, uint16_t workgroup_shadow_compact_token,
-    uint16_t scratch_count, const VgprSpillSequence *spill, std::vector<std::string> &errors) {
+    uint16_t scratch_count, const VgprSpillSequence *spill, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_word_count = nullptr) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI inline-shadow probe requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -2525,13 +2522,6 @@
                         "address: " +
                         std::string(consan_detail::moi_spilled_vgpr_reload_result_name(reload)));
     return false;
-  };
-  const auto append_guest_access = [&] {
-    for (uint64_t offset = 0; offset < candidate.size; offset += sizeof(uint32_t)) {
-      uint32_t word = 0;
-      std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
-      words.push_back(word);
-    }
   };
   // A DS load may use the same VGPR for its address and destination. Preserve
   // the effective address before executing the displaced guest instruction;
@@ -3121,7 +3111,20 @@
       return std::nullopt;
     }
   }
-  append_guest_access();
+  const bool reserve_two_address_replay_scratch =
+      arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
+  const auto guest_words = build_moi_relocated_guest_access_words(
+      bytes, candidate, arch, *lds_byte_offset_vgpr,
+      reserve_two_address_replay_scratch ? std::optional<uint16_t>(static_cast<uint16_t>(
+                                               *options.scratch_vgpr + scratch_count - 1u))
+                                         : std::nullopt,
+      errors);
+  if (!guest_words)
+    return std::nullopt;
+  if (guest_instruction_word_count)
+    *guest_instruction_word_count = static_cast<uint32_t>(guest_words->size());
+  words.insert(words.end(), guest_words->begin(), guest_words->end());
   return words;
 }
 

@@ -20,8 +20,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
 
   const ConSanMoiReportBufferLayout layout = resolve_record_replay_report_layout(
       options, options.moi_track_barriers, options.moi_track_atomics, options.moi_track_atomics);
-  if (options.moi_runtime_sample_stride == 0 ||
-      options.moi_runtime_sample_stride > (1u << 24u) ||
+  if (options.moi_runtime_sample_stride == 0 || options.moi_runtime_sample_stride > (1u << 24u) ||
       (options.moi_runtime_sample_stride & (options.moi_runtime_sample_stride - 1u)) != 0u ||
       options.moi_runtime_sample_offset >= options.moi_runtime_sample_stride) {
     result.warnings.emplace_back(
@@ -112,6 +111,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     uint32_t persistent_private_state_end = 0;
     uint32_t required_private_bytes = 0;
     uint32_t probe_guest_instruction_offset = 0;
+    uint32_t guest_instruction_word_count = 0;
     bool spill_overlaps_guest_operands = false;
     bool wrap_embedded_guest_vgpr_bank = false;
   };
@@ -130,9 +130,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         max_candidate_instruction_words,
         (static_cast<uint64_t>(candidate->size) + sizeof(uint32_t) - 1u) / sizeof(uint32_t));
   }
-  const uint64_t runtime_gate_island_words =
-      moi_runtime_workgroup_gate_reserved_words(
-          static_cast<uint32_t>(max_candidate_instruction_words * sizeof(uint32_t)));
+  const uint64_t runtime_gate_island_words = moi_runtime_workgroup_gate_reserved_words(
+      static_cast<uint32_t>(max_candidate_instruction_words * sizeof(uint32_t)));
   const bool has_spill_backed_scalar_assignment = std::ranges::any_of(
       options.moi_transient_sgpr_assignments, &ConSanMoiTransientSgprAssignment::spill_backed);
   // Spill-backed groups need room for the extra scalar-save arm, while truly
@@ -160,8 +159,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   const bool use_indirect_appended =
       options.moi_exec_save_sgpr.has_value() &&
       (options.moi_runtime_sample_stride > 1u || candidates.size() > 8u ||
-       has_unreachable_function_candidate ||
-       has_spill_backed_scalar_assignment);
+       has_unreachable_function_candidate || has_spill_backed_scalar_assignment);
   uint64_t reserved_barrier_island_count = 0u;
   if (use_indirect_appended && options.moi_track_barriers) {
     // The later persistent-epoch pass excludes split-barrier signals and
@@ -542,12 +540,13 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     }
     std::vector<std::string> candidate_errors;
     uint32_t probe_guest_instruction_offset = 0;
+    uint32_t guest_instruction_word_count = 0;
     auto words = build_first_light_access_record_words(
         bytes, candidate, candidate_options, arch, 0, 0, planned_logical_range_count, layout,
         spill ? &*spill : nullptr,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
         private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
-        candidate_errors, &probe_guest_instruction_offset);
+        candidate_errors, &probe_guest_instruction_offset, &guest_instruction_word_count);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -678,10 +677,10 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         uses_reserved_entry_relay ? access_relay_words : candidate_entry_island_words;
     planned.entry_island_at_anchor = entry_island_at_anchor;
     planned.dense_call_anchor = use_dense_call;
-    planned.runtime_workgroup_gate =
-        uses_reserved_entry_relay && options.moi_runtime_sample_stride > 1u &&
-        !candidate_options.automatic_moi_record_replay_sgpr_spill &&
-        has_scalar_runtime_workgroup_sources;
+    planned.runtime_workgroup_gate = uses_reserved_entry_relay &&
+                                     options.moi_runtime_sample_stride > 1u &&
+                                     !candidate_options.automatic_moi_record_replay_sgpr_spill &&
+                                     has_scalar_runtime_workgroup_sources;
     planned.dense_runtime_workgroup_gate =
         use_dense_call && options.moi_runtime_sample_stride > 1u &&
         !candidate_options.automatic_moi_record_replay_sgpr_spill &&
@@ -695,6 +694,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     planned.record_count = candidate_record_count;
     planned.logical_range_index = planned_logical_range_count;
     planned.probe_guest_instruction_offset = probe_guest_instruction_offset;
+    planned.guest_instruction_word_count = guest_instruction_word_count;
     planned.resources = *resources;
     planned.spill = spill;
     planned.scalar_spill = scalar_spill;
@@ -1153,8 +1153,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           }
           auto gate = build_moi_runtime_workgroup_gate_call_words(
               bytes, candidate, candidate_options, *planned_patch.runtime_workgroup_sources,
-              cave_text_offset, planned_patch.placement.return_target,
-              runtime_gate_island_words, arch);
+              cave_text_offset, planned_patch.placement.return_target, runtime_gate_island_words,
+              arch);
           if (!gate) {
             result.errors.emplace_back(
                 "ConSan MOI first-light probe could not encode its dense runtime gate");
@@ -1173,8 +1173,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         body_options.gfx1250_vgpr_msb_mode = planned_patch.gfx1250_vgpr_msb_mode;
         body_options.entry_prefix_words = dense_gate_words;
         body_options.trailing_guest_word_count =
-            options.moi_dynamic_access_records ? 0u : candidate.size / sizeof(uint32_t);
+            options.moi_dynamic_access_records ? 0u : planned_patch.guest_instruction_word_count;
         body_options.probe_guest_instruction_offset = planned_patch.probe_guest_instruction_offset;
+        body_options.guest_instruction_word_count = planned_patch.guest_instruction_word_count;
         body_options.body_guest_instruction_offset = &body_guest_instruction_offset;
         body_options.restore_vgpr_spill_before_trailing_guest =
             planned_patch.spill_overlaps_guest_operands;

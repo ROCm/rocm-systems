@@ -176,6 +176,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     uint32_t persistent_private_state_end = 0;
     uint32_t required_private_bytes = 0;
     uint32_t probe_guest_instruction_offset = 0;
+    uint32_t guest_instruction_word_count = 0;
     std::optional<uint16_t> transient_exec_save_sgpr;
     bool spill_overlaps_guest_operands = false;
     bool spill_backed_operand_recovery = false;
@@ -199,8 +200,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         max_candidate_instruction_words,
         (static_cast<uint64_t>(candidate->size) + sizeof(uint32_t) - 1u) / sizeof(uint32_t));
   }
-  const uint64_t sampled_access_island_words =
-      23u + max_candidate_instruction_words;
+  const uint64_t sampled_access_island_words = 23u + max_candidate_instruction_words;
   const uint64_t access_island_word_count =
       options.moi_runtime_sample_stride > 1u ? sampled_access_island_words : kIndirectIslandWords;
   const uint64_t access_relay_words = arch == ROCJITSU_CODE_ARCH_GFX1250
@@ -328,9 +328,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       auto island =
           local_entry_islands->claim_reachable_from_all(anchors, group_entry_island_words);
       if (!island && group_resource != nullptr) {
-        const std::vector<MoiSgprRange> host_bootstrap_ranges =
-            moi_relocatable_host_scalar_ranges(group_options,
-                                               MoiRelocatableHostScalarState::AccessRouter, arch);
+        const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
+            group_options, MoiRelocatableHostScalarState::AccessRouter, arch);
         MoiDenseOwnerLivenessProof host_owner_proof =
             resource_state.prepare_dense_liveness_for_owners(
                 group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
@@ -395,12 +394,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         }
         if (best_host) {
           island = best_host->host_offset + sizeof(uint32_t);
-          dense_entry_hosts.emplace(
-              dispatcher,
-              MoiDenseEntryHost{
-                  .host_offset = best_host->host_offset,
-                  .displaced_words = std::move(best_host->displaced_words),
-              });
+          dense_entry_hosts.emplace(dispatcher,
+                                    MoiDenseEntryHost{
+                                        .host_offset = best_host->host_offset,
+                                        .displaced_words = std::move(best_host->displaced_words),
+                                    });
         }
       }
       if (!island)
@@ -449,10 +447,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         });
     const uint16_t expected_scratch_count =
         planned_spill_backed_operand_recovery
-            ? sampled_spill_backed_scratch_count(options, candidate)
-            : direct_sampled_scratch_count(options, candidate);
-    const auto resources =
-        resolve_moi_scratch(result, candidate, options, expected_scratch_count);
+            ? sampled_spill_backed_scratch_count(options, candidate, arch)
+            : direct_sampled_scratch_count(options, candidate, arch);
+    const auto resources = resolve_moi_scratch(result, candidate, options, expected_scratch_count);
     if (!resources) {
       continue;
     }
@@ -513,8 +510,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           candidate, resources->base, resources->count, ignored_overlap_errors);
       spill_backed_operand_recovery = spill_overlaps_guest_operands;
       candidate_options.moi_spill_overlaps_guest_operands = spill_overlaps_guest_operands;
-      candidate_options.moi_sampled_spill_backed_operand_recovery =
-          spill_backed_operand_recovery;
+      candidate_options.moi_sampled_spill_backed_operand_recovery = spill_backed_operand_recovery;
     } else if (spill &&
                sampled_access_can_emit_spill_over_guest_operands(candidate_options, candidate)) {
       std::vector<std::string> ignored_overlap_errors;
@@ -611,15 +607,15 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     const uint32_t prior_access_range_count =
         prior_patch == planned_patches.rend() ? 0u : prior_patch->access_range_count;
     uint32_t probe_guest_instruction_offset = 0;
+    uint32_t guest_instruction_word_count = 0;
     auto words = build_direct_sampled_watchpoint_words(
         bytes, lowered_candidate, candidate_options, arch, next_record_index,
         prior_first_record_index, prior_access_range_count, window_bank_count,
         layout.sampled_causal_windows_offset, layout.sampled_watchpoints_offset,
-        layout.sampled_pending_acquires_offset,
-        spill ? &*spill : nullptr,
+        layout.sampled_pending_acquires_offset, spill ? &*spill : nullptr,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
         private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
-        candidate_errors, &probe_guest_instruction_offset);
+        candidate_errors, &probe_guest_instruction_offset, &guest_instruction_word_count);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -716,6 +712,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       planned.persistent_private_state_end = private_layout->ephemeral_base;
     planned.required_private_bytes = required_private_bytes;
     planned.probe_guest_instruction_offset = probe_guest_instruction_offset;
+    planned.guest_instruction_word_count = guest_instruction_word_count;
     planned.transient_exec_save_sgpr = candidate_options.moi_exec_save_sgpr;
     planned.spill_overlaps_guest_operands = spill_overlaps_guest_operands;
     planned.spill_backed_operand_recovery = spill_backed_operand_recovery;
@@ -1092,9 +1089,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           planned_patch.prior_first_record_index, planned_patch.prior_access_range_count,
           window_bank_count, layout.sampled_causal_windows_offset,
           layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
-          planned_patch.spill ? &*planned_patch.spill : nullptr,
-          planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
-          planned_patch.private_owner_shift, result.errors);
+          planned_patch.spill ? &*planned_patch.spill : nullptr, planned_patch.private_epoch_offset,
+          planned_patch.private_owner_offset, planned_patch.private_owner_shift, result.errors);
       if (!words)
         return;
       const uint64_t spill_bytes =
@@ -1244,6 +1240,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         body_options.gfx1250_vgpr_msb_mode = planned_patch.gfx1250_vgpr_msb_mode;
         body_options.entry_prefix_words = dense_gate_words;
         body_options.probe_guest_instruction_offset = planned_patch.probe_guest_instruction_offset;
+        body_options.guest_instruction_word_count = planned_patch.guest_instruction_word_count;
         body_options.body_guest_instruction_offset = &body_guest_instruction_offset;
         body_options.wrap_embedded_guest_vgpr_bank = planned_patch.wrap_embedded_guest_vgpr_bank;
         auto cave_words = assemble_moi_appended_body(planned_patch, *words, "sampled probe",
