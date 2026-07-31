@@ -24,6 +24,7 @@
  */
 
 #include <cinttypes>
+#include <mutex>
 #include "impl/wddm/device.h"
 #include "impl/wddm/queue.h"
 #include "hsa-runtime/inc/amd_hsa_signal.h"
@@ -84,6 +85,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2(HSAuint32 NodeId,
 
   CHECK_DXG_OPEN();
   assert(Event == nullptr);
+
+#if defined(__linux__)
+  // Defer resolving libhsa-runtime64 symbols until a queue is actually needed.
+  // call_once latches success/failure; a failed resolve fails every subsequent
+  // queue create too (retrying can't help if the library isn't resident).
+  static std::once_flag loader_once;
+  static bool loader_ok = false;
+  std::call_once(loader_once, [] { loader_ok = hsakmt_hsa_loader_init(); });
+  if (!loader_ok)
+    return HSAKMT_STATUS_ERROR;
+#endif
 
   if (Priority < HSA_QUEUE_PRIORITY_MINIMUM ||
       Priority > HSA_QUEUE_PRIORITY_MAXIMUM)
