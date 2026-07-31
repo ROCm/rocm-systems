@@ -2207,8 +2207,16 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
 int SimulatedKfd::debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args &args) {
   // Mirrors kfd_dbg_trap_device_snapshot() (amd/amdkfd/kfd_debug.c): report the
   // total device count, clamp the per-entry size, and fill up to the caller's
-  // buffer capacity. The two-call protocol is: pass num_devices=0 to learn the
-  // count, then pass a buffer sized for that many entries.
+  // buffer capacity. The two-call protocol is to call once with a small buffer
+  // and read the true total back, then call again sized for it -- rocdbgapi's
+  // kfd_snapshots::fetch() probes with a one-entry buffer, not a null pointer.
+  //
+  // The buffer is validated first, before any output is written: the driver
+  // rejects a malformed request outright (-EINVAL) rather than half-answering
+  // it, so a caller cannot read a device total off a call that failed this way.
+  if (args.snapshot_buf_ptr == 0)
+    return -EINVAL;
+
   // Only devices we can actually describe are enumerable. gpu_infos_ is filled
   // by setup_topology, which every embedder is free to skip or to call with
   // fewer devices than gpus_ holds (a config whose device block is absent, or
@@ -2224,9 +2232,10 @@ int SimulatedKfd::debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args 
 
   if (fill == 0)
     return 0;
-  if (args.snapshot_buf_ptr == 0 || in_entry_size == 0)
-    return -EFAULT;
 
+  // A zero stride is not an error: the driver's per-entry copy_to_user() moves
+  // entry_size(OUT) == 0 bytes and succeeds, so the call reports the device
+  // total and writes nothing. Falling through reproduces that exactly.
   auto *out = reinterpret_cast<uint8_t *>(static_cast<uintptr_t>(args.snapshot_buf_ptr));
   for (uint32_t i = 0; i < fill; ++i) {
     const Sysfs::GpuInfo &info = gpu_infos_[i];

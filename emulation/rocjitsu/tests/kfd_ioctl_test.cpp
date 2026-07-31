@@ -1658,11 +1658,17 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
   en.enable.dbg_fd = make_debug_fd();
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
 
-  // First call with num_devices=0 reports the total device count.
+  // First call learns the total device count. rocdbgapi's
+  // kfd_snapshots::fetch() probes with a real one-entry buffer rather than a
+  // null pointer, so model that: the count comes back in num_devices(OUT)
+  // whether or not the buffer was big enough.
+  kfd_dbg_device_info_entry probe_entry{};
   kfd_ioctl_dbg_trap_args count{};
   count.pid = static_cast<uint32_t>(getpid());
   count.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
   count.device_snapshot.entry_size = sizeof(kfd_dbg_device_info_entry);
+  count.device_snapshot.num_devices = 1;
+  count.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&probe_entry);
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &count), 0);
   ASSERT_EQ(count.device_snapshot.num_devices, 1u);
   EXPECT_EQ(count.device_snapshot.entry_size, sizeof(kfd_dbg_device_info_entry));
@@ -1705,49 +1711,61 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
   EXPECT_EQ(entry.num_xcc, soc_->num_xcds());
 }
 
-// Asking for entries without supplying somewhere to put them is the failure
-// amdkfd reports from copy_to_user(): -EFAULT, with the device total still
-// filled in. The count-only probe (num_devices = 0) legitimately passes a null
-// pointer and must keep succeeding, so the two cases are distinguished by the
-// requested count, not by the pointer alone.
-TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotRejectsUnwritableBuffer) {
+// kfd_dbg_trap_device_snapshot() validates its arguments before it writes any
+// of them: a null snapshot buffer is a malformed request, rejected with -EINVAL
+// and with the caller's num_devices/entry_size left exactly as they were. A
+// caller cannot read a device total off a call that failed this way.
+TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotRejectsNullBufferWithoutWritingOutputs) {
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
   en.enable.dbg_fd = make_debug_fd();
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
 
+  // Ask for more devices than exist, at a wider stride than the struct, so a
+  // written-back output would differ from the input and the assertions can tell
+  // "reported" apart from "left as the caller set it".
+  constexpr uint32_t kRequestedDevices = 2;
+  constexpr uint32_t kRequestedStride = sizeof(kfd_dbg_device_info_entry) + 16;
   kfd_ioctl_dbg_trap_args null_buf{};
   null_buf.pid = static_cast<uint32_t>(getpid());
   null_buf.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
-  // Ask for more devices than exist, at a wider stride than the struct, so the
-  // outputs below differ from the inputs and the assertions can tell "written
-  // back" apart from "left as the caller set them".
-  null_buf.device_snapshot.num_devices = 2;
-  null_buf.device_snapshot.entry_size = sizeof(kfd_dbg_device_info_entry) + 16;
-  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &null_buf), -EFAULT);
+  null_buf.device_snapshot.num_devices = kRequestedDevices;
+  null_buf.device_snapshot.entry_size = kRequestedStride;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &null_buf), -EINVAL);
   EXPECT_EQ(null_buf.device_snapshot.snapshot_buf_ptr, 0u);
-  // The outputs are still authoritative: rocdbgapi reads the device total back
-  // even from the call it sized wrong.
-  EXPECT_EQ(null_buf.device_snapshot.num_devices, 1u);
-  EXPECT_EQ(null_buf.device_snapshot.entry_size, sizeof(kfd_dbg_device_info_entry));
+  EXPECT_EQ(null_buf.device_snapshot.num_devices, kRequestedDevices)
+      << "a rejected request must not report a device total";
+  EXPECT_EQ(null_buf.device_snapshot.entry_size, kRequestedStride);
+}
 
-  // A zero stride is the same failure by a different route -- there is no
-  // entry size to write at -- and must not touch the buffer the caller did
-  // provide.
+// A zero stride is not an error. The driver's per-entry copy_to_user() moves
+// entry_size(OUT) == 0 bytes and succeeds, so the call reports the device total
+// and writes nothing -- the caller learns the count without providing room for
+// a single entry.
+TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotZeroStrideReportsCountAndWritesNothing) {
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = make_debug_fd();
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
   constexpr uint8_t kSentinel = 0xAB;
   std::array<uint8_t, sizeof(kfd_dbg_device_info_entry)> buffer{};
   buffer.fill(kSentinel);
+
   kfd_ioctl_dbg_trap_args zero_stride{};
   zero_stride.pid = static_cast<uint32_t>(getpid());
   zero_stride.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
   zero_stride.device_snapshot.num_devices = 1;
   zero_stride.device_snapshot.entry_size = 0;
   zero_stride.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(buffer.data());
-  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &zero_stride), -EFAULT);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &zero_stride), 0);
+  EXPECT_EQ(zero_stride.device_snapshot.num_devices, 1u);
+  EXPECT_EQ(zero_stride.device_snapshot.entry_size, 0u);
   EXPECT_TRUE(std::all_of(buffer.begin(), buffer.end(), [](uint8_t byte) {
     return byte == kSentinel;
-  })) << "rejected snapshot mutated caller memory";
+  })) << "zero-stride snapshot wrote into the caller's buffer";
 }
 
 TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesMultipleAgentsWithCallerStride) {
