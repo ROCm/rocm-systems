@@ -457,6 +457,17 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         saved_dbg_rinfo_size = dbg->enable.rinfo_size;
         break;
       case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+        // Reject a missing output buffer here rather than on the wire. The
+        // driver validates it before writing anything (-EINVAL, outputs
+        // untouched -- kfd_dbg_trap_device_snapshot(), reproduced by
+        // SimulatedKfd::debug_device_snapshot), but the daemon cannot: it
+        // rewrites snapshot_buf_ptr to its own inline tail before replaying the
+        // ioctl (rj_vm.cpp, reconstruct_embedded_pointers), so the driver never
+        // sees the null and answers a malformed request with success and a
+        // device total. Failing client-side is what keeps the two transports
+        // returning the same verdict.
+        if (dbg->device_snapshot.snapshot_buf_ptr == 0)
+          return -EINVAL;
         saved_dbg_snapshot_ptr = dbg->device_snapshot.snapshot_buf_ptr;
         saved_dbg_snapshot_devices = dbg->device_snapshot.num_devices;
         saved_dbg_snapshot_stride = dbg->device_snapshot.entry_size;
@@ -710,12 +721,9 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           // pointer.
           if (resp->result != 0)
             break;
-          // A caller that supplied no buffer has nowhere to receive entries.
-          // The daemon cannot reproduce the driver's -EFAULT here: it rewrites
-          // snapshot_buf_ptr to its own inline tail before replaying the ioctl
-          // (rj_vm.cpp, reconstruct_embedded_pointers), so SimulatedKfd never
-          // sees the null and reports success. Drop the entries rather than
-          // memcpy through a null pointer.
+          // Belt and braces: the request path already rejects a null output
+          // buffer with -EINVAL, so this is unreachable. Keep it so the memcpy
+          // below can never run through a null pointer if that check moves.
           if (saved_dbg_snapshot_ptr == 0)
             break;
           // Replay the driver's write pattern instead of bulk-copying the tail.

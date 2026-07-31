@@ -1263,53 +1263,41 @@ TEST(RemoteDriverDbgSnapshotTest, SuccessfulSnapshotClampsCopyToCallerCapacity) 
 }
 
 // Daemon mode must reach the same verdict as the local path when the caller
-// supplies no snapshot buffer: the failure propagates, the caller's null
-// pointer is restored rather than left holding whatever the reply echoed, and
-// the returned tail goes nowhere. The second half covers a daemon that reports
-// success anyway -- there is still nothing to write through, and the copy-back
-// must not dereference the null pointer.
+// supplies no snapshot buffer, and only the client can deliver it: the daemon
+// rewrites snapshot_buf_ptr to its own inline tail before replaying the ioctl
+// (rj_vm.cpp, reconstruct_embedded_pointers), so SimulatedKfd never sees the
+// null and answers with success plus a device total -- the opposite of the
+// -EINVAL DbgTrapDeviceSnapshotRejectsNullBufferWithoutWritingOutputs pins for
+// the local path. So the request must never reach the wire at all, and the
+// caller's num_devices/entry_size must come back exactly as they went in.
 TEST(RemoteDriverDbgSnapshotTest, NullSnapshotBufferIsNeverWrittenThrough) {
   constexpr uint32_t kNumDevices = 2;
   constexpr uint32_t kEntryBytes = sizeof(kfd_dbg_device_info_entry);
-  constexpr size_t kTail = static_cast<size_t>(kNumDevices) * kEntryBytes;
-  constexpr uint64_t kEchoedGarbagePtr = 0xDEADBEEFull;
-  constexpr uint8_t kPoison = 0xCD;
-  const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
 
-  // A reply that both echoes a bogus snapshot_buf_ptr and carries a full tail,
-  // so a copy-back would have somewhere to go and something to send.
-  const IoctlReplyPatch patch = [&](const rocjitsu::RpcHeader &, kfd_ioctl_dbg_trap_args &echoed) {
-    echoed.device_snapshot.snapshot_buf_ptr = kEchoedGarbagePtr;
-    echoed.device_snapshot.num_devices = kNumDevices;
-    echoed.device_snapshot.entry_size = kEntryBytes;
-  };
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+  const CloseOnScopeExit server_closer{sv[1]};
 
-  for (const int daemon_result : {-EFAULT, 0}) {
-    SCOPED_TRACE(daemon_result);
+  rocjitsu::RemoteDriver rd(sv[0]);
 
-    int sv[2];
-    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = 4242;
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.num_devices = kNumDevices;
+  snap.device_snapshot.entry_size = kEntryBytes;
+  snap.device_snapshot.snapshot_buf_ptr = 0;
 
-    std::jthread server([&, server_fd = sv[1]] {
-      const CloseOnScopeExit closer{server_fd};
-      serve_one_ioctl_reply(server_fd, daemon_result, arg_struct_size, kTail, kPoison, patch);
-    });
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), -EINVAL);
+  EXPECT_EQ(snap.device_snapshot.snapshot_buf_ptr, 0u);
+  EXPECT_EQ(snap.device_snapshot.num_devices, kNumDevices)
+      << "a rejected request must not report a device total";
+  EXPECT_EQ(snap.device_snapshot.entry_size, kEntryBytes);
 
-    rocjitsu::RemoteDriver rd(sv[0]);
-
-    kfd_ioctl_dbg_trap_args snap{};
-    snap.pid = 4242;
-    snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
-    snap.device_snapshot.num_devices = kNumDevices;
-    snap.device_snapshot.entry_size = kEntryBytes;
-    snap.device_snapshot.snapshot_buf_ptr = 0;
-
-    EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), daemon_result);
-    EXPECT_EQ(snap.device_snapshot.snapshot_buf_ptr, 0u)
-        << "the reply's snapshot_buf_ptr leaked into the caller's args";
-
-    server.join();
-  }
+  // Nothing was transmitted, so the daemon side of the pair is still empty.
+  uint8_t byte = 0;
+  EXPECT_EQ(::recv(sv[1], &byte, 1, MSG_DONTWAIT), -1)
+      << "a request with no output buffer reached the wire";
+  EXPECT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK) << ::strerror(errno);
 }
 
 // A zero entry_size reserves no inline tail whatever the device count is, so
