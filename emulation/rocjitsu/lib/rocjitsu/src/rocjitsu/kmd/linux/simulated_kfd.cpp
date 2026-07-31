@@ -2250,12 +2250,12 @@ int SimulatedKfd::debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args 
     e.gfx_target_version = info.gfx_target_version;
     e.simd_count = info.simd_count;
     e.max_waves_per_simd = info.max_waves_per_simd;
-    // KFD array_count is the per-XCC shader-array count (node_props.array_count),
-    // which rocjitsu tracks as num_shader_engines. Unlike sysfs, kfd_debug.c
-    // passes it through unscaled and reports num_xcc alongside; normalize the
-    // XCC count the same way sysfs does so rocdbgapi's
-    // array_count * num_xcc / simd_arrays_per_engine cannot come out zero.
-    e.array_count = info.num_shader_engines;
+    // KFD array_count is the per-XCC shader-array count (node_props.array_count).
+    // Unlike sysfs, kfd_debug.c passes it through unscaled and reports num_xcc
+    // alongside, so rocdbgapi recovers the SoC's total shader-engine count as
+    // array_count * num_xcc / simd_arrays_per_engine. Normalize the XCC count
+    // the same way sysfs does so that quotient cannot come out zero.
+    e.array_count = info.array_count_per_xcc();
     e.simd_arrays_per_engine = info.num_shader_arrays_per_engine;
     e.num_xcc = info.effective_num_xcc();
     const kmd::DebugTopology topology =

@@ -45,8 +45,9 @@ public:
     // Compute unit organization
     uint32_t simd_count = 0;
     uint32_t max_waves_per_simd = 10;
-    uint32_t num_shader_engines = 0; ///< KFD array_count per XCC (the emitted
-                                     ///< property is this times num_xcc).
+    uint32_t num_shader_engines = 0; ///< Shader engines per XCC, matching the
+                                     ///< simulated SoC's se[] count. KFD's
+                                     ///< array_count is derived, not this.
     uint32_t num_shader_arrays_per_engine = 1;
     uint32_t num_cu_per_sh = 0;
     uint32_t simd_per_cu = 4;
@@ -90,6 +91,20 @@ public:
     /// zero, so both the sysfs generator and the DBG_TRAP device snapshot
     /// normalize through here rather than each applying its own floor.
     uint32_t effective_num_xcc() const { return num_xcc == 0 ? 1u : num_xcc; }
+
+    /// @brief Shader arrays per XCC -- KFD's node_props.array_count.
+    ///
+    /// @details The driver reports shader *arrays*, not engines: libhsakmt
+    /// recovers NumShaderBanks as array_count / simd_arrays_per_engine and
+    /// rocdbgapi recovers the engine count as
+    /// array_count * num_xcc / simd_arrays_per_engine, so both invert this
+    /// product to get num_shader_engines back. Deriving it here keeps the
+    /// configs stating the geometry they model -- an MI350X XCD has four
+    /// shader engines of two arrays, so num_shader_engines is 4, not 8.
+    uint32_t array_count_per_xcc() const {
+      return num_shader_engines *
+             (num_shader_arrays_per_engine == 0 ? 1u : num_shader_arrays_per_engine);
+    }
   };
 
   Sysfs() = default;

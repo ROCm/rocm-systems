@@ -1819,8 +1819,12 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
               gpu->gfx_target_version, gpu->revision_id);
           dev->pci_rev = gpu->pci_revision_id;
           dev->family = gpu->family_id;
+          // libdrm reports shader engines, which GpuInfo already stores
+          // directly; the KFD array_count these helpers invert is the derived
+          // value. Round-tripping through drm_shader_engine_count keeps the two
+          // views pinned to one definition.
           dev->num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
-              gpu->num_shader_engines, gpu->num_shader_arrays_per_engine);
+              gpu->array_count_per_xcc(), gpu->num_shader_arrays_per_engine);
           dev->num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
           dev->gpu_counter_freq = 100000;
           dev->max_engine_clock = gpu->max_engine_clk_fcompute;
@@ -1832,7 +1836,7 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
           dev->vram_type = gpu->vram_type;
           dev->vram_bit_width = gpu->mem_width;
           dev->cu_active_number =
-              rocjitsu::kmd::drm_cu_active_number(gpu->num_shader_engines, gpu->num_cu_per_sh);
+              rocjitsu::kmd::drm_cu_active_number(gpu->array_count_per_xcc(), gpu->num_cu_per_sh);
           // VA aperture — libdrm's VA manager (amdgpu_vamgr_init) needs a sane
           // range. Mirror the KFD GPUVM aperture used elsewhere.
           dev->virtual_address_offset = 0x200000;       // 2 MiB

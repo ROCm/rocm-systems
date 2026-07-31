@@ -31,8 +31,9 @@ struct KfdDeviceConfig {
   uint32_t pci_revision_id = 0;     ///< PCI config-space revision id.
   uint32_t simd_count = 0;          ///< Total SIMD units exposed in KFD properties.
   uint32_t max_waves_per_simd = 10; ///< Maximum waves per SIMD.
-  uint32_t num_shader_engines = 0;  ///< KFD array_count per XCC (sysfs scales
-                                    ///< it by num_xcc): shader engines times
+  uint32_t num_shader_engines = 0;  ///< Shader engines per XCC, matching the
+                                    ///< simulated SoC's se[] count. KFD's
+                                    ///< array_count is derived from this and
                                     ///< num_shader_arrays_per_engine.
   uint32_t num_shader_arrays_per_engine = 1; ///< Shader arrays per shader engine.
   uint32_t num_cu_per_sh = 0;                ///< Compute units per shader array.

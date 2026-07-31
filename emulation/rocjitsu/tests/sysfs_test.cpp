@@ -26,6 +26,7 @@ RJ_DIAGNOSTIC_POP
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -268,6 +269,58 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
   // simd_arrays_per_engine, i.e. the node's total shader engines.
   EXPECT_EQ(props["array_count"] / props["simd_arrays_per_engine"],
             num_xcc * loaded.soc()->xcd(0)->num_shader_engines());
+}
+
+// Every shipped config must describe the machine it actually simulates.
+//
+// num_shader_engines is the per-XCC shader-engine count, so it has to equal the
+// SoC's own se[] count -- KFD's array_count is derived from it, not stored in
+// it. And the CU geometry the topology advertises has to multiply back out to
+// the declared simd_count, or a runtime sizing scratch and CWSR from the
+// reported CU count provisions for a machine the simulator does not have.
+//
+// \NPI new GPU: a config added to configs/ is picked up here automatically.
+TEST(SysfsTopologyGeometryTest, ShippedConfigsMatchTheSimulatedSoC) {
+  const std::filesystem::path config_dir = CONFIG_DIR;
+  unsigned checked = 0;
+
+  for (const auto &entry : std::filesystem::directory_iterator(config_dir)) {
+    if (entry.path().extension() != ".json")
+      continue;
+    const std::string name = entry.path().filename().string();
+    // DBT guest configs describe a synthetic node with no SoC behind it; their
+    // geometry is validated by validate_guest_device_geometry() at load time.
+    if (name.rfind("guest_", 0) == 0)
+      continue;
+    SCOPED_TRACE(name);
+
+    auto loaded = config::load_config(entry.path().string(), rocjitsu::kEmbeddedSchema);
+    if (!loaded.device.present || loaded.soc() == nullptr)
+      continue;
+    ++checked;
+
+    const uint32_t num_xcc = loaded.soc()->num_xcds();
+    ASSERT_NE(num_xcc, 0u);
+    EXPECT_EQ(loaded.device.num_shader_engines, loaded.soc()->xcd(0)->num_shader_engines())
+        << "num_shader_engines must be the SoC's shader-engine count, not the array count";
+
+    // Shader arrays partition an engine's CUs, so the CU total is
+    // engines * arrays/engine * CUs/array, per XCC and then across XCCs.
+    const uint32_t arrays_per_engine = loaded.device.num_shader_arrays_per_engine;
+    ASSERT_NE(arrays_per_engine, 0u);
+    const uint64_t cus = static_cast<uint64_t>(loaded.device.num_shader_engines) *
+                         arrays_per_engine * loaded.device.num_cu_per_sh * num_xcc;
+
+    // Harvested parts ship with fewer active CUs than the array geometry holds
+    // (MI300X reports 304 of 320), so the advertised simd_count may be lower --
+    // never higher, which would mean SIMDs with nowhere to live.
+    const uint64_t simds = cus * loaded.device.simd_per_cu;
+    EXPECT_LE(loaded.device.simd_count, simds)
+        << "simd_count exceeds the CU geometry: " << cus << " CUs * " << loaded.device.simd_per_cu
+        << " SIMDs";
+  }
+
+  EXPECT_GE(checked, 5u) << "expected the shipped device configs to be discovered";
 }
 
 // Loading a shipped config for a real GPU must make the synthetic topology

@@ -71,17 +71,21 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna4.device.revision_id, 1u);
   EXPECT_EQ(rdna4.device.pci_revision_id, 192u);
   EXPECT_EQ(rdna4.device.simd_count, 128u);
-  EXPECT_EQ(rdna4.device.num_shader_engines, 8u);
+  EXPECT_EQ(rdna4.device.num_shader_engines, 4u); // R9700: 4 SEs of 2 arrays
   EXPECT_EQ(rdna4.device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(rdna4.device.num_cu_per_sh, 8u);
   EXPECT_EQ(rdna4.device.simd_per_cu, 2u);
   EXPECT_EQ(rdna4.device.vram_type, kmd::kAmdgpuVramTypeGddr6);
-  EXPECT_EQ(rdna4.device.simd_count, rdna4.device.num_shader_engines * rdna4.device.num_cu_per_sh *
-                                         rdna4.device.simd_per_cu);
-  EXPECT_EQ(kmd::drm_shader_engine_count(rdna4.device.num_shader_engines,
+  EXPECT_EQ(rdna4.device.simd_count, rdna4.device.num_shader_engines *
+                                         rdna4.device.num_shader_arrays_per_engine *
+                                         rdna4.device.num_cu_per_sh * rdna4.device.simd_per_cu);
+  EXPECT_EQ(kmd::drm_shader_engine_count(rdna4.device.num_shader_engines *
+                                             rdna4.device.num_shader_arrays_per_engine,
                                          rdna4.device.num_shader_arrays_per_engine),
             4u);
-  EXPECT_EQ(kmd::drm_cu_active_number(rdna4.device.num_shader_engines, rdna4.device.num_cu_per_sh),
+  EXPECT_EQ(kmd::drm_cu_active_number(rdna4.device.num_shader_engines *
+                                          rdna4.device.num_shader_arrays_per_engine,
+                                      rdna4.device.num_cu_per_sh),
             64u);
   EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna4.device.gfx_target_version,
                                                         rdna4.device.revision_id),
@@ -116,17 +120,21 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna3.device.revision_id, 0u);
   EXPECT_EQ(rdna3.device.pci_revision_id, 0u);
   EXPECT_EQ(rdna3.device.simd_count, 192u);
-  EXPECT_EQ(rdna3.device.num_shader_engines, 12u);
+  EXPECT_EQ(rdna3.device.num_shader_engines, 6u); // W7900: 6 SEs of 2 arrays
   EXPECT_EQ(rdna3.device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(rdna3.device.num_cu_per_sh, 8u);
   EXPECT_EQ(rdna3.device.simd_per_cu, 2u);
   EXPECT_EQ(rdna3.device.vram_type, kmd::kAmdgpuVramTypeGddr6);
-  EXPECT_EQ(rdna3.device.simd_count, rdna3.device.num_shader_engines * rdna3.device.num_cu_per_sh *
-                                         rdna3.device.simd_per_cu);
-  EXPECT_EQ(kmd::drm_shader_engine_count(rdna3.device.num_shader_engines,
+  EXPECT_EQ(rdna3.device.simd_count, rdna3.device.num_shader_engines *
+                                         rdna3.device.num_shader_arrays_per_engine *
+                                         rdna3.device.num_cu_per_sh * rdna3.device.simd_per_cu);
+  EXPECT_EQ(kmd::drm_shader_engine_count(rdna3.device.num_shader_engines *
+                                             rdna3.device.num_shader_arrays_per_engine,
                                          rdna3.device.num_shader_arrays_per_engine),
             6u);
-  EXPECT_EQ(kmd::drm_cu_active_number(rdna3.device.num_shader_engines, rdna3.device.num_cu_per_sh),
+  EXPECT_EQ(kmd::drm_cu_active_number(rdna3.device.num_shader_engines *
+                                          rdna3.device.num_shader_arrays_per_engine,
+                                      rdna3.device.num_cu_per_sh),
             96u);
   EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna3.device.gfx_target_version,
                                                         rdna3.device.revision_id),
@@ -149,19 +157,22 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna35.device.revision_id, 0u);
   EXPECT_EQ(rdna35.device.pci_revision_id, 0u);
   EXPECT_EQ(rdna35.device.simd_count, 64u);
-  EXPECT_EQ(rdna35.device.num_shader_engines, 4u);
+  EXPECT_EQ(rdna35.device.num_shader_engines, 2u); // 2 SEs of 2 arrays
   EXPECT_EQ(rdna35.device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(rdna35.device.num_cu_per_sh, 8u);
   EXPECT_EQ(rdna35.device.simd_per_cu, 2u);
   EXPECT_EQ(rdna35.device.vram_type, kmd::kAmdgpuVramTypeGddr6);
   EXPECT_EQ(rdna35.device.simd_count, rdna35.device.num_shader_engines *
+                                          rdna35.device.num_shader_arrays_per_engine *
                                           rdna35.device.num_cu_per_sh * rdna35.device.simd_per_cu);
-  EXPECT_EQ(kmd::drm_shader_engine_count(rdna35.device.num_shader_engines,
+  EXPECT_EQ(kmd::drm_shader_engine_count(rdna35.device.num_shader_engines *
+                                             rdna35.device.num_shader_arrays_per_engine,
                                          rdna35.device.num_shader_arrays_per_engine),
             2u);
-  EXPECT_EQ(
-      kmd::drm_cu_active_number(rdna35.device.num_shader_engines, rdna35.device.num_cu_per_sh),
-      32u);
+  EXPECT_EQ(kmd::drm_cu_active_number(rdna35.device.num_shader_engines *
+                                          rdna35.device.num_shader_arrays_per_engine,
+                                      rdna35.device.num_cu_per_sh),
+            32u);
   EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna35.device.gfx_target_version,
                                                         rdna35.device.revision_id),
             0xc1u);
@@ -341,7 +352,7 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
           "marketing_name": "AMD Instinct MI350X",
           "drm_render_minor": 191,
           "simd_count": 64,
-          "num_shader_engines": 4,
+          "num_shader_engines": 2,
           "num_shader_arrays_per_engine": 2,
           "num_cu_per_sh": 4,
           "local_mem_size": 309237645312
@@ -363,9 +374,9 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
   EXPECT_EQ(dbt.guest_device.gfx_target_version, 90500u);
   EXPECT_EQ(dbt.guest_device.marketing_name, "AMD Instinct MI350X");
   EXPECT_EQ(dbt.guest_device.drm_render_minor, 191u);
-  EXPECT_EQ(dbt.guest_device.simd_count, dbt.guest_device.num_shader_engines *
-                                             dbt.guest_device.num_cu_per_sh *
-                                             dbt.guest_device.simd_per_cu);
+  EXPECT_EQ(dbt.guest_device.simd_count,
+            dbt.guest_device.num_shader_engines * dbt.guest_device.num_shader_arrays_per_engine *
+                dbt.guest_device.num_cu_per_sh * dbt.guest_device.simd_per_cu);
   EXPECT_EQ(dbt.guest_device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(dbt.guest_device.local_mem_size, 309237645312ULL);
   // Revisions default to Unspecified when the config omits them.
@@ -436,7 +447,7 @@ TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
         "marketing_name": "AMD Instinct MI350X",
         "drm_render_minor": 191,
         "simd_count": 64,
-        "num_shader_engines": 4,
+        "num_shader_engines": 2,
         "num_shader_arrays_per_engine": 2,
         "num_cu_per_sh": 4,
         "local_mem_size": 309237645312

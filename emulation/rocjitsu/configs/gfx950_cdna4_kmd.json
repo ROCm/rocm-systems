@@ -16,7 +16,7 @@
         "drm_render_minor": 128,
         "simd_count": 1024,
         "max_waves_per_simd": 8,
-        "num_shader_engines": 8,
+        "num_shader_engines": 4,
         "num_shader_arrays_per_engine": 2,
         "num_cu_per_sh": 4,
         "simd_per_cu": 4,

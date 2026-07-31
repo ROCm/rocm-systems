@@ -298,7 +298,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   // Normalize once (GpuInfo::effective_num_xcc) so array_count and the num_xcc
   // property cannot disagree.
   const uint32_t num_xcc = gpu.effective_num_xcc();
-  const uint32_t node_array_count = gpu.num_shader_engines * num_xcc;
+  const uint32_t node_array_count = gpu.array_count_per_xcc() * num_xcc;
 
   std::ostringstream props;
   props << "cpu_cores_count 0\n"
