@@ -133,7 +133,7 @@ set(RCCL_INCLUDE_DIRS
 # --- Wrapper library for production .cc files that need link stubs ---
 add_library(rccl-source-wrappers STATIC
   mem_manager_src_wrapper.cc
-  mem_manager_test_wrapper.cc
+  mem_manager_wrapper_test.cc
   bootstrap_wrapper.cc
   init_stubs.cpp
   wrapper_link_stubs.cpp
