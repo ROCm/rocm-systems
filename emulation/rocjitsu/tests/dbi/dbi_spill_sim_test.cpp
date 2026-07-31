@@ -503,7 +503,8 @@ struct ExecSimArch {
   for (size_t i = 0; i < text.size(); ++i) {
     const uint32_t w = text[i];
     if ((w >> 23) == kSop1EncodingPrefix && ((w >> 8) & 0xFFu) == mov64 &&
-        ((w >> 16) & 0x7Fu) == scalar_operand_exec_lo(arch) && (w & 0xFFu) < scalar_operand_vcc_lo(arch))
+        ((w >> 16) & 0x7Fu) == scalar_operand_exec_lo(arch) &&
+        (w & 0xFFu) < scalar_operand_vcc_lo(arch))
       return i;
   }
   return text.size();
@@ -660,8 +661,8 @@ protected:
     const uint32_t mov_v4_v2 = 0x7E080302u;                        // v_mov v4, v2 (v2 live)
     const uint32_t mov_v3_v2 = kMovV3V2;                           // v_mov v3, v2
     // Probe widens EXEC to all lanes, then clobbers v2 on all of them.
-    const uint32_t probe_widen =
-        build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch), scalar_inline_neg_one(a_.base.arch), a_.base.arch);
+    const uint32_t probe_widen = build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch),
+                                                 scalar_inline_neg_one(a_.base.arch), a_.base.arch);
 
     // v2=K ; v3=0 ; <narrow EXEC> ; ANCHOR v_mov v4,v2 ; <widen EXEC> ; v3=v2 ; endpgm.
     std::vector<uint32_t> code = {mov_v2_k, mov_v3_0};
@@ -720,8 +721,8 @@ protected:
   // anchor mask and v2's inactive lanes are never saved -- they lose the sentinel.
   void expect_missing_store_full_mask_loses_high_lanes() {
     const std::vector<uint32_t> store = build_scratch_store_dword(2, 64, a_.base.arch);
-    const uint32_t toggle =
-        build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch), scalar_inline_neg_one(a_.base.arch), a_.base.arch);
+    const uint32_t toggle = build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch),
+                                            scalar_inline_neg_one(a_.base.arch), a_.base.arch);
     auto it = std::search(patched_text_.begin(), patched_text_.end(), store.begin(), store.end());
     ASSERT_NE(it, patched_text_.end()) << "spill scratch_store not found";
     ASSERT_NE(it, patched_text_.begin());
