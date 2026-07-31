@@ -22,16 +22,29 @@
 
 #include "output_config.hpp"
 
+#include <cstdint>
+#include <limits>
+
 namespace rocprofiler
 {
 namespace tool
 {
 namespace defaults
 {
+// Perfetto's TraceConfig BufferConfig.size_kb is a uint32_t; the tracing service
+// allocates size_kb * 1024 bytes and rejects the config when that byte count
+// exceeds uint32_t. The value is therefore effectively KiB, bounded by 1 up to
+// floor((2^32 - 1) / 1024). Mirrors PERFETTO_BUFFER_SIZE_KB_{MIN,MAX} in
+// source/bin/rocprofv3.py. Kept here rather than the header because only this
+// translation unit validates the value.
+constexpr auto perfetto_buffer_size_min_kb = size_t{1};
+constexpr auto perfetto_buffer_size_max_kb =
+    static_cast<size_t>(std::numeric_limits<uint32_t>::max()) / common::units::KiB;
+
 void
 validate_perfetto_buffer_size(size_t value)
 {
-    LOG_IF(FATAL, !is_valid_perfetto_buffer_size(value))
+    LOG_IF(FATAL, value < perfetto_buffer_size_min_kb || value > perfetto_buffer_size_max_kb)
         << "Invalid Perfetto buffer size: " << value << " KB. Expected a value from "
         << perfetto_buffer_size_min_kb << " to " << perfetto_buffer_size_max_kb << " KB";
 }

@@ -36,7 +36,6 @@
 #include <fmt/format.h>
 
 #include <cstdint>
-#include <limits>
 #include <set>
 #include <sstream>
 #include <string>
@@ -51,19 +50,12 @@ namespace defaults
 {
 constexpr auto perfetto_buffer_size_kb     = (1 * common::units::GiB) / common::units::KiB;
 constexpr auto perfetto_shmem_size_hint_kb = 64;
-constexpr auto perfetto_buffer_size_min_kb = size_t{1};
-constexpr auto perfetto_buffer_size_max_kb =
-    static_cast<size_t>(std::numeric_limits<uint32_t>::max()) / common::units::KiB;
 
-constexpr bool
-is_valid_perfetto_buffer_size(size_t value)
-{
-    return value >= perfetto_buffer_size_min_kb && value <= perfetto_buffer_size_max_kb;
-}
-
-// Aborts (LOG(FATAL)) when value is outside the Perfetto buffer-size contract.
-// Centralizes the diagnostic so both assignment paths emit the same message: the
-// CLI/YAML/env path (output_config::parse_env) and the rocpd programmatic path
+// Aborts (LOG(FATAL)) when value is outside the Perfetto buffer-size contract
+// (the exact bounds live next to the definition in output_config.cpp, since only
+// that translation unit validates the value). Centralizes the diagnostic so both
+// assignment paths emit the same message: the CLI/YAML/env path
+// (output_config::parse_env) and the rocpd programmatic path
 // (rocpd::output::PerfettoSession, which sets perfetto_buffer_size directly via
 // the pybind binding and never runs parse_env).
 void
