@@ -41,14 +41,15 @@ SemanticScratchAllocator::SemanticScratchAllocator(const Instruction &inst,
 
 bool SemanticScratchAllocator::window_is_allowed(uint16_t base,
                                                  const SemanticScratchRequest &request,
-                                                 uint16_t available_count) const {
+                                                 uint16_t available_count, bool allow_avoid) const {
   if (request.count == 0 || request.alignment == 0 || base % request.alignment != 0 ||
       static_cast<uint32_t>(base) + request.count > available_count)
     return false;
 
   RegisterSet candidate;
   candidate.expand(RegisterRef{RegClass::VGPR, base, static_cast<uint8_t>(request.count)});
-  return !candidate.intersects(request.forbidden);
+  return !candidate.intersects(request.forbidden) &&
+         (allow_avoid || !candidate.intersects(request.avoid));
 }
 
 SemanticScratchResult
@@ -64,53 +65,61 @@ SemanticScratchAllocator::acquire_vgprs(const SemanticScratchRequest &request) {
   // computation and descriptor growth.
   const uint16_t allocated_vgprs =
       static_cast<uint16_t>(std::min<uint32_t>(context_.num_vgprs, policy_.max_vgprs));
-  uint16_t unused_search_start = 0;
-  while (auto unused = liveness_.find_globally_unused_vgpr_run(
-             &inst_, request.count, unused_search_start, request.alignment, allocated_vgprs)) {
-    if (window_is_allowed(*unused, request, allocated_vgprs)) {
-      context_.require_vgprs(static_cast<uint32_t>(*unused) + request.count);
-      return {.lease = SemanticScratchLease{.reg_class = RegClass::VGPR,
-                                            .base = *unused,
-                                            .count = request.count,
-                                            .spilled = false,
-                                            .spill_offset = 0},
-              .failure = SemanticScratchFailure::None};
+  for (const bool allow_avoid : {false, true}) {
+    uint16_t unused_search_start = 0;
+    while (auto unused = liveness_.find_globally_unused_vgpr_run(
+               &inst_, request.count, unused_search_start, request.alignment, allocated_vgprs)) {
+      if (window_is_allowed(*unused, request, allocated_vgprs, allow_avoid)) {
+        context_.require_vgprs(static_cast<uint32_t>(*unused) + request.count);
+        return {.lease = SemanticScratchLease{.reg_class = RegClass::VGPR,
+                                              .base = *unused,
+                                              .count = request.count,
+                                              .spilled = false,
+                                              .spill_offset = 0},
+                .failure = SemanticScratchFailure::None};
+      }
+      unused_search_start = static_cast<uint16_t>(*unused + request.alignment);
     }
-    unused_search_start = static_cast<uint16_t>(*unused + request.alignment);
   }
 
-  uint16_t search_start = 0;
-  while (auto free =
-             liveness_.find_free_run(&inst_, request.count, search_start, request.alignment)) {
-    if (static_cast<uint32_t>(*free) + request.count > policy_.max_vgprs)
-      break;
-    if (window_is_allowed(*free, request, policy_.max_vgprs)) {
-      context_.require_vgprs(static_cast<uint32_t>(*free) + request.count);
-      return {.lease = SemanticScratchLease{.reg_class = RegClass::VGPR,
-                                            .base = *free,
-                                            .count = request.count,
-                                            .spilled = false,
-                                            .spill_offset = 0},
-              .failure = SemanticScratchFailure::None};
+  for (const bool allow_avoid : {false, true}) {
+    uint16_t search_start = 0;
+    while (auto free =
+               liveness_.find_free_run(&inst_, request.count, search_start, request.alignment)) {
+      if (static_cast<uint32_t>(*free) + request.count > policy_.max_vgprs)
+        break;
+      if (window_is_allowed(*free, request, policy_.max_vgprs, allow_avoid)) {
+        context_.require_vgprs(static_cast<uint32_t>(*free) + request.count);
+        return {.lease = SemanticScratchLease{.reg_class = RegClass::VGPR,
+                                              .base = *free,
+                                              .count = request.count,
+                                              .spilled = false,
+                                              .spill_offset = 0},
+                .failure = SemanticScratchFailure::None};
+      }
+      search_start = static_cast<uint16_t>(*free + request.alignment);
     }
-    search_start = static_cast<uint16_t>(*free + request.alignment);
   }
 
   if (!request.allow_spill)
     return {.lease = std::nullopt, .failure = SemanticScratchFailure::NoRegisterWindow};
 
   std::optional<uint16_t> victim;
-  if (request.preferred_victim_base &&
-      window_is_allowed(*request.preferred_victim_base, request, allocated_vgprs)) {
-    victim = request.preferred_victim_base;
-  } else {
-    for (uint16_t base = 0; static_cast<uint32_t>(base) + request.count <= allocated_vgprs;
-         ++base) {
-      if (window_is_allowed(base, request, allocated_vgprs)) {
-        victim = base;
-        break;
+  for (const bool allow_avoid : {false, true}) {
+    if (request.preferred_victim_base &&
+        window_is_allowed(*request.preferred_victim_base, request, allocated_vgprs, allow_avoid)) {
+      victim = request.preferred_victim_base;
+    } else {
+      for (uint16_t base = 0; static_cast<uint32_t>(base) + request.count <= allocated_vgprs;
+           ++base) {
+        if (window_is_allowed(base, request, allocated_vgprs, allow_avoid)) {
+          victim = base;
+          break;
+        }
       }
     }
+    if (victim)
+      break;
   }
 
   if (!victim)

@@ -72,6 +72,15 @@ struct SemanticScratchRequest {
   uint16_t count = 0;
   uint16_t alignment = 1;
   RegisterSet forbidden;
+  /// @brief Registers to avoid when another legal window is available.
+  ///
+  /// @details Unlike `forbidden`, this is a preference rather than a hard
+  /// correctness constraint. Target timing analyses use it to steer scratch
+  /// away from registers covered by a short hardware access window. If every
+  /// legal window intersects this set, allocation may still succeed. The
+  /// target emitter must query its timing analysis for the selected lease and
+  /// insert any required separation.
+  RegisterSet avoid;
   bool allow_spill = true;
   std::optional<uint16_t> preferred_victim_base;
 };
@@ -126,7 +135,7 @@ public:
 
 private:
   [[nodiscard]] bool window_is_allowed(uint16_t base, const SemanticScratchRequest &request,
-                                       uint16_t available_count) const;
+                                       uint16_t available_count, bool allow_avoid) const;
 
   const Instruction &inst_;
   const LivenessAnalysis &liveness_;

@@ -5,6 +5,7 @@
 /// @brief Handwritten semantic expansions for gfx1250 B0-to-A0 translation.
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/gfx1250_rewrite_hazards.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/dbt/semantic_scratch.h"
@@ -71,6 +72,25 @@ gfx1250_floating_wmma_control_error(const gfx1250::Vop3pMachineInst &matrix,
 template <size_t N>
 void append_words(std::vector<uint32_t> &output, const std::array<uint32_t, N> &words) {
   output.insert(output.end(), words.begin(), words.end());
+}
+
+[[nodiscard]] Gfx1250GeneratedValuHazard
+generated_valu_hazard_before(const TranslationContext &context, const Instruction &inst) {
+  if (context.gfx1250_rewrite_hazards == nullptr)
+    return {};
+  return context.gfx1250_rewrite_hazards->before_generated_valu(inst);
+}
+
+void append_generated_valu_hazard_nops(std::vector<uint32_t> &words,
+                                       const Gfx1250GeneratedValuHazard &hazard,
+                                       const TranslationContext &context, const RegisterSet &defs,
+                                       const RegisterSet &uses = {}) {
+  const uint8_t required = hazard.required_nops(defs, uses);
+  const uint8_t additional = required > context.leading_valu_hazard_nops
+                                 ? static_cast<uint8_t>(required - context.leading_valu_hazard_nops)
+                                 : 0;
+  for (uint8_t slot = 0; slot < additional; ++slot)
+    append_words(words, gfx1250::build_vop1(gfx1250::kVNopVop1));
 }
 
 /// @brief Change the gfx1250 VGPR-bank mode while preserving trap recovery state.
@@ -192,6 +212,7 @@ struct Gfx1250SgprScratchLease {
 struct Gfx1250SgprScratchRequest {
   uint16_t count = 0;
   RegisterSet forbidden;
+  RegisterSet avoid;
   Gfx1250SgprCarrierMode carrier_mode = Gfx1250SgprCarrierMode::None;
 };
 
@@ -281,6 +302,7 @@ acquire_gfx1250_sgprs(const Instruction &inst, const LivenessAnalysis &liveness,
   SemanticScratchRequest carrier_request;
   carrier_request.count = request.count;
   carrier_request.forbidden = request.forbidden;
+  carrier_request.avoid = request.avoid;
   // Lane-zero carriers must remain EXEC-independent, while private-memory
   // spill/fill instructions are EXEC-masked.
   // TODO: Support simultaneous SGPR/VGPR pressure without suppressing the
@@ -1146,9 +1168,11 @@ ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint
       inst, liveness, context,
       SemanticScratchPolicy{.max_vgprs = 256,
                             .max_spill_dword_offset = kGfx1250ScratchMaxDwordOffset});
+  const Gfx1250GeneratedValuHazard leading_hazard = generated_valu_hazard_before(context, inst);
   Gfx1250SgprScratchRequest scratch_request;
   scratch_request.count = 1;
   scratch_request.forbidden = gfx1250_instruction_registers(inst);
+  scratch_request.avoid = leading_hazard.avoid_destination_vgprs_in_bank(0);
   scratch_request.carrier_mode = Gfx1250SgprCarrierMode::LaneZero;
   const auto scratch = acquire_gfx1250_sgprs(inst, liveness, context, &allocator, scratch_request);
   if (!scratch || scratch->base > 105) {
@@ -1175,6 +1199,9 @@ ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint
           "gfx1250 cluster-load SGPR carrier cannot prove the VGPR-MSB mode");
     current_mode = *original_mode;
     append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
+    RegisterSet generated_carrier_defs;
+    generated_carrier_defs.expand(scratch->carrier->registers());
+    append_generated_valu_hazard_nops(words, leading_hazard, context, generated_carrier_defs);
     if (!append_gfx1250_sgpr_preservation(words, *scratch, false))
       return ExpandResult::failed("gfx1250 cluster load could not preserve scalar scratch");
     append_gfx1250_vgpr_msb_transition(words, current_mode, *original_mode);
@@ -1223,6 +1250,7 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
 
   gfx1250::VdsMachineInst source{};
   std::memcpy(&source, inst.raw_encoding(), sizeof(source));
+  const Gfx1250GeneratedValuHazard leading_hazard = generated_valu_hazard_before(context, inst);
 
   const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
   const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
@@ -1244,6 +1272,7 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
     SemanticScratchRequest request;
     request.count = 1;
     request.forbidden = gfx1250_instruction_registers(inst);
+    request.avoid = leading_hazard.avoid_destination_vgprs_in_bank(0);
     request.allow_spill = true;
     const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
     if (!scratch) {
@@ -1265,6 +1294,10 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
   append_gfx1250_scratch_dependency_barrier(words);
   uint8_t current_mode = original_mode;
   append_gfx1250_vgpr_msb_transition(words, current_mode, compute_mode);
+  RegisterSet generated_temp;
+  generated_temp.expand(
+      RegisterRef{RegClass::VGPR, static_cast<uint16_t>(temp + compute_bank * 256u), 1});
+  append_generated_valu_hazard_nops(words, leading_hazard, context, generated_temp);
   if (store_scratch && store_scratch->spilled &&
       !append_gfx1250_scratch_preservation(words, *store_scratch, false)) {
     return ExpandResult::failed("gfx1250 DS store ADDTID could not preserve low-bank scratch");
@@ -1348,6 +1381,8 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   SemanticScratchRequest request;
   request.count = 2;
   request.forbidden = gfx1250_instruction_registers(inst);
+  const Gfx1250GeneratedValuHazard leading_hazard = generated_valu_hazard_before(context, inst);
+  request.avoid = leading_hazard.avoid_destination_vgprs_in_bank(0);
   request.allow_spill = true;
   const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
   if (!scratch) {
@@ -1364,6 +1399,7 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   mask_request.count = 2;
   mask_request.forbidden = request.forbidden;
   mask_request.forbidden.expand(scratch.lease->registers());
+  mask_request.avoid = leading_hazard.avoid_destination_vgprs_in_bank(0);
   // The conversion, both generated compares, and scratch memory are inactive
   // under EXEC=0. The compare masks and their carrier save/restore are skipped
   // as one region, so the borrowed SGPR window remains untouched.
@@ -1406,6 +1442,14 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   std::vector<uint32_t> words;
   words.reserve(64);
   append_gfx1250_scratch_dependency_barrier(words);
+  RegisterSet generated_defs;
+  generated_defs.expand(scratch.lease->registers());
+  if (masks->carrier)
+    generated_defs.expand(masks->carrier->registers());
+  RegisterSet generated_uses;
+  generated_uses.expand(RegisterRef{
+      RegClass::VGPR, static_cast<uint16_t>(source.src0 - kVgprEncoding + *src0_bank * 256u), 1});
+  append_generated_valu_hazard_nops(words, leading_hazard, context, generated_defs, generated_uses);
   uint8_t current_mode = original_mode;
   if (scratch.lease->spilled || masks->has_carrier()) {
     append_gfx1250_vgpr_msb_transition(words, current_mode, 0);

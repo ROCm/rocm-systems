@@ -333,6 +333,28 @@ TEST(SemanticScratchAllocator, AllowsFreeWindowInDynamicStackKernel) {
   EXPECT_EQ(context.required_private_segment_fixed_size, 32u);
 }
 
+TEST(SemanticScratchAllocator, PrefersAvoidDisjointWindowAndAllowsFallback) {
+  Instruction inst("scratch_test", nullptr);
+  std::vector<BasicBlock *> blocks;
+  LivenessAnalysis liveness(blocks);
+  TranslationContext context(/*vgprs=*/4, /*agprs=*/0, /*accum_base=*/0,
+                             /*sgprs=*/8, /*private_bytes=*/0);
+  SemanticScratchAllocator allocator(
+      inst, liveness, context, SemanticScratchPolicy{.max_vgprs = 4, .max_spill_dword_offset = 64});
+
+  SemanticScratchRequest request;
+  request.count = 2;
+  request.avoid.expand({RegClass::VGPR, 0, 2});
+  const SemanticScratchResult disjoint = allocator.acquire_vgprs(request);
+  ASSERT_TRUE(disjoint);
+  EXPECT_EQ(disjoint.lease->base, 2u);
+
+  request.avoid.expand({RegClass::VGPR, 2, 2});
+  const SemanticScratchResult fallback = allocator.acquire_vgprs(request);
+  ASSERT_TRUE(fallback);
+  EXPECT_EQ(fallback.lease->base, 0u);
+}
+
 TEST(Cdna3ScratchEmitter, MaterializesSaveAndRestoreSequences) {
   const SemanticScratchLease lease{
       .reg_class = RegClass::VGPR, .base = 6, .count = 2, .spilled = true, .spill_offset = 48};
