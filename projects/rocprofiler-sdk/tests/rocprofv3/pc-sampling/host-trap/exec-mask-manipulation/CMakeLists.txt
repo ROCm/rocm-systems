@@ -33,6 +33,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${ROCPROFV3_TESTS_PC_SAMPLING_ENVIRONMENT}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd
     FIXTURES_REQUIRED rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-output
@@ -68,6 +69,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${ROCPROFV3_TESTS_PC_SAMPLING_ENVIRONMENT}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-json
     FIXTURES_REQUIRED rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-output
@@ -102,6 +104,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${ROCPROFV3_TESTS_PC_SAMPLING_ENVIRONMENT}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-yaml
     FIXTURES_REQUIRED rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-output

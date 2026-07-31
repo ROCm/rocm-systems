@@ -54,7 +54,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS roctx-pause-resume
     TIMEOUT 45
     LABELS "integration-tests;pc-sampling;pause-resume"
-    ENVIRONMENT "${roctx-pause-resume-env}"
+    ENVIRONMENT "${roctx-pause-resume-env}" "${ROCPROFV3_TESTS_PC_SAMPLING_ENVIRONMENT}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     DISABLED "${IS_PC_SAMPLING_DISABLED}"
     FIXTURES_SETUP rocprofv3-test-roctx-pause-resume-pc-sampling
