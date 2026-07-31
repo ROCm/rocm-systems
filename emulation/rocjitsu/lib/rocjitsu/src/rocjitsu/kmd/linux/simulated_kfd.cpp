@@ -1169,10 +1169,15 @@ int SimulatedKfd::get_process_apertures_ioctl(void *arg) {
 
   auto *apertures =
       reinterpret_cast<kfd_process_device_apertures *>(args->kfd_process_device_apertures_ptr);
-  for (uint32_t i = 0; i < n && i < args->num_of_nodes; ++i)
+  const uint32_t filled = std::min(n, args->num_of_nodes);
+  for (uint32_t i = 0; i < filled; ++i)
     apertures[i] = gpu_apertures(i);
 
-  args->num_of_nodes = n;
+  // The count written back is how many entries were filled, not how many nodes
+  // exist -- kfd_ioctl_get_process_apertures_new() reports the loop index. A
+  // caller whose buffer was smaller than the node count would otherwise iterate
+  // past its own allocation over entries this call never wrote.
+  args->num_of_nodes = filled;
   return 0;
 }
 
