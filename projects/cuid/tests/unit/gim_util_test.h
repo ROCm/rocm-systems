@@ -52,4 +52,16 @@ class TestGimFormatBdf : public TestBase {
   void Run() override;
 };
 
+// End-to-end enumeration against a live GIM driver. Requires root and the GIM
+// device node; asserts every device has a unique, canonical BDF and a unique,
+// parseable ASIC serial. Guards against wire-ABI regressions (a wrong struct
+// size or handle width yields zero/garbage devices, duplicate BDFs, or
+// duplicate serials that would collapse GPUs into one CUID).
+class TestGimDeviceEnumeration : public TestBase {
+ public:
+  TestGimDeviceEnumeration();
+  void SetUp() override;
+  void Run() override;
+};
+
 #endif  // CUID_TEST_UNIT_GIM_UTIL_TEST_H_

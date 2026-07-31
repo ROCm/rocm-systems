@@ -32,9 +32,13 @@ namespace amd {
 namespace rdc {
 
 rdc_status_t Smi2RdcError(amdsmi_status_t rsmi);
+
 // Count how many of the retired/bad-page records are pending retirement.
 // Returns 0 when records is null or count is 0.
 uint64_t count_pending_bad_pages(const amdsmi_retired_page_record_t* records, uint32_t count);
+
+// Physical/instance-0: gpu_id is a flat GPU index. Partition-instance: device_index is
+// a socket index, instance_index the per-socket proc. These diverge in CPX. See SmiUtils.cc.
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle);
 amdsmi_status_t get_gpu_id_from_processor_handle(amdsmi_processor_handle processor_handle,
@@ -46,6 +50,18 @@ amdsmi_status_t get_processor_handles(amdsmi_socket_handle socket,
 amdsmi_status_t get_kfd_partition_id(amdsmi_processor_handle proc, uint32_t* partition_id);
 amdsmi_status_t get_metrics_info(amdsmi_processor_handle proc, amdsmi_gpu_metrics_t* metrics);
 amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition);
+
+struct GpuHandleEntry {
+  amdsmi_processor_handle handle;
+  uint32_t socket_index;
+  uint32_t proc_index;
+};
+
+// Flat table of all AMD GPU handles, built on first use and cached. Thread-safe.
+const std::vector<GpuHandleEntry>& get_flat_gpu_table();
+
+// Invalidates the cache (thread-safe). Prefer a daemon restart after a partition-mode change.
+void reset_flat_gpu_table();
 
 }  // namespace rdc
 }  // namespace amd

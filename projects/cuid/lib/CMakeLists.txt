@@ -85,6 +85,8 @@ set(CUID_HEADERS
 add_library(amdcuid_static STATIC ${CUID_SOURCES} ${CUID_HEADERS})
 add_library(amdcuid_shared SHARED ${CUID_SOURCES} ${CUID_HEADERS})
 
+set_property(TARGET amdcuid_static PROPERTY POSITION_INDEPENDENT_CODE ON)
+
 target_include_directories(
     amdcuid_static
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}

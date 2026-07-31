@@ -170,6 +170,7 @@ public:
     virtual bool IsGFX10() const { return false; }
     virtual bool IsGFX11() const { return false; }
     virtual bool IsGFX12() const { return false; }
+    virtual bool IsGFX1250() const { return false; }
     // Return number of XCC on the GPU
     uint32_t GetXccNumber() const { return agent_info_->xcc_num; }
     // Return number of XCC per AID
@@ -244,6 +245,7 @@ public:
 
     virtual int GetAccumLowID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
     virtual int GetAccumHiID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
+    virtual int GetSQGAccumID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
 
     // Return GPU id for a given gfxip string. Pure mapping function; the
     // instance-side GetGpuId() above returns the cached value resolved by

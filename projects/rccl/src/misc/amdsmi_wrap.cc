@@ -113,7 +113,7 @@ RCCL_AMDSMI_FN(amdsmi_get_fabric_telemetry_data, amdsmi_status_t,
                (amdsmi_processor_handle processor_handle, amdsmi_fabric_telemetry_t* telemetry))
 RCCL_AMDSMI_FN(amdsmi_free_fabric_telemetry, amdsmi_status_t,
                (amdsmi_processor_handle processor_handle, amdsmi_fabric_telemetry_t* telemetry))
-RCCL_AMDSMI_FN(amdsmi_fabric_telem_id_to_string, const char*, (uint64_t telem_id))
+RCCL_AMDSMI_FN(amdsmi_fabric_telem_id_to_string, amdsmi_status_t, (uint64_t telem_id, const char** telem_name))
 // Firmware info
 RCCL_AMDSMI_FN(amdsmi_get_fw_info, amdsmi_status_t, (amdsmi_processor_handle processor_handle, amdsmi_fw_info_t* info))
 } // namespace
@@ -640,13 +640,13 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
         devInfo->fabricSupported = false;
         continue;
       }
-      if (fabricInfo.fabric_info.version != AMDSMI_FABRIC_INFO_CURRENT_VERSION) {
+      if (fabricInfo.fabric_version != AMDSMI_FABRIC_INFO_CURRENT_VERSION) {
         WARN("AMD SMI fabric: unexpected fabric info version %u for device %u, expected %u",
-             fabricInfo.fabric_info.version, d, AMDSMI_FABRIC_INFO_CURRENT_VERSION);
+             fabricInfo.fabric_version, d, AMDSMI_FABRIC_INFO_CURRENT_VERSION);
         devInfo->fabricSupported = false;
         continue;
       }
-      const amdsmi_fabric_info_v1_t* v1 = &fabricInfo.fabric_info.fabric_version.v1;
+      const amdsmi_fabric_info_v1_t* v1 = &fabricInfo.fabric_info.v1;
       devInfo->fabricSupported =
         ((v1->fabric_type == AMDSMI_FABRIC_TYPE_UALOE || v1->fabric_type == AMDSMI_FABRIC_TYPE_UALLINK) &&
          (v1->accel_state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE ||
@@ -762,5 +762,10 @@ const char* amd_smi_fabricTelemIdToString(uint64_t telemId) {
   if (pfn_amdsmi_fabric_telem_id_to_string == nullptr) {
     return ARSMI_fabric_telem_id_to_string(telemId);
   }
-  return pfn_amdsmi_fabric_telem_id_to_string(telemId);
+  const char* telemName = nullptr;
+  amdsmi_status_t ret = pfn_amdsmi_fabric_telem_id_to_string(telemId, &telemName);
+  if (ret != AMDSMI_STATUS_SUCCESS || telemName == nullptr) {
+    return "UNKNOWN";
+  }
+  return telemName;
 }
