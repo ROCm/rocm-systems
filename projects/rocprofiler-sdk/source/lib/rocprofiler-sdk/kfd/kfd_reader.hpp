@@ -42,25 +42,26 @@ namespace kfd
 {
 // Start the reader thread. No-op if already running. Safe to call regardless of
 // whether any GPU supports dispatch-log (it simply idles if there is nothing to
-// read).
-void
+// read). Returns true once the reader thread is running and the fork handler is
+// registered; on false the caller must not advertise the dispatch-log as
+// available (the reader has already released everything it acquired).
+bool
 start_kfd_reader();
 
 // Signal the reader thread to stop and join it. Idempotent.
 void
 stop_kfd_reader();
 
-// Ensure the dispatch-log session exists, set up for the given gpu_id. Called
-// from the queue-creation path (queue_controller.cpp), which guarantees the SDK's
-// HSA agent cache is populated and the device is acquired -- the preconditions the
-// session's HSA allocation needs. No-op if KFD dispatch-log is unavailable or the
-// GPU is unsupported.
+// Ensure the dispatch-log session exists, set up for the given gpu_id. Returns
+// true only when a live session belongs to THIS gpu_id, i.e. when firmware
+// records for this GPU will actually be drained; callers must leave the
+// correlation key invalid (HSA fallback) otherwise.
 //
 // Scope: a SINGLE process-wide session, established for the first supported GPU
-// that calls this. Once that session is up, subsequent calls (including for a
-// different gpu_id) are a no-op -- a second GPU does not get its own session and
-// its dispatches fall back to HSA. Multi-GPU sessions are not supported.
-void
+// that calls this. Once that session is up, a call for a different gpu_id is a
+// no-op returning false -- a second GPU does not get its own session and its
+// dispatches fall back to HSA. Multi-GPU sessions are not supported.
+bool
 ensure_reader_session(uint32_t gpu_id);
 }  // namespace kfd
 }  // namespace rocprofiler

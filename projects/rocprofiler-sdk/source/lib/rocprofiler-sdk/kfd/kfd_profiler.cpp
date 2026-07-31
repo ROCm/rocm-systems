@@ -36,11 +36,11 @@
 
 #include <fmt/core.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <string>
 #include <unordered_set>
-#include <vector>
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -54,17 +54,16 @@ namespace kfd
 {
 namespace
 {
-// Minimum profiler ABI that carries dispatch-log support. The dlog kernel on
-// the target host reports KFD_IOC_PROFILER_VERSION_NUM == 5; we gate on >= 3
-// per the integration contract so intermediate ABIs are also accepted.
-constexpr uint32_t kMinProfilerAbiVersion = 3;
+// Minimum profiler ABI. The reader issues the unified-profiler and stream-fd
+// ioctl encodings vendored in kfd_dlog_uapi.h, so anything older than that
+// header's ABI would be sent incompatible ioctls.
+constexpr uint32_t kMinProfilerAbiVersion = KFD_IOC_PROFILER_VERSION_NUM;
 
 // Translation-unit-owned state. Not exposed as bare globals; only the accessor
 // functions below read it. Reset by shutdown_kfd_profiler().
 struct profiler_state
 {
-    int                          kfd_fd      = -1;
-    bool                         available   = false;
+    std::atomic<bool>            available   = {false};
     uint32_t                     abi_version = 0;
     std::unordered_set<uint32_t> supported_gpu_ids;
 };
@@ -128,37 +127,39 @@ discover_dispatch_log_gpus()
 }
 }  // namespace
 
-bool
+void
 init_kfd_profiler()
 {
     auto& st = state();
 
     // Idempotent: if a previous call already succeeded, keep the result.
-    if(st.available) return true;
+    if(st.available) return;
 
     // Respect user opt-out before touching /dev/kfd.
     if(!common::get_env("ROCPROFILER_KFD_DISPATCH_LOG", true))
     {
         ROCP_INFO << "KFD dispatch-log: disabled by ROCPROFILER_KFD_DISPATCH_LOG=0";
-        return false;
+        return;
     }
 
-    // Open a private probe fd. Kept open while available so later stages reuse it.
-    if(st.kfd_fd < 0) st.kfd_fd = ::open("/dev/kfd", O_RDWR | O_CLOEXEC);
-    if(st.kfd_fd < 0)
+    // Private probe fd, used only for the VERSION ioctl below; the reader opens
+    // its own.
+    int probe_fd = ::open("/dev/kfd", O_RDWR | O_CLOEXEC);
+    if(probe_fd < 0)
     {
         ROCP_INFO << "KFD dispatch-log: /dev/kfd unavailable, using HSA timestamps";
-        return false;
+        return;
     }
 
     // Probe the profiler ABI version.
     struct kfd_ioctl_profiler_args args = {};
     args.op                             = KFD_IOC_PROFILER_VERSION;
-    if(ioctl(st.kfd_fd, AMDKFD_IOC_PROFILER, &args) != 0)
+    const int probe_rc                  = ioctl(probe_fd, AMDKFD_IOC_PROFILER, &args);
+    ::close(probe_fd);
+    if(probe_rc != 0)
     {
         ROCP_INFO << "KFD dispatch-log: AMDKFD_IOC_PROFILER not supported, using HSA timestamps";
-        shutdown_kfd_profiler();
-        return false;
+        return;
     }
 
     st.abi_version = args.version;
@@ -168,8 +169,7 @@ init_kfd_profiler()
             "KFD dispatch-log: profiler ABI version {} < {}, using HSA timestamps",
             st.abi_version,
             kMinProfilerAbiVersion);
-        shutdown_kfd_profiler();
-        return false;
+        return;
     }
 
     // ABI probe passed; discover which GPUs expose dispatch-log.
@@ -177,18 +177,17 @@ init_kfd_profiler()
     if(st.supported_gpu_ids.empty())
     {
         ROCP_INFO << "KFD dispatch-log: no GPU exposes dispatch_log_format, using HSA timestamps";
-        shutdown_kfd_profiler();
-        return false;
+        return;
     }
+
+    // Publish availability only once the reader thread and its fork handler exist:
+    // the destroy_queue path uses it to decide whether to take the DoorbellMap lock.
+    if(!start_kfd_reader()) return;
 
     st.available = true;
     ROCP_INFO << fmt::format("KFD dispatch-log: available (ABI version {}, {} supported GPU(s))",
                              st.abi_version,
                              st.supported_gpu_ids.size());
-
-    // Bring up the reader thread now that the KFD path is available.
-    start_kfd_reader();
-    return true;
 }
 
 void
@@ -197,15 +196,19 @@ shutdown_kfd_profiler()
     // Stop the reader thread before tearing down the KFD session/state.
     stop_kfd_reader();
 
-    auto& st = state();
-    if(st.kfd_fd >= 0)
-    {
-        ::close(st.kfd_fd);
-        st.kfd_fd = -1;
-    }
+    auto& st       = state();
     st.available   = false;
     st.abi_version = 0;
     st.supported_gpu_ids.clear();
+}
+
+void
+disable_kfd_dispatch_log()
+{
+    // Reached from the atfork child handler: state() is always already
+    // constructed (the handler is registered only after init succeeded), so this
+    // is a single lock-free atomic store and nothing else.
+    state().available = false;
 }
 
 bool
@@ -219,19 +222,6 @@ gpu_supports_dispatch_log(uint32_t gpu_id)
 {
     const auto& ids = state().supported_gpu_ids;
     return ids.find(gpu_id) != ids.end();
-}
-
-uint32_t
-kfd_profiler_abi_version()
-{
-    return state().abi_version;
-}
-
-std::vector<uint32_t>
-supported_dispatch_log_gpus()
-{
-    const auto& ids = state().supported_gpu_ids;
-    return std::vector<uint32_t>(ids.begin(), ids.end());
 }
 }  // namespace kfd
 }  // namespace rocprofiler

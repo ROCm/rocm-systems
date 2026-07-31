@@ -23,7 +23,6 @@
 #pragma once
 
 #include <cstdint>
-#include <vector>
 
 // KFD dispatch-log profiler: startup probe + GPU support discovery.
 //
@@ -34,28 +33,35 @@
 // fall back to hsa_amd_profiling_get_dispatch_time(). Nothing here ever changes
 // the completion-signal lifecycle.
 //
-// Lifecycle: init_kfd_profiler() is called from kfd::init(); shutdown_kfd_profiler()
-// from kfd::finalize(). State is owned by the translation unit (kfd_profiler.cpp),
-// not exposed as bare globals.
+// Lifecycle: init_kfd_profiler() is called from queue_interposition::
+// interposition_init(), i.e. only when inline interposition -- the sole path that
+// produces a correlation key -- is selected; shutdown_kfd_profiler() from
+// kfd::finalize(). State is owned by the translation unit (kfd_profiler.cpp), not
+// exposed as bare globals.
 
 namespace rocprofiler
 {
 namespace kfd
 {
 // Run the startup probe: env opt-out, open /dev/kfd, profiler VERSION ioctl,
-// ABI version check, then GPU discovery. Returns true only when the ABI probe
-// succeeds AND at least one GPU exposes dispatch-log. Safe to call more than
-// once (idempotent). Never throws.
-bool
+// ABI version check, then GPU discovery. The outcome is published through
+// kfd_dispatch_log_available(). Safe to call more than once (idempotent).
+// Never throws.
+void
 init_kfd_profiler();
 
-// Release the probe fd and reset discovery state. Idempotent.
+// Stop the reader and reset discovery state. Idempotent.
 void
 shutdown_kfd_profiler();
 
-// True when the ABI probe passed and >=1 supported GPU was discovered. Checked
-// by later stages (WriteInterceptor capture, get_dispatch_time) to gate the
-// KFD path. Returns false until init_kfd_profiler() has succeeded.
+// Latch the dispatch-log path off. Async-signal-safe (one atomic store), so it
+// is callable from the pthread_atfork child handler.
+void
+disable_kfd_dispatch_log();
+
+// Gates ensure_reader_session() and the queue-destroy doorbell retirement. True
+// only after the ABI probe passed, >=1 supported GPU was discovered, and
+// start_kfd_reader() succeeded; false again in a forked child.
 bool
 kfd_dispatch_log_available();
 
@@ -64,15 +70,5 @@ kfd_dispatch_log_available();
 // without affecting other GPUs.
 bool
 gpu_supports_dispatch_log(uint32_t gpu_id);
-
-// Profiler ABI version reported by the kernel (0 if the probe has not run or
-// the ioctl is unsupported). Exposed for logging/diagnostics.
-uint32_t
-kfd_profiler_abi_version();
-
-// The set of KFD gpu_ids discovered to support dispatch-log (have the
-// dispatch_log_format sysfs node). Empty until init_kfd_profiler() succeeds.
-std::vector<uint32_t>
-supported_dispatch_log_gpus();
 }  // namespace kfd
 }  // namespace rocprofiler

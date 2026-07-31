@@ -33,7 +33,6 @@
 // Multiple queues can multiplex into one region; records carry their own
 // (doorbell_off, dispatch_id), so interleaving within a region is expected.
 
-#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <unordered_map>
@@ -103,13 +102,11 @@ struct drain_state
 
 // Drain new firmware records from every pipe, pairing start/eop by
 // (doorbell_off, dispatch_id). Pure: no singletons, no mmap ownership, no host
-// clock. Callbacks preserve the reader's ordering (bind-then-deposit):
-//   on_record(doorbell_off, dispatch_id)          -- every non-padding record, in order
-//   on_pair(doorbell_off, dispatch_id, start, end)-- each completed start+eop pair
+// clock. on_pair(doorbell_off, dispatch_id, start, end) is invoked for each
+// completed start+eop pair, in ring order.
 // Advances rptr_arr (the shared consumer cursor firmware/kernel read) and
-// state.rptr. Returns completed-pair count. Returns 0 on the first call (cursor
-// sync) and on invalid geometry.
-template <typename OnRecord, typename OnPair>
+// state.rptr. Returns completed-pair count, or 0 on invalid geometry.
+template <typename OnPair>
 uint64_t
 drain_pipes(const uint8_t*           records_base,
             uint32_t                 num_regions,
@@ -118,15 +115,11 @@ drain_pipes(const uint8_t*           records_base,
             volatile uint64_t*       rptr_arr,
             drain_state&             state,
             uint64_t                 now_ns,
-            OnRecord&&               on_record,
             OnPair&&                 on_pair)
 {
-    if(num_regions == 0) return 0;
-
-    // Cap at the cursor storage (drain_state::rptr[]); reject anything larger rather
+    // Reject geometry that exceeds the cursor storage (drain_state::rptr[]) rather
     // than silently draining a subset.
-    const uint32_t npipes = std::min<uint32_t>(num_regions, kMaxRegions);
-    if(num_regions > kMaxRegions) return 0;
+    if(num_regions == 0 || num_regions > kMaxRegions) return 0;
 
     // Per-region slot count. Must be a power of two so idx masks to a physical slot.
     const uint32_t region_slots = region_record_count;
@@ -140,7 +133,7 @@ drain_pipes(const uint8_t*           records_base,
     // advances past the slots the producer has physically overwritten.
     if(!state.rptr_init)
     {
-        for(uint32_t p = 0; p < npipes; ++p)
+        for(uint32_t p = 0; p < num_regions; ++p)
         {
             state.rptr[p] = 0;
             __atomic_store_n(&rptr_arr[p], 0, __ATOMIC_RELEASE);
@@ -156,7 +149,7 @@ drain_pipes(const uint8_t*           records_base,
     };
 
     uint64_t seen = 0;
-    for(uint32_t p = 0; p < npipes; ++p)
+    for(uint32_t p = 0; p < num_regions; ++p)
     {
         uint64_t w    = __atomic_load_n(&wptr_arr[p], __ATOMIC_ACQUIRE);
         uint64_t scan = state.rptr[p];
@@ -176,8 +169,6 @@ drain_pipes(const uint8_t*           records_base,
                 static_cast<uint64_t>(rec.ts_lo) | (static_cast<uint64_t>(rec.ts_hi) << 32);
             const uint64_t key = (static_cast<uint64_t>(rec.doorbell_off) << 32) |
                                  static_cast<uint64_t>(rec.dispatch_id);
-
-            on_record(rec.doorbell_off, rec.dispatch_id);
 
             if(rec.record_type == kRecStart)
             {

@@ -1669,10 +1669,6 @@ init()
 
         retcode   = init(std::make_index_sequence<KFD_EVENT_LAST>{});
         init_done = true;
-
-        // KFD dispatch-log timestamp source (best-effort; silent HSA fallback).
-        // Does not affect retcode: KFD event tracing must init regardless.
-        init_kfd_profiler();
     }
 
     return retcode;

@@ -37,19 +37,19 @@
 
 #include <fmt/core.h>
 
-#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
-#include <cstring>
 #include <mutex>
+#include <new>
 #include <string>
+#include <system_error>
 #include <thread>
-#include <unordered_map>
 #include <vector>
 
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
 #include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -123,6 +123,13 @@ struct reader_state
     // so the reader sees a fully-built session before it drains).
     std::mutex        setup_mu      = {};
     std::atomic<bool> session_ready = {false};
+    // Latched when the reader can never serve a session: setup_session() failed
+    // (no aperture, alloc, ABI, geometry -- all permanent, and retrying would
+    // repeat 128 alloc ioctls plus a warning on every dispatch), the reader failed
+    // to start, or we are in a forked child. Checked before setup_mu is taken, so a
+    // latched reader never makes a dispatch block on that mutex. Cleared only by
+    // stop_reader().
+    std::atomic<bool> setup_failed = {false};
 
     reader_state() = default;
     ~reader_state();
@@ -276,17 +283,46 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
     }
     s->info = sinfo.info;
 
-    if(s->info.fw_record_size != kFwRecBytes || s->info.num_regions == 0 || s->info.num_regions > 8)
+    // Reject any geometry drain_pipes() would silently refuse to drain (record
+    // size, region count beyond the cursor storage, non-power-of-two slot count),
+    // so setup fails loudly instead of reporting ready and draining nothing.
+    const uint32_t rrc = s->info.region_record_count;
+    if(s->info.fw_record_size != kFwRecBytes || s->info.num_regions == 0 ||
+       s->info.num_regions > kMaxRegions || rrc == 0 || (rrc & (rrc - 1)) != 0)
     {
         ROCP_WARNING << fmt::format(
-            "KFD dispatch-log: unsupported stream geometry (fw_record_size={} num_regions={})",
+            "KFD dispatch-log: unsupported stream geometry (fw_record_size={} num_regions={} "
+            "region_record_count={})",
             s->info.fw_record_size,
-            s->info.num_regions);
+            s->info.num_regions,
+            rrc);
         return false;
     }
 
-    s->smap_len = round_up_page(s->info.mmap_size);
-    s->smap     = mmap(nullptr, s->smap_len, PROT_READ | PROT_WRITE, MAP_SHARED, s->stream_fd, 0);
+    // The offsets below are driver-supplied and are used to form pointers that are
+    // read (records, wptr) AND written (rptr), so every array must lie inside the
+    // mapping. Subtract instead of add so the bounds check cannot overflow, and
+    // reject a mmap_size whose page round-up wrapped.
+    s->smap_len              = round_up_page(s->info.mmap_size);
+    const uint64_t rec_bytes = static_cast<uint64_t>(s->info.num_regions) * rrc * kFwRecBytes;
+    const uint64_t ptr_bytes = static_cast<uint64_t>(s->info.num_regions) * sizeof(uint64_t);
+    auto           fits      = [&](uint64_t off, uint64_t bytes) {
+        return off <= s->info.mmap_size && bytes <= s->info.mmap_size - off;
+    };
+    if(s->smap_len < s->info.mmap_size || !fits(s->info.records_offset, rec_bytes) ||
+       !fits(s->info.wptr_offset, ptr_bytes) || !fits(s->info.rptr_offset, ptr_bytes))
+    {
+        ROCP_WARNING << fmt::format(
+            "KFD dispatch-log: stream layout does not fit the mapping (mmap_size={} "
+            "records_offset={} wptr_offset={} rptr_offset={})",
+            s->info.mmap_size,
+            s->info.records_offset,
+            s->info.wptr_offset,
+            s->info.rptr_offset);
+        return false;
+    }
+
+    s->smap = mmap(nullptr, s->smap_len, PROT_READ | PROT_WRITE, MAP_SHARED, s->stream_fd, 0);
     if(s->smap == MAP_FAILED)
     {
         ROCP_WARNING << fmt::format(
@@ -323,7 +359,7 @@ teardown_session(int kfd, dlog_session* s)
         ::close(s->stream_fd);
         s->stream_fd = -1;
     }
-    if(s->buffer_va != 0 && kfd >= 0)
+    if(s->buffer_va != 0)
     {
         auto unreg           = kfd_ioctl_profiler_args{};
         unreg.op             = KFD_IOC_PROFILER_DLOG;
@@ -344,15 +380,6 @@ teardown_session(int kfd, dlog_session* s)
     }
 }
 
-// Age out pending dispatch_start records that never received a matching eop
-// (queue died mid-dispatch, ring overwrite). Reader-thread-only, no lock. Mirrors
-// ResultsMap::evict_stale. now_ns is passed in for determinism/testability.
-void
-evict_stale_starts(dlog_session* s, uint64_t now_ns, uint64_t max_age_ns)
-{
-    s->drain.evict_stale(now_ns, max_age_ns);
-}
-
 // Drain new firmware records via the shared, unit-tested drain_pipes() core. This
 // wrapper supplies the reader-specific bits: the mmap'd ring pointers, the host
 // clock for start aging, and a paired (start,end) deposit into ResultsMap. The key
@@ -363,8 +390,6 @@ evict_stale_starts(dlog_session* s, uint64_t now_ns, uint64_t max_age_ns)
 uint64_t
 drain_records(dlog_session* s)
 {
-    if(s->smap == MAP_FAILED) return 0;
-
     auto* base     = static_cast<uint8_t*>(s->smap);
     auto* recs     = base + s->info.records_offset;
     auto* wptr_arr = reinterpret_cast<volatile uint64_t*>(base + s->info.wptr_offset);
@@ -378,10 +403,6 @@ drain_records(dlog_session* s)
         rptr_arr,
         s->drain,
         common::timestamp_ns(),
-        [](uint32_t, uint32_t) {
-            // Binding is done at capture (page-relative doorbell slot), so there is
-            // nothing to do per raw record here.
-        },
         [](uint32_t doorbell_off, uint32_t dispatch_id, uint64_t start_ticks, uint64_t end_ticks) {
             uint32_t slot = doorbell_off_to_page_slot(doorbell_off);
             uint32_t gen  = doorbell_map().get_generation(slot);
@@ -415,6 +436,7 @@ stop_reader()
     // concurrent setup_session(). The reader thread is already stopped+joined above.
     teardown_session(st.kfd_fd, &st.session);
     st.session_ready.store(false, std::memory_order_release);
+    st.setup_failed.store(false, std::memory_order_release);
     if(st.kfd_fd >= 0)
     {
         ::close(st.kfd_fd);
@@ -430,6 +452,36 @@ stop_reader()
 }
 
 reader_state::~reader_state() { stop_reader(); }
+
+// pthread_atfork child handler. Only the forking thread survives into the child,
+// so the reader is gone while its joinable std::thread handle, fds and mapping are
+// inherited. Permanently disable the reader in the child (dispatches there use HSA
+// timestamps); there is deliberately no restart path. Async-signal-safe: scalar
+// state reset only -- never join, close, munmap, ioctl or allocate here.
+void
+disable_reader_in_child()
+{
+    // Also latches kfd_dispatch_log_available() false, so the child never takes
+    // the DoorbellMap lock a vanished thread may have been holding.
+    disable_kfd_dispatch_log();
+
+    auto& st = state();
+    st.session_ready.store(false, std::memory_order_relaxed);
+    // Latch unavailable: setup_mu may have been held by a thread that did not
+    // survive the fork, so a child dispatch must not reach it.
+    st.setup_failed.store(true, std::memory_order_relaxed);
+    st.running = false;  // makes stop_reader() and ~reader_state() no-ops
+    // Abandon the handle of the vanished thread. Not detach(): that would touch a
+    // pthread descriptor fork has already reclaimed in the child.
+    new(&st.thread) std::thread{};
+    st.wake_fd = -1;
+    st.kfd_fd  = -1;
+    // Drop ownership of the inherited stream fd / mapping / GTT allocation so the
+    // child can never tear down kernel objects that belong to the parent.
+    st.session.smap      = MAP_FAILED;
+    st.session.stream_fd = -1;
+    st.session.buffer_va = 0;
+}
 
 void
 reader_loop()
@@ -481,7 +533,7 @@ reader_loop()
 
             if(now_ns - last_evict_ns >= kEvictIntervalNs)
             {
-                evict_stale_starts(&st.session, now_ns, kStartMaxAgeNs);
+                st.session.drain.evict_stale(now_ns, kStartMaxAgeNs);
                 results_map().evict_stale(now_ns, kResultMaxAgeNs);
                 last_evict_ns = now_ns;
             }
@@ -491,41 +543,81 @@ reader_loop()
     // Final drain to catch late records.
     if(st.session_ready.load(std::memory_order_acquire)) total_seen += drain_records(&st.session);
 
-    ROCP_INFO << fmt::format("KFD dispatch-log reader: loop exited, total records seen = {}",
-                             total_seen);
+    // Misses are dispatches whose completion callback ran before the reader had
+    // deposited their firmware record; they silently used HSA timestamps.
+    const auto _stats = results_map().stats();
+    ROCP_INFO << fmt::format(
+        "KFD dispatch-log reader: loop exited, total pairs seen = {}, completion-path "
+        "lookups: {} hit / {} miss",
+        total_seen,
+        _stats.hits,
+        _stats.misses);
 }
 }  // namespace
 
-void
+bool
 start_kfd_reader()
 {
     auto& st = state();
-    if(st.running) return;
+    if(st.running) return true;
+
+    // Any return below that leaves st.running false is a failure: drop the fds and
+    // latch the reader unavailable, so dispatches short-circuit in
+    // ensure_reader_session() instead of locking setup_mu for a reader that will
+    // never have a session.
+    common::scope_destructor cleanup{[&st]() {
+        if(st.running) return;
+        st.setup_failed.store(true, std::memory_order_release);
+        if(st.kfd_fd >= 0) ::close(st.kfd_fd);
+        if(st.wake_fd >= 0) ::close(st.wake_fd);
+        st.kfd_fd  = -1;
+        st.wake_fd = -1;
+    }};
 
     st.wake_fd = eventfd(0, kEventfdFlags);
     if(st.wake_fd < 0)
     {
         ROCP_WARNING << "KFD dispatch-log reader: eventfd creation failed, reader not started";
-        return;
+        return false;
     }
 
     st.kfd_fd = ::open("/dev/kfd", O_RDWR | O_CLOEXEC);
     if(st.kfd_fd < 0)
     {
         ROCP_WARNING << "KFD dispatch-log reader: /dev/kfd open failed, reader not started";
-        ::close(st.wake_fd);
-        st.wake_fd = -1;
-        return;
+        return false;
+    }
+
+    // Must be registered before the thread exists: a fork in between would leave the
+    // child with a joinable handle to a vanished thread and no handler to abandon it
+    // (std::terminate from ~reader_state).
+    if(pthread_atfork(nullptr, nullptr, disable_reader_in_child) != 0)
+    {
+        ROCP_WARNING << "KFD dispatch-log reader: pthread_atfork failed, reader not started";
+        return false;
     }
 
     st.stop.store(false, std::memory_order_release);
 
     internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
-    st.thread = std::thread{reader_loop};
+    try
+    {
+        st.thread = std::thread{reader_loop};
+    }
+    catch(const std::system_error& e)
+    {
+        // init_kfd_profiler() promises never to throw: the scope guard drops the fds
+        // and leaves the dispatch-log unavailable, so dispatches use HSA timestamps.
+        internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
+        ROCP_WARNING << fmt::format(
+            "KFD dispatch-log reader: thread creation failed ({}), reader not started", e.what());
+        return false;
+    }
     internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
 
     st.running = true;
     ROCP_INFO << "KFD dispatch-log reader: started";
+    return true;
 }
 
 void
@@ -534,23 +626,40 @@ stop_kfd_reader()
     stop_reader();
 }
 
-void
+bool
 ensure_reader_session(uint32_t gpu_id)
 {
-    if(!kfd_dispatch_log_available() || !gpu_supports_dispatch_log(gpu_id)) return;
+    if(!kfd_dispatch_log_available() || !gpu_supports_dispatch_log(gpu_id)) return false;
 
     auto& st = state();
-    if(st.session_ready.load(std::memory_order_acquire)) return;  // fast path: already up
+    // The session's gpu_id is written before session_ready is released and never
+    // mutated afterwards, so this acquire-load makes it safe to read unlocked.
+    if(st.session_ready.load(std::memory_order_acquire)) return st.session.gpu_id == gpu_id;
+    if(st.setup_failed.load(std::memory_order_acquire)) return false;
 
     auto lk = std::lock_guard<std::mutex>{st.setup_mu};
     if(st.session_ready.load(std::memory_order_relaxed))
-        return;                // lost the race; someone set it up
-    if(st.kfd_fd < 0) return;  // reader not started
+        return st.session.gpu_id == gpu_id;  // lost the race; someone set it up
+    // Threads that all passed the unlocked check before the first failure land here
+    // one at a time; without this recheck each would repeat the failed setup.
+    if(st.setup_failed.load(std::memory_order_relaxed)) return false;
+    if(st.kfd_fd < 0) return false;  // reader not started
 
     // One session for the first supported GPU. (This gpu_id is supported per the
     // guard above.)
-    if(setup_session(st.kfd_fd, gpu_id, &st.session))
-        st.session_ready.store(true, std::memory_order_release);
+    if(!setup_session(st.kfd_fd, gpu_id, &st.session))
+    {
+        st.setup_failed.store(true, std::memory_order_release);
+        return false;
+    }
+    st.session_ready.store(true, std::memory_order_release);
+
+    // Break the reader out of its coarse pre-session poll so the first dispatches
+    // are drained immediately instead of up to 100 ms later.
+    uint64_t one = 1;
+    auto     _   = ::write(st.wake_fd, &one, sizeof(one));
+    (void) _;
+    return true;
 }
 }  // namespace kfd
 }  // namespace rocprofiler
