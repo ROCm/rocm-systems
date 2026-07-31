@@ -69,7 +69,7 @@ static ncclResult_t ncclAllGatherDdaFabricLLTyped(
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
-  const int epochLen = comm->ddaLLEpochLen;
+  const int epochLen = std::min(comm->ddaLLEpochLen, nRanks*blocksPerPeer);  ;
 
   INFO(NCCL_COLL, "DDA fabric AllGather LL: nRanks=%d perRankBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
        nRanks, perRankBytes, grid.x, grid.y, block.x, blocksPerPeer);
