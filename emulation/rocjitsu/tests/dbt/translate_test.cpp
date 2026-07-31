@@ -11133,7 +11133,8 @@ TEST(BinaryTranslatorE2E, Gfx1250DeadScratchWaitsForOutstandingVgprProducer) {
       scratch_write_index = index;
       const rocjitsu::Operand *destination = decoded[index]->dst_operand(0);
       ASSERT_NE(destination, nullptr);
-      EXPECT_EQ(destination->encoding_value(), 0u);
+      EXPECT_EQ(destination->encoding_value(), 1u)
+          << "globally unused v1 is preferred over site-dead v0";
     }
   }
   ASSERT_TRUE(pending_load_index.has_value());

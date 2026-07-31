@@ -115,7 +115,7 @@ public:
   SemanticScratchAllocator(const Instruction &inst, const LivenessAnalysis &liveness,
                            TranslationContext &context, SemanticScratchPolicy policy);
 
-  /// @brief Prefer dead VGPRs, then borrow and spill an allowed guest window.
+  /// @brief Prefer kernel-unused VGPRs, then site-dead or spilled guest windows.
   /// @details Rejects a spill victim in a dynamic-stack kernel, while allowing
   ///          a genuinely free VGPR window that does not need private storage.
   [[nodiscard]] SemanticScratchResult acquire_vgprs(const SemanticScratchRequest &request);
