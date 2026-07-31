@@ -104,6 +104,13 @@ public:
   ~CommandProcessor() override { stop_doorbell_monitor(); }
 
   void set_memory(GpuMemory *mem) { memory_ = mem; }
+  /// @brief Share a dispatch-ID allocator with sibling command processors.
+  /// @details The owning SoC supplies this counter so XCDs in one simulated
+  /// device cannot reuse plugin-visible dispatch IDs. Standalone command
+  /// processors retain their own deterministic allocator.
+  void set_dispatch_id_allocator(std::atomic<uint64_t> *next_id) {
+    dispatch_id_allocator_ = next_id ? next_id : &local_next_dispatch_id_;
+  }
   void add_l2_cache(L2Cache *l2) {
     // Idempotent: the config-driven builder and the Xcd full constructor may
     // both attempt to register the same L2. Avoid duplicate entries so cache
@@ -193,6 +200,9 @@ public:
   }
 
 private:
+  /// @brief Allocate a device-wide dispatch identity shared by every XCD/CP.
+  uint32_t allocate_dispatch_id();
+
   /// @brief Initialize a wavefront's registers per the AMDHSA ABI.
   void init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf, const DispatchEntry &entry,
                            uint32_t global_wg_id, uint32_t wf_index_in_wg);
@@ -319,7 +329,8 @@ private:
   // GFX11+ SDMA GCR keeps the same opcode but changes packet size/layout, so
   // the decoder cannot infer this dialect from the packet header alone.
   SdmaPacketDialect sdma_packet_dialect_ = SdmaPacketDialect::Legacy;
-  uint32_t next_dispatch_id_ = 1;
+  std::atomic<uint64_t> local_next_dispatch_id_{1};
+  std::atomic<uint64_t> *dispatch_id_allocator_ = &local_next_dispatch_id_;
   size_t total_dispatched_ = 0;
 
   struct ClusterWorkgroupPlacement {

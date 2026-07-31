@@ -21,6 +21,7 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <bit>
 #include <cassert>
 #include <cstring>
 #include <memory>
@@ -62,6 +63,10 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
   decoder_->enable_pool();
 
   wfs_.resize(config.num_wf_slots);
+  free_wf_slot_bits_.assign((config.num_wf_slots + 63u) / 64u, ~uint64_t{0});
+  if (!free_wf_slot_bits_.empty() && config.num_wf_slots % 64u != 0)
+    free_wf_slot_bits_.back() = (uint64_t{1} << (config.num_wf_slots % 64u)) - 1u;
+  free_wf_slot_count_ = config.num_wf_slots;
   sgpr_file_.init(config.num_wf_slots * config.sgprs_per_wf, config.sgprs_per_wf);
   sgpr_to_wave_.resize(config.num_wf_slots * config.sgprs_per_wf, nullptr);
 
@@ -116,14 +121,15 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
 }
 
 Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
-                                        uint32_t num_vgprs) {
+                                        uint32_t num_vgprs, uint32_t dispatch_id) {
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
-  // Halted wavefronts have already freed their SGPR/VGPR blocks at s_endpgm, so a
-  // halted slot is immediately available. Find an idle slot.
+  // Halted wavefronts have already returned their slot and register blocks at
+  // s_endpgm. The bitset preserves the historical lowest-slot-first assignment
+  // without rescanning every wavefront object on each dispatch.
   size_t slot = config_.num_wf_slots;
-  for (size_t i = 0; i < wfs_.size(); ++i) {
-    if (wfs_[i]->is_halted()) {
-      slot = i;
+  for (size_t word = 0; word < free_wf_slot_bits_.size(); ++word) {
+    if (free_wf_slot_bits_[word] != 0) {
+      slot = word * 64u + std::countr_zero(free_wf_slot_bits_[word]);
       break;
     }
   }
@@ -134,6 +140,7 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
   // and must hold even when a caller dispatches directly to a full CU.
   if (slot >= config_.num_wf_slots)
     return nullptr;
+  assert(free_wf_slot_count_ > 0 && "free wavefront slot count is inconsistent");
 
   int32_t sgpr_base = sgpr_file_.allocate(num_sgprs);
   if (sgpr_base < 0)
@@ -145,19 +152,24 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
     return nullptr;
   }
 
-  // Zero the allocated register blocks so reused slots don't inherit stale
-  // values from previous kernel runs.
-  std::fill(&sgpr_file_[sgpr_base], &sgpr_file_[sgpr_base] + config_.sgprs_per_wf, 0u);
-  std::memset(raw_vgpr_data(static_cast<uint32_t>(vgpr_base)), 0,
-              vgpr_allocation_block_size() * wf_size_ * sizeof(uint32_t));
+  // RegisterFile::allocate() clears the complete physical block before returning
+  // it, including registers above the logical count. Do not clear both blocks a
+  // second time here; high-volume dispatches allocate millions of wave contexts.
 
-  // Invalidate the L1 scalar cache so this wavefront reads fresh kernel
-  // arguments from L2/memory rather than stale lines from a prior kernel.
-  // On real hardware, the driver issues s_dcache_inv at kernel launch.
-  l1_scalar_.invalidate_all();
+  // Hardware invalidates scalar-cache state at kernel launch, not between
+  // workgroups of one dispatch. Direct standalone waves retain the conservative
+  // historical behavior because they have no dispatch identity.
+  if (dispatch_id == 0) {
+    l1_scalar_.invalidate_all();
+  } else if (!scalar_cache_dispatch_prepared_ || scalar_cache_dispatch_id_ != dispatch_id) {
+    l1_scalar_.invalidate_all();
+    scalar_cache_dispatch_id_ = dispatch_id;
+    scalar_cache_dispatch_prepared_ = true;
+  }
 
   auto *wf = wfs_[slot].get();
   wf->wg_id_ = wg_id;
+  wf->set_dispatch_id(dispatch_id);
   wf->pc = pc;
   wf->sgpr_alloc_ = {static_cast<uint32_t>(sgpr_base), num_sgprs};
   wf->vgpr_alloc_ = {static_cast<uint32_t>(vgpr_base), num_vgprs};
@@ -171,6 +183,8 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
   wf->state_ = WfState::RUNNING;
   wf->set_ready_cycle(cycle_counter_);
   wf->trace_inst_count_ = 0;
+  free_wf_slot_bits_[slot / 64u] &= ~(uint64_t{1} << (slot % 64u));
+  --free_wf_slot_count_;
 
   std::fill(sgpr_to_wave_.begin() + sgpr_base, sgpr_to_wave_.begin() + sgpr_base + num_sgprs, wf);
   fill_vgpr_to_wave(static_cast<uint32_t>(vgpr_base), vgpr_allocation_block_size(), wf);
@@ -183,17 +197,22 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
 }
 
 size_t ComputeUnitCore::num_wfs() const {
-  size_t count = 0;
-  for (const auto &w : wfs_)
-    if (!w->is_halted())
-      ++count;
-  return count;
+  if (free_wf_slot_count_ > wfs_.size())
+    throw std::logic_error("free wavefront slot count exceeds capacity");
+  return wfs_.size() - free_wf_slot_count_;
 }
 
 void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
-  if (wf.sgpr_alloc().count > 0) {
+  const bool was_allocated = wf.sgpr_alloc().count > 0;
+  if (was_allocated) {
     sgpr_file_.free(wf.sgpr_alloc().base);
     free_vgprs(wf.vgpr_alloc().base);
+    const uint32_t slot = wf.wf_id();
+    assert((free_wf_slot_bits_[slot / 64u] & (uint64_t{1} << (slot % 64u))) == 0 &&
+           "double-free of wavefront slot");
+    free_wf_slot_bits_[slot / 64u] |= uint64_t{1} << (slot % 64u);
+    ++free_wf_slot_count_;
+    assert(free_wf_slot_count_ <= wfs_.size() && "free wavefront slot count overflow");
   }
   wf.trace_inst_count_ = 0;
   wf.reset();
@@ -225,22 +244,16 @@ void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
   // resident (not-yet-halted) waves belonging to this WG, drop the refcount entry,
   // and reclaim LDS if the CU is now idle and unpinned. The caller unpins the cluster
   // LDS separately (the pin is CP-side bookkeeping).
-  for (const auto &w : wfs_) {
+  for (const auto &w : wfs_)
     if (!w->is_halted() && w->dispatch_id() == dispatch_id && w->wg_id() == wg_id)
       free_wavefront_resources(*w);
-  }
   active_wgs_.erase(wg_key(dispatch_id, wg_id));
   maybe_reset_lds_alloc();
 }
 
 bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes) const {
-  // Count free wavefront slots.
-  uint32_t free_slots = 0;
-  for (const auto &w : wfs_)
-    if (w->is_halted())
-      ++free_slots;
-  if (free_slots < num_wfs) {
-    util::Logger::vm("CU ", this->name(), " can_accept_wg: REJECT free_slots=", free_slots,
+  if (free_wf_slot_count_ < num_wfs) {
+    util::Logger::vm("CU ", this->name(), " can_accept_wg: REJECT free_slots=", free_wf_slot_count_,
                      " < num_wfs=", num_wfs);
     return false;
   }
@@ -358,18 +371,13 @@ void ComputeUnitCore::update_wf_states() {
   }
 }
 
-void ComputeUnitCore::issue_instruction(Wavefront *active) {
-  uint32_t vmid = active->process_id();
-
-  rj_code_binary_inst_t words[4];
-  for (int i = 0; i < 4; ++i)
-    words[i] = memory_->fetch32(active->pc + i * 4, vmid);
-
+void ComputeUnitCore::issue_instruction(Wavefront *active, const FetchedInstruction &words) {
   active->trace_inst_count_++;
 
   Instruction *inst = nullptr;
   try {
-    inst = decoder_->decode(words);
+    inst = decoder_->decode(words.data());
+    ++decoded_instruction_count_;
   } catch (const util::InvalidInst &e) {
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(InvalidInst) pc=0x",
                      std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
@@ -481,9 +489,38 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 bool ComputeUnitCore::step() {
   update_wf_states();
 
+  // Functional workloads commonly keep every resident wave at the same PC. Snapshot
+  // instruction words once per step for peers in the same address space. Runtime code
+  // patching occurs between simulator steps; instruction memory is stable while the
+  // waves in one step execute. Decoding remains per wave because execute paths may
+  // mutate instruction-owned operand state.
+  struct StepFetchEntry {
+    bool valid = false;
+    uint32_t vmid = 0;
+    uint64_t pc = 0;
+    FetchedInstruction words{};
+  };
+  constexpr size_t kStepFetchEntries = 8;
+  std::array<StepFetchEntry, kStepFetchEntries> step_fetches{};
+
   for (auto &wf : wfs_) {
-    if (wf->state() == WfState::RUNNING)
-      issue_instruction(wf.get());
+    if (wf->state() != WfState::RUNNING)
+      continue;
+
+    const uint32_t vmid = wf->process_id();
+    const uint64_t pc = wf->pc;
+    const size_t fetch_index =
+        ((pc >> 2u) ^ (static_cast<uint64_t>(vmid) * 0x9e3779b9u)) & (kStepFetchEntries - 1u);
+    auto &entry = step_fetches[fetch_index];
+    if (!entry.valid || entry.vmid != vmid || entry.pc != pc) {
+      for (size_t i = 0; i < entry.words.size(); ++i)
+        entry.words[i] = memory_->fetch32(pc + i * sizeof(entry.words[i]), vmid);
+      ++fetched_instruction_count_;
+      entry.valid = true;
+      entry.vmid = vmid;
+      entry.pc = pc;
+    }
+    issue_instruction(wf.get(), entry.words);
   }
 
   ++step_count_;

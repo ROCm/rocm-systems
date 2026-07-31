@@ -37,6 +37,13 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace amdgpu {
 
+uint32_t CommandProcessor::allocate_dispatch_id() {
+  const uint64_t id = dispatch_id_allocator_->fetch_add(1, std::memory_order_relaxed);
+  if (id == 0 || id > std::numeric_limits<uint32_t>::max())
+    throw std::overflow_error("AMDGPU dispatch identity space exhausted");
+  return static_cast<uint32_t>(id);
+}
+
 namespace {
 
 // The supported cluster size must fit the M0 multicast mask captured at issue time.
@@ -976,7 +983,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     };
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
       Wavefront *wf = cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,
-                                      entry.vgprs_per_wf);
+                                      entry.vgprs_per_wf, entry.dispatch_id);
       if (!wf) {
         assert(false && "dispatch_wf failed after placement was reserved");
         free_reserved();
@@ -988,7 +995,6 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       Wavefront *wf = wg_wavefronts[w];
       wf->set_lds_base(lds_base);
       wf->set_lds(placement.lds);
-      wf->set_dispatch_id(entry.dispatch_id);
       wf->set_queue_id(entry.queue_id);
       wf->set_process_id(entry.process_id);
       wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, cu->wf_size()));
@@ -1263,7 +1269,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   uint32_t total_wgs = grid_wgs_x * grid_wgs_y * grid_wgs_z;
 
   DispatchEntry dp{};
-  dp.dispatch_id = next_dispatch_id_++;
+  dp.dispatch_id = allocate_dispatch_id();
   dp.profiling_start_timestamp = hsa_system_timestamp();
   dp.queue_id = queue.queue_id;
   dp.process_id = queue.process_id;
@@ -1610,7 +1616,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
       sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
 
       DispatchEntry dp{
-          .dispatch_id = next_dispatch_id_++,
+          .dispatch_id = allocate_dispatch_id(),
           .queue_id = queue.queue_id,
           .process_id = queue.process_id,
           .completion_signal = sig,
@@ -1665,7 +1671,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
         }
 
         DispatchEntry dp{
-            .dispatch_id = next_dispatch_id_++,
+            .dispatch_id = allocate_dispatch_id(),
             .queue_id = queue.queue_id,
             .process_id = queue.process_id,
             .completion_signal = barrier.completion_signal.handle,
@@ -1725,7 +1731,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
         const uint64_t sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
 
         DispatchEntry dp{
-            .dispatch_id = next_dispatch_id_++,
+            .dispatch_id = allocate_dispatch_id(),
             .queue_id = queue.queue_id,
             .process_id = queue.process_id,
             .completion_signal = sig,

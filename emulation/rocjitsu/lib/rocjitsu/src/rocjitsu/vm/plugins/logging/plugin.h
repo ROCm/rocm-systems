@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <mutex>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace rocjitsu {
@@ -19,12 +20,22 @@ public:
   ~KernelLoggingPlugin() override;
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
+  void onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) override;
   void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
                                        Wavefront &wf) override;
+  void onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) override;
+  void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) override;
 
 private:
+  struct DispatchProgress {
+    uint32_t kernel_number = 0;
+    uint32_t total_workgroups = 0;
+    uint32_t completed_workgroups = 0;
+  };
+
   std::mutex mutex_;
-  int dispatch_count_ = 0;
+  uint32_t dispatch_count_ = 0;
+  std::unordered_map<uint32_t, DispatchProgress> dispatch_progress_;
   std::unordered_set<uint32_t> mfma_printed_;
 };
 

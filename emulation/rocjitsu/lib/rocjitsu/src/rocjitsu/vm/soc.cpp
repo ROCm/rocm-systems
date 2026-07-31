@@ -62,7 +62,7 @@ SoC::SoC(std::string name, const Config &config)
       auto xcd_ptr =
           std::make_unique<amdgpu::Xcd>(soc_name + ".xcd" + std::to_string(i), config.xcd,
                                         config.arch, memory_, config.exec_mode);
-      xcds_.push_back(xcd_ptr.get());
+      add_xcd(xcd_ptr.get());
       add_child(std::move(xcd_ptr));
     }
   } else {
@@ -72,7 +72,7 @@ SoC::SoC(std::string name, const Config &config)
       auto xcd_ptr =
           std::make_unique<amdgpu::Xcd>(soc_name + ".xcd" + std::to_string(i), config.xcd,
                                         config.arch, memory_, config.exec_mode);
-      xcds_.push_back(xcd_ptr.get());
+      add_xcd(xcd_ptr.get());
       add_child(std::move(xcd_ptr));
     }
   }

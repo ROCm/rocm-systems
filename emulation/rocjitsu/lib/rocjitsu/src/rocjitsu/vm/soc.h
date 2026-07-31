@@ -57,7 +57,14 @@ public:
 
   uint32_t gpu_id() const { return gpu_id_; }
 
-  void add_xcd(amdgpu::Xcd *xcd) { xcds_.push_back(xcd); }
+  void add_xcd(amdgpu::Xcd *xcd) {
+    xcds_.push_back(xcd);
+    if (auto *cp = xcd->command_processor())
+      bind_dispatch_id_allocator(cp);
+  }
+  void bind_dispatch_id_allocator(amdgpu::CommandProcessor *cp) {
+    cp->set_dispatch_id_allocator(&next_dispatch_id_);
+  }
   void add_iod(amdgpu::Iod *iod) { iods_.push_back(iod); }
 
   /// @brief Set flat-address-space aperture boundaries on all CUs via the SPI hierarchy.
@@ -168,6 +175,7 @@ private:
   static inline std::atomic<uint32_t> next_gpu_id_{0};
   uint32_t gpu_id_ = next_gpu_id_++;
   std::atomic<uint32_t> next_xcd_assignment_{0};
+  std::atomic<uint64_t> next_dispatch_id_{1};
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
   std::vector<amdgpu::Xcd *> xcds_;

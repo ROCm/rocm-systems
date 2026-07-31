@@ -658,6 +658,8 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
         // from the topology and must wire it here.
         if (xcd_cp && xcd_l2)
           xcd_cp->add_l2_cache(xcd_l2);
+        if (soc && xcd_cp)
+          soc->bind_dispatch_id_allocator(xcd_cp);
       } else if (auto *iod = dynamic_cast<amdgpu::Iod *>(c)) {
         if (soc)
           soc->add_iod(iod);

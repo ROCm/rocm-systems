@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -103,9 +104,12 @@ public:
   /// @param pc Kernel entry point (byte address).
   /// @param num_sgprs Number of scalar registers to allocate.
   /// @param num_vgprs Number of vector registers to allocate.
+  /// @param dispatch_id Owning dispatch, or zero for a direct standalone wave.
+  /// Nonzero dispatches prepare scalar-cache state once per dispatch on this CU.
   /// @returns Pointer to the activated wavefront, or nullptr if no free slot
   ///          or insufficient register space.
-  Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, uint32_t num_vgprs);
+  Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, uint32_t num_vgprs,
+                         uint32_t dispatch_id = 0);
 
   /// @brief Advance every RUNNING wavefront by one instruction, then report
   /// residency.
@@ -372,10 +376,9 @@ public:
   ///   shared partition engine thread (CP and its CUs share one partition, asserted in
   ///   CommandProcessor::startup()); callers on any other thread would race a halt().
   bool has_active_wfs() const {
-    for (const auto &w : wfs_)
-      if (!w->is_halted())
-        return true;
-    return false;
+    if (free_wf_slot_count_ > wfs_.size())
+      throw std::logic_error("free wavefront slot count exceeds capacity");
+    return free_wf_slot_count_ != wfs_.size();
   }
 
   bool has_active_wfs_for_process(uint32_t process_id) const {
@@ -388,6 +391,12 @@ public:
   /// @brief Return the current round-robin scheduling index.
   /// @returns Index of the next wavefront slot to schedule.
   uint64_t cycle_count() const { return cycle_counter_; }
+
+  /// @brief Return the number of instruction objects decoded by this CU.
+  uint64_t decoded_instruction_count() const { return decoded_instruction_count_; }
+
+  /// @brief Return the number of four-word instruction fetches performed by this CU.
+  uint64_t fetched_instruction_count() const { return fetched_instruction_count_; }
 
   /// @brief Read a scalar register from the physical SGPR file.
   /// @details This is the VM-level scalar register accessor. It notifies the
@@ -458,7 +467,10 @@ public:
   /// @brief Return a pointer to a wavefront's SGPR data in the physical file.
   /// @param base Base register index in the SGPR file.
   /// @returns Pointer to the contiguous SGPR data.
-  const uint32_t *sgpr_data(uint32_t base) const { return &sgpr_file_[base]; }
+  const uint32_t *sgpr_data(uint32_t base, uint32_t count) const {
+    sgpr_file_.materialize_range(base, count);
+    return &sgpr_file_[base];
+  }
 
   /// @brief Return a raw pointer to a wavefront's VGPR data in the physical file.
   /// @details This bypasses plugin read hooks and should not be used directly
@@ -466,8 +478,9 @@ public:
   /// code, serialization/checkpointing, diagnostics, and tightly controlled
   /// internals that have a separate observation contract.
   /// @param base Base register index in the VGPR file.
+  /// @param count Number of consecutive registers made valid through the pointer.
   /// @returns Const pointer to the raw VGPR data.
-  virtual const uint8_t *raw_vgpr_data(uint32_t base) const = 0;
+  virtual const uint8_t *raw_vgpr_data(uint32_t base, uint32_t count = 1) const = 0;
 
   /// @brief Return a mutable raw pointer to a wavefront's VGPR data.
   /// @details This bypasses the instruction-facing RegisterAccess boundary.
@@ -476,8 +489,9 @@ public:
   /// tightly controlled internals. Instruction emulators should use Operand or
   /// RegisterAccess write APIs instead.
   /// @param base Base register index in the VGPR file.
+  /// @param count Number of consecutive registers made valid through the pointer.
   /// @returns Mutable pointer to the raw VGPR data.
-  virtual uint8_t *raw_vgpr_data(uint32_t base) = 0;
+  virtual uint8_t *raw_vgpr_data(uint32_t base, uint32_t count = 1) = 0;
 
   /// @brief Number of physical VGPR registers in one allocation block.
   virtual uint32_t vgpr_allocation_block_size() const = 0;
@@ -545,8 +559,10 @@ protected:
   /// @brief Update wavefront states (WAITCNT, BARRIER, ENDING transitions).
   void update_wf_states();
 
-  /// @brief Fetch, decode, execute one instruction from the given wavefront.
-  void issue_instruction(Wavefront *wf);
+  using FetchedInstruction = std::array<rj_code_binary_inst_t, 4>;
+
+  /// @brief Decode and execute one previously fetched instruction.
+  void issue_instruction(Wavefront *wf, const FetchedInstruction &words);
 
   /// @brief Tick all memory pipelines (called at the start of step in clocked mode).
   void tick_pipelines();
@@ -569,6 +585,8 @@ protected:
   std::unique_ptr<Decoder> decoder_;
   simdojo::RegisterFile<uint32_t> sgpr_file_{"sgpr"};
   std::vector<std::unique_ptr<Wavefront>> wfs_; ///< Pre-allocated wavefront slots.
+  std::vector<uint64_t> free_wf_slot_bits_;     ///< One bit per free wavefront slot.
+  size_t free_wf_slot_count_ = 0;
   std::unique_ptr<WavefrontScheduler> scheduler_ = std::make_unique<OldestFirstScheduler>();
   uint64_t cycle_counter_ = 0;
 
@@ -593,6 +611,9 @@ protected:
   uint64_t private_aperture_base_ = 0;
   uint64_t private_aperture_limit_ = 0;
 
+  uint32_t scalar_cache_dispatch_id_ = 0;
+  bool scalar_cache_dispatch_prepared_ = false;
+
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
 
   /// Reverse lookup: physical SGPR index -> owning wavefront (for race detection).
@@ -603,6 +624,8 @@ protected:
   simdojo::Port *cpl_ = nullptr; ///< Completer port: dispatch activation from CP.
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
   uint64_t step_count_ = 0;
+  uint64_t fetched_instruction_count_ = 0;
+  uint64_t decoded_instruction_count_ = 0;
   bool functional_yield_requested_ = false;
 };
 
@@ -769,12 +792,14 @@ public:
   }
 
   /// @returns Const pointer to the raw VGPR data.
-  const uint8_t *raw_vgpr_data(uint32_t base) const override {
+  const uint8_t *raw_vgpr_data(uint32_t base, uint32_t count = 1) const override {
+    vgpr_file_.materialize_range(base, count);
     return reinterpret_cast<const uint8_t *>(&vgpr_file_[base]);
   }
 
   /// @returns Mutable pointer to the raw VGPR data.
-  uint8_t *raw_vgpr_data(uint32_t base) override {
+  uint8_t *raw_vgpr_data(uint32_t base, uint32_t count = 1) override {
+    vgpr_file_.materialize_range(base, count);
     return reinterpret_cast<uint8_t *>(&vgpr_file_[base]);
   }
 

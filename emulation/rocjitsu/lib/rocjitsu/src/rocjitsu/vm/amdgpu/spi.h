@@ -107,12 +107,12 @@ public:
       std::vector<Wavefront *> wg_wfs;
       wg_wfs.reserve(wg.entry->wfs_per_workgroup);
       for (uint32_t w = 0; w < wg.entry->wfs_per_workgroup; ++w) {
-        Wavefront *wf = cu->dispatch_wf(wg.global_wg_id, wg.entry->kernel_entry_pc,
-                                        wg.entry->sgprs_per_wf, wg.entry->vgprs_per_wf);
+        Wavefront *wf =
+            cu->dispatch_wf(wg.global_wg_id, wg.entry->kernel_entry_pc, wg.entry->sgprs_per_wf,
+                            wg.entry->vgprs_per_wf, wg.entry->dispatch_id);
         assert(wf && "dispatch_wf failed after select_cu returned a CU");
         wf->set_lds_base(lds_base);
         wf->set_lds(placement->lds);
-        wf->set_dispatch_id(wg.entry->dispatch_id);
         wf->set_process_id(wg.entry->process_id);
         wf->set_exec(initial_exec_mask_for_wave(*wg.entry, wg.global_wg_id, w, cu->wf_size()));
         init_wf(cu, wf, *wg.entry, wg.global_wg_id, w);

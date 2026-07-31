@@ -61,7 +61,13 @@ public:
   void writeback_all(uint32_t vmid = 0);
 
   /// @brief Invalidate all K$ lines without writeback (s_dcache_inv).
-  void invalidate_all() { cache_.invalidate_all(); }
+  void invalidate_all() {
+    cache_.invalidate_all();
+    ++invalidation_count_;
+  }
+
+  /// @brief Return the number of whole-cache invalidations performed.
+  uint64_t invalidation_count() const { return invalidation_count_; }
 
 private:
   void ensure_line(uint64_t addr, uint32_t vmid = 0);
@@ -70,6 +76,7 @@ private:
   CacheStore cache_;
   L2Cache *l2_;
   GpuMemory *memory_ = nullptr;
+  uint64_t invalidation_count_ = 0;
 };
 
 } // namespace amdgpu

@@ -115,12 +115,13 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           if (w->is_halted())
             continue;
 
-          auto sgprs_vec =
-              builder.CreateVector(cu->sgpr_data(w->sgpr_alloc().base), w->num_sgprs());
+          auto sgprs_vec = builder.CreateVector(cu->sgpr_data(w->sgpr_alloc().base, w->num_sgprs()),
+                                                w->num_sgprs());
           size_t vgpr_bytes = static_cast<size_t>(cu->vgpr_allocation_block_size()) *
                               static_cast<size_t>(w->wf_size()) * sizeof(uint32_t);
-          auto vgprs_vec =
-              builder.CreateVector(cu->raw_vgpr_data(w->vgpr_alloc().base), vgpr_bytes);
+          auto vgprs_vec = builder.CreateVector(
+              cu->raw_vgpr_data(w->vgpr_alloc().base, cu->vgpr_allocation_block_size()),
+              vgpr_bytes);
 
           auto wfs = fb::CreateWavefrontState(builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(),
                                               w->vcc(), w->m0(), w->is_halted(), w->status_raw(),
@@ -240,9 +241,14 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           wf->set_exec_raw(wf_state->exec());
           wf->set_vcc(wf_state->vcc());
           wf->set_m0(wf_state->m0());
-          // Halted wavefronts are never saved (see save_checkpoint skip above),
-          // so halted() is always false here. Keep the branch for future-proofing.
-          wf->set_state(wf_state->halted() ? amdgpu::WfState::HALTED : amdgpu::WfState::RUNNING);
+          // Halted wavefronts are never saved (see save_checkpoint skip above).
+          // If a future producer includes one, release the resources through the
+          // normal invariant-preserving path instead of leaving an occupied slot.
+          if (wf_state->halted()) {
+            cu->free_wavefront_resources(*wf);
+            continue;
+          }
+          wf->set_state(amdgpu::WfState::RUNNING);
           wf->set_status_raw(wf_state->status());
 
           if (auto *sgprs = wf_state->sgprs()) {
@@ -256,7 +262,8 @@ LoadedConfig restore_checkpoint(const std::string &path) {
             size_t vgpr_bytes = static_cast<size_t>(cu->vgpr_allocation_block_size()) *
                                 static_cast<size_t>(wf->wf_size()) * sizeof(uint32_t);
             size_t copy_size = std::min<size_t>(vgprs->size(), vgpr_bytes);
-            std::memcpy(cu->raw_vgpr_data(wf->vgpr_alloc().base), vgprs->data(), copy_size);
+            std::memcpy(cu->raw_vgpr_data(wf->vgpr_alloc().base, cu->vgpr_allocation_block_size()),
+                        vgprs->data(), copy_size);
           }
         }
       }

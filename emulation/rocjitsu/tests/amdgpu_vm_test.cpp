@@ -810,8 +810,85 @@ TEST_P(IsaTest, RegisterFileIsolation) {
   EXPECT_EQ(cu->read_vgpr(w1->vgpr_alloc().base + 0, 0), 200u);
 }
 
+TEST_P(IsaTest, ReusedWavefrontSlotStartsWithClearedRegisters) {
+  VmFixture f(arch(), 1, 1);
+  auto *cu = f.cu();
+  constexpr uint32_t kLogicalSgprs = 8;
+  constexpr uint32_t kLogicalVgprs = 8;
+  auto *first = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1040, kLogicalSgprs, kLogicalVgprs);
+  ASSERT_NE(first, nullptr);
+  const uint32_t slot = first->wf_id();
+  const uint32_t sgpr = first->sgpr_alloc().base + cu->sgpr_file().regs_per_block() - 1;
+  const uint32_t vgpr = first->vgpr_alloc().base + cu->vgpr_allocation_block_size() - 1;
+  cu->write_sgpr(sgpr, 0x11223344);
+  cu->write_vgpr(vgpr, 0, 0xaabbccdd);
+  cu->free_wavefront_resources(*first);
+  EXPECT_EQ(cu->num_wfs(), 0u);
+
+  auto *reused = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x1040, kLogicalSgprs, kLogicalVgprs);
+  ASSERT_NE(reused, nullptr);
+  EXPECT_EQ(reused->wf_id(), slot);
+  EXPECT_EQ(cu->read_sgpr(sgpr), 0u);
+  EXPECT_EQ(cu->read_vgpr(vgpr, 0), 0u);
+}
+
+TEST_P(IsaTest, LockstepWavesShareStepLocalInstructionFetch) {
+  VmFixture f(arch(), 1, 2);
+  auto *cu = f.cu();
+  f.mem()->write32(0x1040, SOPP_S_NOP);
+  f.mem()->write32(0x1044, SOPP_S_ENDPGM);
+
+  ASSERT_NE(cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1040, /*num_sgprs=*/104, /*num_vgprs=*/256),
+            nullptr);
+  ASSERT_NE(cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x1040, /*num_sgprs=*/104, /*num_vgprs=*/256),
+            nullptr);
+
+  EXPECT_TRUE(cu->step());
+  EXPECT_EQ(cu->fetched_instruction_count(), 1u);
+  EXPECT_EQ(cu->decoded_instruction_count(), 2u);
+  EXPECT_EQ(cu->wf(0)->pc, 0x1044u);
+  EXPECT_EQ(cu->wf(1)->pc, 0x1044u);
+}
+
+TEST_P(IsaTest, StepFetchSeparatesIdenticalAddressesAcrossVmids) {
+  constexpr uint32_t kVmidA = 7;
+  constexpr uint32_t kVmidB = 8;
+  constexpr uint64_t kCodePage = 0x1000;
+  constexpr uint64_t kPc = 0x1040;
+  std::array<uint8_t, amdgpu::GpuMemory::PAGE_SIZE> backing_a{};
+  std::array<uint8_t, amdgpu::GpuMemory::PAGE_SIZE> backing_b{};
+  std::memcpy(backing_a.data() + (kPc - kCodePage), &SOPP_S_NOP, sizeof(SOPP_S_NOP));
+  std::memcpy(backing_b.data() + (kPc - kCodePage), &SOPP_S_ENDPGM, sizeof(SOPP_S_ENDPGM));
+
+  VmFixture f(arch(), 1, 2);
+  KfdProcess process_a(kVmidA);
+  KfdProcess process_b(kVmidB);
+  process_a.map_pages(kCodePage, backing_a.data(), backing_a.size());
+  process_b.map_pages(kCodePage, backing_b.data(), backing_b.size());
+  f.mem()->register_process(kVmidA, &process_a.page_table_, &process_a.page_table_mutex_);
+  f.mem()->register_process(kVmidB, &process_b.page_table_, &process_b.page_table_mutex_);
+
+  auto *cu = f.cu();
+  auto *wave_a = cu->dispatch_wf(/*wg_id=*/0, kPc, /*num_sgprs=*/104, /*num_vgprs=*/256);
+  auto *wave_b = cu->dispatch_wf(/*wg_id=*/1, kPc, /*num_sgprs=*/104, /*num_vgprs=*/256);
+  ASSERT_NE(wave_a, nullptr);
+  ASSERT_NE(wave_b, nullptr);
+  wave_a->set_process_id(kVmidA);
+  wave_b->set_process_id(kVmidB);
+
+  EXPECT_TRUE(cu->step());
+  EXPECT_EQ(cu->fetched_instruction_count(), 2u);
+  EXPECT_EQ(cu->decoded_instruction_count(), 2u);
+  EXPECT_EQ(wave_a->pc, kPc + sizeof(uint32_t));
+  EXPECT_TRUE(wave_b->is_halted());
+
+  f.mem()->unregister_process(kVmidA);
+  f.mem()->unregister_process(kVmidB);
+}
+
 TEST_P(IsaTest, DispatchAndCapacity) {
   VmFixture f(arch(), 1, 2);
+  const uint64_t initial_invalidations = f.cu()->l1_scalar().invalidation_count();
 
   // 2 workgroups of 64 (= 2 wavefronts), CU has 2 slots — fills exactly.
   const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
@@ -822,6 +899,10 @@ TEST_P(IsaTest, DispatchAndCapacity) {
 
   // Both workgroups ran to completion; their waves freed themselves at s_endpgm.
   EXPECT_EQ(f.cp()->dispatched_count(), 1u);
+  EXPECT_EQ(f.cu()->num_wfs(), 0u);
+  // One invalidation prepares this dispatch; one comes from the queue's final
+  // cache-maintenance flush. Per-wave invalidation would add a third.
+  EXPECT_EQ(f.cu()->l1_scalar().invalidation_count(), initial_invalidations + 2);
 }
 
 TEST_P(IsaTest, DispatchWfReturnsNullWhenSlotsExhausted) {
@@ -836,6 +917,31 @@ TEST_P(IsaTest, DispatchWfReturnsNullWhenSlotsExhausted) {
   EXPECT_EQ(cu->num_wfs(), kSlots);
   // All slots are occupied by resident (non-halted) waves — the next dispatch fails.
   EXPECT_EQ(cu->dispatch_wf(0, 0x1040, 104, 256), nullptr);
+}
+
+TEST(Gfx1250AllocationTest, BitsetsCrossWordBoundaryAndReuseLowestSlot) {
+  for (uint32_t slots : {65u, 128u}) {
+    VmFixture f("gfx1250", 1, slots);
+    auto *cu = f.cu();
+    std::vector<amdgpu::Wavefront *> waves;
+    waves.reserve(slots);
+    for (uint32_t i = 0; i < slots; ++i) {
+      auto *wave = cu->dispatch_wf(/*wg_id=*/i, /*pc=*/0x1040, /*num_sgprs=*/8,
+                                   /*num_vgprs=*/8);
+      ASSERT_NE(wave, nullptr) << "slots=" << slots << " index=" << i;
+      EXPECT_EQ(wave->wf_id(), i);
+      waves.push_back(wave);
+    }
+    EXPECT_EQ(cu->num_wfs(), slots);
+    EXPECT_EQ(cu->dispatch_wf(0, 0x1040, 8, 8), nullptr);
+
+    cu->free_wavefront_resources(*waves[64]);
+    auto *reused = cu->dispatch_wf(/*wg_id=*/slots, /*pc=*/0x1040, /*num_sgprs=*/8,
+                                   /*num_vgprs=*/8);
+    ASSERT_NE(reused, nullptr);
+    EXPECT_EQ(reused->wf_id(), 64u);
+    EXPECT_EQ(cu->num_wfs(), slots);
+  }
 }
 
 TEST_P(IsaTest, VendorSpecificExtKernelDispatch) {

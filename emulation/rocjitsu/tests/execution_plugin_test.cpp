@@ -28,6 +28,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "rocjitsu/vm/plugins/logging/plugin.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
@@ -492,13 +493,13 @@ struct PluginFixture {
   SoC *soc = nullptr;
   amdgpu::GpuMemory *mem = nullptr;
 
-  explicit PluginFixture(uint32_t num_wf_slots = 10) {
+  explicit PluginFixture(uint32_t num_wf_slots = 10, uint32_t num_xcds = 1) {
     std::string json = std::format(R"({{
       "max_ticks":10000,"num_threads":1,"exec_mode":"functional",
       "vm":{{"arch":"cdna4","gpu":{{"device":{{"wave_front_size":64}}}}}},
       "topology":{{"root":{{"name":"soc","type":"soc","children":[
         {{"name":"vram","type":"gpu_memory"}},
-        {{"name":"xcd0","type":"xcd","children":[
+        {{"name":"xcd[0:{}]","type":"xcd","children":[
           {{"name":"l2","type":"l2_cache"}},
           {{"name":"cp","type":"command_processor"}},
           {{"name":"se0","type":"shader_engine","children":[
@@ -511,11 +512,15 @@ struct PluginFixture {
           ]}}
         ]}}
       ]}},"links":[
-        {{"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2}},
-        {{"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}}
+        {{"pattern":"xcd[i].cp.req_0 -> xcd[i].se0.cu0.cpl",
+          "for_ranges":[{{"var_name":"i","start":0,"end":{}}}],
+          "latency":1,"weight":2}},
+        {{"pattern":"xcd[i].se0.cu0.req -> xcd[i].l2.cpl_0",
+          "for_ranges":[{{"var_name":"i","start":0,"end":{}}}],
+          "latency":1,"weight":10}}
       ]}}}}
     )",
-                                   num_wf_slots);
+                                   num_xcds, num_wf_slots, num_xcds, num_xcds);
     auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
     soc = loaded.soc();
     mem = loaded.memory();
@@ -525,8 +530,10 @@ struct PluginFixture {
     engine->create();
   }
 
-  amdgpu::ComputeUnitCore *cu() { return soc->xcd(0)->shader_engine(0)->compute_unit(0); }
-  amdgpu::CommandProcessor *cp() { return soc->xcd(0)->command_processor(); }
+  amdgpu::ComputeUnitCore *cu(uint32_t xcd = 0) {
+    return soc->xcd(xcd)->shader_engine(0)->compute_unit(0);
+  }
+  amdgpu::CommandProcessor *cp(uint32_t xcd = 0) { return soc->xcd(xcd)->command_processor(); }
 
   uint64_t write_kernel(uint64_t addr, const uint32_t *code, size_t num_words) {
     using namespace rocr::llvm::amdhsa;
@@ -1276,6 +1283,29 @@ TEST(DisasmCacheTest, HandlesNonMonotonicPcOrder) {
   EXPECT_EQ(disasm.at(0x100002a100), "s_endpgm");
 }
 
+TEST(HookOrderingTest, DispatchIdsAreUniqueAcrossCommandProcessors) {
+  PluginFixture fixture(/*num_wf_slots=*/1, /*num_xcds=*/2);
+  auto *plugin = fixture.attach_ordering_plugin();
+  const uint32_t code[] = {S_ENDPGM};
+  const uint64_t kernel = fixture.write_kernel(0x1000, code, std::size(code));
+
+  test::AqlQueue first_queue(fixture.mem, fixture.cp(0));
+  test::AqlQueue second_queue(fixture.mem, fixture.cp(1), /*ring_addr=*/0xF0100000,
+                              test::AqlQueue::DEFAULT_RING_SIZE,
+                              /*read_ptr_addr=*/0xF0110000,
+                              /*write_ptr_addr=*/0xF0110008,
+                              /*doorbell_addr=*/0xF0110010);
+  first_queue.dispatch(kernel, 64, 64);
+  second_queue.dispatch(kernel, 64, 64);
+  fixture.run_until_idle();
+
+  ASSERT_EQ(fixture.cp(0)->dispatched_count(), 1u);
+  ASSERT_EQ(fixture.cp(1)->dispatched_count(), 1u);
+  const auto ids = EventLog(plugin->events).dispatchIds();
+  ASSERT_EQ(ids.size(), 2u);
+  EXPECT_NE(ids[0], ids[1]);
+}
+
 TEST(RaceDetectorPluginOutputTest, DispatchLineUsesQuestionMarksForUnresolvedKernel) {
   StringSink sink;
   ExecutionPluginGroup plugin_group;
@@ -1304,6 +1334,54 @@ TEST(RaceDetectorPluginOutputTest, DispatchLineUsesReadableNameAndExactSymbol) {
   EXPECT_NE(sink.str().find("[rocjitsu] Kernel dispatch: \"racy_kernel\" "
                             "symbol=\"_Z11racy_kernelPKfPf\"\n"),
             std::string::npos);
+}
+
+TEST(KernelLoggingPluginOutputTest, ReportsLargeDispatchLifecycleAndCleansUpState) {
+  StringSink sink;
+  ExecutionPluginGroup plugin_group;
+  plugin_group.add_sink(&sink);
+  ASSERT_TRUE(plugin_group.add(std::make_unique<KernelLoggingPlugin>()));
+
+  KernelDispatchInfo info{};
+  info.dispatch_id = 17;
+  info.workgroup_count = 8195;
+  plugin_group.onAmdgpuDispatchPacketProcessed(info);
+  plugin_group.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+  for (uint32_t wg = 0; wg < info.workgroup_count; ++wg)
+    plugin_group.onAmdgpuWorkgroupCompleted(info.dispatch_id, wg);
+  plugin_group.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+
+  EXPECT_NE(sink.str().find("Kernel #1 execution begin"), std::string::npos);
+  EXPECT_NE(sink.str().find("Kernel #1 progress 1/8195"), std::string::npos);
+  EXPECT_NE(sink.str().find("Kernel #1 progress 1024/8195"), std::string::npos);
+  EXPECT_NE(sink.str().find("Kernel #1 progress 8195/8195 (100.0%)"), std::string::npos);
+  EXPECT_NE(sink.str().find("Kernel #1 execution end"), std::string::npos);
+
+  sink.clear();
+  plugin_group.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+  plugin_group.onAmdgpuWorkgroupCompleted(info.dispatch_id, 0);
+  plugin_group.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+  EXPECT_TRUE(sink.str().empty());
+}
+
+TEST(KernelLoggingPluginOutputTest, SuppressesProgressBelowLargeDispatchThreshold) {
+  StringSink sink;
+  ExecutionPluginGroup plugin_group;
+  plugin_group.add_sink(&sink);
+  ASSERT_TRUE(plugin_group.add(std::make_unique<KernelLoggingPlugin>()));
+
+  KernelDispatchInfo info{};
+  info.dispatch_id = 18;
+  info.workgroup_count = 8191;
+  plugin_group.onAmdgpuDispatchPacketProcessed(info);
+  plugin_group.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+  for (uint32_t wg = 0; wg < info.workgroup_count; ++wg)
+    plugin_group.onAmdgpuWorkgroupCompleted(info.dispatch_id, wg);
+  plugin_group.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+
+  EXPECT_EQ(sink.str().find(" progress "), std::string::npos);
+  EXPECT_NE(sink.str().find("Kernel #1 execution begin"), std::string::npos);
+  EXPECT_NE(sink.str().find("Kernel #1 execution end"), std::string::npos);
 }
 
 } // namespace
