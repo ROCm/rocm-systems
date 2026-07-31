@@ -12,6 +12,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
@@ -25,6 +26,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -113,6 +115,62 @@ struct Fixture {
   uint32_t sgpr_base() const { return wf->sgpr_alloc().base; }
   uint32_t vgpr_base() const { return wf->vgpr_alloc().base; }
 };
+
+TEST(RegisterAccessTest, ScopedOperandDelegateRestoresAfterException) {
+  Operand source(32, 1);
+  Operand previous(32, 2);
+  Operand staged(32, 3);
+  source.set_delegate(&previous);
+
+  EXPECT_THROW(
+      {
+        ScopedOperandDelegate binding(source, &staged);
+        EXPECT_EQ(source.delegate(), &staged);
+        throw std::runtime_error("test");
+      },
+      std::runtime_error);
+  EXPECT_EQ(source.delegate(), &previous);
+
+  {
+    ScopedOperandDelegate no_binding(source, nullptr);
+    EXPECT_EQ(source.delegate(), &previous);
+  }
+  EXPECT_EQ(source.delegate(), &previous);
+}
+
+TEST(RegisterAccessTest, SdwaStageSourceObservesAndSelectsActiveBytes) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->set_exec(0b0101);
+
+  constexpr uint32_t logical_vgpr = 6;
+  const uint32_t physical_vgpr = fx.vgpr_base() + logical_vgpr;
+  fx.cu->write_vgpr(physical_vgpr, 0, 0x11223380u);
+  fx.cu->write_vgpr(physical_vgpr, 1, 0x44556681u);
+  fx.cu->write_vgpr(physical_vgpr, 2, 0x7788997Fu);
+  fx.cu->write_vgpr(physical_vgpr, 3, 0xAABBCC82u);
+
+  cdna4::Operand source(32, cdna4::OperandType::OPR_SRC_VGPR, 256 + logical_vgpr);
+  std::unique_ptr<StagedOperand> storage;
+  sdwa::stage_source(source, sdwa::BYTE_0, /*sign_extend=*/true, /*negate=*/false,
+                     /*absolute=*/false, storage, *fx.wf);
+
+  ASSERT_NE(storage, nullptr);
+  ASSERT_EQ(fx.plugin->reads.size(), 1u);
+  EXPECT_EQ(fx.plugin->reads[0].physical_reg, physical_vgpr);
+  EXPECT_EQ(fx.plugin->reads[0].lane_mask, 0b0101u);
+  EXPECT_EQ(fx.plugin->reads[0].byte_mask, 0b0001u);
+
+  auto staged = RegisterAccess(*fx.wf).read_operand(*storage, 0b1111);
+  EXPECT_EQ(staged.lane(0), 0xFFFFFF80u);
+  EXPECT_EQ(staged.lane(1), 0u);
+  EXPECT_EQ(staged.lane(2), 0x0000007Fu);
+  EXPECT_EQ(staged.lane(3), 0u);
+
+  sdwa::stage_source(source, sdwa::DWORD, /*sign_extend=*/false, /*negate=*/false,
+                     /*absolute=*/false, storage, *fx.wf);
+  EXPECT_EQ(storage, nullptr);
+}
 
 TEST(RegisterAccessTest, ReadRegionObservesAllRegistersAndReturnsLaneSpans) {
   Fixture fx;

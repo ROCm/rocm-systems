@@ -536,6 +536,49 @@ private:
                                     uint8_t byte_mask) const override;
 };
 
+/// @brief Temporarily redirect operand reads through another operand.
+///
+/// Restores the previous delegate on scope exit, including exception and early
+/// return paths. A null delegate leaves the operand unchanged.
+class ScopedOperandDelegate {
+public:
+  ScopedOperandDelegate(Operand &operand, Operand *delegate) noexcept {
+    if (!delegate)
+      return;
+    operand_ = &operand;
+    previous_ = operand.delegate();
+    operand.set_delegate(delegate);
+  }
+
+  ~ScopedOperandDelegate() noexcept { restore(); }
+
+  ScopedOperandDelegate(const ScopedOperandDelegate &) = delete;
+  ScopedOperandDelegate &operator=(const ScopedOperandDelegate &) = delete;
+
+  ScopedOperandDelegate(ScopedOperandDelegate &&other) noexcept
+      : operand_(std::exchange(other.operand_, nullptr)), previous_(other.previous_) {}
+
+  ScopedOperandDelegate &operator=(ScopedOperandDelegate &&other) noexcept {
+    if (this == &other)
+      return *this;
+    restore();
+    operand_ = std::exchange(other.operand_, nullptr);
+    previous_ = other.previous_;
+    return *this;
+  }
+
+private:
+  void restore() noexcept {
+    if (!operand_)
+      return;
+    operand_->set_delegate(previous_);
+    operand_ = nullptr;
+  }
+
+  Operand *operand_ = nullptr;
+  Operand *previous_ = nullptr;
+};
+
 /// @brief Operand backed by instruction-scoped staged lane values.
 ///
 /// Holds source values prepared before semantic execution, including lane
@@ -580,7 +623,7 @@ private:
   int lane_count_ = 0;
 };
 
-// Compatibility name used by generated encoding members.
+// Compatibility name for generated output predating StagedOperand.
 using DppOperand = StagedOperand;
 
 } // namespace rocjitsu

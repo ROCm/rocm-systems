@@ -393,6 +393,40 @@ inline uint32_t sdwa_src_select(uint32_t val, uint32_t sel, bool sign_ext) {
   return word_val;
 }
 
+/// @brief Stage one SDWA source for semantic execution.
+///
+/// Reads exactly the selected source bytes from active lanes, applies SDWA
+/// selection/sign extension and source abs/neg modifiers, and installs fresh
+/// instruction-owned storage for later delegate binding. DWORD sources need no
+/// staging and clear any stale storage left by an earlier execution.
+inline void stage_source(Operand &source, uint32_t selection, bool sign_extend, bool negate,
+                         bool absolute, std::unique_ptr<StagedOperand> &storage, Wavefront &wf) {
+  storage.reset();
+  if (selection == DWORD)
+    return;
+
+  const uint64_t exec = wf.exec();
+  const auto source_view =
+      RegisterAccess(wf).read_operand(source, exec, sdwa_src_byte_mask(selection));
+  uint32_t staged[StagedOperand::MAX_LANES] = {};
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if ((exec & (uint64_t{1} << lane)) == 0)
+      continue;
+
+    uint32_t value = sdwa_src_select(source_view.lane(lane), selection, sign_extend);
+    if (absolute || negate) {
+      float float_value = std::bit_cast<float>(value);
+      if (absolute)
+        float_value = std::fabs(float_value);
+      if (negate)
+        float_value = -float_value;
+      value = std::bit_cast<uint32_t>(float_value);
+    }
+    staged[lane] = value;
+  }
+  storage = std::make_unique<StagedOperand>(source, staged, static_cast<int>(wf.wf_size()));
+}
+
 /// @brief Merge an ALU result into a destination register per SDWA dst_sel.
 ///
 /// @param result The 32-bit ALU result to merge.
