@@ -13,6 +13,7 @@
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "simdojo/sim/simulation.h"
+#include "util/unique_handle.h"
 
 #include <gtest/gtest.h>
 
@@ -1116,17 +1117,9 @@ TEST_F(DbgTrapDaemonTest, ForeignClientCannotDriveAnothersSession) {
 // Closes an fd however the enclosing scope exits. A daemon stand-in that
 // returns early without closing leaves the client blocked in rpc_recv_msg()
 // waiting for an EOF that never arrives, which hangs the run instead of
-// failing the test.
-struct CloseOnScopeExit {
-  explicit CloseOnScopeExit(int fd) : fd_(fd) {}
-  CloseOnScopeExit(const CloseOnScopeExit &) = delete;
-  CloseOnScopeExit &operator=(const CloseOnScopeExit &) = delete;
-  ~CloseOnScopeExit() {
-    if (fd_ >= 0)
-      ::close(fd_);
-  }
-  int fd_;
-};
+// failing the test. util::UniqueHandle already owns a POSIX fd exactly this
+// way, so there is nothing to hand-roll.
+using CloseOnScopeExit = util::UniqueHandle;
 
 // Inspect the request header and rewrite the arg struct the reply echoes back,
 // so one stand-in can model a daemon that reports different outputs than the

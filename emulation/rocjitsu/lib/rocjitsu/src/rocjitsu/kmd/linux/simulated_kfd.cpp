@@ -2247,43 +2247,43 @@ int SimulatedKfd::debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args 
     const Sysfs::GpuInfo &info = gpu_infos_[i];
     const kfd_process_device_apertures ap = gpu_apertures(i);
 
-    kfd_dbg_device_info_entry e{};
-    e.gpu_id = gpus_[i].gpu_id;
-    e.lds_base = ap.lds_base;
-    e.lds_limit = ap.lds_limit;
-    e.scratch_base = ap.scratch_base;
-    e.scratch_limit = ap.scratch_limit;
-    e.gpuvm_base = ap.gpuvm_base;
-    e.gpuvm_limit = ap.gpuvm_limit;
-    e.location_id = info.location_id;
-    e.vendor_id = info.vendor_id;
-    e.device_id = info.device_id;
-    e.revision_id = info.pci_revision_id;
-    e.subsystem_vendor_id = info.vendor_id;
-    e.subsystem_device_id = info.device_id;
-    e.fw_version = info.fw_version;
-    e.gfx_target_version = info.gfx_target_version;
-    e.simd_count = info.simd_count;
-    e.max_waves_per_simd = info.max_waves_per_simd;
+    kfd_dbg_device_info_entry entry{};
+    entry.gpu_id = gpus_[i].gpu_id;
+    entry.lds_base = ap.lds_base;
+    entry.lds_limit = ap.lds_limit;
+    entry.scratch_base = ap.scratch_base;
+    entry.scratch_limit = ap.scratch_limit;
+    entry.gpuvm_base = ap.gpuvm_base;
+    entry.gpuvm_limit = ap.gpuvm_limit;
+    entry.location_id = info.location_id;
+    entry.vendor_id = info.vendor_id;
+    entry.device_id = info.device_id;
+    entry.revision_id = info.pci_revision_id;
+    entry.subsystem_vendor_id = info.vendor_id;
+    entry.subsystem_device_id = info.device_id;
+    entry.fw_version = info.fw_version;
+    entry.gfx_target_version = info.gfx_target_version;
+    entry.simd_count = info.simd_count;
+    entry.max_waves_per_simd = info.max_waves_per_simd;
     // KFD array_count is the per-XCC shader-array count (node_props.array_count).
     // Unlike sysfs, kfd_debug.c passes it through unscaled and reports num_xcc
     // alongside, so rocdbgapi recovers the SoC's total shader-engine count as
     // array_count * num_xcc / simd_arrays_per_engine. Normalize the XCC count
     // the same way sysfs does so that quotient cannot come out zero.
-    e.array_count = info.array_count_per_xcc();
-    e.simd_arrays_per_engine = info.effective_arrays_per_engine();
-    e.num_xcc = info.effective_num_xcc();
+    entry.array_count = info.array_count_per_xcc();
+    entry.simd_arrays_per_engine = info.effective_arrays_per_engine();
+    entry.num_xcc = info.effective_num_xcc();
     const kmd::DebugTopology topology =
         kmd::effective_topology_for(info.gfx_target_version, info.capability, info.capability2,
                                     info.debug_prop, info.revision_id);
-    e.capability = topology.capability;
+    entry.capability = topology.capability;
     // debug_prop is __u32 in the snapshot entry but __u64 in the sysfs node
     // property, so a config that captured a debug_prop above 2^32 would have
     // the two paths report different values. The derived bits all fit; make the
     // narrowing the uapi struct imposes explicit rather than incidental.
-    e.debug_prop = static_cast<uint32_t>(topology.debug_prop);
+    entry.debug_prop = static_cast<uint32_t>(topology.debug_prop);
 
-    std::memcpy(out + static_cast<uint64_t>(i) * in_entry_size, &e, args.entry_size);
+    std::memcpy(out + static_cast<uint64_t>(i) * in_entry_size, &entry, args.entry_size);
   }
   return 0;
 }
