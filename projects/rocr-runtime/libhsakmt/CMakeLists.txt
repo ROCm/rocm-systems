@@ -38,6 +38,7 @@ else()
 
   project ( ${HSAKMT_TARGET} VERSION 1.9.0)
 
+
   # Optionally, build HSAKMT with ccache.
   set(ROCM_CCACHE_BUILD OFF CACHE BOOL "Set to ON for a ccache enabled build")
   if (ROCM_CCACHE_BUILD)
@@ -126,14 +127,16 @@ else()
     endif()
   endif()
 
+  if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+  endif()
+
   if (WIN32)
     if (EXISTS "${CMAKE_CURRENT_BINARY_DIR}../inc/shared")
       # Include UVD IP interface file. It's public as the file is in the PAL interface.
       target_include_directories(${HSAKMT_TARGET} PUBLIC ${CMAKE_CURRENT_BINARY_DIR}../inc/shared)
     endif()
-
-    set(CMAKE_CXX_STANDARD 20)
-    set(CMAKE_CXX_STANDARD_REQUIRED ON)
     ## Source files
     set ( HSAKMT_SRC "src/dxg/ais.cpp"
                      "src/dxg/debug.cpp"
@@ -171,8 +174,6 @@ else()
                      "src/libhsakmt.c"
                      "src/memory.c"
                      "src/openclose.c"
-                     "src/perfctr.c"
-                     "src/pmc_table.c"
                      "src/queues.c"
                      "src/time.c"
                      "src/topology.c"
@@ -184,6 +185,9 @@ else()
                      "src/ais.c"
                      "src/kfdcontext.c"
                      "src/extsem.c")
+    if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+      list(APPEND HSAKMT_SRC "src/perfctr.c" "src/pmc_table.c")
+    endif()
   endif()
 
   ## Declare the library target name
@@ -205,6 +209,10 @@ else()
       ${CMAKE_CURRENT_SOURCE_DIR}/../runtime
       ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime/core
       ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime)
+  endif()
+
+  if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+    target_include_directories( ${HSAKMT_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/linux )
   endif()
 
   ## Add headers.  The public headers need to point at their location in both build and install
@@ -410,6 +418,10 @@ else()
     ## In static builds, libdrm and libdrm_amdgpu need to be linked statically
     add_library (${HSAKMT_STATIC_DRM_TARGET}  STATIC "")
     target_sources (${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${HSAKMT_SRC})
+
+    if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+      target_include_directories( ${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/linux )
+    endif()
 
     target_include_directories( ${HSAKMT_STATIC_DRM_TARGET}
       PUBLIC
