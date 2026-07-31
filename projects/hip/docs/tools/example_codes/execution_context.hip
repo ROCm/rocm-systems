@@ -322,11 +322,23 @@ void demonstrate_reading_resources()
     // [read-cu-resource-end]
 
     // [read-wq-config-start]
-    hipDevResource wq_config = {};
-    HIP_CHECK(hipDeviceGetDevResource(current_device, &wq_config, hipDevResourceTypeWorkqueueConfig));
+    // Reading the work queue configuration from a device is not supported on
+    // every ROCm runtime. Capture the status instead of aborting, and only print
+    // the configuration when the query succeeds.
+    hipDevResource   wq_config = {};
+    const hipError_t wq_status
+        = hipDeviceGetDevResource(current_device, &wq_config, hipDevResourceTypeWorkqueueConfig);
 
-    std::cout << "WQ concurrency limit: " << wq_config.wqConfig.wqConcurrencyLimit << "\n";
-    std::cout << "WQ sharing scope: " << wq_config.wqConfig.sharingScope << "\n";
+    if(wq_status == hipSuccess)
+    {
+        std::cout << "WQ concurrency limit: " << wq_config.wqConfig.wqConcurrencyLimit << "\n";
+        std::cout << "WQ sharing scope: " << wq_config.wqConfig.sharingScope << "\n";
+    }
+    else
+    {
+        std::cout << "Work queue configuration query is not supported on this runtime ("
+                  << hipGetErrorString(wq_status) << ").\n";
+    }
     // [read-wq-config-end]
 }
 #endif

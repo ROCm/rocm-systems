@@ -222,13 +222,15 @@ Three resource types are defined:
 
 ``hipDevResourceTypeInvalid`` marks an unset resource.
 
-Query a device with :cpp:func:`hipDeviceGetDevResource` and it reports all three:
-a CU resource covering every CU available to the process, a work queue
-configuration covering the device's work queues, and the matching work queue
-resource. You can also ask an execution context or a stream what resources it
-holds, using :cpp:func:`hipExecutionCtxGetDevResource` and
-:cpp:func:`hipStreamGetDevResource`. An execution context can hold several
-resource types at once; a stream only ever carries a CU resource.
+Query a device with :cpp:func:`hipDeviceGetDevResource` to obtain its resources: a
+CU resource covering every CU available to the process, and, on runtimes that
+support it, a work queue configuration covering the device's work queues and the
+matching work queue resource. Reading the work queue configuration from a device
+is not supported on every ROCm runtime, so check the returned status. You can also
+ask an execution context or a stream what resources it holds, using
+:cpp:func:`hipExecutionCtxGetDevResource` and :cpp:func:`hipStreamGetDevResource`.
+An execution context can hold several resource types at once; a stream only ever
+carries a CU resource.
 
 Compute unit resource
 -------------------------------------------------------------------------------
@@ -354,7 +356,9 @@ Reading a device's CUs looks like this:
    :language: cpp
    :dedent:
 
-Reading the work queue configuration is similar:
+Reading the work queue configuration follows the same pattern, but not every
+ROCm runtime supports querying it from a device. Check the returned status rather
+than aborting, and only use the configuration when the query succeeds:
 
 .. literalinclude:: ../../tools/example_codes/execution_context.hip
    :start-after: // [read-wq-config-start]
@@ -362,8 +366,8 @@ Reading the work queue configuration is similar:
    :language: cpp
    :dedent:
 
-For a device, ``wqConcurrencyLimit`` reflects ``GPU_MAX_HW_QUEUES`` or its
-default.
+When the query succeeds, ``wqConcurrencyLimit`` reflects ``GPU_MAX_HW_QUEUES`` or
+its default for the device.
 
 Step 2: Split the CU resource
 -------------------------------------------------------------------------------
