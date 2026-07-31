@@ -2096,9 +2096,21 @@ kmd_driver_t::set_wave_launch_trap_override (
         return nt_status_to_dbgapi_status (status);
 
       /* TODO, what to do?.  */
-      if (previous_value != nullptr)
-        *previous_value = static_cast<os_wave_launch_trap_mask_t> (
-          cmd.Output.enableTrapsForExceptionsOut.trapSupportMask);
+      if (agent.kmd_version < kmd::version_t{ 2, 0 })
+        {
+          if (previous_value != nullptr)
+            *previous_value = static_cast<os_wave_launch_trap_mask_t> (
+              cmd.Output.enableTrapsForExceptionsOut.trapSupportMask);
+        }
+      else
+        {
+          if (previous_value != nullptr)
+            *previous_value = static_cast<os_wave_launch_trap_mask_t> (
+              cmd.Output.enableTrapsForExceptionsOut.prevTrapEnabledMask);
+          if (supported_mask != nullptr)
+            *supported_mask = static_cast<os_wave_launch_trap_mask_t> (
+              cmd.Output.enableTrapsForExceptionsOut.trapSupportMask);
+        }
     }
   return AMD_DBGAPI_STATUS_SUCCESS;
   TRACE_DRIVER_END (make_ref (param_out (previous_value)),
