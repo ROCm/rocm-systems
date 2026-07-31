@@ -6,6 +6,7 @@
 
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/dbt/semantic_scratch.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
@@ -37,6 +38,14 @@ namespace {
 [[nodiscard]] bool cvt_f32_fp8_e5m3_residual(const Instruction &inst);
 [[nodiscard]] bool cvt_pk_fp8_f32_e5m3_residual(const Instruction &inst);
 [[nodiscard]] bool cvt_sr_fp8_f32_e5m3_residual(const Instruction &inst);
+
+[[nodiscard]] constexpr RewriteDischarge checked_discharge(ResidualExpandFn check) {
+  return RewriteDischarge::checked(check);
+}
+
+[[nodiscard]] constexpr RewriteDischarge no_success_discharge(const char *rationale) {
+  return RewriteDischarge::no_success(rationale);
+}
 
 /// @brief gfx1250 special-scalar operand encodings.
 /// @details CRITICAL: on gfx1250 these are the INVERSE of CDNA — M0 = 125 and
@@ -2597,103 +2606,142 @@ static_assert(kSetregImm32B32EncodingId == kSetregB32EncodingId + 1,
 inline constexpr std::array<TranslationRule, 43> kGfx1250B0ToA0ExpandRules = {{
     {kSetregB32EncodingId, cdna5::kSSetregB32Sopk, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_setreg_mode_ordering, nullptr, nullptr, false,
-     setreg_mode_ordering_residual},
+     checked_discharge(setreg_mode_ordering_residual)},
     {kSetregImm32B32EncodingId, cdna5::kSSetregImm32B32Sopk, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_setreg_mode_ordering, nullptr, nullptr, false,
-     setreg_mode_ordering_residual},
+     checked_discharge(setreg_mode_ordering_residual)},
     {cdna5::encoding::kSop1, cdna5::kSBarrierSignalIsfirstSop1, RuleAction::Expand, 0, 0, nullptr,
-     expand_gfx1250_barrier_signal_isfirst, nullptr, nullptr, false},
+     expand_gfx1250_barrier_signal_isfirst, nullptr, nullptr, false,
+     no_success_discharge("the rule only rejects one unsupported source encoding and never emits")},
     {cdna5::encoding::kSopp, cdna5::kSClauseSopp, RuleAction::Expand, 0, 0, nullptr,
-     expand_gfx1250_s_clause, nullptr, nullptr, false, always_residual},
+     expand_gfx1250_s_clause, nullptr, nullptr, false, checked_discharge(always_residual)},
     {cdna5::encoding::kVop3p, cdna5::kVWmmaF3216x16x128F8f6f4Vop3p, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_bare_f8f6f4_wmma, nullptr, nullptr, false, always_residual},
+     nullptr, expand_gfx1250_bare_f8f6f4_wmma, nullptr, nullptr, false,
+     checked_discharge(always_residual)},
     {cdna5::encoding::kVop3p, kWmmaScaleSrc2PrefixOp, RuleAction::Expand, 0, 0, nullptr,
-     expand_gfx1250_wmma_scale_src2, nullptr, nullptr, true, regular_scale_residual},
+     expand_gfx1250_wmma_scale_src2, nullptr, nullptr, true,
+     checked_discharge(regular_scale_residual)},
     {cdna5::encoding::kVop3p, kWmmaScale16PrefixOp, RuleAction::Expand, 0, 0, nullptr,
-     expand_gfx1250_wmma_scale16, nullptr, nullptr, true, scale16_residual},
+     expand_gfx1250_wmma_scale16, nullptr, nullptr, true, checked_discharge(scale16_residual)},
     {cdna5::encoding::kVop3p, cdna5::kVWmmaI3216x16x64Iu8Vop3p, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_wmma_iu8_spacing, nullptr, nullptr, false, iu8_spacing_residual},
+     nullptr, expand_gfx1250_wmma_iu8_spacing, nullptr, nullptr, false,
+     checked_discharge(iu8_spacing_residual)},
     {cdna5::encoding::kVop3p, cdna5::kVSwmmacI3216x16x128Iu8Vop3p, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_wmma_iu8_spacing, nullptr, nullptr, false, iu8_spacing_residual},
+     nullptr, expand_gfx1250_wmma_iu8_spacing, nullptr, nullptr, false,
+     checked_discharge(iu8_spacing_residual)},
     {cdna5::encoding::kVop3pOpHi1, cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false, always_residual},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false,
+     checked_discharge(always_residual)},
     {cdna5::encoding::kVop3pOpHi1, cdna5::kVWmmaF3216x16x128Fp8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false, always_residual},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false,
+     checked_discharge(always_residual)},
     {cdna5::encoding::kVop3pOpHi1, cdna5::kVWmmaF3216x16x128Bf8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false, always_residual},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false,
+     checked_discharge(always_residual)},
     {cdna5::encoding::kVop3pOpHi1, cdna5::kVWmmaF3216x16x128Bf8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false, always_residual},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false,
+     checked_discharge(always_residual)},
     {cdna5::encoding::kVop3pOpHi1, cdna5::kVWmmaF1616x16x128Fp8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false,
+     checked_discharge(always_residual)},
     {cdna5::encoding::kVop3pOpHi1, cdna5::kVWmmaF1616x16x128Fp8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false,
+     checked_discharge(always_residual)},
     {cdna5::encoding::kVop3pOpHi1, cdna5::kVWmmaF1616x16x128Bf8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false,
+     checked_discharge(always_residual)},
     {cdna5::encoding::kVop3pOpHi1, cdna5::kVWmmaF1616x16x128Bf8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false,
+     checked_discharge(always_residual)},
     {cdna5::encoding::kVop3pOpHi1, cdna5::kVWmmaF3232x16x128F4Vop3p, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_wmma_32x16_f4, nullptr, nullptr, true, always_residual},
+     nullptr, expand_gfx1250_wmma_32x16_f4, nullptr, nullptr, true,
+     checked_discharge(always_residual)},
     {cdna5::encoding::kVimage, cdna5::kTensorLoadToLdsVimage, RuleAction::Expand, 0, 0, nullptr,
-     expand_gfx1250_tensor_load_to_lds, nullptr, nullptr, true, tensor_load_residual},
+     expand_gfx1250_tensor_load_to_lds, nullptr, nullptr, true,
+     checked_discharge(tensor_load_residual)},
     {cdna5::encoding::kVop3OpHi3, cdna5::kVCvtF32Fp8Vop3, RuleAction::Expand, 0, 0, nullptr,
-     expand_gfx1250_cvt_f32_fp8_e5m3, nullptr, nullptr, true, cvt_f32_fp8_e5m3_residual},
+     expand_gfx1250_cvt_f32_fp8_e5m3, nullptr, nullptr, true,
+     checked_discharge(cvt_f32_fp8_e5m3_residual)},
     {cdna5::encoding::kVop3OpHi6, cdna5::kVCvtPkFp8F32Vop3, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_cvt_pk_fp8_f32_e5m3, nullptr, nullptr, true,
-     cvt_pk_fp8_f32_e5m3_residual},
+     checked_discharge(cvt_pk_fp8_f32_e5m3_residual)},
     {cdna5::encoding::kVop3OpHi6, cdna5::kVCvtSrFp8F32Vop3, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_cvt_sr_fp8_f32_e5m3, nullptr, nullptr, true,
-     cvt_sr_fp8_f32_e5m3_residual},
+     checked_discharge(cvt_sr_fp8_f32_e5m3_residual)},
     {cdna5::encoding::kVds, cdna5::kDsStore2addrB32Vds, RuleAction::Expand, 0, 0, nullptr,
-     expand_gfx1250_ds2, nullptr, nullptr, true, always_residual},
+     expand_gfx1250_ds2, nullptr, nullptr, true, checked_discharge(always_residual)},
     {cdna5::encoding::kVds, cdna5::kDsStore2addrStride64B32Vds, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_ds2, nullptr, nullptr, true, always_residual},
+     nullptr, expand_gfx1250_ds2, nullptr, nullptr, true, checked_discharge(always_residual)},
     {cdna5::encoding::kVdsOpHi1, cdna5::kDsStorexchg2addrRtnB32Vds, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_ds2, nullptr, nullptr, true, always_residual},
+     nullptr, expand_gfx1250_ds2, nullptr, nullptr, true, checked_discharge(always_residual)},
     {cdna5::encoding::kVdsOpHi1, cdna5::kDsStorexchg2addrStride64RtnB32Vds, RuleAction::Expand,
-     0, 0, nullptr, expand_gfx1250_ds2, nullptr, nullptr, true, always_residual},
+     0, 0, nullptr, expand_gfx1250_ds2, nullptr, nullptr, true, checked_discharge(always_residual)},
     {cdna5::encoding::kVdsOpHi1, cdna5::kDsLoad2addrB32Vds, RuleAction::Expand, 0, 0, nullptr,
-     expand_gfx1250_ds2, nullptr, nullptr, true, always_residual},
+     expand_gfx1250_ds2, nullptr, nullptr, true, checked_discharge(always_residual)},
     {cdna5::encoding::kVdsOpHi1, cdna5::kDsLoad2addrStride64B32Vds, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_ds2, nullptr, nullptr, true, always_residual},
+     nullptr, expand_gfx1250_ds2, nullptr, nullptr, true, checked_discharge(always_residual)},
     {cdna5::encoding::kVdsOpHi2, cdna5::kDsStore2addrB64Vds, RuleAction::Expand, 0, 0, nullptr,
-     expand_gfx1250_ds2, nullptr, nullptr, true, always_residual},
+     expand_gfx1250_ds2, nullptr, nullptr, true, checked_discharge(always_residual)},
     {cdna5::encoding::kVdsOpHi2, cdna5::kDsStore2addrStride64B64Vds, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_ds2, nullptr, nullptr, true, always_residual},
+     nullptr, expand_gfx1250_ds2, nullptr, nullptr, true, checked_discharge(always_residual)},
     {cdna5::encoding::kVdsOpHi3, cdna5::kDsStorexchg2addrRtnB64Vds, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_ds2, nullptr, nullptr, true, always_residual},
+     nullptr, expand_gfx1250_ds2, nullptr, nullptr, true, checked_discharge(always_residual)},
     {cdna5::encoding::kVdsOpHi3, cdna5::kDsStorexchg2addrStride64RtnB64Vds, RuleAction::Expand,
-     0, 0, nullptr, expand_gfx1250_ds2, nullptr, nullptr, true, always_residual},
+     0, 0, nullptr, expand_gfx1250_ds2, nullptr, nullptr, true, checked_discharge(always_residual)},
     {cdna5::encoding::kVdsOpHi3, cdna5::kDsLoad2addrB64Vds, RuleAction::Expand, 0, 0, nullptr,
-     expand_gfx1250_ds2, nullptr, nullptr, true, always_residual},
+     expand_gfx1250_ds2, nullptr, nullptr, true, checked_discharge(always_residual)},
     {cdna5::encoding::kVdsOpHi3, cdna5::kDsLoad2addrStride64B64Vds, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_ds2, nullptr, nullptr, true, always_residual},
+     nullptr, expand_gfx1250_ds2, nullptr, nullptr, true, checked_discharge(always_residual)},
     {cdna5::encoding::kVdsOpHi5, cdna5::kDsStoreAddtidB32Vds, RuleAction::Expand, 0, 0, nullptr,
-     expand_gfx1250_ds_addtid, nullptr, nullptr, true, always_residual},
+     expand_gfx1250_ds_addtid, nullptr, nullptr, true, checked_discharge(always_residual)},
     {cdna5::encoding::kVdsOpHi5, cdna5::kDsLoadAddtidB32Vds, RuleAction::Expand, 0, 0, nullptr,
-     expand_gfx1250_ds_addtid, nullptr, nullptr, true, always_residual},
+     expand_gfx1250_ds_addtid, nullptr, nullptr, true, checked_discharge(always_residual)},
     {cdna5::encoding::kVglobal, cdna5::kClusterLoadB32Vglobal, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true, cluster_load_residual},
+     nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true,
+     checked_discharge(cluster_load_residual)},
     {cdna5::encoding::kVglobal, cdna5::kClusterLoadB64Vglobal, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true, cluster_load_residual},
+     nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true,
+     checked_discharge(cluster_load_residual)},
     {cdna5::encoding::kVglobal, cdna5::kClusterLoadB128Vglobal, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true, cluster_load_residual},
+     nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true,
+     checked_discharge(cluster_load_residual)},
     {cdna5::encoding::kVglobal, cdna5::kClusterLoadAsyncToLdsB8Vglobal, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true, cluster_load_residual},
+     0, nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true,
+     checked_discharge(cluster_load_residual)},
     {cdna5::encoding::kVglobal, cdna5::kClusterLoadAsyncToLdsB32Vglobal, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true, cluster_load_residual},
+     0, nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true,
+     checked_discharge(cluster_load_residual)},
     {cdna5::encoding::kVglobal, cdna5::kClusterLoadAsyncToLdsB64Vglobal, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true, cluster_load_residual},
+     0, nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true,
+     checked_discharge(cluster_load_residual)},
     {cdna5::encoding::kVglobal, cdna5::kClusterLoadAsyncToLdsB128Vglobal, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true, cluster_load_residual},
+     0, nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true,
+     checked_discharge(cluster_load_residual)},
 }};
 
 static_assert(translation_rules_sorted(kGfx1250B0ToA0ExpandRules),
               "the gfx1250 B0-to-A0 rule table must stay sorted by (encoding id, opcode)");
+
+inline constexpr std::array<RegisteredInstructionRewrite, 1> kGfx1250B0ToA0InstructionRewriteRules =
+    {{
+        {"flat-scratch-base-64bit-source", gfx1250_reads_flat_scratch_base_64bit,
+         gfx1250_lower_flat_scratch_base_source, true,
+         checked_discharge(gfx1250_flat_scratch_base_residual)},
+    }};
+
+inline constexpr RewriteRegistry kGfx1250B0ToA0RewriteRegistry = {
+    kGfx1250B0ToA0ExpandRules,
+    kGfx1250B0ToA0InstructionRewriteRules,
+};
+
+static_assert(kGfx1250B0ToA0RewriteRegistry.has_complete_discharge());
 
 } // namespace
 
 std::span<const TranslationRule> semantic_expand_rules_gfx1250_b0_to_a0() {
   return kGfx1250B0ToA0ExpandRules;
 }
+
+RewriteRegistry rewrite_registry_gfx1250_b0_to_a0() { return kGfx1250B0ToA0RewriteRegistry; }
 
 } // namespace rocjitsu

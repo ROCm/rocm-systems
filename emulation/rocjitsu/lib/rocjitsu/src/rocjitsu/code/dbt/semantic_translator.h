@@ -53,10 +53,10 @@ struct SemanticReplacement {
 
 /// @brief Semantic translator for cross-ISA behavioral differences.
 ///
-/// @details All expansion rules (waitcnt, MFMA→WMMA, AccVGPR, etc.) are
-/// registered as TranslationRule entries with RuleAction::Expand. The
-/// try_lower_expand() method looks up rules by (encoding_id, opcode) via
-/// binary search.
+/// @details Opcode-keyed expansion rules (waitcnt, MFMA→WMMA, AccVGPR, etc.)
+/// remain TranslationRule entries looked up by binary search. Operand-driven
+/// instruction rewrites use a small ordered list. One RewriteRegistry selects
+/// both representations and supplies their final-stream audit contracts.
 class SemanticTranslator {
 public:
   SemanticTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
@@ -73,6 +73,12 @@ public:
                                               const LivenessAnalysis &liveness,
                                               TranslationContext &context) const;
 
+  /// @brief Try the registered non-opcode-keyed instruction rewrites.
+  [[nodiscard]] ExpandResult try_lower_instruction_rewrite(const Instruction &inst, uint64_t offset,
+                                                           std::span<const uint8_t> source_text,
+                                                           const LivenessAnalysis &liveness,
+                                                           TranslationContext &context) const;
+
   /// @brief Whether @p inst has a registered semantic expansion rule.
   ///
   /// @details The rule can still decline expansion after inspecting operands or
@@ -85,20 +91,26 @@ public:
                               packed_rule_key(encoding_id, opcode));
   }
 
-  /// @brief Whether the matching expansion can query kernel liveness.
-  [[nodiscard]] bool expand_rule_requires_liveness(const Instruction &inst) const;
+  /// @brief Whether a registered non-opcode-keyed rewrite matches @p inst.
+  [[nodiscard]] bool has_instruction_rewrite(const Instruction &inst) const;
+
+  /// @brief Whether any matching rewrite can query kernel liveness.
+  [[nodiscard]] bool rewrite_requires_liveness(const Instruction &inst) const;
 
   /// @brief Whether an implemented expansion remains actionable at @p inst.
   ///
-  /// @details This is a read-only query over the same rule table used by
-  /// try_lower_expand(). Rules without a registered residual predicate are
-  /// excluded.
-  [[nodiscard]] bool residual_expand_rule_applies(const Instruction &inst) const;
+  /// @details This checks both opcode-keyed and non-table rules selected by the
+  /// same profile registry used for lowering.
+  [[nodiscard]] bool residual_rewrite_applies(const Instruction &inst) const;
 
-  [[nodiscard]] bool has_rules() const { return !expand_rules_.empty(); }
+  [[nodiscard]] bool has_rules() const {
+    return !expand_rules_.empty() || !instruction_rewrite_rules_.empty();
+  }
 
-  /// @brief Whether this profile registers any residual expansion predicates.
-  [[nodiscard]] bool has_residual_rules() const;
+  /// @brief Whether every selected rewrite has a valid explicit audit contract.
+  [[nodiscard]] bool supports_rewrite_discharge() const {
+    return rewrite_registry_.has_complete_discharge();
+  }
 
 private:
   [[nodiscard]] static constexpr uint32_t packed_rule_key(uint16_t encoding_id, uint16_t opcode) {
@@ -113,7 +125,9 @@ private:
 
   [[nodiscard]] const TranslationRule *find_expand_rule(const Instruction &inst) const;
 
-  std::span<const TranslationRule> expand_rules_;   ///< Sorted by (src_encoding_id, src_opcode).
+  RewriteRegistry rewrite_registry_;
+  std::span<const TranslationRule> expand_rules_; ///< Sorted by (src_encoding_id, src_opcode).
+  std::span<const RegisteredInstructionRewrite> instruction_rewrite_rules_;
   std::vector<uint32_t> expand_rule_keys_;          ///< Packed keys parallel to expand_rules_.
   std::vector<uint64_t> expand_rule_encoding_bits_; ///< Cheap encoding prefilter for hot scans.
   rj_code_arch_t host_arch_;

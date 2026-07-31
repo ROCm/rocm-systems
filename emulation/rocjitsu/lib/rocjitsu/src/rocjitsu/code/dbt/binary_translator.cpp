@@ -23,7 +23,6 @@
 #include "rocjitsu/code/dbt/lds_virtualization.h"
 #include "rocjitsu/code/dbt/legalization/gfx1250_b0_to_a0.h"
 #include "rocjitsu/code/dbt/scoped_cfg_edges.h"
-#include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
 #include "rocjitsu/code/dbt/semantic_translator.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
@@ -2028,10 +2027,24 @@ BinaryTranslator::lookup_legalization(const Instruction &inst) const {
   // tables cannot express their revision-specific behavior. Instructions in
   // the B0-to-A0 profile use handwritten legalization; everything else follows
   // the raw same-ISA copy path.
+  const InstructionLegalization *legalization = nullptr;
   if (is_gfx1250_b0_to_a0())
-    return gfx1250_b0_to_a0_legalization(inst);
+    legalization = gfx1250_b0_to_a0_legalization(inst);
+  else if (legalization_lookup_)
+    legalization = legalization_lookup_(inst.encoding_id(), inst.opcode());
+  if (legalization != nullptr)
+    return legalization;
 
-  return legalization_lookup_ ? legalization_lookup_(inst.encoding_id(), inst.opcode()) : nullptr;
+  if (semantic_translator_ != nullptr && semantic_translator_->has_instruction_rewrite(inst)) {
+    static constexpr InstructionLegalization kRegisteredRewrite{
+        .src_opcode = 0,
+        .src_encoding_id = 0,
+        .action = Action::Expand,
+        .target_opcode = 0,
+    };
+    return &kRegisteredRewrite;
+  }
+  return nullptr;
 }
 
 void BinaryTranslator::set_trace_callback(TranslationTraceCallback callback) {
@@ -2040,8 +2053,7 @@ void BinaryTranslator::set_trace_callback(TranslationTraceCallback callback) {
 
 void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) const {
   result.rewrite_discharge_checked = true;
-  const bool has_operand_residual_rules = is_gfx1250_b0_to_a0();
-  if (!semantic_translator_->has_residual_rules() && !has_operand_residual_rules) {
+  if (!semantic_translator_->supports_rewrite_discharge()) {
     append_rewrite_discharge_error(
         result.diagnostics,
         "rewrite-discharge verification is unavailable for this translation profile");
@@ -2117,10 +2129,7 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
     bool found_residual = false;
     for (const auto &block : blocks) {
       for (const Instruction &inst : block->instructions()) {
-        const bool semantic_residual = semantic_translator_->residual_expand_rule_applies(inst);
-        const bool operand_residual =
-            is_gfx1250_b0_to_a0() && gfx1250_flat_scratch_base_residual(inst);
-        if (!semantic_residual && !operand_residual)
+        if (!semantic_translator_->residual_rewrite_applies(inst))
           continue;
         found_residual = true;
         append_rewrite_discharge_error(result.diagnostics,
@@ -3053,13 +3062,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         if (block == nullptr)
           continue;
         for (const Instruction &inst : block->instructions()) {
-          // The gfx1250 flat-scratch-base rewrite is selected by operand rather
-          // than by (encoding, opcode), so the rule-table query above cannot see
-          // it. It borrows an SGPR pair for vector reads and therefore carries
-          // its own live-before requirement.
-          const bool operand_driven_rewrite =
-              is_gfx1250_b0_to_a0() && gfx1250_reads_flat_scratch_base_64bit(inst);
-          if (semantic_translator_->expand_rule_requires_liveness(inst) || operand_driven_rewrite) {
+          if (semantic_translator_->rewrite_requires_liveness(inst)) {
             scope_requires_liveness = true;
             live_before_instructions.push_back(&inst);
           }
@@ -3895,16 +3898,16 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           }
         }
 
-        // Operand-driven gfx1250 rewrites cannot be keyed by (encoding, opcode)
-        // the way the semantic rule table is, so they run after that lookup
-        // misses and before the missing-rule failure below.
-        if (is_gfx1250_b0_to_a0()) {
-          auto base_expansion =
-              gfx1250_lower_flat_scratch_base_source(inst, offset, text, liveness, kernel_context);
-          if (base_expansion.status == ExpandStatus::Failed) {
-            auto failure = make_kernel_failure(DiagnosticKind::ExpandFailed, base_expansion.message,
-                                               offset, std::string(inst.mnemonic()),
-                                               std::move(base_expansion.required_work));
+        // Non-opcode-keyed rewrites retain their historical position after
+        // virtual-LDS lowering. Their registry supplies the same applicability
+        // test to liveness collection and the corresponding final-stream check.
+        if (semantic_translator_ != nullptr) {
+          auto registered_expansion = semantic_translator_->try_lower_instruction_rewrite(
+              inst, offset, text, liveness, kernel_context);
+          if (registered_expansion.status == ExpandStatus::Failed) {
+            auto failure = make_kernel_failure(
+                DiagnosticKind::ExpandFailed, registered_expansion.message, offset,
+                std::string(inst.mnemonic()), std::move(registered_expansion.required_work));
             if (continue_after_failure && !skip_failed_kernels) {
               append_error(result.diagnostics, failure.kind, failure.message, failure.guest_offset,
                            failure.mnemonic, failure.required_work);
@@ -3918,8 +3921,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             }
             return leave_unchanged();
           }
-          if (base_expansion.status == ExpandStatus::Success) {
-            std::vector<uint32_t> target_words = std::move(base_expansion.words);
+          if (registered_expansion.status == ExpandStatus::Success) {
+            std::vector<uint32_t> target_words = std::move(registered_expansion.words);
             append_words(kernel_text, target_words);
             queue_trace(pending_traces, inst, offset, leg, false, true, true, target_offset,
                         std::move(target_words));

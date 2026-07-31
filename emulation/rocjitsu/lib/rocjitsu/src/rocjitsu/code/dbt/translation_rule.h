@@ -415,6 +415,76 @@ using ExpandFn = ExpandResult (*)(const Instruction &inst, uint32_t arch, uint64
 /// corresponding ExpandFn, but must not allocate resources or emit words.
 using ResidualExpandFn = bool (*)(const Instruction &inst);
 
+/// @brief Whether and how a rewrite participates in final-stream discharge.
+enum class RewriteDischargeDisposition : uint8_t {
+  Unregistered,          ///< No audit contract was declared; audited profiles reject this state.
+  Checked,               ///< Run the registered read-only predicate on the final stream.
+  NoSuccessfulExpansion, ///< The rule may decline or fail, but must never emit output.
+};
+
+/// @brief Explicit final-stream audit contract for one rewrite.
+///
+/// @details Audited profiles require every rewrite to use checked() or
+/// no_success().
+/// The default Unregistered state keeps older, unaudited profiles source
+/// compatible without allowing an audited profile to silently omit a rule.
+class RewriteDischarge {
+public:
+  RewriteDischargeDisposition disposition = RewriteDischargeDisposition::Unregistered;
+  ResidualExpandFn check = nullptr;
+  const char *rationale = nullptr;
+
+  [[nodiscard]] static constexpr RewriteDischarge checked(ResidualExpandFn predicate) {
+    return {RewriteDischargeDisposition::Checked, predicate, nullptr};
+  }
+
+  [[nodiscard]] static constexpr RewriteDischarge no_success(const char *reason) {
+    return {RewriteDischargeDisposition::NoSuccessfulExpansion, nullptr, reason};
+  }
+
+  [[nodiscard]] constexpr bool valid() const {
+    if (disposition == RewriteDischargeDisposition::Checked)
+      return check != nullptr && rationale == nullptr;
+    if (disposition == RewriteDischargeDisposition::NoSuccessfulExpansion)
+      return check == nullptr && rationale != nullptr && rationale[0] != '\0';
+    return false;
+  }
+
+  /// @brief Whether @p status is compatible with the declared audit contract.
+  [[nodiscard]] constexpr bool allows(ExpandStatus status) const {
+    return disposition != RewriteDischargeDisposition::NoSuccessfulExpansion ||
+           status != ExpandStatus::Success;
+  }
+};
+
+/// @brief Applicability test for a non-opcode-keyed instruction rewrite.
+using InstructionRewriteAppliesFn = bool (*)(const Instruction &inst);
+
+/// @brief Lowering callback for a non-opcode-keyed instruction rewrite.
+using InstructionRewriteFn = ExpandResult (*)(const Instruction &inst, uint64_t offset,
+                                              std::span<const uint8_t> source_text,
+                                              const LivenessAnalysis &liveness,
+                                              TranslationContext &context);
+
+/// @brief One rewrite selected by operands or other instruction-local state.
+///
+/// @details These rules are kept separate from the sorted opcode table so that
+/// table lookup remains cheap. The same declaration drives applicability,
+/// liveness selection, lowering, and final-stream discharge.
+class RegisteredInstructionRewrite {
+public:
+  const char *name = nullptr;
+  InstructionRewriteAppliesFn applies = nullptr;
+  InstructionRewriteFn lower = nullptr;
+  bool requires_liveness = true;
+  RewriteDischarge discharge;
+
+  [[nodiscard]] constexpr bool valid() const {
+    return name != nullptr && name[0] != '\0' && applies != nullptr && lower != nullptr &&
+           discharge.valid();
+  }
+};
+
 /// @brief A single translation rule for one (source, target) instruction.
 ///
 /// @details Keyed by (src_encoding_id, src_opcode) for lookup via binary search.
@@ -435,8 +505,18 @@ struct TranslationRule {
   const LaneLayout *guest_layout; ///< Source matrix layout (for matrix Expand).
   const LaneLayout *host_layout;  ///< Target matrix layout (for matrix Expand).
   bool requires_liveness = true;  ///< Conservative default; tables opt out after auditing.
-  /// Read-only residual predicate; nullptr excludes a rule from discharge verification.
-  ResidualExpandFn residual_expand_fn = nullptr;
+  /// Explicit final-stream audit disposition for this expansion.
+  RewriteDischarge discharge;
+
+  constexpr TranslationRule(uint16_t source_encoding_id, uint16_t source_opcode,
+                            RuleAction rule_action, uint16_t target_opcode, uint8_t field_map_count,
+                            const FieldMap *maps, ExpandFn expansion,
+                            const LaneLayout *source_layout, const LaneLayout *target_layout,
+                            bool needs_liveness = true, RewriteDischarge audit = {})
+      : src_encoding_id(source_encoding_id), src_opcode(source_opcode), action(rule_action),
+        dst_opcode(target_opcode), num_field_maps(field_map_count), field_maps(maps),
+        expand_fn(expansion), guest_layout(source_layout), host_layout(target_layout),
+        requires_liveness(needs_liveness), discharge(audit) {}
 
   constexpr auto operator<=>(const TranslationRule &rhs) const {
     if (auto cmp = src_encoding_id <=> rhs.src_encoding_id; cmp != 0)
@@ -487,6 +567,36 @@ static_assert(!translation_rules_sorted(kSameKeyDifferentTail),
               "translation_rules_sorted() stops rejecting duplicate keys");
 
 } // namespace translation_rule_detail
+
+/// @brief Complete handwritten rewrite declaration for one translation profile.
+///
+/// @details Opcode-keyed expansions and non-table instruction rewrites retain
+/// their existing dispatch mechanisms, but are selected here as one profile.
+/// Verification is available only when the registry is nonempty, the opcode
+/// rules have strictly ordered unique keys, and every declared rule carries a
+/// valid checked or no-success disposition.
+class RewriteRegistry {
+public:
+  std::span<const TranslationRule> opcode_rules;
+  std::span<const RegisteredInstructionRewrite> instruction_rules;
+
+  [[nodiscard]] constexpr bool has_complete_discharge() const {
+    if (opcode_rules.empty() && instruction_rules.empty())
+      return false;
+    for (size_t rule_index = 0; rule_index < opcode_rules.size(); ++rule_index) {
+      const TranslationRule &rule = opcode_rules[rule_index];
+      if (rule.action != RuleAction::Expand || rule.expand_fn == nullptr || !rule.discharge.valid())
+        return false;
+      if (rule_index != 0 && !(opcode_rules[rule_index - 1] < rule))
+        return false;
+    }
+    for (const RegisteredInstructionRewrite &rule : instruction_rules) {
+      if (!rule.valid())
+        return false;
+    }
+    return true;
+  }
+};
 
 // ---------------------------------------------------------------------------
 // Tier 3: Lane Layout Descriptor

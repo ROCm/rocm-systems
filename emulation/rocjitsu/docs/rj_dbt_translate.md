@@ -116,7 +116,12 @@ rj_dbt_translate input.gfx1250.co \
 The verifier decodes the final executable stream after all translation and ELF
 materialization have finished. It reconstructs executable entry boundaries,
 runs the read-only applicability check associated with each implemented rewrite,
-and reports any residual site as an error at its final `.text` offset.
+and reports any residual site as an error at its final `.text` offset. One
+profile registry supplies both opcode-keyed and operand-driven rewrites to
+lowering and verification. Every rule in an audited profile must explicitly
+register either a residual predicate or a no-success contract; a no-success rule
+that later begins emitting output fails its registry contract instead of
+silently escaping verification.
 
 This is an opt-in offline development audit. The implementation lives beside
 translation because it needs the final materialized ELF and decoded CFG, while

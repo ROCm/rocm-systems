@@ -8401,16 +8401,32 @@ TEST(SemanticTranslator, Gfx1250ClassifiesLivenessFreeExpandRules) {
   EXPECT_FALSE(translator.has_expand_rule(*v_nop_inst));
 }
 
-TEST(SemanticTranslator, Gfx1250RegistersResidualChecksForEverySuccessfulExpandRule) {
-  std::vector<uint32_t> rules_without_residual_checks;
-  for (const rocjitsu::TranslationRule &rule : rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0()) {
-    if (rule.residual_expand_fn == nullptr) {
-      rules_without_residual_checks.push_back((static_cast<uint32_t>(rule.src_encoding_id) << 16) |
-                                              rule.src_opcode);
+TEST(SemanticTranslator, Gfx1250RegistryHasCompleteDischargeContracts) {
+  const rocjitsu::RewriteRegistry registry = rocjitsu::rewrite_registry_gfx1250_b0_to_a0();
+  EXPECT_TRUE(registry.has_complete_discharge());
+  ASSERT_EQ(registry.opcode_rules.size(), 39u);
+  ASSERT_EQ(registry.instruction_rules.size(), 1u);
+
+  size_t checked_rules = 0;
+  size_t no_success_rules = 0;
+  std::vector<uint32_t> no_success_rule_keys;
+  for (const rocjitsu::TranslationRule &rule : registry.opcode_rules) {
+    EXPECT_TRUE(rule.discharge.valid());
+    if (rule.discharge.disposition == rocjitsu::RewriteDischargeDisposition::Checked)
+      ++checked_rules;
+    if (rule.discharge.disposition ==
+        rocjitsu::RewriteDischargeDisposition::NoSuccessfulExpansion) {
+      ++no_success_rules;
+      no_success_rule_keys.push_back((static_cast<uint32_t>(rule.src_encoding_id) << 16) |
+                                     rule.src_opcode);
+      EXPECT_FALSE(rule.discharge.allows(rocjitsu::ExpandStatus::Success));
+      EXPECT_TRUE(rule.discharge.allows(rocjitsu::ExpandStatus::Failed));
+      EXPECT_TRUE(rule.discharge.allows(rocjitsu::ExpandStatus::NotHandled));
     }
   }
-
-  const std::vector<uint32_t> expected_non_discharge_rules = {
+  EXPECT_EQ(checked_rules, 34u);
+  EXPECT_EQ(no_success_rules, 5u);
+  const std::vector<uint32_t> expected_no_success_rule_keys = {
       (static_cast<uint32_t>(gfx1250::encoding::kSop1) << 16) | gfx1250::kSBarrierSignalIsfirstSop1,
       (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
           gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p,
@@ -8421,10 +8437,43 @@ TEST(SemanticTranslator, Gfx1250RegistersResidualChecksForEverySuccessfulExpandR
       (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
           gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p,
   };
-  EXPECT_EQ(rules_without_residual_checks, expected_non_discharge_rules);
-  EXPECT_EQ(rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0().size() -
-                rules_without_residual_checks.size(),
-            34u);
+  EXPECT_EQ(no_success_rule_keys, expected_no_success_rule_keys);
+
+  const std::array out_of_order_rules = {registry.opcode_rules[1], registry.opcode_rules[0]};
+  const rocjitsu::RewriteRegistry out_of_order_registry{out_of_order_rules, {}};
+  EXPECT_FALSE(out_of_order_registry.has_complete_discharge());
+  const std::array duplicate_rules = {registry.opcode_rules[0], registry.opcode_rules[0]};
+  const rocjitsu::RewriteRegistry duplicate_registry{duplicate_rules, {}};
+  EXPECT_FALSE(duplicate_registry.has_complete_discharge());
+
+  const rocjitsu::RegisteredInstructionRewrite &flat_scratch = registry.instruction_rules.front();
+  EXPECT_STREQ(flat_scratch.name, "flat-scratch-base-64bit-source");
+  EXPECT_TRUE(flat_scratch.requires_liveness);
+  EXPECT_TRUE(flat_scratch.valid());
+  EXPECT_EQ(flat_scratch.discharge.disposition, rocjitsu::RewriteDischargeDisposition::Checked);
+
+  rocjitsu::SemanticTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250,
+                                          rocjitsu::ProcessorRevision::Gfx1250B0,
+                                          rocjitsu::ProcessorRevision::Gfx1250A0);
+  EXPECT_TRUE(translator.supports_rewrite_discharge());
+  rocjitsu::SemanticTranslator legacy_translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+                                                 rocjitsu::ProcessorRevision::Unspecified,
+                                                 rocjitsu::ProcessorRevision::Unspecified);
+  EXPECT_FALSE(legacy_translator.supports_rewrite_discharge());
+  constexpr auto selector_230 =
+      gfx1250::build_sop1(gfx1250::kSMovB64Sop1, {.ssrc0 = 230, .sdst = 10});
+  constexpr auto selector_231 =
+      gfx1250::build_sop1(gfx1250::kSMovB64Sop1, {.ssrc0 = 231, .sdst = 10});
+  const auto low = rocjitsu::decode_one(selector_230[0], ROCJITSU_CODE_ARCH_GFX1250);
+  const auto high = rocjitsu::decode_one(selector_231[0], ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(low, nullptr);
+  ASSERT_NE(high, nullptr);
+  EXPECT_TRUE(translator.has_instruction_rewrite(*low));
+  EXPECT_TRUE(translator.has_instruction_rewrite(*high));
+  EXPECT_TRUE(translator.rewrite_requires_liveness(*low));
+  EXPECT_TRUE(translator.rewrite_requires_liveness(*high));
+  EXPECT_FALSE(translator.residual_rewrite_applies(*low));
+  EXPECT_TRUE(translator.residual_rewrite_applies(*high));
 }
 
 TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule) {
@@ -8512,7 +8561,7 @@ TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule
 
   std::vector<const rocjitsu::TranslationRule *> residual_rules;
   for (const rocjitsu::TranslationRule &rule : rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0()) {
-    if (rule.residual_expand_fn != nullptr)
+    if (rule.discharge.disposition == rocjitsu::RewriteDischargeDisposition::Checked)
       residual_rules.push_back(&rule);
   }
   ASSERT_EQ(samples.size(), residual_rules.size());
@@ -8528,7 +8577,7 @@ TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(inst->encoding_id(), residual_rules[sample_index]->src_encoding_id);
     EXPECT_EQ(inst->opcode(), residual_rules[sample_index]->src_opcode);
-    EXPECT_TRUE(translator.residual_expand_rule_applies(*inst));
+    EXPECT_TRUE(translator.residual_rewrite_applies(*inst));
   }
 }
 
