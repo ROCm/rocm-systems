@@ -1116,7 +1116,7 @@ public:
             builder.BuildWriteUConfigRegPacket(
                 cmd_buffer, Primitives::RLC_PERFMON_CLK_CNTL_ADDR, 0);
 
-        if constexpr(Primitives::GFXIP_LEVEL >= 12)
+        if constexpr(Primitives::GFXIP_LEVEL == 12)
         {
             if(counters_vec.get_attr() & CounterBlockTcAttr) DisableCpPerfCounters(cmd_buffer);
         }
