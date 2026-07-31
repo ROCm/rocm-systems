@@ -294,6 +294,18 @@ start_context(rocprofiler_context_id_t context_id)
             // conflicting context
             return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
         }
+        else if(cfg->dispatch_thread_trace && itr->dispatch_thread_trace)
+        {
+            // Single-context-only is a hard invariant for dispatch thread trace, and it now needs
+            // enforcing. Previously it held by accident: the per-queue callback registry registered
+            // one global client, so a second concurrent ATT context silently did nothing. With the
+            // registry gone the hooks iterate every active ATT context, and
+            // DispatchThreadTracer::post_kernel_call identifies packets by dynamic_cast plus agent
+            // lookup with no per-context ownership check, decrementing post_move_data before it
+            // verifies agent ownership -- so two ATT contexts on one agent would cross-talk and
+            // mis-refcount rather than one being ignored.
+            return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+        }
     }
 
     uint64_t rocp_tot_contexts = get_registered_contexts_impl()->size();

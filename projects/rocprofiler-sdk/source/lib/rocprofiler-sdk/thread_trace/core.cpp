@@ -71,10 +71,6 @@ struct cbdata_t
     uint64_t                                        next_chunk = 0;
 };
 
-// Keeps track of a single client registering for serialized thread trace
-// operations so we can gate new traces while one is active.
-common::Synchronized<std::optional<int64_t>> client;
-
 // True once the HSA runtime is registered. Gates start_context() so pre-init
 // start requests are deferred and replayed by initialize().
 std::atomic<bool>&
