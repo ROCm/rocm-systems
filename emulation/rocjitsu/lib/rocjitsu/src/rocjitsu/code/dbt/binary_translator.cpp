@@ -389,6 +389,7 @@ void append_diagnostic(std::vector<TranslationDiagnostic> &diagnostics, Diagnost
   diagnostics.push_back({.severity = severity,
                          .kind = kind,
                          .guest_offset = guest_offset,
+                         .output_offset = std::nullopt,
                          .mnemonic = std::move(mnemonic),
                          .message = std::move(message),
                          .required_work = std::move(required_work)});
@@ -406,6 +407,19 @@ void append_warning(std::vector<TranslationDiagnostic> &diagnostics, DiagnosticK
                     std::string mnemonic = {}, std::vector<std::string> required_work = {}) {
   append_diagnostic(diagnostics, DiagnosticSeverity::Warning, kind, std::move(message),
                     guest_offset, std::move(mnemonic), std::move(required_work));
+}
+
+void append_rewrite_discharge_error(std::vector<TranslationDiagnostic> &diagnostics,
+                                    std::string message,
+                                    std::optional<uint64_t> output_offset = std::nullopt,
+                                    std::string mnemonic = {}) {
+  diagnostics.push_back({.severity = DiagnosticSeverity::Error,
+                         .kind = DiagnosticKind::ResidualRewrite,
+                         .guest_offset = std::nullopt,
+                         .output_offset = output_offset,
+                         .mnemonic = std::move(mnemonic),
+                         .message = std::move(message),
+                         .required_work = {}});
 }
 
 void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
@@ -581,6 +595,161 @@ kernel_hardware_entry_offsets(std::span<const KdTranslation> kernels) {
   std::ranges::sort(offsets);
   offsets.erase(std::ranges::unique(offsets).begin(), offsets.end());
   return offsets;
+}
+
+[[nodiscard]] bool elf_image_contains(std::span<const uint8_t> image, uint64_t offset,
+                                      uint64_t size) {
+  const uint64_t image_size = image.size();
+  return offset <= image_size && size <= image_size - offset;
+}
+
+/// @brief Collect defined addressable symbol entries within one executable section.
+///
+/// @details Kernel descriptors and relocation-backed function tables are the
+/// translator's primary executable roots. Defined STT_FUNC and STT_NOTYPE
+/// externally visible symbols supply conservative additional boundaries for
+/// descriptorless images and helpers: instructions immediately before such a
+/// symbol are not guaranteed to execute before the symbol target. Local labels
+/// are omitted because direct control-flow targets are recovered structurally
+/// and address-taken entries are recovered from relocations. Anonymous
+/// R_AMDGPU_RELATIVE64 addends into .text are runtime-dereferenced entries and
+/// supply the same boundary even without an owning table symbol.
+[[nodiscard]] std::optional<std::vector<uint64_t>>
+text_external_block_leaders(std::span<const uint8_t> image, const Section &text) {
+  if (!elf_image_contains(image, 0, sizeof(Elf64_Ehdr)))
+    return std::nullopt;
+
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  if (ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
+      !elf_image_contains(image, ehdr.e_shoff,
+                          static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr))) {
+    return std::nullopt;
+  }
+
+  std::vector<Elf64_Shdr> shdrs(ehdr.e_shnum);
+  if (!shdrs.empty())
+    std::memcpy(shdrs.data(), image.data() + ehdr.e_shoff, shdrs.size() * sizeof(Elf64_Shdr));
+
+  const auto text_it = std::ranges::find_if(shdrs, [&](const Elf64_Shdr &section) {
+    return section.sh_offset == text.sectionOffset() && section.sh_size == text.size();
+  });
+  if (text_it == shdrs.end())
+    return std::nullopt;
+  const size_t text_index = static_cast<size_t>(text_it - shdrs.begin());
+
+  std::vector<uint64_t> leaders;
+  std::unordered_set<uint64_t> allocated_relocation_symbols;
+  const auto relocation_place_is_allocated = [&](const Elf64_Shdr &relocs,
+                                                 const Elf64_Rela &relocation) {
+    if (relocs.sh_info < shdrs.size() && (shdrs[relocs.sh_info].sh_flags & SHF_ALLOC) != 0)
+      return true;
+    if (ehdr.e_type != ET_DYN)
+      return false;
+    return std::ranges::any_of(shdrs, [&](const Elf64_Shdr &section) {
+      return (section.sh_flags & SHF_ALLOC) != 0 && relocation.r_offset >= section.sh_addr &&
+             relocation.r_offset - section.sh_addr < section.sh_size;
+    });
+  };
+
+  for (size_t relocation_section_index = 0; relocation_section_index < shdrs.size();
+       ++relocation_section_index) {
+    const Elf64_Shdr &relocs = shdrs[relocation_section_index];
+    if (relocs.sh_type != SHT_RELA)
+      continue;
+    if (relocs.sh_entsize != sizeof(Elf64_Rela) || relocs.sh_size % sizeof(Elf64_Rela) != 0 ||
+        !elf_image_contains(image, relocs.sh_offset, relocs.sh_size)) {
+      return std::nullopt;
+    }
+
+    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    for (size_t relocation_index = 0; relocation_index < count; ++relocation_index) {
+      Elf64_Rela relocation{};
+      std::memcpy(&relocation,
+                  image.data() + relocs.sh_offset + relocation_index * sizeof(Elf64_Rela),
+                  sizeof(relocation));
+      if (!relocation_place_is_allocated(relocs, relocation))
+        continue;
+
+      const uint32_t relocation_type = elf_reloc_type(relocation.r_info);
+      const uint32_t symbol_index = elf_reloc_sym(relocation.r_info);
+      if (relocation_type == R_AMDGPU_ABS64 && symbol_index != 0) {
+        if (relocs.sh_link >= shdrs.size())
+          return std::nullopt;
+        allocated_relocation_symbols.insert((static_cast<uint64_t>(relocs.sh_link) << 32) |
+                                            symbol_index);
+      }
+
+      if (ehdr.e_type != ET_DYN || relocation_type != R_AMDGPU_RELATIVE64 ||
+          relocation.r_addend < 0) {
+        continue;
+      }
+      const uint64_t target = static_cast<uint64_t>(relocation.r_addend);
+      if (target < text.vaddr())
+        continue;
+      const uint64_t offset = target - text.vaddr();
+      if (offset < text.size())
+        leaders.push_back(offset);
+    }
+  }
+
+  for (size_t symtab_section_index = 0; symtab_section_index < shdrs.size();
+       ++symtab_section_index) {
+    const Elf64_Shdr &symtab = shdrs[symtab_section_index];
+    if (symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM)
+      continue;
+    if (symtab.sh_entsize != sizeof(Elf64_Sym) || symtab.sh_size % sizeof(Elf64_Sym) != 0 ||
+        !elf_image_contains(image, symtab.sh_offset, symtab.sh_size)) {
+      return std::nullopt;
+    }
+
+    const size_t count = symtab.sh_size / sizeof(Elf64_Sym);
+    for (size_t symbol_index = 0; symbol_index < count; ++symbol_index) {
+      Elf64_Sym symbol{};
+      std::memcpy(&symbol, image.data() + symtab.sh_offset + symbol_index * sizeof(Elf64_Sym),
+                  sizeof(symbol));
+      const uint8_t symbol_type = elf_symbol_type(symbol.st_info);
+      const uint8_t symbol_bind = elf_symbol_bind(symbol.st_info);
+      const bool is_externally_visible =
+          symbol_bind == kElfSymbolBindGlobal || symbol_bind == kElfSymbolBindWeak;
+      const bool is_address_taken = allocated_relocation_symbols.contains(
+          (static_cast<uint64_t>(symtab_section_index) << 32) | symbol_index);
+      if (symbol.st_shndx != text_index ||
+          (symbol_type != kElfSymbolTypeFunc && symbol_type != kElfSymbolTypeNone) ||
+          (!is_externally_visible && !is_address_taken)) {
+        continue;
+      }
+
+      uint64_t offset = symbol.st_value;
+      if (ehdr.e_type != ET_REL) {
+        if (symbol.st_value < text.vaddr())
+          return std::nullopt;
+        offset = symbol.st_value - text.vaddr();
+      }
+      if (offset > text.size())
+        return std::nullopt;
+      if (offset < text.size())
+        leaders.push_back(offset);
+    }
+  }
+
+  std::ranges::sort(leaders);
+  leaders.erase(std::ranges::unique(leaders).begin(), leaders.end());
+  return leaders;
+}
+
+[[nodiscard]] bool has_invalid_block_leader(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                            std::span<const uint64_t> block_leaders,
+                                            uint64_t text_size) {
+  std::unordered_set<uint64_t> decoded_block_starts;
+  decoded_block_starts.reserve(blocks.size());
+  for (const auto &block : blocks) {
+    if (block != nullptr)
+      decoded_block_starts.insert(block->start_offset());
+  }
+  return std::ranges::any_of(block_leaders, [&](uint64_t leader) {
+    return leader >= text_size || !decoded_block_starts.contains(leader);
+  });
 }
 
 struct KernelTranslationScope {
@@ -1869,6 +2038,105 @@ void BinaryTranslator::set_trace_callback(TranslationTraceCallback callback) {
   trace_callback_ = std::move(callback);
 }
 
+void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) const {
+  result.rewrite_discharge_checked = true;
+  const bool has_operand_residual_rules = is_gfx1250_b0_to_a0();
+  if (!semantic_translator_->has_residual_rules() && !has_operand_residual_rules) {
+    append_rewrite_discharge_error(
+        result.diagnostics,
+        "rewrite-discharge verification is unavailable for this translation profile");
+    return;
+  }
+
+  try {
+    AmdGpuCodeObject output(result.elf_bytes.data(), result.elf_bytes.size());
+    if (!output.is_valid()) {
+      append_rewrite_discharge_error(
+          result.diagnostics,
+          "rewrite-discharge verification could not parse the final code object");
+      return;
+    }
+    if (output.text_sections().empty()) {
+      result.rewrite_discharge_verified = true;
+      return;
+    }
+    if (output.text_sections().size() != 1) {
+      append_rewrite_discharge_error(
+          result.diagnostics,
+          "rewrite-discharge verification requires exactly one executable text section");
+      return;
+    }
+
+    auto decoder = Decoder::create(host_arch_);
+    if (!decoder) {
+      append_rewrite_discharge_error(
+          result.diagnostics,
+          "rewrite-discharge verification has no decoder for the final architecture");
+      return;
+    }
+
+    const Section *text = output.text_sections().front();
+    if (text->size() == 0) {
+      result.rewrite_discharge_verified = true;
+      return;
+    }
+    const auto image = std::span<const uint8_t>(result.elf_bytes);
+    const auto text_bytes =
+        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
+
+    KernelDescriptorTranslator descriptor_parser(host_arch_, host_arch_);
+    const auto descriptor_translations = descriptor_parser.translate_image(
+        image, text->sectionOffset(), text->size(), KernelDescriptorTranslationOptions{});
+    auto block_leaders = kernel_block_leaders(descriptor_translations, text_bytes);
+
+    for (const RelocationFunctionTable &table : discover_relocation_function_tables(output)) {
+      for (const RelocationFunctionPointer &entry : table.entries)
+        block_leaders.push_back(entry.target_text_offset);
+    }
+
+    const auto external_leaders = text_external_block_leaders(image, *text);
+    if (!external_leaders) {
+      append_rewrite_discharge_error(
+          result.diagnostics,
+          "rewrite-discharge verification could not recover final executable entries");
+      return;
+    }
+    block_leaders.insert(block_leaders.end(), external_leaders->begin(), external_leaders->end());
+    std::ranges::sort(block_leaders);
+    block_leaders.erase(std::ranges::unique(block_leaders).begin(), block_leaders.end());
+
+    const auto blocks = BasicBlock::build(output, *decoder, host_arch_, block_leaders,
+                                          ExternalEntryPolicy::ExplicitOnly);
+    if (has_invalid_block_leader(blocks, block_leaders, text->size())) {
+      append_rewrite_discharge_error(
+          result.diagnostics,
+          "rewrite-discharge verification found an invalid final executable entry");
+      return;
+    }
+
+    bool found_residual = false;
+    for (const auto &block : blocks) {
+      for (const Instruction &inst : block->instructions()) {
+        const bool semantic_residual = semantic_translator_->residual_expand_rule_applies(inst);
+        const bool operand_residual =
+            is_gfx1250_b0_to_a0() && gfx1250_flat_scratch_base_residual(inst);
+        if (!semantic_residual && !operand_residual)
+          continue;
+        found_residual = true;
+        append_rewrite_discharge_error(result.diagnostics,
+                                       "implemented rewrite remains actionable in final output",
+                                       inst.src_loc(), std::string(inst.mnemonic()));
+      }
+    }
+    result.rewrite_discharge_verified = !found_residual;
+  } catch (const std::exception &error) {
+    append_rewrite_discharge_error(
+        result.diagnostics,
+        std::string("rewrite-discharge verification failed to decode final output: ") +
+            error.what());
+  }
+}
+
 TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   TranslatedCodeObject result;
   result.host_arch = host_arch_;
@@ -1881,6 +2149,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     const auto *image = reinterpret_cast<const uint8_t *>(obj.image_data());
     if (obj.image_size() != 0)
       result.elf_bytes.assign(image, image + obj.image_size());
+    if (options_.verify_rewrite_discharge && result.ok())
+      verify_rewrite_discharge(result);
     return result;
   };
 
@@ -1964,6 +2234,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     for (const RelocationFunctionPointer &entry : table.entries)
       block_leaders.push_back(entry.target_text_offset);
   }
+  const auto external_leaders =
+      text_external_block_leaders(patcher.image_bytes(), *obj.text_sections().front());
+  if (!external_leaders) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "translation could not recover executable entries from ELF symbols and "
+                 "relocations");
+    return leave_unchanged();
+  }
+  block_leaders.insert(block_leaders.end(), external_leaders->begin(), external_leaders->end());
   std::ranges::sort(block_leaders);
   block_leaders.erase(std::ranges::unique(block_leaders).begin(), block_leaders.end());
 
@@ -2018,6 +2297,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                                ExternalEntryPolicy::ExplicitOnly, block_split_points);
   } catch (const util::InvalidInst &error) {
     append_error(result.diagnostics, DiagnosticKind::Legalization, error.what());
+    return leave_unchanged();
+  }
+  if (has_invalid_block_leader(blocks, block_leaders, text.size())) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "translation found an invalid executable entry");
     return leave_unchanged();
   }
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
@@ -4364,6 +4648,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   if (!materialized)
     return leave_unchanged();
   result.elf_bytes = std::move(*materialized);
+  if (options_.verify_rewrite_discharge && result.ok())
+    verify_rewrite_discharge(result);
   return result;
 }
 

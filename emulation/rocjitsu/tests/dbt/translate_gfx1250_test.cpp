@@ -131,6 +131,8 @@ gfx1250_revision_options(rocjitsu::ProcessorRevision input_revision,
   rocjitsu::BinaryTranslatorOptions options;
   options.input_revision = input_revision;
   options.output_revision = output_revision;
+  options.verify_rewrite_discharge = input_revision == rocjitsu::ProcessorRevision::Gfx1250B0 &&
+                                     output_revision == rocjitsu::ProcessorRevision::Gfx1250A0;
   return options;
 }
 
@@ -7097,14 +7099,17 @@ TEST(BinaryTranslatorE2E, Gfx1250RelocatesDirectCallForB0ToA0) {
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
 
-  rocjitsu::BinaryTranslator translator(
-      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
-      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
-                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto options = gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                          rocjitsu::ProcessorRevision::Gfx1250A0);
+  options.verify_rewrite_discharge = true;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+                                        options);
   auto result = translator.translate(source);
 
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
                                                           : result.diagnostics.front().message);
+  EXPECT_TRUE(result.rewrite_discharge_checked);
+  EXPECT_TRUE(result.rewrite_discharge_verified);
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_FALSE(translated.text_sections().empty());
   const auto *target_words =
@@ -8396,6 +8401,137 @@ TEST(SemanticTranslator, Gfx1250ClassifiesLivenessFreeExpandRules) {
   EXPECT_FALSE(translator.has_expand_rule(*v_nop_inst));
 }
 
+TEST(SemanticTranslator, Gfx1250RegistersResidualChecksForEverySuccessfulExpandRule) {
+  std::vector<uint32_t> rules_without_residual_checks;
+  for (const rocjitsu::TranslationRule &rule : rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0()) {
+    if (rule.residual_expand_fn == nullptr) {
+      rules_without_residual_checks.push_back((static_cast<uint32_t>(rule.src_encoding_id) << 16) |
+                                              rule.src_opcode);
+    }
+  }
+
+  const std::vector<uint32_t> expected_non_discharge_rules = {
+      (static_cast<uint32_t>(gfx1250::encoding::kSop1) << 16) | gfx1250::kSBarrierSignalIsfirstSop1,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF1616x16x128Bf8Fp8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p,
+  };
+  EXPECT_EQ(rules_without_residual_checks, expected_non_discharge_rules);
+  EXPECT_EQ(rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0().size() -
+                rules_without_residual_checks.size(),
+            34u);
+}
+
+TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule) {
+  std::vector<std::vector<uint32_t>> samples;
+  const auto add_sample = [&](const auto &words) {
+    samples.emplace_back(words.begin(), words.end());
+  };
+  const auto add_compound_sample = [&](const auto &prefix, const auto &body) {
+    std::vector<uint32_t> words(prefix.begin(), prefix.end());
+    words.insert(words.end(), body.begin(), body.end());
+    samples.push_back(std::move(words));
+  };
+
+  add_sample(gfx1250::build_sopp(gfx1250::kSClauseSopp, {.simm16 = 4}));
+  add_sample(gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
+                                  {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
+
+  constexpr auto regular_scale =
+      gfx1250::build_vop3p(0x35, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 0});
+  constexpr auto scale16 =
+      gfx1250::build_vop3p(0x3a, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 0});
+  constexpr auto scale_body =
+      gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
+                           {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 256 + 48});
+  add_compound_sample(regular_scale, scale_body);
+  add_compound_sample(scale16, scale_body);
+
+  add_sample(gfx1250::build_vop3p(gfx1250::kVWmmaI3216x16x64Iu8Vop3p,
+                                  {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
+  add_sample(gfx1250::build_vop3p(gfx1250::kVSwmmacI3216x16x128Iu8Vop3p,
+                                  {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
+
+  for (const uint16_t opcode : {
+           gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+           gfx1250::kVWmmaF3216x16x128Fp8Bf8Vop3p,
+           gfx1250::kVWmmaF3216x16x128Bf8Fp8Vop3p,
+           gfx1250::kVWmmaF3216x16x128Bf8Bf8Vop3p,
+       }) {
+    add_sample(gfx1250::build_vop3p(opcode, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
+  }
+  add_sample(
+      gfx1250::build_vop3p(gfx1250::kVWmmaF3232x16x128F4Vop3p,
+                           {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 40, .src2 = 256 + 64}));
+
+  add_sample(gfx1250::build_vimage(
+      gfx1250::kTensorLoadToLdsVimage,
+      {.vaddr4 = 124, .vaddr0 = 8, .vaddr1 = 0, .vaddr2 = 124, .vaddr3 = 124}));
+  add_sample(
+      gfx1250::build_vop3(gfx1250::kVCvtF32Fp8Vop3, {.vdst = 30, .clamp = 1, .src0 = 256 + 22}));
+
+  constexpr gfx1250::VdsBuilderFields ds2_fields{
+      .offset0 = 3, .offset1 = 5, .addr = 20, .data0 = 30, .data1 = 40, .vdst = 50};
+  for (const uint16_t opcode : {
+           gfx1250::kDsStore2addrB32Vds,
+           gfx1250::kDsStore2addrStride64B32Vds,
+           gfx1250::kDsStorexchg2addrRtnB32Vds,
+           gfx1250::kDsStorexchg2addrStride64RtnB32Vds,
+           gfx1250::kDsLoad2addrB32Vds,
+           gfx1250::kDsLoad2addrStride64B32Vds,
+           gfx1250::kDsStore2addrB64Vds,
+           gfx1250::kDsStore2addrStride64B64Vds,
+           gfx1250::kDsStorexchg2addrRtnB64Vds,
+           gfx1250::kDsStorexchg2addrStride64RtnB64Vds,
+           gfx1250::kDsLoad2addrB64Vds,
+           gfx1250::kDsLoad2addrStride64B64Vds,
+       }) {
+    add_sample(gfx1250::build_vds(opcode, ds2_fields));
+  }
+  add_sample(gfx1250::build_vds(gfx1250::kDsStoreAddtidB32Vds,
+                                {.offset0 = 0x34, .offset1 = 0x12, .data0 = 16}));
+  add_sample(gfx1250::build_vds(gfx1250::kDsLoadAddtidB32Vds,
+                                {.offset0 = 0x34, .offset1 = 0x12, .vdst = 8}));
+
+  for (const uint16_t opcode : {
+           gfx1250::kClusterLoadB32Vglobal,
+           gfx1250::kClusterLoadB64Vglobal,
+           gfx1250::kClusterLoadB128Vglobal,
+           gfx1250::kClusterLoadAsyncToLdsB8Vglobal,
+           gfx1250::kClusterLoadAsyncToLdsB32Vglobal,
+           gfx1250::kClusterLoadAsyncToLdsB64Vglobal,
+           gfx1250::kClusterLoadAsyncToLdsB128Vglobal,
+       }) {
+    add_sample(gfx1250::build_vglobal(opcode, {.saddr = 4, .vdst = 8, .vaddr = 12}));
+  }
+
+  std::vector<const rocjitsu::TranslationRule *> residual_rules;
+  for (const rocjitsu::TranslationRule &rule : rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0()) {
+    if (rule.residual_expand_fn != nullptr)
+      residual_rules.push_back(&rule);
+  }
+  ASSERT_EQ(samples.size(), residual_rules.size());
+
+  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  rocjitsu::SemanticTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250,
+                                          rocjitsu::ProcessorRevision::Gfx1250B0,
+                                          rocjitsu::ProcessorRevision::Gfx1250A0);
+  for (size_t sample_index = 0; sample_index < samples.size(); ++sample_index) {
+    SCOPED_TRACE(sample_index);
+    std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(samples[sample_index].data(), 0));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->encoding_id(), residual_rules[sample_index]->src_encoding_id);
+    EXPECT_EQ(inst->opcode(), residual_rules[sample_index]->src_opcode);
+    EXPECT_TRUE(translator.residual_expand_rule_applies(*inst));
+  }
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250UsesNeutralScaledK128Fp8Bf8Wmma) {
   struct WmmaCase {
     const char *name;
@@ -9355,6 +9491,50 @@ TEST(BinaryTranslatorE2E, Gfx1250ClusterLoadFailsClosedWithoutExecIndependentCar
   EXPECT_TRUE(rocjitsu::test_support::has_error_containing(
       result, rocjitsu::DiagnosticKind::ExpandFailed,
       "gfx1250 cluster load could not allocate scalar scratch for M0 preservation"));
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250DischargesEveryClusterLoadVariant) {
+  struct Case {
+    std::array<uint32_t, 3> words;
+    std::string_view mnemonic;
+  };
+  constexpr std::array cases = {
+      Case{{0xEE19C000u, 0x00000001u, 0x00000000u}, "cluster_load_b32"},
+      Case{{0xEE1A0000u, 0x00000000u, 0x00000002u}, "cluster_load_b64"},
+      Case{{0xEE1A4000u, 0x00010002u, 0x00000000u}, "cluster_load_b128"},
+      Case{{0xEE1A8000u, 0x00000000u, 0x00000000u}, "cluster_load_async_to_lds_b8"},
+      Case{{0xEE1AC000u, 0x00000000u, 0x00000800u}, "cluster_load_async_to_lds_b32"},
+      Case{{0xEE1B0000u, 0x00000004u, 0x00000004u}, "cluster_load_async_to_lds_b64"},
+      Case{{0xEE1B4000u, 0x00010001u, 0x00000000u}, "cluster_load_async_to_lds_b128"},
+  };
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.mnemonic);
+    auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+        {test_case.words[0], test_case.words[1], test_case.words[2], kGfx1250SEndpgm});
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    const auto result = translator.translate(source);
+
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+    EXPECT_TRUE(result.rewrite_discharge_checked);
+    EXPECT_TRUE(result.rewrite_discharge_verified);
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_FALSE(translated.text_sections().empty());
+    const auto decoded =
+        decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+    EXPECT_EQ(
+        std::ranges::count_if(
+            decoded, [&](const auto &inst) { return inst->mnemonic() == test_case.mnemonic; }),
+        1);
+  }
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250ClusterLoadPreservesGuestM0ClearWithoutRestore) {
@@ -11161,13 +11341,16 @@ TEST(BinaryTranslatorE2E, Gfx1250TensorLoadPreservesGuestMaskClearWithoutRestore
       {source_clear[0], source_tensor[0], source_tensor[1], source_tensor[2], kGfx1250SEndpgm});
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
 
-  rocjitsu::BinaryTranslator translator(
-      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
-      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
-                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto options = gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                          rocjitsu::ProcessorRevision::Gfx1250A0);
+  options.verify_rewrite_discharge = true;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+                                        options);
   auto result = translator.translate(source);
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
                                                           : result.diagnostics.front().message);
+  EXPECT_TRUE(result.rewrite_discharge_checked);
+  EXPECT_TRUE(result.rewrite_discharge_verified);
 
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_FALSE(translated.text_sections().empty());

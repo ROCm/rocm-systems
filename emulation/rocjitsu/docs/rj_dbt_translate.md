@@ -48,6 +48,10 @@ Options:
   requests whose input and output architecture families differ. A second-pass
   failure or byte difference makes the command fail. This option cannot be
   combined with `--skip-failed-kernels` or `--list-code-objects`.
+- `--verify-rewrite-discharge`: scan the final gfx1250 B0-to-A0 output with the
+  applicability checks registered by its implemented rewrites. The command
+  fails if any of those rewrites remains actionable. This option cannot
+  be combined with `--skip-failed-kernels` or `--list-code-objects`.
 - `--list-code-objects`: list extractable code objects and exit.
 - `--help`: print command-line help.
 
@@ -95,6 +99,37 @@ other ELF materialization are part of the result, so changes in any of them make
 verification fail. A failure does not by itself mean that the first output is
 invalid; it means the translation is not a byte-level fixed point. This mode is
 intended to expose such instability while developing or auditing the translator.
+
+## Rewrite-discharge Verification
+
+Use `--verify-rewrite-discharge` to check that the complete gfx1250 B0-to-A0
+translation discharged the applicability conditions of its implemented
+rewrites:
+
+```sh
+rj_dbt_translate input.gfx1250.co \
+  --input-target gfx1250 --input-revision b0 \
+  --output-target gfx1250 --output-revision a0 \
+  --verify-rewrite-discharge --output-mode code-object > output.gfx1250-a0.co
+```
+
+The verifier decodes the final executable stream after all translation and ELF
+materialization have finished. It reconstructs executable entry boundaries,
+runs the read-only applicability check associated with each implemented rewrite,
+and reports any residual site as an error at its final `.text` offset.
+
+This is an opt-in offline development audit. The implementation lives beside
+translation because it needs the final materialized ELF and decoded CFG, while
+`rj_dbt_translate` is the enabling consumer. Runtime translation leaves the
+check disabled; when explicitly requested, an unavailable profile or failed
+scan is reported as an ordinary translation error.
+
+This check proves only that the current rewrite payloads clear the conditions
+recognized by their corresponding applicability checks. It does not establish
+that those checks are complete or correct, prove semantic equivalence, or
+validate runtime prerequisites. `--verify-idempotence` can be enabled alongside
+this option when both the residual-trigger property and byte-level fixed-point
+property are desired.
 
 ### Generated Artifact Markers
 

@@ -408,6 +408,13 @@ using ExpandFn = ExpandResult (*)(const Instruction &inst, uint32_t arch, uint64
                                   const LivenessAnalysis &liveness, TranslationContext &context,
                                   const LaneLayout *guest_layout, const LaneLayout *host_layout);
 
+/// @brief Read-only test for whether an implemented expansion is still actionable.
+///
+/// @details The predicate observes only the decoded instruction stream. It must
+/// share any operand or neighboring-instruction trigger checks used by the
+/// corresponding ExpandFn, but must not allocate resources or emit words.
+using ResidualExpandFn = bool (*)(const Instruction &inst);
+
 /// @brief A single translation rule for one (source, target) instruction.
 ///
 /// @details Keyed by (src_encoding_id, src_opcode) for lookup via binary search.
@@ -428,6 +435,8 @@ struct TranslationRule {
   const LaneLayout *guest_layout; ///< Source matrix layout (for matrix Expand).
   const LaneLayout *host_layout;  ///< Target matrix layout (for matrix Expand).
   bool requires_liveness = true;  ///< Conservative default; tables opt out after auditing.
+  /// Read-only residual predicate; nullptr excludes a rule from discharge verification.
+  ResidualExpandFn residual_expand_fn = nullptr;
 
   constexpr auto operator<=>(const TranslationRule &rhs) const {
     if (auto cmp = src_encoding_id <=> rhs.src_encoding_id; cmp != 0)

@@ -133,6 +133,13 @@ struct BinaryTranslatorOptions {
   /// skipped-kernel warning. The symbol remains loadable so other kernels in the
   /// same code object are not blocked by one untranslated kernel.
   bool skip_failed_kernels = false;
+
+  /// @brief Opt in to an offline audit for implemented rewrites still actionable in final output.
+  ///
+  /// @details The audit is available only for translation profiles with registered semantic or
+  /// operand-level residual checks. Requesting it for any other profile produces an error
+  /// diagnostic. Runtime translation does not enable this development check by default.
+  bool verify_rewrite_discharge = false;
 };
 
 /// @brief Result of translating a code object.
@@ -140,6 +147,8 @@ struct TranslatedCodeObject {
   std::vector<uint8_t> elf_bytes;                        ///< Translated ELF for the host ISA.
   rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_INVALID; ///< Host ISA architecture.
   std::vector<TranslationDiagnostic> diagnostics;        ///< Translation warnings/errors.
+  bool rewrite_discharge_checked = false;                ///< Final output scan was attempted.
+  bool rewrite_discharge_verified = false; ///< No implemented rewrite remained actionable.
 
   /// @brief True if translation produced no error diagnostics.
   ///
@@ -195,6 +204,8 @@ public:
 private:
   /// @brief Whether this translator is running the gfx1250 B0-to-A0 profile.
   [[nodiscard]] bool is_gfx1250_b0_to_a0() const;
+
+  void verify_rewrite_discharge(TranslatedCodeObject &result) const;
 
   /// @brief Return the generated or revision-specific legalization for an instruction.
   [[nodiscard]] const InstructionLegalization *lookup_legalization(const Instruction &inst) const;

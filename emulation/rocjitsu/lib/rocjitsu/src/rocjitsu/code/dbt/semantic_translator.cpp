@@ -101,4 +101,15 @@ bool SemanticTranslator::expand_rule_requires_liveness(const Instruction &inst) 
   return rule != nullptr && rule->requires_liveness;
 }
 
+bool SemanticTranslator::residual_expand_rule_applies(const Instruction &inst) const {
+  const TranslationRule *rule = find_expand_rule(inst);
+  return rule != nullptr && rule->residual_expand_fn != nullptr && rule->residual_expand_fn(inst);
+}
+
+bool SemanticTranslator::has_residual_rules() const {
+  return std::ranges::any_of(expand_rules_, [](const TranslationRule &rule) {
+    return rule.residual_expand_fn != nullptr;
+  });
+}
+
 } // namespace rocjitsu

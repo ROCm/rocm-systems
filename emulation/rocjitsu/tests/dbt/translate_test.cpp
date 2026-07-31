@@ -720,11 +720,14 @@ TEST(BinaryTranslatorE2E, EmptyTextSameArchIsSuccessfulNoOp) {
   BinaryTranslatorOptions options;
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
+  options.verify_rewrite_discharge = true;
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_TRUE(result.ok());
   EXPECT_TRUE(result.dispatchable());
+  EXPECT_TRUE(result.rewrite_discharge_checked);
+  EXPECT_TRUE(result.rewrite_discharge_verified);
   EXPECT_EQ(result.elf_bytes, image);
   const auto warning = std::ranges::find_if(result.diagnostics, [](const auto &diagnostic) {
     return diagnostic.kind == DiagnosticKind::DataOnly;
@@ -935,6 +938,509 @@ TEST(CodeObjectPatcher, ResolvesAllocatedDataPayloadsAndEndpoints) {
   ASSERT_TRUE(resolve_allocated_data_section_address(sections, 0x2010));
   EXPECT_FALSE(resolve_pc_relative_data_section_address(sections, 0x2010, 0x2010, 0x8))
       << "source text takes precedence over a data section ending at the same address";
+}
+
+TEST(BinaryTranslatorE2E, RewriteDischargeRejectsIdentityOutputWithResidualTrigger) {
+  auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
+  write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                 EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  constexpr auto source_clause = gfx1250::build_sopp(gfx1250::kSClauseSopp, {.simm16 = 4});
+  write_value_for_test<uint32_t>(image, 0x100, source_clause[0]);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslatorOptions options;
+  options.input_revision = ProcessorRevision::Gfx1250B0;
+  options.output_revision = ProcessorRevision::Gfx1250A0;
+  options.verify_rewrite_discharge = true;
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(result.rewrite_discharge_checked);
+  EXPECT_FALSE(result.rewrite_discharge_verified);
+  const auto residual = std::ranges::find_if(result.diagnostics, [](const auto &diagnostic) {
+    return diagnostic.kind == DiagnosticKind::ResidualRewrite;
+  });
+  ASSERT_NE(residual, result.diagnostics.end());
+  EXPECT_EQ(residual->severity, DiagnosticSeverity::Error);
+  EXPECT_EQ(residual->output_offset, std::optional<uint64_t>(0));
+  EXPECT_EQ(residual->mnemonic, "s_clause");
+}
+
+TEST(BinaryTranslatorE2E, RewriteDischargeRejectsResidualFlatScratchBaseSelector) {
+  auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
+  write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                 EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  constexpr auto source = gfx1250::build_sop1(gfx1250::kSMovB64Sop1, {.ssrc0 = 231, .sdst = 10});
+  write_value_for_test<uint32_t>(image, 0x100, source[0]);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  ASSERT_TRUE(code_object.is_valid());
+
+  BinaryTranslatorOptions options;
+  options.input_revision = ProcessorRevision::Gfx1250B0;
+  options.output_revision = ProcessorRevision::Gfx1250A0;
+  options.verify_rewrite_discharge = true;
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  const auto result = translator.translate(code_object);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(result.rewrite_discharge_checked);
+  EXPECT_FALSE(result.rewrite_discharge_verified);
+  const auto residual = std::ranges::find_if(result.diagnostics, [](const auto &diagnostic) {
+    return diagnostic.kind == DiagnosticKind::ResidualRewrite;
+  });
+  ASSERT_NE(residual, result.diagnostics.end());
+  EXPECT_EQ(residual->severity, DiagnosticSeverity::Error);
+  EXPECT_EQ(residual->output_offset, std::optional<uint64_t>(0));
+  EXPECT_EQ(residual->mnemonic, "s_mov_b64");
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250TranslationHonorsExternallyVisibleTextEntries) {
+  constexpr auto clear_m0 = gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 125});
+  constexpr auto cluster = gfx1250::build_vglobal(gfx1250::kClusterLoadB32Vglobal,
+                                                  {.saddr = 124, .vdst = 8, .vaddr = 12});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const std::vector<uint32_t> words = {clear_m0[0], cluster[0], cluster[1], cluster[2],
+                                       kGfx1250SEndpgm};
+
+  for (const uint8_t symbol_bind : {kElfSymbolBindGlobal, kElfSymbolBindWeak}) {
+    SCOPED_TRACE(symbol_bind == kElfSymbolBindGlobal ? "STB_GLOBAL" : "STB_WEAK");
+    auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words, words.size());
+    const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+    write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                   EF_AMDGPU_MACH_AMDGCN_GFX1250);
+    const auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+    const auto text_it = std::ranges::find_if(
+        shdrs, [](const Elf64_Shdr &section) { return (section.sh_flags & SHF_EXECINSTR) != 0; });
+    const auto symtab_it = std::ranges::find_if(
+        shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_SYMTAB; });
+    ASSERT_NE(text_it, shdrs.end());
+    ASSERT_NE(symtab_it, shdrs.end());
+
+    auto symbols = read_elf_array_for_test<Elf64_Sym>(image, symtab_it->sh_offset,
+                                                      symtab_it->sh_size / sizeof(Elf64_Sym));
+    ASSERT_EQ(symbols.size(), 3u);
+    symbols[2].st_info = elf_symbol_info(symbol_bind, kElfSymbolTypeFunc);
+    symbols[2].st_shndx = static_cast<uint16_t>(text_it - shdrs.begin());
+    symbols[2].st_value = text_it->sh_addr + sizeof(uint32_t);
+    symbols[2].st_size = 4 * sizeof(uint32_t);
+    write_bytes_for_test(image, symtab_it->sh_offset, symbols.data(),
+                         symbols.size() * sizeof(Elf64_Sym));
+
+    AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    BinaryTranslatorOptions options;
+    options.input_revision = ProcessorRevision::Gfx1250B0;
+    options.output_revision = ProcessorRevision::Gfx1250A0;
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+    const auto result = translator.translate(source);
+
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+    EXPECT_FALSE(result.rewrite_discharge_checked)
+        << "ordinary translation must honor the entry without relying on the optional verifier";
+    AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(translated.is_valid());
+    ASSERT_EQ(translated.text_sections().size(), 1u);
+    const Section *translated_text = translated.text_sections().front();
+    ASSERT_EQ(translated_text->size() % sizeof(uint32_t), 0u);
+    const auto translated_words =
+        std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(translated_text->data()),
+                                  translated_text->size() / sizeof(uint32_t));
+    EXPECT_EQ(std::ranges::count(translated_words, clear_m0[0]), 2)
+        << "the externally entered cluster load needs its own M0 clear";
+    EXPECT_EQ(std::ranges::count(translated_words, cluster[0]), 1);
+  }
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250TranslationFailsClosedOnInvalidExternalTextEntry) {
+  constexpr auto clear_m0 = gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 125});
+  constexpr auto cluster = gfx1250::build_vglobal(gfx1250::kClusterLoadB32Vglobal,
+                                                  {.saddr = 124, .vdst = 8, .vaddr = 12});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const std::vector<uint32_t> words = {clear_m0[0], cluster[0], cluster[1], cluster[2],
+                                       kGfx1250SEndpgm};
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words, words.size());
+
+  const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                 EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  const auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+  const auto text_it = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return (section.sh_flags & SHF_EXECINSTR) != 0; });
+  const auto symtab_it = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_SYMTAB; });
+  ASSERT_NE(text_it, shdrs.end());
+  ASSERT_NE(symtab_it, shdrs.end());
+
+  auto symbols = read_elf_array_for_test<Elf64_Sym>(image, symtab_it->sh_offset,
+                                                    symtab_it->sh_size / sizeof(Elf64_Sym));
+  ASSERT_EQ(symbols.size(), 3u);
+  symbols[2].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
+  symbols[2].st_shndx = static_cast<uint16_t>(text_it - shdrs.begin());
+  symbols[2].st_value = text_it->sh_addr + 2 * sizeof(uint32_t);
+  symbols[2].st_size = sizeof(uint32_t);
+  write_bytes_for_test(image, symtab_it->sh_offset, symbols.data(),
+                       symbols.size() * sizeof(Elf64_Sym));
+
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslatorOptions options;
+  options.input_revision = ProcessorRevision::Gfx1250B0;
+  options.output_revision = ProcessorRevision::Gfx1250A0;
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_FALSE(result.rewrite_discharge_checked);
+  EXPECT_TRUE(has_error_containing(result, DiagnosticKind::Legalization,
+                                   "translation found an invalid executable entry"));
+}
+
+TEST(BinaryTranslatorE2E, RewriteDischargeIgnoresUnreferencedLocalTextLabel) {
+  constexpr auto clear_m0 = gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 125});
+  constexpr auto cluster = gfx1250::build_vglobal(gfx1250::kClusterLoadB32Vglobal,
+                                                  {.saddr = 124, .vdst = 8, .vaddr = 12});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const std::vector<uint32_t> words = {clear_m0[0], cluster[0], cluster[1], cluster[2],
+                                       kGfx1250SEndpgm};
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words, words.size());
+
+  const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                 EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+  const auto text_it = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return (section.sh_flags & SHF_EXECINSTR) != 0; });
+  const auto symtab_it = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_SYMTAB; });
+  ASSERT_NE(text_it, shdrs.end());
+  ASSERT_NE(symtab_it, shdrs.end());
+
+  auto symbols = read_elf_array_for_test<Elf64_Sym>(image, symtab_it->sh_offset,
+                                                    symtab_it->sh_size / sizeof(Elf64_Sym));
+  ASSERT_EQ(symbols.size(), 3u);
+  std::swap(symbols[1], symbols[2]);
+  symbols[1].st_info = elf_symbol_info(kElfSymbolBindLocal, kElfSymbolTypeFunc);
+  symbols[1].st_shndx = static_cast<uint16_t>(text_it - shdrs.begin());
+  symbols[1].st_value = text_it->sh_addr + sizeof(uint32_t);
+  symbols[1].st_size = 4 * sizeof(uint32_t);
+  symtab_it->sh_info = 2;
+  write_bytes_for_test(image, symtab_it->sh_offset, symbols.data(),
+                       symbols.size() * sizeof(Elf64_Sym));
+  write_bytes_for_test(image, ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslatorOptions options;
+  options.input_revision = ProcessorRevision::Gfx1250B0;
+  options.output_revision = ProcessorRevision::Gfx1250A0;
+  options.verify_rewrite_discharge = true;
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  const auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  EXPECT_TRUE(result.rewrite_discharge_checked);
+  EXPECT_TRUE(result.rewrite_discharge_verified);
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_EQ(translated.text_sections().size(), 1u);
+  const Section *translated_text = translated.text_sections().front();
+  const auto translated_words =
+      std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(translated_text->data()),
+                                translated_text->size() / sizeof(uint32_t));
+  EXPECT_EQ(translated_words.size(), words.size());
+  EXPECT_EQ(std::ranges::count(translated_words, clear_m0[0]), 1)
+      << "an unreferenced local label must not force a redundant cluster wrapper";
+}
+
+TEST(BinaryTranslatorE2E, RewriteDischargeHonorsRelocationBackedLocalTextEntry) {
+  auto image = make_amdgpu_elf_with_symbol_relocation(kElfSymbolTypeFunc, true);
+  const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                 EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+  const auto text_it = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return (section.sh_flags & SHF_EXECINSTR) != 0; });
+  const auto symtab_it = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_SYMTAB; });
+  ASSERT_NE(text_it, shdrs.end());
+  ASSERT_NE(symtab_it, shdrs.end());
+
+  constexpr auto compound = gfx1250::build_vop3p(
+      gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272});
+  static_assert(compound.size() == 2);
+  write_bytes_for_test(image, text_it->sh_offset, compound.data(), sizeof(compound));
+  auto symbols = read_elf_array_for_test<Elf64_Sym>(image, symtab_it->sh_offset,
+                                                    symtab_it->sh_size / sizeof(Elf64_Sym));
+  ASSERT_EQ(symbols.size(), 2u);
+  symbols[1].st_info = elf_symbol_info(kElfSymbolBindLocal, kElfSymbolTypeFunc);
+  symbols[1].st_value = text_it->sh_addr + sizeof(uint32_t);
+  symbols[1].st_size = sizeof(uint32_t);
+  symtab_it->sh_info = 2;
+  write_bytes_for_test(image, symtab_it->sh_offset, symbols.data(),
+                       symbols.size() * sizeof(Elf64_Sym));
+  write_bytes_for_test(image, ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslatorOptions options;
+  options.input_revision = ProcessorRevision::Gfx1250B0;
+  options.output_revision = ProcessorRevision::Gfx1250A0;
+  options.verify_rewrite_discharge = true;
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(result.rewrite_discharge_checked);
+  EXPECT_FALSE(result.rewrite_discharge_verified);
+  const auto diagnostic = std::ranges::find_if(result.diagnostics, [](const auto &candidate) {
+    return candidate.kind == DiagnosticKind::ResidualRewrite;
+  });
+  ASSERT_NE(diagnostic, result.diagnostics.end());
+  EXPECT_EQ(diagnostic->message,
+            "rewrite-discharge verification found an invalid final executable entry");
+}
+
+TEST(BinaryTranslatorE2E, RewriteDischargeFailsClosedOnInvalidExternalEntryMetadata) {
+  constexpr auto cluster = gfx1250::build_vglobal(gfx1250::kClusterLoadB32Vglobal,
+                                                  {.saddr = 124, .vdst = 8, .vaddr = 12});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  struct Case {
+    int64_t target_delta;
+    std::string_view expected_message;
+  };
+  constexpr std::array cases = {
+      Case{static_cast<int64_t>(sizeof(uint32_t)),
+           "rewrite-discharge verification found an invalid final executable entry"},
+      Case{-static_cast<int64_t>(sizeof(uint32_t)),
+           "rewrite-discharge verification could not recover final executable entries"},
+  };
+
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.expected_message);
+    auto image = make_minimal_amdgpu_elf_with_two_kernel_descriptors(
+        {cluster[0], cluster[1], cluster[2], kGfx1250SEndpgm});
+    const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+    write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                   EF_AMDGPU_MACH_AMDGCN_GFX1250);
+    const auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+    const auto text_it = std::ranges::find_if(
+        shdrs, [](const Elf64_Shdr &section) { return (section.sh_flags & SHF_EXECINSTR) != 0; });
+    const auto symtab_it = std::ranges::find_if(
+        shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_SYMTAB; });
+    ASSERT_NE(text_it, shdrs.end());
+    ASSERT_NE(symtab_it, shdrs.end());
+
+    auto symbols = read_elf_array_for_test<Elf64_Sym>(image, symtab_it->sh_offset,
+                                                      symtab_it->sh_size / sizeof(Elf64_Sym));
+    ASSERT_EQ(symbols.size(), 3u);
+    symbols[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
+    symbols[1].st_shndx = static_cast<uint16_t>(text_it - shdrs.begin());
+    symbols[1].st_value = text_it->sh_addr;
+    symbols[1].st_size = sizeof(uint32_t);
+    symbols[2].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
+    symbols[2].st_shndx = static_cast<uint16_t>(text_it - shdrs.begin());
+    symbols[2].st_value =
+        static_cast<uint64_t>(static_cast<int64_t>(text_it->sh_addr) + test_case.target_delta);
+    symbols[2].st_size = sizeof(uint32_t);
+    write_bytes_for_test(image, symtab_it->sh_offset, symbols.data(),
+                         symbols.size() * sizeof(Elf64_Sym));
+
+    AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    BinaryTranslatorOptions options;
+    options.input_revision = ProcessorRevision::Gfx1250B0;
+    options.output_revision = ProcessorRevision::Gfx1250A0;
+    options.verify_rewrite_discharge = true;
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+    const auto result = translator.translate(source);
+
+    EXPECT_FALSE(result.ok());
+    EXPECT_EQ(result.elf_bytes, image);
+    EXPECT_TRUE(result.rewrite_discharge_checked);
+    EXPECT_FALSE(result.rewrite_discharge_verified);
+    const auto diagnostic = std::ranges::find_if(result.diagnostics, [](const auto &candidate) {
+      return candidate.kind == DiagnosticKind::ResidualRewrite;
+    });
+    ASSERT_NE(diagnostic, result.diagnostics.end());
+    EXPECT_EQ(diagnostic->severity, DiagnosticSeverity::Error);
+    EXPECT_EQ(diagnostic->guest_offset, std::nullopt);
+    EXPECT_EQ(diagnostic->output_offset, std::nullopt);
+    EXPECT_TRUE(diagnostic->mnemonic.empty());
+    EXPECT_EQ(diagnostic->message, test_case.expected_message);
+  }
+}
+
+TEST(BinaryTranslatorE2E, RewriteDischargeFailsClosedOnMultipleExecutableSections) {
+  auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
+  const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                 EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+  ASSERT_GE(shdrs.size(), 3u);
+  shdrs[2].sh_name = shdrs[1].sh_name;
+  shdrs[2].sh_flags |= SHF_EXECINSTR;
+  write_bytes_for_test(image, ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  ASSERT_EQ(source.text_sections().size(), 2u);
+  BinaryTranslatorOptions options;
+  options.input_revision = ProcessorRevision::Gfx1250B0;
+  options.output_revision = ProcessorRevision::Gfx1250A0;
+  options.verify_rewrite_discharge = true;
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(result.rewrite_discharge_checked);
+  EXPECT_FALSE(result.rewrite_discharge_verified);
+  const auto diagnostic = std::ranges::find_if(result.diagnostics, [](const auto &candidate) {
+    return candidate.kind == DiagnosticKind::ResidualRewrite;
+  });
+  ASSERT_NE(diagnostic, result.diagnostics.end());
+  EXPECT_EQ(diagnostic->severity, DiagnosticSeverity::Error);
+  EXPECT_EQ(diagnostic->guest_offset, std::nullopt);
+  EXPECT_EQ(diagnostic->output_offset, std::nullopt);
+  EXPECT_TRUE(diagnostic->mnemonic.empty());
+  EXPECT_EQ(diagnostic->message,
+            "rewrite-discharge verification requires exactly one executable text section");
+}
+
+TEST(BinaryTranslatorE2E, RewriteDischargeDoesNotCreditPredecessorAcrossTextSymbolEntry) {
+  constexpr auto clear_m0 = gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 125});
+  constexpr auto cluster = gfx1250::build_vglobal(gfx1250::kClusterLoadB32Vglobal,
+                                                  {.saddr = 124, .vdst = 8, .vaddr = 12});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+
+  for (const uint8_t symbol_type : {kElfSymbolTypeFunc, kElfSymbolTypeNone}) {
+    SCOPED_TRACE(symbol_type == kElfSymbolTypeFunc ? "STT_FUNC" : "STT_NOTYPE");
+    auto image = make_minimal_amdgpu_elf_with_two_kernel_descriptors(
+        {clear_m0[0], cluster[0], cluster[1], cluster[2], kGfx1250SEndpgm});
+
+    const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+    write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                   EF_AMDGPU_MACH_AMDGCN_GFX1250);
+    const auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+    const auto symtab_it = std::ranges::find_if(
+        shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_SYMTAB; });
+    ASSERT_NE(symtab_it, shdrs.end());
+    auto symbols = read_elf_array_for_test<Elf64_Sym>(image, symtab_it->sh_offset,
+                                                      symtab_it->sh_size / sizeof(Elf64_Sym));
+    ASSERT_EQ(symbols.size(), 3u);
+    symbols[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, symbol_type);
+    symbols[1].st_shndx = 1;
+    symbols[1].st_value = 0x1100;
+    symbols[1].st_size = sizeof(uint32_t);
+    symbols[2].st_info = elf_symbol_info(kElfSymbolBindGlobal, symbol_type);
+    symbols[2].st_shndx = 1;
+    symbols[2].st_value = 0x1100 + sizeof(uint32_t);
+    symbols[2].st_size = 4 * sizeof(uint32_t);
+    write_bytes_for_test(image, symtab_it->sh_offset, symbols.data(),
+                         symbols.size() * sizeof(Elf64_Sym));
+
+    AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+
+    BinaryTranslatorOptions options;
+    options.input_revision = ProcessorRevision::Gfx1250B0;
+    options.output_revision = ProcessorRevision::Gfx1250A0;
+    options.verify_rewrite_discharge = true;
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+    const auto result = translator.translate(source);
+
+    EXPECT_FALSE(result.ok());
+    EXPECT_EQ(result.elf_bytes, image);
+    EXPECT_TRUE(result.rewrite_discharge_checked);
+    EXPECT_FALSE(result.rewrite_discharge_verified);
+    const auto residual = std::ranges::find_if(result.diagnostics, [](const auto &diagnostic) {
+      return diagnostic.kind == DiagnosticKind::ResidualRewrite;
+    });
+    ASSERT_NE(residual, result.diagnostics.end());
+    EXPECT_EQ(residual->severity, DiagnosticSeverity::Error);
+    EXPECT_EQ(residual->output_offset, std::optional<uint64_t>(sizeof(uint32_t)));
+    EXPECT_EQ(residual->mnemonic, "cluster_load_b32");
+  }
+}
+
+TEST(BinaryTranslatorE2E, RewriteDischargeDoesNotCreditPredecessorAcrossRelativeEntry) {
+  constexpr auto clear_m0 = gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 125});
+  constexpr auto cluster = gfx1250::build_vglobal(gfx1250::kClusterLoadB32Vglobal,
+                                                  {.saddr = 124, .vdst = 8, .vaddr = 12});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = make_minimal_amdgpu_elf_with_two_kernel_descriptors(
+      {clear_m0[0], cluster[0], cluster[1], cluster[2], kGfx1250SEndpgm});
+
+  const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                 EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+  const auto text_it = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return (section.sh_flags & SHF_EXECINSTR) != 0; });
+  const auto data_it = std::ranges::find_if(shdrs, [](const Elf64_Shdr &section) {
+    return section.sh_type == SHT_PROGBITS && (section.sh_flags & SHF_ALLOC) != 0 &&
+           (section.sh_flags & SHF_EXECINSTR) == 0;
+  });
+  const auto symtab_it = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_SYMTAB; });
+  ASSERT_NE(text_it, shdrs.end());
+  ASSERT_NE(data_it, shdrs.end());
+  ASSERT_NE(symtab_it, shdrs.end());
+
+  auto symbols = read_elf_array_for_test<Elf64_Sym>(image, symtab_it->sh_offset,
+                                                    symtab_it->sh_size / sizeof(Elf64_Sym));
+  ASSERT_EQ(symbols.size(), 3u);
+  for (size_t symbol_index = 1; symbol_index < symbols.size(); ++symbol_index) {
+    symbols[symbol_index].st_shndx = SHN_UNDEF;
+    symbols[symbol_index].st_value = 0;
+    symbols[symbol_index].st_size = 0;
+  }
+  write_bytes_for_test(image, symtab_it->sh_offset, symbols.data(),
+                       symbols.size() * sizeof(Elf64_Sym));
+
+  Elf64_Rela relocation{};
+  relocation.r_offset = data_it->sh_addr;
+  relocation.r_info = R_AMDGPU_RELATIVE64;
+  relocation.r_addend =
+      static_cast<int64_t>(text_it->sh_addr + static_cast<uint64_t>(sizeof(uint32_t)));
+  write_bytes_for_test(image, data_it->sh_offset, &relocation, sizeof(relocation));
+
+  data_it->sh_type = SHT_RELA;
+  data_it->sh_size = sizeof(Elf64_Rela);
+  data_it->sh_link = static_cast<uint32_t>(symtab_it - shdrs.begin());
+  data_it->sh_info = 0;
+  data_it->sh_addralign = alignof(Elf64_Rela);
+  data_it->sh_entsize = sizeof(Elf64_Rela);
+  write_bytes_for_test(image, ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslatorOptions options;
+  options.input_revision = ProcessorRevision::Gfx1250B0;
+  options.output_revision = ProcessorRevision::Gfx1250A0;
+  options.verify_rewrite_discharge = true;
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(result.rewrite_discharge_checked);
+  EXPECT_FALSE(result.rewrite_discharge_verified);
+  const auto residual = std::ranges::find_if(result.diagnostics, [](const auto &diagnostic) {
+    return diagnostic.kind == DiagnosticKind::ResidualRewrite;
+  });
+  ASSERT_NE(residual, result.diagnostics.end());
+  EXPECT_EQ(residual->severity, DiagnosticSeverity::Error);
+  EXPECT_EQ(residual->output_offset, std::optional<uint64_t>(sizeof(uint32_t)));
+  EXPECT_EQ(residual->mnemonic, "cluster_load_b32");
 }
 
 TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {

@@ -88,7 +88,17 @@ public:
   /// @brief Whether the matching expansion can query kernel liveness.
   [[nodiscard]] bool expand_rule_requires_liveness(const Instruction &inst) const;
 
+  /// @brief Whether an implemented expansion remains actionable at @p inst.
+  ///
+  /// @details This is a read-only query over the same rule table used by
+  /// try_lower_expand(). Rules without a registered residual predicate are
+  /// excluded.
+  [[nodiscard]] bool residual_expand_rule_applies(const Instruction &inst) const;
+
   [[nodiscard]] bool has_rules() const { return !expand_rules_.empty(); }
+
+  /// @brief Whether this profile registers any residual expansion predicates.
+  [[nodiscard]] bool has_residual_rules() const;
 
 private:
   [[nodiscard]] static constexpr uint32_t packed_rule_key(uint16_t encoding_id, uint16_t opcode) {

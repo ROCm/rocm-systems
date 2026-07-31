@@ -437,6 +437,7 @@ void append_descriptor_error(KdTranslation &result, std::string message) {
   result.diagnostics.push_back({.severity = DiagnosticSeverity::Error,
                                 .kind = DiagnosticKind::KernelDescriptor,
                                 .guest_offset = std::nullopt,
+                                .output_offset = std::nullopt,
                                 .mnemonic = {},
                                 .message = std::move(message),
                                 .required_work = {}});
