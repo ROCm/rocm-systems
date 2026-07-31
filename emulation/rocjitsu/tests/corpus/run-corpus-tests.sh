@@ -68,6 +68,31 @@ done
 
 corpus_test_status=0
 corpus_work_dir="$(pwd -P)"
+rocjitsu_launcher="$(command -v rocjitsu)"
+run_wrapper_prefix=()
+
+# Clang's shared ASan runtime cannot safely initialize a late-loaded HIP
+# runtime. Preload HIP for those builds and suppress only ROCR's known
+# process-lifetime allocations; GCC ASan and non-sanitized builds need neither.
+clang_asan_runtime="$(
+  ldd "${rocjitsu_launcher}" |
+    awk '$1 ~ /^libclang_rt\.asan/ { print $3; exit }'
+)"
+if [[ -n "${clang_asan_runtime}" ]]; then
+  hip_runtime="${ROCM_PATH}/lib/libamdhip64.so.7"
+  lsan_suppressions="${ROCJITSU_SOURCE_DIR}/tests/corpus/lsan.supp"
+  if [[ ! -f "${hip_runtime}" || ! -f "${lsan_suppressions}" ]]; then
+    echo "Could not resolve HIP runtime or LSan suppressions for corpus preload" >&2
+    exit 1
+  fi
+  corpus_preload="${clang_asan_runtime}:${hip_runtime}${LD_PRELOAD:+:${LD_PRELOAD}}"
+  corpus_lsan_options="${LSAN_OPTIONS:+${LSAN_OPTIONS}:}suppressions=${lsan_suppressions}"
+  run_wrapper_prefix=(
+    env
+    "LD_PRELOAD=${corpus_preload}"
+    "LSAN_OPTIONS=${corpus_lsan_options}"
+  )
+fi
 
 for target in "${targets[@]}"; do
   read -r name rocjitsu_config skip_tests_config <<< "${target}"
@@ -77,12 +102,19 @@ for target in "${targets[@]}"; do
   skip_tests_config_path="${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}"
   artifact_dir="${corpus_work_dir}/.pytest-artifacts/${name}"
   cache_dir="${corpus_work_dir}/.pytest-cache/${name}"
+  run_wrapper=(
+    "${run_wrapper_prefix[@]}"
+    "${rocjitsu_launcher}"
+    --config "${rocjitsu_config_path}"
+    --
+  )
+  printf -v run_wrapper_command '%q ' "${run_wrapper[@]}"
 
   pytest_cmd=(
     pytest tests/test_corpus.py
     --target "${name}"
     --suite iree,kernels,cts
-    --run-wrapper "rocjitsu --config ${rocjitsu_config_path} --"
+    --run-wrapper "${run_wrapper_command% }"
     --skip-tests-config "${skip_tests_config_path}"
     --artifact-directory "${artifact_dir}"
     --durations=0
