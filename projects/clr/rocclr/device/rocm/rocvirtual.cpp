@@ -4707,7 +4707,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
           std::min(gpuKernel.KernargSegmentByteSize(), signature.paramsSize()),
           gpuKernel.KernargSegmentByteSize(), gpuKernel.KernargSegmentAlignment());
 
-  amd::NDRange<> local_size(sizes.local());
+  amd::NDRange local_size(sizes.local());
   address hidden_arguments = const_cast<address>(parameters);
   // Calculate local size if it wasn't provided
   devKernel->FindLocalWorkSize(sizes.dimensions(), sizes.global(), local_size);

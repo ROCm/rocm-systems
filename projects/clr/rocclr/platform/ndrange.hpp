@@ -25,27 +25,27 @@ namespace amd {
  */
 
 //! A fixed 3-element typed index space (no dimension tracking — NDRangeContainer owns dims).
-template <typename T = size_t> class NDRange : public EmbeddedObject {
+template <typename T = size_t> class NDRangeImpl : public EmbeddedObject {
  private:
   T data_[3];  //!< indexes array
 
  public:
-  NDRange(T dataX, T dataY, T dataZ) {
+  NDRangeImpl(T dataX, T dataY, T dataZ) {
     data_[0] = dataX;
     data_[1] = dataY;
     data_[2] = dataZ;
   }
 
   //! Copy constructor.
-  NDRange(const NDRange& space) { *this = space; }
+  NDRangeImpl(const NDRangeImpl& space) { *this = space; }
 
   //! Converting copy constructor — widens or narrows element type.
-  template <typename U> NDRange(const NDRange<U>& space) {
+  template <typename U> NDRangeImpl(const NDRangeImpl<U>& space) {
     for (size_t i = 0; i < 3; ++i) data_[i] = static_cast<T>(space[i]);
   }
 
   //! Copy operator.
-  NDRange& operator=(const NDRange& space) {
+  NDRangeImpl& operator=(const NDRangeImpl& space) {
     data_[0] = space.data_[0];
     data_[1] = space.data_[1];
     data_[2] = space.data_[2];
@@ -72,19 +72,25 @@ template <typename T = size_t> class NDRange : public EmbeddedObject {
   }
 
   //! Return true if this index space is identical to \a x.
-  bool operator==(const NDRange& x) const {
+  bool operator==(const NDRangeImpl& x) const {
     return data_[0] == x.data_[0] && data_[1] == x.data_[1] && data_[2] == x.data_[2];
   }
 
   //! Return true if this index space and \a x are different.
-  bool operator!=(const NDRange& x) const { return !(*this == x); }
+  bool operator!=(const NDRangeImpl& x) const { return !(*this == x); }
 
   const T* Data() const { return data_; }
+
+  static bool CanSafelyNarrow(size_t x, size_t y, size_t z) {
+    return (x <= std::numeric_limits<T>::max() && y <= std::numeric_limits<T>::max() &&
+            z <= std::numeric_limits<T>::max());
+  }
 };
 
-using NDRange32 = NDRange<uint32_t>;  //!< AQL grid_size_{x,y,z}
-using NDRange16 = NDRange<uint16_t>;  //!< AQL workgroup_size_{x,y,z}
-using NDRange8 = NDRange<uint8_t>;    //!< AQL cluster_size_{x,y,z}
+using NDRange = NDRangeImpl<size_t>;      //!< Default index space (size_t elements)
+using NDRange32 = NDRangeImpl<uint32_t>;  //!< AQL grid_size_{x,y,z}
+using NDRange16 = NDRangeImpl<uint16_t>;  //!< AQL workgroup_size_{x,y,z}
+using NDRange8 = NDRangeImpl<uint8_t>;    //!< AQL cluster_size_{x,y,z}
 
 //! Stucture to store launch parameters.
 struct LaunchParams {
@@ -110,17 +116,13 @@ struct LaunchParams {
         sharedMemBytes_(sharedMemBytes),
         hipParams_(hipParams),
         validConfig_(true) {
-    if (clusterX > std::numeric_limits<uint8_t>::max() ||
-        clusterY > std::numeric_limits<uint8_t>::max() ||
-        clusterZ > std::numeric_limits<uint8_t>::max()) {
+    if (!NDRange8::CanSafelyNarrow(clusterX, clusterY, clusterZ)) {
       validConfig_ = false;
     }
 
     if (hipParams_) {
       // Check that the size_t globals fit in uint32_t before the narrowing cast above.
-      if (globalX > std::numeric_limits<uint32_t>::max() ||
-          globalY > std::numeric_limits<uint32_t>::max() ||
-          globalZ > std::numeric_limits<uint32_t>::max()) {
+      if (!NDRange32::CanSafelyNarrow(globalX, globalY, globalZ)) {
         validConfig_ = false;
       }
     } else {
@@ -189,7 +191,7 @@ struct HIPLaunchParams : public LaunchParams {
 //! A container for the local and global worksizes.
 class NDRangeContainer {
  private:
-  NDRange<> offset_;     //!< Global work-item offset (size_t — passed as-is to hidden args).
+  NDRange offset_;       //!< Global work-item offset (size_t — passed as-is to hidden args).
   NDRange32 global_;     //!< Total number of work-items in N-dims (AQL grid_size).
   NDRange16 local_;      //!< Number of work-items per workgroup (AQL workgroup_size).
   NDRange8 cluster_;     //!< Cluster dims (AQL cluster_size, max 255 per dim).
@@ -233,7 +235,7 @@ class NDRangeContainer {
   //! Return the number of dimensions.
   size_t dimensions() const { return dimensions_; }
 
-  const NDRange<>& offset() const { return offset_; }
+  const NDRange& offset() const { return offset_; }
   const NDRange32& global() const { return global_; }
   const NDRange16& local() const { return local_; }
   const NDRange8& cluster() const { return cluster_; }

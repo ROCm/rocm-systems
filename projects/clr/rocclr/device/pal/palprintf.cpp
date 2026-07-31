@@ -50,7 +50,7 @@ bool PrintfDbg::create() {
   return false;
 }
 
-bool PrintfDbg::init(VirtualGPU& gpu, bool printfEnabled, const amd::NDRange<>& size) {
+bool PrintfDbg::init(VirtualGPU& gpu, bool printfEnabled, const amd::NDRange& size) {
   // Set up debug output buffer (if printf active)
   if (printfEnabled) {
     if (!allocate()) {

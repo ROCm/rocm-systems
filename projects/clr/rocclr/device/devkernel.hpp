@@ -310,9 +310,9 @@ class Kernel {
   const std::vector<PrintfInfo>& printfInfo() const { return printf_; }
 
   //! Finds local workgroup size
-  void FindLocalWorkSize(size_t workDim,                     //!< Work dimension
-                         const amd::NDRange<>& gblWorkSize,  //!< Global work size
-                         amd::NDRange<>& lclWorkSize         //!< Calculated local work size
+  void FindLocalWorkSize(size_t workDim,                   //!< Work dimension
+                         const amd::NDRange& gblWorkSize,  //!< Global work size
+                         amd::NDRange& lclWorkSize         //!< Calculated local work size
   ) const;
 
   const uint64_t KernelCodeHandle() const { return kernelCodeHandle_; }
