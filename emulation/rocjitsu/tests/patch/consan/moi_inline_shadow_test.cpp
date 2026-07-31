@@ -2365,19 +2365,29 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
   })) << testing::PrintToString(resource_errors);
 }
 
-TEST(ConSanMoi, Rdna4InlineBranchOnlyFixedStackPreservesEntryScalarInputs) {
-  std::vector<uint32_t> text_words(800u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_arch_t arch) {
+  std::vector<uint32_t> text_words(800u, build_s_nop(0, arch));
   size_t cursor = 0u;
-  text_words[cursor++] = 0xD8340000u;
-  text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0
-  text_words[cursor++] = build_s_mov_b32(105u, 105u, ROCJITSU_CODE_ARCH_RDNA4);
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+    constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0u, .data0 = 0u});
+    text_words[cursor++] = store[0];
+    text_words[cursor++] = store[1];
+  } else {
+    text_words[cursor++] = 0xD8340000u;
+    text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0
+  }
+  text_words[cursor++] = build_s_mov_b32(105u, 105u, arch);
   for (uint16_t sgpr = 0u; sgpr < 105u; ++sgpr)
-    text_words[cursor++] = build_s_mov_b32(105u, sgpr, ROCJITSU_CODE_ARCH_RDNA4);
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+    text_words[cursor++] = build_s_mov_b32(105u, sgpr, arch);
+  text_words.back() = build_s_endpgm(arch);
   const std::vector<uint8_t> bytes =
-      make_rdna4_lds_code_object(text_words, "inline_branch_only_fixed_stack",
-                                 kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
-                                 /*uses_dynamic_stack=*/false);
+      arch == ROCJITSU_CODE_ARCH_GFX1250
+          ? make_gfx1250_code_object(text_words, "inline_branch_only_fixed_stack_gfx1250",
+                                     kRdna4Wave64AllVgprsGranulated, /*wave32=*/true,
+                                     /*uses_dynamic_stack=*/false)
+          : make_rdna4_lds_code_object(text_words, "inline_branch_only_fixed_stack_rdna4",
+                                       kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
+                                       /*uses_dynamic_stack=*/false);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -2419,19 +2429,16 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyFixedStackPreservesEntryScalarInputs) {
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
   const auto first_save = instrumentation::build_v_writelane_b32(
-      *prologue->entry_scalar_backup_vgpr, assignment.exec_save_sgpr, /*lane=*/0u,
-      ROCJITSU_CODE_ARCH_RDNA4);
+      *prologue->entry_scalar_backup_vgpr, assignment.exec_save_sgpr, /*lane=*/0u, arch);
   const auto last_save = instrumentation::build_v_writelane_b32(
       *prologue->entry_scalar_backup_vgpr,
       static_cast<uint16_t>(assignment.exec_save_sgpr + kConSanMoiInlineExecSaveSgprCount - 1u),
-      kConSanMoiInlineExecSaveSgprCount - 1u, ROCJITSU_CODE_ARCH_RDNA4);
+      kConSanMoiInlineExecSaveSgprCount - 1u, arch);
   const auto first_restore = instrumentation::build_v_readlane_b32(
-      assignment.exec_save_sgpr, *prologue->entry_scalar_backup_vgpr, /*lane=*/0u,
-      ROCJITSU_CODE_ARCH_RDNA4);
+      assignment.exec_save_sgpr, *prologue->entry_scalar_backup_vgpr, /*lane=*/0u, arch);
   const auto last_restore = instrumentation::build_v_readlane_b32(
       static_cast<uint16_t>(assignment.exec_save_sgpr + kConSanMoiInlineExecSaveSgprCount - 1u),
-      *prologue->entry_scalar_backup_vgpr, kConSanMoiInlineExecSaveSgprCount - 1u,
-      ROCJITSU_CODE_ARCH_RDNA4);
+      *prologue->entry_scalar_backup_vgpr, kConSanMoiInlineExecSaveSgprCount - 1u, arch);
   ASSERT_TRUE(first_save);
   ASSERT_TRUE(last_save);
   ASSERT_TRUE(first_restore);
@@ -2441,6 +2448,50 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyFixedStackPreservesEntryScalarInputs) {
   EXPECT_TRUE(contains_subsequence(prologue_words, *last_save));
   EXPECT_TRUE(contains_subsequence(prologue_words, *first_restore));
   EXPECT_TRUE(contains_subsequence(prologue_words, *last_restore));
+}
+
+TEST(ConSanMoi, Rdna4InlineBranchOnlyFixedStackPreservesEntryScalarInputs) {
+  check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(ROCJITSU_CODE_ARCH_RDNA4);
+}
+
+TEST(ConSanMoi, Gfx1250InlineBranchOnlyFixedStackPreservesEntryScalarInputs) {
+  check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(ROCJITSU_CODE_ARCH_GFX1250);
+}
+
+TEST(ConSanMoi, Rdna4InlineUnknownStackDoesNotSelectFixedStackBranchOnlySpill) {
+  std::vector<uint32_t> text_words(800u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  size_t cursor = 0u;
+  text_words[cursor++] = 0xD8340000u;
+  text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0
+  text_words[cursor++] = build_s_mov_b32(105u, 105u, ROCJITSU_CODE_ARCH_RDNA4);
+  for (uint16_t sgpr = 0u; sgpr < 105u; ++sgpr)
+    text_words[cursor++] = build_s_mov_b32(105u, sgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "inline_branch_only_unknown_stack",
+                                 kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
+                                 /*uses_dynamic_stack=*/false);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1u);
+  });
+  mutate_elf_symbol_by_name(bytes, "inline_branch_only_unknown_stack.has_dyn_sized_stack",
+                            [](Elf64_Sym &symbol) { symbol.st_name = 0u; });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  EXPECT_FALSE(result.kernels.front().uses_dynamic_stack.has_value());
+  EXPECT_FALSE(std::ranges::any_of(result.resolved_moi_transient_sgpr_assignments,
+                                   &ConSanMoiTransientSgprAssignment::branch_only_scalar_spill))
+      << testing::PrintToString(result.warnings);
+  EXPECT_FALSE(std::ranges::any_of(result.patches, &ConSanPatchInfo::branch_only_continuation))
+      << testing::PrintToString(result.warnings);
 }
 
 TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRoutesThroughIsolatedNopWords) {

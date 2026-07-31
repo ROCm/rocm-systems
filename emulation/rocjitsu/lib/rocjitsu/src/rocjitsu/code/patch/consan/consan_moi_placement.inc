@@ -3148,24 +3148,47 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       // A full-pressure owner may have no scalar register that remains dead
       // from an access anchor through an appended router. Route with
       // branch-only hops instead and preserve the complete Inline window
-      // before using it. Dynamic-stack owners additionally need one ordinary
-      // bootstrap pair while establishing their private frame. Every choice
-      // stays inside every owner's existing allocation and is derived from
+      // before using it. Prefer this path to a site-local dead window because
+      // the latter cannot retain the entry-to-probe visible-evidence latch and
+      // therefore cannot preserve local LDS exact-shadow eligibility.
+      // Dynamic-stack owners additionally need one ordinary bootstrap pair
+      // while establishing their private frame. Every choice stays inside
+      // every owner's existing allocation and is derived from
       // descriptor/runtime ABI state rather than a fixed range.
+      const auto owner_uses_dynamic_stack = [&](uint64_t descriptor_offset) -> std::optional<bool> {
+        const auto kernel = std::ranges::find(result.kernels, descriptor_offset,
+                                              &ConSanKernelInfo::descriptor_file_offset);
+        if (kernel == result.kernels.end())
+          return std::nullopt;
+        if (kernel->uses_dynamic_stack)
+          return kernel->uses_dynamic_stack;
+        if (descriptor_offset > state.bytes.size() ||
+            sizeof(KD) > state.bytes.size() - descriptor_offset) {
+          return std::nullopt;
+        }
+        KD descriptor{};
+        std::memcpy(&descriptor, state.bytes.data() + descriptor_offset, sizeof(descriptor));
+        // A runtime-sized frame requires the private-segment ABI. Its absence
+        // is an architectural fixed-stack proof even when older metadata omits
+        // the optional stack marker. A scratch-enabled owner without a marker
+        // remains unknown and must fail closed.
+        if (AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
+                            kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT) == 0u) {
+          return false;
+        }
+        return std::nullopt;
+      };
       const bool all_owners_use_dynamic_stack =
           is_rdna4_family_arch(arch) && !owners.empty() &&
           std::ranges::all_of(owners, [&](uint64_t descriptor_offset) {
-            const auto kernel = std::ranges::find(result.kernels, descriptor_offset,
-                                                  &ConSanKernelInfo::descriptor_file_offset);
-            return kernel != result.kernels.end() && kernel->uses_dynamic_stack.value_or(false);
+            return owner_uses_dynamic_stack(descriptor_offset).value_or(false);
           });
       const bool all_owners_use_fixed_stack =
           is_rdna4_family_arch(arch) && !owners.empty() &&
           std::ranges::all_of(owners, [&](uint64_t descriptor_offset) {
-            const auto kernel = std::ranges::find(result.kernels, descriptor_offset,
-                                                  &ConSanKernelInfo::descriptor_file_offset);
-            return kernel != result.kernels.end() &&
-                   !kernel->uses_dynamic_stack.value_or(false);
+            const std::optional<bool> uses_dynamic_stack =
+                owner_uses_dynamic_stack(descriptor_offset);
+            return uses_dynamic_stack.has_value() && !*uses_dynamic_stack;
           });
       if (!selected && (all_owners_use_dynamic_stack || all_owners_use_fixed_stack)) {
         uint16_t allocated_limit = limit;
@@ -3314,8 +3337,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       continue;
     }
     const bool spill_backed = (spill_pc && spill_scc && spill_key && spill_call_return) ||
-                              branch_only_scalar_spill ||
-                              dynamic_stack_borrowed_sgpr.has_value();
+                              branch_only_scalar_spill || dynamic_stack_borrowed_sgpr.has_value();
     const std::optional<uint16_t> dispatch_id_sgpr =
         options.moi_dispatch_id_sgpr &&
                 moi_scalar_contexts_admit_reserved_window(

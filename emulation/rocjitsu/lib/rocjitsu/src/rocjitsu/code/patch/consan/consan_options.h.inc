@@ -349,8 +349,8 @@ struct ConSanMoiTransientSgprAssignment {
   /// anchor through the router.
   bool branch_only_scalar_spill = false;
   /// Live ordinary pair preserved through the dynamic-stack VGPR bootstrap.
-  /// Present only when branch-only routing avoids every live-through router
-  /// register.
+  /// This optional dynamic-stack sub-case is valid only when
+  /// branch_only_scalar_spill is true.
   std::optional<uint16_t> dynamic_stack_borrowed_sgpr;
 
   auto operator<=>(const ConSanMoiTransientSgprAssignment &) const = default;
@@ -539,8 +539,9 @@ struct ConSanOptions {
   /// Internal proof marker for an Inline component whose saved scalar window
   /// is reached through branch-only relays instead of live-through SGPR state.
   bool moi_inline_branch_only_scalar_spill = false;
-  /// Component-local live pair used only while a spill-backed Inline body
-  /// establishes and releases its runtime-sized private frame.
+  /// Component-local live pair used only while a branch-only spill-backed
+  /// Inline body establishes and releases its runtime-sized private frame.
+  /// A value is valid only when moi_inline_branch_only_scalar_spill is true.
   std::optional<uint16_t> moi_inline_dynamic_stack_borrowed_sgpr;
   std::optional<uint16_t> moi_record_replay_dispatch_key_sgpr;
   std::optional<uint16_t> moi_record_replay_call_return_sgpr;

@@ -155,6 +155,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     bool dense_call_anchor = false;
     std::optional<uint64_t> dense_dispatcher_offset;
     std::optional<BranchOnlyRelayRoute> branch_only_route;
+    std::optional<uint64_t> branch_only_relay_bank_offset;
+    uint64_t branch_only_relay_bank_word_count = 0;
     std::vector<uint32_t> displaced_tail_words;
     ResolvedMoiScratchPlan resources;
     ConSanMoiWorkgroupSources workgroup_sources;
@@ -264,6 +266,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     local_entry_islands.emplace(original_text, result, arch, kIndirectIslandWords,
                                 options.preapplied_reserved_ranges);
   BranchOnlyRelayRouter branch_router;
+  std::optional<uint64_t> latest_generated_frontier_word;
   if (local_entry_islands) {
     for (uint64_t offset : local_entry_islands->available_word_offsets())
       (void)branch_router.offer(offset, BranchOnlyRelayProvenance::PristineNop);
@@ -511,8 +514,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       const uint64_t slice_begin = access_island_begin + candidate_indices.at(candidate) *
                                                              access_relay_words * sizeof(uint32_t);
       for (uint64_t word = kIndirectIslandWords; word < access_relay_words; ++word) {
-        (void)branch_router.offer(slice_begin + word * sizeof(uint32_t),
-                                  BranchOnlyRelayProvenance::GeneratedBank);
+        const uint64_t offset = slice_begin + word * sizeof(uint32_t);
+        if (branch_router.offer(offset, BranchOnlyRelayProvenance::GeneratedBank)) {
+          latest_generated_frontier_word =
+              std::max(latest_generated_frontier_word.value_or(0u), offset);
+        }
       }
     }
   }
@@ -598,17 +604,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                return lhs->text_offset < rhs->text_offset;
                              });
   }
-  std::unordered_map<const ConSanMoiCandidate *, uint64_t> branch_only_frontier_pair_counts;
-  uint64_t remaining_branch_only_pairs =
-      static_cast<uint64_t>(std::ranges::count_if(planning_candidates,
-                                                  uses_branch_only_scalar_spill));
-  for (const ConSanMoiCandidate *candidate : planning_candidates) {
-    if (!uses_branch_only_scalar_spill(candidate))
-      continue;
-    branch_only_frontier_pair_counts.emplace(candidate, remaining_branch_only_pairs);
-    --remaining_branch_only_pairs;
-  }
-  for (const ConSanMoiCandidate *candidate_ptr : planning_candidates) {
+  for (size_t planning_index = 0; planning_index < planning_candidates.size(); ++planning_index) {
+    const ConSanMoiCandidate *candidate_ptr = planning_candidates[planning_index];
     const ConSanMoiCandidate &candidate = *candidate_ptr;
     const bool use_dense_call = dense_entry_islands.contains(candidate_ptr);
     const uint64_t candidate_end = candidate.text_offset + candidate.size;
@@ -899,61 +896,97 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     bool entry_island_at_anchor = false;
     std::vector<uint32_t> displaced_tail_words;
     std::optional<BranchOnlyRelayRoute> branch_only_route;
+    std::optional<uint64_t> branch_only_relay_bank_offset;
+    uint64_t branch_only_relay_bank_word_count = 0u;
     uint32_t displaced_original_size = candidate.size;
     bool placed_through_indirect_island = false;
     if (use_indirect_appended && candidate_options.moi_inline_branch_only_scalar_spill) {
       const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t)) +
                                    spill_bytes + scalar_spill_bytes + vgpr_msb_bytes +
                                    sizeof(uint32_t);
-      // Each generated frontier must retain one forward and one return slot
-      // for every pair that may cross it later. Reserving exactly two words
-      // per remaining pair supplies that complete capacity while shrinking
-      // monotonically as sites are placed; it depends only on route topology,
-      // not on a workload-specific bank size.
-      const uint64_t remaining_pair_count = branch_only_frontier_pair_counts.at(candidate_ptr);
-      if (remaining_pair_count > std::numeric_limits<uint64_t>::max() / 2u) {
+      const uint64_t remaining_candidate_count = planning_candidates.size() - planning_index;
+      const uint64_t remaining_patch_budget =
+          options.max_patches > planned_patches.size()
+              ? static_cast<uint64_t>(options.max_patches - planned_patches.size())
+              : 0u;
+      const uint64_t remaining_pair_capacity =
+          std::min(remaining_candidate_count, remaining_patch_budget);
+      if (remaining_pair_capacity == 0u ||
+          remaining_pair_capacity >
+              std::numeric_limits<uint64_t>::max() / (2u * sizeof(uint32_t)) ||
+          patch_bytes > std::numeric_limits<uint64_t>::max() - sizeof(uint32_t)) {
         ++result.moi_branch_only_placement_failure_count;
       } else {
-        const uint64_t relay_bank_words = remaining_pair_count * 2u;
         DbiPatchPlacementPlanner tentative_planner = placement_planner;
         BranchOnlyRelayRouter tentative_router = branch_router;
-        const uint64_t relay_bank_offset = tentative_planner.appended_end();
         std::string relay_error;
-        const bool reserved_relay_bank =
-            relay_bank_words <= std::numeric_limits<uint64_t>::max() / sizeof(uint32_t) &&
-            tentative_planner.reserve_appended_prefix(
-                relay_bank_words * sizeof(uint32_t), &relay_error);
-        if (reserved_relay_bank) {
-          for (uint64_t word = 0; word < relay_bank_words; ++word) {
-            (void)tentative_router.offer(relay_bank_offset + word * sizeof(uint32_t),
-                                         BranchOnlyRelayProvenance::GeneratedBank);
+        std::optional<uint64_t> tentative_latest_frontier_word = latest_generated_frontier_word;
+        const uint64_t body_reservation_bytes = patch_bytes + sizeof(uint32_t);
+        const uint64_t appended_begin = tentative_planner.appended_end();
+        const uint64_t future_pair_capacity =
+            std::min(remaining_candidate_count - 1u, remaining_patch_budget - 1u);
+        const uint64_t future_bank_words = future_pair_capacity * 2u;
+        const bool lookahead_overflows =
+            future_bank_words > std::numeric_limits<uint64_t>::max() / sizeof(uint32_t) ||
+            body_reservation_bytes >
+                std::numeric_limits<uint64_t>::max() - future_bank_words * sizeof(uint32_t) ||
+            appended_begin > std::numeric_limits<uint64_t>::max() - body_reservation_bytes -
+                                 future_bank_words * sizeof(uint32_t);
+        const uint64_t lookahead_end =
+            lookahead_overflows
+                ? 0u
+                : appended_begin + body_reservation_bytes + future_bank_words * sizeof(uint32_t);
+        const bool needs_spatial_frontier =
+            !tentative_latest_frontier_word || lookahead_overflows ||
+            !compute_sopp_branch_simm16(*tentative_latest_frontier_word, lookahead_end) ||
+            !compute_sopp_branch_simm16(lookahead_end, *tentative_latest_frontier_word);
+        bool frontier_ready = !lookahead_overflows;
+        if (needs_spatial_frontier && frontier_ready) {
+          const uint64_t relay_bank_words = remaining_pair_capacity * 2u;
+          const uint64_t relay_bank_bytes = relay_bank_words * sizeof(uint32_t);
+          const uint64_t relay_bank_offset = tentative_planner.appended_end();
+          const bool bank_overflows =
+              relay_bank_bytes > std::numeric_limits<uint64_t>::max() - relay_bank_offset ||
+              body_reservation_bytes >
+                  std::numeric_limits<uint64_t>::max() - relay_bank_offset - relay_bank_bytes;
+          const uint64_t relay_bank_last_word =
+              bank_overflows ? 0u : relay_bank_offset + relay_bank_bytes - sizeof(uint32_t);
+          const uint64_t body_end =
+              bank_overflows ? 0u : relay_bank_offset + relay_bank_bytes + body_reservation_bytes;
+          const bool bank_reaches_prior_frontier =
+              !tentative_latest_frontier_word ||
+              (compute_sopp_branch_simm16(*tentative_latest_frontier_word, relay_bank_last_word) &&
+               compute_sopp_branch_simm16(relay_bank_last_word, *tentative_latest_frontier_word));
+          const bool bank_spans_body = !bank_overflows &&
+                                       compute_sopp_branch_simm16(relay_bank_offset, body_end) &&
+                                       compute_sopp_branch_simm16(body_end, relay_bank_offset);
+          frontier_ready =
+              bank_reaches_prior_frontier && bank_spans_body &&
+              tentative_planner.reserve_appended_prefix(relay_bank_bytes, &relay_error);
+          if (frontier_ready) {
+            for (uint64_t word = 0; word < relay_bank_words; ++word) {
+              (void)tentative_router.offer(relay_bank_offset + word * sizeof(uint32_t),
+                                           BranchOnlyRelayProvenance::GeneratedBank);
+            }
+            branch_only_relay_bank_offset = relay_bank_offset;
+            branch_only_relay_bank_word_count = relay_bank_words;
+            tentative_latest_frontier_word = relay_bank_last_word;
           }
         }
         const auto reservation =
-            reserved_relay_bank
-                ? tentative_planner.plan_indirect_appended(
-                      candidate.text_offset, candidate.size, patch_bytes + sizeof(uint32_t))
-                : std::nullopt;
+            frontier_ready ? tentative_planner.plan_indirect_appended(
+                                 candidate.text_offset, candidate.size, body_reservation_bytes)
+                           : std::nullopt;
         if (!reservation) {
           ++result.moi_branch_only_placement_failure_count;
         } else {
           BranchOnlyRelayPlanOutcome relay_outcome;
           BranchOnlyRelaySearchLimits relay_limits;
-          const size_t relay_count = tentative_router.available_count();
-          const size_t complete_greedy_pair_work =
-              relay_count > (std::numeric_limits<size_t>::max() - 2u) / 2u
-                  ? std::numeric_limits<size_t>::max()
-                  : relay_count * 2u + 2u;
-          relay_limits.pair_greedy_work =
-              std::max(relay_limits.pair_greedy_work, complete_greedy_pair_work);
-          const size_t fallback_setup_per_relay =
-              std::max<size_t>(std::bit_width(relay_count) + 1u, 1u);
-          const size_t complete_fallback_setup_work =
-              relay_count > std::numeric_limits<size_t>::max() / fallback_setup_per_relay
-                  ? std::numeric_limits<size_t>::max()
-                  : relay_count * fallback_setup_per_relay;
-          relay_limits.batch_fallback_setup_work =
-              std::max(relay_limits.batch_fallback_setup_work, complete_fallback_setup_work);
+          // Inline routing exposes banks shared by the complete object, so its
+          // useful fallback window is larger than the generic router default.
+          // Fixed ceilings keep every pair bounded independently of inventory.
+          relay_limits.batch_fallback_setup_work = 1'000'000u;
+          relay_limits.pair_greedy_work = 1'000'000u;
           branch_only_route = tentative_router.plan_pair(
               tentative_planner, candidate.text_offset, reservation->body_offset,
               reservation->body_offset + patch_bytes, candidate.text_offset + candidate.size,
@@ -980,6 +1013,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             }
             branch_router = std::move(tentative_router);
             placement_planner = std::move(tentative_planner);
+            latest_generated_frontier_word = tentative_latest_frontier_word;
             placement = *reservation;
             placement->body_size = patch_bytes;
             placement->return_target = candidate.text_offset + candidate.size;
@@ -1101,6 +1135,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     planned.entry_island_at_anchor = entry_island_at_anchor;
     planned.dense_call_anchor = use_dense_call;
     planned.branch_only_route = std::move(branch_only_route);
+    planned.branch_only_relay_bank_offset = branch_only_relay_bank_offset;
+    planned.branch_only_relay_bank_word_count = branch_only_relay_bank_word_count;
     if (use_dense_call)
       planned.dense_dispatcher_offset = dense_dispatchers.at(candidate_ptr);
     planned.displaced_tail_words = std::move(displaced_tail_words);
@@ -1588,8 +1624,19 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
 
       if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
         const uint64_t cave_text_offset = planned_patch.placement.body_offset;
-        if (planned_patch.branch_only_route) {
-          while (new_text.size() < cave_text_offset)
+        if (planned_patch.branch_only_relay_bank_offset.has_value() !=
+            (planned_patch.branch_only_relay_bank_word_count != 0u)) {
+          result.errors.emplace_back(
+              "ConSan MOI inline-shadow probe has inconsistent branch-only relay-bank metadata");
+          return;
+        }
+        if (planned_patch.branch_only_relay_bank_offset) {
+          if (new_text.size() != *planned_patch.branch_only_relay_bank_offset) {
+            result.errors.emplace_back(
+                "ConSan MOI inline-shadow probe emitted a stale branch-only relay-bank mapping");
+            return;
+          }
+          for (uint64_t word = 0; word < planned_patch.branch_only_relay_bank_word_count; ++word)
             append_word_bytes(new_text, build_s_nop(0, arch));
         }
         if (new_text.size() != cave_text_offset) {
