@@ -48,7 +48,7 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-roctx-pause-resume-pc-sampling
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --marker-trace --pc-sampling-unit time
-        --pc-sampling-method host_trap --pc-sampling-interval 512 -d
+        --pc-sampling-method host_trap --pc-sampling-interval 1 -d
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-pc-sampling -o out --output-format json csv
         --log-level env -- $<TARGET_FILE:roctx-pause-resume>
     DEPENDS roctx-pause-resume
