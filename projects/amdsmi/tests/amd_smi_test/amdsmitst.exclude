@@ -47,7 +47,6 @@ $BLACKLIST_ALL_ASICS\
 "GpuFunctionalReadOnly.TestVoltCurvRead:"\
 "GpuFunctionalReadOnly.TestFrequenciesRead:"\
 "GpuFunctionalReadWrite.FanReadWrite:"\
-"GpuFunctionalReadWrite.TestFrequenciesReadWrite:"\
 "GpuFunctionalReadWrite.TestPciReadWrite:"\
 "GpuFunctionalReadWrite.TestPowerReadWrite"
 
