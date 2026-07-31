@@ -2876,10 +2876,11 @@ bool KernelBlitManager::ShaderCopyBufferBatchRaw(
     const uint64_t destination_address = reinterpret_cast<uint64_t>(copy_operation.dst);
     needs_system_scope |= copy_operation.needs_system_scope || !copy_operation.metadata.isAsync_;
     attach_signal |= copy_operation.attach_signal || !copy_operation.metadata.isAsync_;
-    const bool addresses_aligned = ((source_address % kMaxAlignment) == 0) &&
-                                   ((destination_address % kMaxAlignment) == 0);
-    const uint32_t aligned_element_size =
-        (addresses_aligned) ? kMaxAlignment : sizeof(uint32_t);
+    // Use the largest power-of-two element width (<= kMaxAlignment) that divides
+    // both endpoints.
+    const uint64_t combined_alignment = source_address | destination_address;
+    const uint32_t aligned_element_size = static_cast<uint32_t>(std::min<uint64_t>(
+        combined_alignment & (~combined_alignment + 1), kMaxAlignment));
     const uint64_t aligned_element_count =
         copy_operation.size / aligned_element_size;
     const uint32_t trailing_byte_count =
@@ -3118,6 +3119,122 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
 }
 
 // ================================================================================================
+bool KernelBlitManager::useShaderSwapPath(const Memory& src, const Memory& dst, size_t srcOffset,
+                                          size_t dstOffset, size_t size,
+                                          const amd::CopyMetadata& metadata) const {
+  const bool isSdmaPref =
+      metadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA;
+  const bool isBlitPref =
+      metadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT;
+  if (!dev().settings().sdma_swap_supported_) return true;  // no HW swap -> shader
+
+  // SDMA COPY_LINEAR_SWAP requires 32 byte alignment, so use blit kernel in these cases
+  constexpr uint64_t kSdmaSwapAlignment = 32;
+  const uint64_t srcAddr = src.virtualAddress() + srcOffset;
+  const uint64_t dstAddr = dst.virtualAddress() + dstOffset;
+  if (((srcAddr | dstAddr) & (kSdmaSwapAlignment - 1)) != 0) return true;
+
+  if (isSdmaPref) return false;                             // explicit CE  -> SDMA
+  if (isBlitPref) return true;                              // explicit BLIT -> shader
+  return size <= dev().settings().sdmaSwapThreshold_;        // else size-based
+}
+
+// ================================================================================================
+bool KernelBlitManager::ShaderSwapBufferBatch(
+    const std::vector<amd::BatchCopyOp>& copy_operations) const {
+  std::scoped_lock transfer_operations_lock(lockXferOps_);
+
+  constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
+  constexpr uint32_t kLocalWorkSize = 512;
+  const uint32_t max_workgroups_per_copy = std::max<uint32_t>(
+      dev().settings().limit_blit_wg_ / copy_operations.size(), 1);
+  const size_t descriptor_bytes =
+      copy_operations.size() * sizeof(CopyBufferBatchDescriptor);
+  void* descriptor_buffer = gpu().allocKernArg(descriptor_bytes, kCBAlignment);
+  CopyBufferBatchDescriptor* descriptors =
+      static_cast<CopyBufferBatchDescriptor*>(descriptor_buffer);
+  size_t descriptor_index = 0;
+  uint64_t max_aligned_element_count = 0;
+  bool needs_system_scope = false;
+  bool attach_signal = false;
+
+  for (const auto& copy_operation : copy_operations) {
+    device::Memory* source_device_memory =
+        copy_operation.srcMemory->getDeviceMemory(
+            *copy_operation.srcMemory->getContext().devices()[0]);
+    device::Memory* destination_device_memory =
+        copy_operation.dstMemory->getDeviceMemory(
+            *copy_operation.dstMemory->getContext().devices()[0]);
+
+    const uint64_t source_address =
+        source_device_memory->virtualAddress() + copy_operation.srcOffset;
+    const uint64_t destination_address =
+        destination_device_memory->virtualAddress() + copy_operation.dstOffset;
+
+    // Overlapping src/dst within one swap op is UB (same contract as the SDMA swap).
+    assert((source_address + copy_operation.size <= destination_address ||
+            destination_address + copy_operation.size <= source_address) &&
+           "ShaderSwapBufferBatch: src and dst ranges must not overlap");
+
+    const bool source_svm_atomics =
+        (source_device_memory->owner()->getMemFlags() & CL_MEM_SVM_ATOMICS) != 0;
+    const bool destination_svm_atomics =
+        (destination_device_memory->owner()->getMemFlags() & CL_MEM_SVM_ATOMICS) != 0;
+    needs_system_scope |=
+        (!source_svm_atomics && source_device_memory->isHostMemDirectAccess()) ||
+        (!destination_svm_atomics && destination_device_memory->isHostMemDirectAccess()) ||
+        !copy_operation.metadata.isAsync_;
+    attach_signal |= !copy_operation.metadata.isAsync_;
+    // Use the largest power-of-two element width (<= kMaxAlignment) that divides
+    // both endpoints.
+    const uint64_t combined_alignment = source_address | destination_address;
+    const uint32_t aligned_element_size = static_cast<uint32_t>(std::min<uint64_t>(
+        combined_alignment & (~combined_alignment + 1), kMaxAlignment));
+    const uint64_t aligned_element_count =
+        copy_operation.size / aligned_element_size;
+    const uint32_t trailing_byte_count =
+        copy_operation.size % aligned_element_size;
+    max_aligned_element_count =
+        std::max(max_aligned_element_count, aligned_element_count);
+
+    descriptors[descriptor_index++] = {
+        source_address, destination_address, aligned_element_count,
+        aligned_element_size, trailing_byte_count};
+  }
+
+  uint32_t workgroup_count = static_cast<uint32_t>(
+      std::min<uint64_t>(max_workgroups_per_copy,
+                         amd::alignUp(max_aligned_element_count,
+                                      static_cast<uint64_t>(kLocalWorkSize)) /
+                             kLocalWorkSize));
+  workgroup_count = std::max<uint32_t>(workgroup_count, 1);
+  const uint32_t copy_stride = workgroup_count * kLocalWorkSize;
+
+  amd::Kernel* const kernel = kernels_[BlitSwapBufferBatch];
+  constexpr bool kDirectVa = true;
+  setArgument(kernel, 0, sizeof(cl_mem), descriptor_buffer, 0, nullptr,
+              kDirectVa);
+
+  setArgument(kernel, 1, sizeof(kLocalWorkSize), &kLocalWorkSize);
+  setArgument(kernel, 2, sizeof(copy_stride), &copy_stride);
+
+  size_t global_work_size[2] = {copy_stride, copy_operations.size()};
+  size_t local_work_size[2] = {kLocalWorkSize, 1};
+  amd::NDRangeContainer nd_range(2, nullptr, global_work_size, local_work_size);
+
+  address parameters = captureArguments(kernel);
+  if (needs_system_scope) {
+    gpu().addSystemScope();
+  }
+  bool submit_result =
+      gpu().submitKernelInternal(nd_range, *kernel, parameters, nullptr, 0,
+                                 nullptr, nullptr, attach_signal);
+  releaseArguments(parameters);
+
+  return submit_result;
+}
+
+// ================================================================================================
 bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOps) const {
   if (copyOps.empty()) {
     return true;
@@ -3135,6 +3252,7 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   // Partition into intra-device (kernel blit) and inter-device (DMA batch) groups.
   std::vector<amd::BatchCopyOp> d2dCopyOps;
   std::vector<amd::BatchCopyOp> p2pCopyOps;
+  std::vector<amd::BatchCopyOp> swapShaderOps;
 
   for (const auto& op : copyOps) {
     device::Memory* srcDevMem = op.srcMemory->getDeviceMemory(
@@ -3149,15 +3267,16 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
 
     const Memory& srcMem = gpuMem(*srcDevMem);
     const Memory& dstMem = gpuMem(*dstDevMem);
-    bool isLinearCopyOp = op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpLinear;
-    // ShaderCopyBufferBatch only describes linear copies; route swap/other ops through DMA.
-    bool useShaderCopyPath =
-        isLinearCopyOp && useShaderCopyBufferPath(srcMem, dstMem, op.size, op.metadata);
+    bool isSwapOp = op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpSwap;
+    bool isLinearOp = op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpLinear;
 
-    if (useShaderCopyPath) {
+    if (isSwapOp && useShaderSwapPath(srcMem, dstMem, op.srcOffset, op.dstOffset, op.size,
+                                      op.metadata)) {
+      swapShaderOps.push_back(op);
+    } else if (isLinearOp && useShaderCopyBufferPath(srcMem, dstMem, op.size, op.metadata)) {
       d2dCopyOps.push_back(op);
     } else {
-      p2pCopyOps.push_back(op);
+      p2pCopyOps.push_back(op);   // large HW-supported swaps + everything else
     }
   }
 
@@ -3191,10 +3310,10 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
     }
   }
 
-  // Dispatch intra-device copies for overlap with SDMA.
+  // Dispatch intra-device copies and shader swaps for overlap with SDMA.
   // Set engine to Compute so WaitingSignal(Compute) inside copyBuffer does not
   // see an engine switch and does not add the batch's current_id_ as a dependency.
-  if (!d2dCopyOps.empty()) {
+  if (!d2dCopyOps.empty() || !swapShaderOps.empty()) {
     gpu().Barriers().SetActiveEngine(HwQueueEngine::Compute);
     // Re-add priorSignal as external so intra copies depend on prior stream operations.
     if (priorSignal != nullptr) {
@@ -3212,6 +3331,16 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
       if (!ShaderCopyBufferBatch(copy_ops_by_size)) {
         LogError("KernelBlitManager::ShaderCopyBufferBatch: Intra-device batch "
                  "copy failed!");
+        return false;
+      }
+    }
+
+    std::map<size_t, std::vector<amd::BatchCopyOp>, std::greater<size_t>> swap_ops_by_size;
+    for (const auto& op : swapShaderOps) { swap_ops_by_size[op.size].push_back(op); }
+    for (const auto& swap_ops_by_size_entry : swap_ops_by_size) {
+      const auto& swap_ops = swap_ops_by_size_entry.second;
+      if (!ShaderSwapBufferBatch(swap_ops)) {
+        LogError("KernelBlitManager::ShaderSwapBufferBatch: Intra-device batch swap failed!");
         return false;
       }
     }

@@ -3076,14 +3076,6 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     }
   }
 
-  if (attrs != nullptr && !stream.device().settings().sdma_swap_supported_) {
-    for (size_t i = 0; i < numAttrs; ++i) {
-      if (attrs[i].flags & hipMemcpyFlagExtOpSwap) {
-        return hipErrorNotSupported;
-      }
-    }
-  }
-
   if (attrs != nullptr && !stream.device().settings().sdma_indirect_supported_) {
     const unsigned int kIndirectMask =
         hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
