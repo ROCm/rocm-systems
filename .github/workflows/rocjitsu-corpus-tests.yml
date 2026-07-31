@@ -137,8 +137,10 @@ jobs:
             c_compiler: gcc
             cxx_compiler: g++
             run_corpus: true
-            corpus_soft_timeout: 120
-            corpus_hard_timeout: 240
+            # Due to sanitizer and expensive checks
+            # one test needs ~145s in CI to finish.
+            corpus_soft_timeout: 240
+            corpus_hard_timeout: 480
 
     steps:
       - name: Install base dependencies
