@@ -1,6 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import os
 from pathlib import Path
 
 import pytest
@@ -12,9 +13,10 @@ from amdisa.parser import Parser
 
 
 def _mrisa_dir() -> Path:
-    return (
+    default = (
         Path(__file__).resolve().parents[6] / 'shared' / 'machine-readable-isa' / 'isa'
     )
+    return Path(os.environ.get('ISA_XML_DIR', default))
 
 
 def _find_instruction(spec, encoding_name: str, instruction_name: str):

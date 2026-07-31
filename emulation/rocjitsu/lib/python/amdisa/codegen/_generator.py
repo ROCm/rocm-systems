@@ -2497,10 +2497,10 @@ class CodeGenerator:
                 if _dpp8_struct:
                     class_members.append(cgen.Statement('uint32_t dpp8_lane_sel_ = 0'))
                 class_members.append(
-                    cgen.Statement('std::unique_ptr<DppOperand> dpp_src0_')
+                    cgen.Statement('std::unique_ptr<StagedOperand> dpp_src0_')
                 )
                 class_members.append(
-                    cgen.Statement('std::unique_ptr<DppOperand> dpp_src1_')
+                    cgen.Statement('std::unique_ptr<StagedOperand> dpp_src1_')
                 )
             if _enc_upper in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC'):
                 # SDWA fields (CDNA and RDNA1/2 have hardware SDWA encoding; fields
@@ -7745,69 +7745,34 @@ class CodeGenerator:
                                     f'        dpp_src0_, wf{_dpp_src0_byte_mask_arg});\n'
                                 )
                             if _has_sdwa_encoding:
-                                # src1 permute references the field-bearing second
-                                # source by name (it may not sit at
-                                # src_operands_[1]; see FMAMK/MADMK note above) and
-                                # redirects reads through its delegate, so the
-                                # src_operands_[] slot is left untouched. Emitted
-                                # only when a field-bearing src1 exists.
+                                # src1 references the field-bearing second source
+                                # by name (it may not sit at src_operands_[1]; see
+                                # FMAMK/MADMK note above). The shared helper owns
+                                # byte observation, source selection/modifiers,
+                                # and staged storage; generated code supplies only
+                                # instruction-specific operands and fields.
                                 _sdwa_src1_block = ''
                                 if _src1_name:
                                     _sdwa_src1_block = (
-                                        '    if (sdwa_src1_sel_ != amdgpu::sdwa::DWORD && num_src_ > 1) {\n'
-                                        '      uint64_t ex = wf.exec();\n'
-                                        f'      auto src1_view = amdgpu::RegisterAccess(wf).read_operand(\n'
-                                        f'          {_src1_name}, ex, amdgpu::sdwa::sdwa_src_byte_mask(sdwa_src1_sel_));\n'
-                                        '      uint32_t result1[64] = {};\n'
-                                        '      for (uint32_t i = 0; i < ws; ++i) {\n'
-                                        '        if (!(ex & (1ULL << i))) continue;\n'
-                                        '        result1[i] = amdgpu::sdwa::sdwa_src_select(\n'
-                                        '            src1_view.lane(i), sdwa_src1_sel_, sdwa_src1_sext_);\n'
-                                        '      }\n'
-                                        '      if (sdwa_src1_abs_ || sdwa_src1_neg_) {\n'
-                                        '        for (uint32_t i = 0; i < ws; ++i) {\n'
-                                        '          float sv = std::bit_cast<float>(result1[i]);\n'
-                                        '          if (sdwa_src1_abs_) sv = std::fabs(sv);\n'
-                                        '          if (sdwa_src1_neg_) sv = -sv;\n'
-                                        '          result1[i] = std::bit_cast<uint32_t>(sv);\n'
-                                        '        }\n'
-                                        '      }\n'
-                                        f'      dpp_src1_ = std::make_unique<DppOperand>(\n'
-                                        f'          {_src1_name}, result1, static_cast<int>(ws));\n'
-                                        '    }\n'
+                                        '    if (num_src_ > 1)\n'
+                                        f'      amdgpu::sdwa::stage_source({_src1_name}, sdwa_src1_sel_,\n'
+                                        '          sdwa_src1_sext_, sdwa_src1_neg_, sdwa_src1_abs_,\n'
+                                        '          dpp_src1_, wf);\n'
                                     )
                                 _dpp_preamble += (
                                     '  if (inst_.src0 == amdgpu::SRC_SDWA) {\n'
-                                    '    uint32_t ws = wf.wf_size();\n'
-                                    '    if (sdwa_src0_sel_ != amdgpu::sdwa::DWORD) {\n'
-                                    '      uint64_t ex = wf.exec();\n'
-                                    '      auto src0_view = amdgpu::RegisterAccess(wf).read_operand(\n'
-                                    '          *src_operands_[0], ex,\n'
-                                    '          amdgpu::sdwa::sdwa_src_byte_mask(sdwa_src0_sel_));\n'
-                                    '      uint32_t result[64] = {};\n'
-                                    '      for (uint32_t i = 0; i < ws; ++i) {\n'
-                                    '        if (!(ex & (1ULL << i))) continue;\n'
-                                    '        result[i] = amdgpu::sdwa::sdwa_src_select(\n'
-                                    '            src0_view.lane(i), sdwa_src0_sel_, sdwa_src0_sext_);\n'
-                                    '      }\n'
-                                    '      if (sdwa_src0_abs_ || sdwa_src0_neg_) {\n'
-                                    '        for (uint32_t i = 0; i < ws; ++i) {\n'
-                                    '          float sv = std::bit_cast<float>(result[i]);\n'
-                                    '          if (sdwa_src0_abs_) sv = std::fabs(sv);\n'
-                                    '          if (sdwa_src0_neg_) sv = -sv;\n'
-                                    '          result[i] = std::bit_cast<uint32_t>(sv);\n'
-                                    '        }\n'
-                                    '      }\n'
-                                    '      dpp_src0_ = std::make_unique<DppOperand>(\n'
-                                    '          *src_operands_[0], result, static_cast<int>(ws));\n'
-                                    '    }\n' + _sdwa_src1_block + '  }\n'
+                                    '    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_,\n'
+                                    '        sdwa_src0_sext_, sdwa_src0_neg_, sdwa_src0_abs_,\n'
+                                    '        dpp_src0_, wf);\n'
+                                    + _sdwa_src1_block
+                                    + '  }\n'
                                 )
                             _dpp_preamble += (
-                                f'  if (dpp_src0_) {_src0_name}.set_delegate(dpp_src0_.get());\n'
+                                f'  ScopedOperandDelegate dpp_src0_binding_({_src0_name}, dpp_src0_.get());\n'
                                 if _src0_name
                                 else ''
                             ) + (
-                                f'  if (dpp_src1_) {_src1_name}.set_delegate(dpp_src1_.get());\n'
+                                f'  ScopedOperandDelegate dpp_src1_binding_({_src1_name}, dpp_src1_.get());\n'
                                 if _src1_name
                                 else ''
                             )
@@ -7844,10 +7809,6 @@ class CodeGenerator:
                                         '    wf.set_vcc(dpp_old_vcc_);\n'
                                         '  }\n'
                                     )
-                            if _src0_name:
-                                _dpp_cleanup += f'  {_src0_name}.clear_delegate();\n'
-                            if _src1_name:
-                                _dpp_cleanup += f'  {_src1_name}.clear_delegate();\n'
                         _apply_float_sdwa_clamp = bool(
                             sem and sem.data_type in ('f16', 'f32', 'f64')
                         )
