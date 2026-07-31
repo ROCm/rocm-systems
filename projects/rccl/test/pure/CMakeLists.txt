@@ -94,6 +94,26 @@ endif()
 message(STATUS "hipcc: ${CMAKE_CXX_COMPILER}")
 message(STATUS "Hipified sources: ${RCCL_HIPIFY_DIR}")
 
+# --- Detect whether the system amdsmi.h exposes the UALoE fabric struct ---
+# Compile-only (STATIC_LIBRARY) avoids link failures from amdsmi symbols.
+include(CheckCXXSourceCompiles)
+unset(AMDSMI_FABRIC_API CACHE)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+check_cxx_source_compiles("
+  #include <amd_smi/amdsmi.h>
+  int main() {
+    amdsmi_fabric_info_t info{};
+    (void)info;
+    return 0;
+  }
+" AMDSMI_FABRIC_API)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+if(AMDSMI_FABRIC_API)
+  message(STATUS "amdsmi fabric API found - enabling AMDSMI_FABRIC_DIRECT")
+else()
+  message(STATUS "amdsmi fabric API not found (AMDSMI_FABRIC_DIRECT disabled)")
+endif()
+
 # --- Common include paths for hipified RCCL headers ---
 set(RCCL_INCLUDE_DIRS
   ${RCCL_HIPIFY_DIR}/src/include
@@ -119,6 +139,7 @@ target_compile_definitions(rccl-source-wrappers PRIVATE
   __HIP_PLATFORM_AMD__
   NCCL_OS_LINUX
   ROCM_VERSION=70000
+  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
 )
 target_link_libraries(rccl-source-wrappers PRIVATE
   GTest::GTest
@@ -152,6 +173,7 @@ target_compile_definitions(rccl-PureUnitTests PRIVATE
   ROCM_VERSION=70000
   RCCL_EXPOSE_STATIC
   ARSMI_TEST_BUILD
+  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
 )
 
 target_link_options(rccl-PureUnitTests PRIVATE -no-hip-rt)
