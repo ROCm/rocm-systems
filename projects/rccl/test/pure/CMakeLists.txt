@@ -203,6 +203,7 @@ add_executable(rccl-PureUnitTests
   ${RCCL_TEST_DIR}/DdaCollCommonTests.cpp
   ${RCCL_TEST_DIR}/RomeTopoConsensusTests.cpp
   ${RCCL_TEST_DIR}/MiscTests.cpp
+  ${RCCL_TEST_DIR}/VersionGateTests.cpp
   ${RCCL_TEST_DIR}/TimeoutTests.cpp
   ${RCCL_TEST_DIR}/EnqueueCountTests.cpp
   ${RCCL_TEST_DIR}/BootstrapBidirTests.cpp
