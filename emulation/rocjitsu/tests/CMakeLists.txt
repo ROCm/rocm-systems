@@ -1016,7 +1016,9 @@ target_include_directories(
 target_link_libraries(
     hsa_hooks_unit_test
     PRIVATE
-        rocjitsu_hooks
+        # Test-only hook variant: same objects as rocjitsu_hooks plus the
+        # exported rj_hsa_dbt_set_topology_nodes_root_for_test seam.
+        rocjitsu_hooks_testing
         ${RJ_OBJECT_LIBS}
         util
         flatbuffers

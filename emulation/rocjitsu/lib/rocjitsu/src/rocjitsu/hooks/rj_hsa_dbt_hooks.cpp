@@ -26,6 +26,7 @@
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/hooks/rj_hsa_dbt_test_seams.h"
 #include "rocjitsu/hooks/sidecar_registry.h"
 #include "rocjitsu/hooks/virtual_lds.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -71,6 +72,30 @@ RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
 RJ_DIAGNOSTIC_POP
+
+// Test seams live outside the anonymous namespace so the test-only translation
+// unit can reach them, but they stay at hidden visibility: only
+// librocjitsu_hooks_testing.so exports a C entry point for them.
+namespace rocjitsu::hooks {
+namespace {
+
+std::mutex g_topology_nodes_root_mutex;
+std::optional<std::string> g_topology_nodes_root_for_test;
+
+} // namespace
+
+void set_topology_nodes_root_for_test(const char *root) {
+  std::lock_guard lock(g_topology_nodes_root_mutex);
+  g_topology_nodes_root_for_test =
+      root != nullptr && *root != '\0' ? std::optional<std::string>(root) : std::nullopt;
+}
+
+std::optional<std::string> topology_nodes_root_for_test() {
+  std::lock_guard lock(g_topology_nodes_root_mutex);
+  return g_topology_nodes_root_for_test;
+}
+
+} // namespace rocjitsu::hooks
 
 namespace {
 
@@ -1399,22 +1424,6 @@ RjHsaLayer &layer() {
   return result;
 }
 
-std::mutex g_topology_nodes_root_mutex;
-std::optional<std::string> g_topology_nodes_root_for_test;
-
-/// @brief Set or clear the synthetic KFD topology root used by unit tests.
-void set_topology_nodes_root_for_test(const char *root) {
-  std::lock_guard lock(g_topology_nodes_root_mutex);
-  g_topology_nodes_root_for_test =
-      root != nullptr && *root != '\0' ? std::optional<std::string>(root) : std::nullopt;
-}
-
-/// @brief Return a snapshot of the synthetic KFD topology root used by unit tests.
-[[nodiscard]] std::optional<std::string> topology_nodes_root_for_test() {
-  std::lock_guard lock(g_topology_nodes_root_mutex);
-  return g_topology_nodes_root_for_test;
-}
-
 /// @brief Translate a configured KFD gpu_id to ROCR's HSA driver node id.
 ///
 /// @details The config uses the KFD topology `gpu_id` because it is stable
@@ -1422,7 +1431,7 @@ void set_topology_nodes_root_for_test(const char *root) {
 /// not expose that value directly, so the hook reads the redirected topology
 /// tree and later compares agents by `HSA_AMD_AGENT_INFO_DRIVER_NODE_ID`.
 [[nodiscard]] std::optional<uint32_t> node_id_for_kfd_gpu_id(uint32_t gpu_id) {
-  if (std::optional<std::string> root = topology_nodes_root_for_test())
+  if (std::optional<std::string> root = rocjitsu::hooks::topology_nodes_root_for_test())
     return node_id_for_kfd_gpu_id_in_root(root->c_str(), gpu_id);
 
   constexpr std::array<const char *, 2> kTopologyNodeRoots = {
@@ -4035,11 +4044,6 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
 #else
 #define RJ_HOOK_EXPORT
 #endif
-
-/// @brief Set or clear the synthetic KFD topology root used by hook unit tests.
-extern "C" RJ_HOOK_EXPORT void rj_hsa_dbt_set_topology_nodes_root_for_test(const char *root) {
-  set_topology_nodes_root_for_test(root);
-}
 
 /// @brief ROCR HSA tools entry point.
 ///
