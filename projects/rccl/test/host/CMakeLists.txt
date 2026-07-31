@@ -34,7 +34,7 @@ execute_process(
 get_filename_component(_gcc_install_dir "${_gcc_libstdcpp}" DIRECTORY)
 set(CMAKE_CXX_FLAGS_INIT "--gcc-install-dir=${_gcc_install_dir} --offload-host-only")
 
-project(rccl-PureUnitTests LANGUAGES CXX)
+project(rccl-HostUnitTests LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -151,7 +151,7 @@ target_link_libraries(rccl-source-wrappers PRIVATE
 )
 
 # --- Main test executable ---
-add_executable(rccl-PureUnitTests
+add_executable(rccl-HostUnitTests
   main.cpp
   ${RCCL_TEST_DIR}/BitOpsTests.cpp
   ${RCCL_TEST_DIR}/IommuPassthrough_test.cpp
@@ -170,9 +170,9 @@ add_executable(rccl-PureUnitTests
   ${RCCL_HIPIFY_DIR}/src/graph/rome_topo_consensus.cc
 )
 
-target_include_directories(rccl-PureUnitTests PRIVATE ${RCCL_INCLUDE_DIRS})
+target_include_directories(rccl-HostUnitTests PRIVATE ${RCCL_INCLUDE_DIRS})
 
-target_compile_definitions(rccl-PureUnitTests PRIVATE
+target_compile_definitions(rccl-HostUnitTests PRIVATE
   __HIP_PLATFORM_AMD__
   NCCL_OS_LINUX
   ROCM_VERSION=70000
@@ -181,9 +181,9 @@ target_compile_definitions(rccl-PureUnitTests PRIVATE
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
 )
 
-target_link_options(rccl-PureUnitTests PRIVATE -no-hip-rt)
+target_link_options(rccl-HostUnitTests PRIVATE -no-hip-rt)
 
-target_link_libraries(rccl-PureUnitTests PRIVATE
+target_link_libraries(rccl-HostUnitTests PRIVATE
   GTest::GTest
   Threads::Threads
   fmt::fmt-header-only

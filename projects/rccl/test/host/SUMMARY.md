@@ -1,4 +1,4 @@
-# rccl-PureUnitTests — CPU-Only Test Binary
+# rccl-HostUnitTests — CPU-Only Test Binary
 
 **Date:** 2026-07-31
 **Compiler:** hipcc --offload-host-only (mandatory)
@@ -66,10 +66,10 @@ RCCL source files compiled into the binary:
 ## Build
 
 ```bash
-cd projects/rccl/test/pure
+cd projects/rccl/test/host
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DROCM_PATH=/path/to/rocm
 cmake --build build -j$(nproc)
-./build/rccl-PureUnitTests
+./build/rccl-HostUnitTests
 ```
 
 Prerequisite: hipified sources must exist at `../../build/hipify/`. Generate

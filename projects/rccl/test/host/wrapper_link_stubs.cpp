@@ -1,5 +1,5 @@
 // Link-time stubs for symbols referenced by production .cc files compiled
-// into the pure UT binary. These are defined in other RCCL translation units
+// into the host UT binary. These are defined in other RCCL translation units
 // that we do not compile; they satisfy the linker but are never called.
 //
 // This file uses forward declarations instead of real headers to avoid
