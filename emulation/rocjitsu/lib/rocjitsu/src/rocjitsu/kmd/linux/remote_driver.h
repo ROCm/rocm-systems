@@ -128,7 +128,13 @@ private:
   Sysfs::GpuInfo gpu_info_{};        ///< GPU metadata received from daemon handshake.
   bool has_gpu_info_ = false;        ///< True when gpu_info_ is valid.
   std::atomic<bool> closing_{false}; ///< Set by close() to break WAIT_EVENTS loops.
-  int shutdown_efd_ = -1;            ///< eventfd written by close() to wake WAIT_EVENTS pollers.
+  /// @brief Set when the RPC stream is known to be unusable.
+  /// @details A reply header we refuse to read the body of leaves the stream
+  /// misaligned, so every later call would parse its header out of the stale
+  /// body. Once this is set the connection is terminal and further ioctls fail
+  /// with -EPROTO rather than returning bogus results from a poisoned stream.
+  std::atomic<bool> protocol_failed_{false};
+  int shutdown_efd_ = -1; ///< eventfd written by close() to wake WAIT_EVENTS pollers.
 
   /// @brief Serializes all RPC send+recv pairs on sock_.
   /// @details ROCR is multithreaded — concurrent ioctl/mmap calls interleave

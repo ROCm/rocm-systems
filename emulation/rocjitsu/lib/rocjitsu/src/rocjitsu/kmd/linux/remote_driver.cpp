@@ -403,6 +403,10 @@ int RemoteDriver::ioctl(unsigned long request, void *arg) {
 }
 
 int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
+  // The stream is misaligned past a rejected reply; every later header would be
+  // parsed out of stale bytes. Fail closed instead of returning bogus results.
+  if (protocol_failed_.load(std::memory_order_acquire))
+    return -EPROTO;
   std::lock_guard<std::mutex> lock(rpc_mutex_);
 
   size_t arg_size = 0;
@@ -603,6 +607,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // (rather than close()) keeps the fd number reserved, so the concurrent
   // readers of sock_ that rpc_mutex_ does not cover cannot land on a reused fd.
   if (resp->payload_bytes > kMaxPayloadBytes) {
+    protocol_failed_.store(true, std::memory_order_release);
     syscall(SYS_shutdown, sock_, SHUT_RDWR);
     return -EPROTO;
   }
