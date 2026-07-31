@@ -49,7 +49,7 @@ env:
   ROCJITSU_DBT_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-dbt-test-corpus
   ROCJITSU_DBT_VENV: ${{ github.workspace }}/gfx1250-dbt-venv-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
-  ROCM_SDK_VERSION: 7.14.0a20260624
+  ROCM_SDK_VERSION: 7.15.0a20260728
   UV_VERSION: 0.9.26
 
 jobs:
