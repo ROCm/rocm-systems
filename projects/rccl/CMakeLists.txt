@@ -88,7 +88,7 @@ option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example librarie
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
-option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
+option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     OFF)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
 option(DISABLE_KERNARG_PRELOAD                 "Disable amdgpu-kernarg-preload-count compile/link flag" OFF)
 # Move .hip_fatbin to the end of librccl.so so that small-code-model host

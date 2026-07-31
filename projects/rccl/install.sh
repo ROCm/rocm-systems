@@ -37,7 +37,7 @@ time_trace=false
 use_ninja=false
 force_reduce_pipeline=false
 generate_sym_kernels=true
-device_linker=true
+device_linker=false
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 kernarg_preload=true
 quiet_warnings=false
@@ -58,7 +58,7 @@ function display_help()
     echo "       --debug                 Build debug library"
     echo "       --debug-fast            Build debug library with lto optimization disabled (fast build times)"
     echo "    -d|--dependencies          Install RCCL dependencies"
-    echo "       --device-linker         Build with assembly-extract device linker (default)"
+    echo "       --device-linker         Build with assembly-extract device linker"
     echo "       --disable-roctx         Build without ROCTX logging"
     echo "       --disable-sym-kernels   Disable symmetric memory kernels"
     echo "       --disable-warp-speed    Disable WARP_SPEED kernel optimizations"
@@ -76,7 +76,7 @@ function display_help()
     echo "    -l|--local_gpu_only        Only compile for local GPU architecture"
     echo "       --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)"
     echo "       --no_clean              Don't delete files if they already exist"
-    echo "       --no-device-linker      Disable device linker, use standard -fgpu-rdc"
+    echo "       --no-device-linker      Disable device linker, use standard -fgpu-rdc (default)"
     echo "       --openmp-test-enable    Enable OpenMP in rccl unit tests"
     echo "    -p|--package_build         Build RCCL package"
     echo "       --prefix                Specify custom directory to install RCCL to (default: \`/opt/rocm\`)"
