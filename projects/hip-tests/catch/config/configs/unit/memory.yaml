@@ -894,6 +894,18 @@ memory:
   Unit_hipMemcpyBatchAsync_H2H_Functional:
     <<: *level_2
     tags: [transfer, P1]
+  Unit_hipMemcpyBatchAsync_Swap_H2D_Functional:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Swap_D2H_Functional:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Swap_MultiOp:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Swap_UnalignedMatrix:
+    <<: *level_2
+    tags: [transfer]
   Unit_hipMemcpyBatchAsync_Mixed_Functional:
     <<: *level_2
     tags: [transfer]
