@@ -1367,6 +1367,66 @@ IoctlReplyPatch snapshot_outputs(uint32_t out_num_devices, uint32_t out_entry_si
   };
 }
 
+// entry_size(IN) is the caller's buffer stride, and the uapi lets it exceed the
+// current struct (kfd_ioctl.h), so a caller may legally declare a stride wider
+// than the whole RPC payload budget. Transmitting it verbatim left room for no
+// entries at all, and the count-only request that produced came back as success
+// over an untouched buffer -- where local mode fills the entry. The wire stride
+// is the struct instead, and the packed reply is scattered into the caller's
+// own slots.
+TEST(RemoteDriverDbgSnapshotTest, StrideWiderThanThePayloadLimitStillFillsEntries) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  constexpr uint32_t kEntryBytes = sizeof(kfd_dbg_device_info_entry);
+  // A stride the request could never carry: wider than the payload ceiling.
+  constexpr size_t kCallerStride = static_cast<size_t>(rocjitsu::kMaxPayloadBytes) + 4096;
+  constexpr uint8_t kSentinel = 0xAB;
+  constexpr uint8_t kPoison = 0xCD;
+  const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
+
+  std::vector<uint8_t> caller_buf(kCallerStride, kSentinel);
+  std::atomic<uint32_t> observed_stride{0};
+  std::atomic<uint32_t> observed_devices{0};
+  std::atomic<uint32_t> observed_payload{0};
+
+  std::jthread server([&, server_fd = sv[1]] {
+    const CloseOnScopeExit closer{server_fd};
+    serve_one_ioctl_reply(server_fd, 0, arg_struct_size, kEntryBytes, kPoison,
+                          [&](const rocjitsu::RpcHeader &hdr, kfd_ioctl_dbg_trap_args &echoed) {
+                            observed_payload = hdr.payload_bytes;
+                            observed_stride = echoed.device_snapshot.entry_size;
+                            observed_devices = echoed.device_snapshot.num_devices;
+                            echoed.device_snapshot.num_devices = 1;
+                            echoed.device_snapshot.entry_size = kEntryBytes;
+                          });
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = 4242;
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.num_devices = 1;
+  snap.device_snapshot.entry_size = static_cast<uint32_t>(kCallerStride);
+  snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
+
+  ASSERT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+  server.join();
+
+  EXPECT_EQ(observed_stride.load(), kEntryBytes) << "caller stride was transmitted verbatim";
+  EXPECT_EQ(observed_devices.load(), 1u) << "the fill request degraded to a count-only probe";
+  EXPECT_LE(observed_payload.load(), rocjitsu::kMaxPayloadBytes);
+
+  EXPECT_EQ(snap.device_snapshot.num_devices, 1u);
+  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.begin() + kEntryBytes, [](uint8_t b) {
+    return b == kPoison;
+  })) << "the entry did not reach the caller's buffer";
+  EXPECT_TRUE(std::all_of(caller_buf.begin() + kEntryBytes, caller_buf.end(), [](uint8_t b) {
+    return b == kSentinel;
+  })) << "copy-back wrote past the one entry the daemon returned";
+}
+
 // libhsakmt's hsaKmtDbgGetDeviceDataCtx() asks for UINT32_MAX devices and lets
 // the driver report the real total. Serialized literally that reserves
 // UINT32_MAX * sizeof(kfd_dbg_device_info_entry) (~480 GiB) and kills the
@@ -1447,9 +1507,9 @@ TEST(RemoteDriverDbgSnapshotTest, SuccessfulSnapshotLeavesUnfilledEntriesAndPadd
   constexpr size_t kCap = static_cast<size_t>(kRequested) * kStride;
   constexpr uint8_t kSentinel = 0xAB;
   constexpr uint8_t kUnwritten = 0;
-  // Distinct per-entry contents, so reading the tail at the wrong stride (the
-  // daemon lays entries out at entry_size(IN), not densely at entry_size(OUT))
-  // shows up as the wrong entry rather than as identical bytes.
+  // Distinct per-entry contents, so scattering the packed tail into the
+  // caller's wider slots at the wrong pitch shows up as the wrong entry rather
+  // than as identical bytes.
   const auto entry_byte = [](uint32_t i) { return static_cast<uint8_t>(0xC0 + i); };
   const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
 
@@ -1457,14 +1517,15 @@ TEST(RemoteDriverDbgSnapshotTest, SuccessfulSnapshotLeavesUnfilledEntriesAndPadd
 
   std::jthread server([&, server_fd = sv[1]] {
     const CloseOnScopeExit closer{server_fd};
-    // Mirror what SimulatedKfd writes into the daemon's tail: kReturned entries
-    // of kEntryBytes at kStride, everything else untouched.
+    // Mirror what SimulatedKfd writes into the daemon's tail. The client
+    // transmits the compact stride, not the caller's, so the daemon lays
+    // kReturned entries down back to back at kEntryBytes.
     serve_one_ioctl_reply(
         server_fd, 0, arg_struct_size, kCap, kUnwritten, snapshot_outputs(kReturned, kEntryBytes),
         [&](uint8_t *tail, size_t bytes) {
           std::memset(tail, kUnwritten, bytes);
           for (uint32_t i = 0; i < kReturned; ++i)
-            std::memset(tail + static_cast<size_t>(i) * kStride, entry_byte(i), kEntryBytes);
+            std::memset(tail + static_cast<size_t>(i) * kEntryBytes, entry_byte(i), kEntryBytes);
         });
   });
 

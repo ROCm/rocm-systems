@@ -424,6 +424,10 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // declared buffer capacity.
   uint32_t saved_dbg_snapshot_devices = 0;
   uint32_t saved_dbg_snapshot_stride = 0;
+  // The stride actually put on the wire, which is the caller's clamped to the
+  // struct the daemon fills. Entries arrive packed at this pitch and are
+  // scattered out at the caller's, so the two cannot be conflated.
+  uint32_t saved_dbg_snapshot_wire_stride = 0;
   if (has_embedded_pointers(request)) {
     switch (request) {
     case AMDKFD_IOC_WAIT_EVENTS:
@@ -506,17 +510,28 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         // payload does not match it exactly (validate_ioctl_payload). Only the
         // serialized copy is edited — the caller's args keep the original
         // request until the reply overwrites them with the true device total.
+        //
+        // Transmit a compact stride rather than the caller's. entry_size(IN) is
+        // documented as the caller's buffer stride and is allowed to exceed the
+        // current struct (kfd_ioctl.h), so a caller with wide padding between
+        // entries would otherwise reserve -- and make the daemon return -- that
+        // padding as wire bytes. Worse, a stride at or above the payload budget
+        // left room for no entries at all, and the count-only request that
+        // produced would come back as success over an untouched buffer. The
+        // daemon fills at this stride; the copy-back scatters each entry into
+        // the caller's own wider slot.
+        const uint32_t wire_stride =
+            std::min<uint32_t>(dbg->device_snapshot.entry_size, sizeof(kfd_dbg_device_info_entry));
         const uint32_t requested = dbg->device_snapshot.num_devices;
-        const uint32_t devices =
-            clamp_snapshot_devices(requested, dbg->device_snapshot.entry_size, arg_size);
-        // Not even one entry fits: the caller's stride alone exceeds the
-        // transport's capacity. Transmitting devices == 0 would turn a fill
-        // request into the count-only probe the daemon answers with success,
-        // leaving the caller's buffer untouched behind a zero return.
-        if (devices == 0 && requested != 0 && dbg->device_snapshot.entry_size != 0)
+        const uint32_t devices = clamp_snapshot_devices(requested, wire_stride, arg_size);
+        // A single compact entry not fitting would mean kMaxPayloadBytes is
+        // smaller than one struct; fail rather than degrade to the count probe.
+        if (devices == 0 && requested != 0 && wire_stride != 0)
           return -ENOMEM;
         dbg->device_snapshot.num_devices = devices;
-        inline_size = static_cast<size_t>(devices) * dbg->device_snapshot.entry_size;
+        dbg->device_snapshot.entry_size = wire_stride;
+        saved_dbg_snapshot_wire_stride = wire_stride;
+        inline_size = static_cast<size_t>(devices) * wire_stride;
         break;
       }
       default:
@@ -697,24 +712,28 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           // capping the loop at it is the same bound the driver applies; the
           // per-entry `extra` test additionally refuses to read past the tail
           // the daemon actually sent.
-          if (saved_dbg_snapshot_stride == 0)
+          if (saved_dbg_snapshot_stride == 0 || saved_dbg_snapshot_wire_stride == 0)
             break;
           const uint32_t entries =
               std::min(saved_dbg_snapshot_devices, dbg->device_snapshot.num_devices);
-          const size_t stride = saved_dbg_snapshot_stride;
+          // Two pitches: the tail is packed at the stride we transmitted, the
+          // caller's buffer is laid out at the stride it declared.
+          const size_t src_stride = saved_dbg_snapshot_wire_stride;
+          const size_t dst_stride = saved_dbg_snapshot_stride;
           // entry_size(OUT) is the daemon's word, not ours. The local path
           // clamps it to the struct it actually fills, so apply the same bound
           // here: an inflated value would pull the neighbouring entries' bytes
           // into the padding the caller's wider stride leaves between entries.
           const size_t written = std::min<size_t>(
               std::min<size_t>(dbg->device_snapshot.entry_size, sizeof(kfd_dbg_device_info_entry)),
-              stride);
+              std::min(src_stride, dst_stride));
           auto *snapshot_out = reinterpret_cast<uint8_t *>(saved_dbg_snapshot_ptr);
           for (uint32_t i = 0; i < entries; ++i) {
-            const size_t offset = static_cast<size_t>(i) * stride;
-            if (offset + written > extra)
+            const size_t src = static_cast<size_t>(i) * src_stride;
+            const size_t dst = static_cast<size_t>(i) * dst_stride;
+            if (src + written > extra)
               break;
-            std::memcpy(snapshot_out + offset, payload.data() + arg_size + offset, written);
+            std::memcpy(snapshot_out + dst, payload.data() + arg_size + src, written);
           }
           break;
         }
