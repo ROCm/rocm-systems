@@ -320,6 +320,8 @@ having been generated before rocpd support was added. They are regenerated in th
 
 ### Phase A-2: Remove the now-dead `--join-type` option
 
+Status: implemented.
+
 `--join-type {kernel,grid}` only ever fed the csv-format wide merge in
 `join_prof`. With that merge removed in Phase A, nothing
 in `src/` reads it, and `grid` vs `kernel` now produce identical output
@@ -329,15 +331,6 @@ removal itself because it also deletes user-facing surface, the dedicated
 `join_type_grid` / `join_type_kernel` golden workloads, their related tests,
 and the `--join-type` references in the docs.
 
-This phase removes the option, its deprecation warning, the `join` pytest marker
-and the `test_profile_join` ctest that selected it, the two workloads from
-`generate_workloads.sh` and the analyze workload list, and all four architecture
-directories of each golden workload.
-
-The `join_type` key is intentionally left in the remaining
-`tests/workloads/*/profiling_config.yaml` files. Those files record the
-arguments a workload was generated with, nothing reads the key after Phase A,
-and they age out as workloads are regenerated.
 
 ## Phase B: Add Compression at CSV Read/Write
 
