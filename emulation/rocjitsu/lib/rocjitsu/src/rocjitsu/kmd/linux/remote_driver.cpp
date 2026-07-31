@@ -771,6 +771,13 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           const size_t written = std::min<size_t>(
               std::min<size_t>(dbg->device_snapshot.entry_size, sizeof(kfd_dbg_device_info_entry)),
               std::min(src_stride, dst_stride));
+          // A zero-width entry writes nothing, so the loop has nothing to do —
+          // and the `src + written > extra` bound below degenerates into a bare
+          // offset test that lets a daemon-reported entry_size(OUT) of 0 spin
+          // the loop over the whole tail forming out-of-range destination
+          // pointers (UB) for no effect.
+          if (written == 0)
+            break;
           auto *snapshot_out = reinterpret_cast<uint8_t *>(saved_dbg_snapshot_ptr);
           for (uint32_t i = 0; i < entries; ++i) {
             const size_t src = static_cast<size_t>(i) * src_stride;
