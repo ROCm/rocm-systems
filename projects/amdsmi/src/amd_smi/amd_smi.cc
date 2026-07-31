@@ -154,6 +154,24 @@ static_assert(offsetof(rsmi_gpu_metrics_t, apu_metrics) ==
                   offsetof(amdsmi_gpu_metrics_t, apu_metrics),
               "GPU metrics: apu_metrics (last field) offset mismatch");
 
+// amdsmi_link_topology_t crosses the baremetal/host ABI boundary and is consumed
+// by the generated Python bindings, so its 64-byte layout must stay in lockstep
+// with the host definition; guard the size and field offsets at compile time.
+static_assert(sizeof(amdsmi_link_topology_t) == 64,
+              "amdsmi_link_topology_t must remain 64 bytes to match the published ABI");
+static_assert(offsetof(amdsmi_link_topology_t, weight) == 0,
+              "amdsmi_link_topology_t: weight offset mismatch");
+static_assert(offsetof(amdsmi_link_topology_t, link_status) == 8,
+              "amdsmi_link_topology_t: link_status offset mismatch");
+static_assert(offsetof(amdsmi_link_topology_t, link_type) == 12,
+              "amdsmi_link_topology_t: link_type offset mismatch");
+static_assert(offsetof(amdsmi_link_topology_t, num_hops) == 16,
+              "amdsmi_link_topology_t: num_hops offset mismatch");
+static_assert(offsetof(amdsmi_link_topology_t, fb_sharing) == 17,
+              "amdsmi_link_topology_t: fb_sharing offset mismatch");
+static_assert(offsetof(amdsmi_link_topology_t, reserved) == 20,
+              "amdsmi_link_topology_t: reserved offset mismatch");
+
 static void copy_rsmi_gpu_metrics_to_amdsmi(const rsmi_gpu_metrics_t& rsmi_metrics,
                                             amdsmi_gpu_metrics_t* amdsmi_metrics) {
   if (amdsmi_metrics == nullptr) return;
@@ -3233,6 +3251,72 @@ amdsmi_status_t amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_han
                                           reinterpret_cast<RSMI_IO_LINK_TYPE*>(type),
                                           reinterpret_cast<rsmi_p2p_capability_t*>(cap));
   return amd::smi::rsmi_to_amdsmi_status(rstatus);
+}
+
+amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handle_src,
+                                         amdsmi_processor_handle processor_handle_dst,
+                                         amdsmi_link_topology_t* topology_info) {
+  AMDSMI_CHECK_INIT();
+
+  if (topology_info == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Zero-initialize up front so every error path leaves the caller with a
+  // well-defined topology rather than a partially filled one.
+  *topology_info = {};
+  topology_info->link_type = AMDSMI_LINK_TYPE_UNKNOWN;
+  topology_info->link_status = AMDSMI_LINK_STATUS_DISABLED;
+
+  amd::smi::AMDSmiGPUDevice* src_device = nullptr;
+  amd::smi::AMDSmiGPUDevice* dst_device = nullptr;
+  amdsmi_status_t r = get_gpu_device_from_handle(processor_handle_src, &src_device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  r = get_gpu_device_from_handle(processor_handle_dst, &dst_device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+
+  uint32_t src_id = src_device->get_gpu_id();
+  uint32_t dst_id = dst_device->get_gpu_id();
+
+  // rsmi_topo_get_link_type writes an RSMI_IO_LINK_TYPE through the cast below, so
+  // amdsmi_link_type_t must be at least as wide to avoid an out-of-bounds write.
+  static_assert(sizeof(amdsmi_link_type_t) >= sizeof(RSMI_IO_LINK_TYPE),
+                "amdsmi_link_type_t must be at least as wide as RSMI_IO_LINK_TYPE");
+
+  uint64_t hops = 0;
+  amdsmi_link_type_t link_type = AMDSMI_LINK_TYPE_UNKNOWN;
+  amdsmi_status_t status = amd::smi::rsmi_to_amdsmi_status(rsmi_topo_get_link_type(
+      src_id, dst_id, &hops, reinterpret_cast<RSMI_IO_LINK_TYPE*>(&link_type)));
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+
+  uint64_t weight = 0;
+  status = amd::smi::rsmi_to_amdsmi_status(rsmi_topo_get_link_weight(src_id, dst_id, &weight));
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+
+  // Framebuffer sharing: two GPUs can share framebuffer memory when they are
+  // P2P-accessible (e.g. same xGMI hive). Best-effort: a missing P2P result
+  // must not fail the query.
+  uint8_t fb_sharing = 0;
+  bool accessible = false;
+  if (amd::smi::rsmi_to_amdsmi_status(rsmi_is_P2P_accessible(src_id, dst_id, &accessible)) ==
+      AMDSMI_STATUS_SUCCESS) {
+    fb_sharing = accessible ? 1 : 0;
+  }
+
+  topology_info->link_type = link_type;
+  // num_hops is a small step count; clamp to the uint8_t range instead of
+  // wrapping.
+  topology_info->num_hops = hops > 255 ? 255 : static_cast<uint8_t>(hops);
+  topology_info->weight = weight;
+  // link_status is derived, not read from hardware: a concrete resolved type is
+  // ENABLED; NOT_APPLICABLE and UNKNOWN map to DISABLED.
+  topology_info->link_status =
+      (link_type == AMDSMI_LINK_TYPE_NOT_APPLICABLE || link_type == AMDSMI_LINK_TYPE_UNKNOWN)
+          ? AMDSMI_LINK_STATUS_DISABLED
+          : AMDSMI_LINK_STATUS_ENABLED;
+  topology_info->fb_sharing = fb_sharing;
+
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 // Compute Partition functions
