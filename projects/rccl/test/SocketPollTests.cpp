@@ -18,18 +18,20 @@
  * deliberately slow. It measures the CPU time consumed by the receiving thread
  * while it is blocked waiting for data:
  *
- *   - With NCCL_SOCKET_POLL_TIMEOUT_MSEC > 0 (the fix, default on >= v2.29) the
- *     receiver sleeps in poll(), so it consumes almost no CPU relative to the
- *     wall-clock time it spends waiting.
- *   - With NCCL_SOCKET_POLL_TIMEOUT_MSEC == 0 (pre-fix behavior, and the code
- *     path taken by every release before v2.29) the receiver busy-spins, so it
+ *   - With NCCL_SOCKET_POLL_TIMEOUT_MSEC > 0 the receiver sleeps in poll(), so
+ *     it consumes almost no CPU relative to the wall-clock time it spends
+ *     waiting. The parameter is opt-in and defaults to 0 (see NCCL_PARAM in
+ *     src/misc/socket.cc), so the test sets it explicitly; the poll code path it
+ *     selects only exists on builds that carry the fix.
+ *   - With NCCL_SOCKET_POLL_TIMEOUT_MSEC == 0 (the default, and the only code
+ *     path available on builds lacking the fix) the receiver busy-spins, so it
  *     consumes CPU time roughly equal to the wall-clock wait.
  *
- * The "poll enabled -> low CPU" assertion passes on v2.29+ and fails on any
- * build lacking the fix (where the parameter is ignored and the loop always
- * spins), giving a clean pass-after / fail-before signal. The "poll disabled ->
- * high CPU" case is kept as a control that documents the busy-loop behavior the
- * fix removes.
+ * The "poll enabled -> low CPU" assertion passes on builds that honor the
+ * parameter and fails on any build lacking the fix (where the parameter is
+ * ignored and the loop always spins), giving a clean pass-after / fail-before
+ * signal. The "poll disabled -> high CPU" case is kept as a control that
+ * documents the busy-loop behavior the fix removes.
  */
 
 #include "socket.h"
@@ -39,11 +41,13 @@
 #include "gtest/gtest.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <netinet/in.h>
 #include <thread>
+#include <vector>
 
 namespace RcclUnitTesting {
 namespace {
@@ -95,14 +99,20 @@ TransferMeasurement RunSlowTransfer() {
   const uint64_t magic = NCCL_SOCKET_MAGIC;
   const enum ncclSocketType type = ncclSocketTypeBootstrap;
 
+  // Abort flag lives on listenSock; ncclSocketAccept copies it onto acceptSock,
+  // so raising it unblocks a thread parked in the blocking accept() loop (e.g.
+  // when the connect side fails and no peer ever arrives).
+  volatile uint32_t abortFlag = 0;
+
   struct ncclSocket listenSock;
   union ncclSocketAddress listenAddr = LoopbackAddr();
-  if (ncclSocketInit(&listenSock, &listenAddr, magic, type) != ncclSuccess) {
+  if (ncclSocketInit(&listenSock, &listenAddr, magic, type, &abortFlag) != ncclSuccess) {
     TEST_INFO("ncclSocketInit(listen) failed");
     return m;
   }
   if (ncclSocketListen(&listenSock) != ncclSuccess) {
     TEST_INFO("ncclSocketListen failed");
+    ncclSocketClose(&listenSock);
     return m;
   }
 
@@ -130,7 +140,11 @@ TransferMeasurement RunSlowTransfer() {
     acceptOk.store(acceptSock.state == ncclSocketStateReady);
   });
 
+  // Zero-init so that, if ncclSocketInit() fails below, connectSock has state
+  // ncclSocketStateNone (0) and the ncclSocketClose() cleanup path is a safe
+  // no-op instead of acting on a garbage descriptor.
   struct ncclSocket connectSock;
+  memset(&connectSock, 0, sizeof(connectSock));
   union ncclSocketAddress connectAddr = boundAddr;
   bool connectOk = false;
   if (ncclSocketInit(&connectSock, &connectAddr, magic, type) == ncclSuccess &&
@@ -140,6 +154,10 @@ TransferMeasurement RunSlowTransfer() {
     TEST_INFO("ncclSocketConnect failed");
   }
 
+  // If the connect side never came up, no peer will reach the accept() loop;
+  // raise the abort flag so acceptThread returns instead of blocking until the
+  // test timeout fires.
+  if (!connectOk) abortFlag = 1;
   acceptThread.join();
 
   if (!connectOk || !acceptOk.load()) {
@@ -179,6 +197,11 @@ TransferMeasurement RunSlowTransfer() {
   ncclResult_t sendRes =
       ncclSocketSend(&acceptSock, sendBuf.data(), kPayloadBytes);
 
+  // If the payload never went out, the receiver would otherwise sit in
+  // ncclSocketRecv() until the test timeout. Shut the sender side down so the
+  // peer sees EOF and recvThread can join promptly.
+  if (sendRes != ncclSuccess) ncclSocketShutdown(&acceptSock, SHUT_RDWR);
+
   recvThread.join();
 
   if (sendRes == ncclSuccess && m.dataValid)
@@ -197,11 +220,15 @@ TransferMeasurement RunSlowTransfer() {
 void CheckSlowTransfer(bool expectBusy) {
   TransferMeasurement m = RunSlowTransfer();
 
-  if (!m.connected) {
-    GTEST_SKIP() << "Could not establish a loopback socket pair; "
-                 << "networking may be unavailable in this environment.";
-    return;
-  }
+  // Loopback (127.0.0.1) bootstrap sockets must always come up in the test
+  // environment, so a failed handshake is a real defect, not a reason to skip.
+  // A skip would also be misleading here: in the isolated child a skip exits
+  // RCCL_TEST_SKIPPED, which the runner does not count as a failure, so the
+  // outer gtest case would report PASSED and hide a broken handshake. Fail hard
+  // instead.
+  ASSERT_TRUE(m.connected)
+      << "Could not establish a loopback bootstrap socket pair; the slow-transfer "
+      << "measurement never ran.";
 
   ASSERT_TRUE(m.dataValid) << "Payload was not received intact over the socket pair.";
   ASSERT_GT(m.wallMs, kSenderIdleMs * 0.5)
