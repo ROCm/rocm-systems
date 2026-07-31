@@ -8,6 +8,7 @@
 #SBATCH --output=%x-%j.out
 #SBATCH --error=%x-%j.err
 #SBATCH --propagate=NONE
+#SBATCH --qos=vip_prio
 #
 # Compute-node orchestrator for the RCCL device-API CI job, invoked from
 # .github/workflows/rccl-suite.yml (suite=device-api) via submit_slurm_job.py.
