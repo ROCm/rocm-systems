@@ -10,6 +10,12 @@
 #include "group.h"
 #include "nvtx.h"
 #include "utils.h"
+#include <mutex>
+
+static std::mutex& getVmmMutex() {
+  static std::mutex vmm_mutex;
+  return vmm_mutex;
+}
 
 NCCL_API(ncclResult_t, ncclMemAlloc, void** ptr, size_t size);
 ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
@@ -40,6 +46,8 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
 #if CUDART_VERSION >= 12030
     // Query device to see if FABRIC handle support is available
     flag = 0;
+    // Lock VMM calls to prevent ROCclr host race conditions
+    std::lock_guard<std::mutex> lock(getVmmMutex());
     (void)CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev));
     if (flag) requestedHandleTypes |= CU_MEM_HANDLE_TYPE_FABRIC;
 #endif
@@ -93,12 +101,23 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
     for (int i = 0; i < dcnt; ++i) {
       int p2p = 0;
       if (i == cudaDev || (CUDASUCCESS(cudaDeviceCanAccessPeer(&p2p, i, cudaDev)) && p2p)) {
-        hipDeviceptr_t dummyCtx;
-        hipDevicePrimaryCtxRetain((hipCtx_t*)&dummyCtx, i);
-        accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-        accessDesc.location.id = i;
-        accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-        CUCHECK(cuMemSetAccess((CUdeviceptr)*ptr, handleSize, &accessDesc, 1));
+        // 1. Initialize & increment refcount for GPU i
+        hipCtx_t ctx;
+        hipError_t err = hipDevicePrimaryCtxRetain(&ctx, i); 
+        if (err == hipSuccess) {
+          accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+          accessDesc.location.id = i;
+          accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+          CUCHECK(cuMemSetAccess((CUdeviceptr)*ptr, handleSize, &accessDesc, 1));
+          hipDevicePrimaryCtxRelease(i);
+        }
+        else {
+          WARN("hipDevicePrimaryCtxRetain failed for GPU %d with error %d: %s", i, err, hipGetErrorString(err));
+          cuMemUnmap((CUdeviceptr)*ptr, handleSize);
+          cuMemAddressFree((CUdeviceptr)*ptr, handleSize);
+          *ptr = NULL;
+          goto fallback;
+        }
       }
       if (0 == p2p && i != cudaDev) INFO(NCCL_ALLOC, "P2P not supported between GPU%d and GPU%d", cudaDev, i);
     }
@@ -135,6 +154,7 @@ ncclResult_t ncclMemFree_impl(void* ptr) {
   CUCHECKGOTO(cuPointerGetAttribute((void*)&ptrDev, CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL, (CUdeviceptr)ptr), ret, fail);
   CUDACHECKGOTO(cudaSetDevice((int)ptrDev), ret, fail);
   if (ncclCuMemEnable()) {
+    std::lock_guard<std::mutex> lock(getVmmMutex());
     NCCLCHECKGOTO(ncclCuMemFree(ptr, nullptr), ret,
                   fail); // User facing API, memManager does not need to track user memory. Same as ncclMemAlloc
     goto exit;
