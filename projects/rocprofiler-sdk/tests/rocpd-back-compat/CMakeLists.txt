@@ -43,6 +43,10 @@
 # Of course, the PRESENT test should be run by the LATEST_SCHEMA, to ensure latest
 # continues to support the graph_launch fields (for example).
 #
+# NOTE: you may need to delete
+# build/tests/rocpd-back-compat/tests.integration.validate.rocpd-back-compat_tests.cmake
+# and rerun cmake --build to pickup new validate.py tests.
+#
 # * Add additional tests for other output formats (as required).
 #
 # If the schema change also affects PFTRACE or OTF2 output, add tests for those formats as

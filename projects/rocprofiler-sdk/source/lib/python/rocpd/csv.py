@@ -254,10 +254,6 @@ def get_kernel_csv_query(importData, config) -> str:
         "grid_z AS Grid_Size_Z",
     ]
 
-    # Fields added in schema 3.0.1 and later can be appended here:
-    # if get_schema_version(importData) >= (3, 0, 1):
-    #     select_columns += ["new_field AS New_Field"]
-
     select_clause = ",\n".join(select_columns)
 
     return f"""

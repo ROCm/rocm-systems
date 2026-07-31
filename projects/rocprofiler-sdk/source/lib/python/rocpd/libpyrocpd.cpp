@@ -521,7 +521,6 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                 return std::find(feats.begin(), feats.end(), name) != feats.end();
             };
             const auto graph_launch_supported = has_feature("graph_launch");
-            const auto spm_counters_supported = has_feature("spm_counters");
 
             //
             // End of schema specific limits & features
@@ -558,6 +557,17 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                                pitr.pid);
                         };
 
+                        auto select_guid_nid_pid_and_condition =
+                            [&nitr, &pitr](std::string_view tbl, std::string_view condition) {
+                                return fmt::format("SELECT * FROM {} WHERE guid = '{}' AND nid "
+                                                   "= {} AND pid = {} AND {}",
+                                                   tbl,
+                                                   pitr.guid,
+                                                   nitr.id,
+                                                   pitr.pid,
+                                                   condition);
+                            };
+
                         // For schemas < 3.0.2 the kernels/memory_copies views lack
                         // graph_exec_id and graph_node_id.  Inject zero-valued aliases
                         // so the deserializer always finds the expected column names and
@@ -578,16 +588,9 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         // causing the timeline to render incorrectly.
                         // The subquery against rocpd_kernel_dispatch is small (one row per
                         // dispatch, typically ~100s) and fast.
-                        auto samples_no_spm_query =
-                            fmt::format("SELECT * FROM samples"
-                                        " WHERE guid = '{}' AND nid = {} AND pid = {}"
-                                        " AND event_id NOT IN ("
-                                        "  SELECT event_id FROM rocpd_kernel_dispatch"
-                                        "  WHERE guid = '{}'"
-                                        " )",
-                                        pitr.guid,
-                                        nitr.id,
-                                        pitr.pid,
+                        auto samples_condition =
+                            fmt::format("event_id NOT IN (SELECT event_id FROM "
+                                        "rocpd_kernel_dispatch WHERE guid = '{}')",
                                         pitr.guid);
 
                         auto _sqlgen_perft = common::simple_timer{fmt::format(
@@ -629,8 +632,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
                         auto samples = rocpd::sql_generator<rocpd::types::sample>{
                             conn,
-                            spm_counters_supported ? samples_no_spm_query
-                                                   : select_guid_nid_pid("samples"),
+                            select_guid_nid_pid_and_condition("samples", samples_condition),
                             sample_order_by};
 
                         auto threads = rocpd::sql_generator<rocpd::types::thread>{
