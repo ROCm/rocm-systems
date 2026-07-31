@@ -7,6 +7,7 @@
 #include "rocjitsu/code/dbt/legalization/gfx1250_b0_to_a0.h"
 
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
+#include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
 #include "rocjitsu/isa/instruction.h"
@@ -29,20 +30,18 @@ namespace {
 /// NOT-YET-SUPPORTED (classified as needing an expansion but with no semantic
 /// expander, so translating a kernel that uses them fails closed rather than
 /// passing the instruction through unchanged):
-///   * s_barrier_signal_isfirst,
 ///   * v_cvt_pk_fp8_f32, v_cvt_sr_fp8_f32 (only when CLAMP selects the B0-only
 ///     mode; the ordinary form stays on the copy path),
 ///   * v_wmma_scale / v_wmma_scale16 forms without an implemented rule,
 ///   * integer IU4 and IU8 WMMA/SWMMAC forms without an implemented spacing
 ///     rule.
-/// Separately, a 64-bit source using FLAT_SCRATCH_BASE_HI is classified via
-/// operand inspection (see uses_flat_scratch_base_hi_64bit_source), and the
+/// Separately, a 64-bit source reading FLAT_SCRATCH_BASE is classified via
+/// operand inspection (see gfx1250_reads_flat_scratch_base_64bit), and the
 /// barrier-state and sleep/monitor families are DEFERRED with a pass-through
 /// warning rather than fail-closed (see is_deferred_gfx1250_family).
 /// Classifying the fail-closed cases keeps the failure explicit and located; add
 /// the semantic rule (and update this note) once each expansion is implemented.
-inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemonics = {
-    "s_barrier_signal_isfirst",
+inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemonics = {
     "ds_load_2addr_b32",
     "ds_load_2addr_b64",
     "ds_load_2addr_stride64_b32",
@@ -91,7 +90,8 @@ inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemoni
   // but not A0, so they require semantic expansion. The common f32 K=128 forms
   // use one neutral regular-Scale mixed-format operation. Source fields with no
   // meaning for these opcodes are discarded while constructing the target.
-  // The f16 and standalone 32x16 FP4 forms still fail closed.
+  // The standalone 32x16 FP4 form splits into two scaled M=16 halves; the f16
+  // K=128 forms still fail closed in their semantic rule.
   const bool is_k128_fp8_bf8 = (mnemonic.starts_with("v_wmma_f16_16x16x128_") ||
                                 mnemonic.starts_with("v_wmma_f32_16x16x128_")) &&
                                (mnemonic.ends_with("_fp8_fp8") || mnemonic.ends_with("_fp8_bf8") ||
@@ -150,25 +150,6 @@ inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemoni
   return encoding.clamp != 0;
 }
 
-/// @brief True when any source operand uses the special FLAT_SCRATCH_BASE_HI
-/// value in a 64-bit source position.
-/// @details This special scalar source is not usable in a 64-bit source position
-/// on this target, but the restriction is operand-sensitive rather than tied to a
-/// mnemonic family, so it needs per-operand inspection. A 32-bit use of the same
-/// value is unaffected. Encoding value 231 identifies the special source (see
-/// gfx1250/operand_types.h).
-[[nodiscard]] bool uses_flat_scratch_base_hi_64bit_source(const Instruction &inst) {
-  constexpr int kFlatScratchBaseHiEncoding = 231;
-  constexpr int k64BitOperand = 64;
-  for (int i = 0; i < inst.num_src_operands(); ++i) {
-    const Operand *op = inst.src_operand(i);
-    if (op != nullptr && op->size_bits() == k64BitOperand &&
-        op->encoding_value() == kFlatScratchBaseHiEncoding)
-      return true;
-  }
-  return false;
-}
-
 /// @brief True for instruction families whose A0 handling is deferred pending
 /// confirmation of the exact translated set.
 /// @details The barrier-state query and the sleep/monitor families may need
@@ -194,8 +175,10 @@ const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &
   if (fp8_clamp_family && !requires_fp8_clamp_emulation(inst))
     return nullptr;
 
+  // Reading FLAT_SCRATCH_BASE through a 64-bit source position is a property of
+  // the operand rather than the mnemonic, so it is classified separately.
   if (!requires_b0_to_a0_expansion(inst.mnemonic()) &&
-      !uses_flat_scratch_base_hi_64bit_source(inst)) {
+      !gfx1250_reads_flat_scratch_base_64bit(inst)) {
     // Deferred families pass through unchanged but warn, so the not-yet-handled
     // case is visible rather than silent. See is_deferred_gfx1250_family.
     if (is_deferred_gfx1250_family(mnemonic))
