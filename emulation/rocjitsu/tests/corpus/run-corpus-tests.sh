@@ -79,9 +79,10 @@ for target in "${targets[@]}"; do
   cache_dir="${corpus_work_dir}/.pytest-cache/${name}"
 
   pytest_cmd=(
-    rocjitsu --config "${rocjitsu_config_path}" -- pytest tests/test_corpus.py
+    pytest tests/test_corpus.py
     --target "${name}"
     --suite iree,kernels,cts
+    --run-wrapper "rocjitsu --config ${rocjitsu_config_path} --"
     --skip-tests-config "${skip_tests_config_path}"
     --artifact-directory "${artifact_dir}"
     --durations=0
