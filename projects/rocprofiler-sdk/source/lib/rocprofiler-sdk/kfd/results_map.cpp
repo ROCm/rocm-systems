@@ -40,11 +40,22 @@ ResultsMap::take(const correlation_key& key)
 {
     return m_data.wlock([&](auto& map) -> std::optional<kfd_timing_result> {
         auto it = map.find(key);
-        if(it == map.end()) return std::nullopt;
+        if(it == map.end())
+        {
+            ++m_misses;
+            return std::nullopt;
+        }
         auto result = it->second;
         map.erase(it);
+        ++m_hits;
         return result;
     });
+}
+
+ResultsMap::take_stats
+ResultsMap::stats() const
+{
+    return take_stats{m_hits.load(), m_misses.load()};
 }
 
 size_t
@@ -69,12 +80,6 @@ ResultsMap::evict_stale(uint64_t now_ns, uint64_t max_age_ns)
         }
         return evicted;
     });
-}
-
-size_t
-ResultsMap::size() const
-{
-    return m_data.rlock([&](const auto& map) { return map.size(); });
 }
 }  // namespace kfd
 }  // namespace rocprofiler

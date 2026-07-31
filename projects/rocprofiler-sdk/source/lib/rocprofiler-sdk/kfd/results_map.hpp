@@ -25,6 +25,7 @@
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/kfd/correlation_types.hpp"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -75,12 +76,22 @@ public:
     // and unit-testable. Returns the number of entries evicted.
     size_t evict_stale(uint64_t now_ns, uint64_t max_age_ns);
 
-    // Current entry count (diagnostics/tests).
-    size_t size() const;
+    // Cumulative take() outcomes. A miss means a completed dispatch looked up a
+    // valid correlation key before the reader had deposited its firmware record
+    // (or the record never arrived) and silently fell back to HSA timestamps --
+    // the only externally visible symptom of that race.
+    struct take_stats
+    {
+        uint64_t hits   = 0;
+        uint64_t misses = 0;
+    };
+    take_stats stats() const;
 
 private:
     using map_t = std::unordered_map<correlation_key, kfd_timing_result, correlation_key_hash>;
-    common::Synchronized<map_t> m_data = {};
+    common::Synchronized<map_t> m_data   = {};
+    std::atomic<uint64_t>       m_hits   = {0};
+    std::atomic<uint64_t>       m_misses = {0};
 };
 }  // namespace kfd
 }  // namespace rocprofiler

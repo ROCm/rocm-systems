@@ -54,6 +54,16 @@ struct correlation_key
     bool operator!=(const correlation_key& rhs) const { return !(*this == rhs); }
 };
 
+// Whether a firmware record's converted (system-domain) timestamps are usable:
+// they must form a positive interval that fits inside the dispatch's own CPU
+// window [enqueue_ts, now_ns]. A record taken for the wrong dispatch lands
+// outside those bounds, so the caller falls back to HSA timestamps.
+inline bool
+kfd_time_is_sane(uint64_t start_ns, uint64_t end_ns, uint64_t enqueue_ts, uint64_t now_ns)
+{
+    return start_ns < end_ns && start_ns >= enqueue_ts && end_ns <= now_ns;
+}
+
 // std::hash-compatible functor for correlation_key. Combines the three 32-bit
 // fields with the common boost-style hash_combine mix.
 struct correlation_key_hash
