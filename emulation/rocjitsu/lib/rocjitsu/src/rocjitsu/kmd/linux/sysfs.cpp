@@ -120,7 +120,6 @@ void reap_stale_sysfs_dirs() {
 // The debug-topology derivation (trap-debug capability/capability2/debug_prop
 // per GFXIP) lives in kfd_topology.h so the DBG_TRAP GET_DEVICE_SNAPSHOT path
 // and this sysfs topology generator share one source of truth.
-using kmd::debug_topology_for;
 using kmd::DebugTopology;
 
 } // namespace
@@ -296,10 +295,9 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   // simd_arrays_per_engine and cu_per_simd_array stay per-XCC. The DBG_TRAP
   // device snapshot passes the unscaled value through instead (kfd_debug.c),
   // which is why the two paths report different numbers for the same property.
-  // Normalize once so array_count and the num_xcc property cannot disagree:
-  // a node reporting "num_xcc 0" next to a scaled array_count would make
-  // rocdbgapi's array_count * num_xcc / simd_arrays_per_engine come out zero.
-  const uint32_t num_xcc = std::max(1u, gpu.num_xcc);
+  // Normalize once (GpuInfo::effective_num_xcc) so array_count and the num_xcc
+  // property cannot disagree.
+  const uint32_t num_xcc = gpu.effective_num_xcc();
   const uint32_t node_array_count = gpu.num_shader_engines * num_xcc;
 
   std::ostringstream props;

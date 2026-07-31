@@ -83,6 +83,13 @@ public:
     // Firmware
     uint32_t fw_version = 0;
     uint32_t sdma_fw_version = 0;
+
+    /// @brief XCC count with a floor of one, as every KFD consumer needs it.
+    /// @details A node reporting "num_xcc 0" alongside a scaled array_count
+    /// makes rocdbgapi's array_count * num_xcc / simd_arrays_per_engine come out
+    /// zero, so both the sysfs generator and the DBG_TRAP device snapshot
+    /// normalize through here rather than each applying its own floor.
+    uint32_t effective_num_xcc() const { return num_xcc == 0 ? 1u : num_xcc; }
   };
 
   Sysfs() = default;

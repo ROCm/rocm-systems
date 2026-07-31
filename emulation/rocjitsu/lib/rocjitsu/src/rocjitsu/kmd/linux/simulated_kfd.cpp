@@ -251,8 +251,8 @@ void SimulatedKfd::setup_topology(const std::vector<config::KfdDeviceConfig> &de
     return;
   for (size_t i = 0; i < infos.size() && i < gpus_.size(); ++i)
     gpus_[i].gpu_id = infos[i].gpu_id;
-  gpu_infos_ = infos;
-  topology_.generate(infos);
+  gpu_infos_ = std::move(infos);
+  topology_.generate(gpu_infos_);
   topology_.setup_environment();
 }
 
@@ -2178,13 +2178,14 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     // mode nothing is owned, so the debugger's own fd is left untouched.
     sess = KfdProcess::DebugSession{};
     return 0;
+  case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+    return debug_device_snapshot(args->device_snapshot);
+
   // Recognized ops whose handlers are not wired up yet. The kernel dispatches
   // each to a real implementation; the skeleton reports ENOSYS ("not
   // implemented") so a debugger can tell a stubbed-but-valid op apart from a
   // genuinely unknown one (EINVAL below). Each case graduates out of this group
-  // as its handler lands.
-  case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
-    return debug_device_snapshot(args->device_snapshot);
+  // as its handler lands — move it above this comment, not below it.
   case KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT:
   case KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED:
   case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE:
@@ -2208,7 +2209,13 @@ int SimulatedKfd::debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args 
   // total device count, clamp the per-entry size, and fill up to the caller's
   // buffer capacity. The two-call protocol is: pass num_devices=0 to learn the
   // count, then pass a buffer sized for that many entries.
-  const uint32_t total = static_cast<uint32_t>(gpus_.size());
+  // Only devices we can actually describe are enumerable. gpu_infos_ is filled
+  // by setup_topology, which every embedder is free to skip or to call with
+  // fewer devices than gpus_ holds (a config whose device block is absent, or
+  // the single-GpuInfo overload on a multi-SoC driver). Reporting gpus_.size()
+  // regardless would hand rocdbgapi entries with simd_count/array_count zero,
+  // which its agent_snapshot treats as a fatal error rather than a bad ioctl.
+  const uint32_t total = static_cast<uint32_t>(std::min(gpus_.size(), gpu_infos_.size()));
   const uint32_t in_entry_size = args.entry_size;
   const uint32_t fill = std::min<uint32_t>(args.num_devices, total);
 
@@ -2220,10 +2227,9 @@ int SimulatedKfd::debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args 
   if (args.snapshot_buf_ptr == 0 || in_entry_size == 0)
     return -EFAULT;
 
-  const Sysfs::GpuInfo empty_info{};
   auto *out = reinterpret_cast<uint8_t *>(static_cast<uintptr_t>(args.snapshot_buf_ptr));
   for (uint32_t i = 0; i < fill; ++i) {
-    const Sysfs::GpuInfo &info = i < gpu_infos_.size() ? gpu_infos_[i] : empty_info;
+    const Sysfs::GpuInfo &info = gpu_infos_[i];
     const kfd_process_device_apertures ap = gpu_apertures(i);
 
     kfd_dbg_device_info_entry e{};
@@ -2251,7 +2257,7 @@ int SimulatedKfd::debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args 
     // array_count * num_xcc / simd_arrays_per_engine cannot come out zero.
     e.array_count = info.num_shader_engines;
     e.simd_arrays_per_engine = info.num_shader_arrays_per_engine;
-    e.num_xcc = std::max(1u, info.num_xcc);
+    e.num_xcc = info.effective_num_xcc();
     const kmd::DebugTopology topology =
         kmd::effective_topology_for(info.gfx_target_version, info.capability, info.capability2,
                                     info.debug_prop, info.revision_id);
