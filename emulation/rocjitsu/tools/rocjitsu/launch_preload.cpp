@@ -150,11 +150,6 @@ std::string find_loaded_tsan_runtime() {
 }
 
 void prepend_launch_preloads(LaunchEnvironment &environment, const std::string &interposer_path) {
-  // Add caller-requested child libraries before enforcing sanitizer/interposer
-  // ordering. This avoids preloading those libraries into the launcher itself.
-  if (const char *extra_preload = environment.get("RJ_LAUNCH_PRELOAD");
-      extra_preload && *extra_preload)
-    environment.prepend_path("LD_PRELOAD", extra_preload);
   environment.prepend_path("LD_PRELOAD", interposer_path);
   if (std::string asan_runtime = find_loaded_asan_runtime(); !asan_runtime.empty())
     environment.prepend_path("LD_PRELOAD", asan_runtime);
