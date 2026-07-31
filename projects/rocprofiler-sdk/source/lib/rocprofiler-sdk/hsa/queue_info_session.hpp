@@ -68,9 +68,8 @@ struct packet_data_t
     // could race with queue destroy/recreate. All default to the invalid state so
     // any dispatch that skips capture automatically falls back to HSA timestamps.
     bool     kfd_correlation_key_valid = false;
-    uint64_t hsa_queue_pkt_index       = 0;  // full 64-bit slot index
     uint32_t kfd_doorbell_off          = 0;  // snapshot at enqueue
-    uint32_t kfd_dispatch_idx_low32    = 0;  // hsa_queue_pkt_index & 0xFFFFFFFF
+    uint32_t kfd_dispatch_idx_low32    = 0;  // low 32 bits of the HSA queue slot
     uint32_t kfd_generation            = 0;  // snapshot at enqueue
 };
 

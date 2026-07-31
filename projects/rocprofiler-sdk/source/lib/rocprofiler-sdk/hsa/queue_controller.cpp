@@ -28,7 +28,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
-#include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 
 #include <hsa/amd_hsa_queue.h>
 #include <hsa/amd_hsa_signal.h>
@@ -103,10 +103,6 @@ create_queue(hsa_agent_t        agent,
             });
             controller->add_queue(*queue, std::move(new_queue));
             ROCP_INFO << "created queue for HSA agent handle " << agent.handle;
-
-            // Now that a queue exists (agent cache populated, device acquired),
-            // ensure the KFD dispatch-log session is up for this GPU.
-            kfd::ensure_reader_session(static_cast<uint32_t>(agent_info.get_rocp_agent()->gpu_id));
             return HSA_STATUS_SUCCESS;
         }
     }
@@ -411,8 +407,9 @@ QueueController::destroy_queue(hsa_queue_t* id)
     if(!queue) return;
 
     // KFD dispatch-log: retire this queue's doorbell binding (bumps generation
-    // so a reused doorbell cannot misattribute records to this dead queue).
-    kfd::doorbell_map().on_queue_destroyed(queue->get_id());
+    // so a reused doorbell cannot misattribute records to this dead queue). The
+    // gate keeps a forked child out of the DoorbellMap lock.
+    if(kfd::kfd_dispatch_log_available()) kfd::doorbell_map().on_queue_destroyed(queue->get_id());
 
     queue_interposition::destroy_queue_state(id);
     queue->sync();
@@ -776,10 +773,17 @@ capture_doorbell_key(rocprofiler_queue_id_t queue_id, const hsa_queue_t* interce
     uint64_t hwptr = 0;
     if(intercept_queue != nullptr && intercept_queue->doorbell_signal.handle != 0)
     {
+        // hsa_signal_t::handle IS the address of the amd_signal_t in the AMD HSA
+        // ABI, so the int-to-ptr conversion is the only way to reach it; same
+        // construct as queue_interposition.cpp's lookup_queue_state_by_doorbell.
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         const auto* sig =
             reinterpret_cast<const amd_signal_t*>(intercept_queue->doorbell_signal.handle);
-        hwptr = reinterpret_cast<uint64_t>(sig->hardware_doorbell_ptr);
+        // hardware_doorbell_ptr aliases other union members for non-doorbell kinds
+        // (a legacy intercept queue exposes a USER-kind signal), so reading it
+        // there would yield a bogus key instead of a clean HSA fallback.
+        if(sig->kind == AMD_SIGNAL_KIND_DOORBELL || sig->kind == AMD_SIGNAL_KIND_LEGACY_DOORBELL)
+            hwptr = reinterpret_cast<uint64_t>(sig->hardware_doorbell_ptr);
     }
     if(hwptr == 0) return std::nullopt;
 

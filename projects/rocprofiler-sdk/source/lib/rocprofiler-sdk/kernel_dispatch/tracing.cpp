@@ -22,7 +22,6 @@
 
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/common/logging.hpp"
-
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -85,29 +84,21 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
             // Sanity guard against a mis-correlated / stale firmware record: the
             // converted times must form a positive interval that fits inside this
             // dispatch's own CPU window [enqueue, now]. A record pulled for the wrong
-            // dispatch would land outside these bounds; rather than let
-            // adjust_profiling_time() clamp it (or FATAL under CI-strict) into a
-            // plausible-but-wrong value, we reject and fall back to HSA. This checks
-            // correlation, not the conversion (which is HSA's own).
+            // dispatch would land outside these bounds, so reject it and fall back to
+            // HSA. This checks correlation, not the conversion (which is HSA's own).
             const uint64_t _now      = common::timestamp_ns();
             const bool     _kfd_sane = _s1 == HSA_STATUS_SUCCESS && _s2 == HSA_STATUS_SUCCESS &&
-                                   kfd_start_sys < kfd_end_sys &&
-                                   kfd_start_sys >= session.enqueue_ts && kfd_end_sys <= _now;
+                                   kfd::kfd_time_is_sane(
+                                       kfd_start_sys, kfd_end_sys, session.enqueue_ts, _now);
 
-            if(_kfd_sane)
-            {
-                // Emit firmware timestamps. The firmware interval (end-start) is
-                // deliberately kept: it is measured at the true HW dispatch
-                // boundaries and is tighter/earlier than HSA's signal-machinery
-                // timing, so we do NOT force it to match the HSA duration.
-                auto kfd_time =
-                    tracing::profiling_time{HSA_STATUS_SUCCESS, kfd_start_sys, kfd_end_sys};
-                return tracing::adjust_profiling_time(
-                    "dispatch",
-                    "kfd_dispatch_log",
-                    kfd_time,
-                    tracing::profiling_time{HSA_STATUS_SUCCESS, session.enqueue_ts, _now});
-            }
+            // Emit the firmware timestamps as-is. They are already in the system
+            // clock domain and the guard above has bounds-checked them, so
+            // adjust_profiling_time() would only duplicate that work and, under
+            // ROCPROFILER_CI_FREQ_SCALE_TIMESTAMPS, rescale already-scaled values.
+            // The firmware interval is deliberately kept: it is measured at the
+            // true HW dispatch boundaries and is tighter than HSA's
+            // signal-machinery timing, so it must not be forced to the HSA one.
+            if(_kfd_sane) return profiling_time{HSA_STATUS_SUCCESS, kfd_start_sys, kfd_end_sys};
             // convert failed or record failed the sanity guard: fall through to HSA.
         }
     }

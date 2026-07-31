@@ -689,9 +689,8 @@ write_interceptor(Queue*                                queue,
             // write index of packet i is simply base + i. Low 32 bits match the
             // firmware record's dispatch_id. The doorbell + generation that
             // complete the correlation key are resolved below.
-            _packet_data.hsa_queue_pkt_index = _base_pkt_index + i;
             _packet_data.kfd_dispatch_idx_low32 =
-                static_cast<uint32_t>(_packet_data.hsa_queue_pkt_index & 0xFFFFFFFFULL);
+                static_cast<uint32_t>((_base_pkt_index + i) & 0xFFFFFFFFULL);
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
             auto& completion_signal =
                 is_ext_kernel_dispatch
@@ -748,25 +747,21 @@ write_interceptor(Queue*                                queue,
                                       .grid_size            = pkt_info.grid_size,
                                       .reserved_padding     = {0}}};
 
-            // KFD dispatch-log correlation (inline path). Only attempted when
-            // the KFD path is available for this GPU. hsa_queue_pkt_index /
-            // kfd_dispatch_idx_low32 were captured above; here we resolve the
-            // queue's doorbell + generation and, if certain, publish the full
-            // key so get_dispatch_time() can pair firmware records to this
-            // dispatch. If anything is unavailable/uncertain,
+            // KFD dispatch-log correlation (inline path). kfd_dispatch_idx_low32
+            // was captured above; here we resolve the queue's doorbell +
+            // generation and publish the full key so get_dispatch_time() can pair
+            // firmware records to this dispatch. If anything is unavailable,
             // kfd_correlation_key_valid stays false -> HSA fallback.
             {
+                // The inline path does not go through QueueController::create_queue,
+                // so this is where the session is triggered. Idempotent, and true
+                // only when the live session belongs to THIS GPU -- a dispatch on any
+                // other GPU has no reader draining its records, so it must stay on
+                // HSA timestamps.
                 const auto _gpu_id = queue->get_agent().get_rocp_agent()->gpu_id;
-                if(kfd::kfd_dispatch_log_available() &&
-                   kfd::gpu_supports_dispatch_log(static_cast<uint32_t>(_gpu_id)))
+                if(kfd::ensure_reader_session(static_cast<uint32_t>(_gpu_id)))
                 {
-                    // Ensure the dispatch-log session exists for this GPU. The
-                    // inline path does not go through QueueController::create_queue,
-                    // so this is where the session is triggered for it. Idempotent.
-                    kfd::ensure_reader_session(static_cast<uint32_t>(_gpu_id));
-
-                    // Resolve + bind the queue's page-relative doorbell slot (shared
-                    // helper with the batch path so the slot math cannot drift).
+                    // Resolve + bind the queue's page-relative doorbell slot.
                     // nullopt when the doorbell pointer is unavailable -> HSA fallback.
                     if(auto _db = capture_doorbell_key(queue->get_id(), queue->intercept_queue()))
                     {
@@ -1297,6 +1292,11 @@ interposition_init(CoreApiTable* core_table, bool enabled)
 
     // mark that intercept has been activated
     s_intercept_active.store(enabled, std::memory_order_release);
+
+    // The inline intercept installed above is the only path that can produce a KFD
+    // correlation key, so the dispatch-log probe belongs here rather than in the
+    // generic queue_init(). Best-effort: a failure leaves dispatches on HSA times.
+    kfd::init_kfd_profiler();
 }
 
 void
