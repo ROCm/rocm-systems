@@ -347,8 +347,8 @@ The following table lists AMD Instinct GPUs that support PC sampling and shows w
 
    * - AMD Instinct GPU
      - Architecture
-     - stochastic
-     - host-trap
+     - Stochastic
+     - Host-trap
    * - MI355X
      - CDNA4
      - ✅
