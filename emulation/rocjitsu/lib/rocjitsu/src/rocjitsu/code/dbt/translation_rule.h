@@ -37,6 +37,7 @@ namespace rocjitsu {
 
 class Instruction;
 class LivenessAnalysis;
+class Gfx1250RewriteHazardAnalysis;
 
 /// @brief Architecture-neutral resource accounting shared by semantic lowerings.
 ///
@@ -251,13 +252,37 @@ struct VirtualLdsTranslationState {
   uint32_t virtual_lds_kernarg_pointer_offset = 0;
 };
 
+/// @brief gfx1250 B0-to-A0 timing state owned by BinaryTranslator.
+struct Gfx1250HazardTranslationState {
+  /// @brief Short timing windows that allocator-backed gfx1250 rules must honor.
+  ///
+  /// @details Other translation pairs leave the pointer null.
+  const Gfx1250RewriteHazardAnalysis *gfx1250_rewrite_hazards = nullptr;
+
+  /// @brief Source-boundary V_NOPs already emitted before the current rewrite.
+  ///
+  /// @details The whole-stream gfx1250 B0-to-A0 repair covers conflicts already
+  /// present around the source instruction. Allocator-backed expansions use
+  /// this count when a generated first VALU needs an equal or larger gap, so
+  /// the boundary receives the maximum required separation rather than two
+  /// independently accumulated gaps.
+  ///
+  /// Semantic expansions must preserve source-window VALU slots and must query
+  /// the analysis before their first generated VALU access. This keeps the
+  /// decoded-stream repair and generated-instruction repair composable without
+  /// a production re-decode of the translated kernel.
+  uint8_t leading_valu_hazard_nops = 0;
+};
+
 /// @brief Per-kernel state passed through semantic translation rules.
 ///
 /// @details Inheritance preserves the compact field access used by existing
 /// rules while making the ownership split explicit. Generic DBT/DBI resource
 /// helpers can consume KernelResourceRequirements without depending on virtual
-/// LDS, and pair-specific lowerings can consume VirtualLdsTranslationState.
-struct TranslationContext : KernelResourceRequirements, VirtualLdsTranslationState {
+/// LDS, and pair-specific lowerings can consume their dedicated state.
+struct TranslationContext : KernelResourceRequirements,
+                            VirtualLdsTranslationState,
+                            Gfx1250HazardTranslationState {
   TranslationContext() = default;
 
   TranslationContext(uint32_t vgprs, uint32_t sgprs) : KernelResourceRequirements(vgprs, sgprs) {}

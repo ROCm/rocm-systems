@@ -4,6 +4,7 @@
 #include "rocjitsu/code/dbt/binary_translator.h"
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/gfx1250_rewrite_hazards.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -29,6 +30,7 @@
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/code/relocation_function_table.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -1730,6 +1732,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       liveness_options.min_free_vgpr = *options_.debug_min_free_vgpr;
     std::vector<const Instruction *> live_before_instructions;
     bool scope_requires_liveness = false;
+    const bool needs_gfx1250_rewrite_hazards =
+        guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
+        options_.input_revision == ProcessorRevision::Gfx1250B0 &&
+        options_.output_revision == ProcessorRevision::Gfx1250A0;
+    bool scope_has_gfx1250_rewrite_hazard_producer = false;
     if (semantic_translator_ && semantic_translator_->has_rules()) {
       // Semantic expansion rules are the only BinaryTranslator path that queries
       // LivenessAnalysis. Other rewrites use separate resource strategies: virtual
@@ -1746,6 +1753,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           // its own live-before requirement.
           const bool operand_driven_rewrite =
               is_gfx1250_b0_to_a0() && gfx1250_reads_flat_scratch_base_64bit(inst);
+          if (needs_gfx1250_rewrite_hazards && !scope_has_gfx1250_rewrite_hazard_producer &&
+              gfx1250_is_rewrite_hazard_producer(inst)) {
+            scope_has_gfx1250_rewrite_hazard_producer = true;
+          }
           if (semantic_translator_->expand_rule_requires_liveness(inst) || operand_driven_rewrite) {
             scope_requires_liveness = true;
             live_before_instructions.push_back(&inst);
@@ -1757,9 +1768,27 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           live_before_instructions.data(), live_before_instructions.size());
     }
     LivenessAnalysis liveness = LivenessAnalysis::unavailable();
+    std::vector<ScopedCfgEdge> liveness_edges;
     if (scope_requires_liveness) {
-      const auto liveness_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
+      liveness_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
       liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), liveness_options, liveness_edges);
+    }
+    std::optional<Gfx1250RewriteHazardAnalysis> gfx1250_rewrite_hazards;
+    std::unordered_map<uint64_t, uint8_t> gfx1250_leading_hazard_nops;
+    const KernelBlockScope kernel_blocks(scope.blocks);
+    if (needs_gfx1250_rewrite_hazards &&
+        (scope_has_gfx1250_rewrite_hazard_producer ||
+         ((!semantic_translator_ || !semantic_translator_->has_rules()) &&
+          gfx1250_scope_has_rewrite_hazard_producer(kernel_blocks)))) {
+      if (liveness_edges.empty())
+        liveness_edges = scoped_call_liveness_edges(kernel_blocks, text);
+      gfx1250_rewrite_hazards.emplace(kernel_blocks, scope.entry, liveness_edges, text);
+      kernel_context.gfx1250_rewrite_hazards = &*gfx1250_rewrite_hazards;
+      for (const Gfx1250InstructionHazard &hazard :
+           gfx1250_rewrite_hazards->find_instruction_hazards()) {
+        uint8_t &required = gfx1250_leading_hazard_nops[hazard.consumer_offset];
+        required = std::max(required, hazard.missing_nops());
+      }
     }
 
     std::unordered_map<uint64_t, const Instruction *> source_instruction_by_offset;
@@ -2098,6 +2127,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         const uint64_t offset = inst.src_loc();
         uint64_t target_offset = kernel_text.size();
         const uint32_t inst_size = inst.size();
+        kernel_context.leading_valu_hazard_nops = 0;
 
         if (active_generated_island_pool && offset < active_generated_island_pool->source_end)
           continue;
@@ -2339,6 +2369,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                .is_call = source_fixup.source_is_call});
           append_nop_padding(kernel_text, sizeof(uint32_t), host_arch_);
           continue;
+        }
+
+        if (const auto hazard = gfx1250_leading_hazard_nops.find(offset);
+            hazard != gfx1250_leading_hazard_nops.end()) {
+          const uint32_t v_nop = gfx1250::build_vop1(gfx1250::kVNopVop1)[0];
+          for (uint8_t slot = 0; slot < hazard->second; ++slot)
+            append_words(kernel_text, std::span<const uint32_t>(&v_nop, 1));
+          kernel_context.leading_valu_hazard_nops = hazard->second;
         }
 
         const uint32_t *raw = inst.raw_encoding();
