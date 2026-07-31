@@ -193,7 +193,7 @@ class NDRangeContainer {
   NDRange32 global_;     //!< Total number of work-items in N-dims (AQL grid_size).
   NDRange16 local_;      //!< Number of work-items per workgroup (AQL workgroup_size).
   NDRange8 cluster_;     //!< Cluster dims (AQL cluster_size, max 255 per dim).
-  uint16_t dimensions_;  //!< Number of dimensions.
+  uint8_t dimensions_;   //!< Number of dimensions (1, 2, or 3).
 
  public:
   //! From size_t arrays (blit, OCL, devprogram callers — no cluster).
@@ -203,8 +203,8 @@ class NDRangeContainer {
         global_(1, 1, 1),
         local_(1, 1, 1),
         cluster_(1, 1, 1),
-        dimensions_(static_cast<uint16_t>(dimensions)) {
-    assert(dimensions_ < 3 && "Dimensions must be less than 3");
+        dimensions_(static_cast<uint8_t>(dimensions)) {
+    assert(dimensions_ >= 1 && dimensions_ <= 3 && "Dimensions must be 1, 2, or 3");
     for (size_t i = 0; i < dimensions; ++i) {
       offset_[i] = globalWorkOffset != nullptr ? globalWorkOffset[i] : 0;
       global_[i] = static_cast<uint32_t>(globalWorkSize[i]);
@@ -220,8 +220,8 @@ class NDRangeContainer {
         global_(1, 1, 1),
         local_(1, 1, 1),
         cluster_(1, 1, 1),
-        dimensions_(static_cast<uint16_t>(dimensions)) {
-    assert(dimensions_ < 3 && "Dimensions must be less than 3");
+        dimensions_(static_cast<uint8_t>(dimensions)) {
+    assert(dimensions_ >= 1 && dimensions_ <= 3 && "Dimensions must be 1, 2, or 3");
     for (size_t i = 0; i < dimensions; ++i) {
       offset_[i] = globalWorkOffset != nullptr ? globalWorkOffset[i] : 0;
       global_[i] = globalWorkSize[i];
