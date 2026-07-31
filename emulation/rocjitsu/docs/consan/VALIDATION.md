@@ -117,6 +117,21 @@ The Sharktank interpreter must import the IREE Python bindings plus `pytest`,
 `numpy`, and `ml_dtypes`; the other two variables are needed only when those
 workload families are selected.
 
+The gfx1250 Tensile runner resolves the TensileLite checkout, packaged ROCm
+SDK, prebuilt client, RocJITsu launcher/config, checked-in launcher wrapper,
+and `llvm-readelf` as one toolchain. `doctor --workload
+tensile-sk-sgemm-runtime-smoke` prints every resolved path. Nonstandard layouts
+can override individual components with
+`CONSAN_VALIDATION_TENSILELITE_ROOT`, `CONSAN_VALIDATION_ROCM_ROOT`,
+`CONSAN_VALIDATION_TENSILE_CLIENT`, `CONSAN_VALIDATION_TENSILE_WRAPPER`,
+`CONSAN_VALIDATION_ROCJITSU_EXE`, `CONSAN_VALIDATION_ROCJITSU_CONFIG`, and
+`CONSAN_VALIDATION_LLVM_READELF`.
+Only the bounded checked-in smoke row has a 55-second inner Tensile execution
+budget; other Tensile rows retain their existing outer row budgets. The smoke
+also requires exactly one numeric row, verifies the selected Stream-K mode and
+every emitted gfx1250 object, and refuses the fixed-grid request if the
+resolved TensileLite checkout no longer exposes its runtime control.
+
 PyTorch validation deliberately uses a separate, prebuilt-wheel interpreter;
 the workspace `pytorch/` checkout is for workload discovery and source
 provenance, not for building PyTorch.  Point the runner at that interpreter:
@@ -644,6 +659,7 @@ python3 -m unittest \
   test_consan_coverage_gate.py \
   test_consan_fault_runner.py \
   test_consan_run_provenance.py \
+  test_consan_tensile_validation.py \
   test_consan_validation.py
 ```
 

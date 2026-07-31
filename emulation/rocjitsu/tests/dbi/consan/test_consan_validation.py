@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -44,6 +45,7 @@ def moi_auto_report(
     *,
     diagnostics: int = 0,
     visible_records: int = 1,
+    diagnostic_capacity: int = 1,
     code_object_fingerprint: str = RETIRED_TOPK_CODE_OBJECT_FINGERPRINT,
 ) -> str:
     return (
@@ -51,6 +53,7 @@ def moi_auto_report(
         f"generation={generation} "
         f"code_object={code_object_fingerprint} "
         f"diagnostics={diagnostics} visible_records={visible_records} "
+        f"diagnostic_capacity={diagnostic_capacity} "
         "visible_barriers=0 visible_atomics=0 visible_fences=0 "
         "sampled_conflicts=0 sampled_immediate_conflicts=0"
     )
@@ -92,7 +95,7 @@ def moi_auto_replay(
     conflict: bool | None = None,
     metadata_full: bool = False,
     capacity_exhausted: bool = False,
-    diagnostic_capacity: int = 4,
+    diagnostic_capacity: int = 1,
     provenance_repaired: int = 0,
     provenance_unresolved: int = 0,
     code_object_fingerprint: str = RETIRED_TOPK_CODE_OBJECT_FINGERPRINT,
@@ -190,6 +193,48 @@ class ConSanValidationTest(unittest.TestCase):
             time.sleep(0.05)
         else:
             self.fail(f"timed-out descendant {child_pid} remained runnable")
+
+    def test_run_process_timeout_does_not_wait_for_an_escaped_output_pipe(
+        self,
+    ) -> None:
+        parent = (
+            "import subprocess,time; "
+            "child=subprocess.Popen(['sleep','60'], start_new_session=True); "
+            "print(child.pid, flush=True); time.sleep(60)"
+        )
+        child_pid = None
+        try:
+            with (
+                temporary_root() as root,
+                mock.patch.object(
+                    validation,
+                    "PROCESS_TERMINATION_GRACE_SECONDS",
+                    0.1,
+                ),
+                mock.patch.object(
+                    validation,
+                    "PROCESS_OUTPUT_DRAIN_SECONDS",
+                    0.1,
+                ),
+            ):
+                started = time.monotonic()
+                returncode, _, output = validation._run_process(
+                    [sys.executable, "-c", parent],
+                    os.environ.copy(),
+                    root / "run.log",
+                    1,
+                )
+                elapsed = time.monotonic() - started
+            child_pid = int(output.splitlines()[0])
+            self.assertEqual(returncode, 124)
+            self.assertLess(elapsed, 2)
+            self.assertIn("validation timeout after 1s", output)
+        finally:
+            if child_pid is not None:
+                try:
+                    os.killpg(child_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
     def test_coverage_summary_rejects_static_analysis_incompleteness(self) -> None:
         counts = {name: 0 for name in _COVERAGE_COUNT_FIELDS}
@@ -437,7 +482,11 @@ class ConSanValidationTest(unittest.TestCase):
                 "replay diagnostic indices invalid",
             ),
             "runtime diagnostic capacity mismatch": (
-                fixture.replace("diagnostic_capacity=4", "diagnostic_capacity=5", 1),
+                fixture.replace(
+                    "diagnostic_capacity=18794",
+                    "diagnostic_capacity=18793",
+                    1,
+                ),
                 "replay diagnostic capacity mismatch",
             ),
             "code-object fingerprint drift": (
@@ -835,7 +884,7 @@ class ConSanValidationTest(unittest.TestCase):
             profile="record-replay",
         )
         malformed = validation._coverage_summary(
-            valid_log.replace("diagnostic_capacity=4 ", "", 1),
+            valid_log.replace("diagnostic_capacity=1 ", "", 1),
             profile="record-replay",
         )
 
@@ -849,6 +898,36 @@ class ConSanValidationTest(unittest.TestCase):
                 for reason in malformed["reasons"]
             ),
             malformed["reasons"],
+        )
+
+    def test_record_replay_capacity_is_clamped_to_visible_records(self) -> None:
+        report = moi_auto_report(
+            7,
+            1,
+            visible_records=3,
+            diagnostic_capacity=18794,
+        )
+        valid_log = complete_coverage_log(
+            moi_auto_replay(7, 1, 0, diagnostic_capacity=3)
+        ).replace(moi_auto_report(7, 1), report)
+        invalid_log = valid_log.replace(
+            "diagnostic_capacity=3 ",
+            "diagnostic_capacity=18794 ",
+            1,
+        )
+
+        valid = validation._coverage_summary(valid_log, profile="record-replay")
+        invalid = validation._coverage_summary(invalid_log, profile="record-replay")
+
+        self.assertTrue(valid["accepted"], valid["reasons"])
+        self.assertFalse(invalid["accepted"])
+        self.assertTrue(
+            any(
+                "replay diagnostic capacity mismatch" in reason
+                and "expected=3" in reason
+                for reason in invalid["reasons"]
+            ),
+            invalid["reasons"],
         )
 
     def test_ordinary_record_replay_allows_an_empty_report_without_replay(
@@ -1149,12 +1228,12 @@ class ConSanValidationTest(unittest.TestCase):
                 replace(base, max_diagnostics=0),
                 "max_diagnostics must be positive",
             ),
-            "runtime capacity": (
+            "policy limit": (
                 replace(
                     base,
-                    max_diagnostics=validation.MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY + 1,
+                    max_diagnostics=validation.MAX_COVERAGE_OUTPUT_DIAGNOSTICS + 1,
                 ),
-                "max_diagnostics exceeds runtime capacity",
+                "max_diagnostics exceeds policy limit",
             ),
             "groups": (
                 replace(base, instruction_groups=((2, 2),)),
@@ -3150,7 +3229,13 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(command[0], "/workspace/venv/bin/python")
         self.assertTrue(command[1].endswith("consan_tensile_validation.py"))
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
-        self.assertEqual(command[command.index("--config") + 1], workload.relative_path)
+        self.assertEqual(
+            command[command.index("--config") + 1],
+            str(Path("/workspace") / workload.corpus / workload.relative_path),
+        )
+        self.assertNotIn("--streamk-fixed-grid", command)
+        self.assertNotIn("--timeout-seconds", command)
+        self.assertNotIn("--expect-numeric-rows", command)
         self.assertEqual(
             command[command.index("--output-dir") + 1],
             "/artifacts/tensile-work",
@@ -3187,11 +3272,145 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(command[0], "/workspace/venv/bin/python")
         self.assertTrue(command[1].endswith("consan_tensile_validation.py"))
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
-        self.assertEqual(command[command.index("--config") + 1], workload.relative_path)
+        self.assertEqual(
+            command[command.index("--config") + 1],
+            str(Path("/workspace") / workload.corpus / workload.relative_path),
+        )
         self.assertEqual(
             command[command.index("--output-dir") + 1],
             "/artifacts/tensile-work",
         )
+
+    def test_bounded_tensile_smoke_is_workspace_native_and_fixed_grid(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["tensile-sk-sgemm-runtime-smoke"]
+        command = validation._workload_command(
+            Path("/workspace"),
+            "gfx1250",
+            workload,
+            "clean",
+            Path("/artifacts/benchmark.json"),
+        )
+        self.assertEqual(workload.priority, "P1")
+        self.assertEqual(workload.corpus, "rocm-systems")
+        self.assertEqual(workload.run_timeout_seconds, 60)
+        self.assertEqual(workload.tensile_inner_timeout_seconds, 55)
+        self.assertEqual(workload.tensile_expected_numeric_rows, 1)
+        self.assertEqual(
+            command[command.index("--config") + 1],
+            (
+                "/workspace/rocm-systems/emulation/rocjitsu/tests/dbi/consan/"
+                "fixtures/gfx1250_tensile_streamk_smoke.yaml"
+            ),
+        )
+        self.assertEqual(
+            command[command.index("--timeout-seconds") + 1],
+            str(workload.tensile_inner_timeout_seconds),
+        )
+        self.assertEqual(command[command.index("--expect-numeric-rows") + 1], "1")
+        self.assertEqual(command[command.index("--streamk-fixed-grid") + 1], "4")
+        self.assertEqual(command[command.index("--require-streamk-mode") + 1], "3")
+
+    def test_tensile_required_paths_follow_selected_corpus(self) -> None:
+        smoke = validation.WORKLOAD_BY_ID["tensile-sk-sgemm-runtime-smoke"]
+        external = validation.WORKLOAD_BY_ID["tensile-sk-sgemm-quick"]
+        resolved = mock.Mock(
+            tensilelite=Path("/toolchain/tensilelite"),
+            rocm=Path("/toolchain/rocm"),
+        )
+        with (
+            mock.patch.object(
+                validation,
+                "resolve_tensile_validation_paths",
+                return_value=resolved,
+            ),
+            mock.patch.object(
+                validation,
+                "git_identity",
+                side_effect=lambda path: {"root": str(path)},
+            ),
+        ):
+            smoke_paths = validation._required_paths(Path("/workspace"), (smoke,))
+            external_paths = validation._required_paths(Path("/workspace"), (external,))
+            smoke_sources = validation._source_identities(Path("/workspace"), smoke)
+        self.assertNotIn("rocjitsu-test-corpus", smoke_paths)
+        self.assertNotIn(
+            "/workspace/rocjitsu-test-corpus",
+            {source["root"] for source in smoke_sources},
+        )
+        self.assertEqual(
+            external_paths["rocjitsu-test-corpus"],
+            Path("/workspace/rocjitsu-test-corpus"),
+        )
+
+    def test_tensile_input_inventory_covers_the_resolved_toolchain(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["tensile-sk-sgemm-runtime-smoke"]
+        resolved = mock.Mock(
+            tensilelite=Path("/toolchain/tensilelite"),
+            rocm=Path("/toolchain/rocm"),
+            client=Path("/toolchain/client"),
+            wrapper=Path("/toolchain/wrapper"),
+            rocjitsu=Path("/toolchain/rocjitsu"),
+            rocjitsu_config=Path("/toolchain/gfx1250.json"),
+            llvm_readelf=Path("/toolchain/llvm-readelf"),
+        )
+        with mock.patch.object(
+            validation,
+            "resolve_tensile_validation_paths",
+            return_value=resolved,
+        ):
+            inputs = validation._input_files(Path("/workspace"), "gfx1250", workload)
+        self.assertEqual(
+            set(inputs),
+            {
+                "python",
+                "workload-source",
+                "support-source",
+                "config",
+                "client",
+                "wrapper",
+                "rocjitsu",
+                "rocjitsu-config",
+                "llvm-readelf",
+                "amdclang++",
+            },
+        )
+        self.assertEqual(inputs["client"], resolved.client)
+        self.assertEqual(inputs["amdclang++"], resolved.rocm / "bin" / "amdclang++")
+
+    def test_tensile_doctor_checks_executable_permissions(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["tensile-sk-sgemm-runtime-smoke"]
+        with temporary_root() as root:
+            inputs = {}
+            for label in (
+                "python",
+                "workload-source",
+                "support-source",
+                "config",
+                "client",
+                "wrapper",
+                "rocjitsu",
+                "rocjitsu-config",
+                "llvm-readelf",
+                "amdclang++",
+            ):
+                path = root / label
+                path.write_text("input\n", encoding="utf-8")
+                path.chmod(0o755)
+                inputs[label] = path
+            inputs["wrapper"].chmod(0o644)
+            with (
+                mock.patch.object(validation, "_required_paths", return_value={}),
+                mock.patch.object(validation, "_input_files", return_value=inputs),
+                mock.patch.object(validation.shutil, "which", return_value="/tool"),
+            ):
+                rejected = validation._doctor(root, "gfx1250", (workload.id,))
+                inputs["wrapper"].chmod(0o755)
+                accepted = validation._doctor(root, "gfx1250", (workload.id,))
+        self.assertFalse(rejected["ok"])
+        self.assertFalse(
+            rejected["paths"][f"workload:{workload.id}:wrapper"]["present"]
+        )
+        self.assertTrue(accepted["ok"], accepted)
 
     def test_pytorch_json_reports_independent_variant_medians(self) -> None:
         document = {

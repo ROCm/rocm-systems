@@ -1,0 +1,55 @@
+GlobalParameters:
+  NumElementsToValidate: -1
+  BoundsCheck: False
+  KernelTime: False
+  CpuThreads: 32
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  MaxWorkspaceSize: 134217728
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  SleepPercent: 50
+  ISA: [[12, 5, 0]]
+
+BenchmarkProblems:
+  - # One non-divisible SGEMM NT case keeps several tiles and Stream-K
+    # synchronization while bounding functional-simulator iteration time.
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # One wave32 matrix-instruction shape is enough for the numeric canary.
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - StreamK: [3]
+        - GlobalSplitU: [0]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - 1LDSBuffer: [-1]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 1, 2]
+        - MIArchVgpr: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StoreRemapVectorWidth: [0]
+        - TransposeLDS: [0]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WorkGroupMapping: [1]
+
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [33, 33, 1, 65]

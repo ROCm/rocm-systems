@@ -27,6 +27,7 @@ import time
 
 import consan_cdna_hip_moi_registry as cdna_hip_moi_registry
 from consan_coverage_gate import CoverageParseError, parse_coverage_evidence
+from consan_tensile_support import resolve_tensile_validation_paths
 from consan_validation_support import (
     SITE_KINDS,
     atomic_write_json,
@@ -41,6 +42,8 @@ PYTORCH_PYTHON_ENV = "CONSAN_VALIDATION_PYTORCH_PYTHON"
 SHARKTANK_PYTHON_ENV = "CONSAN_VALIDATION_SHARKTANK_PYTHON"
 TENSILE_PYTHON_ENV = "CONSAN_VALIDATION_TENSILE_PYTHON"
 TIMEOUT_SECONDS = 30
+PROCESS_OUTPUT_DRAIN_SECONDS = 2
+PROCESS_TERMINATION_GRACE_SECONDS = 5
 NATIVE_CDNA_TARGETS = frozenset(("gfx942", "gfx950"))
 SINGLE_REPETITION_TARGETS = frozenset(("gfx942", "gfx950", "gfx1250"))
 QWEN_OVERHEAD_REPETITIONS = {target: 1 for target in SINGLE_REPETITION_TARGETS}
@@ -173,6 +176,10 @@ class Workload:
     moi_record_evidence_expected: bool = True
     run_timeout_seconds: int = TIMEOUT_SECONDS
     coverage_output_contract: CoverageOutputContract | None = None
+    tensile_inner_timeout_seconds: int | None = None
+    tensile_expected_numeric_rows: int | None = None
+    tensile_streamk_fixed_grid: int | None = None
+    tensile_streamk_mode: int | None = None
 
 
 PROFILES = {
@@ -234,9 +241,9 @@ MOI_SHADOW_ACCESS_WRITE = 2
 # pinned by producer-shaped fixtures.
 COVERAGE_OUTPUT_PROFILE_IDS = ("record-replay",)
 COVERAGE_OUTPUT_DIAGNOSTICS = ("exact-lds-write-write",)
-# The hook currently retains at most four replay diagnostics per report buffer.
-# This is a producer-format invariant, separate from any workload policy bound.
-MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY = 4
+# Coverage-output exceptions remain deliberately small even though the runtime
+# now sizes replay diagnostic storage from each report's visible record count.
+MAX_COVERAGE_OUTPUT_DIAGNOSTICS = 4
 WORKLOADS = (
     Workload(
         id="tensile-sk-mxf8gemm-explicit",
@@ -373,12 +380,12 @@ WORKLOADS = (
     ),
     Workload(
         id="tensile-sk-sgemm-runtime-smoke",
-        priority="P2",
-        corpus="rocjitsu-test-corpus",
+        priority="P1",
+        corpus="rocm-systems",
         kind="tensile",
         relative_path=(
-            "corpus/tensile/configs/Tensile/Tests/common/streamk/gfx1250/"
-            "sk_sgemm_runtime_smoke.yaml"
+            "emulation/rocjitsu/tests/dbi/consan/fixtures/"
+            "gfx1250_tensile_streamk_smoke.yaml"
         ),
         clean_filter=None,
         overhead_filter=None,
@@ -389,6 +396,11 @@ WORKLOADS = (
         overhead_processes=1,
         fault_families=("barrier-drop",),
         targets=("gfx1250",),
+        run_timeout_seconds=60,
+        tensile_inner_timeout_seconds=55,
+        tensile_expected_numeric_rows=1,
+        tensile_streamk_fixed_grid=4,
+        tensile_streamk_mode=3,
     ),
     Workload(
         id="tensile-sk-sgemm-quick",
@@ -926,9 +938,9 @@ def _validate_coverage_output_contract(workload: Workload) -> None:
         raise RuntimeError(
             f"{workload.id} coverage-output max_diagnostics must be positive"
         )
-    if contract.max_diagnostics > MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY:
+    if contract.max_diagnostics > MAX_COVERAGE_OUTPUT_DIAGNOSTICS:
         raise RuntimeError(
-            f"{workload.id} coverage-output max_diagnostics exceeds runtime capacity"
+            f"{workload.id} coverage-output max_diagnostics exceeds policy limit"
         )
     instruction_sites = [
         instruction for group in contract.instruction_groups for instruction in group
@@ -1378,11 +1390,12 @@ def _required_paths(
         paths["iree-test-suites-build"] = workspace / "iree-test-suites-build"
     if any(workload.corpus == "hip-moi" for workload in workloads):
         paths["hip-moi"] = workspace / "hip-moi"
-    if any(workload.kind == "llama" for workload in workloads):
+    if any(workload.corpus == "rocjitsu-test-corpus" for workload in workloads):
         paths["rocjitsu-test-corpus"] = workspace / "rocjitsu-test-corpus"
     if any(workload.kind == "tensile" for workload in workloads):
-        paths["rocjitsu-test-corpus"] = workspace / "rocjitsu-test-corpus"
-        paths["tensilelite"] = _tensilelite_root(workspace)
+        tensile_paths = resolve_tensile_validation_paths(workspace)
+        paths["tensilelite"] = tensile_paths.tensilelite
+        paths["rocm"] = tensile_paths.rocm
     return paths
 
 
@@ -1502,27 +1515,6 @@ def _tensile_python() -> Path:
     )
 
 
-def _tensilelite_root(workspace: Path) -> Path:
-    return (
-        workspace
-        / "TheRock"
-        / "rocm-libraries"
-        / "projects"
-        / "hipblaslt"
-        / "tensilelite"
-    )
-
-
-def _tensile_client(workspace: Path) -> Path:
-    return (
-        _tensilelite_root(workspace)
-        / "build_tmp"
-        / "tensilelite"
-        / "client"
-        / "tensilelite-client"
-    )
-
-
 def _llama_executable(workspace: Path, target: str, name: str) -> Path:
     candidates = (
         workspace
@@ -1557,11 +1549,18 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
             "workload-source": Path(__file__).with_name(workload.relative_path),
         }
     if workload.kind == "tensile":
+        paths = resolve_tensile_validation_paths(workspace)
         return {
             "python": _tensile_python(),
             "workload-source": Path(__file__).with_name("consan_tensile_validation.py"),
-            "config": workspace / "rocjitsu-test-corpus" / workload.relative_path,
-            "client": _tensile_client(workspace),
+            "support-source": Path(__file__).with_name("consan_tensile_support.py"),
+            "config": workspace / workload.corpus / workload.relative_path,
+            "client": paths.client,
+            "wrapper": paths.wrapper,
+            "rocjitsu": paths.rocjitsu,
+            "rocjitsu-config": paths.rocjitsu_config,
+            "llvm-readelf": paths.llvm_readelf,
+            "amdclang++": paths.rocm / "bin" / "amdclang++",
         }
     if workload.kind == "llama":
         case = (
@@ -1650,9 +1649,17 @@ def _doctor(
     tools = {tool: shutil.which(tool) for tool in required_tools}
     for workload in workloads:
         for label, path in _input_files(workspace, target, workload).items():
+            executable = workload.kind == "tensile" and label in {
+                "client",
+                "wrapper",
+                "rocjitsu",
+                "llvm-readelf",
+                "amdclang++",
+            }
             path_checks[f"workload:{workload.id}:{label}"] = {
                 "path": str(path),
-                "present": path.is_file(),
+                "present": path.is_file()
+                and (not executable or os.access(path, os.X_OK)),
             }
     runtimes = {}
     pytorch_workloads = tuple(
@@ -1985,13 +1992,13 @@ def _workload_command(
             f"{workload.id}-{phase}",
         ]
     if workload.kind == "tensile":
-        return [
+        command = [
             str(_tensile_python()),
             str(Path(__file__).with_name("consan_tensile_validation.py")),
             "--workspace",
             str(workspace),
             "--config",
-            workload.relative_path,
+            str(workspace / workload.corpus / workload.relative_path),
             "--output-dir",
             str(output.parent / "tensile-work"),
             "--repetitions",
@@ -1999,6 +2006,35 @@ def _workload_command(
             "--label",
             f"{workload.id}-{phase}",
         ]
+        if workload.tensile_inner_timeout_seconds is not None:
+            command.extend(
+                (
+                    "--timeout-seconds",
+                    str(workload.tensile_inner_timeout_seconds),
+                )
+            )
+        if workload.tensile_expected_numeric_rows is not None:
+            command.extend(
+                (
+                    "--expect-numeric-rows",
+                    str(workload.tensile_expected_numeric_rows),
+                )
+            )
+        if workload.tensile_streamk_fixed_grid is not None:
+            command.extend(
+                (
+                    "--streamk-fixed-grid",
+                    str(workload.tensile_streamk_fixed_grid),
+                )
+            )
+        if workload.tensile_streamk_mode is not None:
+            command.extend(
+                (
+                    "--require-streamk-mode",
+                    str(workload.tensile_streamk_mode),
+                )
+            )
+        return command
     if workload.kind == "llama":
         llama_workload = (
             "mul-mat-vec-q"
@@ -2073,12 +2109,10 @@ def _source_identities(workspace: Path, workload: Workload) -> list[dict | None]
         Path(__file__).resolve().parents[5],
     ]
     if workload.kind == "tensile":
-        roots.extend(
-            [
-                workspace / "rocjitsu-test-corpus",
-                workspace / "TheRock" / "rocm-libraries",
-            ]
-        )
+        paths = resolve_tensile_validation_paths(workspace)
+        if workload.corpus == "rocjitsu-test-corpus":
+            roots.append(workspace / "rocjitsu-test-corpus")
+        roots.append(paths.tensilelite)
     if workload.kind == "llama":
         roots.append(workspace / "rocjitsu-test-corpus")
     if workload.kind == "pytorch":
@@ -2179,6 +2213,8 @@ class _ReplayReport:
     reported: int
     sampled_conflicts: int
     replay_required: bool
+    visible_records: int
+    diagnostic_capacity: int
 
 
 @dataclass(frozen=True)
@@ -2394,6 +2430,7 @@ def _parse_record_replay_diagnostic_output(log_text: str) -> ParsedDiagnosticOut
             identity = _replay_identity(fields)
             fingerprint = _code_object_fingerprint(fields)
             diagnostics = _unsigned(fields, "diagnostics")
+            diagnostic_capacity = _unsigned(fields, "diagnostic_capacity")
             address = _unsigned(fields, "addr")
             byte_count = _unsigned(fields, "bytes")
             sampled_counts = tuple(
@@ -2413,6 +2450,7 @@ def _parse_record_replay_diagnostic_output(log_text: str) -> ParsedDiagnosticOut
                 identity is None
                 or fingerprint is None
                 or diagnostics is None
+                or diagnostic_capacity is None
                 or address is None
                 or byte_count is None
                 or any(count is None for count in sampled_counts)
@@ -2434,6 +2472,8 @@ def _parse_record_replay_diagnostic_output(log_text: str) -> ParsedDiagnosticOut
                     replay_required=any(
                         count for count in visible_counts if count is not None
                     ),
+                    visible_records=visible_counts[0],
+                    diagnostic_capacity=diagnostic_capacity,
                 )
         elif "ConSan MOI auto replay diagnostic reader=" in line:
             fields = _parse_log_fields(
@@ -2583,32 +2623,42 @@ def _parse_record_replay_diagnostic_output(log_text: str) -> ParsedDiagnosticOut
                 f"{_identity_label(identity)}, "
                 f"reported={summary.reported}, detailed={detailed}"
             )
-        if summary.reported <= MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY:
-            indices = [record.index for record in details]
-            expected_indices = list(range(summary.reported))
-            if (
-                any(index is None for index in indices)
-                or len(set(indices)) != len(indices)
-                or sorted(index for index in indices if index is not None)
-                != expected_indices
-            ):
-                actual_indices = ",".join(
-                    "malformed" if index is None else str(index) for index in indices
-                )
-                reasons.append(
-                    "replay diagnostic indices invalid: "
-                    f"{_identity_label(identity)}, "
-                    f"expected={','.join(map(str, expected_indices)) or 'none'}, "
-                    f"actual={actual_indices or 'none'}"
-                )
-        if summary.diagnostic_capacity != MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY:
+        indices = [record.index for record in details]
+        concrete_indices = [index for index in indices if index is not None]
+        indices_are_contiguous = (
+            not indices
+            if summary.reported == 0
+            else (
+                len(indices) == summary.reported
+                and len(set(concrete_indices)) == summary.reported
+                and min(concrete_indices, default=-1) == 0
+                and max(concrete_indices, default=-1) == summary.reported - 1
+            )
+        )
+        if any(index is None for index in indices) or not indices_are_contiguous:
+            actual_indices = ",".join(
+                "malformed" if index is None else str(index) for index in indices
+            )
+            expected_indices = (
+                f"0..{summary.reported - 1}" if summary.reported else "none"
+            )
+            reasons.append(
+                "replay diagnostic indices invalid: "
+                f"{_identity_label(identity)}, "
+                f"expected={expected_indices}, "
+                f"actual={actual_indices or 'none'}"
+            )
+        expected_diagnostic_capacity = (
+            min(report.diagnostic_capacity, report.visible_records)
+            if report is not None
+            else None
+        )
+        if summary.diagnostic_capacity != expected_diagnostic_capacity:
             reasons.append(
                 "replay diagnostic capacity mismatch: "
                 f"{_identity_label(identity)}, "
                 f"value={summary.diagnostic_capacity}, "
-                "producer=kAutoReplayDiagnosticCapacity, "
-                "consumer=MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY="
-                f"{MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY}"
+                f"expected={expected_diagnostic_capacity}"
             )
         expected_conflict = summary.reported != 0
         if summary.conflict is not expected_conflict:
@@ -3022,18 +3072,18 @@ def _run_process(
         returncode = 124
         _stop_process_group(process, signal.SIGTERM)
         try:
-            output, _ = process.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
+            output, _ = process.communicate(timeout=PROCESS_TERMINATION_GRACE_SECONDS)
+        except subprocess.TimeoutExpired as error:
             _stop_process_group(process, signal.SIGKILL)
-            output, _ = process.communicate()
+            output = _bounded_process_output(process, error.output)
         output = (output or "") + f"\nvalidation timeout after {timeout}s\n"
     except BaseException:
         _stop_process_group(process, signal.SIGTERM)
         try:
-            process.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
+            process.communicate(timeout=PROCESS_TERMINATION_GRACE_SECONDS)
+        except subprocess.TimeoutExpired as error:
             _stop_process_group(process, signal.SIGKILL)
-            process.communicate()
+            _bounded_process_output(process, error.output)
         raise
     elapsed = time.monotonic() - start
     log_path.write_text(output, encoding="utf-8")
@@ -3327,6 +3377,23 @@ def _stop_process_group(process: subprocess.Popen[bytes], sig: signal.Signals) -
         os.killpg(process.pid, sig)
     except ProcessLookupError:
         pass
+
+
+def _bounded_process_output(
+    process: subprocess.Popen[str], partial_output: str | bytes | None
+) -> str:
+    try:
+        output, _ = process.communicate(timeout=PROCESS_OUTPUT_DRAIN_SECONDS)
+        return output
+    except subprocess.TimeoutExpired as error:
+        if process.stdout is not None:
+            process.stdout.close()
+        try:
+            process.wait(timeout=PROCESS_OUTPUT_DRAIN_SECONDS)
+        except subprocess.TimeoutExpired:
+            pass
+        output = error.output or partial_output or ""
+        return output.decode(errors="replace") if isinstance(output, bytes) else output
 
 
 def _run_inventory_process(
