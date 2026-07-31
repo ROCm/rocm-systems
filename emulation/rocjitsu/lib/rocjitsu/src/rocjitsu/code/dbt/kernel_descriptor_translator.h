@@ -164,6 +164,9 @@ struct KernelResourcePlan {
   /// @brief Per-lane private segment size encoded in the target descriptor.
   uint32_t target_private_size = 0;
 
+  /// @brief Whether the source kernel uses a runtime-managed dynamic call stack.
+  bool uses_dynamic_stack = false;
+
   /// @brief Target descriptor wavefront size.
   uint8_t target_wave_size = 64;
 
