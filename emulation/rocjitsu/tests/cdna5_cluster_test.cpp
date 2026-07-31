@@ -1445,7 +1445,7 @@ TEST(Gfx1250SimulationTest, Ttmp7ClusterGridYDoesNotBleedIntoZAt16BitBoundary) {
 
   ASSERT_NE(target, nullptr);
   ASSERT_NE(target_cu, nullptr);
-  EXPECT_EQ(target_cu->read_sgpr(target->sgpr_alloc().base + 115), 0u);
+  EXPECT_EQ(target->read_trap_register(/*TTMP7 selector=*/115), 0u);
 }
 
 TEST(Gfx1250SimulationTest, IbSts2ClusterFieldsAreZeroForOrdinaryDispatch) {
@@ -1534,7 +1534,7 @@ TEST(Gfx1250SimulationTest, DynamicClusterLaunchStateMatchesCompilerAbiWithAlign
   };
   std::vector<LaunchState> states;
   for (const auto &wf : sim.snapshot->snapshots())
-    states.push_back({wf.wg_id, wf.sgpr(114), wf.sgpr(115), wf.sgpr(117), wf.sgpr(2), wf.sgpr(3),
+    states.push_back({wf.wg_id, wf.ttmp(6), wf.ttmp(7), wf.ttmp(9), wf.sgpr(2), wf.sgpr(3),
                       wf.sgpr(6), wf.sgpr(10), wf.sgpr(13)});
   std::sort(states.begin(), states.end(), [](const LaunchState &lhs, const LaunchState &rhs) {
     return lhs.workgroup_id < rhs.workgroup_id;

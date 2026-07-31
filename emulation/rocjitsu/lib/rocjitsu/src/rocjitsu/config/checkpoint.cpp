@@ -149,11 +149,13 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           auto sgprs_vec =
               builder.CreateVector(cu->sgpr_data(w->sgpr_alloc().base), w->num_sgprs());
           auto vgprs_vec = serialize_vgpr_block(builder, *cu, w->vgpr_alloc().base);
+          auto trap_registers_vec =
+              builder.CreateVector(w->trap_register_data(), amdgpu::Wavefront::kTrapRegisterCount);
 
           auto wfs = fb::CreateWavefrontState(builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(),
                                               w->vcc(), w->m0(), w->is_halted(), w->status_raw(),
                                               sgprs_vec, vgprs_vec, w->mode_raw(),
-                                              w->wave_sched_mode_raw());
+                                              w->wave_sched_mode_raw(), trap_registers_vec);
           wf_offsets.push_back(wfs);
         }
 
@@ -282,6 +284,16 @@ LoadedConfig restore_checkpoint(const std::string &path) {
             for (size_t r = 0; r < sgprs->size() && r < wf->num_sgprs(); ++r) {
               cu->write_sgpr(wf->sgpr_alloc().base + static_cast<uint32_t>(r),
                              sgprs->Get(static_cast<unsigned>(r)));
+            }
+          }
+
+          if (auto *trap_registers = wf_state->trap_registers()) {
+            const size_t count =
+                std::min<size_t>(trap_registers->size(), amdgpu::Wavefront::kTrapRegisterCount);
+            for (size_t r = 0; r < count; ++r) {
+              wf->write_trap_register(amdgpu::Wavefront::kTrapRegisterSelectorBase +
+                                          static_cast<uint32_t>(r),
+                                      trap_registers->Get(static_cast<unsigned>(r)));
             }
           }
 

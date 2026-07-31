@@ -467,6 +467,77 @@ TEST(RegisterAccessTest, Sgpr64ReadObservesBothRegisters) {
   EXPECT_EQ(fx.cu->read_sgpr(base + 20), 0xABCDEF01u);
 }
 
+TEST(RegisterAccessTest, TtmpAccessDoesNotAliasAdjacentWaveSgprs) {
+  for (uint32_t sgprs_per_wf : {104u, 106u, 128u}) {
+    SCOPED_TRACE(sgprs_per_wf);
+    GpuMemory gpu_mem{"ttmp_storage_mem"};
+    L2Cache l2{"ttmp_storage_l2"};
+    ComputeUnitCore::Config cfg{};
+    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.num_wf_slots = 2;
+    cfg.sgprs_per_wf = sgprs_per_wf;
+    cfg.vgprs_per_wf = kVgprsPerWave;
+    cfg.lds_size_kb = 64;
+
+    auto cu = ComputeUnitCore::create("ttmp_storage_cu", cfg, &gpu_mem, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto plugin_group = std::make_shared<ExecutionPluginGroup>();
+    auto recorder = std::make_unique<RecordingPlugin>();
+    auto *plugin = recorder.get();
+    plugin_group->add(std::move(recorder));
+    cu->set_plugin_group(plugin_group);
+    auto *first = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    auto *second = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+
+    // This is the original corruption for a 104-slot block:
+    //
+    //   wave 0 TTMP0 -> wave 0 SGPR base + selector 108
+    //                -> physical SGPR 108
+    //                -> wave 1 s4
+    //
+    // A 106-slot block similarly aliases wave 1 s2. A 128-slot block keeps the
+    // old location inside wave 0's padding, but TTMP state must still remain
+    // independent of that ordinary physical SGPR storage.
+    const uint32_t former_alias = first->sgpr_alloc().base + cdna4::OpSelSrc::OPR_SRC_TTMP0;
+    ASSERT_LT(former_alias, cfg.num_wf_slots * cfg.sgprs_per_wf);
+    if (sgprs_per_wf < cdna4::OpSelSrc::OPR_SRC_TTMP0) {
+      ASSERT_EQ(former_alias,
+                second->sgpr_alloc().base + (cdna4::OpSelSrc::OPR_SRC_TTMP0 - sgprs_per_wf));
+    } else {
+      ASSERT_LT(former_alias, second->sgpr_alloc().base);
+    }
+    cu->write_sgpr(former_alias, 0xA5A50000u | sgprs_per_wf);
+
+    cdna4::Operand ttmp0_source(32, cdna4::OperandType::OPR_SRC, cdna4::OpSelSrc::OPR_SRC_TTMP0);
+    cdna4::Operand ttmp0_destination(32, cdna4::OperandType::OPR_SDST,
+                                     cdna4::OpSelSdst::OPR_SDST_TTMP0);
+    cdna4::Operand ttmp15_source(32, cdna4::OperandType::OPR_SRC, cdna4::OpSelSrc::OPR_SRC_TTMP15);
+    cdna4::Operand ttmp15_destination(32, cdna4::OperandType::OPR_SDST,
+                                      cdna4::OpSelSdst::OPR_SDST_TTMP15);
+
+    RegisterAccess first_regs(*first);
+    EXPECT_EQ(first_regs.read_scalar(ttmp0_source), 0u);
+    first_regs.write_scalar(ttmp0_destination, 0x12345678u);
+    EXPECT_EQ(first_regs.read_scalar(ttmp0_source), 0x12345678u);
+    EXPECT_TRUE(plugin->sgpr_reads.empty());
+    EXPECT_EQ(cu->read_sgpr(former_alias), 0xA5A50000u | sgprs_per_wf);
+
+    // The final resident wave must also own TTMP15 without indexing beyond
+    // the physical SGPR file.
+    RegisterAccess second_regs(*second);
+    second_regs.write_scalar(ttmp15_destination, 0xDEADBEEFu);
+    EXPECT_EQ(second_regs.read_scalar(ttmp15_source), 0xDEADBEEFu);
+    EXPECT_EQ(first_regs.read_scalar(ttmp15_source), 0u);
+
+    cu->free_wavefront_resources(*first);
+    auto *reused = cu->dispatch_wf(/*wg_id=*/2, /*pc=*/0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(reused, nullptr);
+    EXPECT_EQ(RegisterAccess(*reused).read_scalar(ttmp0_source), 0u);
+  }
+}
+
 TEST(RegisterAccessTest, PublicOperandChunkReadObservesReadWindow) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);

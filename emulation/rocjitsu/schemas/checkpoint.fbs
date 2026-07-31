@@ -22,6 +22,7 @@ table WavefrontState {
   vgprs: [ubyte];  // Vector register file (raw bytes).
   mode: uint32;     // MODE register.
   wave_sched_mode: uint32; // WAVE_SCHED_MODE register.
+  trap_registers: [uint32]; // Per-wave scalar selectors 108..123 (TTMP/TBA/TMA).
 }
 
 /// Serialized state of a compute unit.

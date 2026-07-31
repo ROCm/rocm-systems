@@ -4335,6 +4335,23 @@ def test_generated_operand_validation_switch_is_shared_by_constructors(
         assert literal16_constructor in operand
 
 
+def test_generated_trap_register_operands_use_per_wave_storage(
+    amdgpu_generated_root: Path,
+):
+    for arch in ('cdna4', 'rdna1', 'rdna4'):
+        operand = (amdgpu_generated_root / arch / 'operand.cpp').read_text()
+        assert 'return wf.read_trap_register(static_cast<uint32_t>(ev));' in operand
+        assert 'wf.write_trap_register(static_cast<uint32_t>(ev), val);' in operand
+        assert (
+            'uint32_t hi = wf.read_trap_register(static_cast<uint32_t>(ev + 1));'
+            in operand
+        )
+        assert (
+            'wf.write_trap_register(static_cast<uint32_t>(ev + 1), '
+            'static_cast<uint32_t>(val >> 32));'
+        ) in operand
+
+
 def test_cdna4_mfma_f8f6f4_accepts_standalone_and_prefixed_encodings(
     amdgpu_generated_root: Path,
 ):

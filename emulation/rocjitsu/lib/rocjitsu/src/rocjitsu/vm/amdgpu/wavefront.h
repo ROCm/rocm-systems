@@ -15,6 +15,7 @@
 #include "rocjitsu/vm/plugins/wavefront_state.h"
 #include "rocjitsu/vm/thread_context.h"
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -46,10 +47,11 @@ struct RegAllocation {
 
 /// @brief AMDGPU wavefront execution state.
 ///
-/// @details The wavefront does not own its register storage, the parent
-/// ComputeUnitCore holds the physical SGPR and VGPR files. Callers access
-/// registers through Operand or RegisterAccess in instruction code and through the owning CU in VM
-/// code.
+/// @details The parent ComputeUnitCore holds the ordinary physical SGPR and
+/// VGPR files. Per-wave special state, including selectors 108..123 used for
+/// TTMP/TBA/TMA, lives directly on the wavefront. Callers access ordinary
+/// registers through Operand or RegisterAccess in instruction code and through
+/// the owning CU in VM code.
 ///
 /// Each wavefront is permanently bound to a ComputeUnitCore and a slot index
 /// (wf_id) at construction time. These persist across reset()/dispatch
@@ -293,6 +295,31 @@ public:
   /// @param val New M0 value.
   void set_m0(uint32_t val) { m0_ = val; }
 
+  /// Scalar selector window occupied by TTMPs and, on RDNA1/2, TBA/TMA.
+  static constexpr uint32_t kTrapRegisterSelectorBase = 108;
+  static constexpr uint32_t kTrapRegisterCount = 16;
+
+  /// @brief Read a per-wave trap register by scalar selector value.
+  /// @details Selectors 108..123 are architectural per-wave state, not slots
+  /// in the ordinary SGPR allocation. The exact names vary by architecture:
+  /// CDNA and newer RDNA targets expose TTMP0..15, while RDNA1/2 reserve the
+  /// first four selectors for TBA/TMA and expose TTMP0..11 at 112..123.
+  uint32_t read_trap_register(uint32_t selector) const {
+    assert(selector >= kTrapRegisterSelectorBase);
+    assert(selector < kTrapRegisterSelectorBase + kTrapRegisterCount);
+    return trap_registers_[selector - kTrapRegisterSelectorBase];
+  }
+
+  /// @brief Write a per-wave trap register by scalar selector value.
+  void write_trap_register(uint32_t selector, uint32_t value) {
+    assert(selector >= kTrapRegisterSelectorBase);
+    assert(selector < kTrapRegisterSelectorBase + kTrapRegisterCount);
+    trap_registers_[selector - kTrapRegisterSelectorBase] = value;
+  }
+
+  /// @brief Return contiguous trap-register storage for checkpointing.
+  const uint32_t *trap_register_data() const { return trap_registers_.data(); }
+
   static constexpr uint32_t DX10_CLAMP_BIT = 1u << 8;
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
   static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
@@ -535,6 +562,7 @@ public:
     exec_ = lane_mask();
     vcc_ = 0;
     m0_ = 0;
+    trap_registers_.fill(0);
     set_mode_raw(0);
     set_wave_sched_mode_raw(0);
     scratch_base_ = 0;
@@ -592,9 +620,10 @@ private:
 
   uint64_t lane_mask() const { return wf_size_ >= 64 ? ~0ULL : ((1ULL << wf_size_) - 1ULL); }
 
-  uint64_t exec_ = ~0ULL;            ///< EXEC mask -- one bit per lane (1 = active).
-  uint64_t vcc_ = 0;                 ///< Vector condition code (per-lane comparison result).
-  uint32_t m0_ = 0;                  ///< M0 special register (misc addressing).
+  uint64_t exec_ = ~0ULL; ///< EXEC mask -- one bit per lane (1 = active).
+  uint64_t vcc_ = 0;      ///< Vector condition code (per-lane comparison result).
+  uint32_t m0_ = 0;       ///< M0 special register (misc addressing).
+  std::array<uint32_t, kTrapRegisterCount> trap_registers_{};
   uint32_t mode_raw_ = 0;            ///< MODE register state.
   bool mode_has_gpr_idx_en_ = false; ///< True when MODE[27] is GPR_IDX_EN.
   uint8_t vgpr_msb_mode_ = 0;        ///< S_SET_VGPR_MSB layout for MODE VGPR_MSB bits.

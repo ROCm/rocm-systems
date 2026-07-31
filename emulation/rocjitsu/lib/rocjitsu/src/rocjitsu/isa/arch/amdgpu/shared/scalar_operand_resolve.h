@@ -37,7 +37,7 @@ inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
   if (ev == 107)
     return static_cast<uint32_t>(wf.vcc() >> 32);
   if (ev >= 108 && ev <= 123)
-    return RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+    return wf.read_trap_register(static_cast<uint32_t>(ev));
   if (m0_ev == 125 && ev == 124)
     return 0u; // NULL
   if (ev == m0_ev)
@@ -146,9 +146,8 @@ inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
   if (ev == 106)
     return wf.vcc();
   if (ev >= 108 && ev <= 122) {
-    uint32_t lo = RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
-    uint32_t hi =
-        RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
+    uint32_t lo = wf.read_trap_register(static_cast<uint32_t>(ev));
+    uint32_t hi = wf.read_trap_register(static_cast<uint32_t>(ev + 1));
     return static_cast<uint64_t>(hi) << 32 | lo;
   }
   if (m0_ev == 125 && ev == 124)
@@ -216,7 +215,7 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
     return;
   }
   if (ev >= 108 && ev <= 123) {
-    RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+    wf.write_trap_register(static_cast<uint32_t>(ev), val);
     return;
   }
   if (m0_ev == 125 && ev == 124)
@@ -253,10 +252,8 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
     return;
   }
   if (ev >= 108 && ev <= 122) {
-    RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
-                                  static_cast<uint32_t>(val));
-    RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
-                                  static_cast<uint32_t>(val >> 32));
+    wf.write_trap_register(static_cast<uint32_t>(ev), static_cast<uint32_t>(val));
+    wf.write_trap_register(static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));
     return;
   }
   if (ev == 124)

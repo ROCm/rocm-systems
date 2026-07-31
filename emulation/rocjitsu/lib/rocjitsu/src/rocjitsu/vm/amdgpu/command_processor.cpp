@@ -69,10 +69,10 @@ static_assert(kMaxClusterWorkgroups <= 16,
 
 // GFX12 launch-state scalar selectors used by compiler-generated workgroup
 // and cluster identity sequences.
-constexpr uint32_t kGfx12Ttmp6 = 114;
-constexpr uint32_t kGfx12Ttmp7 = 115;
-constexpr uint32_t kGfx12Ttmp8 = 116;
-constexpr uint32_t kGfx12Ttmp9 = 117;
+constexpr uint32_t kGfx12Ttmp6Selector = 114;
+constexpr uint32_t kGfx12Ttmp7Selector = 115;
+constexpr uint32_t kGfx12Ttmp8Selector = 116;
+constexpr uint32_t kGfx12Ttmp9Selector = 117;
 
 // LLVM's gfx1250 architected-SGPR ABI maps TTMP6 as seven 4-bit fields:
 // cluster-local XYZ, cluster-max XYZ, and max-flat-ID from low to high bits.
@@ -391,13 +391,6 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   }
   const auto properties = isa_properties(cu->arch());
   if (properties.uses_ttmp_workgroup_ids) {
-    // The simulator aliases TTMP scalar selectors into the wavefront SGPR
-    // block, so the block must include slots through TTMP9.
-    if (cu->config().sgprs_per_wf <= kGfx12Ttmp9) {
-      throw std::runtime_error("TTMP workgroup-ID launch payload requires at least 118 SGPR "
-                               "slots per wavefront");
-    }
-
     // The ordinary TTMP ABI uses grid coordinates. Targets advertising the
     // clustered extension reinterpret these fields below.
     uint32_t ttmp6 = 0;
@@ -432,10 +425,10 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
       ttmp7 = (cluster_grid_z << 16) | cluster_grid_y;
       ttmp9 = grid_wg_id_x / cluster_size_x;
     }
-    cu->write_sgpr(sbase + kGfx12Ttmp6, ttmp6);
-    cu->write_sgpr(sbase + kGfx12Ttmp7, ttmp7);
-    cu->write_sgpr(sbase + kGfx12Ttmp8, ttmp8);
-    cu->write_sgpr(sbase + kGfx12Ttmp9, ttmp9);
+    wf->write_trap_register(kGfx12Ttmp6Selector, ttmp6);
+    wf->write_trap_register(kGfx12Ttmp7Selector, ttmp7);
+    wf->write_trap_register(kGfx12Ttmp8Selector, ttmp8);
+    wf->write_trap_register(kGfx12Ttmp9Selector, ttmp9);
   }
 
   // Workitem IDs per AMDHSA ABI. The SPI decomposes the flat thread index
@@ -1161,7 +1154,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     // maybe_reset_lds_alloc() on this CU. Two failure modes are covered by doing all
     // fallible work up front: a dispatch_wf() null (placement gating makes this
     // unreachable, but the assert is compiled out in release), and a throw from
-    // init_wavefront_regs() (malformed kernarg-preload / undersized TTMP SGPR block).
+    // init_wavefront_regs() (for example, malformed kernarg preload).
     // On either, release the reserved-but-uncommitted waves. Use
     // free_wavefront_resources() rather than halt(): these waves never executed, so
     // firing halt()'s onAmdgpuWavefrontHalted hook would feed observers a spurious

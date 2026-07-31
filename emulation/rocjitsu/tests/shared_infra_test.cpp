@@ -4091,6 +4091,42 @@ TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
   }
 }
 
+TEST(Gfx1250AddrCalcTest, SmemTtmpOffsetUsesPerWaveTrapStorage) {
+  amdgpu::GpuMemory mem("gfx1250_smem_ttmp_mem");
+  amdgpu::L2Cache l2("gfx1250_smem_ttmp_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_smem_ttmp_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *first = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  auto *second = cu->dispatch_wf(1, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+
+  constexpr uint64_t kBase = 0x2'0000'1000ULL;
+  const uint32_t sbase = first->sgpr_alloc().base;
+  cu->write_sgpr(sbase, static_cast<uint32_t>(kBase));
+  cu->write_sgpr(sbase + 1, static_cast<uint32_t>(kBase >> 32));
+
+  constexpr uint32_t kTtmp6Selector = cdna5::OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP6;
+  const uint32_t former_alias = sbase + kTtmp6Selector;
+  ASSERT_EQ(former_alias, second->sgpr_alloc().base + 10);
+  cu->write_sgpr(former_alias, 0x80);
+  first->write_trap_register(kTtmp6Selector, 0x40);
+
+  cdna5::SmemMachineInst inst{};
+  inst.sbase = 0;
+  inst.soffset = kTtmp6Selector;
+  inst.ioffset = 0x20;
+  EXPECT_EQ(cdna5::smem_calculate_address(inst, *first, /*access_size_bytes=*/4), kBase + 0x60);
+  EXPECT_EQ(cu->read_sgpr(former_alias), 0x80u);
+}
+
 TEST(RdnaAddrCalcTest, Rdna4SmemSoffsetHandlesNullM0AndSgprSelectors) {
   amdgpu::GpuMemory mem("rdna4_smem_addr_mem");
   amdgpu::L2Cache l2("rdna4_smem_addr_l2");
