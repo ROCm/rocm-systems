@@ -7,8 +7,8 @@ interface, inspects final native machine code, and loads a validated patched
 replacement when the selected flavor and engine can instrument it.
 
 ConSan has target-specific native instrumentation for `gfx942`, `gfx950`,
-`gfx1201`, and `gfx1250`. It does not translate kernels between GPU ISAs; it
-patches the final code object for the architecture that will actually run.
+`gfx1100`, `gfx1201`, and `gfx1250`. It does not translate kernels between GPU
+ISAs; it patches the final code object for the architecture that will actually run.
 Workgroup-LDS capacity comes from the runtime agent. The simulator JSON is the
 source of truth for offline execution, so no target-specific LDS size is baked
 into gfx942 probes.
@@ -26,7 +26,7 @@ in [AMDGPU register spilling](../spilling.md).
 | Area | Implemented today | Boundary or direction |
 | --- | --- | --- |
 | Interception | HSA-tools hook via `HSA_TOOLS_LIB`. | Keep HSA-tools as the main path. |
-| Architecture | Target-specific native instrumentation for `gfx942`, `gfx950`, `gfx1201`, and `gfx1250`. | Keep target capabilities and encoders explicit; do not translate between targets. |
+| Architecture | Target-specific native instrumentation for `gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and `gfx1250`. | Keep target capabilities and encoders explicit; do not translate between targets. |
 | Public selection | Loading the hook selects MOI Record/Replay. `RJ_CONSAN_MODE` selects alternatives and `RJ_CONSAN_POLICY` selects default or strict completeness checks. | Keep flavor and engine as implementation concepts beneath a small public interface. |
 | SuperCollider | Delayed redundant LDS and admitted group-flat observations with an automatic mismatch marker, including gfx1250 dynamic-stack group-FLAT probes under full register pressure. | Keep as a complementary perturbation/value-instability flavor. |
 | MOI Record/Replay | Bounded device records plus host replay. This is the recommended starting engine. | Preserve clear reference/debug semantics while making snapshot limits explicit. |
@@ -109,7 +109,7 @@ Primary files:
   - Per-owner register requests, descriptor growth, and spill-plan selection.
 - `lib/rocjitsu/src/rocjitsu/code/patch/instruction_sequence.*`
   - Reusable checked instruction-sequence composition used by probe builders.
-- `lib/rocjitsu/src/rocjitsu/code/patch/{cdna3,cdna4,gfx1250,rdna4}_instrumentation_builder.h`
+- `lib/rocjitsu/src/rocjitsu/code/patch/{cdna3,cdna4,gfx1250,rdna3,rdna4}_instrumentation_builder.h`
   - Target-specific instruction encoders used by injected probes, isolated
     from the architecture-generic `instruction_builder.*` surface.
 - `lib/rocjitsu/src/rocjitsu/code/patch/trampoline_builder.*`,
@@ -127,6 +127,8 @@ Test anchors:
     test manifest only invokes the focused registration helpers.
 - `tests/patch/{cdna3,cdna4,gfx1250,rdna4}_instrumentation_builder_test.cpp`
   - Exact encoding and rejection coverage for the target-specific builders.
+- `tests/patch/instrumentation_builder_dispatch_test.cpp`
+  - Exact RDNA3 encoding and architecture-dispatch coverage for gfx1100.
 - `tests/patch/consan/`
   - Shared synthetic ELF fixtures plus feature-centric core, analysis,
     resource, fault-injection, SuperCollider, Record/Replay, Inline Shadow, and
@@ -224,9 +226,9 @@ The implementation boundary is:
   patched under ordinary settings, then applies deterministic runtime
   selection before deferred host scanning. An immediate adjacent-range
   in-kernel check remains an expert extension.
-- **Architecture dispatch.** `gfx942`, `gfx950`, `gfx1201`, and `gfx1250` use explicit
-  ISA-specific capability checks and encoders rather than implicit RDNA4
-  assumptions.
+- **Architecture dispatch.** `gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and
+  `gfx1250` use explicit ISA-specific capability checks and encoders rather
+  than implicit RDNA4 assumptions.
 
 The recommended ordinary invocation is:
 
@@ -890,8 +892,8 @@ Important current simplifications:
   Record/Replay and Sampled. Inline Shadow instead uses a resident-wave
   hardware ID because `workitem_id_x` aliases waves in multidimensional
   workgroups.
-- Inline Shadow's hardware owner is wave-uniform on gfx942, gfx950, gfx1201,
-  and gfx1250. ConSan automatically assigns and preserves its scalar
+- Inline Shadow's hardware owner is wave-uniform on gfx942, gfx950, gfx1100,
+  gfx1201, and gfx1250. ConSan automatically assigns and preserves its scalar
   temporary; an explicit scalar remains a debug override.
 - Atomic ordering metadata is finite and direct-mapped; exhausted contention
   retries or a simultaneous collision between distinct objects makes the
@@ -1017,8 +1019,8 @@ The ordinary owner source is `RJ_CONSAN_MOI_OWNER_SOURCE=automatic` (the
 reusable guest state, and derives the current estimate as
 `workitem_id_x >> log2(wavefront_size)`. Inline Shadow resolves automatic
 ownership to a one-based resident-wave hardware ID and derives it at each
-probe. CDNA3/CDNA4 use the legacy `HW_ID` resident-wave fields; RDNA4 and
-gfx1250 use `HW_ID1`.
+probe. CDNA3/CDNA4 use the legacy `HW_ID` resident-wave fields; gfx1100,
+RDNA4, and gfx1250 use `HW_ID1`.
 
 Expert/debug alternatives are:
 

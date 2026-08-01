@@ -4942,8 +4942,9 @@ TEST(ConSanMoi, RecordReplayOwnerLocalExecSaveRequiresCommonWindowForSharedHelpe
       }));
 }
 
-TEST(ConSanMoi, RecordReplaySpillsExecVccStateOnGfx12) {
-  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+TEST(ConSanMoi, RecordReplaySpillsExecVccStateOnRdna) {
+  for (const rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
     for (const bool uses_dynamic_stack : {false, true}) {
       SCOPED_TRACE(arch);
       SCOPED_TRACE(uses_dynamic_stack ? "dynamic-stack" : "fixed-stack");
@@ -4972,9 +4973,14 @@ TEST(ConSanMoi, RecordReplaySpillsExecVccStateOnGfx12) {
               ? make_gfx1250_code_object(words, "record_replay_scalar_spill",
                                          kRdna4Wave64AllVgprsGranulated, /*wave32=*/true,
                                          uses_dynamic_stack)
+          : arch == ROCJITSU_CODE_ARCH_RDNA3
+              ? make_rdna3_lds_code_object(words, "record_replay_scalar_spill",
+                                           kRdna4Wave64AllVgprsGranulated,
+                                           /*wave32=*/false, uses_dynamic_stack,
+                                           /*workgroup_id_dimension_mask=*/7u)
               : make_rdna4_lds_code_object(words, "record_replay_scalar_spill",
-                                           kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
-                                           uses_dynamic_stack);
+                                           kRdna4Wave64AllVgprsGranulated,
+                                           /*wave32=*/false, uses_dynamic_stack);
 
       ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
       options.scratch_vgpr = 8;
@@ -5015,6 +5021,52 @@ TEST(ConSanMoi, RecordReplaySpillsExecVccStateOnGfx12) {
       EXPECT_TRUE(result.final_validation_passed);
     }
   }
+}
+
+TEST(ConSanMoi, Gfx1100RecordReplayRoutesDenseBarrierInventory) {
+  constexpr uint32_t kSiteCount = 33u;
+  constexpr auto store = rdna3::build_ds(rdna3::kDsStoreB32Ds, {.addr = 0u, .data0 = 1u});
+  const auto barrier = build_rdna3_s_barrier(ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_TRUE(barrier);
+  std::vector<uint32_t> words;
+  words.reserve(kSiteCount * 3u + 1u);
+  for (uint32_t index = 0u; index < kSiteCount; ++index) {
+    words.insert(words.end(), store.begin(), store.end());
+    words.push_back(*barrier);
+  }
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size =
+      consan_moi_report_buffer_min_bytes(kSiteCount, 0u, 0u, 0u, kSiteCount);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 2u * kSiteCount;
+
+  const ConSanResult result =
+      try_patch_consan(make_rdna3_lds_code_object(words, "gfx1100_dense_barriers",
+                                                  kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
+                                                  /*uses_dynamic_stack=*/false,
+                                                  /*workgroup_id_dimension_mask=*/7u),
+                       options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            kSiteCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
+                               &ConSanPatchInfo::kind),
+            kSiteCount);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+  }));
 }
 
 TEST(ConSanMoi, RecordReplayDynamicStackKernelEntryRelayUsesSpecialStateOnly) {

@@ -2927,6 +2927,35 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedLoadInPlace) {
   EXPECT_EQ(rewritten_words, expected_words);
 }
 
+TEST(ConSan, Gfx1100LdsCheckTrapUsesRdna3CompletionWait) {
+  constexpr auto load = rdna3::build_ds(rdna3::kDsLoadB32Ds, {.addr = 2, .vdst = 1});
+  std::array<uint32_t, 13> text_words{};
+  text_words[0] = load[0];
+  text_words[1] = load[1];
+  std::fill(text_words.begin() + 2, text_words.end() - 1, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA3));
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 3;
+  options.delay_nops = 2;
+
+  const ConSanResult result = try_patch_consan(make_rdna3_lds_code_object(text_words), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
+  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX1100);
+  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
+  const std::vector<uint32_t> rewritten =
+      patched_words_at_file_offset(result, 0x100u, result.patches.front().original_size);
+  EXPECT_NE(std::ranges::find(rewritten, 0xBF89FC07u), rewritten.end())
+      << testing::PrintToString(rewritten);
+  EXPECT_EQ(std::ranges::find(rewritten, 0xBFC60000u), rewritten.end());
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250VdsLoadInPlace) {
   constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   const std::array<uint32_t, 13> text_words = {

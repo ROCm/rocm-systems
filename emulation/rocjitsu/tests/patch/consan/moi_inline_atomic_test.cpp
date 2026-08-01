@@ -35,7 +35,12 @@ enum class InlineAtomicSequenceKind : uint8_t { Release, Acquire, AcquireRelease
   const bool has_release = sequence_kind != InlineAtomicSequenceKind::Acquire;
   const bool has_acquire = sequence_kind != InlineAtomicSequenceKind::Release;
   if (has_release) {
-    if (target.arch == ROCJITSU_CODE_ARCH_CDNA3) {
+    if (target.arch == ROCJITSU_CODE_ARCH_RDNA3) {
+      // gfx11 does not expose a standalone release cache operation. Its
+      // compiler-lowered acquire sequence is qualified below, while a release
+      // cannot be inferred from the atomic encoding alone.
+      return {};
+    } else if (target.arch == ROCJITSU_CODE_ARCH_CDNA3) {
       const auto release = cdna3::build_mubuf(cdna3::kBufferWbl2Mubuf, {.sc1 = 1});
       const auto wait = build_cdna3_s_wait_vmcnt_lgkmcnt0(target.arch);
       if (!wait)
@@ -57,7 +62,16 @@ enum class InlineAtomicSequenceKind : uint8_t { Release, Acquire, AcquireRelease
   }
   text_words.insert(text_words.end(), guest_atomic_words.begin(), guest_atomic_words.end());
   if (has_acquire) {
-    if (target.arch == ROCJITSU_CODE_ARCH_CDNA3) {
+    if (target.arch == ROCJITSU_CODE_ARCH_RDNA3) {
+      const auto wait = build_rdna3_s_wait_vmcnt0(target.arch);
+      const auto gl1 = rdna3::build_mubuf(rdna3::kBufferGl1InvMubuf, {});
+      const auto gl0 = rdna3::build_mubuf(rdna3::kBufferGl0InvMubuf, {});
+      if (!wait)
+        return {};
+      text_words.push_back(*wait);
+      text_words.insert(text_words.end(), gl1.begin(), gl1.end());
+      text_words.insert(text_words.end(), gl0.begin(), gl0.end());
+    } else if (target.arch == ROCJITSU_CODE_ARCH_CDNA3) {
       const auto wait = build_cdna3_s_wait_vmcnt_lgkmcnt0(target.arch);
       const auto acquire = cdna3::build_mubuf(cdna3::kBufferInvMubuf, {.sc1 = 1});
       if (!wait)
@@ -80,6 +94,8 @@ enum class InlineAtomicSequenceKind : uint8_t { Release, Acquire, AcquireRelease
   text_words.push_back(build_s_endpgm(target.arch));
 
   switch (target.arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return make_rdna3_lds_code_object(text_words, "atomic_release_sequence");
   case ROCJITSU_CODE_ARCH_CDNA3:
     return make_cdna3_lds_code_object(text_words, "atomic_release_sequence");
   case ROCJITSU_CODE_ARCH_CDNA4:
@@ -91,6 +107,59 @@ enum class InlineAtomicSequenceKind : uint8_t { Release, Acquire, AcquireRelease
   default:
     return {};
   }
+}
+
+TEST(ConSanMoi, Gfx1100InlineAtomicAcquireUsesCompleteGfx11CacheSequence) {
+  const InlineReleaseSequenceTarget target{ROCJITSU_CODE_ARCH_RDNA3, "gfx1100/rdna3",
+                                           /*release_transaction_vsrc=*/12,
+                                           /*token_transaction_vsrc=*/26};
+  std::vector<uint32_t> atomic_words;
+  const std::vector<uint8_t> bytes = make_inline_atomic_sequence_fixture(
+      target, atomic_words, {}, InlineAtomicSequenceKind::Acquire);
+  ASSERT_FALSE(bytes.empty());
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_dispatch_id_sgpr = 20;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 1;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  ASSERT_EQ(result.kernels.front().atomic_sites.size(), 1u);
+  const ConSanAtomicSite &site = result.kernels.front().atomic_sites.front();
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(site, ConSanMoiAtomicEventKind::Acquire,
+                                                      ROCJITSU_CODE_ARCH_RDNA3),
+            ConSanMoiInlineAtomicSupport::Supported)
+      << "mnemonic=" << site.mnemonic << " size=" << site.size
+      << " raw_saddr=" << testing::PrintToString(site.raw_saddr)
+      << " raw_ioffset=" << testing::PrintToString(site.raw_ioffset)
+      << " raw_scope=" << testing::PrintToString(site.raw_scope)
+      << " raw_th=" << testing::PrintToString(site.raw_th)
+      << " returns=" << testing::PrintToString(site.returns_old_value);
+  ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
+                               << " dispositions="
+                               << testing::PrintToString(result.site_dispositions)
+                               << " kernels=" << testing::PrintToString(result.kernels);
+  EXPECT_TRUE(result.final_validation_passed);
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave_words =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  EXPECT_EQ(count_subsequence(cave_words, atomic_words), 1u);
+  EXPECT_EQ(consan_capability_disposition(ROCJITSU_CODE_TARGET_GFX1100,
+                                          ConSanCapabilityEngine::InlineShadow,
+                                          ConSanCapabilityForm::OrderedFlatAtomic),
+            ConSanCapabilityDisposition::Supported);
 }
 
 TEST(ConSanMoi, InlineShadowSkipsUnusedAtomicTransactionScratch) {

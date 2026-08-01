@@ -642,6 +642,19 @@ std::vector<uint8_t> make_rdna4_lds_code_object(
   return image;
 }
 
+std::vector<uint8_t> make_rdna3_lds_code_object(
+    std::span<const uint32_t> text_words, std::string_view kernel_name = "lds_probe",
+    uint32_t vgpr_granulated = kRdna4Wave64AllVgprsGranulated, bool wave32 = false,
+    bool uses_dynamic_stack = false, uint32_t workgroup_id_dimension_mask = 0,
+    uint32_t group_segment_fixed_size = 0) {
+  std::vector<uint8_t> image = make_rdna4_lds_code_object(
+      text_words, kernel_name, vgpr_granulated, wave32, uses_dynamic_stack,
+      workgroup_id_dimension_mask, group_segment_fixed_size);
+  mutate_elf_header(image,
+                    [](Elf64_Ehdr &header) { header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1100; });
+  return image;
+}
+
 std::vector<uint8_t> make_rdna4_many_kernel_lds_code_object(uint32_t kernel_count,
                                                             uint32_t accesses_per_kernel) {
   if (kernel_count == 0u || accesses_per_kernel == 0u) {

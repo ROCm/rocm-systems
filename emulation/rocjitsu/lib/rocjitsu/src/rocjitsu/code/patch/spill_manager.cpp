@@ -7,6 +7,7 @@
 #include "rocjitsu/code/patch/cdna3_instrumentation_builder.h"
 #include "rocjitsu/code/patch/cdna4_instrumentation_builder.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/patch/rdna3_instrumentation_builder.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "util/bit.h"
 
@@ -54,6 +55,8 @@ namespace {
     return cdna4::build_vop1(cdna4::kVMovB32Vop1,
                              {.src0 = ssrc, .vdst = static_cast<uint8_t>(vdst)})[0];
   }
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+    return build_rdna3_v_mov_b32(vdst, ssrc, arch);
   if (!is_rdna4_family_arch(arch))
     return std::nullopt;
   return build_v_mov_b32_e32(vdst, ssrc, arch);
@@ -67,6 +70,8 @@ namespace {
     return build_cdna3_v_readfirstlane_b32(sdst, vsrc, arch);
   if (arch == ROCJITSU_CODE_ARCH_CDNA4)
     return build_cdna4_v_readfirstlane_b32(sdst, vsrc, arch);
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+    return build_rdna3_v_readfirstlane_b32(sdst, vsrc, arch);
   return build_v_readfirstlane_b32(sdst, vsrc, arch);
 }
 
@@ -158,8 +163,8 @@ std::optional<uint32_t> SpillManager::offset_for(RegisterRef reg) const {
 std::optional<VgprSpillSequence> build_vgpr_spill_sequence(SpillManager &manager,
                                                            uint16_t vgpr_base, uint16_t vgpr_count,
                                                            rj_code_arch_t arch) {
-  if ((!is_rdna4_family_arch(arch) && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-       arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA3 && !is_rdna4_family_arch(arch) &&
+       arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
       vgpr_count == 0 || static_cast<uint32_t>(vgpr_base) + vgpr_count > REGISTER_SET_MAX_VGPRS) {
     return std::nullopt;
   }
@@ -173,10 +178,12 @@ std::optional<VgprSpillSequence> build_vgpr_spill_sequence(SpillManager &manager
     return std::nullopt;
   }
 
-  const auto wait_store = arch == ROCJITSU_CODE_ARCH_CDNA3   ? build_cdna3_s_wait_vmcnt0(arch)
+  const auto wait_store = arch == ROCJITSU_CODE_ARCH_RDNA3   ? build_rdna3_s_wait_vmcnt0(arch)
+                          : arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_s_wait_vmcnt0(arch)
                           : arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
                                                              : build_s_wait_storecnt0(arch);
-  const auto wait_load = arch == ROCJITSU_CODE_ARCH_CDNA3   ? build_cdna3_s_wait_vmcnt0(arch)
+  const auto wait_load = arch == ROCJITSU_CODE_ARCH_RDNA3   ? build_rdna3_s_wait_vmcnt0(arch)
+                         : arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_s_wait_vmcnt0(arch)
                          : arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
                                                             : build_s_wait_loadcnt0(arch);
   if (!wait_store || !wait_load)
@@ -201,7 +208,14 @@ std::optional<VgprSpillSequence> build_vgpr_spill_sequence(SpillManager &manager
     if (!offset)
       return std::nullopt;
     sequence.slot_offsets.push_back(*offset);
-    if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+      const auto store = build_rdna3_address_free_scratch_store_b32(vgpr, *offset, arch);
+      const auto load = build_rdna3_address_free_scratch_load_b32(vgpr, *offset, arch);
+      if (!store || !load)
+        return std::nullopt;
+      sequence.save_words.insert(sequence.save_words.end(), store->begin(), store->end());
+      sequence.restore_words.insert(sequence.restore_words.end(), load->begin(), load->end());
+    } else if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
       const auto store = build_cdna3_address_free_scratch_store_b32(vgpr, *offset, arch);
       const auto load = build_cdna3_address_free_scratch_load_b32(vgpr, *offset, arch);
       if (!store || !load)
@@ -236,8 +250,8 @@ build_dynamic_stack_vgpr_spill_sequence(uint16_t vgpr_base, uint16_t vgpr_count,
                                         uint16_t stack_top_sgpr, uint16_t frame_base_sgpr,
                                         uint16_t saved_frame_base_sgpr, uint16_t saved_scc_sgpr,
                                         rj_code_arch_t arch, uint32_t additional_frame_bytes) {
-  if ((!is_rdna4_family_arch(arch) && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-       arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA3 && !is_rdna4_family_arch(arch) &&
+       arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
       vgpr_count == 0 || static_cast<uint32_t>(vgpr_base) + vgpr_count > REGISTER_SET_MAX_VGPRS ||
       stack_top_sgpr > 127 || frame_base_sgpr > 127 || saved_frame_base_sgpr > 127 ||
       saved_scc_sgpr > 127 || saved_frame_base_sgpr == stack_top_sgpr ||
@@ -252,14 +266,19 @@ build_dynamic_stack_vgpr_spill_sequence(uint16_t vgpr_base, uint16_t vgpr_count,
   if (!private_limit || frame_bytes > *private_limit ||
       frame_bytes > std::numeric_limits<uint32_t>::max())
     return std::nullopt;
-  const auto wait_store = arch == ROCJITSU_CODE_ARCH_CDNA3   ? build_cdna3_s_wait_vmcnt0(arch)
+  const auto wait_store = arch == ROCJITSU_CODE_ARCH_RDNA3   ? build_rdna3_s_wait_vmcnt0(arch)
+                          : arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_s_wait_vmcnt0(arch)
                           : arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
                                                              : build_s_wait_storecnt0(arch);
-  const auto wait_load = arch == ROCJITSU_CODE_ARCH_CDNA3   ? build_cdna3_s_wait_vmcnt0(arch)
+  const auto wait_load = arch == ROCJITSU_CODE_ARCH_RDNA3   ? build_rdna3_s_wait_vmcnt0(arch)
+                         : arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_s_wait_vmcnt0(arch)
                          : arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
                                                             : build_s_wait_loadcnt0(arch);
   const auto capture_scc =
-      arch == ROCJITSU_CODE_ARCH_CDNA3
+      arch == ROCJITSU_CODE_ARCH_RDNA3
+          ? build_rdna3_s_cselect_b32(saved_scc_sgpr, scalar_positive_inline_u32(1),
+                                      scalar_positive_inline_u32(0), arch)
+      : arch == ROCJITSU_CODE_ARCH_CDNA3
           ? build_cdna3_s_cselect_b32(saved_scc_sgpr, scalar_positive_inline_u32(1),
                                       scalar_positive_inline_u32(0), arch)
       : arch == ROCJITSU_CODE_ARCH_CDNA4
@@ -268,14 +287,18 @@ build_dynamic_stack_vgpr_spill_sequence(uint16_t vgpr_base, uint16_t vgpr_count,
           : build_rdna4_s_cselect_b32(saved_scc_sgpr, scalar_positive_inline_u32(1),
                                       scalar_positive_inline_u32(0), arch);
   const auto advance_stack =
-      arch == ROCJITSU_CODE_ARCH_CDNA3   ? build_cdna3_s_add_u32(stack_top_sgpr, stack_top_sgpr,
+      arch == ROCJITSU_CODE_ARCH_RDNA3   ? build_rdna3_s_add_u32(stack_top_sgpr, stack_top_sgpr,
+                                                                 /*literal source=*/255u, arch)
+      : arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_s_add_u32(stack_top_sgpr, stack_top_sgpr,
                                                                  /*literal source=*/255u, arch)
       : arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_add_u32(stack_top_sgpr, stack_top_sgpr,
                                                                  /*literal source=*/255u, arch)
                                          : build_rdna4_s_add_u32(stack_top_sgpr, stack_top_sgpr,
                                                                  /*literal source=*/255u, arch);
   const auto restore_scc =
-      arch == ROCJITSU_CODE_ARCH_CDNA3
+      arch == ROCJITSU_CODE_ARCH_RDNA3
+          ? build_rdna3_s_cmp_lg_u32(saved_scc_sgpr, scalar_positive_inline_u32(0), arch)
+      : arch == ROCJITSU_CODE_ARCH_CDNA3
           ? build_cdna3_s_cmp_lg_u32(saved_scc_sgpr, scalar_positive_inline_u32(0), arch)
       : arch == ROCJITSU_CODE_ARCH_CDNA4
           ? build_cdna4_s_cmp_lg_u32(saved_scc_sgpr, scalar_positive_inline_u32(0), arch)
@@ -300,7 +323,14 @@ build_dynamic_stack_vgpr_spill_sequence(uint16_t vgpr_base, uint16_t vgpr_count,
     const uint16_t vgpr = static_cast<uint16_t>(vgpr_base + i);
     const uint32_t offset = static_cast<uint32_t>(i) * SpillManager::kSlotBytes;
     sequence.slot_offsets.push_back(offset);
-    if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+      const auto store = build_rdna3_scratch_store_b32_saddr(vgpr, frame_base_sgpr, offset, arch);
+      const auto load = build_rdna3_scratch_load_b32_saddr(vgpr, frame_base_sgpr, offset, arch);
+      if (!store || !load)
+        return std::nullopt;
+      sequence.save_words.insert(sequence.save_words.end(), store->begin(), store->end());
+      sequence.restore_words.insert(sequence.restore_words.end(), load->begin(), load->end());
+    } else if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
       const auto store = build_cdna3_scratch_store_b32_saddr(vgpr, frame_base_sgpr, offset, arch);
       const auto load = build_cdna3_scratch_load_b32_saddr(vgpr, frame_base_sgpr, offset, arch);
       if (!store || !load)
@@ -346,9 +376,10 @@ build_dynamic_stack_borrowed_sgpr_spill_sequence(uint16_t vgpr_base, uint16_t vg
   const uint32_t reservoir_end =
       static_cast<uint32_t>(scalar_reservoir_vgpr_base) + kReservoirCount;
   const uint32_t borrowed_end = static_cast<uint32_t>(borrowed_sgpr_base) + kBorrowedSgprCount;
-  if (!is_rdna4_family_arch(arch) || vgpr_count < kReservoirCount ||
-      vgpr_end > REGISTER_SET_MAX_VGPRS || scalar_reservoir_vgpr_base < vgpr_base ||
-      reservoir_end > vgpr_end || borrowed_end > REGISTER_SET_ALLOCATABLE_SGPRS ||
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA3 && !is_rdna4_family_arch(arch)) ||
+      vgpr_count < kReservoirCount || vgpr_end > REGISTER_SET_MAX_VGPRS ||
+      scalar_reservoir_vgpr_base < vgpr_base || reservoir_end > vgpr_end ||
+      borrowed_end > REGISTER_SET_ALLOCATABLE_SGPRS ||
       additional_frame_bytes % SpillManager::kSlotBytes != 0u ||
       (borrowed_sgpr_base <= kDynamicStackTopSgpr && kDynamicStackTopSgpr < borrowed_end) ||
       (borrowed_sgpr_base <= kDynamicFrameBaseSgpr && kDynamicFrameBaseSgpr < borrowed_end)) {
@@ -369,14 +400,25 @@ build_dynamic_stack_borrowed_sgpr_spill_sequence(uint16_t vgpr_base, uint16_t vg
   if (!total_private_bytes || *total_private_bytes > *private_limit)
     return std::nullopt;
 
-  const auto wait_store = build_s_wait_storecnt0(arch);
-  const auto wait_load = build_s_wait_loadcnt0(arch);
-  const auto capture_scc = build_rdna4_s_cselect_b32(
-      borrowed_sgpr_base, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
-  const auto advance_stack = build_rdna4_s_add_u32(kDynamicStackTopSgpr, kDynamicStackTopSgpr,
-                                                   /*literal source=*/255u, arch);
+  const auto wait_store = arch == ROCJITSU_CODE_ARCH_RDNA3 ? build_rdna3_s_wait_vmcnt0(arch)
+                                                           : build_s_wait_storecnt0(arch);
+  const auto wait_load = arch == ROCJITSU_CODE_ARCH_RDNA3 ? build_rdna3_s_wait_vmcnt0(arch)
+                                                          : build_s_wait_loadcnt0(arch);
+  const auto capture_scc =
+      arch == ROCJITSU_CODE_ARCH_RDNA3
+          ? build_rdna3_s_cselect_b32(borrowed_sgpr_base, scalar_positive_inline_u32(1),
+                                      scalar_positive_inline_u32(0), arch)
+          : build_rdna4_s_cselect_b32(borrowed_sgpr_base, scalar_positive_inline_u32(1),
+                                      scalar_positive_inline_u32(0), arch);
+  const auto advance_stack = arch == ROCJITSU_CODE_ARCH_RDNA3
+                                 ? build_rdna3_s_add_u32(kDynamicStackTopSgpr, kDynamicStackTopSgpr,
+                                                         /*literal source=*/255u, arch)
+                                 : build_rdna4_s_add_u32(kDynamicStackTopSgpr, kDynamicStackTopSgpr,
+                                                         /*literal source=*/255u, arch);
   const auto restore_scc =
-      build_rdna4_s_cmp_lg_u32(borrowed_sgpr_base, scalar_positive_inline_u32(0), arch);
+      arch == ROCJITSU_CODE_ARCH_RDNA3
+          ? build_rdna3_s_cmp_lg_u32(borrowed_sgpr_base, scalar_positive_inline_u32(0), arch)
+          : build_rdna4_s_cmp_lg_u32(borrowed_sgpr_base, scalar_positive_inline_u32(0), arch);
   if (!wait_store || !wait_load || !capture_scc || !advance_stack || !restore_scc)
     return std::nullopt;
 
@@ -397,12 +439,23 @@ build_dynamic_stack_borrowed_sgpr_spill_sequence(uint16_t vgpr_base, uint16_t vg
     const uint16_t vgpr = static_cast<uint16_t>(vgpr_base + i);
     const uint32_t offset = static_cast<uint32_t>(i) * SpillManager::kSlotBytes;
     sequence.slot_offsets.push_back(offset);
-    const auto store = build_scratch_store_b32_saddr(vgpr, kDynamicStackTopSgpr, offset, arch);
-    const auto load = build_scratch_load_b32_saddr(vgpr, kDynamicStackTopSgpr, offset, arch);
-    if (!store || !load)
-      return std::nullopt;
-    sequence.save_words.insert(sequence.save_words.end(), store->begin(), store->end());
-    fill_words.insert(fill_words.end(), load->begin(), load->end());
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+      const auto store =
+          build_rdna3_scratch_store_b32_saddr(vgpr, kDynamicStackTopSgpr, offset, arch);
+      const auto load =
+          build_rdna3_scratch_load_b32_saddr(vgpr, kDynamicStackTopSgpr, offset, arch);
+      if (!store || !load)
+        return std::nullopt;
+      sequence.save_words.insert(sequence.save_words.end(), store->begin(), store->end());
+      fill_words.insert(fill_words.end(), load->begin(), load->end());
+    } else {
+      const auto store = build_scratch_store_b32_saddr(vgpr, kDynamicStackTopSgpr, offset, arch);
+      const auto load = build_scratch_load_b32_saddr(vgpr, kDynamicStackTopSgpr, offset, arch);
+      if (!store || !load)
+        return std::nullopt;
+      sequence.save_words.insert(sequence.save_words.end(), store->begin(), store->end());
+      fill_words.insert(fill_words.end(), load->begin(), load->end());
+    }
   }
   sequence.save_words.push_back(*wait_store);
 
@@ -462,8 +515,8 @@ build_dynamic_stack_sgpr_spill_sequence(uint16_t sgpr_base, uint16_t sgpr_count,
   const uint64_t frame_end = static_cast<uint64_t>(frame_byte_offset) +
                              static_cast<uint64_t>(sgpr_count) * SpillManager::kSlotBytes;
   const auto private_limit = address_free_scratch_private_limit(arch);
-  if ((!is_rdna4_family_arch(arch) && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-       arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA3 && !is_rdna4_family_arch(arch) &&
+       arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
       sgpr_count == 0 || static_cast<uint32_t>(sgpr_base) + sgpr_count > REGISTER_SET_MAX_SGPRS ||
       !vgpr_frame.uses_dynamic_stack_frame || !vgpr_frame.has_complete_slot_metadata() ||
       transfer_vgpr < vgpr_frame.vgpr_base ||
@@ -475,10 +528,12 @@ build_dynamic_stack_sgpr_spill_sequence(uint16_t sgpr_base, uint16_t sgpr_count,
     return std::nullopt;
   }
   const uint16_t frame_base_sgpr = vgpr_frame.dynamic_frame_base_sgpr;
-  const auto wait_store = arch == ROCJITSU_CODE_ARCH_CDNA3   ? build_cdna3_s_wait_vmcnt0(arch)
+  const auto wait_store = arch == ROCJITSU_CODE_ARCH_RDNA3   ? build_rdna3_s_wait_vmcnt0(arch)
+                          : arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_s_wait_vmcnt0(arch)
                           : arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
                                                              : build_s_wait_storecnt0(arch);
-  const auto wait_load = arch == ROCJITSU_CODE_ARCH_CDNA3   ? build_cdna3_s_wait_vmcnt0(arch)
+  const auto wait_load = arch == ROCJITSU_CODE_ARCH_RDNA3   ? build_rdna3_s_wait_vmcnt0(arch)
+                         : arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_s_wait_vmcnt0(arch)
                          : arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
                                                             : build_s_wait_loadcnt0(arch);
   if (!wait_store || !wait_load)
@@ -497,7 +552,16 @@ build_dynamic_stack_sgpr_spill_sequence(uint16_t sgpr_base, uint16_t sgpr_count,
     if (!save)
       return std::nullopt;
     sequence.save_words.push_back(*save);
-    if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+      const auto store =
+          build_rdna3_scratch_store_b32_saddr(transfer_vgpr, frame_base_sgpr, offset, arch);
+      const auto load =
+          build_rdna3_scratch_load_b32_saddr(transfer_vgpr, frame_base_sgpr, offset, arch);
+      if (!store || !load)
+        return std::nullopt;
+      sequence.save_words.insert(sequence.save_words.end(), store->begin(), store->end());
+      sequence.restore_words.insert(sequence.restore_words.end(), load->begin(), load->end());
+    } else if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
       const auto store =
           build_cdna3_scratch_store_b32_saddr(transfer_vgpr, frame_base_sgpr, offset, arch);
       const auto load =

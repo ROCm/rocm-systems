@@ -2632,7 +2632,10 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedWidth);
   const bool cdna_flat_encoding =
       arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
-  const uint32_t expected_size = cdna_flat_encoding ? 2u * sizeof(uint32_t) : 3u * sizeof(uint32_t);
+  const bool rdna3_flat_encoding = arch == ROCJITSU_CODE_ARCH_RDNA3;
+  const bool two_word_flat_encoding = cdna_flat_encoding || rdna3_flat_encoding;
+  const uint32_t expected_size =
+      two_word_flat_encoding ? 2u * sizeof(uint32_t) : 3u * sizeof(uint32_t);
   if (site.size != expected_size || !site.raw_saddr || !site.raw_vaddr || !site.raw_ioffset)
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
   // Scope does not affect effective-address reconstruction. Wave scope is not
@@ -2644,15 +2647,18 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
     return reject(ConSanMoiAtomicAddressSupport::MissingAddressOperands);
 
   const uint32_t flat_no_saddr =
-      cdna_flat_encoding
+      rdna3_flat_encoding
+          ? (site.mnemonic.starts_with("global_atomic") ? kRdna3GlobalNoSaddrEncoding
+                                                        : kRdna3FlatNoSaddrEncoding)
+      : cdna_flat_encoding
           ? (site.mnemonic.starts_with("global_atomic") ? kCdnaGlobalNoSaddrEncoding : 0u)
           : flat_no_saddr_encoding(arch);
   constexpr int32_t kSigned13Min = -(1 << 12);
   constexpr int32_t kSigned13Max = (1 << 12) - 1;
   constexpr int32_t kSigned24Min = -(1 << 23);
   constexpr int32_t kSigned24Max = (1 << 23) - 1;
-  const int32_t signed_vglobal_offset_min = cdna_flat_encoding ? kSigned13Min : kSigned24Min;
-  const int32_t signed_vglobal_offset_max = cdna_flat_encoding ? kSigned13Max : kSigned24Max;
+  const int32_t signed_vglobal_offset_min = two_word_flat_encoding ? kSigned13Min : kSigned24Min;
+  const int32_t signed_vglobal_offset_max = two_word_flat_encoding ? kSigned13Max : kSigned24Max;
   const bool is_compare_exchange = consan_atomic_is_compare_exchange(site);
   const uint16_t value_word_count = static_cast<uint16_t>(site.width_bits / 32u);
   const uint16_t data_count =
@@ -2815,12 +2821,12 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
     words.insert(words.end(), tag->begin(), tag->end());
     return words;
   }
-  const bool cdna_address_materialization =
-      instrumentation::is_cdna_family_arch(arch) &&
+  const bool legacy_address_materialization =
+      (instrumentation::is_cdna_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_RDNA3) &&
       (plan.kind == ConSanMoiAtomicAddressKind::FlatGuestPairMaterialized ||
        plan.kind == ConSanMoiAtomicAddressKind::VglobalGuestPairMaterialized ||
        plan.kind == ConSanMoiAtomicAddressKind::VglobalMaterialized);
-  if (!is_rdna4_family_arch(arch) && !cdna_address_materialization)
+  if (!is_rdna4_family_arch(arch) && !legacy_address_materialization)
     return std::nullopt;
   const bool buffer_resource = plan.kind == ConSanMoiAtomicAddressKind::BufferResourceMaterialized;
   const bool scalar_vector =

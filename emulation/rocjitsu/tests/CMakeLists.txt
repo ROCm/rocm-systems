@@ -1451,6 +1451,8 @@ if(HSA_RUNTIME64)
         set(HAS_CDNA3_GPU FALSE)
         set(HAS_RDNA4_GPU FALSE)
         set(HAS_GFX1201_GPU FALSE)
+        set(HAS_GFX1100_GPU FALSE)
+        set(GFX1100_GPU_UUID "")
         set(HAS_GFX950_GPU FALSE)
         set(HAS_CDNA2_GPU FALSE)
         if(ROCM_AGENT_ENUM)
@@ -1475,6 +1477,28 @@ if(HSA_RUNTIME64)
             endif()
             if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx1201")
                 set(HAS_GFX1201_GPU TRUE)
+            endif()
+            if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx1100")
+                set(HAS_GFX1100_GPU TRUE)
+                if(ROCMINFO_EXECUTABLE)
+                    execute_process(
+                        COMMAND ${ROCMINFO_EXECUTABLE}
+                        OUTPUT_VARIABLE _rocminfo_agents
+                        ERROR_QUIET
+                        RESULT_VARIABLE _rocminfo_agents_rc
+                    )
+                    if(_rocminfo_agents_rc EQUAL 0)
+                        string(
+                            REGEX MATCH
+                            "Name:[ \t]+gfx1100[ \t\r]*\n[ \t]*Uuid:[ \t]+(GPU-[0-9A-Fa-f]+)"
+                            _gfx1100_agent_match
+                            "${_rocminfo_agents}"
+                        )
+                        if(_gfx1100_agent_match)
+                            set(GFX1100_GPU_UUID "${CMAKE_MATCH_1}")
+                        endif()
+                    endif()
+                endif()
             endif()
             if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx950")
                 set(HAS_GFX950_GPU TRUE)
@@ -1967,6 +1991,7 @@ find_library(HIP_RUNTIME64 amdhip64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
 set(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH FALSE)
 set(RJ_HIP_RUNTIME_SUPPORTS_GFX950 FALSE)
 set(RJ_HIP_RUNTIME_SUPPORTS_GFX942 FALSE)
+set(RJ_HIP_RUNTIME_SUPPORTS_GFX1100 FALSE)
 set(RJ_HIP_RUNTIME_SUPPORTS_GFX1250 FALSE)
 
 if(HIP_RUNTIME64 AND CMAKE_DL_LIBS)
@@ -2043,6 +2068,7 @@ if(RJ_ENABLE_HIP_TESTS)
     )
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX950 "gfx950")
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX942 "gfx942")
+    rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX1100 "gfx1100")
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX1250 "gfx1250")
 endif()
 

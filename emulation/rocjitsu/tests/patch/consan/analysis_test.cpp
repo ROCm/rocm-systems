@@ -1207,7 +1207,7 @@ TEST(ConSan, RetainsTypedIdentityForEverySupportedTarget) {
     rj_code_arch_t arch;
     std::vector<uint8_t> bytes;
   };
-  const std::array<TargetCase, 4> cases = {
+  const std::array<TargetCase, 5> cases = {
       TargetCase{
           .target = ROCJITSU_CODE_TARGET_GFX942,
           .arch = ROCJITSU_CODE_ARCH_CDNA3,
@@ -1217,6 +1217,11 @@ TEST(ConSan, RetainsTypedIdentityForEverySupportedTarget) {
           .target = ROCJITSU_CODE_TARGET_GFX950,
           .arch = ROCJITSU_CODE_ARCH_CDNA4,
           .bytes = make_cdna4_lds_code_object(std::array{build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)}),
+      },
+      TargetCase{
+          .target = ROCJITSU_CODE_TARGET_GFX1100,
+          .arch = ROCJITSU_CODE_ARCH_RDNA3,
+          .bytes = make_rdna3_lds_code_object(std::array{build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3)}),
       },
       TargetCase{
           .target = ROCJITSU_CODE_TARGET_GFX1201,

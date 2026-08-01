@@ -1414,6 +1414,13 @@ void build_barrier_move_destination_inventory(
 
 [[nodiscard]] bool is_acquire_cache_event(const ConSanSyncEvent *event) {
   return event != nullptr && (event->mnemonic == "global_inv" || event->mnemonic == "buffer_inv" ||
+                              event->mnemonic == "s_dcache_inv" ||
+                              event->mnemonic == "buffer_gl0_inv" ||
+                              event->mnemonic == "buffer_gl1_inv");
+}
+
+[[nodiscard]] bool is_single_acquire_cache_event(const ConSanSyncEvent *event) {
+  return event != nullptr && (event->mnemonic == "global_inv" || event->mnemonic == "buffer_inv" ||
                               event->mnemonic == "s_dcache_inv");
 }
 
@@ -1441,6 +1448,17 @@ void build_barrier_move_destination_inventory(
     expected_offset += static_cast<uint64_t>(instruction.size());
   }
   return expected_offset == after.begin_text_offset;
+}
+
+[[nodiscard]] bool is_rdna3_acquire_cache_pair(
+    const ConSanSyncSequence &first, const ConSanSyncSequence &second,
+    const SyncEventIdentityIndex &events,
+    const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
+  const ConSanSyncEvent *first_event = first_sequence_event(events, first);
+  const ConSanSyncEvent *second_event = first_sequence_event(events, second);
+  return first_event != nullptr && second_event != nullptr &&
+         first_event->mnemonic == "buffer_gl1_inv" &&
+         second_event->mnemonic == "buffer_gl0_inv" && has_only_waits_between(first, second, blocks);
 }
 
 enum class BoundedAcquirePathKind { SameBlock, ExactFallthroughJoin, ExactSelfLoopExit };
@@ -1563,7 +1581,8 @@ prove_bounded_acquire_path(const ConSanSyncSequence &before, const ConSanSyncSeq
 
 [[nodiscard]] ConSanSyncSequence
 associate_atomic_cache_sequence(const ConSanSyncSequence *release, const ConSanSyncSequence &atomic,
-                                const ConSanSyncSequence *acquire) {
+                                const ConSanSyncSequence *acquire,
+                                const ConSanSyncSequence *acquire_tail = nullptr) {
   ConSanSyncSequence sequence = atomic;
   sequence.memory_role = release != nullptr && acquire != nullptr
                              ? ConSanSyncMemoryRole::AcquireRelease
@@ -1593,12 +1612,22 @@ associate_atomic_cache_sequence(const ConSanSyncSequence *release, const ConSanS
                  atomic.member_event_identities.end());
   if (acquire != nullptr) {
     sequence.identity += "|acquire-cache=" + acquire->identity;
-    sequence.end_text_offset = acquire->end_text_offset;
     sequence.in_cyclic_cfg_component |= acquire->in_cyclic_cfg_component;
     sequence.inside_scalar_clause |= acquire->inside_scalar_clause;
     members.insert(members.end(), acquire->member_event_identities.begin(),
                    acquire->member_event_identities.end());
   }
+  if (acquire_tail != nullptr) {
+    sequence.identity += "|acquire-cache-tail=" + acquire_tail->identity;
+    sequence.in_cyclic_cfg_component |= acquire_tail->in_cyclic_cfg_component;
+    sequence.inside_scalar_clause |= acquire_tail->inside_scalar_clause;
+    members.insert(members.end(), acquire_tail->member_event_identities.begin(),
+                   acquire_tail->member_event_identities.end());
+  }
+  if (acquire_tail != nullptr)
+    sequence.end_text_offset = acquire_tail->end_text_offset;
+  else if (acquire != nullptr)
+    sequence.end_text_offset = acquire->end_text_offset;
   sequence.member_event_identities = std::move(members);
   return sequence;
 }
@@ -1651,26 +1680,46 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
       if (atomic.kind == ConSanSyncSequenceKind::Atomic &&
           has_only_waits_between(current, atomic, blocks)) {
         const ConSanSyncSequence *acquire = nullptr;
+        const ConSanSyncSequence *acquire_tail = nullptr;
         if (i + 2 < result.sync_sequences.size()) {
           const ConSanSyncSequence &candidate = result.sync_sequences[i + 2];
           if (candidate.kind == ConSanSyncSequenceKind::Fence &&
-              is_acquire_cache_event(first_sequence_event(events, candidate)) &&
+              is_single_acquire_cache_event(first_sequence_event(events, candidate)) &&
               prove_bounded_acquire_path(atomic, candidate, blocks)) {
             acquire = &candidate;
+          } else if (arch == ROCJITSU_CODE_ARCH_RDNA3 &&
+                     i + 3 < result.sync_sequences.size() &&
+                     result.sync_sequences[i + 3].kind == ConSanSyncSequenceKind::Fence &&
+                     prove_bounded_acquire_path(atomic, candidate, blocks) &&
+                     is_rdna3_acquire_cache_pair(candidate, result.sync_sequences[i + 3], events,
+                                                 blocks)) {
+            acquire = &candidate;
+            acquire_tail = &result.sync_sequences[i + 3];
           }
         }
-        associated.push_back(associate_atomic_cache_sequence(&current, atomic, acquire));
-        i += acquire != nullptr ? 3 : 2;
+        associated.push_back(
+            associate_atomic_cache_sequence(&current, atomic, acquire, acquire_tail));
+        i += acquire_tail != nullptr ? 4 : (acquire != nullptr ? 3 : 2);
         continue;
       }
     }
     if (current.kind == ConSanSyncSequenceKind::Atomic && i + 1 < result.sync_sequences.size()) {
       const ConSanSyncSequence &acquire = result.sync_sequences[i + 1];
       if (acquire.kind == ConSanSyncSequenceKind::Fence &&
-          is_acquire_cache_event(first_sequence_event(events, acquire)) &&
+          is_single_acquire_cache_event(first_sequence_event(events, acquire)) &&
           prove_bounded_acquire_path(current, acquire, blocks)) {
         associated.push_back(associate_atomic_cache_sequence(nullptr, current, &acquire));
         i += 2;
+        continue;
+      }
+      if (arch == ROCJITSU_CODE_ARCH_RDNA3 && i + 2 < result.sync_sequences.size() &&
+          acquire.kind == ConSanSyncSequenceKind::Fence &&
+          result.sync_sequences[i + 2].kind == ConSanSyncSequenceKind::Fence &&
+          prove_bounded_acquire_path(current, acquire, blocks) &&
+          is_rdna3_acquire_cache_pair(acquire, result.sync_sequences[i + 2], events, blocks)) {
+        associated.push_back(associate_atomic_cache_sequence(nullptr, current, &acquire,
+                                                              &result.sync_sequences[i + 2]));
+        i += 3;
         continue;
       }
     }

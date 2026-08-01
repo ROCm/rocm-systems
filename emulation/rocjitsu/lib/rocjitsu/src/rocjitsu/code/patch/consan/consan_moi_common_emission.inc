@@ -23,6 +23,8 @@ struct MoiResidentWaveHwreg {
 moi_resident_wave_hwreg(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
     return MoiResidentWaveHwreg{.id = kLegacyHwRegHwId, .bits = kLegacyHwIdResidentWaveBits};
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+    return MoiResidentWaveHwreg{.id = kGfx11HwRegHwId1, .bits = kGfx11HwIdResidentWaveBits};
   if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250)
     return MoiResidentWaveHwreg{.id = kGfx12HwRegHwId1, .bits = kGfx12HwIdResidentWaveBits};
   return std::nullopt;

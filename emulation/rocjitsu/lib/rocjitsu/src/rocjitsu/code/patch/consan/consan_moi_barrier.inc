@@ -176,9 +176,9 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
       186 + (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
       (scalar_spill ? scalar_spill->save_words.size() + scalar_spill->restore_words.size() : 0u));
   const bool runtime_workgroup_gate =
-      options.moi_runtime_sample_stride > 1u &&
-      !options.automatic_moi_record_replay_sgpr_spill && workgroup_sources.x.scalar_src &&
-      workgroup_sources.y.scalar_src && workgroup_sources.z.scalar_src;
+      options.moi_runtime_sample_stride > 1u && !options.automatic_moi_record_replay_sgpr_spill &&
+      workgroup_sources.x.scalar_src && workgroup_sources.y.scalar_src &&
+      workgroup_sources.z.scalar_src;
   if (runtime_workgroup_gate) {
     ConSanMoiCandidate barrier_guest;
     barrier_guest.file_offset = candidate.site.file_offset;
@@ -1238,7 +1238,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
              (candidate_options.moi_engine == ConSanMoiEngine::InlineShadow ||
               candidate_options.moi_engine == ConSanMoiEngine::RecordReplay)) ||
-            ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+            ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+              arch == ROCJITSU_CODE_ARCH_CDNA4) &&
              candidate_options.moi_engine == ConSanMoiEngine::RecordReplay &&
              candidate_options.moi_record_replay_dense_barrier_router);
         if (has_dense_router &&
@@ -1735,8 +1736,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         if (arch == ROCJITSU_CODE_ARCH_GFX1250)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
-        if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-            arch == ROCJITSU_CODE_ARCH_CDNA4)
+        if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+            arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };
@@ -2077,8 +2078,9 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
                                                   ConSanResult &result) {
   if (!options.moi_track_barriers)
     return;
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250 &&
-      arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA4 &&
+      arch != ROCJITSU_CODE_ARCH_GFX1250 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
+      arch != ROCJITSU_CODE_ARCH_CDNA4) {
     result.warnings.emplace_back(
         "ConSan MOI barrier record patch does not support this architecture");
     return;

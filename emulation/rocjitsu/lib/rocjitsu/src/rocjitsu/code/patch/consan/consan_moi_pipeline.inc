@@ -1108,8 +1108,7 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
       }
     }
   }
-  if ((is_rdna4_family_arch(state.arch) || state.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-       state.arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+  if (instrumentation::is_admitted_arch(state.arch) &&
       options.automatic_moi_partial_exec_save_sgprs && options.moi_exec_save_sgpr) {
     const uint16_t exec_base = *options.moi_exec_save_sgpr;
     const uint16_t exec_count = moi_exec_save_sgpr_count(options, state.arch);

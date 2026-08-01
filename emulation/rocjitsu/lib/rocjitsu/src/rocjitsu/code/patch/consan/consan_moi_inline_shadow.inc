@@ -2129,7 +2129,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     return true;
   }
   if (!append_moi_report_dispatch_id_pair(words, options, bank_vgpr, temporary_vgpr, arch,
-                                          ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly)) {
+                                          ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
     return false;
   }
   const auto mix = [&](uint16_t source) {
@@ -2292,7 +2292,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     errors.emplace_back("ConSan MOI runtime sampled probe could not derive a wave owner");
     return std::nullopt;
   }
-  if (runtime_sampled && !options.moi_dispatch_id_sgpr && !is_rdna4_family_arch(arch)) {
+  if (runtime_sampled && !options.moi_dispatch_id_sgpr &&
+      !instrumentation::is_consan_rdna_arch(arch)) {
     errors.emplace_back("ConSan MOI runtime sampled probe requires a hardware dispatch ID");
     return std::nullopt;
   }
@@ -3084,7 +3085,7 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count) {
     uint64_t cave_text_offset, uint64_t return_text_offset, uint64_t island_word_count,
     rj_code_arch_t arch) {
   if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u ||
-      (!options.moi_dispatch_id_sgpr && !is_rdna4_family_arch(arch)))
+      (!options.moi_dispatch_id_sgpr && !instrumentation::is_consan_rdna_arch(arch)))
     return std::nullopt;
   const uint16_t saved_scc = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u);
   const uint16_t quotient = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 5u);
@@ -3189,7 +3190,7 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count) {
     uint64_t gate_text_offset, uint64_t return_text_offset, uint64_t reserved_word_count,
     rj_code_arch_t arch) {
   if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u ||
-      (!options.moi_dispatch_id_sgpr && !is_rdna4_family_arch(arch)))
+      (!options.moi_dispatch_id_sgpr && !instrumentation::is_consan_rdna_arch(arch)))
     return std::nullopt;
   const uint16_t saved_scc = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u);
   const uint16_t quotient = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 5u);

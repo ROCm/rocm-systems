@@ -1635,6 +1635,109 @@ function(rj_add_consan_hip_tests)
             )
         endif()
     endif()
+    if(RJ_HIP_RUNTIME_SUPPORTS_GFX1100)
+        rj_add_hip_test(
+                hip_consan_lds_gfx1100_test
+                ARCH gfx1100
+                SOURCE dbi/consan/hip_consan_lds_test.hip
+        )
+        rj_add_hip_test(
+                hip_consan_moi_gfx1100_test
+                ARCH gfx1100
+                SOURCE dbi/consan/hip_consan_moi_rdna3_test.hip
+        )
+        add_dependencies(hip_consan_lds_gfx1100_test_target rocjitsu_dbi_hooks)
+        add_dependencies(hip_consan_moi_gfx1100_test_target rocjitsu_dbi_hooks)
+        if(HAS_GFX1100_GPU AND GFX1100_GPU_UUID)
+            set(_rj_consan_gfx1100_device
+                "ROCR_VISIBLE_DEVICES=${GFX1100_GPU_UUID}"
+            )
+            set(_rj_consan_gfx1100_clean
+                "ConSanMoiRdna3Test.BarrierOrderedAccessesPreserveOutput"
+            )
+            rj_add_consan_hip_case(
+                NAME "ConSanGfx1100Physical.BaselineClean"
+                TARGET hip_consan_moi_gfx1100_test
+                FILTER "${_rj_consan_gfx1100_clean}"
+                RUN_SERIAL
+                ENVIRONMENT "${_rj_consan_gfx1100_device}"
+            )
+            rj_add_consan_hip_case(
+                NAME "ConSanGfx1100Physical.SuperColliderClean"
+                TARGET hip_consan_moi_gfx1100_test
+                FILTER "${_rj_consan_gfx1100_clean}"
+                RUN_SERIAL
+                ENVIRONMENT
+                    "${_rj_consan_gfx1100_device}"
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_MODE=supercollider"
+                    "RJ_CONSAN_DELAY=2"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_rdna3_barrier_ordered_accesses_for_instrumentation"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_MAX_PATCHES=2"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            foreach(
+                _rj_consan_gfx1100_mode
+                IN
+                ITEMS record-replay sampled inline-shadow
+            )
+                string(
+                    REPLACE
+                    "-"
+                    "_"
+                    _rj_consan_gfx1100_mode_name
+                    "${_rj_consan_gfx1100_mode}"
+                )
+                rj_add_consan_hip_case(
+                    NAME "ConSanGfx1100Physical.Moi_${_rj_consan_gfx1100_mode_name}"
+                    TARGET hip_consan_moi_gfx1100_test
+                    FILTER "${_rj_consan_gfx1100_clean}"
+                    PASS_REGEX "kind=trampoline-moi-"
+                    RUN_SERIAL
+                    ENVIRONMENT
+                        "${_rj_consan_gfx1100_device}"
+                        "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                        "RJ_CONSAN_MODE=${_rj_consan_gfx1100_mode}"
+                        "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                        "RJ_CONSAN_TEST_KERNEL_FILTER=moi_rdna3_barrier_ordered_accesses_for_instrumentation"
+                        "RJ_CONSAN_LOG=3"
+                        "RJ_CONSAN_MAX_PATCHES=3"
+                        "RJ_CONSAN_REQUIRE_PATCH=1"
+                        "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                        "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                )
+            endforeach()
+            rj_add_consan_hip_case(
+                NAME "ConSanGfx1100Physical.InlineShadowDetectsRace"
+                TARGET hip_consan_moi_gfx1100_test
+                FILTER "ConSanMoiRdna3Test.TwoWaveRacyStoresComplete"
+                PASS_REGEX "ConSan MOI auto diagnostic.*first_owner=[1-9][0-9]* second_owner=[1-9][0-9]*"
+                RUN_SERIAL
+                ENVIRONMENT
+                    "${_rj_consan_gfx1100_device}"
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_MODE=inline-shadow"
+                    "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+                    "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_rdna3_two_wave_racy_stores_for_instrumentation"
+                    "RJ_CONSAN_LOG=2"
+                    "RJ_CONSAN_MAX_PATCHES=1"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+            )
+            rj_add_consan_hip_case(
+                NAME "ConSanGfx1100Physical.PostInstrumentationHealth"
+                TARGET hip_consan_moi_gfx1100_test
+                FILTER "${_rj_consan_gfx1100_clean}"
+                RUN_SERIAL
+                ENVIRONMENT "${_rj_consan_gfx1100_device}"
+            )
+            unset(_rj_consan_gfx1100_clean)
+            unset(_rj_consan_gfx1100_device)
+        endif()
+    endif()
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX1250)
         # Keep native gfx1250 code objects available on every host so the
         # target-specific ConSan path can be regression-tested in simulation.

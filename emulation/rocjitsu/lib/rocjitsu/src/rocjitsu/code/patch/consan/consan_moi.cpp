@@ -248,7 +248,12 @@ consan_detail::append_reload_moi_spilled_vgpr(std::vector<uint32_t> &words,
   InstructionSequence sequence(words);
   bool encoded = false;
   if (spill.uses_dynamic_stack_frame) {
-    if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+      encoded =
+          sequence.emit_all(build_rdna3_scratch_load_b32_saddr(
+                                destination, spill.dynamic_frame_base_sgpr, slot_offset, arch),
+                            wait);
+    } else if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
       encoded =
           sequence.emit_all(build_cdna3_scratch_load_b32_saddr(
                                 destination, spill.dynamic_frame_base_sgpr, slot_offset, arch),
@@ -597,8 +602,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   constexpr size_t kCompactRecordReplayBarrierMemberLimit = 32u;
   effective_options.moi_record_replay_dense_barrier_router =
       effective_options.moi_record_replay_dense_barrier_router ||
-      ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-        arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      (instrumentation::is_admitted_arch(arch) &&
        effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
        supported_barrier_members > kCompactRecordReplayBarrierMemberLimit);
   const MoiSyncInventoryIndex sync_index(result);

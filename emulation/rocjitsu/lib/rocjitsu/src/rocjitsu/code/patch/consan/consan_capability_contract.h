@@ -70,9 +70,10 @@ struct ConSanCapabilityTarget {
 /// The production target-admission map and the documentation iteration order
 /// share this table. Adding support for a target therefore cannot leave the
 /// public matrix on a separate target list.
-inline constexpr std::array<ConSanCapabilityTarget, 4> kConSanCapabilityTargets = {{
+inline constexpr std::array<ConSanCapabilityTarget, 5> kConSanCapabilityTargets = {{
     {ROCJITSU_CODE_TARGET_GFX942, ROCJITSU_CODE_ARCH_CDNA3},
     {ROCJITSU_CODE_TARGET_GFX950, ROCJITSU_CODE_ARCH_CDNA4},
+    {ROCJITSU_CODE_TARGET_GFX1100, ROCJITSU_CODE_ARCH_RDNA3},
     {ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_ARCH_RDNA4},
     {ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_ARCH_GFX1250},
 }};
@@ -164,7 +165,8 @@ template <typename Enum, std::size_t N>
                                                                   ConSanCapabilityForm form) {
   const bool supported_arch =
       arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-      arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
+      arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+      arch == ROCJITSU_CODE_ARCH_GFX1250;
   if (!supported_arch)
     return false;
 

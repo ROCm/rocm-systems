@@ -82,6 +82,8 @@ inline constexpr uint32_t kMaxAddressFreeScratchPrivateBytes = 0x800000u;
 /// 12-bit byte offset field, and the corresponding per-lane private extent.
 inline constexpr uint32_t kMaxCdnaAddressFreeScratchDwordOffset = 0xffcu;
 inline constexpr uint32_t kMaxCdnaAddressFreeScratchPrivateBytes = 0x1000u;
+inline constexpr uint32_t kMaxRdna3AddressFreeScratchDwordOffset = 0x1ffcu;
+inline constexpr uint32_t kMaxRdna3AddressFreeScratchPrivateBytes = 0x2000u;
 
 /// @brief Return the per-lane private extent addressable by the architecture's
 /// address-free scratch form.
@@ -100,6 +102,8 @@ address_free_scratch_private_limit(rj_code_arch_t arch) {
     return kMaxCdnaAddressFreeScratchPrivateBytes;
   case ROCJITSU_CODE_ARCH_CDNA3:
     return kMaxCdnaAddressFreeScratchPrivateBytes;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return kMaxRdna3AddressFreeScratchPrivateBytes;
   default:
     return std::nullopt;
   }
@@ -117,7 +121,8 @@ normalize_address_free_scratch_private_size(rj_code_arch_t arch, uint32_t reques
   if (!limit)
     return std::nullopt;
   const uint64_t normalized =
-      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+       arch == ROCJITSU_CODE_ARCH_RDNA3)
           ? util::align_up(static_cast<uint64_t>(requested_bytes), static_cast<uint64_t>(16u))
           : requested_bytes;
   if (normalized > *limit)

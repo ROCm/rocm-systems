@@ -73,6 +73,60 @@ TEST_P(MoiEngineConformanceTest, UsesBranchIslandsForManyLargeAccessBodies) {
   }
 }
 
+TEST_P(MoiEngineConformanceTest, InstrumentsGfx1100NativeLdsAccess) {
+  constexpr auto store = rdna3::build_ds(rdna3::kDsStoreB32Ds, {.addr = 0, .data0 = 1});
+  const std::array<uint32_t, 3> text_words = {store[0], store[1],
+                                              build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3)};
+  const MoiEngineConformanceCase &test_case = GetParam();
+
+  const ConSanResult result =
+      try_patch_consan(make_rdna3_lds_code_object(text_words, "gfx1100_native_lds",
+                                                  kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
+                                                  /*uses_dynamic_stack=*/false,
+                                                  /*workgroup_id_dimension_mask=*/7u),
+                       conformance_options(test_case, /*access_count=*/1u));
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
+  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX1100);
+  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_EQ(std::ranges::count(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind),
+            1u);
+}
+
+TEST_P(MoiEngineConformanceTest, InstrumentsGfx1100SingletonWorkgroupBarrier) {
+  constexpr auto store = rdna3::build_ds(rdna3::kDsStoreB32Ds, {.addr = 0, .data0 = 1});
+  const std::array<uint32_t, 4> text_words = {store[0], store[1],
+                                              *build_rdna3_s_barrier(ROCJITSU_CODE_ARCH_RDNA3),
+                                              build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3)};
+  const MoiEngineConformanceCase &test_case = GetParam();
+  ConSanOptions options = conformance_options(test_case, /*access_count=*/1u);
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_track_barriers = true;
+  options.max_patches = 2u;
+
+  const ConSanResult result =
+      try_patch_consan(make_rdna3_lds_code_object(text_words, "gfx1100_workgroup_barrier",
+                                                  kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
+                                                  /*uses_dynamic_stack=*/false,
+                                                  /*workgroup_id_dimension_mask=*/7u),
+                       options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
+  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX1100);
+  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_RDNA3);
+  const ConSanPatchKind expected_kind = test_case.engine == ConSanMoiEngine::InlineShadow
+                                            ? ConSanPatchKind::TrampolineMoiInlineEpochBarrier
+                                        : test_case.engine == ConSanMoiEngine::Sampled
+                                            ? ConSanPatchKind::TrampolineMoiSampledSyncMetadata
+                                            : ConSanPatchKind::TrampolineMoiBarrierRecord;
+  EXPECT_EQ(std::ranges::count(result.patches, expected_kind, &ConSanPatchInfo::kind), 1u)
+      << testing::PrintToString(result.warnings) << testing::PrintToString(result.patches);
+}
+
 TEST_P(MoiEngineConformanceTest, RelocatesStraightLinePrefixWhenNoEntryIslandIsReachable) {
   const MoiEngineConformanceCase &test_case = GetParam();
   const std::array<uint32_t, 2> kernel_words = {

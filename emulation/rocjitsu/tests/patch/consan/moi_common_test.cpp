@@ -208,10 +208,8 @@ TEST(ConSanMoi, SpilledVgprReloadSelectsFixedAndDynamicTargetEncodings) {
   constexpr uint16_t kFrameBaseSgpr = 33u;
   constexpr uint32_t kSlotOffset = 20u;
   constexpr std::array kArchitectures = {
-      ROCJITSU_CODE_ARCH_CDNA3,
-      ROCJITSU_CODE_ARCH_CDNA4,
-      ROCJITSU_CODE_ARCH_RDNA4,
-      ROCJITSU_CODE_ARCH_GFX1250,
+      ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_CDNA3,   ROCJITSU_CODE_ARCH_CDNA4,
+      ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250,
   };
 
   for (rj_code_arch_t arch : kArchitectures) {
@@ -247,7 +245,12 @@ TEST(ConSanMoi, SpilledVgprReloadSelectsFixedAndDynamicTargetEncodings) {
                                                             kSource, arch),
               consan_detail::MoiSpilledVgprReloadResult::Appended);
     std::vector<uint32_t> expected_dynamic;
-    if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+      const auto load =
+          build_rdna3_scratch_load_b32_saddr(kDestination, kFrameBaseSgpr, kSlotOffset, arch);
+      ASSERT_TRUE(load);
+      expected_dynamic.assign(load->begin(), load->end());
+    } else if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
       const auto load =
           build_cdna3_scratch_load_b32_saddr(kDestination, kFrameBaseSgpr, kSlotOffset, arch);
       ASSERT_TRUE(load);
@@ -302,8 +305,8 @@ TEST(ConSanMoi, SpilledVgprReloadClassifiesRejectedRequestsWithoutAppending) {
           Result::UnsupportedEncoding);
 
   constexpr std::array kUnsupportedArchitectures = {
-      ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_RDNA1,
-      ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+      ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,   ROCJITSU_CODE_ARCH_RDNA1,
+      ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3_5,
   };
   for (rj_code_arch_t arch : kUnsupportedArchitectures) {
     SCOPED_TRACE(arch);
@@ -2225,8 +2228,8 @@ TEST(ConSanMoi, NativeB96CapabilityMatchesArchitectureBoundary) {
     SCOPED_TRACE(mnemonic);
     EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA4));
     EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_GFX1250));
-    // RDNA3 and RDNA3.5 hardware encode B96, but they are intentionally
-    // outside ConSan's supported target set.
+    // RDNA3 and RDNA3.5 hardware encode B96, but ConSan's RDNA3 subset does
+    // not admit that width.
     EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3));
     EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3_5));
     EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA3));
@@ -2769,6 +2772,59 @@ TEST(ConSanMoi, OwnerEpochPrologueCanUseHwIdOwnerSource) {
                                                         expected_prologue_words.size());
   EXPECT_TRUE(std::equal(expected_prologue_words.begin(), expected_prologue_words.end(),
                          actual_prologue_words.begin()));
+}
+
+TEST(ConSanMoi, Gfx1100OwnerEpochPrologueUsesHwId1ResidentWaveIdentity) {
+  constexpr uint64_t kExpectedPrologueOffset = 256;
+  const std::array<uint32_t, 2> text_words = {
+      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA3),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3),
+  };
+
+  const std::vector<uint8_t> bytes =
+      make_rdna3_lds_code_object(text_words, "gfx1100_owner_prologue", /*vgpr_granulated=*/0);
+  ConSanOptions options = moi_options();
+  options.moi_init_owner_epoch = true;
+  options.moi_owner_source = ConSanMoiOwnerSource::HwId;
+  options.moi_owner_sgpr = 20;
+  options.moi_owner_vgpr = 11;
+  options.moi_epoch_vgpr = 12;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+
+  const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
+  ASSERT_TRUE(hwreg);
+  const auto get_hw_id =
+      instrumentation::build_s_getreg_b32(/*sdst=*/20, *hwreg, ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_TRUE(get_hw_id);
+  const std::array<uint32_t, 6> expected_prologue_words = {
+      *get_hw_id,
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA3),
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA3),
+      build_v_mov_b32_e32(11, /*src0=*/20, ROCJITSU_CODE_ARCH_RDNA3),
+      build_v_mov_b32_e32(12, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA3),
+      build_s_branch(
+          *compute_sopp_branch_simm16(kExpectedPrologueOffset + 5u * sizeof(uint32_t), 0),
+          ROCJITSU_CODE_ARCH_RDNA3),
+  };
+
+  const auto text_word_count = patched.text_sections().front()->size() / sizeof(uint32_t);
+  std::vector<uint32_t> actual_words(text_word_count);
+  std::memcpy(actual_words.data(), patched.text_sections().front()->data(),
+              actual_words.size() * sizeof(uint32_t));
+  const size_t prologue_word_offset = kExpectedPrologueOffset / sizeof(uint32_t);
+  ASSERT_GE(actual_words.size(), prologue_word_offset + expected_prologue_words.size());
+  EXPECT_TRUE(std::equal(expected_prologue_words.begin(), expected_prologue_words.end(),
+                         actual_words.begin() + static_cast<ptrdiff_t>(prologue_word_offset)));
 }
 
 TEST(ConSanMoi, InlineShadowHwIdOwnerPrologueRemapsReservedZero) {

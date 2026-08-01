@@ -3078,7 +3078,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
   const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   if (replacement.text_sections().size() != 1 ||
       (has_global_exact_patch && !result.resolved_moi_dispatch_id_sgpr &&
-       !result.resolved_moi_dispatch_id_vgpr && !is_rdna4_family_arch(arch))) {
+       !result.resolved_moi_dispatch_id_vgpr && !instrumentation::is_consan_rdna_arch(arch))) {
     errors.emplace_back(
         "ConSan final validation found exact-shadow publication without dispatch-ID state");
     return errors;
@@ -3913,7 +3913,8 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
         requirement.require_full_workgroup_id &&
         (!cdna || std::ranges::binary_search(result.moi_full_workgroup_id_descriptor_offsets,
                                              original_kernel.descriptor_file_offset)) &&
-        (cdna || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250);
+        (cdna || arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_GFX1250);
     const auto normalize_workgroup_id_payload = [&](uint32_t &rsrc2) {
       AMDHSA_BITS_SET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
                       AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,

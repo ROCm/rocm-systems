@@ -2,7 +2,8 @@
 
 This guide explains the reproducible experiment behind the per-target support
 ledgers: [gfx942](STATUS_CDNA3.md), [gfx950](STATUS_CDNA4.md),
-[gfx1201](STATUS_RDNA4.md), and [gfx1250](STATUS_GFX1250.md). The executable authority is
+[gfx1100](STATUS_RDNA3.md), [gfx1201](STATUS_RDNA4.md), and
+[gfx1250](STATUS_GFX1250.md). The executable authority is
 [`consan_validation.py`](../../tests/dbi/consan/consan_validation.py): it owns the
 workload manifest, instrumentation profiles, commands, timeouts, knob hygiene,
 coverage gates, overhead calculation, and fault-containment policy. Prefer a
@@ -13,6 +14,20 @@ script change with tests over copying another command into this document.
 reusable backend is documented in
 [AMDGPU register spilling](../spilling.md), and
 the target-specific status files above are the published result ledgers.
+
+The compact physical gfx1100 bring-up gate is registered separately from the
+application campaign:
+
+```sh
+ctest --test-dir "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build" \
+  -R '^ConSanGfx1100Physical\.' --output-on-failure -j1
+```
+
+Configuration discovers the gfx1100 agent UUID through `rocminfo`; the tests
+do not assume a device ordinal. This gate covers exact output, all four
+engines, required Inline Shadow conflict attribution, cleanup, and post-run
+device health. Broader workload status remains in
+[STATUS_RDNA3.md](STATUS_RDNA3.md).
 
 The status table began as a cumulative ledger: its rows were promoted at
 different frozen checkpoints and some predated today's stronger completeness

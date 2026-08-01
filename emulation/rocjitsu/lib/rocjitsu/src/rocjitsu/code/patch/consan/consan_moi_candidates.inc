@@ -18,12 +18,19 @@ inline constexpr uint16_t kLegacyHwRegHwId = 4;
 inline constexpr uint16_t kLegacyHwIdResidentWaveBits = 6;
 inline constexpr uint16_t kLegacyMaxResidentWaveOwner =
     (1u << kLegacyHwIdResidentWaveBits) - 1u;
+inline constexpr uint16_t kGfx11HwRegHwId1 = 23;
+inline constexpr uint16_t kGfx11HwIdResidentWaveBits = 10;
+inline constexpr uint16_t kGfx11HwIdWaveMask = 0x1f;
+inline constexpr uint16_t kGfx11HwIdSimdMask = 0x300;
+inline constexpr uint16_t kGfx11MaxResidentWaveOwner =
+    kGfx11HwIdWaveMask | kGfx11HwIdSimdMask;
 inline constexpr uint16_t kGfx12HwRegHwId1 = 23;
 inline constexpr uint16_t kGfx12HwIdResidentWaveBits = 10;
 inline constexpr uint16_t kGfx12HwIdWaveMask = 0x1f;
 inline constexpr uint16_t kGfx12HwIdSimdMask = 0x300;
 inline constexpr uint16_t kGfx12MaxResidentWaveOwner = kGfx12HwIdWaveMask | kGfx12HwIdSimdMask;
 static_assert(kLegacyMaxResidentWaveOwner + 1u <= consan_moi_exact_shadow::max_owner);
+static_assert(kGfx11MaxResidentWaveOwner + 1u <= consan_moi_exact_shadow::max_owner);
 static_assert(kGfx12MaxResidentWaveOwner + 1u <= consan_moi_exact_shadow::max_owner);
 inline constexpr uint8_t kRdna4ScopeDevice = 2;
 inline constexpr uint32_t kRdna4VectorFlatNoSaddr = static_cast<uint32_t>(rdna4::OPR_SREG_NULL);
@@ -695,8 +702,8 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
                                                        rj_code_arch_t arch) {
   // RDNA4 B96 is admitted as a family capability: both gfx1201 and gfx1250
   // share the qualified three-dword resource plan and fixed-register lowering.
-  // RDNA3/RDNA3.5 encode B96 but are intentionally outside ConSan's supported
-  // target set; extend this gate only when those targets gain full support.
+  // RDNA3/RDNA3.5 encode B96, but the qualified RDNA3 ConSan subset does not
+  // admit that width.
   // CDNA spells the operations ds_read_b96/ds_write_b96; they are absent from
   // both admitted mnemonic lists, and
   // CdnaNativeB96AccessesRemainUnsupportedAtTransformBoundary pins that
@@ -956,7 +963,7 @@ struct ConSanMoiReportDispatchIdWordSource {
 // literal after owner-local resolution has established that no SGPR pair is
 // available. Keep every caller explicit so a new path cannot silently choose
 // the wrong side of that contract.
-enum class ConSanMoiLiteralDispatchIdPolicy : uint8_t { Rdna4FamilyOnly, AnyArchitecture };
+enum class ConSanMoiLiteralDispatchIdPolicy : uint8_t { RdnaFamilyOnly, AnyArchitecture };
 
 [[nodiscard]] ConSanMoiReportDispatchIdWordSource
 moi_report_dispatch_id_word_source(const ConSanOptions &options, bool high_word) {
@@ -982,7 +989,8 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
                                         ConSanMoiLiteralDispatchIdPolicy policy,
                                         rj_code_arch_t arch) {
   return source.sgpr || source.vgpr ||
-         policy == ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture || is_rdna4_family_arch(arch);
+         policy == ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture ||
+         instrumentation::is_consan_rdna_arch(arch);
 }
 
 [[nodiscard]] bool append_moi_report_dispatch_id_word(std::vector<uint32_t> &words,

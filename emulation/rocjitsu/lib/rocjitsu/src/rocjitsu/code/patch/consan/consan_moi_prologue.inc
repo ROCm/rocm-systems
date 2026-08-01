@@ -1207,7 +1207,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
 [[nodiscard]] bool enable_moi_full_workgroup_id_payload(rj_code_arch_t arch, ConSanResult &result) {
   result.moi_full_workgroup_id_descriptor_offsets.clear();
   if (result.elf_bytes.empty() ||
-      (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4 &&
+      (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
+       arch != ROCJITSU_CODE_ARCH_CDNA4 &&
        arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250)) {
     return true;
   }

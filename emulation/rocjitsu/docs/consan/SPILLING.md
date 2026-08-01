@@ -196,7 +196,7 @@ from removing private-size mutation.
 | Transient scalar state | Component-local dead/fresh windows, plus bounded private-memory preservation for supported Record/Replay, Sampled, and InlineShadow probes. Indirect-router scalars remain dead/fresh. |
 | Barrier and atomic VGPR temporaries | Dead, fresh-growth, and spill-backed common plans, including the engine/target dynamic-stack matrix above. |
 | General SGPR or AccVGPR spilling | Not implemented. |
-| Dynamic-stack kernels | InlineShadow, Record/Replay, and Sampled on all admitted CDNA3/CDNA4/RDNA4-family targets; gfx1250 SuperCollider group-FLAT full-pressure spill; unsupported engine/target or mixed-owner spill recipes fail closed. |
+| Dynamic-stack kernels | InlineShadow, Record/Replay, and Sampled on all admitted CDNA3/CDNA4/RDNA3/RDNA4-family targets; gfx1250 SuperCollider group-FLAT full-pressure spill; unsupported engine/target or mixed-owner spill recipes fail closed. |
 | Unresolved indirect ownership | Not instrumented. |
 
 This is narrower than a compiler register allocator. It is the semantically

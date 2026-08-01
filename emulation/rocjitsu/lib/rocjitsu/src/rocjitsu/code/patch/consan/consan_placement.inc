@@ -306,7 +306,8 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
 }
 
 [[nodiscard]] std::optional<uint32_t> build_s_wait_dscnt_word(uint16_t count, rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+      arch == ROCJITSU_CODE_ARCH_RDNA3)
     return count == 0 ? instrumentation::build_s_wait_lds0(arch) : std::nullopt;
   if (!is_rdna4_family_arch(arch))
     return std::nullopt;
@@ -398,7 +399,7 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
                                                                          bool two_address,
                                                                          rj_code_arch_t arch) {
   uint32_t base = 0;
-  if (is_rdna4_family_arch(arch)) {
+  if (instrumentation::is_consan_rdna_arch(arch)) {
     if (two_address) {
       switch (word0 & 0xFFFF0000u) {
       case 0xD8380000u:

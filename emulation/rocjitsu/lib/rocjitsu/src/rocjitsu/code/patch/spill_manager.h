@@ -245,7 +245,7 @@ struct SgprSpillSequence {
 /// stack kernels: save the current frame base, set it to the stack top,
 /// advance the top by the temporary frame size, then reverse those operations
 /// after filling the VGPRs. The SCC value is restored before guest code runs.
-/// The encoding is available for CDNA3, CDNA4, RDNA4, and gfx1250. Callers
+/// The encoding is available for CDNA3, CDNA4, RDNA3, RDNA4, and gfx1250. Callers
 /// remain responsible for requiring enough descriptor/AQL backing for the
 /// compiler maximum stack depth plus this temporary frame.
 [[nodiscard]] std::optional<VgprSpillSequence>

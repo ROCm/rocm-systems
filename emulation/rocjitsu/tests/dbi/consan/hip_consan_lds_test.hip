@@ -46,6 +46,21 @@ int main(int argc, char **argv) {
 #define RJ_CONSAN_TEST_FLAT_LOAD_HIGH_I8 "flat_load_sbyte_d16_hi %0, v[0:1]\n\t"
 #define RJ_CONSAN_TEST_FLAT_LOAD_WAIT "s_waitcnt vmcnt(0) lgkmcnt(0)\n\t"
 #define RJ_CONSAN_TEST_SET_VCC_TRUE "v_cmp_eq_u32_e32 vcc, %[value], %[value]\n\t"
+#elif defined(__gfx1100__)
+#define RJ_CONSAN_TEST_WORKGROUP_BARRIER "s_barrier\n\t"
+#define RJ_CONSAN_TEST_DS_STORE_B32 "ds_store_b32 %0, %1\n\t"
+#define RJ_CONSAN_TEST_DS_LOAD_B32 "ds_load_b32 %[loaded], %[lds_addr]\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_B32 "flat_store_b32 v[0:1], %0\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_B32_NAMED "flat_store_b32 v[0:1], %[value]\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 "flat_store_b8 v[0:1], %[value]\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_LOW_B16 "flat_store_b16 v[0:1], %[value]\n\t"
+#define RJ_CONSAN_TEST_V_ADD_U32 "v_add_nc_u32 v0, v0, %[offset]\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B8 "flat_store_d16_hi_b8 v[0:1], %[value]\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B16 "flat_store_d16_hi_b16 v[0:1], %0\n\t"
+#define RJ_CONSAN_TEST_FLAT_LOAD_HIGH_B16 "flat_load_d16_hi_b16 %0, v[0:1]\n\t"
+#define RJ_CONSAN_TEST_FLAT_LOAD_HIGH_I8 "flat_load_d16_hi_i8 %0, v[0:1]\n\t"
+#define RJ_CONSAN_TEST_FLAT_LOAD_WAIT "s_waitcnt vmcnt(0) lgkmcnt(0)\n\t"
+#define RJ_CONSAN_TEST_SET_VCC_TRUE "v_cmp_eq_u32_e32 vcc_lo, %[value], %[value]\n\t"
 #else
 #define RJ_CONSAN_TEST_WORKGROUP_BARRIER                                                           \
   "s_barrier_signal -1\n\t"                                                                        \

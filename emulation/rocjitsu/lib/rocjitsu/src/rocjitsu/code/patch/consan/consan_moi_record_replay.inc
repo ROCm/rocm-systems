@@ -207,8 +207,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   // facts needed by dense relay selection. Re-decoding the whole code object
   // here (and a third time for component-local scalar assignments) is both
   // redundant and dominant on multi-thousand-kernel generated libraries.
-  if ((is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-       arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+  if (instrumentation::is_admitted_arch(arch) &&
       use_indirect_appended && local_entry_islands) {
     const auto merge_ranges = [](std::vector<std::pair<uint64_t, uint64_t>> &ranges) {
       std::ranges::sort(ranges);

@@ -7,13 +7,13 @@ struct MoiLocalNopIsland {
                                                               ConSanMoiEngine engine) {
   if (engine == ConSanMoiEngine::InlineShadow)
     return true;
-  return (is_rdna4_family_arch(arch) || instrumentation::is_cdna_family_arch(arch)) &&
+  return instrumentation::is_admitted_arch(arch) &&
          (engine == ConSanMoiEngine::RecordReplay || engine == ConSanMoiEngine::Sampled);
 }
 
 [[nodiscard]] constexpr bool moi_supports_full_pressure_component_state(rj_code_arch_t arch,
                                                                         ConSanMoiEngine engine) {
-  return (is_rdna4_family_arch(arch) || instrumentation::is_cdna_family_arch(arch)) &&
+  return instrumentation::is_admitted_arch(arch) &&
          (engine == ConSanMoiEngine::RecordReplay || engine == ConSanMoiEngine::InlineShadow ||
           engine == ConSanMoiEngine::Sampled);
 }
@@ -915,8 +915,8 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
     const ConSanOptions &options, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
   return options.moi_engine == ConSanMoiEngine::Sampled &&
          candidate.source == ConSanMoiCandidateSource::NativeLds &&
-         (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-          arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+         (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+          instrumentation::is_cdna_family_arch(arch)) &&
          !candidate_requires_gfx1250_flat_offset_materialization(candidate);
 }
 
@@ -2485,7 +2485,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   const bool supports_access_operand_overlap_spill =
       (options.moi_engine == ConSanMoiEngine::InlineShadow &&
        !guest_replay_needs_disjoint_address_scratch) ||
-      ((is_rdna4_family_arch(state.arch) || instrumentation::is_cdna_family_arch(state.arch)) &&
+      (instrumentation::is_admitted_arch(state.arch) &&
        ((options.moi_engine == ConSanMoiEngine::RecordReplay &&
          !options.moi_dynamic_access_records && !guest_replay_needs_disjoint_address_scratch) ||
         (access_candidate != nullptr && !guest_replay_needs_disjoint_address_scratch &&
@@ -2493,7 +2493,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
           sampled_access_supports_spill_backed_operand_recovery(options, *access_candidate,
                                                                 state.arch)))));
   const bool supports_sampled_atomic_operand_overlap_spill =
-      (is_rdna4_family_arch(state.arch) || instrumentation::is_cdna_family_arch(state.arch)) &&
+      instrumentation::is_admitted_arch(state.arch) &&
       options.moi_engine == ConSanMoiEngine::Sampled && site_kind == ConSanResourceSiteKind::Atomic;
   if (register_plan.source == ConSanRegisterAllocationSource::Unsupported &&
       register_plan.reason == ConSanRegisterPlanReason::NoLegalWindow &&
@@ -3070,8 +3070,7 @@ moi_special_state_sgprs(const ConSanOptions &options) {
     return MoiSpecialStateSgprs{
         .vcc_save_sgpr = publication->selection_vcc_save_sgpr,
         .scc_save_sgpr =
-            options.automatic_moi_record_replay_sgpr_spill &&
-                    options.moi_inline_indirect_scc_sgpr
+            options.automatic_moi_record_replay_sgpr_spill && options.moi_inline_indirect_scc_sgpr
                 ? *options.moi_inline_indirect_scc_sgpr
                 : publication->publication_exec_save_sgpr,
     };
@@ -3173,9 +3172,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   const std::span<const uint8_t> bytes = planning_state.bytes;
   const rj_code_arch_t arch = planning_state.arch;
   const bool component_local_sampled =
-      options.moi_engine == ConSanMoiEngine::Sampled &&
-      (is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-       arch == ROCJITSU_CODE_ARCH_CDNA4);
+      options.moi_engine == ConSanMoiEngine::Sampled && instrumentation::is_admitted_arch(arch);
   if ((options.moi_engine != ConSanMoiEngine::RecordReplay &&
        options.moi_engine != ConSanMoiEngine::InlineShadow && !component_local_sampled) ||
       !options.automatic_moi_partial_exec_save_sgprs || !options.moi_exec_save_sgpr)
@@ -3349,9 +3346,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       }
     }
     if (!selected && options.moi_engine == ConSanMoiEngine::InlineShadow &&
-        (is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-        address_free_scratch_private_limit(arch)) {
+        instrumentation::is_admitted_arch(arch) && address_free_scratch_private_limit(arch)) {
       const auto reserved = [&](uint16_t base, uint16_t width) {
         return (options.moi_owner_sgpr &&
                 range_overlaps(base, width, *options.moi_owner_sgpr, 1u)) ||
@@ -3601,8 +3596,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     }
     const bool supports_compact_scalar_spill =
         (options.moi_engine == ConSanMoiEngine::RecordReplay || component_local_sampled) &&
-        (is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA4);
+        instrumentation::is_admitted_arch(arch);
     if (!selected && supports_compact_scalar_spill && address_free_scratch_private_limit(arch)) {
       const auto conflicts_with_cdna_vcc = [&](uint16_t base, uint16_t width) {
         return moi_scalar_contexts_conflict_with_physical_vcc(component_contexts->summaries, base,
@@ -3882,11 +3876,10 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
   // assignments for the independent owners that do not.  Trying this before
   // the monolithic Inline spill fallback avoids spilling every kernel in a
   // generated library merely because one component has high scalar pressure.
-  const bool supports_partial_owner_exec =
-      (is_rdna4_family_arch(arch) || instrumentation::is_cdna_family_arch(arch)) &&
-      (options.moi_engine == ConSanMoiEngine::RecordReplay ||
-       options.moi_engine == ConSanMoiEngine::InlineShadow ||
-       options.moi_engine == ConSanMoiEngine::Sampled);
+  const bool supports_partial_owner_exec = instrumentation::is_admitted_arch(arch) &&
+                                           (options.moi_engine == ConSanMoiEngine::RecordReplay ||
+                                            options.moi_engine == ConSanMoiEngine::InlineShadow ||
+                                            options.moi_engine == ConSanMoiEngine::Sampled);
   if (supports_partial_owner_exec) {
     const int32_t last_base = static_cast<int32_t>((ordinary_sgpr_limit - count) & ~1u);
     for (int32_t base = last_base; base >= 0; base -= 2) {
@@ -4239,6 +4232,11 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
        arch != ROCJITSU_CODE_ARCH_GFX1250);
   if (!needs_dispatch_id || !options.moi_report_buffer_address || options.moi_dispatch_id_sgpr ||
       options.moi_dispatch_id_vgpr) {
+    return false;
+  }
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+    result.warnings.emplace_back(
+        "ConSan MOI is using the code-object dispatch identity directly on RDNA3");
     return false;
   }
 

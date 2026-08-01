@@ -1,8 +1,8 @@
 # ConSan semantic capability matrix
 
 This document is the normative supported-form contract for ConSan on
-`gfx942`, `gfx950`, `gfx1201`, and `gfx1250`. It describes equivalent memory
-and synchronization semantics, not identical ISA mnemonic sets. The
+`gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and `gfx1250`. It describes
+equivalent memory and synchronization semantics, not identical ISA mnemonic sets. The
 target-specific status ledgers record workload qualification separately.
 
 The following compact projection is generated from the typed contract in
@@ -26,6 +26,10 @@ an engine-specific lowering gap for a form admitted by the target family.
 | `gfx950` | Record/Replay | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary |
 | `gfx950` | Sampled | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
 | `gfx950` | Inline Shadow | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
+| `gfx1100` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only) | addressed ordinary (mutation only) |
+| `gfx1100` | Record/Replay | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary |
+| `gfx1100` | Sampled | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary (associated only) |
+| `gfx1100` | Inline Shadow | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary (associated only) |
 | `gfx1201` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only) | addressed ordinary (mutation only) |
 | `gfx1201` | Record/Replay | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary |
 | `gfx1201` | Sampled | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary (associated only) |
@@ -62,18 +66,18 @@ therefore intentional and are not target-parity gaps.
 
 ## Cross-target equivalent forms
 
-| Semantic form | `gfx942` / CDNA3 | `gfx950` / CDNA4 | `gfx1201` / RDNA4 | `gfx1250` |
-| --- | --- | --- | --- | --- |
-| Native LDS single-range read/write | 8, 16, 32, 64, and 128-bit admitted forms | 8, 16, 32, 64, and 128-bit admitted forms | 16, 32, 64, and 128-bit admitted forms | 8, 16, 32, 64, and 128-bit admitted forms; 96-bit load extension (SuperCollider also admits the store readback) |
-| Native LDS dual-range read/write | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms |
-| Native LDS transpose read | Target-native admitted transpose forms | Target-native admitted transpose forms | No equivalent claimed | Target-native admitted transpose forms |
-| Group-FLAT read/write | 16, 32, 64, and 128-bit forms | 16, 32, 64, and 128-bit forms | 16, 32, 64, and 128-bit forms | 16, 32, 64, and 128-bit forms, including the encoded signed immediate |
-| Full workgroup barrier | Singleton `s_barrier` | Singleton `s_barrier` | Qualified signal/wait sequence | Qualified signal/wait sequence |
-| Cluster-scope barrier | No target form claimed | No target form claimed | No target form claimed | Qualified cluster signal/wait sequence |
-| 32-bit ordered FLAT atomic | Cache-associated device/system release, acquire, and acquire-release | Cache-associated device/system release, acquire, and acquire-release | Device/system release, acquire, and acquire-release | Device/system release, acquire, and acquire-release |
-| Ordered VGLOBAL atomic address forms | VGLOBAL vector-only and scalar-base materialization | VGLOBAL vector-only and scalar-base materialization | VGLOBAL vector-only and scalar-base materialization | VGLOBAL vector-only and scalar-base materialization |
-| Ordered LDS atomic | Relaxed LDS RMW is access-only | Relaxed LDS RMW is access-only | No ordered LDS form claimed | Ordered LDS token form plus relaxed access-only forms |
-| Addressed ordinary-memory fence | Cache-associated release/acquire sequence | Cache-associated release/acquire sequence | Global/buffer communication sequence | Global/buffer communication sequence |
+| Semantic form | `gfx942` / CDNA3 | `gfx950` / CDNA4 | `gfx1100` / RDNA3 | `gfx1201` / RDNA4 | `gfx1250` |
+| --- | --- | --- | --- | --- | --- |
+| Native LDS single-range read/write | 8, 16, 32, 64, and 128-bit admitted forms | 8, 16, 32, 64, and 128-bit admitted forms | 8, 16, 32, 64, and 128-bit admitted forms | 16, 32, 64, 96, and 128-bit admitted forms | 8, 16, 32, 64, and 128-bit admitted forms; 96-bit load extension (SuperCollider also admits the store readback) |
+| Native LDS dual-range read/write | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms |
+| Native LDS transpose read | Target-native admitted transpose forms | Target-native admitted transpose forms | Target-native admitted transpose forms | No equivalent claimed | Target-native admitted transpose forms |
+| Group-FLAT read/write | 16, 32, 64, and 128-bit forms | 16, 32, 64, and 128-bit forms | 16, 32, 64, and 128-bit forms | 16, 32, 64, and 128-bit forms | 16, 32, 64, and 128-bit forms, including the encoded signed immediate |
+| Full workgroup barrier | Singleton `s_barrier` | Singleton `s_barrier` | Singleton `s_barrier` | Qualified signal/wait sequence | Qualified signal/wait sequence |
+| Cluster-scope barrier | No target form claimed | No target form claimed | No target form claimed | No target form claimed | Qualified cluster signal/wait sequence |
+| 32-bit ordered FLAT atomic | Cache-associated device/system release, acquire, and acquire-release | Cache-associated device/system release, acquire, and acquire-release | Compiler-qualified device-scoped acquire; release is not inferred | Device/system release, acquire, and acquire-release | Device/system release, acquire, and acquire-release |
+| Ordered VGLOBAL atomic address forms | VGLOBAL vector-only and scalar-base materialization | VGLOBAL vector-only and scalar-base materialization | VGLOBAL vector-only and scalar-base materialization | VGLOBAL vector-only and scalar-base materialization | VGLOBAL vector-only and scalar-base materialization |
+| Ordered LDS atomic | Relaxed LDS RMW is access-only | Relaxed LDS RMW is access-only | No ordered LDS form claimed | No ordered LDS form claimed | Ordered LDS token form plus relaxed access-only forms |
+| Addressed ordinary-memory fence | Cache-associated release/acquire sequence | Cache-associated release/acquire sequence | Compiler-qualified acquire cache sequence; no release claim | Global/buffer communication sequence | Global/buffer communication sequence |
 
 The width lists name semantic byte ranges admitted by ConSan, not every alias
 spelling in an ISA manual. For example, CDNA `ds_read_*`/`ds_write_*`, RDNA
@@ -88,7 +92,8 @@ These exclusions are part of the contract:
   used only as synchronization identities for admitted ordering sequences;
 - arbitrary FLAT accesses without group provenance are not treated as LDS;
 - group-FLAT 8-bit and 96-bit ordinary accesses have no cross-target claim;
-- `gfx1201` has no claimed native-LDS 8-bit or 96-bit ordinary form;
+- `gfx1201` has no claimed native-LDS 8-bit ordinary form, and the current
+  `gfx1100` subset does not admit native 96-bit ordinary forms;
 - native transpose and 96-bit forms are target extensions, not parity
   requirements;
 - barrier lifecycle operations with dynamic participant state are inventoried
@@ -116,25 +121,35 @@ HSA hook:
 - access decoding and normalization:
   `analysis_test.cpp`, `moi_record_replay_test.cpp`, and
   `supercollider_test.cpp`, including CDNA subword/transpose/dual-range,
-  gfx1250 subword/transpose/96-bit, and group-FLAT D16 cases;
+  gfx1100 native LDS and group-FLAT, gfx1250 subword/transpose/96-bit, and
+  group-FLAT D16 cases;
 - all-engine access placement:
   `moi_engine_conformance_test.cpp`, `moi_sampled_test.cpp`, and
   `moi_inline_shadow_test.cpp`;
 - barrier semantics:
   `moi_record_replay_test.cpp`, `moi_sampled_test.cpp`, and
-  `moi_inline_shadow_test.cpp`, including CDNA singleton, RDNA split, and
-  gfx1250 cluster cases;
+  `moi_inline_shadow_test.cpp`, including CDNA and gfx1100 singleton, gfx1100
+  dense Record/Replay routing, RDNA4 split, and gfx1250 cluster cases;
+- register preservation and private frames:
+  `spill_manager_test.cpp` and `moi_record_replay_test.cpp`, including gfx1100
+  fixed and runtime-selected dynamic frames, scalar composition, and
+  full-pressure Record/Replay placement;
 - atomic and fence semantics:
   `moi_record_replay_model_test.cpp`, `moi_record_replay_test.cpp`,
   `moi_sampled_test.cpp`, and `moi_inline_atomic_test.cpp`; and
-- the four-target Inline release transaction:
+- the CDNA3/CDNA4/RDNA4/gfx1250 Inline release transaction:
   `ConSanMoi.SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor`; and
+- the complete gfx1100 compiler acquire sequence:
+  `ConSanMoi.Gfx1100InlineAtomicAcquireUsesCompleteGfx11CacheSequence`; and
 - CDNA3/CDNA4 Inline VGLOBAL release, acquire, returning compare-exchange,
   no-return fail-closed behavior, and native address lowering:
   `ConSanMoi.CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering`.
 
 The registered execution gates use native code objects for each target:
 
+- physical `gfx1100`: `ConSanGfx1100Physical.*`, covering clean execution in
+  all three MOI detection engines, a required same-site two-wave race
+  diagnostic, sequential consistency, and post-instrumentation health;
 - physical `gfx1201`: `ConSanMoiHipTest.*` and `ConSanInlineShadowTest.*`;
 - simulated `gfx1250`: `ConSanGfx1250Sim.*`;
 - simulated `gfx950`: `ConSanGfx950Sim.*` and the opted-in

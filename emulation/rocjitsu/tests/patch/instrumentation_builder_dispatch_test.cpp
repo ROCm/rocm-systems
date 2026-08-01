@@ -63,6 +63,11 @@ TEST(InstrumentationBuilderDispatch, VectorAndWaitSemanticsSelectTargetBackend) 
   EXPECT_EQ(ib::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_CDNA3), 0xbf8c0070u);
   EXPECT_EQ(ib::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_CDNA3), 0xbf8c0f70u);
   EXPECT_EQ(ib::build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA3), 0xbf8cc07fu);
+  EXPECT_EQ(ib::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_RDNA3), 0xbf890007u);
+  EXPECT_EQ(ib::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA3), 0xbf8903f7u);
+  EXPECT_EQ(ib::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_RDNA3), 0xbf8903f7u);
+  EXPECT_EQ(ib::build_s_wait_lds0(ROCJITSU_CODE_ARCH_RDNA3), 0xbf89fc07u);
+  EXPECT_EQ(ib::build_s_wait_scalar_load0(ROCJITSU_CODE_ARCH_RDNA3), 0xbf89fc07u);
   EXPECT_EQ(ib::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_RDNA4), 0xbfc80000u);
   EXPECT_EQ(ib::build_s_wait_flat_store0(ROCJITSU_CODE_ARCH_RDNA4), 0xbfc90000u);
   EXPECT_EQ(ib::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4), 0xbfc00000u);
@@ -74,6 +79,26 @@ TEST(InstrumentationBuilderDispatch, VectorAndWaitSemanticsSelectTargetBackend) 
   EXPECT_EQ(ib::build_salu_dependency_delay(ROCJITSU_CODE_ARCH_CDNA4), 0xbf800000u);
   EXPECT_EQ(ib::build_s_wait_indirect_pc0(ROCJITSU_CODE_ARCH_CDNA4), 0xbf800000u);
   EXPECT_EQ(ib::build_s_trap(2, ROCJITSU_CODE_ARCH_CDNA4), 0xbf920002u);
+}
+
+TEST(InstrumentationBuilderDispatch, Gfx1100UsesRdna3InstructionForms) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA3;
+  EXPECT_TRUE(ib::is_admitted_arch(kArch));
+  EXPECT_TRUE(ib::is_consan_rdna_arch(kArch));
+  EXPECT_FALSE(is_rdna4_family_arch(kArch));
+  EXPECT_EQ(ib::build_s_trap(0, kArch), 0xbf900000u);
+  EXPECT_EQ(ib::build_s_mov_b64(20, 22, kArch), 0xbe940116u);
+  EXPECT_EQ(ib::build_v_add_u32(6, vector_source_vgpr(7), 8, kArch),
+            (std::vector<uint32_t>{0x4a0c1107u}));
+  EXPECT_EQ(ib::build_ds_store_b32(0, 1, 0, kArch),
+            (std::vector<uint32_t>{0xd8340000u, 0x00000100u}));
+  EXPECT_EQ(ib::build_ds_load_b32(2, 0, 0, kArch),
+            (std::vector<uint32_t>{0xd8d80000u, 0x02000000u}));
+  EXPECT_EQ(ib::build_flat_store_b32(0, 2, kArch),
+            (std::vector<uint32_t>{0xdc680000u, 0x007c0200u}));
+  EXPECT_EQ(ib::build_private_store_b32(7, 4, kArch),
+            (std::vector<uint32_t>{0xdc690004u, 0x007c0700u}));
+  EXPECT_EQ(ib::build_workgroup_barrier_only(kArch), (std::vector<uint32_t>{0xbfbd0000u}));
 }
 
 TEST(InstrumentationBuilderDispatch, SaluToValuDependencyWaitSelectsTargetBackend) {

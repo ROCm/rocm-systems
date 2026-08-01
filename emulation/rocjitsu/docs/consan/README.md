@@ -3,10 +3,10 @@
 ConSan instruments AMD LDS/shared-memory behavior by intercepting HSA
 code-object loads, inspecting final native machine code, and loading a patched
 replacement when instrumentation is possible. ConSan has native support for
-`gfx942`, `gfx950`, `gfx1201`, and `gfx1250`; it does not translate between GPU
-ISAs.
+`gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and `gfx1250`; it does not translate
+between GPU ISAs.
 
-The runtime agent supplies the active workgroup-LDS capacity, so gfx942 support
+The runtime agent supplies the active workgroup-LDS capacity, so target support
 does not assume a fixed architectural size. Simulator and offline validation
 use the selected RocJITsu JSON configuration as the source of truth for that
 capacity.
@@ -79,6 +79,8 @@ or GPU reset is not by itself a ConSan diagnostic.
   boundaries.
 - [CAPABILITIES.md](CAPABILITIES.md): normative target-by-engine access,
   barrier, atomic, fence, and typed-exclusion matrix.
+- [STATUS_RDNA3.md](STATUS_RDNA3.md): physical gfx1100 qualification and
+  explicit semantic boundaries.
 - [SPILLING.md](SPILLING.md): ConSan register selection, ownership, private
   layout, and runtime integration.
 - [AMDGPU register spilling](../spilling.md): reusable RocJitsu allocation and
