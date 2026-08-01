@@ -982,6 +982,15 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   snprintf(roctxMsg, sizeof(roctxMsg),
       "rccl-tests timed_loop size=%zu count=%zu type=%d op=%d in_place=%d proc=%d thread=%d ngpus=%d graph=%d",
       args->nbytes, count, (int)type, (int)op, in_place, args->proc, args->thread, args->nGpus, cudaGraphLaunches >= 1);
+
+  // Take the warmup and data-check dispatches out of the way first, so the
+  // records this loop collects are only the ones it timed.
+  if (KernelTimingTrace::get().enabled()) {
+    char setupMsg[288];
+    snprintf(setupMsg, sizeof(setupMsg), "%s phase=setup", roctxMsg);
+    for (int i = 0; i < args->nGpus; i++) KernelTimingTrace::get().collect(args->comms[i], setupMsg);
+  }
+
   timer tim;
   {
     scopedRoctxRange timedRange(roctxMsg);
