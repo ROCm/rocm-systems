@@ -723,7 +723,7 @@ TEST(ExecutionPluginTest, NoPluginNoCrash) {
 }
 
 TEST(ExecutionPluginTest, GroupCapabilitiesComeFromContainedPlugins) {
-  ExecutionPluginGroup group;
+  ExecutionPluginGroup group(PluginSinkConfig{});
   EXPECT_FALSE(group.has_hooks());
   EXPECT_FALSE(group.requires_serial_execution());
 
@@ -738,12 +738,37 @@ TEST(ExecutionPluginTest, GroupCapabilitiesComeFromContainedPlugins) {
 TEST(ExecutionPluginTest, ProfileDecoratorIsAConservativePlugin) {
   auto nested = std::make_unique<ExecutionPluginGroup>(PluginSinkConfig{});
   nested->add(std::make_unique<ParallelSafePlugin>());
-  auto profile = std::make_unique<ProfiledExecutionPlugin>(std::move(nested));
 
-  ExecutionPluginGroup group;
-  ASSERT_TRUE(group.add(std::move(profile)));
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto *profile = ProfiledExecutionPlugin::add_to(group, std::move(nested));
+  ASSERT_NE(profile, nullptr);
   EXPECT_TRUE(group.has_hooks());
+  EXPECT_TRUE(profile->requires_serial_execution());
   EXPECT_TRUE(group.requires_serial_execution());
+}
+
+TEST(ExecutionPluginTest, NestedProfileDecoratorsShareWavefrontStateSlots) {
+  auto leaf = std::make_unique<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto inner_plugin = std::make_unique<ParallelSafePlugin>();
+  auto *inner = inner_plugin.get();
+  ASSERT_TRUE(leaf->add(std::move(inner_plugin)));
+
+  auto middle = std::make_unique<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto *inner_profile = ProfiledExecutionPlugin::add_to(*middle, std::move(leaf));
+  ASSERT_NE(inner_profile, nullptr);
+
+  ExecutionPluginGroup outer(PluginSinkConfig{});
+  auto *outer_profile = ProfiledExecutionPlugin::add_to(outer, std::move(middle));
+  ASSERT_NE(outer_profile, nullptr);
+
+  auto outer_plugin = std::make_unique<ExecutionPlugin>("outer");
+  auto *outer_member = outer_plugin.get();
+  ASSERT_TRUE(outer.add(std::move(outer_plugin)));
+
+  EXPECT_EQ(inner->slot_index(), 0u);
+  EXPECT_EQ(inner_profile->slot_index(), 1u);
+  EXPECT_EQ(outer_profile->slot_index(), 2u);
+  EXPECT_EQ(outer_member->slot_index(), 3u);
 }
 
 TEST(ExecutionPluginTest, ValuSimdReadObservationUsesActiveExecMask) {

@@ -39,13 +39,26 @@ class ProfiledExecutionPlugin final : public ExecutionPlugin {
   };
 
 public:
-  explicit ProfiledExecutionPlugin(std::unique_ptr<ExecutionPluginGroup> plugins)
-      : ExecutionPlugin("profile"), plugins_(std::move(plugins)), start_time_(Clock::now()) {
-    if (!plugins_)
-      plugins_ = std::make_unique<ExecutionPluginGroup>(PluginSinkConfig{});
+  /// Add a profiling decorator as the sole plugin in @p outer. The outer and
+  /// nested groups share a slot allocator, keeping wavefront-state indices
+  /// unique across arbitrarily nested decorator trees.
+  static ProfiledExecutionPlugin *add_to(ExecutionPluginGroup &outer,
+                                         std::unique_ptr<ExecutionPluginGroup> plugins) {
+    if (!outer.empty())
+      return nullptr;
+    if (!plugins)
+      plugins = std::make_unique<ExecutionPluginGroup>(PluginSinkConfig{});
+
+    outer.slot_allocator_ = plugins->slot_allocator_;
+    auto profile =
+        std::unique_ptr<ProfiledExecutionPlugin>(new ProfiledExecutionPlugin(std::move(plugins)));
+    auto *result = profile.get();
+    return outer.add(std::move(profile)) ? result : nullptr;
   }
 
-  ExecutionPluginGroup &plugins() { return *plugins_; }
+  /// Profiling counters and the dispatch-name map are unsynchronized. If they
+  /// become concurrency-safe, return plugins_->requires_serial_execution().
+  bool requires_serial_execution() const override { return true; }
 
   void onInit() override { plugins_->onInit(); }
 
@@ -144,6 +157,9 @@ public:
   }
 
 private:
+  explicit ProfiledExecutionPlugin(std::unique_ptr<ExecutionPluginGroup> plugins)
+      : ExecutionPlugin("profile"), plugins_(std::move(plugins)), start_time_(Clock::now()) {}
+
   template <typename F> void profiled_dispatch(HookProfile &prof, F &&fn) {
     prof.count++;
     if ((prof.count % prof.interval) == 0) {

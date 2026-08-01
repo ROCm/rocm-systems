@@ -242,7 +242,7 @@ PluginLoader::configure_plugin_group(const std::string &config_json, const std::
     return std::shared_ptr<ExecutionPluginGroup>(std::move(plugins));
 
   auto group = std::make_shared<ExecutionPluginGroup>(parse_sink_config(root));
-  group->add(std::make_unique<ProfiledExecutionPlugin>(std::move(plugins)));
+  ProfiledExecutionPlugin::add_to(*group, std::move(plugins));
   return group;
 }
 

@@ -31,6 +31,8 @@
 
 namespace rocjitsu {
 
+class ProfiledExecutionPlugin;
+
 /// @brief Deleter for owned plugin instances.
 ///
 /// Every plugin instance is freed through a destroy function, so allocation and
@@ -90,7 +92,7 @@ public:
     for (const auto &existing : plugins_)
       if (existing.plugin->name() == p->name())
         return false;
-    p->slot_index_ = static_cast<uint32_t>(plugins_.size());
+    p->slot_index_ = slot_allocator_->next++;
     SinkBundle sink = build_sink_bundle(p->name() + ".log");
     if (auto *configured_sink = sink.get())
       p->sink_ = configured_sink;
@@ -225,6 +227,16 @@ public:
   }
 
 private:
+  friend class ProfiledExecutionPlugin;
+
+  struct SlotAllocator {
+    uint32_t next = 0;
+  };
+
+  // Nested decorator groups share one allocator so every plugin in the tree
+  // receives a distinct Wavefront::plugin_states_ slot.
+  std::shared_ptr<SlotAllocator> slot_allocator_ = std::make_shared<SlotAllocator>();
+
   /// Internal fanout over sinks whose lifetime is guaranteed by the owning
   /// group or SinkBundle. It is deliberately not part of the public sink API.
   class FanoutSink final : public PluginSink {
@@ -234,7 +246,6 @@ private:
       for (auto *sink : children_)
         sink->write(msg);
     }
-
     bool empty() const { return children_.empty(); }
 
   private:

@@ -57,7 +57,7 @@ TEST_F(PluginLoaderTest, RejectsAbiMismatchBeforeCreate) {
 }
 
 TEST_F(PluginLoaderTest, RejectsLegacyV2InterfaceBeforeCreate) {
-  rocjitsu::ExecutionPluginGroup group;
+  rocjitsu::ExecutionPluginGroup group(rocjitsu::PluginSinkConfig{});
   EXPECT_EQ(load("legacy_v2", group), 0);
   EXPECT_TRUE(group.empty());
   EXPECT_EQ(trace().find("legacy_v2:create\n"), std::string::npos);
@@ -92,6 +92,16 @@ TEST_F(PluginLoaderTest, RejectsProfiledGroupWithMultipleThreads) {
   EXPECT_THROW(
       rocjitsu::PluginLoader::configure_plugin_group(R"({"profiled":true})", "", engine_config),
       std::invalid_argument);
+}
+
+TEST_F(PluginLoaderTest, ProfileDecoratorForwardsLoadedPluginLifecycle) {
+  auto group = rocjitsu::PluginLoader::configure_plugin_group(
+      R"({"profiled":true,"plugins":{"good":{}}})", PLUGIN_LOADER_FIXTURE_DIR);
+
+  ASSERT_EQ(group->num_plugins(), 1u);
+  EXPECT_NE(trace().find("good:create\n"), std::string::npos);
+  group->onInit();
+  EXPECT_NE(trace().find("good:init\n"), std::string::npos);
 }
 
 TEST_F(PluginLoaderTest, ProfileFileSinkFailureFallsBackToStderr) {

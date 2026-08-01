@@ -47,7 +47,8 @@ public:
 
   const std::string &name() const { return name_; }
 
-  /// Index into Wavefront::plugin_states_, assigned by the group on add().
+  /// Index into Wavefront::plugin_states_. Groups in one nested decorator tree
+  /// share an allocator, so every plugin receives a distinct slot.
   uint32_t slot_index() const { return slot_index_; }
 
   /// Output sink for this plugin. Use sink().write("msg") for all output.
