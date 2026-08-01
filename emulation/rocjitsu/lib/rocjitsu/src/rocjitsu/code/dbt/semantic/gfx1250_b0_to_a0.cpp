@@ -14,6 +14,7 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/operand.h"
 
 #include <algorithm>
 #include <array>
@@ -392,6 +393,43 @@ ExpandResult expand_gfx1250_s_clause(const Instruction &inst, uint32_t, uint64_t
 
   const auto nop = gfx1250::build_sopp(gfx1250::kSNopSopp, {.simm16 = 0});
   return ExpandResult::success(std::vector<uint32_t>(nop.begin(), nop.end()));
+}
+
+/// @brief Decline the one barrier id this profile excludes.
+///
+/// @details Barrier id -3 is the only one this instruction may not name; every
+/// other id stays on the copy path.
+///
+/// The decision reads the raw SSRC0 field rather than the decoded operand
+/// value. This operand takes an inline constant or M0 and nothing else, so the
+/// excluded id has exactly one spelling the encoding can state: inline selector
+/// 195. Comparing decoded values instead would not separate that spelling from
+/// a register-supplied id.
+///
+/// The M0 form (selector 125) is copied through, and that is not a hole in the
+/// static check: it takes the id from a zero-extended low field, so it cannot
+/// produce a negative id and therefore cannot name the excluded one at run
+/// time. Were a register-held id able to reach that value, copying would not be
+/// fail-closed and this rule would have to refuse the dynamic form instead.
+ExpandResult expand_gfx1250_barrier_signal_isfirst(const Instruction &inst, uint32_t,
+                                                   uint64_t offset,
+                                                   std::span<const uint8_t> source_text,
+                                                   const LivenessAnalysis &, TranslationContext &,
+                                                   const LaneLayout *, const LaneLayout *) {
+  constexpr uint32_t kExcludedBarrierIdInline = 195;
+
+  const size_t size = static_cast<size_t>(inst.size());
+  if (size < sizeof(uint32_t) || offset + size > source_text.size())
+    return ExpandResult::failed("gfx1250 barrier-signal rule received an unsupported instruction");
+
+  uint32_t word0 = 0;
+  std::memcpy(&word0, source_text.data() + offset, sizeof(word0));
+  if ((word0 & 0xffu) != kExcludedBarrierIdInline)
+    return ExpandResult::not_handled();
+
+  return ExpandResult::failed(
+      "gfx1250 s_barrier_signal_isfirst cannot name barrier id -3 (inline selector 195)",
+      {"Use a different barrier id, or signal it without the first-signal form."});
 }
 
 struct Gfx1250Ds2Shape {
@@ -1604,7 +1642,9 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
 // The semantic translator binary-searches this table, so entries must stay
 // sorted by the full encoding ID and then opcode. VDS encoding IDs include the
 // high opcode bits, hence the four consecutive kVdsOpHi* groups below.
-inline constexpr std::array<TranslationRule, 38> kGfx1250B0ToA0ExpandRules = {{
+inline constexpr std::array<TranslationRule, 39> kGfx1250B0ToA0ExpandRules = {{
+    {gfx1250::encoding::kSop1, gfx1250::kSBarrierSignalIsfirstSop1, RuleAction::Expand, 0, 0,
+     nullptr, expand_gfx1250_barrier_signal_isfirst, nullptr, nullptr, false},
     {gfx1250::encoding::kSopp, gfx1250::kSClauseSopp, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_s_clause, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3p, gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p, RuleAction::Expand, 0, 0,
