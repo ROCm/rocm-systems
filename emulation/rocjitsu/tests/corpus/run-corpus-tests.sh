@@ -95,8 +95,11 @@ if ! rocjitsu_launcher="$(command -v rocjitsu)"; then
   echo "Could not resolve rocjitsu on PATH for corpus tests" >&2
   exit 1
 fi
-if ! command -v setpriv >/dev/null || ! command -v timeout >/dev/null; then
-  echo "Could not resolve setpriv and timeout for corpus process cleanup" >&2
+corpus_process_supervisor="${ROCJITSU_SOURCE_DIR}/tests/corpus/corpus-process-supervisor.sh"
+if ! command -v setpriv >/dev/null || ! command -v setsid >/dev/null ||
+   ! command -v timeout >/dev/null ||
+   [[ ! -x "${corpus_process_supervisor}" ]]; then
+  echo "Could not resolve the corpus process cleanup tools" >&2
   exit 1
 fi
 
@@ -128,12 +131,24 @@ if [[ "${sanitizer_mode}" == clang-asan ]]; then
   launcher_preload_args=(--preload "${hip_runtime}")
 fi
 
+# Full corpus coverage remains in the release lane. Instrumenting the
+# interpreter makes the larger generated workloads too slow for a bounded CI
+# job, so sanitizer lanes run a stable runtime smoke set on every target.
+sanitizer_pytest_args=()
+if [[ "${sanitizer_mode}" != none ]]; then
+  sanitizer_pytest_args=(
+    -k
+    "fpsan_build_canary or fpsan_cast_test or fpsan_core_test"
+  )
+fi
+
 run_pytest() {
   local timeout_seconds="$1"
   shift
   local run_wrapper=(
     "${run_wrapper_prefix[@]}"
     setpriv --pdeathsig TERM
+    "${corpus_process_supervisor}"
     timeout --signal=TERM --kill-after=5s "${timeout_seconds}s"
     "${rocjitsu_launcher}"
     --config "${rocjitsu_config_path}"
@@ -156,6 +171,7 @@ run_pytest() {
     --tb=short
     -n "${worker_count}"
     -o "timeout_func_only=true"
+    "${sanitizer_pytest_args[@]}"
   )
   "${pytest_cmd[@]}" --timeout "${timeout_seconds}" "$@"
 }

@@ -22,3 +22,11 @@ not silently accepted or treated as passing translations.
 `global_load_tr` path currently attempts to write a lane outside the gfx1201
 simulator wavefront. This is a simulator modeling gap, not a change introduced
 by the corpus SDK nightly.
+
+## Sanitizer simulator coverage
+
+The Clang and GCC ASan+UBSan lanes run `fpsan_build_canary`, `fpsan_cast_test`,
+and `fpsan_core_test` on every simulated target. These runtime cases exercise
+the instrumented launcher and interpreter while keeping the five-target matrix
+within its CI job budget. The release lane continues to run the complete
+corpus.

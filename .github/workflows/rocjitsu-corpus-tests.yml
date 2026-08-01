@@ -87,8 +87,8 @@ jobs:
             corpus_sanitizer: none
           - name: asan-ubsan
             allow_failure: true
-            # Sanitized simulator cases need extra headroom for large FPSan
-            # modules. A failed-test rerun preserves extra diagnostics.
+            # Sanitized simulator smoke cases need extra interpreter headroom.
+            # A failed-test rerun preserves extra diagnostics.
             verify_dbt_idempotence: 0
             dbt_timeout: 180
             dbt_memory_limit_mib: 4096
