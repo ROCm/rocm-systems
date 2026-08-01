@@ -92,6 +92,14 @@ struct PcAddressBuilder {
   /// erase an intervening instruction. A non-contiguous producer cannot back a
   /// whole-scope relocation invariant even though its final value is known.
   bool contiguous = true;
+  /// @brief True when two observations of this producer disagreed on its value.
+  ///
+  /// Distinct from a cleared @ref resolved, which also covers a producer this
+  /// pass simply never followed to a setpc. A poisoned producer is one no single
+  /// delta rewrite can satisfy, so a caller reasoning about whether every code
+  /// address is relocated must fail closed on it rather than defer to another
+  /// analysis that happened to track the same getpc.
+  bool poisoned = false;
 
   friend bool operator==(const PcAddressBuilder &, const PcAddressBuilder &) = default;
 };

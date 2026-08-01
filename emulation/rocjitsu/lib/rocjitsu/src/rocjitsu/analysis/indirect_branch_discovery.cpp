@@ -2381,8 +2381,14 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
   if (pc_builders != nullptr) {
     pc_builders->clear();
     pc_builders->reserve(round_builders.size());
-    for (const auto &[getpc_offset, entry] : round_builders)
-      pc_builders->push_back(entry.record);
+    for (const auto &[getpc_offset, entry] : round_builders) {
+      // Publish the disagreement flag on the copy that leaves this pass. It is kept off the stored
+      // record so the equality test above, which decides whether a second observation conflicts,
+      // keeps comparing only the observed value.
+      PcAddressBuilder published = entry.record;
+      published.poisoned = entry.poisoned;
+      pc_builders->push_back(published);
+    }
     std::ranges::sort(*pc_builders, {}, &PcAddressBuilder::source_getpc_offset);
   }
 

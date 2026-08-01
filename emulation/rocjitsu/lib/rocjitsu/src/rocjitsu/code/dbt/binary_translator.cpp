@@ -1542,10 +1542,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                                        static_cast<uint64_t>(builder.source_target_offset))) {
             continue;
           }
-        } else if (lattice_saw_getpc) {
+        } else if (lattice_saw_getpc && !builder.poisoned) {
           // This pass gave up -- it only follows producers that reach a setpc -- but the rewrite
           // lattice did track the getpc, and the lattice is what emits the relocation. Its coverage
           // is the operative one.
+          //
+          // A poisoned producer is excluded because it is not the same situation. There the pass
+          // did follow the getpc and saw two irreconcilable values, so a sibling add under it can
+          // still carry a stale literal that the one value the lattice tracked does not cover.
           continue;
         } else {
           return false;
