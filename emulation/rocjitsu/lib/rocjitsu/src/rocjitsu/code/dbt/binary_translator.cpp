@@ -832,6 +832,7 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     std::vector<BasicBlock *> stack{entry};
     std::unordered_set<BasicBlock *> body;
     std::vector<std::pair<BasicBlock *, uint16_t>> candidates;
+    std::map<std::pair<uint16_t, uint16_t>, std::set<uint16_t>> saved_lane_sources;
     while (!stack.empty()) {
       BasicBlock *block = stack.back();
       stack.pop_back();
@@ -844,6 +845,23 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
           candidates.emplace_back(
               block, static_cast<uint16_t>(text_word_at(text, term->src_loc()) & 0xffu));
       }
+      // A lane only holds the caller's value because this body put it there. Record each
+      // v_writelane_b32 as (vgpr, lane) <- sgpr so a later read can be checked against it; without
+      // that pairing any lane read into the pair would look like a restore.
+      for (const Instruction &inst : block->instructions()) {
+        if (inst.mnemonic() != "v_writelane_b32")
+          continue;
+        const Operand *vdst = inst.dst_operand(0);
+        const Operand *ssrc = inst.src_operand(0);
+        const Operand *lane = inst.src_operand(1);
+        if (vdst == nullptr || ssrc == nullptr || lane == nullptr)
+          continue;
+        if (vdst->encoding_value() < 0 || ssrc->encoding_value() < 0 || lane->encoding_value() < 0)
+          continue;
+        saved_lane_sources[{static_cast<uint16_t>(vdst->encoding_value()),
+                            static_cast<uint16_t>(lane->encoding_value())}]
+            .insert(static_cast<uint16_t>(ssrc->encoding_value()));
+      }
       for (BasicBlock *succ : block->successors())
         stack.push_back(succ);
     }
@@ -852,7 +870,7 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     // caller's value, any other definition replaces it with something this analysis cannot vouch
     // for, and everything else leaves the search running.
     enum class Effect { kNone, kRestores, kRedefines };
-    auto effect_on = [](const Instruction &inst, uint16_t sgpr) {
+    auto effect_on = [&saved_lane_sources](const Instruction &inst, uint16_t sgpr) {
       bool defines = false;
       for (int i = 0; i < inst.num_dst_operands(); ++i) {
         const Operand *dst = inst.dst_operand(i);
@@ -865,7 +883,22 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
       }
       if (!defines)
         return Effect::kNone;
-      return inst.mnemonic() == "v_readlane_b32" ? Effect::kRestores : Effect::kRedefines;
+      if (inst.mnemonic() != "v_readlane_b32")
+        return Effect::kRedefines;
+      // Only a read of the exact lane this body saved the same register into restores the caller's
+      // value. Reading some other lane, or another register's lane, produces a value this analysis
+      // cannot vouch for and must not be mistaken for a return address.
+      const Operand *vsrc = inst.src_operand(0);
+      const Operand *lane = inst.src_operand(1);
+      if (vsrc == nullptr || lane == nullptr || vsrc->encoding_value() < 0 ||
+          lane->encoding_value() < 0) {
+        return Effect::kRedefines;
+      }
+      const auto saved = saved_lane_sources.find({static_cast<uint16_t>(vsrc->encoding_value()),
+                                                  static_cast<uint16_t>(lane->encoding_value())});
+      if (saved == saved_lane_sources.end() || !saved->second.contains(sgpr))
+        return Effect::kRedefines;
+      return Effect::kRestores;
     };
 
     // Backward reaching-definition search for one half, starting just above `from`.
@@ -1483,27 +1516,45 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                           });
 
   const bool code_addresses_fully_accounted = [&] {
-    std::unordered_set<uint64_t> lattice_getpc_offsets;
+    // Keyed by the value each add produces, not merely by the getpc that seeded it. One getpc can
+    // feed several adds -- distinct branches materializing distinct addresses -- so treating the
+    // getpc as covered because any one add was tracked would let a sibling add keep a stale code
+    // literal while this predicate still reported everything accounted for.
+    std::unordered_map<uint64_t, std::unordered_set<uint64_t>> lattice_targets_by_getpc;
     for (const PcRelativeAddressBuilder &builder : pc_relative_address_builders)
-      lattice_getpc_offsets.insert(builder.source_getpc_offset);
+      lattice_targets_by_getpc[builder.source_getpc_offset].insert(builder.target_vaddr);
+
     for (const auto &block : blocks) {
       if (block == nullptr)
         continue;
       for (const PcAddressBuilder &builder : block->static_pc_address_builders()) {
-        // The lattice owning this builder is what matters: it is the analysis that drives both the
-        // data and the code rewrite, so a builder it matched is rewritten regardless of what the
-        // indirect-branch pass made of it. The two passes resolve independently and disagree
-        // routinely -- the branch pass gives up on anything that does not reach a setpc.
-        if (lattice_getpc_offsets.contains(builder.source_getpc_offset))
+        // A producer whose value this pass could not pin down, or whose arithmetic is not one
+        // contiguous run, cannot be rewritten by anybody -- accept it only if the rewrite lattice
+        // resolved the very same value, which is the evidence that a relocation was emitted for it.
+        const auto targets = lattice_targets_by_getpc.find(builder.source_getpc_offset);
+        const bool lattice_saw_getpc = targets != lattice_targets_by_getpc.end();
+        if (builder.resolved && builder.contiguous && builder.source_target_offset >= 0) {
+          // Both analyses pinned a value, so demand they agree on it. Accepting the getpc merely
+          // because some add under it was tracked is what would let a sibling add keep a stale
+          // literal while this predicate still reported the object accounted for.
+          if (lattice_saw_getpc &&
+              targets->second.contains(text_vaddr +
+                                       static_cast<uint64_t>(builder.source_target_offset))) {
+            continue;
+          }
+        } else if (lattice_saw_getpc) {
+          // This pass gave up -- it only follows producers that reach a setpc -- but the rewrite
+          // lattice did track the getpc, and the lattice is what emits the relocation. Its coverage
+          // is the operative one.
           continue;
-        // Otherwise the value has to be known here, or it may be a code address left stale.
-        if (!builder.resolved || !builder.contiguous)
+        } else {
           return false;
+        }
         // A known non-code target needs nothing: it cannot be a stale jump destination.
         if (builder.source_target_offset < 0 ||
             static_cast<uint64_t>(builder.source_target_offset) >= text.size())
           continue;
-        // A code target the lattice never saw is one this translation cannot rewrite.
+        // A code target whose exact value the lattice never produced cannot be rewritten.
         return false;
       }
     }
@@ -1606,16 +1657,29 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // already qualifies. A compiler-anonymous pointer array carries no such symbol and so is not
   // covered here; that case still refuses, which is the pre-existing behavior.
   std::vector<uint64_t> adopted_roots;
+  std::unordered_set<uint64_t> address_taken_offsets;
   {
-    std::unordered_set<const BasicBlock *> covered;
-    for (const KernelTranslationScope &scope : scopes)
-      covered.insert(scope.blocks.begin(), scope.blocks.end());
+    // How many scopes would emit each block on their own. A body reached by one scope already has
+    // a single placement, so its address is unambiguous and nothing needs adopting. A body reached
+    // by none has no placement at all, and one reached by several has no single placement -- a
+    // runtime-dereferenced pointer holds one value and cannot choose between clones. Both of those
+    // get a canonical copy, emitted once by the adopting scope, that every code address names.
+    std::unordered_map<const BasicBlock *, unsigned> emitting_scopes;
+    for (const KernelTranslationScope &scope : scopes) {
+      for (const BasicBlock *block : scope.blocks)
+        ++emitting_scopes[block];
+    }
 
     const auto adopt = [&](uint64_t text_offset) {
       const BasicBlock *entry = block_for_offset(block_index, text_offset);
-      // A body that is already reached is left alone. Adopting it would add a second placement of
-      // the same source offset, and a runtime-dereferenced pointer cannot choose between them.
-      if (entry == nullptr || covered.contains(entry))
+      if (entry == nullptr)
+        return;
+      address_taken_offsets.insert(text_offset);
+      // Only a body no scope reaches needs adopting. One that several scopes clone is left where it
+      // is: lowering it through an unrelated scope would deny it the context its real caller
+      // supplies -- DS2 mode inference and liveness are scope-relative -- so the ambiguity between
+      // clones is settled by naming one of them canonical instead of by making a fresh copy.
+      if (emitting_scopes.contains(entry))
         return;
       adopted_roots.push_back(text_offset);
     };
@@ -1831,6 +1895,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   };
   std::vector<PendingCodeRelocation> pending_code_relocations;
   std::vector<PcRelativeTextRelocation> code_relocations;
+  // Final offset of the one copy of each adopted body. Code addresses name this copy, so a body a
+  // caller also clones still has exactly one address, and that address is stable no matter which
+  // scope happens to hold a clone.
+  std::unordered_map<uint64_t, uint64_t> canonical_placement;
 
   auto fail_or_skip_kernel =
       [&](const KernelTranslationScope &scope, KernelFailure failure, size_t output_begin,
@@ -3086,6 +3154,13 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       return leave_unchanged();
     }
     const uint64_t target_delta = materialized.target_delta;
+    // kernel_translation_scopes() gives the adopted roots to the first scope it builds, so that is
+    // the scope whose placements are canonical.
+    for (const uint64_t taken : address_taken_offsets) {
+      const auto placed = target_offset_by_source_offset.find(taken);
+      if (placed != target_offset_by_source_offset.end())
+        canonical_placement.try_emplace(taken, placed->second + target_delta);
+    }
     for (const auto &[source_offset, target_offset] : target_offset_by_source_offset) {
       text_relocations.push_back(
           {.source_offset = source_offset, .target_offset = target_offset + target_delta});
@@ -3158,8 +3233,19 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       if (recovered_builder_getpc_offsets.contains(builder.source_getpc_offset))
         continue;
       const uint64_t source_target = builder.target_vaddr - text_vaddr;
-      // Prefer this scope's own copy of the target. A body reached by several kernels is cloned
-      // once per scope so each scope's branches resolve through its own placement map, and
+      // An adopted body has one canonical copy; every code address names it, whatever scope the
+      // builder lives in. Resolving that here rather than after the loop keeps the address stable
+      // even when a caller also clones the body.
+      if (const auto canonical = canonical_placement.find(source_target);
+          canonical != canonical_placement.end()) {
+        code_relocations.push_back(
+            {.target_getpc_offset = getpc->second + target_delta,
+             .target_literal_offset = add->second + target_delta + sizeof(uint32_t),
+             .target_text_offset = canonical->second});
+        continue;
+      }
+      // Otherwise prefer this scope's own copy of the target. A body reached by several kernels is
+      // cloned once per scope so each scope's branches resolve through its own placement map, and
       // patch_recovered_builder_fixups already points a recovered builder at its scope's clone.
       // Following the same convention keeps a computed address consistent with the code that
       // computed it, and avoids inventing a conflict between clones that are only distinguishable
@@ -3331,6 +3417,13 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         conflicting.insert(relocation.source_offset);
     }
     for (const PendingCodeRelocation &pending : pending_code_relocations) {
+      if (const auto canonical = canonical_placement.find(pending.source_target_text_offset);
+          canonical != canonical_placement.end()) {
+        code_relocations.push_back({.target_getpc_offset = pending.target_getpc_offset,
+                                    .target_literal_offset = pending.target_literal_offset,
+                                    .target_text_offset = canonical->second});
+        continue;
+      }
       const auto placed = placement.find(pending.source_target_text_offset);
       if (placed == placement.end() || conflicting.contains(pending.source_target_text_offset)) {
         append_error(result.diagnostics, DiagnosticKind::Legalization,
