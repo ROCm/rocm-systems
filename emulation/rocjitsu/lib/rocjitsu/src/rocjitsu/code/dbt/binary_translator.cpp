@@ -38,6 +38,7 @@
 #include <array>
 #include <cassert>
 #include <cstring>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -853,6 +854,12 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     // this: a save that appears after the read, or on a path that does not join it, or one a later
     // write to the same VGPR has already destroyed, would all still be in the set and would let an
     // arbitrary lane read pass as a return-address restore.
+    // Declared ahead of the lane query so that query can prove the SGPR a save captured really
+    // was the caller's incoming value. The bool disables lane-restore classification inside the
+    // nested query, which bounds the recursion at one level and keeps the nested question strictly
+    // simpler than the outer one.
+    std::function<bool(BasicBlock *, const Instruction *, uint16_t, bool)> caller_value_reaches;
+
     auto lane_holds_saved_sgpr = [&](BasicBlock *start, const Instruction *from, uint16_t vgpr,
                                      uint16_t lane, uint16_t sgpr) {
       std::vector<std::pair<BasicBlock *, const Instruction *>> work{{start, from}};
@@ -883,9 +890,21 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         while (cursor > 0) {
           --cursor;
           const Instruction &inst = *ordered[cursor];
+          const std::string_view lane_mnemonic = inst.mnemonic();
+          // The lane identity here is a low selector only. Anything that moves the VGPR bank makes
+          // that selector name a different physical register, so the comparison below stops meaning
+          // what it says and the proof has to give up.
+          if (lane_mnemonic == "s_set_vgpr_msb" || lane_mnemonic == "s_setreg_b32" ||
+              lane_mnemonic == "s_setreg_imm32_b32")
+            return false;
+          // A call between the save and the read can clobber the lane inside the callee, which this
+          // walk does not model.
+          if ((inst.flags() & INDIRECT_CALL) != 0 || lane_mnemonic == "s_call_i64" ||
+              lane_mnemonic == "s_swap_pc_i64" || lane_mnemonic == "s_swappc_b64")
+            return false;
           const Operand *vdst = inst.dst_operand(0);
-          const bool writes_lane = inst.mnemonic() == "v_writelane_b32" && vdst != nullptr &&
-                                   vdst->encoding_value() >= 0;
+          const bool writes_lane =
+              lane_mnemonic == "v_writelane_b32" && vdst != nullptr && vdst->encoding_value() >= 0;
           if (writes_lane && static_cast<uint16_t>(vdst->encoding_value()) == vgpr) {
             const Operand *ssrc = inst.src_operand(0);
             const Operand *written_lane = inst.src_operand(1);
@@ -896,6 +915,10 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
             if (static_cast<uint16_t>(written_lane->encoding_value()) != lane)
               continue;
             if (static_cast<uint16_t>(ssrc->encoding_value()) != sgpr)
+              return false;
+            // Finding the save is not enough: it captured whatever the SGPR held at that point, so
+            // the value is the caller's return PC only if the caller's value still reached here.
+            if (!caller_value_reaches(block, &inst, sgpr, /*allow_lane_restore=*/false))
               return false;
             resolved = true;
             break;
@@ -937,7 +960,8 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     // caller's value, any other definition replaces it with something this analysis cannot vouch
     // for, and everything else leaves the search running.
     enum class Effect { kNone, kRestores, kRedefines };
-    auto effect_on = [&](const Instruction &inst, uint16_t sgpr, BasicBlock *block) {
+    auto effect_on = [&](const Instruction &inst, uint16_t sgpr, BasicBlock *block,
+                         bool allow_lane_restore) {
       bool defines = false;
       for (int i = 0; i < inst.num_dst_operands(); ++i) {
         const Operand *dst = inst.dst_operand(i);
@@ -950,7 +974,9 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
       }
       if (!defines)
         return Effect::kNone;
-      if (inst.mnemonic() != "v_readlane_b32")
+      // The nested provenance query runs with this off: a lane restore is exactly what it is
+      // trying to justify, so letting it count one would be circular.
+      if (!allow_lane_restore || inst.mnemonic() != "v_readlane_b32")
         return Effect::kRedefines;
       // Only a read of the exact lane this body saved the same register into restores the caller's
       // value. Reading some other lane, or another register's lane, produces a value this analysis
@@ -969,7 +995,8 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     };
 
     // Backward reaching-definition search for one half, starting just above `from`.
-    auto caller_value_reaches = [&](BasicBlock *start, const Instruction *from, uint16_t sgpr) {
+    caller_value_reaches = [&](BasicBlock *start, const Instruction *from, uint16_t sgpr,
+                               bool allow_lane_restore) {
       std::vector<std::pair<BasicBlock *, const Instruction *>> work{{start, from}};
       // Keyed by the whole work item, not the block. Processing one is deterministic, so meeting
       // the same pair twice adds nothing and is skipped; the same block reached with a different
@@ -998,7 +1025,7 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         bool resolved = false;
         while (cursor > 0) {
           --cursor;
-          const Effect effect = effect_on(*ordered[cursor], sgpr, block);
+          const Effect effect = effect_on(*ordered[cursor], sgpr, block, allow_lane_restore);
           if (effect == Effect::kNone)
             continue;
           if (effect == Effect::kRedefines)
@@ -1027,8 +1054,9 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
 
     for (const auto &[block, ssrc0] : candidates) {
       const Instruction *term = block->terminator();
-      if (caller_value_reaches(block, term, ssrc0) &&
-          caller_value_reaches(block, term, static_cast<uint16_t>(ssrc0 + 1)))
+      if (caller_value_reaches(block, term, ssrc0, /*allow_lane_restore=*/true) &&
+          caller_value_reaches(block, term, static_cast<uint16_t>(ssrc0 + 1),
+                               /*allow_lane_restore=*/true))
         returns.insert(term->src_loc());
     }
   }
