@@ -66,7 +66,8 @@ RUN mkdir -p /etc/apt/keyrings \
  && for ver in ${ROCM_LEGACY_VERSIONS}; do \
       apt-get install -y rocm${ver}; \
     done \
- && apt-get clean && rm -rf /var/lib/apt/lists/*
+ && apt-get clean && rm -rf /var/lib/apt/lists/* \
+ && { update-alternatives --query rocm >/dev/null 2>&1 && update-alternatives --remove-all rocm; }
 
 ###############################################################################
 # ROCm 7.13 (TheRock repo.amd.com)
@@ -78,12 +79,14 @@ RUN wget -qO- https://repo.amd.com/rocm/packages/gpg/rocm.gpg \
       > /etc/apt/sources.list.d/amdrocm.list \
  && apt-get update \
  && apt-get install -y \
-      amdrocm-core-dev${ROCM_THEROCK_VERSION} \
-      amdrocm-core${ROCM_THEROCK_VERSION}-gfx942 \
-      amdrocm-core${ROCM_THEROCK_VERSION}-gfx950 \
-      amdrocm-developer-tools${ROCM_THEROCK_VERSION} \
-      amdrocm-runtime-dev \
- && ln -sf /opt/rocm/core/.info /opt/rocm/.info \
+      "amdrocm-core-dev${ROCM_THEROCK_VERSION}" \
+      "amdrocm-core${ROCM_THEROCK_VERSION}-gfx942" \
+      "amdrocm-core${ROCM_THEROCK_VERSION}-gfx950" \
+      "amdrocm-developer-tools${ROCM_THEROCK_VERSION}" \
+      "amdrocm-runtime-dev${ROCM_THEROCK_VERSION}" \
+      "amdrocm-runtime${ROCM_THEROCK_VERSION}" \
+      "amdrocm-llvm${ROCM_THEROCK_VERSION}" \
+      "amdrocm-sysdeps${ROCM_THEROCK_VERSION}" \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 ###############################################################################
@@ -186,9 +189,20 @@ RUN if [ -n "${ROCM_NIGHTLY_VERSION}" ]; then \
     fi
 
 ###############################################################################
-# Python wheel dependencies
+# Python venv + wheel dependencies
 ###############################################################################
-RUN pip install --break-system-packages pybind11 pytest
+# Install Python build deps declared in rocshmem's own pyproject.toml into a
+# dedicated venv so the system Python install is not modified.
+# COPY from local context so local changes are respected (works for both
+# USE_SRC and ROCSHMEM_REF builds since the build context is always local).
+COPY python/pyproject.toml /tmp/rocshmem-pyproject.toml
+ENV ROCSHMEM_VENV=/opt/rocshmem-venv
+RUN python3 -m venv ${ROCSHMEM_VENV} \
+ && ${ROCSHMEM_VENV}/bin/pip install \
+      $(python3 -c "import tomllib; f=open('/tmp/rocshmem-pyproject.toml','rb'); d=tomllib.load(f); print(' '.join(d.get('build-system',{}).get('requires',[])))") \
+      pytest \
+      pyyaml
+ENV PATH="${ROCSHMEM_VENV}/bin:${PATH}"
 
 ###############################################################################
 # Environment
