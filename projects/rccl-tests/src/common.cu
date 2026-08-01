@@ -24,7 +24,9 @@
 #include <utility>
 #include <errno.h>     /* program_invocation_short_name */
 #include <dlfcn.h>
+#include <limits.h>    /* PATH_MAX */
 #include <stdlib.h>
+#include <unistd.h>    /* getpid */
 //#define DEBUG_PRINT
 
 #include "verifiable.h"
@@ -219,6 +221,106 @@ public:
 
 private:
   bool active = false;
+};
+
+// RCCL kernel timing: per-dispatch GPU start/end taken from the dispatch packet
+// itself, so the same information rocprof's kernel trace provides is available
+// without running a profiler. Set RCCL_KERNEL_TIMING=1 for the library side and
+// RCCL_TESTS_KERNEL_TIMING=<prefix> here; every record is kept and written to
+// <prefix>_pid<pid>.csv at exit.
+//
+// Layout must match ncclKernelTimingRecord in RCCL. The drain entry point is
+// resolved at runtime so the binary still runs against a librccl without it.
+struct rcclKernelTimingRecord {
+  uint64_t startNs, endNs, seq, commHash, count;
+  uint32_t func, datatype, nChannels, nThreads;
+  int32_t rank;
+  uint32_t nColls;
+};
+typedef ncclResult_t (*rcclKernelTimingDrainFn)(ncclComm_t, rcclKernelTimingRecord*, int, int*, uint64_t*);
+
+class KernelTimingTrace {
+public:
+  static KernelTimingTrace& get() {
+    static KernelTimingTrace instance;
+    return instance;
+  }
+
+  bool enabled() const { return _drain != nullptr && !_prefix.empty(); }
+
+  // Drains everything currently buffered and tags it with the configuration
+  // this measurement belongs to, which is what the roctx range communicates to
+  // rocprof today.
+  void collect(ncclComm_t comm, const char* tag) {
+    if (!enabled() || comm == nullptr) return;
+    size_t tagIdx = internTag(tag);
+    rcclKernelTimingRecord buf[1024];
+    for (;;) {
+      int got = 0;
+      uint64_t dropped = 0;
+      if (_drain(comm, buf, (int)(sizeof(buf) / sizeof(buf[0])), &got, &dropped) != ncclSuccess) return;
+      _dropped = dropped;
+      for (int i = 0; i < got; i++) {
+        _records.push_back(buf[i]);
+        _tagIdx.push_back(tagIdx);
+      }
+      if (got < (int)(sizeof(buf) / sizeof(buf[0]))) break;
+    }
+  }
+
+  ~KernelTimingTrace() { write(); }
+
+private:
+  KernelTimingTrace() {
+    const char* prefix = getenv("RCCL_TESTS_KERNEL_TIMING");
+    if (prefix == nullptr || prefix[0] == '\0') return;
+    _prefix = prefix;
+    _drain = (rcclKernelTimingDrainFn)dlsym(RTLD_DEFAULT, "ncclKernelTimingDrain");
+    if (_drain == nullptr) {
+      fprintf(stderr, "rccl-tests: RCCL_TESTS_KERNEL_TIMING set but librccl has no kernel timing support\n");
+    }
+  }
+
+  size_t internTag(const char* tag) {
+    std::string t(tag ? tag : "");
+    for (size_t i = 0; i < _tags.size(); i++) {
+      if (_tags[i] == t) return i;
+    }
+    _tags.push_back(t);
+    return _tags.size() - 1;
+  }
+
+  void write() {
+    if (!enabled() || _records.empty()) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s_pid%d.csv", _prefix.c_str(), (int)getpid());
+    FILE* f = fopen(path, "w");
+    if (f == nullptr) {
+      fprintf(stderr, "rccl-tests: cannot write %s\n", path);
+      return;
+    }
+    // Start/End timestamps are CLOCK_BOOTTIME nanoseconds, the same domain
+    // rocprof uses, so these rows line up with an external trace as-is.
+    fprintf(f, "\"Rank\",\"Seq\",\"Comm_Hash\",\"Func\",\"Datatype\",\"Count\",\"nChannels\",\"nThreads\","
+               "\"nColls\",\"Start_Timestamp\",\"End_Timestamp\",\"Duration_ns\",\"Config\"\n");
+    for (size_t i = 0; i < _records.size(); i++) {
+      const rcclKernelTimingRecord& r = _records[i];
+      fprintf(f, "%d,%llu,\"%llx\",%u,%u,%llu,%u,%u,%u,%llu,%llu,%llu,\"%s\"\n", r.rank,
+              (unsigned long long)r.seq, (unsigned long long)r.commHash, r.func, r.datatype,
+              (unsigned long long)r.count, r.nChannels, r.nThreads, r.nColls, (unsigned long long)r.startNs,
+              (unsigned long long)r.endNs, (unsigned long long)(r.endNs - r.startNs), _tags[_tagIdx[i]].c_str());
+    }
+    fclose(f);
+    fprintf(stderr, "rccl-tests: wrote %zu kernel timing records to %s (%llu dropped)\n", _records.size(), path,
+            (unsigned long long)_dropped);
+  }
+
+  std::string _prefix;
+  rcclKernelTimingDrainFn _drain = nullptr;
+  std::vector<rcclKernelTimingRecord> _records;
+  std::vector<size_t> _tagIdx;
+  std::vector<std::string> _tags;
+  uint64_t _dropped = 0;
 };
 
 // Test bias
@@ -949,6 +1051,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
     TESTCHECK(completeColl(args));
   }
+  for (int i = 0; i < args->nGpus; i++) KernelTimingTrace::get().collect(args->comms[i], roctxMsg);
   double cputimeSec = tim.elapsed()/(iters*agg_iters);
 
   double deltaSec = tim.elapsed();
