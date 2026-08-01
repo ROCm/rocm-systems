@@ -2002,6 +2002,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     size_t code_relocations_begin = 0;
     size_t pending_code_relocations_begin = 0;
     std::vector<uint64_t> canonical_placements_added;
+    // The resource verdict is set before descriptor recomputation, which can still skip the scope.
+    // Rolling the placements back without also restoring this would leave a skipped host's verdict
+    // standing and refuse the object over a scope that no longer contributes anything.
+    bool canonical_host_outgrew_its_descriptor = false;
   };
 
   auto fail_or_skip_kernel =
@@ -2028,6 +2032,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     pending_code_relocations.resize(relocation_snapshot.pending_code_relocations_begin);
     for (const uint64_t placed : relocation_snapshot.canonical_placements_added)
       canonical_placement.erase(placed);
+    canonical_host_outgrew_its_descriptor =
+        relocation_snapshot.canonical_host_outgrew_its_descriptor;
     for (const DescriptorVariantCheckpoint &saved : descriptor_snapshot) {
       if (saved.index >= descriptor_translations.size()) {
         append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
@@ -2072,10 +2078,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     const size_t output_begin = translated_text.size();
     const size_t text_relocations_begin = text_relocations.size();
     const size_t data_relocations_begin = data_relocations.size();
-    ScopeRelocationCheckpoint relocation_snapshot{.code_relocations_begin = code_relocations.size(),
-                                                  .pending_code_relocations_begin =
-                                                      pending_code_relocations.size(),
-                                                  .canonical_placements_added = {}};
+    ScopeRelocationCheckpoint relocation_snapshot{
+        .code_relocations_begin = code_relocations.size(),
+        .pending_code_relocations_begin = pending_code_relocations.size(),
+        .canonical_placements_added = {},
+        .canonical_host_outgrew_its_descriptor = canonical_host_outgrew_its_descriptor};
     const auto descriptor_snapshot =
         checkpoint_scope_descriptors(descriptor_translations, *scope.translation);
     bool skip_scope = false;
@@ -3306,9 +3313,21 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     // not the same set: one whose target could not be resolved, or whose consumer was handled by a
     // direct-window conversion instead, never reaches patch_recovered_builder_fixups. Excluding
     // those here would leave their builders written by nobody.
-    std::unordered_set<uint64_t> recovered_builder_getpc_offsets;
-    for (const IndirectCallFixup &fixup : layout.recovered_builder_fixups)
-      recovered_builder_getpc_offsets.insert(fixup.source_getpc_offset);
+    // Keyed by the byte range each queued recovery rebuilds, not by its getpc. One getpc can seed
+    // several adds -- distinct branches materializing distinct addresses -- and only the add inside
+    // a queued range is rewritten by that model. Keying on the shared getpc would suppress the
+    // sibling's relocation too, leaving its literal measuring the distance the body used to be at.
+    std::vector<std::pair<uint64_t, uint64_t>> recovered_builder_ranges;
+    recovered_builder_ranges.reserve(layout.recovered_builder_fixups.size());
+    for (const IndirectCallFixup &fixup : layout.recovered_builder_fixups) {
+      recovered_builder_ranges.emplace_back(fixup.source_recovery_begin_offset,
+                                            fixup.source_recovery_end_offset);
+    }
+    const auto owned_by_recovered_builder = [&](uint64_t source_add_offset) {
+      return std::ranges::any_of(recovered_builder_ranges, [&](const auto &range) {
+        return source_add_offset >= range.first && source_add_offset < range.second;
+      });
+    };
 
     std::unordered_set<uint64_t> patched_address_add_offsets;
     for (const RelocationTableDispatch &dispatch : relocation_table_dispatches) {
@@ -3364,7 +3383,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       // emitted by a different scope, so this scope's placement map cannot answer for it yet.
       if (builder.target_vaddr < text_vaddr || builder.target_vaddr - text_vaddr >= text.size())
         continue;
-      if (recovered_builder_getpc_offsets.contains(builder.source_getpc_offset))
+      if (owned_by_recovered_builder(builder.source_address_add_offset))
         continue;
       const uint64_t source_target = builder.target_vaddr - text_vaddr;
       // An adopted body has one canonical copy; every code address names it, whatever scope the
