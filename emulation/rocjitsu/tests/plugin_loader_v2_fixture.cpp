@@ -63,17 +63,20 @@ private:
   PluginSink *sink_ = &StderrSink::instance();
 };
 
-} // namespace rocjitsu
-
-namespace {
-
-struct PluginMetadataV2 {
+// Preserved from plugin ABI v2. Keep the contract type and exported function
+// signature identical to the host so UBSan can safely call the metadata
+// accessor before the loader rejects the stale ABI version.
+struct PluginMetadata {
   int abi;
   const char *name;
   const char *contact;
   const char *version;
   const char *config_schema;
 };
+
+} // namespace rocjitsu
+
+namespace {
 
 void trace_create() {
   const char *path = std::getenv("ROCJITSU_PLUGIN_TEST_TRACE");
@@ -92,8 +95,8 @@ public:
 
 } // namespace
 
-extern "C" RJ_API_EXPORT const PluginMetadataV2 *rocjitsu_plugin_metadata() {
-  static const PluginMetadataV2 metadata{2, "legacy_v2", "rocjitsu-tests", "1", "{}"};
+extern "C" RJ_API_EXPORT const rocjitsu::PluginMetadata *rocjitsu_plugin_metadata() {
+  static const rocjitsu::PluginMetadata metadata{2, "legacy_v2", "rocjitsu-tests", "1", "{}"};
   return &metadata;
 }
 
