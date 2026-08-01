@@ -270,6 +270,8 @@ struct ConSanMoiSampledSyncPublishResult {
 };
 
 struct ConSanMoiAtomicReleaseRecord {
+  /// One sparse causal-clock component published at atomic_address. The
+  /// producer can be the releasing owner or an owner ordered before it.
   bool valid = false;
   uint64_t generation = 0;
   uint64_t atomic_address = 0;
@@ -279,6 +281,7 @@ struct ConSanMoiAtomicReleaseRecord {
 };
 
 struct ConSanMoiAcquiredEpochToken {
+  /// One sparse causal-clock component imported by consumer_owner_id.
   bool valid = false;
   uint64_t generation = 0;
   uint32_t consumer_owner_id = 0;

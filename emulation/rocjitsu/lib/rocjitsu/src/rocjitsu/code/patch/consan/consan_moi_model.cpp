@@ -712,102 +712,177 @@ bool consan_moi_acquired_epoch_orders(std::span<const ConSanMoiAcquiredEpochToke
   return false;
 }
 
-ConSanMoiAtomicSyncResult
-consan_moi_record_replay_atomic_release(std::span<ConSanMoiAtomicReleaseRecord> release_records,
-                                        uint64_t generation, uint64_t atomic_address,
-                                        uint32_t producer_owner_id, uint32_t producer_epoch,
-                                        uint32_t release_instruction_offset) {
-  ConSanMoiAtomicSyncResult result;
-  ConSanMoiAtomicReleaseRecord *empty_slot = nullptr;
-  for (ConSanMoiAtomicReleaseRecord &record : release_records) {
-    if (!record.valid) {
-      if (empty_slot == nullptr)
-        empty_slot = &record;
-      continue;
-    }
-    if (record.generation != generation || record.atomic_address != atomic_address ||
-        record.producer_owner_id != producer_owner_id)
-      continue;
-    if (producer_epoch > record.producer_epoch) {
-      record.producer_epoch = producer_epoch;
-      record.release_instruction_offset = release_instruction_offset;
-      result.updated_record_count = 1;
-    }
-    return result;
-  }
-
-  if (empty_slot == nullptr) {
-    result.metadata_full = true;
-    return result;
-  }
-
-  *empty_slot = ConSanMoiAtomicReleaseRecord{
-      /*valid=*/true,    generation,     atomic_address,
-      producer_owner_id, producer_epoch, release_instruction_offset,
-  };
-  result.updated_record_count = 1;
-  return result;
-}
-
 namespace {
 
+struct ConSanMoiCausalEpochComponent {
+  uint32_t owner_id = 0;
+  uint32_t epoch = 0;
+};
+
+void merge_causal_epoch_component(std::vector<ConSanMoiCausalEpochComponent> &components,
+                                  uint32_t owner_id, uint32_t epoch) {
+  for (ConSanMoiCausalEpochComponent &component : components) {
+    if (component.owner_id != owner_id)
+      continue;
+    component.epoch = std::max(component.epoch, epoch);
+    return;
+  }
+  components.push_back({owner_id, epoch});
+}
+
+[[nodiscard]] std::vector<ConSanMoiCausalEpochComponent>
+collect_causal_epoch_components(std::span<const ConSanMoiAcquiredEpochToken> tokens,
+                                uint64_t generation, uint32_t publisher_owner_id,
+                                uint32_t publisher_epoch) {
+  std::vector<ConSanMoiCausalEpochComponent> components;
+  components.reserve(tokens.size() + 1u);
+  merge_causal_epoch_component(components, publisher_owner_id, publisher_epoch);
+  for (const ConSanMoiAcquiredEpochToken &token : tokens) {
+    if (!token.valid || token.generation != generation ||
+        token.consumer_owner_id != publisher_owner_id || token.producer_epoch_plus_one == 0)
+      continue;
+    merge_causal_epoch_component(components, token.producer_owner_id,
+                                 token.producer_epoch_plus_one - 1u);
+  }
+  return components;
+}
+
 [[nodiscard]] ConSanMoiAtomicSyncResult
-record_acquired_epoch_token(std::span<ConSanMoiAcquiredEpochToken> tokens, uint64_t generation,
-                            uint32_t consumer_owner_id, uint32_t producer_owner_id,
-                            uint32_t producer_epoch_plus_one, uint32_t acquire_instruction_offset) {
-  ConSanMoiAtomicSyncResult result;
-  ConSanMoiAcquiredEpochToken *empty_slot = nullptr;
+record_acquired_epoch_components(std::span<ConSanMoiAcquiredEpochToken> tokens,
+                                 std::span<const ConSanMoiCausalEpochComponent> components,
+                                 uint64_t generation, uint32_t consumer_owner_id,
+                                 uint32_t acquire_instruction_offset) {
+  std::vector<ConSanMoiAcquiredEpochToken *> targets(components.size());
+  std::vector<ConSanMoiAcquiredEpochToken *> empty_slots;
+  empty_slots.reserve(tokens.size());
   for (ConSanMoiAcquiredEpochToken &token : tokens) {
     if (!token.valid) {
-      if (empty_slot == nullptr)
-        empty_slot = &token;
+      empty_slots.push_back(&token);
       continue;
     }
-    if (token.generation != generation || token.consumer_owner_id != consumer_owner_id ||
-        token.producer_owner_id != producer_owner_id)
+    for (size_t index = 0; index < components.size(); ++index) {
+      if (token.generation == generation && token.consumer_owner_id == consumer_owner_id &&
+          token.producer_owner_id == components[index].owner_id) {
+        targets[index] = &token;
+        break;
+      }
+    }
+  }
+
+  size_t next_empty_slot = 0;
+  for (ConSanMoiAcquiredEpochToken *&target : targets) {
+    if (target != nullptr)
       continue;
+    if (next_empty_slot == empty_slots.size())
+      return {/*metadata_full=*/true, /*updated_record_count=*/0};
+    target = empty_slots[next_empty_slot++];
+  }
+
+  ConSanMoiAtomicSyncResult result;
+  for (size_t index = 0; index < components.size(); ++index) {
+    ConSanMoiAcquiredEpochToken &token = *targets[index];
+    const uint32_t producer_epoch_plus_one =
+        consan_moi_acquired_epoch_token_value(components[index].epoch);
+    if (!token.valid) {
+      token = ConSanMoiAcquiredEpochToken{
+          /*valid=*/true,          generation,
+          consumer_owner_id,       components[index].owner_id,
+          producer_epoch_plus_one, acquire_instruction_offset,
+      };
+      ++result.updated_record_count;
+      continue;
+    }
     if (producer_epoch_plus_one > token.producer_epoch_plus_one) {
       token.producer_epoch_plus_one = producer_epoch_plus_one;
       token.acquire_instruction_offset = acquire_instruction_offset;
-      result.updated_record_count = 1;
+      ++result.updated_record_count;
     }
-    return result;
   }
-
-  if (empty_slot == nullptr) {
-    result.metadata_full = true;
-    return result;
-  }
-
-  *empty_slot = ConSanMoiAcquiredEpochToken{
-      /*valid=*/true,          generation,
-      consumer_owner_id,       producer_owner_id,
-      producer_epoch_plus_one, acquire_instruction_offset,
-  };
-  result.updated_record_count = 1;
   return result;
 }
 
 } // namespace
 
+ConSanMoiAtomicSyncResult
+consan_moi_record_replay_atomic_release(std::span<ConSanMoiAtomicReleaseRecord> release_records,
+                                        uint64_t generation, uint64_t atomic_address,
+                                        uint32_t producer_owner_id, uint32_t producer_epoch,
+                                        uint32_t release_instruction_offset) {
+  return consan_moi_record_replay_atomic_release(
+      release_records, std::span<const ConSanMoiAcquiredEpochToken>{}, generation, atomic_address,
+      producer_owner_id, producer_epoch, release_instruction_offset);
+}
+
+ConSanMoiAtomicSyncResult consan_moi_record_replay_atomic_release(
+    std::span<ConSanMoiAtomicReleaseRecord> release_records,
+    std::span<const ConSanMoiAcquiredEpochToken> acquired_epoch_tokens, uint64_t generation,
+    uint64_t atomic_address, uint32_t producer_owner_id, uint32_t producer_epoch,
+    uint32_t release_instruction_offset) {
+  const std::vector<ConSanMoiCausalEpochComponent> components = collect_causal_epoch_components(
+      acquired_epoch_tokens, generation, producer_owner_id, producer_epoch);
+  std::vector<ConSanMoiAtomicReleaseRecord *> targets(components.size());
+  std::vector<ConSanMoiAtomicReleaseRecord *> empty_slots;
+  empty_slots.reserve(release_records.size());
+  for (ConSanMoiAtomicReleaseRecord &record : release_records) {
+    if (!record.valid) {
+      empty_slots.push_back(&record);
+      continue;
+    }
+    for (size_t index = 0; index < components.size(); ++index) {
+      if (record.generation == generation && record.atomic_address == atomic_address &&
+          record.producer_owner_id == components[index].owner_id) {
+        targets[index] = &record;
+        break;
+      }
+    }
+  }
+
+  size_t next_empty_slot = 0;
+  for (ConSanMoiAtomicReleaseRecord *&target : targets) {
+    if (target != nullptr)
+      continue;
+    if (next_empty_slot == empty_slots.size())
+      return {/*metadata_full=*/true, /*updated_record_count=*/0};
+    target = empty_slots[next_empty_slot++];
+  }
+
+  ConSanMoiAtomicSyncResult result;
+  for (size_t index = 0; index < components.size(); ++index) {
+    ConSanMoiAtomicReleaseRecord &record = *targets[index];
+    const ConSanMoiCausalEpochComponent component = components[index];
+    if (!record.valid) {
+      record = ConSanMoiAtomicReleaseRecord{
+          /*valid=*/true,     generation,      atomic_address,
+          component.owner_id, component.epoch, release_instruction_offset,
+      };
+      ++result.updated_record_count;
+      continue;
+    }
+    if (component.epoch > record.producer_epoch) {
+      record.producer_epoch = component.epoch;
+      record.release_instruction_offset = release_instruction_offset;
+      ++result.updated_record_count;
+    }
+  }
+  return result;
+}
+
 ConSanMoiAtomicSyncResult consan_moi_record_replay_atomic_acquire(
     std::span<const ConSanMoiAtomicReleaseRecord> release_records,
     std::span<ConSanMoiAcquiredEpochToken> acquired_epoch_tokens, uint64_t generation,
     uint64_t atomic_address, uint32_t consumer_owner_id, uint32_t acquire_instruction_offset) {
-  ConSanMoiAtomicSyncResult result;
+  std::vector<ConSanMoiCausalEpochComponent> components;
+  components.reserve(release_records.size());
   for (const ConSanMoiAtomicReleaseRecord &release : release_records) {
     if (!release.valid)
       continue;
     if (release.generation != generation || release.atomic_address != atomic_address ||
         release.producer_owner_id == consumer_owner_id)
       continue;
-    const ConSanMoiAtomicSyncResult token_result = record_acquired_epoch_token(
-        acquired_epoch_tokens, generation, consumer_owner_id, release.producer_owner_id,
-        consan_moi_acquired_epoch_token_value(release.producer_epoch), acquire_instruction_offset);
-    result.metadata_full |= token_result.metadata_full;
-    result.updated_record_count += token_result.updated_record_count;
+    merge_causal_epoch_component(components, release.producer_owner_id, release.producer_epoch);
   }
-  return result;
+  return record_acquired_epoch_components(acquired_epoch_tokens, components, generation,
+                                          consumer_owner_id, acquire_instruction_offset);
 }
 
 ConSanMoiSparseExactByteShadow::ConSanMoiSparseExactByteShadow(uint64_t byte_capacity,
@@ -836,6 +911,7 @@ ConSanMoiExactByteAccessResult ConSanMoiSparseExactByteShadow::access(
   };
 
   std::optional<uint32_t> newest_conflict_index;
+  bool provenance_valid = true;
   const auto consider_intervals = [&](const IntervalMap &intervals) {
     auto overlap = intervals.upper_bound(current.lds_byte_offset);
     if (overlap != intervals.begin()) {
@@ -849,6 +925,7 @@ ConSanMoiExactByteAccessResult ConSanMoiSparseExactByteShadow::access(
       const uint32_t prior_index = overlap->second.provenance_index;
       if (prior_index == 0 || prior_index > provenance_.size()) {
         result.capacity_exhausted = true;
+        provenance_valid = false;
         return false;
       }
       const ConSanMoiExactByteAccess &prior = provenance_[prior_index - 1u];
@@ -877,48 +954,47 @@ ConSanMoiExactByteAccessResult ConSanMoiSparseExactByteShadow::access(
   for (const ConSanMoiShadowAccessKind prior_kind : access_kinds) {
     if (!consan_moi_shadow_kind_conflicts(current.kind, prior_kind))
       continue;
-    const CrossOwnerClass first_class{
+    const EpochKindClass epoch_kind{
         current.generation,
         current.epoch,
         prior_kind,
-        0,
     };
-    for (auto prior_class = cross_owner_intervals_.lower_bound(first_class);
-         prior_class != cross_owner_intervals_.end() &&
-         prior_class->first.generation == current.generation &&
-         prior_class->first.epoch == current.epoch && prior_class->first.kind == prior_kind;
-         ++prior_class) {
-      if (prior_class->first.owner_id == current.owner_id)
-        continue;
-      if (!consider_intervals(prior_class->second))
-        return result;
+    const auto prior_owners = cross_owner_intervals_.find(epoch_kind);
+    if (prior_owners != cross_owner_intervals_.end()) {
+      for (const auto &[owner_id, intervals] : prior_owners->second) {
+        if (owner_id == current.owner_id)
+          continue;
+        if (!consider_intervals(intervals))
+          break;
+      }
     }
+    if (!provenance_valid)
+      break;
     if (!current.exact_address_group)
       continue;
-    const SameSiteClass first_site_class{
-        current.generation,
-        current.epoch,
-        prior_kind,
+    const SameSiteClass same_site{
+        epoch_kind,
         current.owner_id,
         current.instruction_offset,
-        0,
     };
-    for (auto prior_site = same_site_intervals_.lower_bound(first_site_class);
-         prior_site != same_site_intervals_.end() &&
-         prior_site->first.generation == current.generation &&
-         prior_site->first.epoch == current.epoch && prior_site->first.kind == prior_kind &&
-         prior_site->first.owner_id == current.owner_id &&
-         prior_site->first.instruction_offset == current.instruction_offset;
-         ++prior_site) {
-      if (!consider_intervals(prior_site->second))
-        return result;
+    const auto prior_groups = same_site_intervals_.find(same_site);
+    if (prior_groups != same_site_intervals_.end()) {
+      for (const auto &[lane_mask, intervals] : prior_groups->second) {
+        (void)lane_mask;
+        if (!consider_intervals(intervals))
+          break;
+      }
     }
+    if (!provenance_valid)
+      break;
   }
   if (newest_conflict_index) {
     result.conflict = true;
     result.prior = provenance_[*newest_conflict_index - 1u];
     return result;
   }
+  if (!provenance_valid)
+    return result;
 
   if (provenance_.size() >= maximum_access_count_) {
     result.capacity_exhausted = true;
@@ -956,21 +1032,17 @@ ConSanMoiExactByteAccessResult ConSanMoiSparseExactByteShadow::access(
     if (right_remainder)
       intervals.insert_or_assign(right_remainder->first, right_remainder->second);
   };
-  update_intervals(cross_owner_intervals_[CrossOwnerClass{
+  update_intervals(cross_owner_intervals_[EpochKindClass{
       current.generation,
       current.epoch,
       current.kind,
-      current.owner_id,
-  }]);
+  }][current.owner_id]);
   if (current.exact_address_group) {
     update_intervals(same_site_intervals_[SameSiteClass{
-        current.generation,
-        current.epoch,
-        current.kind,
+        EpochKindClass{current.generation, current.epoch, current.kind},
         current.owner_id,
         current.instruction_offset,
-        current.lane_mask,
-    }]);
+    }][current.lane_mask]);
   }
   return result;
 }
@@ -1080,6 +1152,7 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     bool in_barrier_run = false;
   };
   std::vector<ReplayWorkgroupState> workgroups;
+  const size_t synchronization_metadata_capacity = atomic_events.size() + fence_events.size();
   std::optional<size_t> first_workgroup_index;
   auto find_workgroup_state = [&](uint64_t generation, uint32_t workgroup_x, uint32_t workgroup_y,
                                   uint32_t workgroup_z) -> ReplayWorkgroupState & {
@@ -1099,8 +1172,10 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     state.owner_epochs.resize(consan_moi_exact_shadow::max_owner + 1u);
     if (!first_workgroup_index)
       state.exported_exact_shadow_entries.resize(exact_shadow_entries.size());
-    state.atomic_release_records.resize(atomic_events.size());
-    state.acquired_epoch_tokens.resize(atomic_events.size() + fence_events.size());
+    // Atomic and fence synchronization share one causal clock. A component
+    // imported through either mechanism can be published by the other.
+    state.atomic_release_records.resize(synchronization_metadata_capacity);
+    state.acquired_epoch_tokens.resize(synchronization_metadata_capacity);
     workgroups.push_back(std::move(state));
     if (!first_workgroup_index)
       first_workgroup_index = workgroups.size() - 1u;
@@ -1232,30 +1307,60 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     uint32_t workgroup_x = 0;
     uint32_t workgroup_y = 0;
     uint32_t workgroup_z = 0;
-    uint32_t owner_id = 0;
+    uint32_t producer_owner_id = 0;
     uint32_t epoch = 0;
     uint32_t scope = 0;
     uint32_t instruction_offset = 0;
     uint64_t communication_token = 0;
   };
   std::vector<FenceRelease> fence_releases;
-  fence_releases.reserve(fence_events.size());
+  fence_releases.reserve(synchronization_metadata_capacity);
 
   auto publish_fence = [&](const ConSanMoiRecordReplayFenceEvent &record, uint64_t generation,
-                           uint32_t epoch) {
-    for (FenceRelease &release : fence_releases) {
-      if (release.generation == generation && release.workgroup_x == record.workgroup_x &&
-          release.workgroup_y == record.workgroup_y && release.workgroup_z == record.workgroup_z &&
-          release.owner_id == record.owner_id && release.scope == record.scope &&
-          release.communication_token == record.communication_token) {
-        release.epoch = std::max(release.epoch, epoch);
+                           uint32_t epoch,
+                           std::span<const ConSanMoiAcquiredEpochToken> acquired_epoch_tokens) {
+    const std::vector<ConSanMoiCausalEpochComponent> components =
+        collect_causal_epoch_components(acquired_epoch_tokens, generation, record.owner_id, epoch);
+    std::vector<std::optional<size_t>> targets(components.size());
+    size_t new_record_count = 0;
+    for (size_t component_index = 0; component_index < components.size(); ++component_index) {
+      for (size_t release_index = 0; release_index < fence_releases.size(); ++release_index) {
+        const FenceRelease &release = fence_releases[release_index];
+        if (release.generation == generation && release.workgroup_x == record.workgroup_x &&
+            release.workgroup_y == record.workgroup_y &&
+            release.workgroup_z == record.workgroup_z &&
+            release.producer_owner_id == components[component_index].owner_id &&
+            release.scope == record.scope &&
+            release.communication_token == record.communication_token) {
+          targets[component_index] = release_index;
+          break;
+        }
+      }
+      if (!targets[component_index])
+        ++new_record_count;
+    }
+    if (new_record_count > synchronization_metadata_capacity - fence_releases.size())
+      return ConSanMoiAtomicSyncResult{/*metadata_full=*/true, /*updated_record_count=*/0};
+
+    ConSanMoiAtomicSyncResult result;
+    for (size_t component_index = 0; component_index < components.size(); ++component_index) {
+      const ConSanMoiCausalEpochComponent component = components[component_index];
+      if (!targets[component_index]) {
+        fence_releases.push_back({generation, record.workgroup_x, record.workgroup_y,
+                                  record.workgroup_z, component.owner_id, component.epoch,
+                                  record.scope, record.instruction_offset,
+                                  record.communication_token});
+        ++result.updated_record_count;
+        continue;
+      }
+      FenceRelease &release = fence_releases[*targets[component_index]];
+      if (component.epoch > release.epoch) {
+        release.epoch = component.epoch;
         release.instruction_offset = record.instruction_offset;
-        return;
+        ++result.updated_record_count;
       }
     }
-    fence_releases.push_back({generation, record.workgroup_x, record.workgroup_y,
-                              record.workgroup_z, record.owner_id, epoch, record.scope,
-                              record.instruction_offset, record.communication_token});
+    return result;
   };
 
   for (const ReplayEvent &event : events) {
@@ -1297,25 +1402,31 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
       }
       const uint32_t epoch = record.epoch != 0 ? record.epoch : state.owner_epochs[record.owner_id];
       if (acquire) {
+        std::vector<ConSanMoiCausalEpochComponent> components;
+        components.reserve(fence_releases.size());
         for (const FenceRelease &prior : fence_releases) {
           // The current shadow tracks workgroup-local LDS. Even device/system
           // fences cannot order an LDS owner in a different workgroup.
           if (prior.generation != generation || prior.workgroup_x != record.workgroup_x ||
               prior.workgroup_y != record.workgroup_y || prior.workgroup_z != record.workgroup_z ||
-              prior.owner_id == record.owner_id ||
+              prior.producer_owner_id == record.owner_id ||
               prior.communication_token != record.communication_token)
             continue;
           const uint32_t common_scope = std::min(prior.scope, record.scope);
           if (common_scope < 1)
             continue;
-          const ConSanMoiAtomicSyncResult token_result = record_acquired_epoch_token(
-              state.acquired_epoch_tokens, generation, record.owner_id, prior.owner_id,
-              consan_moi_acquired_epoch_token_value(prior.epoch), record.instruction_offset);
-          replay.metadata_full |= token_result.metadata_full;
+          merge_causal_epoch_component(components, prior.producer_owner_id, prior.epoch);
         }
+        const ConSanMoiAtomicSyncResult token_result =
+            record_acquired_epoch_components(state.acquired_epoch_tokens, components, generation,
+                                             record.owner_id, record.instruction_offset);
+        replay.metadata_full |= token_result.metadata_full;
       }
-      if (release)
-        publish_fence(record, generation, epoch);
+      if (release) {
+        const ConSanMoiAtomicSyncResult release_result =
+            publish_fence(record, generation, epoch, state.acquired_epoch_tokens);
+        replay.metadata_full |= release_result.metadata_full;
+      }
       continue;
     }
 
@@ -1344,8 +1455,8 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
         if (record.operation != ConSanMoiAtomicOperation::CompareExchange ||
             *outcome == ConSanMoiAtomicOutcome::Success)
           atomic_result = consan_moi_record_replay_atomic_release(
-              state.atomic_release_records, generation, record.atomic_address, record.owner_id,
-              epoch, record.instruction_offset);
+              state.atomic_release_records, state.acquired_epoch_tokens, generation,
+              record.atomic_address, record.owner_id, epoch, record.instruction_offset);
         break;
       case ConSanMoiAtomicEventKind::Acquire:
         atomic_result = consan_moi_record_replay_atomic_acquire(
@@ -1361,8 +1472,8 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
         if (record.operation != ConSanMoiAtomicOperation::CompareExchange ||
             *outcome == ConSanMoiAtomicOutcome::Success) {
           const ConSanMoiAtomicSyncResult release_result = consan_moi_record_replay_atomic_release(
-              state.atomic_release_records, generation, record.atomic_address, record.owner_id,
-              epoch, record.instruction_offset);
+              state.atomic_release_records, state.acquired_epoch_tokens, generation,
+              record.atomic_address, record.owner_id, epoch, record.instruction_offset);
           atomic_result.metadata_full |= release_result.metadata_full;
         }
         break;
@@ -1439,12 +1550,6 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     const ConSanMoiExactByteAccessResult access_result =
         state.exact_byte_shadow.access(access, state.acquired_epoch_tokens);
     ++replay.processed_access_count;
-    if (access_result.capacity_exhausted) {
-      replay.metadata_full = true;
-      replay.conflict = true;
-      append_diagnostic(state, make_metadata_full_diagnostic(access), record.event_index);
-      continue;
-    }
     if (access_result.conflict) {
       if (!access_result.prior) {
         replay.metadata_full = true;
@@ -1455,6 +1560,13 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
       replay.conflict = true;
       append_diagnostic(state, make_access_conflict_diagnostic(*access_result.prior, access),
                         record.event_index);
+      replay.metadata_full |= access_result.capacity_exhausted;
+      continue;
+    }
+    if (access_result.capacity_exhausted) {
+      replay.metadata_full = true;
+      replay.conflict = true;
+      append_diagnostic(state, make_metadata_full_diagnostic(access), record.event_index);
       continue;
     }
     const uint64_t packed = pack_consan_moi_exact_shadow_entry(

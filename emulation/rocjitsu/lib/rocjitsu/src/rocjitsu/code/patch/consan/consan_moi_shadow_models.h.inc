@@ -597,7 +597,10 @@ consan_moi_exact_byte_overlap(const ConSanMoiExactByteAccess &first,
 
 /// Target-neutral conflict contract for exact-byte provenance.
 /// Different sites in one wave are program ordered. Distinct exact address
-/// groups from one site are concurrent lane groups and conflict on overlap.
+/// groups from one site are conservatively treated as concurrent lane groups
+/// and conflict on overlap. event_index is publication order, not a dynamic
+/// instruction-instance identity: automatic capture assigns a separate index
+/// while publishing each group from one address-group loop.
 [[nodiscard]] constexpr bool
 consan_moi_exact_byte_accesses_conflict(const ConSanMoiExactByteAccess &current,
                                         const ConSanMoiExactByteAccess &prior) {
@@ -614,13 +617,19 @@ consan_moi_exact_byte_accesses_conflict(const ConSanMoiExactByteAccess &current,
 }
 
 /// Bounded sparse byte-range provenance for host-side Record/Replay detection.
-/// Cross-owner state is partitioned by generation, epoch, owner, and access
-/// kind. Same-owner exact-group state additionally retains the instruction
-/// site and lane group. An access replaces byte intervals only within a class
-/// that is equivalent for every future conflict and acquired-order decision.
-/// Storage stays linear in admitted accesses and interval boundaries rather
-/// than the LDS extent. maximum_access_count is a structural input bound, not
-/// a second runtime policy budget.
+/// Cross-owner state is partitioned by generation, epoch, access kind, and
+/// owner. Same-owner exact-group state additionally retains the instruction
+/// site and lane group. These keys contain every non-spatial field read by
+/// consan_moi_exact_byte_accesses_conflict; the cross-owner key also contains
+/// every prior-access field read by consan_moi_acquired_epoch_orders. An access
+/// replaces byte intervals only within a class that is equivalent for every
+/// future conflict and acquired-order decision. Storage stays linear in
+/// admitted accesses and interval boundaries rather than the LDS extent.
+/// Lookup visits the conflicting access-kind classes and the owners or lane
+/// groups in the current workgroup that share the relevant class; it does not
+/// scale with the LDS extent or the total retained site inventory.
+/// maximum_access_count is a structural input bound, not a second runtime
+/// policy budget.
 class ConSanMoiSparseExactByteShadow {
 public:
   explicit ConSanMoiSparseExactByteShadow(uint64_t byte_capacity, uint32_t maximum_access_count);
@@ -635,33 +644,31 @@ private:
     uint32_t provenance_index = 0;
   };
 
-  struct CrossOwnerClass {
+  struct EpochKindClass {
     uint64_t generation = 0;
     uint32_t epoch = 0;
     ConSanMoiShadowAccessKind kind = ConSanMoiShadowAccessKind::Empty;
-    uint32_t owner_id = 0;
 
-    auto operator<=>(const CrossOwnerClass &) const = default;
+    auto operator<=>(const EpochKindClass &) const = default;
   };
 
   struct SameSiteClass {
-    uint64_t generation = 0;
-    uint32_t epoch = 0;
-    ConSanMoiShadowAccessKind kind = ConSanMoiShadowAccessKind::Empty;
+    EpochKindClass epoch_kind;
     uint32_t owner_id = 0;
     uint32_t instruction_offset = 0;
-    uint64_t lane_mask = 0;
 
     auto operator<=>(const SameSiteClass &) const = default;
   };
 
   using IntervalMap = std::map<uint64_t, Interval>;
+  using OwnerIntervalMaps = std::map<uint32_t, IntervalMap>;
+  using LaneIntervalMaps = std::map<uint64_t, IntervalMap>;
 
   uint64_t byte_capacity_ = 0;
   uint32_t maximum_access_count_ = 0;
   std::vector<ConSanMoiExactByteAccess> provenance_;
-  std::map<CrossOwnerClass, IntervalMap> cross_owner_intervals_;
-  std::map<SameSiteClass, IntervalMap> same_site_intervals_;
+  std::map<EpochKindClass, OwnerIntervalMaps> cross_owner_intervals_;
+  std::map<SameSiteClass, LaneIntervalMaps> same_site_intervals_;
 };
 
 [[nodiscard]] constexpr uint32_t consan_moi_inline_acquired_epoch_token_value(uint32_t epoch) {
@@ -1088,6 +1095,14 @@ consan_moi_record_replay_atomic_release(std::span<ConSanMoiAtomicReleaseRecord> 
                                         uint64_t generation, uint64_t atomic_address,
                                         uint32_t producer_owner_id, uint32_t producer_epoch,
                                         uint32_t release_instruction_offset);
+
+/// Publishes the releasing owner's sparse causal clock at atomic_address. The
+/// own epoch and every imported producer epoch commit together or not at all.
+[[nodiscard]] ConSanMoiAtomicSyncResult consan_moi_record_replay_atomic_release(
+    std::span<ConSanMoiAtomicReleaseRecord> release_records,
+    std::span<const ConSanMoiAcquiredEpochToken> acquired_epoch_tokens, uint64_t generation,
+    uint64_t atomic_address, uint32_t producer_owner_id, uint32_t producer_epoch,
+    uint32_t release_instruction_offset);
 
 [[nodiscard]] ConSanMoiAtomicSyncResult consan_moi_record_replay_atomic_acquire(
     std::span<const ConSanMoiAtomicReleaseRecord> release_records,

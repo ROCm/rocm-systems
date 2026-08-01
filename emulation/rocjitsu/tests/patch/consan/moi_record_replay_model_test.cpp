@@ -1091,6 +1091,61 @@ TEST(ConSanMoi, RecordReplayAtomicReleaseKeepsMaxEpochPerProducerAddress) {
   EXPECT_EQ(full.updated_record_count, 0u);
 }
 
+TEST(ConSanMoi, RecordReplayAtomicReleasePublishesCausalClockTransactionally) {
+  const std::array<ConSanMoiAcquiredEpochToken, 1> acquired{{
+      ConSanMoiAcquiredEpochToken{
+          /*valid=*/true,
+          /*generation=*/7,
+          /*consumer_owner_id=*/1,
+          /*producer_owner_id=*/0,
+          /*producer_epoch_plus_one=*/3,
+          /*acquire_instruction_offset=*/0x200,
+      },
+  }};
+
+  std::array<ConSanMoiAtomicReleaseRecord, 2> releases{};
+  const ConSanMoiAtomicSyncResult published = consan_moi_record_replay_atomic_release(
+      releases, acquired, /*generation=*/7, /*atomic_address=*/0x5000,
+      /*producer_owner_id=*/1, /*producer_epoch=*/4, /*release_instruction_offset=*/0x300);
+  EXPECT_FALSE(published.metadata_full);
+  EXPECT_EQ(published.updated_record_count, 2u);
+  const auto owner_zero =
+      std::ranges::find(releases, 0u, &ConSanMoiAtomicReleaseRecord::producer_owner_id);
+  const auto owner_one =
+      std::ranges::find(releases, 1u, &ConSanMoiAtomicReleaseRecord::producer_owner_id);
+  ASSERT_NE(owner_zero, releases.end());
+  ASSERT_NE(owner_one, releases.end());
+  EXPECT_EQ(owner_zero->producer_epoch, 2u);
+  EXPECT_EQ(owner_one->producer_epoch, 4u);
+
+  std::array<ConSanMoiAcquiredEpochToken, 2> imported{};
+  const ConSanMoiAtomicSyncResult acquired_by_two = consan_moi_record_replay_atomic_acquire(
+      releases, imported, /*generation=*/7, /*atomic_address=*/0x5000,
+      /*consumer_owner_id=*/2, /*acquire_instruction_offset=*/0x400);
+  EXPECT_FALSE(acquired_by_two.metadata_full);
+  EXPECT_EQ(acquired_by_two.updated_record_count, 2u);
+  EXPECT_NE(std::ranges::find(imported, 0u, &ConSanMoiAcquiredEpochToken::producer_owner_id),
+            imported.end());
+  EXPECT_NE(std::ranges::find(imported, 1u, &ConSanMoiAcquiredEpochToken::producer_owner_id),
+            imported.end());
+
+  std::array<ConSanMoiAcquiredEpochToken, 1> insufficient_import{};
+  const ConSanMoiAtomicSyncResult rejected_import = consan_moi_record_replay_atomic_acquire(
+      releases, insufficient_import, /*generation=*/7, /*atomic_address=*/0x5000,
+      /*consumer_owner_id=*/2, /*acquire_instruction_offset=*/0x400);
+  EXPECT_TRUE(rejected_import.metadata_full);
+  EXPECT_EQ(rejected_import.updated_record_count, 0u);
+  EXPECT_FALSE(insufficient_import[0].valid);
+
+  std::array<ConSanMoiAtomicReleaseRecord, 1> insufficient{};
+  const ConSanMoiAtomicSyncResult rejected = consan_moi_record_replay_atomic_release(
+      insufficient, acquired, /*generation=*/7, /*atomic_address=*/0x5000,
+      /*producer_owner_id=*/1, /*producer_epoch=*/4, /*release_instruction_offset=*/0x300);
+  EXPECT_TRUE(rejected.metadata_full);
+  EXPECT_EQ(rejected.updated_record_count, 0u);
+  EXPECT_FALSE(insufficient[0].valid);
+}
+
 TEST(ConSanMoi, RecordReplayAtomicEventsSuppressOrderedConflict) {
   ConSanMoiReportHeader header = make_consan_moi_report_header(
       /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/2,
@@ -1144,6 +1199,118 @@ TEST(ConSanMoi, RecordReplayAtomicEventsSuppressOrderedConflict) {
   EXPECT_EQ(final.owner_id, 1u);
   EXPECT_EQ(final.epoch, 0u);
   EXPECT_EQ(final.instruction_offset, 0x20u);
+}
+
+TEST(ConSanMoi, RecordReplayAtomicEventsPropagateOrderingAcrossAddresses) {
+  ConSanMoiReportHeader header = make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/3,
+      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/1,
+      /*sampled_watchpoint_capacity=*/0);
+  header.access_record_count = 3;
+
+  std::array<ConSanMoiAccessRecord, 3> records{};
+  for (uint32_t owner = 0; owner < records.size(); ++owner) {
+    records[owner].wave_id = owner;
+    records[owner].event_index = owner * 3;
+    records[owner].instruction_offset = 0x10 + owner * 0x10;
+    records[owner].access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
+    records[owner].lds_byte_count = 4;
+    records[owner].cell_count = 1;
+  }
+
+  std::array<ConSanMoiRecordReplayAtomicEvent, 4> atomics{};
+  atomics[0].owner_id = 0;
+  atomics[0].atomic_address = 0x4000;
+  atomics[0].instruction_offset = 0x100;
+  atomics[0].event_index = 1;
+  atomics[0].kind = ConSanMoiAtomicEventKind::Release;
+
+  atomics[1].owner_id = 1;
+  atomics[1].atomic_address = 0x4000;
+  atomics[1].instruction_offset = 0x200;
+  atomics[1].event_index = 2;
+  atomics[1].kind = ConSanMoiAtomicEventKind::Acquire;
+
+  atomics[2].owner_id = 1;
+  atomics[2].atomic_address = 0x5000;
+  atomics[2].instruction_offset = 0x300;
+  atomics[2].event_index = 4;
+  atomics[2].kind = ConSanMoiAtomicEventKind::Release;
+
+  atomics[3].owner_id = 2;
+  atomics[3].atomic_address = 0x5000;
+  atomics[3].instruction_offset = 0x400;
+  atomics[3].event_index = 5;
+  atomics[3].kind = ConSanMoiAtomicEventKind::Acquire;
+
+  std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
+  std::array<uint64_t, 1> shadow{};
+  const ConSanMoiRecordReplayResult replay = consan_moi_record_replay_access_records(
+      header, records, std::span<const ConSanMoiBarrierRecord>{}, atomics, diagnostics, shadow);
+
+  EXPECT_EQ(replay.processed_access_count, 3u);
+  EXPECT_EQ(replay.processed_atomic_count, 4u);
+  EXPECT_EQ(replay.unsupported_atomic_count, 0u);
+  EXPECT_FALSE(replay.metadata_full);
+  EXPECT_FALSE(replay.conflict);
+  EXPECT_EQ(header.diagnostic_count, 0u);
+}
+
+TEST(ConSanMoi, RecordReplayPropagatesOrderingAcrossAtomicAndFence) {
+  ConSanMoiReportHeader header = make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/3,
+      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/1,
+      /*sampled_watchpoint_capacity=*/0);
+  header.access_record_count = 3;
+
+  std::array<ConSanMoiAccessRecord, 3> records{};
+  for (uint32_t owner = 0; owner < records.size(); ++owner) {
+    records[owner].wave_id = owner;
+    records[owner].event_index = owner * 3;
+    records[owner].instruction_offset = 0x10 + owner * 0x10;
+    records[owner].access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
+    records[owner].lds_byte_count = 4;
+    records[owner].cell_count = 1;
+  }
+
+  std::array<ConSanMoiRecordReplayAtomicEvent, 2> atomics{};
+  atomics[0].owner_id = 0;
+  atomics[0].atomic_address = 0x4000;
+  atomics[0].instruction_offset = 0x100;
+  atomics[0].event_index = 1;
+  atomics[0].kind = ConSanMoiAtomicEventKind::Release;
+  atomics[1].owner_id = 1;
+  atomics[1].atomic_address = 0x4000;
+  atomics[1].instruction_offset = 0x200;
+  atomics[1].event_index = 2;
+  atomics[1].kind = ConSanMoiAtomicEventKind::Acquire;
+
+  std::array<ConSanMoiRecordReplayFenceEvent, 2> fences{};
+  fences[0].owner_id = 1;
+  fences[0].instruction_offset = 0x300;
+  fences[0].event_index = 4;
+  fences[0].kind = ConSanMoiFenceEventKind::Release;
+  fences[0].scope = 1;
+  fences[0].communication_token = 0x5000;
+  fences[1].owner_id = 2;
+  fences[1].instruction_offset = 0x400;
+  fences[1].event_index = 5;
+  fences[1].kind = ConSanMoiFenceEventKind::Acquire;
+  fences[1].scope = 1;
+  fences[1].communication_token = 0x5000;
+
+  std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
+  std::array<uint64_t, 1> shadow{};
+  const ConSanMoiRecordReplayResult replay = consan_moi_record_replay_access_records(
+      header, records, std::span<const ConSanMoiBarrierRecord>{}, atomics, fences, diagnostics,
+      shadow);
+
+  EXPECT_EQ(replay.processed_access_count, 3u);
+  EXPECT_EQ(replay.processed_atomic_count, 2u);
+  EXPECT_EQ(replay.processed_fence_count, 2u);
+  EXPECT_FALSE(replay.metadata_full);
+  EXPECT_FALSE(replay.conflict);
+  EXPECT_EQ(header.diagnostic_count, 0u);
 }
 
 TEST(ConSanMoi, RecordReplayAtomicEventsRequireMatchingAddress) {
@@ -1445,29 +1612,20 @@ TEST(ConSanMoi, SparseExactByteShadowRetainsSelectivelyOrderedOwners) {
       /*generation=*/7,
       /*owner_id=*/1,
       /*epoch=*/0,
-      ConSanMoiShadowAccessKind::Write,
+      ConSanMoiShadowAccessKind::Read,
       /*lds_byte_offset=*/0,
       /*lds_byte_count=*/4,
       /*instruction_offset=*/0x10,
       /*lane_mask=*/0x1,
   };
-  ConSanMoiExactByteAccess ordered = first;
-  ordered.owner_id = 2;
-  ordered.instruction_offset = 0x20;
-  const std::array<ConSanMoiAcquiredEpochToken, 1> first_to_ordered{{
-      ConSanMoiAcquiredEpochToken{
-          /*valid=*/true,
-          /*generation=*/7,
-          /*consumer_owner_id=*/2,
-          /*producer_owner_id=*/1,
-          /*producer_epoch_plus_one=*/1,
-          /*acquire_instruction_offset=*/0x100,
-      },
-  }};
+  ConSanMoiExactByteAccess second = first;
+  second.owner_id = 2;
+  second.instruction_offset = 0x20;
   ConSanMoiExactByteAccess probe = first;
   probe.owner_id = 3;
+  probe.kind = ConSanMoiShadowAccessKind::Write;
   probe.instruction_offset = 0x30;
-  const std::array<ConSanMoiAcquiredEpochToken, 1> ordered_to_probe{{
+  const std::array<ConSanMoiAcquiredEpochToken, 1> second_to_probe{{
       ConSanMoiAcquiredEpochToken{
           /*valid=*/true,
           /*generation=*/7,
@@ -1479,14 +1637,14 @@ TEST(ConSanMoi, SparseExactByteShadowRetainsSelectivelyOrderedOwners) {
   }};
 
   EXPECT_FALSE(model.access(first).conflict);
-  EXPECT_FALSE(model.access(ordered, first_to_ordered).conflict);
-  const ConSanMoiExactByteAccessResult conflict = model.access(probe, ordered_to_probe);
+  EXPECT_FALSE(model.access(second).conflict);
+  const ConSanMoiExactByteAccessResult conflict = model.access(probe, second_to_probe);
   ASSERT_TRUE(conflict.conflict);
   ASSERT_TRUE(conflict.prior);
   EXPECT_EQ(conflict.prior->owner_id, first.owner_id);
 }
 
-TEST(ConSanMoi, SparseExactByteShadowBoundsLargeOrderedSiteInventory) {
+TEST(ConSanMoi, SparseExactByteShadowScalesAcrossLargeOrderedSiteInventory) {
   constexpr uint32_t site_count = 10000;
   ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4,
                                        /*maximum_access_count=*/site_count + 1);
@@ -1583,7 +1741,7 @@ TEST(ConSanMoi, SparseExactByteShadowPreservesRemainderAboveUint32Boundary) {
   EXPECT_EQ(result.prior->instruction_offset, outer.instruction_offset);
 }
 
-TEST(ConSanMoi, SparseExactByteShadowMatchesDenseByteOracle) {
+TEST(ConSanMoi, SparseExactByteShadowMatchesFullHistoryOracle) {
   constexpr uint32_t byte_capacity = 64;
   constexpr uint32_t access_count = 40;
   for (uint64_t seed = 1; seed <= 256; ++seed) {
@@ -1595,11 +1753,11 @@ TEST(ConSanMoi, SparseExactByteShadowMatchesDenseByteOracle) {
     };
 
     ConSanMoiSparseExactByteShadow model(byte_capacity, access_count);
-    std::vector<ConSanMoiExactByteAccess> dense;
+    std::vector<ConSanMoiExactByteAccess> history;
     for (uint32_t access_index = 0; access_index < access_count; ++access_index) {
       SCOPED_TRACE(access_index);
       ConSanMoiExactByteAccess current;
-      current.generation = 7;
+      current.generation = 7 + next_random() % 3;
       current.owner_id = 1 + static_cast<uint32_t>(next_random() % 4);
       current.epoch = static_cast<uint32_t>(next_random() % 3);
       current.kind =
@@ -1611,31 +1769,59 @@ TEST(ConSanMoi, SparseExactByteShadowMatchesDenseByteOracle) {
       current.lane_mask = uint64_t{1} << (next_random() % 8);
       current.exact_address_group = (next_random() & 1u) != 0;
 
-      std::optional<ConSanMoiExactByteAccess> dense_prior;
-      for (auto prior = dense.rbegin(); prior != dense.rend(); ++prior) {
-        if (consan_moi_exact_byte_accesses_conflict(current, *prior)) {
-          dense_prior = *prior;
-          break;
-        }
+      std::array<ConSanMoiAcquiredEpochToken, 4> tokens{};
+      for (ConSanMoiAcquiredEpochToken &token : tokens) {
+        token.valid = (next_random() & 1u) != 0;
+        token.generation = (next_random() & 3u) == 0 ? current.generation + 1 : current.generation;
+        token.consumer_owner_id =
+            (next_random() & 3u) == 0 ? current.owner_id % 4 + 1 : current.owner_id;
+        token.producer_owner_id = 1 + static_cast<uint32_t>(next_random() % 4);
+        token.producer_epoch_plus_one = 1 + static_cast<uint32_t>(next_random() % 4);
+        token.acquire_instruction_offset = static_cast<uint32_t>(next_random() % 8) * 4;
       }
 
-      const ConSanMoiExactByteAccessResult sparse = model.access(current);
+      const ConSanMoiExactShadowEntry current_entry{
+          current.kind,
+          current.owner_id,
+          current.epoch,
+          static_cast<uint32_t>(current.generation),
+          current.instruction_offset,
+      };
+
+      std::optional<ConSanMoiExactByteAccess> history_prior;
+      for (auto prior = history.rbegin(); prior != history.rend(); ++prior) {
+        if (!consan_moi_exact_byte_accesses_conflict(current, *prior))
+          continue;
+        const ConSanMoiExactShadowEntry prior_entry{
+            prior->kind,
+            prior->owner_id,
+            prior->epoch,
+            static_cast<uint32_t>(prior->generation),
+            prior->instruction_offset,
+        };
+        if (consan_moi_acquired_epoch_orders(tokens, current_entry, prior_entry))
+          continue;
+        history_prior = *prior;
+        break;
+      }
+
+      const ConSanMoiExactByteAccessResult sparse = model.access(current, tokens);
       ASSERT_FALSE(sparse.capacity_exhausted);
-      EXPECT_EQ(sparse.conflict, dense_prior.has_value());
-      EXPECT_EQ(sparse.prior.has_value(), dense_prior.has_value());
-      if (dense_prior) {
+      EXPECT_EQ(sparse.conflict, history_prior.has_value());
+      EXPECT_EQ(sparse.prior.has_value(), history_prior.has_value());
+      if (history_prior) {
         ASSERT_TRUE(sparse.prior);
-        EXPECT_EQ(sparse.prior->owner_id, dense_prior->owner_id);
-        EXPECT_EQ(sparse.prior->epoch, dense_prior->epoch);
-        EXPECT_EQ(sparse.prior->kind, dense_prior->kind);
-        EXPECT_EQ(sparse.prior->lds_byte_offset, dense_prior->lds_byte_offset);
-        EXPECT_EQ(sparse.prior->lds_byte_count, dense_prior->lds_byte_count);
-        EXPECT_EQ(sparse.prior->instruction_offset, dense_prior->instruction_offset);
-        EXPECT_EQ(sparse.prior->lane_mask, dense_prior->lane_mask);
-        EXPECT_EQ(sparse.prior->exact_address_group, dense_prior->exact_address_group);
+        EXPECT_EQ(sparse.prior->owner_id, history_prior->owner_id);
+        EXPECT_EQ(sparse.prior->epoch, history_prior->epoch);
+        EXPECT_EQ(sparse.prior->kind, history_prior->kind);
+        EXPECT_EQ(sparse.prior->lds_byte_offset, history_prior->lds_byte_offset);
+        EXPECT_EQ(sparse.prior->lds_byte_count, history_prior->lds_byte_count);
+        EXPECT_EQ(sparse.prior->instruction_offset, history_prior->instruction_offset);
+        EXPECT_EQ(sparse.prior->lane_mask, history_prior->lane_mask);
+        EXPECT_EQ(sparse.prior->exact_address_group, history_prior->exact_address_group);
         continue;
       }
-      dense.push_back(current);
+      history.push_back(current);
     }
   }
 }
@@ -1747,6 +1933,9 @@ TEST(ConSanMoi, RecordReplayRetainsSameSiteGroupAcrossOrderedSite) {
     records[index].lds_byte_count = 4;
     records[index].cell_count = 1;
     records[index].flags = kConSanMoiAccessRecordFlagExactAddressGroupMask;
+    // Automatic capture increments the publication counter inside its
+    // address-group loop, so concurrent groups from one execution have
+    // distinct event indices.
     records[index].event_index = index + 1;
   }
   records[0].lane_mask = 0x1;
