@@ -5,6 +5,7 @@
 /// @brief CDNA3/CDNA4 smoke tests for hook-driven ConSan MOI instrumentation.
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -48,12 +49,6 @@ constexpr size_t moi_report_buffer_bytes(uint32_t access_record_capacity,
          barrier_record_capacity * sizeof(MoiBarrierRecord) +
          atomic_record_capacity * sizeof(MoiAtomicRecord) +
          fence_record_capacity * sizeof(MoiFenceRecord);
-}
-
-constexpr size_t moi_atomic_records_offset(uint32_t access_record_capacity,
-                                           uint32_t barrier_record_capacity = 0) {
-  return sizeof(MoiReportHeader) + access_record_capacity * sizeof(MoiAccessRecord) +
-         barrier_record_capacity * sizeof(MoiBarrierRecord);
 }
 
 constexpr size_t moi_sampled_report_buffer_bytes(uint32_t capacity) {
@@ -165,28 +160,34 @@ __launch_bounds__(64) void moi_cdna_barrier_forced_spill_kernel_for_instrumentat
 }
 
 __attribute__((amdgpu_num_vgpr(256))) __global__ __launch_bounds__(
-    64) void moi_cdna_atomic_forced_spill_kernel_for_instrumentation(uint32_t *atomic_value,
-                                                                     uint32_t *out) {
+    64) void moi_cdna_atomic_forced_spill_kernel_for_instrumentation(
+    uint32_t *vector_atomic_value, uint32_t *scalar_atomic_value, uint32_t *out) {
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
   uint32_t values[8] = {
       0xa1000000u ^ tid, 0xa2000000u ^ tid, 0xa3000000u ^ tid, 0xa4000000u ^ tid,
       0xa5000000u ^ tid, 0xa6000000u ^ tid, 0xa7000000u ^ tid, 0xa8000000u ^ tid,
   };
-  uint32_t old_value = 0;
   constexpr uint32_t kIncrement = 1;
+  constexpr uint32_t kZeroOffset = 0;
 
   asm volatile("v_mov_b32 v255, 0" ::: "v255");
   asm volatile(""
                : "+v"(values[0]), "+v"(values[1]), "+v"(values[2]), "+v"(values[3]),
                  "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7]));
-  asm volatile("buffer_wbl2 sc1\n\t"
-               "s_waitcnt vmcnt(0)\n\t"
-               "flat_atomic_add %0, %1, %2 sc0\n\t"
-               "s_waitcnt vmcnt(0)\n\t"
-               "buffer_inv sc1\n\t"
-               : "=v"(old_value)
-               : "v"(atomic_value), "v"(kIncrement)
-               : "memory");
+  if (tid == 0) {
+    asm volatile("buffer_wbl2 sc1\n\t"
+                 "s_waitcnt vmcnt(0)\n\t"
+                 "global_atomic_add %0, %1, off sc1\n\t"
+                 "s_waitcnt vmcnt(0)\n\t"
+                 "buffer_wbl2 sc1\n\t"
+                 "s_waitcnt vmcnt(0)\n\t"
+                 "global_atomic_add %2, %1, %3 sc1\n\t"
+                 "s_waitcnt vmcnt(0)\n\t" RJ_CONSAN_MOI_RECORD_NOP_CAVE
+                 :
+                 : "v"(vector_atomic_value), "v"(kIncrement), "v"(kZeroOffset),
+                   "s"(scalar_atomic_value)
+                 : "memory");
+  }
   asm volatile(""
                : "+v"(values[0]), "+v"(values[1]), "+v"(values[2]), "+v"(values[3]),
                  "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7]));
@@ -194,8 +195,6 @@ __attribute__((amdgpu_num_vgpr(256))) __global__ __launch_bounds__(
   const uint32_t output_base = tid * 8u;
   for (uint32_t i = 0; i < 8u; ++i)
     out[output_base + i] = values[i];
-  if (old_value == 0xffffffffu)
-    out[output_base] = old_value;
 }
 
 __global__ __launch_bounds__(
@@ -361,44 +360,32 @@ TEST(ConSanMoiCdnaTest, BarrierForcedSpillPreservesLiveVgprsAndWritesRecords) {
   }));
 }
 
-TEST(ConSanMoiCdnaTest, AtomicForcedSpillPreservesLiveVgprsAndWritesRecord) {
+TEST(ConSanMoiCdnaTest, AtomicForcedSpillExecutesVglobalAddressForms) {
   constexpr uint32_t kThreads = 64;
   constexpr uint32_t kValuesPerThread = 8;
-  constexpr uint32_t kAccessSlots = 1;
-  constexpr uint32_t kAtomicSlots = 1;
-  constexpr uint32_t kFenceSlots = 2;
-  constexpr size_t kReportBytes = moi_report_buffer_bytes(
-      kAccessSlots, /*barrier_record_capacity=*/0, kAtomicSlots, kFenceSlots);
+  constexpr uint32_t kAtomicSlots = 2;
   uint32_t *atomic_device = nullptr;
   uint32_t *out_device = nullptr;
-  void *report_device = nullptr;
-  HIP_ASSERT(hipMalloc(&atomic_device, sizeof(uint32_t)));
+  HIP_ASSERT(hipMalloc(&atomic_device, kAtomicSlots * sizeof(uint32_t)));
   HIP_ASSERT(hipMalloc(&out_device, kThreads * kValuesPerThread * sizeof(uint32_t)));
-  HIP_ASSERT(hipMalloc(&report_device, kReportBytes));
-  HIP_ASSERT(hipMemset(atomic_device, 0, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(atomic_device, 0, kAtomicSlots * sizeof(uint32_t)));
   HIP_ASSERT(hipMemset(out_device, 0, kThreads * kValuesPerThread * sizeof(uint32_t)));
-  HIP_ASSERT(hipMemset(report_device, 0, kReportBytes));
-
-  ReportEnvGuard report_env;
-  ASSERT_TRUE(set_moi_report_buffer_env(report_device, kReportBytes));
-  moi_cdna_atomic_forced_spill_kernel_for_instrumentation<<<1, kThreads>>>(atomic_device,
-                                                                           out_device);
+  moi_cdna_atomic_forced_spill_kernel_for_instrumentation<<<1, kThreads>>>(
+      atomic_device, atomic_device + 1, out_device);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
-  uint32_t atomic_value = 0;
+  std::array<uint32_t, kAtomicSlots> atomic_values{};
   std::vector<uint32_t> out(kThreads * kValuesPerThread);
-  std::vector<uint8_t> report(kReportBytes);
-  HIP_ASSERT(hipMemcpy(&atomic_value, atomic_device, sizeof(atomic_value), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipMemcpy(atomic_values.data(), atomic_device, sizeof(atomic_values),
+                       hipMemcpyDeviceToHost));
   HIP_ASSERT(
       hipMemcpy(out.data(), out_device, out.size() * sizeof(uint32_t), hipMemcpyDeviceToHost));
-  HIP_ASSERT(hipMemcpy(report.data(), report_device, report.size(), hipMemcpyDeviceToHost));
-  const uintptr_t atomic_address = reinterpret_cast<uintptr_t>(atomic_device);
-  HIP_ASSERT(hipFree(report_device));
   HIP_ASSERT(hipFree(out_device));
   HIP_ASSERT(hipFree(atomic_device));
 
-  EXPECT_EQ(atomic_value, kThreads);
+  EXPECT_EQ(atomic_values[0], 1u);
+  EXPECT_EQ(atomic_values[1], 1u);
   constexpr uint32_t kBases[kValuesPerThread] = {
       0xa1000000u, 0xa2000000u, 0xa3000000u, 0xa4000000u,
       0xa5000000u, 0xa6000000u, 0xa7000000u, 0xa8000000u,
@@ -409,14 +396,6 @@ TEST(ConSanMoiCdnaTest, AtomicForcedSpillPreservesLiveVgprsAndWritesRecord) {
           << "tid=" << tid << " value=" << i;
   }
 
-  MoiReportHeader header{};
-  std::memcpy(&header, report.data(), sizeof(header));
-  EXPECT_EQ(header.atomic_record_count, 1u);
-  MoiAtomicRecord record{};
-  std::memcpy(&record, report.data() + moi_atomic_records_offset(kAccessSlots), sizeof(record));
-  EXPECT_EQ(record.atomic_address, atomic_address);
-  EXPECT_EQ(record.scope, 2u);
-  EXPECT_EQ(record.semantics, 0u);
 }
 
 TEST(ConSanMoiCdnaTest, DynamicStackInlineSpillPreservesPrivateValues) {

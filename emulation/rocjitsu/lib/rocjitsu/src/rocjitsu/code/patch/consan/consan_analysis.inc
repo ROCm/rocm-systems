@@ -1414,6 +1414,9 @@ void fill_cdna_flat_like_atomic_raw(ConSanAtomicSite &site, const Raw &raw) {
   // ConSan's admitted FLAT and VGLOBAL forms are device-scoped, matching the
   // builder contract.
   site.raw_scope = 2u;
+  // Preserve the target-native cache-policy bits in the common semantics
+  // field. Unlike gfx12 TH, SC0 also selects whether the old value is returned.
+  site.raw_th = static_cast<uint32_t>(raw.sc0) | (static_cast<uint32_t>(raw.sc1) << 1u);
   site.returns_old_value = raw.sc0 != 0u;
 }
 

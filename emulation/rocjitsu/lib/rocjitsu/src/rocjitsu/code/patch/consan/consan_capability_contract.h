@@ -218,9 +218,6 @@ consan_capability_disposition(rj_code_target_id_t target, ConSanCapabilityEngine
     return supercollider ? ConSanCapabilityDisposition::MutationOnly
                          : ConSanCapabilityDisposition::Supported;
   case ConSanCapabilityForm::OrderedVglobalAtomic:
-    if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-        engine == ConSanCapabilityEngine::InlineShadow)
-      return ConSanCapabilityDisposition::Unsupported;
     return supercollider ? ConSanCapabilityDisposition::MutationOnly
                          : ConSanCapabilityDisposition::Supported;
   case ConSanCapabilityForm::OrderedLdsAtomic:

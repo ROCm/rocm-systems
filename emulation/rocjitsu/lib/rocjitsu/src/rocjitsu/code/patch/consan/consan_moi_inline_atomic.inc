@@ -42,7 +42,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                      [&](const auto &candidate) {
                        const ConSanMoiInlineAtomicSupport support =
                            classify_consan_moi_inline_atomic_support(candidate.site,
-                                                                     candidate.event_kind);
+                                                                     candidate.event_kind, arch);
                        if (support == ConSanMoiInlineAtomicSupport::Supported)
                          return false;
                        result.warnings.emplace_back(

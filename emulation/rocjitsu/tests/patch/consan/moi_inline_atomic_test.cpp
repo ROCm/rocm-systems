@@ -14,37 +14,68 @@ struct InlineReleaseSequenceTarget {
   uint16_t token_transaction_vsrc;
 };
 
-[[nodiscard]] std::vector<uint8_t>
-make_inline_release_sequence_fixture(const InlineReleaseSequenceTarget &target,
-                                     std::vector<uint32_t> &guest_atomic_words) {
-  const auto atomic = instrumentation::build_flat_atomic_add_u32(
-      /*vaddr=*/2, /*vsrc=*/4, /*vdst=*/0, /*return_old_value=*/false,
-      /*scope=*/2, target.arch);
-  if (!atomic)
-    return {};
-  guest_atomic_words = *atomic;
+enum class InlineAtomicSequenceKind : uint8_t { Release, Acquire, AcquireRelease };
+
+[[nodiscard]] std::vector<uint8_t> make_inline_atomic_sequence_fixture(
+    const InlineReleaseSequenceTarget &target, std::vector<uint32_t> &guest_atomic_words,
+    std::span<const uint32_t> atomic_override = {},
+    InlineAtomicSequenceKind sequence_kind = InlineAtomicSequenceKind::Release) {
+  if (atomic_override.empty()) {
+    const auto atomic = instrumentation::build_flat_atomic_add_u32(
+        /*vaddr=*/2, /*vsrc=*/4, /*vdst=*/0, /*return_old_value=*/false,
+        /*scope=*/2, target.arch);
+    if (!atomic)
+      return {};
+    guest_atomic_words = *atomic;
+  } else {
+    guest_atomic_words.assign(atomic_override.begin(), atomic_override.end());
+  }
 
   std::vector<uint32_t> text_words;
-  if (target.arch == ROCJITSU_CODE_ARCH_CDNA3) {
-    const auto release = cdna3::build_mubuf(cdna3::kBufferWbl2Mubuf, {.sc1 = 1});
-    const auto wait = build_cdna3_s_wait_vmcnt_lgkmcnt0(target.arch);
-    if (!wait)
-      return {};
-    text_words.insert(text_words.end(), release.begin(), release.end());
-    text_words.push_back(*wait);
-  } else if (target.arch == ROCJITSU_CODE_ARCH_CDNA4) {
-    const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
-    const auto wait = build_cdna4_s_wait_flat0(target.arch);
-    if (!wait)
-      return {};
-    text_words.insert(text_words.end(), release.begin(), release.end());
-    text_words.push_back(*wait);
-  } else {
-    // global_wb is the target-native release member paired with the gfx12
-    // FLAT atomic. Both admitted gfx12 decoders use this three-dword form.
-    text_words.insert(text_words.end(), {0xEE0B0000u, 0x00000000u, 0x00000000u});
+  const bool has_release = sequence_kind != InlineAtomicSequenceKind::Acquire;
+  const bool has_acquire = sequence_kind != InlineAtomicSequenceKind::Release;
+  if (has_release) {
+    if (target.arch == ROCJITSU_CODE_ARCH_CDNA3) {
+      const auto release = cdna3::build_mubuf(cdna3::kBufferWbl2Mubuf, {.sc1 = 1});
+      const auto wait = build_cdna3_s_wait_vmcnt_lgkmcnt0(target.arch);
+      if (!wait)
+        return {};
+      text_words.insert(text_words.end(), release.begin(), release.end());
+      text_words.push_back(*wait);
+    } else if (target.arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+      const auto wait = build_cdna4_s_wait_flat0(target.arch);
+      if (!wait)
+        return {};
+      text_words.insert(text_words.end(), release.begin(), release.end());
+      text_words.push_back(*wait);
+    } else {
+      // global_wb is the target-native release member paired with the gfx12
+      // FLAT atomic. Both admitted gfx12 decoders use this three-dword form.
+      text_words.insert(text_words.end(), {0xEE0B0000u, 0x00000000u, 0x00000000u});
+    }
   }
-  text_words.insert(text_words.end(), atomic->begin(), atomic->end());
+  text_words.insert(text_words.end(), guest_atomic_words.begin(), guest_atomic_words.end());
+  if (has_acquire) {
+    if (target.arch == ROCJITSU_CODE_ARCH_CDNA3) {
+      const auto wait = build_cdna3_s_wait_vmcnt_lgkmcnt0(target.arch);
+      const auto acquire = cdna3::build_mubuf(cdna3::kBufferInvMubuf, {.sc1 = 1});
+      if (!wait)
+        return {};
+      text_words.push_back(*wait);
+      text_words.insert(text_words.end(), acquire.begin(), acquire.end());
+    } else if (target.arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      const auto wait = build_cdna4_s_wait_flat0(target.arch);
+      const auto acquire = cdna4::build_mubuf(cdna4::kBufferInvMubuf, {.sc1 = 1});
+      if (!wait)
+        return {};
+      text_words.push_back(*wait);
+      text_words.insert(text_words.end(), acquire.begin(), acquire.end());
+    } else {
+      // global_inv is the target-native gfx12 acquire member.
+      text_words.insert(text_words.end(), {0xEE0AC000u, 0x00000000u, 0x00000000u});
+    }
+  }
   text_words.resize(800, build_s_nop(0, target.arch));
   text_words.push_back(build_s_endpgm(target.arch));
 
@@ -176,7 +207,7 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor) {
   for (const InlineReleaseSequenceTarget &target : targets) {
     SCOPED_TRACE(target.label);
     std::vector<uint32_t> atomic_words;
-    const std::vector<uint8_t> bytes = make_inline_release_sequence_fixture(target, atomic_words);
+    const std::vector<uint8_t> bytes = make_inline_atomic_sequence_fixture(target, atomic_words);
     ASSERT_FALSE(bytes.empty());
     ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
     options.moi_track_atomics = true;
@@ -225,6 +256,205 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor) {
     ASSERT_TRUE(advance_consumer_segment);
     EXPECT_EQ(count_subsequence(cave_words, *advance_consumer_segment), 0u)
         << "release-sequence inheritance must not advance the consumer segment";
+  }
+}
+
+TEST(ConSanMoi, CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering) {
+  constexpr std::array targets = {
+      InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_CDNA3, "gfx942/cdna3",
+                                  /*release_transaction_vsrc=*/12,
+                                  /*token_transaction_vsrc=*/26},
+      InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_CDNA4, "gfx950/cdna4",
+                                  /*release_transaction_vsrc=*/12,
+                                  /*token_transaction_vsrc=*/26},
+  };
+  struct VglobalCase {
+    std::string_view label;
+    std::array<uint32_t, 2> words;
+    InlineAtomicSequenceKind sequence_kind;
+    ConSanMoiAtomicEventKind event_kind;
+    ConSanMoiAtomicAddressKind address_kind;
+    uint16_t input_vgpr_count;
+    std::optional<uint16_t> scalar_base_sgpr;
+    int32_t signed_byte_offset;
+    uint32_t semantics;
+    ConSanMoiInlineAtomicSupport expected_support;
+  };
+  constexpr std::array cases = {
+      VglobalCase{
+          "release add vector-only zero-offset",
+          {
+              0xdf088000u,
+              0x007f0604u, // global_atomic_add v[4:5], v6, off sc1
+          },
+          InlineAtomicSequenceKind::Release,
+          ConSanMoiAtomicEventKind::Release,
+          ConSanMoiAtomicAddressKind::VglobalGuestPair,
+          2u,
+          std::nullopt,
+          0,
+          2u,
+          ConSanMoiInlineAtomicSupport::Supported,
+      },
+      VglobalCase{
+          "release add vector-only negative offset",
+          {
+              0xdf089fecu,
+              0x007f0604u, // global_atomic_add v[4:5], v6, off offset:-20 sc1
+          },
+          InlineAtomicSequenceKind::Release,
+          ConSanMoiAtomicEventKind::Release,
+          ConSanMoiAtomicAddressKind::VglobalGuestPairMaterialized,
+          2u,
+          std::nullopt,
+          -20,
+          2u,
+          ConSanMoiInlineAtomicSupport::Supported,
+      },
+      VglobalCase{
+          "release add scalar-base positive offset",
+          {
+              0xdf088014u,
+              0x00140604u, // global_atomic_add v4, v6, s[20:21] offset:20 sc1
+          },
+          InlineAtomicSequenceKind::Release,
+          ConSanMoiAtomicEventKind::Release,
+          ConSanMoiAtomicAddressKind::VglobalMaterialized,
+          1u,
+          20u,
+          20,
+          2u,
+          ConSanMoiInlineAtomicSupport::Supported,
+      },
+      VglobalCase{
+          "acquire returning add vector-only",
+          {
+              0xdf098000u,
+              0x007f0604u, // global_atomic_add v0, v[4:5], v6, off sc0 sc1
+          },
+          InlineAtomicSequenceKind::Acquire,
+          ConSanMoiAtomicEventKind::Acquire,
+          ConSanMoiAtomicAddressKind::VglobalGuestPair,
+          2u,
+          std::nullopt,
+          0,
+          3u,
+          ConSanMoiInlineAtomicSupport::Supported,
+      },
+      VglobalCase{
+          "acquire-release returning CAS scalar-base",
+          {
+              0xdf058014u,
+              0x00140604u, // global_atomic_cmpswap v0, v4, v[6:7], s[20:21] offset:20 sc0 sc1
+          },
+          InlineAtomicSequenceKind::AcquireRelease,
+          ConSanMoiAtomicEventKind::AcquireRelease,
+          ConSanMoiAtomicAddressKind::VglobalMaterialized,
+          1u,
+          20u,
+          20,
+          3u,
+          ConSanMoiInlineAtomicSupport::Supported,
+      },
+      VglobalCase{
+          "acquire-release no-return CAS fails closed",
+          {
+              0xdf048000u,
+              0x007f0604u, // global_atomic_cmpswap v[4:5], v[6:7], off sc1
+          },
+          InlineAtomicSequenceKind::AcquireRelease,
+          ConSanMoiAtomicEventKind::AcquireRelease,
+          ConSanMoiAtomicAddressKind::VglobalGuestPair,
+          2u,
+          std::nullopt,
+          0,
+          2u,
+          ConSanMoiInlineAtomicSupport::CompareExchangeOutcomeUnavailable,
+      },
+  };
+
+  for (const InlineReleaseSequenceTarget &target : targets) {
+    SCOPED_TRACE(target.label);
+    const rj_code_target_id_t target_id = target.arch == ROCJITSU_CODE_ARCH_CDNA3
+                                              ? ROCJITSU_CODE_TARGET_GFX942
+                                              : ROCJITSU_CODE_TARGET_GFX950;
+    for (const VglobalCase &test_case : cases) {
+      SCOPED_TRACE(test_case.label);
+      std::vector<uint32_t> atomic_words;
+      const std::vector<uint8_t> bytes = make_inline_atomic_sequence_fixture(
+          target, atomic_words, test_case.words, test_case.sequence_kind);
+      ASSERT_FALSE(bytes.empty());
+      ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+      options.moi_track_atomics = true;
+      options.scratch_vgpr = 8;
+      options.moi_exec_save_sgpr = 80;
+      options.moi_owner_vgpr = 40;
+      options.moi_epoch_vgpr = 41;
+      options.moi_report_buffer_address = 0x123456780000ull;
+      options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+      options.max_patches = 1;
+
+      const ConSanResult result = try_patch_consan(bytes, options);
+
+      ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+      ASSERT_EQ(result.kernels.size(), 1u);
+      const auto site = std::ranges::find_if(
+          result.kernels.front().atomic_sites, [](const ConSanAtomicSite &candidate) {
+            return candidate.mnemonic.starts_with("global_atomic_");
+          });
+      ASSERT_NE(site, result.kernels.front().atomic_sites.end());
+      EXPECT_EQ(classify_consan_moi_inline_atomic_support(*site, test_case.event_kind, target.arch),
+                test_case.expected_support);
+      EXPECT_EQ(site->raw_th, test_case.semantics);
+      if (test_case.expected_support != ConSanMoiInlineAtomicSupport::Supported) {
+        EXPECT_FALSE(result.modified);
+        EXPECT_EQ(std::ranges::count(result.patches,
+                                     ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
+                                     &ConSanPatchInfo::kind),
+                  0u);
+        continue;
+      }
+      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+      EXPECT_TRUE(result.final_validation_passed);
+      const auto patch =
+          std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
+                            &ConSanPatchInfo::kind);
+      ASSERT_NE(patch, result.patches.end());
+      ASSERT_TRUE(patch->scratch_vgpr);
+      const auto resource_plan = std::ranges::find_if(
+          result.resource_plans, [](const ConSanCandidateResourcePlan &candidate) {
+            return candidate.site_kind == ConSanResourceSiteKind::Atomic;
+          });
+      ASSERT_NE(resource_plan, result.resource_plans.end());
+      const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
+          *site, *patch->scratch_vgpr, resource_plan->scratch_vgpr_count,
+          ConSanRegisterAllocationSource::Explicit, target.arch);
+      ASSERT_TRUE(address_plan.supported())
+          << consan_moi_atomic_address_support_name(address_plan.support);
+      EXPECT_EQ(address_plan.kind, test_case.address_kind);
+      EXPECT_EQ(address_plan.input_address_vgpr_count, test_case.input_vgpr_count);
+      EXPECT_EQ(address_plan.scalar_base_sgpr, test_case.scalar_base_sgpr);
+      EXPECT_EQ(address_plan.signed_byte_offset, test_case.signed_byte_offset);
+
+      AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(patched.is_valid());
+      const std::vector<uint32_t> cave_words =
+          text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+      const auto materialization = build_consan_moi_atomic_address_materialization(
+          address_plan, /*vcc_save_sgpr=*/88u, /*scc_save_sgpr=*/90u, target.arch);
+      ASSERT_TRUE(materialization);
+      if (test_case.address_kind == ConSanMoiAtomicAddressKind::VglobalGuestPair) {
+        EXPECT_TRUE(materialization->empty());
+      } else {
+        ASSERT_FALSE(materialization->empty());
+        EXPECT_TRUE(contains_subsequence(cave_words, *materialization));
+      }
+      EXPECT_EQ(count_subsequence(cave_words, atomic_words), 1u);
+      EXPECT_EQ(consan_capability_disposition(target_id, ConSanCapabilityEngine::InlineShadow,
+                                              ConSanCapabilityForm::OrderedVglobalAtomic),
+                ConSanCapabilityDisposition::Supported);
+    }
   }
 }
 
@@ -1504,76 +1734,124 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
   site.raw_th = 0;
   site.returns_old_value = false;
 
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(site, ConSanMoiAtomicEventKind::Release),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(site, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::Supported);
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(site, ConSanMoiAtomicEventKind::Acquire),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(site, ConSanMoiAtomicEventKind::Acquire,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::Supported);
-  EXPECT_EQ(
-      classify_consan_moi_inline_atomic_support(site, ConSanMoiAtomicEventKind::AcquireRelease),
-      ConSanMoiInlineAtomicSupport::Supported);
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(
+                site, ConSanMoiAtomicEventKind::AcquireRelease, ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanMoiInlineAtomicSupport::Supported);
 
   ConSanAtomicSite changed = site;
   changed.mnemonic = "flat_atomic_cmpswap_u32";
   changed.dst_vgpr = 6;
   changed.returns_old_value = true;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::Supported);
   changed.returns_old_value = false;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::CompareExchangeOutcomeUnavailable);
   changed = site;
   changed.mnemonic = "global_atomic_add_u32";
   changed.raw_saddr = 4;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::Supported);
   changed.size = 2u * sizeof(uint32_t);
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::UnsupportedEncoding);
-  EXPECT_EQ(consan_capability_disposition(ROCJITSU_CODE_TARGET_GFX950,
-                                          ConSanCapabilityEngine::InlineShadow,
-                                          ConSanCapabilityForm::OrderedVglobalAtomic),
-            ConSanCapabilityDisposition::Unsupported);
+  changed.raw_saddr = kCdnaGlobalNoSaddrEncoding;
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_CDNA4),
+            ConSanMoiInlineAtomicSupport::Supported);
   changed.size = 3u * sizeof(uint32_t);
+  changed.raw_saddr = 4;
   changed.mnemonic = "global_atomic_cmpswap_b32";
   changed.dst_vgpr = 6;
   changed.returns_old_value = true;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::Supported);
   changed.returns_old_value = false;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::CompareExchangeOutcomeUnavailable);
+
+  struct VglobalContractCase {
+    rj_code_target_id_t target;
+    rj_code_arch_t arch;
+    uint32_t size;
+    uint32_t raw_saddr;
+  };
+  constexpr std::array contract_cases = {
+      VglobalContractCase{ROCJITSU_CODE_TARGET_GFX942, ROCJITSU_CODE_ARCH_CDNA3,
+                          2u * sizeof(uint32_t), kCdnaGlobalNoSaddrEncoding},
+      VglobalContractCase{ROCJITSU_CODE_TARGET_GFX950, ROCJITSU_CODE_ARCH_CDNA4,
+                          2u * sizeof(uint32_t), kCdnaGlobalNoSaddrEncoding},
+      VglobalContractCase{ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_ARCH_RDNA4,
+                          3u * sizeof(uint32_t), 4u},
+      VglobalContractCase{ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_ARCH_GFX1250,
+                          3u * sizeof(uint32_t), 4u},
+  };
+  for (const VglobalContractCase &contract_case : contract_cases) {
+    ConSanAtomicSite representative = site;
+    representative.mnemonic = "global_atomic_add_u32";
+    representative.size = contract_case.size;
+    representative.raw_saddr = contract_case.raw_saddr;
+    EXPECT_EQ(classify_consan_moi_inline_atomic_support(
+                  representative, ConSanMoiAtomicEventKind::Release, contract_case.arch),
+              ConSanMoiInlineAtomicSupport::Supported);
+    EXPECT_EQ(consan_capability_disposition(contract_case.target,
+                                            ConSanCapabilityEngine::InlineShadow,
+                                            ConSanCapabilityForm::OrderedVglobalAtomic),
+              ConSanCapabilityDisposition::Supported);
+  }
   changed = site;
   changed.width_bits = 64;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::UnsupportedWidth);
   changed = site;
   changed.raw_ioffset = 4;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::NonzeroOffset);
   changed = site;
   changed.raw_scope = 0;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::UnsupportedScope);
   changed.raw_scope = 1;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::Supported);
   changed.raw_scope = 3;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::Supported);
   changed.raw_scope = 4;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::UnsupportedScope);
   changed = site;
   changed.raw_saddr = 4;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::UnsupportedEncoding);
   changed = site;
   changed.addr_vgpr.reset();
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::MissingOperands);
   changed = site;
   changed.raw_scope.reset();
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
+                                                      ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::MissingOrderingMetadata);
 }
 
@@ -3016,9 +3294,9 @@ TEST(ConSanMoi, InlineVglobalReturningCasPublishesTokenBeforeSuccessPredicatedRe
     ASSERT_EQ(result.kernels.size(), 1u);
     ASSERT_EQ(result.kernels.front().atomic_sites.size(), 1u);
     const ConSanAtomicSite &site = result.kernels.front().atomic_sites.front();
-    EXPECT_EQ(
-        classify_consan_moi_inline_atomic_support(site, ConSanMoiAtomicEventKind::AcquireRelease),
-        ConSanMoiInlineAtomicSupport::Supported);
+    EXPECT_EQ(classify_consan_moi_inline_atomic_support(
+                  site, ConSanMoiAtomicEventKind::AcquireRelease, ROCJITSU_CODE_ARCH_RDNA4),
+              ConSanMoiInlineAtomicSupport::Supported);
 
     const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
       return item.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;

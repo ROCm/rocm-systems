@@ -21,11 +21,11 @@ an engine-specific lowering gap for a form admitted by the target family.
 | `gfx942` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only) | addressed ordinary (mutation only) |
 | `gfx942` | Record/Replay | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary |
 | `gfx942` | Sampled | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
-| `gfx942` | Inline Shadow | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL (unsupported)<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
+| `gfx942` | Inline Shadow | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
 | `gfx950` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only) | addressed ordinary (mutation only) |
 | `gfx950` | Record/Replay | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary |
 | `gfx950` | Sampled | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
-| `gfx950` | Inline Shadow | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL (unsupported)<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
+| `gfx950` | Inline Shadow | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
 | `gfx1201` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only) | addressed ordinary (mutation only) |
 | `gfx1201` | Record/Replay | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary |
 | `gfx1201` | Sampled | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary (associated only) |
@@ -128,7 +128,10 @@ HSA hook:
   `moi_record_replay_model_test.cpp`, `moi_record_replay_test.cpp`,
   `moi_sampled_test.cpp`, and `moi_inline_atomic_test.cpp`; and
 - the four-target Inline release transaction:
-  `ConSanMoi.SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor`.
+  `ConSanMoi.SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor`; and
+- CDNA3/CDNA4 Inline VGLOBAL release, acquire, returning compare-exchange,
+  no-return fail-closed behavior, and native address lowering:
+  `ConSanMoi.CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering`.
 
 The registered execution gates use native code objects for each target:
 

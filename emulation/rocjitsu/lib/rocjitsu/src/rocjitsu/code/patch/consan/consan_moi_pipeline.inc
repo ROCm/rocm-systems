@@ -642,9 +642,10 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       for (const ConSanFunctionInfo &function : result.functions)
         append_inline_atomic_candidates(function, sync_index, candidates);
       candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
-                                      [](const auto &candidate) {
+                                      [&](const auto &candidate) {
                                         return classify_consan_moi_inline_atomic_support(
-                                                   candidate.site, candidate.event_kind) !=
+                                                   candidate.site, candidate.event_kind,
+                                                   state.arch) !=
                                                ConSanMoiInlineAtomicSupport::Supported;
                                       }),
                        candidates.end());
@@ -816,7 +817,7 @@ void append_moi_atomic_site_dispositions(const Container &container, const ConSa
       reason = ConSanSiteDispositionReason::UnqualifiedSyncSequence;
     } else if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
       reason = inline_atomic_disposition_reason(
-          classify_consan_moi_inline_atomic_support(site, *event_kind));
+          classify_consan_moi_inline_atomic_support(site, *event_kind, semantic_result.arch));
     } else {
       const ConSanAtomicSite normalized =
           normalize_atomic_record_site(site, allow_ordered_lds_atomic);

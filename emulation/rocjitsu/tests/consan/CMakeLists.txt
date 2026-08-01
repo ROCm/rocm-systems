@@ -391,7 +391,7 @@ set(RJ_CONSAN_CDNA_MOI_BARRIER_TEST
     "ConSanMoiCdnaTest.BarrierForcedSpillPreservesLiveVgprsAndWritesRecords"
 )
 set(RJ_CONSAN_CDNA_MOI_ATOMIC_TEST
-    "ConSanMoiCdnaTest.AtomicForcedSpillPreservesLiveVgprsAndWritesRecord"
+    "ConSanMoiCdnaTest.AtomicForcedSpillExecutesVglobalAddressForms"
 )
 set(RJ_CONSAN_CDNA_MOI_DYNAMIC_STACK_TEST
     "ConSanMoiCdnaTest.DynamicStackInlineSpillPreservesPrivateValues"
@@ -954,7 +954,28 @@ function(rj_add_consan_cdna_sim_cases)
             "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
             "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_atomic_forced_spill_kernel_for_instrumentation"
             "RJ_CONSAN_LOG=3"
-            "RJ_CONSAN_MAX_PATCHES=1"
+            "RJ_CONSAN_MAX_PATCHES=2"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+    rj_add_consan_hip_case(
+        NAME "${_sim_PREFIX}.MoiInlineVglobalAtomics"
+        TARGET ${_sim_MOI_TARGET}
+        FILTER "${RJ_CONSAN_CDNA_MOI_ATOMIC_TEST}"
+        CONFIG "${_sim_CONFIG}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX "visible_inline_atomic_releases=2"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=inline-shadow"
+            "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+            "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_atomic_forced_spill_kernel_for_instrumentation"
+            "RJ_CONSAN_LOG=3"
+            "RJ_CONSAN_MAX_PATCHES=2"
             "RJ_CONSAN_REQUIRE_PATCH=1"
     )
     rj_add_consan_hip_case(
@@ -1539,7 +1560,7 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_atomic_forced_spill_kernel_for_instrumentation"
                     "RJ_CONSAN_LOG=3"
-                    "RJ_CONSAN_MAX_PATCHES=1"
+                    "RJ_CONSAN_MAX_PATCHES=2"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
             rj_add_consan_hip_case(
