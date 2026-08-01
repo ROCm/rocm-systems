@@ -41,7 +41,12 @@ objects through RocJITsu with `gfx1100_w7900.json`. Its five compact cases
 cover a no-filter all-supported-site SuperCollider pass, clean Record/Replay,
 Sampled, and Inline Shadow execution, and required Inline Shadow conflict
 attribution. This simulator evidence uses JSON-declared LDS capacity and is
-reported separately from the physical results above.
+reported separately from the physical results above. The conflict gate pins
+the target-native owner pair to 257 and 769 in either report order, rather than
+accepting arbitrary nonzero owners. This deliberately compact gate does not
+compose the common cross-family high-half-D16, forced-spill, shared-helper, or
+exact-byte fixtures; those broader transformations remain covered by the host
+suite.
 
 ## Semantic boundary
 

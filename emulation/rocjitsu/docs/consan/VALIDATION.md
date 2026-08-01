@@ -35,13 +35,16 @@ as its offline source of truth:
 
 ```sh
 ctest --test-dir "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build" \
-  -R '^ConSanGfx1100Sim\\.' --output-on-failure -j1
+  -R '^ConSanGfx1100Sim\.' --output-on-failure -j1
 ```
 
 It covers the no-filter SuperCollider path, clean execution through all three
 MOI engines, and required Inline Shadow conflict attribution. Simulator and
 physical results remain separate evidence because only the physical path gets
-LDS capacity from the active runtime agent.
+LDS capacity from the active runtime agent. This deliberately compact,
+target-native smoke slice does not duplicate the common cross-family
+high-half-D16, forced-spill, shared-helper, or exact-byte simulator fixtures;
+the complete host suite retains that broad transformation coverage.
 
 The status table began as a cumulative ledger: its rows were promoted at
 different frozen checkpoints and some predated today's stronger completeness

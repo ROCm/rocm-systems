@@ -2372,28 +2372,51 @@ def test_gfx1250_helper_blocks_emit_hwreg_and_scaled_wmma_hooks():
     )
 
 
-def test_rdna3_helper_block_reads_gfx11_resident_wave_identity():
+def test_rdna3_profile_uses_gfx11_hwreg_contract():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='rdna3',
         profile=Rdna3Profile(),
     )
 
-    hwreg = codegen._emit_hwreg_helpers()
-    assert 'HW_REG_HW_ID1 = 23' in hwreg
-    assert 'HW_REG_HW_ID2 = 24' in hwreg
-    assert 'wf.hw_id1_raw()' in hwreg
-    assert 'wf.hw_id2_raw()' in hwreg
+    profile = codegen.isa_spec.profile
+    assert not profile.use_hwreg_helpers
+    assert profile.hwreg_mode_id == 1
+    assert profile.hwreg_status_id == 2
+    assert profile.hwreg_hw_id1_id == 23
+    assert profile.hwreg_hw_id2_id == 24
+    assert codegen._hwreg_identity_expressions(profile) == (
+        'wf.hw_id1_raw()',
+        'wf.hw_id2_raw()',
+    )
 
 
 def test_hwreg_identity_models_preserve_each_family_representation():
-    assert Cdna1Profile().hwreg_identity_model == HwregIdentityModel.COMPUTE_UNIT
-    assert Cdna2Profile().hwreg_identity_model == HwregIdentityModel.COMPUTE_UNIT
+    assert (
+        Cdna1Profile().hwreg_identity_model == HwregIdentityModel.UNMODELED_COMPONENT_ID
+    )
+    assert (
+        Cdna2Profile().hwreg_identity_model == HwregIdentityModel.UNMODELED_COMPONENT_ID
+    )
+    assert (
+        Rdna1Profile().hwreg_identity_model == HwregIdentityModel.UNMODELED_COMPONENT_ID
+    )
+    assert (
+        Rdna2Profile().hwreg_identity_model == HwregIdentityModel.UNMODELED_COMPONENT_ID
+    )
     assert CdnaProfile().hwreg_identity_model == HwregIdentityModel.LEGACY
     assert Rdna3Profile().hwreg_identity_model == HwregIdentityModel.TOPOLOGY
     assert Rdna3_5Profile().hwreg_identity_model == HwregIdentityModel.TOPOLOGY
     assert Rdna4Profile().hwreg_identity_model == HwregIdentityModel.TOPOLOGY
     assert Gfx1250Profile().hwreg_identity_model == HwregIdentityModel.TOPOLOGY
+
+
+def test_hwreg_identity_model_mapping_is_exhaustive():
+    class UnknownIdentityModel:
+        hwreg_identity_model = object()
+
+    with pytest.raises(ValueError, match='no generated HWREG identity expressions'):
+        CodeGenerator._hwreg_identity_expressions(UnknownIdentityModel())
 
 
 def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):

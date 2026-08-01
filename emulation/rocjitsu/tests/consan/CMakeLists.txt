@@ -1375,23 +1375,30 @@ function(rj_add_consan_gfx1250_sim_cases)
     )
 endfunction()
 
-function(rj_add_consan_rdna3_sim_cases)
+function(rj_add_consan_rdna3_compact_sim_cases)
     set(_one_value_args PREFIX LDS_TARGET MOI_TARGET CONFIG)
     cmake_parse_arguments(PARSE_ARGV 0 _sim "" "${_one_value_args}" "")
     if(_sim_UNPARSED_ARGUMENTS)
         message(
             FATAL_ERROR
-            "unknown ConSan RDNA3 simulator arguments: ${_sim_UNPARSED_ARGUMENTS}"
+            "unknown compact ConSan RDNA3 simulator arguments: ${_sim_UNPARSED_ARGUMENTS}"
         )
     endif()
     foreach(_required IN ITEMS PREFIX LDS_TARGET MOI_TARGET CONFIG)
         if(NOT _sim_${_required})
             message(
                 FATAL_ERROR
-                "ConSan RDNA3 simulator cases require ${_required}"
+                "compact ConSan RDNA3 simulator cases require ${_required}"
             )
         endif()
     endforeach()
+
+    # This is intentionally a target-native smoke slice rather than the common
+    # cross-family simulator matrix. The common matrix depends on generic
+    # high-half D16, forced-spill, shared-helper, and exact-byte fixtures that
+    # are not RDNA3-native qualification artifacts. Broad transformation
+    # coverage stays in the host suite; this slice proves that native gfx11
+    # objects execute all four engines and attribute a real conflict.
 
     rj_add_consan_hip_case(
         NAME "${_sim_PREFIX}.SuperColliderAllSupportedSites"
@@ -1442,7 +1449,7 @@ function(rj_add_consan_rdna3_sim_cases)
         TIMEOUT 60
         RUN_SERIAL
         PASS_REGEX
-            "ConSan MOI auto diagnostic.*first_owner=[1-9][0-9]* second_owner=[1-9][0-9]*"
+            "ConSan MOI auto diagnostic.*first_owner=(257 second_owner=769|769 second_owner=257)"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=inline-shadow"
@@ -1730,7 +1737,7 @@ function(rj_add_consan_hip_tests)
         )
         add_dependencies(hip_consan_lds_gfx1100_test_target rocjitsu_dbi_hooks)
         add_dependencies(hip_consan_moi_gfx1100_test_target rocjitsu_dbi_hooks)
-        rj_add_consan_rdna3_sim_cases(
+        rj_add_consan_rdna3_compact_sim_cases(
             PREFIX "ConSanGfx1100Sim"
             LDS_TARGET hip_consan_lds_gfx1100_test
             MOI_TARGET hip_consan_moi_gfx1100_test

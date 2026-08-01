@@ -55,9 +55,12 @@ class MemoryCoherencyModel(Enum):
 
 
 class HwregIdentityModel(Enum):
-    """Selects how generated HW_ID1/HW_ID2 reads identify a resident wave."""
+    """Selects the representation emitted for generated hardware-ID reads."""
 
-    COMPUTE_UNIT = auto()
+    # Compatibility mode for profiles whose architectural topology fields are
+    # not modeled yet. This preserves their existing simulator component-ID
+    # behavior, but deliberately does not present it as a hardware encoding.
+    UNMODELED_COMPONENT_ID = auto()
     LEGACY = auto()
     TOPOLOGY = auto()
 
@@ -345,7 +348,7 @@ class IsaProfile(ABC):
     @property
     def hwreg_identity_model(self) -> HwregIdentityModel:
         """Resident-wave identity representation used by generated HWREG reads."""
-        return HwregIdentityModel.COMPUTE_UNIT
+        return HwregIdentityModel.UNMODELED_COMPONENT_ID
 
     @property
     def hwreg_ib_sts2_id(self) -> int | None:
@@ -1144,7 +1147,7 @@ class Cdna1Profile(CdnaProfile):
 
     @property
     def hwreg_identity_model(self) -> HwregIdentityModel:
-        return HwregIdentityModel.COMPUTE_UNIT
+        return HwregIdentityModel.UNMODELED_COMPONENT_ID
 
     @property
     def acc_vgpr_encoding_base(self) -> int:
@@ -1199,7 +1202,7 @@ class Cdna2Profile(CdnaProfile):
 
     @property
     def hwreg_identity_model(self) -> HwregIdentityModel:
-        return HwregIdentityModel.COMPUTE_UNIT
+        return HwregIdentityModel.UNMODELED_COMPONENT_ID
 
     @property
     def flat_scratch_mechanism(self) -> str:
@@ -1406,16 +1409,20 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
-    def use_hwreg_helpers(self) -> bool:
-        return True
-
-    @property
     def hwreg_hw_id1_id(self) -> int:
         return 23
 
     @property
     def hwreg_hw_id2_id(self) -> int:
         return 24
+
+    @property
+    def hwreg_mode_id(self) -> int | None:
+        return 1
+
+    @property
+    def hwreg_status_id(self) -> int:
+        return 2
 
     @property
     def hwreg_identity_model(self) -> HwregIdentityModel:

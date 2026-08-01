@@ -3166,6 +3166,11 @@ class CodeGenerator:
     @staticmethod
     def _hwreg_identity_expressions(profile) -> tuple[str, str]:
         """Return generated C++ expressions for the profile's HW_ID registers."""
+        if profile.hwreg_identity_model == HwregIdentityModel.UNMODELED_COMPONENT_ID:
+            return (
+                'static_cast<uint32_t>(wf.cu().id())',
+                'static_cast<uint32_t>(wf.cu().id() >> 16)',
+            )
         if profile.hwreg_identity_model == HwregIdentityModel.LEGACY:
             return (
                 'wf.legacy_hw_id_raw()',
@@ -3173,9 +3178,9 @@ class CodeGenerator:
             )
         if profile.hwreg_identity_model == HwregIdentityModel.TOPOLOGY:
             return 'wf.hw_id1_raw()', 'wf.hw_id2_raw()'
-        return (
-            'static_cast<uint32_t>(wf.cu().id())',
-            'static_cast<uint32_t>(wf.cu().id() >> 16)',
+        raise ValueError(
+            'no generated HWREG identity expressions for '
+            f'{profile.hwreg_identity_model!r}'
         )
 
     @staticmethod

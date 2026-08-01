@@ -587,12 +587,12 @@ TEST(ResidentWaveHardwareIdTest, SGetregDistinguishesEveryResidentWaveOnSupporte
   }
 }
 
-TEST(ResidentWaveHardwareIdTest, Gfx12RegisterPairCarriesMultiCuAndDispatchIdentity) {
+TEST(ResidentWaveHardwareIdTest, Gfx11AndGfx12RegisterPairCarriesMultiCuAndDispatchIdentity) {
   constexpr uint32_t kReadFullHwId1 = 0xB882F817u;
   constexpr uint32_t kReadFullHwId2 = 0xB883F818u;
   const std::array code = {kReadFullHwId1, kReadFullHwId2, SOPP_S_ENDPGM};
 
-  for (std::string_view arch : {"rdna4", "gfx1250"}) {
+  for (std::string_view arch : {"rdna3", "rdna3_5", "rdna4", "gfx1250"}) {
     SCOPED_TRACE(arch);
     VmFixture f(arch, /*num_cus=*/2, /*num_wf_slots=*/10,
                 /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
@@ -609,15 +609,43 @@ TEST(ResidentWaveHardwareIdTest, Gfx12RegisterPairCarriesMultiCuAndDispatchIdent
     ASSERT_EQ(cu1.size(), 1u);
     EXPECT_NE(cu0.front()->sgpr(2), cu1.front()->sgpr(2));
     EXPECT_EQ(cu0.front()->sgpr(2), 0u);
-    EXPECT_EQ(cu1.front()->sgpr(2), arch == "rdna4" ? 0x100u : 0x400u);
+    EXPECT_EQ(cu1.front()->sgpr(2), arch == "gfx1250" ? 0x400u : 0x100u);
     EXPECT_EQ(cu0.front()->sgpr(3), 0x00000001u);
     EXPECT_EQ(cu1.front()->sgpr(3), 0x00010001u);
+  }
+}
+
+TEST(HwregRegisterTest, Gfx11ModeAndStatusUseArchitecturalIds) {
+  constexpr uint32_t kSetStatusBit0 = 0xB9800002u;
+  constexpr uint32_t kSetModeBit0 = 0xB9800001u;
+  constexpr uint32_t kReadModeBit0 = 0xB8820001u;
+  constexpr uint32_t kReadStatusBit0 = 0xB8830002u;
+  const std::array code = {
+      kSetStatusBit0, 1u, kSetModeBit0, 0u, kReadModeBit0, kReadStatusBit0, SOPP_S_ENDPGM,
+  };
+
+  for (std::string_view arch : {"rdna3", "rdna3_5"}) {
+    SCOPED_TRACE(arch);
+    VmFixture f(arch);
+    auto *snap = f.capture_halts();
+    const uint64_t kernel = f.write_kernel(0x1000, code.data(), sizeof(code), 104, 32);
+
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(kernel, /*grid_size_x=*/32, /*workgroup_size_x=*/32);
+    step_until_halted(*f.engine, {f.cu()});
+
+    ASSERT_EQ(snap->snapshots().size(), 1u);
+    EXPECT_EQ(snap->snapshots().front().sgpr(2), 0u);
+    EXPECT_EQ(snap->snapshots().front().sgpr(3), 1u);
   }
 }
 
 TEST(ResidentWaveHardwareIdTest, ConfigurationRejectsUnencodableResidentWaveCount) {
   EXPECT_THROW((void)VmFixture("cdna3", /*num_cus=*/1, /*num_wf_slots=*/65), std::invalid_argument);
   EXPECT_THROW((void)VmFixture("cdna4", /*num_cus=*/1, /*num_wf_slots=*/65), std::invalid_argument);
+  EXPECT_THROW((void)VmFixture("rdna3", /*num_cus=*/1, /*num_wf_slots=*/65), std::invalid_argument);
+  EXPECT_THROW((void)VmFixture("rdna3_5", /*num_cus=*/1, /*num_wf_slots=*/65),
+               std::invalid_argument);
   EXPECT_THROW((void)VmFixture("rdna4", /*num_cus=*/1, /*num_wf_slots=*/65), std::invalid_argument);
   EXPECT_THROW((void)VmFixture("gfx1250", /*num_cus=*/1, /*num_wf_slots=*/129),
                std::invalid_argument);
