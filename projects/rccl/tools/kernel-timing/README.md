@@ -46,6 +46,20 @@ one dispatch's ticks over 2 s shows zero drift.
 Because the domain is CLOCK_BOOTTIME, timestamps are directly comparable across
 all GPUs in a node with no calibration, and merge with a rocprof trace as-is.
 
+**Read the timestamps from ROCr, not from the runtime's cache.** The converted
+pair ROCclr caches is not reliably present: on gfx950 it was found for one device
+of four, and its location differs between ROCm builds. The signal handle is the
+stable thing to locate; asking `hsa_amd_profiling_get_dispatch_time` for the
+numbers on every harvest costs nothing measurable and removes any dependence on
+how the runtime caches or converts them.
+
+**Ask the right agent.** `hsa_amd_profiling_get_dispatch_time` converts ticks
+with the calibration of whichever agent is passed and does not check that the
+signal belongs to it, so the wrong agent returns a plausible but skewed answer —
+on a 4-GPU run, 21 of 48 dispatches on one rank then reported starting before
+their own launch. The agent has to be matched to the device by PCI address;
+HIP's device order and HSA's agent order need not agree.
+
 **Caveats.**
 
 - `hipExtModuleLaunchKernel` takes *global work size* (grid x block), not grid
@@ -53,11 +67,30 @@ all GPUs in a node with no calibration, and merge with a rocprof trace as-is.
 - Under stream capture the launch is legal, but graph replay never populates the
   events; `hipEventElapsedTime` then returns `hipErrorInvalidHandle`. Graph plans
   need a fallback.
-- Under rocprof, the pointer chase finds nothing — rocprof's interception
-  relocates the fields. Discovery fails cleanly and the caller falls back.
+- Under rocprof, the pointer chase finds nothing — rocprof replaces the
+  completion signals. Discovery fails cleanly and the caller falls back, so the
+  two cannot be collected in one run.
 - On the very first dispatch of a process the cache and the HSA API once differed
   by 420 ns (spans still matching to 1 ns). Never reproduced in steady state;
   cause unknown.
+
+## In-tree validation (gfx950, 4x MI350X)
+
+Against `all_reduce_perf -b 1M -e 64M -f 8 -g 4 -n 50 -w 10`, with
+`RCCL_KERNEL_TIMING=1` and rccl-tests writing the drained records
+(`check_trace.py`, `compare_rocprof.py`):
+
+- 1524 of 1524 dispatches timed, no gaps in the per-rank sequence, every window
+  well-formed and non-overlapping, every timestamp inside the host-clock window
+  of the run.
+- Durations against a rocprofv3 `--kernel-trace` of the same workload on the same
+  runtime: **+0.06%** at 8 MB and **+0.02%** at 64 MB. At 1 MB the drain API
+  reports 3.6 us *less* than rocprof (33.0 vs 36.6 us) — small collectives are
+  where rocprof's own perturbation shows up.
+- Cost of leaving it enabled, by message size: +5 us at 8 KB, +2.5 us at 64 KB,
+  and nothing measurable from 512 KB up. Harvesting must stay off the launch
+  path to get this: querying an event per launch makes the runtime flush the
+  queue and cost ~190 us per dispatch.
 
 ## `evtstamp.h`
 
@@ -84,3 +117,5 @@ at `+16` of the same object.
 | `timestamp_validation` | host-clock bracketing, and stop-event-only mode |
 | `launch_cost` | per-launch cost of each timing scheme (table above) |
 | `hsa_signal_crosscheck` | finds the ROCr signal, compares against `hsa_amd_profiling_get_dispatch_time`, measures conversion drift |
+| `check_trace.py` | sanity-checks a trace written by rccl-tests: counts, gaps, overlaps, malformed windows |
+| `compare_rocprof.py` | duration distributions from the drain API vs a rocprofv3 kernel trace |
