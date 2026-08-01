@@ -620,9 +620,21 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
   return ordered;
 }
 
+/// @brief Build one translation scope per kernel descriptor variant.
+///
+/// @param adopted_roots Device-function entries that no kernel scope reaches on its own. A body
+/// whose address is only ever produced by a data relocation has no decoded edge leading to it, so
+/// the reachability walk cannot find it and the relocated `.text` would drop it. Such a body is
+/// adopted as an additional root of the lowest-offset scope. One scope rather than every scope is
+/// deliberate: a helper reached by several kernels is cloned per scope so each clone resolves
+/// through its own placement map, but a runtime-dereferenced pointer has exactly one value, and
+/// cloning would leave `relocate_relative_text_addends()` choosing between placements. Attributing
+/// the body to a single scope is sound because it is entered through an absolute pointer and
+/// returns through a caller-saved PC, so it is position-independent with respect to its callers.
 [[nodiscard]] std::vector<KernelTranslationScope>
 kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                          const BlockOffsetIndex &block_index, std::span<KdTranslation> kernels) {
+                          const BlockOffsetIndex &block_index, std::span<KdTranslation> kernels,
+                          std::span<const uint64_t> adopted_roots = {}) {
   std::vector<KernelTranslationScope> scopes;
   const auto entries = kernel_entry_offsets(kernels);
   if (entries.empty())
@@ -657,6 +669,10 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
         continue;
       own_entries.insert(kernel->kernarg_preload_firmware_entry_text_offset);
     }
+    // ordered_kernels is sorted by entry offset, so "the first scope built" names the same scope on
+    // every run and on a second pass over already-translated text.
+    if (scopes.empty())
+      own_entries.insert(adopted_roots.begin(), adopted_roots.end());
 
     scopes.push_back({kernel, entry,
                       reachable_kernel_blocks(blocks, block_index, block_positions, *entry,
@@ -777,6 +793,134 @@ scoped_call_return_offsets(std::span<BasicBlock *const> blocks, std::span<const 
         assert(term != nullptr && "function_return_blocks returns non-empty decoded blocks");
         returns.insert(term->src_loc());
       }
+    }
+  }
+  return returns;
+}
+
+/// @brief Return offsets of the `s_setpc_b64` returns belonging to adopted device-function roots.
+///
+/// @details An adopted root has no call edge, so scoped_call_return_offsets() -- which derives the
+/// return register from the call site that saved it -- reports nothing for it and the body's own
+/// return reads as an unrecoverable indirect branch. The register is recovered from the body
+/// instead: a terminator that jumps through an SGPR pair the body never redefines can only be
+/// returning to an address its caller supplied. Such an address is absolute and produced outside
+/// this code object's relocated text, so moving the body does not change it and there is nothing to
+/// recover.
+///
+/// A lane restore is not a redefinition for this purpose. A non-leaf device function stashes the
+/// incoming pair in a VGPR lane, lets its own `s_swap_pc_i64` calls overwrite the architectural
+/// pair, and reads the original back with `v_readlane_b32` before returning. The question is
+/// therefore which definition *reaches* the terminator, not whether one exists anywhere in the
+/// body: the call's write is real but dead by then. The search walks back from the terminator to
+/// the nearest definition of each half on every path, and accepts only a lane restore or the
+/// function entry itself. Any other reaching definition disqualifies the pair, since a computed
+/// value could be a relocated PC that needs the recovery this bypasses. A PC-relative builder
+/// feeding the terminator is not reached here at all: the caller's recovered-indirect and
+/// direct-branch tests run first and claim that shape.
+[[nodiscard]] std::unordered_set<uint64_t>
+adopted_root_return_offsets(const BlockOffsetIndex &block_index,
+                            std::span<const uint64_t> adopted_roots,
+                            std::span<const uint8_t> text) {
+  std::unordered_set<uint64_t> returns;
+  for (const uint64_t root : adopted_roots) {
+    BasicBlock *entry = block_for_offset(block_index, root);
+    if (entry == nullptr)
+      continue;
+
+    // Forward pass: collect the body's blocks and its candidate return terminators.
+    std::vector<BasicBlock *> stack{entry};
+    std::unordered_set<BasicBlock *> body;
+    std::vector<std::pair<BasicBlock *, uint16_t>> candidates;
+    while (!stack.empty()) {
+      BasicBlock *block = stack.back();
+      stack.pop_back();
+      if (block == nullptr || !body.insert(block).second)
+        continue;
+      const Instruction *term = block->terminator();
+      if (term != nullptr && term->size() == sizeof(uint32_t)) {
+        const std::string_view mnemonic = term->mnemonic();
+        if (mnemonic == "s_setpc_b64" || mnemonic == "s_set_pc_i64")
+          candidates.emplace_back(block, static_cast<uint16_t>(
+                                             text_word_at(text, term->src_loc()) & 0xffu));
+      }
+      for (BasicBlock *succ : block->successors())
+        stack.push_back(succ);
+    }
+
+    // Classify one instruction's effect on the tracked half: a lane restore reinstates the
+    // caller's value, any other definition replaces it with something this analysis cannot vouch
+    // for, and everything else leaves the search running.
+    enum class Effect { kNone, kRestores, kRedefines };
+    auto effect_on = [](const Instruction &inst, uint16_t sgpr) {
+      bool defines = false;
+      for (int i = 0; i < inst.num_dst_operands(); ++i) {
+        const Operand *dst = inst.dst_operand(i);
+        if (dst == nullptr || dst->encoding_value() < 0)
+          continue;
+        const auto base = static_cast<uint16_t>(dst->encoding_value());
+        const int halves = dst->size_bits() > 32 ? dst->size_bits() / 32 : 1;
+        if (sgpr >= base && sgpr < base + halves)
+          defines = true;
+      }
+      if (!defines)
+        return Effect::kNone;
+      return inst.mnemonic() == "v_readlane_b32" ? Effect::kRestores : Effect::kRedefines;
+    };
+
+    // Backward reaching-definition search for one half, starting just above `from`.
+    auto caller_value_reaches = [&](BasicBlock *start, const Instruction *from, uint16_t sgpr) {
+      std::vector<std::pair<BasicBlock *, const Instruction *>> work{{start, from}};
+      std::unordered_set<BasicBlock *> seen;
+      while (!work.empty()) {
+        const auto [block, before] = work.back();
+        work.pop_back();
+        if (block == nullptr || !body.contains(block))
+          return false;
+        // The instruction list is forward-only, so materialize it to scan upwards from `before`.
+        std::vector<const Instruction *> ordered;
+        ordered.reserve(block->num_instructions());
+        for (const Instruction &inst : block->instructions())
+          ordered.push_back(&inst);
+        size_t cursor = ordered.size();
+        if (before != nullptr) {
+          const auto found = std::ranges::find(ordered, before);
+          if (found == ordered.end())
+            return false;
+          cursor = static_cast<size_t>(found - ordered.begin());
+        }
+
+        bool resolved = false;
+        while (cursor > 0) {
+          --cursor;
+          const Effect effect = effect_on(*ordered[cursor], sgpr);
+          if (effect == Effect::kNone)
+            continue;
+          if (effect == Effect::kRedefines)
+            return false;
+          resolved = true;
+          break;
+        }
+        if (resolved)
+          continue;
+        // No definition in this block. The function entry means the value is the caller's; any
+        // other block defers to its predecessors, and a predecessor outside the body is a path
+        // this analysis cannot see, so it fails closed above.
+        if (block == entry)
+          continue;
+        if (block->predecessors().empty() || !seen.insert(block).second)
+          return false;
+        for (BasicBlock *pred : block->predecessors())
+          work.emplace_back(pred, nullptr);
+      }
+      return true;
+    };
+
+    for (const auto &[block, ssrc0] : candidates) {
+      const Instruction *term = block->terminator();
+      if (caller_value_reaches(block, term, ssrc0) &&
+          caller_value_reaches(block, term, static_cast<uint16_t>(ssrc0 + 1)))
+        returns.insert(term->src_loc());
     }
   }
   return returns;
@@ -1391,6 +1535,42 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
   }
 
+  // A device function whose address is produced only by a data relocation -- a C++ vtable slot is
+  // the common case -- is named by no decoded edge, so no kernel scope reaches it. Translated text
+  // replaces .text wholesale, so leaving it unreached drops the body and strands the addend that
+  // points at it. Adopt those bodies as roots and rebuild the scopes so the ordinary lowering path
+  // emits them and records their placement, which is what lets the addend be rewritten.
+  //
+  // The candidate set is the populated slots of the discovered function tables: a C++ vtable is an
+  // STT_OBJECT holding symbol-less RELATIVE64 addends into .text, which is exactly what discovery
+  // already qualifies. A compiler-anonymous pointer array carries no such symbol and so is not
+  // covered here; that case still refuses, which is the pre-existing behavior.
+  std::vector<uint64_t> adopted_roots;
+  {
+    std::unordered_set<const BasicBlock *> covered;
+    for (const KernelTranslationScope &scope : scopes)
+      covered.insert(scope.blocks.begin(), scope.blocks.end());
+
+    for (const RelocationFunctionTable &table : relocation_function_tables) {
+      for (const RelocationFunctionPointer &slot : table.entries) {
+        const BasicBlock *entry = block_for_offset(block_index, slot.target_text_offset);
+        // A body that is already reached is left alone. Adopting it would add a second placement of
+        // the same source offset, and a runtime-dereferenced pointer cannot choose between them.
+        if (entry == nullptr || covered.contains(entry))
+          continue;
+        adopted_roots.push_back(slot.target_text_offset);
+      }
+    }
+    std::ranges::sort(adopted_roots);
+    adopted_roots.erase(std::ranges::unique(adopted_roots).begin(), adopted_roots.end());
+    if (!adopted_roots.empty()) {
+      scopes = kernel_translation_scopes(blocks, block_index, descriptor_translations,
+                                         adopted_roots);
+    }
+  }
+  const std::unordered_set<uint64_t> adopted_return_offsets =
+      adopted_root_return_offsets(block_index, adopted_roots, text);
+
   const size_t expected_scope_count = kernel_translation_scope_count(descriptor_translations);
   if (scopes.size() != expected_scope_count) {
     append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
@@ -1918,8 +2098,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     // consumer has multiple recovered targets, no single direct window can
     // preserve semantics; DBT keeps the original indirect consumer and asks the
     // patch layer to rewrite each source-side PC builder once.
-    const std::unordered_set<uint64_t> valid_call_return_offsets =
+    std::unordered_set<uint64_t> valid_call_return_offsets =
         scoped_call_return_offsets(KernelBlockScope(scope.blocks), text);
+    // An adopted root's return is validated from its own body rather than from a call site, so it
+    // is added here for whichever scope ended up carrying that body.
+    valid_call_return_offsets.insert(adopted_return_offsets.begin(), adopted_return_offsets.end());
     struct RecoveredConsumer {
       std::vector<IndirectCallFixup> fixups;
       bool use_transfer_window = false;
