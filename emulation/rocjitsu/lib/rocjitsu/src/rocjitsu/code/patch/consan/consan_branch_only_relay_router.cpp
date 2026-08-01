@@ -1198,7 +1198,7 @@ struct QualifiedRelayInventoryView {
   const size_t fallback_setup_cost = multiply_saturated(
       relay_offsets.size(), std::max<size_t>(std::bit_width(relay_offsets.size()), 1u));
   const bool fallback_inventory_available = fallback_setup_work.consume(fallback_setup_cost);
-  add_saturated(batch.scan_work_consumed, fallback_setup_work.consumed());
+  add_saturated(batch.fallback_setup_work_consumed, fallback_setup_work.consumed());
   FixedRelayInventory unused_relays;
   if (fallback_inventory_available) {
     for (size_t relay = 0u; relay < relay_offsets.size(); ++relay) {
@@ -1340,7 +1340,7 @@ struct QualifiedRelayInventoryView {
           batch.route_optimization_invariant_failed || pair_optimization_invariant_failed;
     }
     add_saturated(batch.search_work_consumed, pair_search_work.consumed());
-    add_saturated(batch.scan_work_consumed, pair_scan_work.consumed());
+    add_saturated(batch.feasibility_scan_work_consumed, pair_scan_work.consumed());
 
     if (pair_termination == ExactFixedRelayBatchSolver::Termination::Solved) {
       batch.routes[request_index].entry_relay_offsets = std::move(pair_routes[0]);
@@ -1371,7 +1371,7 @@ struct QualifiedRelayInventoryView {
       if (entry_route.status == GreedyFixedRelayRoute::Status::Solved) {
         return_route = plan_greedy_fixed_relay_route(pair_demands[1], unused_relays, greedy_work);
       }
-      add_saturated(batch.scan_work_consumed, greedy_work.consumed());
+      add_saturated(batch.feasibility_scan_work_consumed, greedy_work.consumed());
       if (entry_route.status == GreedyFixedRelayRoute::Status::InvariantFailure ||
           return_route.status == GreedyFixedRelayRoute::Status::InvariantFailure) {
         batch.routing_invariant_failed = true;
@@ -1422,7 +1422,7 @@ struct QualifiedRelayInventoryView {
                 entry_status == GreedyFixedRelayRoute::Status::InvariantFailure
             ? entry_status
             : probe(pair_demands[1]);
-    add_saturated(batch.scan_work_consumed, classification_work.consumed());
+    add_saturated(batch.feasibility_scan_work_consumed, classification_work.consumed());
     if (entry_status == GreedyFixedRelayRoute::Status::InvariantFailure ||
         return_status == GreedyFixedRelayRoute::Status::InvariantFailure) {
       batch.failure = BranchOnlyRelayPlanFailure::Reservation;
@@ -1461,11 +1461,15 @@ void record_branch_only_relay_plan(ConSanBranchOnlyRoutingTelemetry &telemetry,
   if (outcome.route_optimization_invariant_failed)
     add_saturated(telemetry.route_optimization_invariant_failure_count, 1u);
   add_saturated(telemetry.search_work_count, outcome.search_work_consumed);
-  add_saturated(telemetry.scan_work_count, outcome.scan_work_consumed);
+  add_saturated(telemetry.scan_work_count, outcome.scan_work_consumed());
   add_saturated(telemetry.route_optimization_search_work_count,
                 outcome.route_optimization_search_work_consumed);
   add_saturated(telemetry.route_optimization_scan_work_count,
                 outcome.route_optimization_scan_work_consumed);
+  add_saturated(telemetry.relay_qualification_work_count,
+                outcome.relay_qualification_work_consumed);
+  add_saturated(telemetry.fallback_setup_work_count, outcome.fallback_setup_work_consumed);
+  add_saturated(telemetry.feasibility_scan_work_count, outcome.feasibility_scan_work_consumed);
   for (BranchOnlyRelayPlanStrategy strategy : pair_strategies) {
     if (strategy == BranchOnlyRelayPlanStrategy::ExactPairFallback ||
         strategy == BranchOnlyRelayPlanStrategy::GreedyPairFallback) {
@@ -1525,7 +1529,7 @@ void record_branch_only_relay_rejection(ConSanBranchOnlyRoutingTelemetry &teleme
 }
 
 static_assert(
-    sizeof(ConSanBranchOnlyRoutingTelemetry) == 17u * sizeof(size_t),
+    sizeof(ConSanBranchOnlyRoutingTelemetry) == 20u * sizeof(size_t),
     "add new routing counters to branch_only_relay_telemetry_delta and its exhaustive unit test");
 
 ConSanBranchOnlyRoutingTelemetry
@@ -1567,6 +1571,12 @@ branch_only_relay_telemetry_delta(const ConSanBranchOnlyRoutingTelemetry &after,
                                                     before.route_optimization_search_work_count),
       .route_optimization_scan_work_count = delta(after.route_optimization_scan_work_count,
                                                   before.route_optimization_scan_work_count),
+      .relay_qualification_work_count =
+          delta(after.relay_qualification_work_count, before.relay_qualification_work_count),
+      .fallback_setup_work_count =
+          delta(after.fallback_setup_work_count, before.fallback_setup_work_count),
+      .feasibility_scan_work_count =
+          delta(after.feasibility_scan_work_count, before.feasibility_scan_work_count),
   };
 }
 
@@ -1804,7 +1814,7 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
       .complete = relay_inventory_complete,
   };
   assert(qualified_relays.shape_valid());
-  add_saturated(batch.scan_work_consumed, qualification_work.consumed());
+  add_saturated(batch.relay_qualification_work_consumed, qualification_work.consumed());
   batch.work_budget_exhausted |= !qualified_relays.complete;
 
   ExactFixedRelayBatchSolver::Termination exact_termination =
@@ -1845,7 +1855,7 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
       add_saturated(batch.route_optimization_scan_work_consumed, solve.optimization_scan_work);
     }
     add_saturated(batch.search_work_consumed, search_work.consumed());
-    add_saturated(batch.scan_work_consumed, scan_work.consumed());
+    add_saturated(batch.feasibility_scan_work_consumed, scan_work.consumed());
   }
   if (exact_termination == ExactFixedRelayBatchSolver::Termination::Solved) {
     for (size_t demand_index = 0u; demand_index < demands.size(); ++demand_index) {

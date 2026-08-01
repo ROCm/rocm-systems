@@ -211,15 +211,28 @@ static_assert(sizeof(BranchOnlyRelayPlanFlags) == 4u * sizeof(bool),
 struct BranchOnlyRelayPlanOutcome : BranchOnlyRelayPlanFlags {
   BranchOnlyRelayPlanFailure failure = BranchOnlyRelayPlanFailure::None;
   BranchOnlyRelayPlanStrategy strategy = BranchOnlyRelayPlanStrategy::ExactBatch;
-  /// Routing work aggregates feasibility search/scan work with the independently
-  /// bounded relay-qualification and fallback-inventory setup phases. It
-  /// excludes the independent route-minimization pass.
+  /// All compatibility search work is feasibility-search work. Compatibility
+  /// scan work is derived from the independently bounded phases below. Both
+  /// exclude the independent route-minimization pass.
   size_t search_work_consumed = 0u;
-  size_t scan_work_consumed = 0u;
   /// Route-minimization work is reported independently even when a later
   /// routing reservation discards the improved route.
   size_t route_optimization_search_work_consumed = 0u;
   size_t route_optimization_scan_work_consumed = 0u;
+  /// These phase counters saturating-sum to the compatibility scan total.
+  size_t relay_qualification_work_consumed = 0u;
+  size_t fallback_setup_work_consumed = 0u;
+  size_t feasibility_scan_work_consumed = 0u;
+
+  [[nodiscard]] size_t scan_work_consumed() const {
+    const auto saturated_add = [](size_t lhs, size_t rhs) {
+      return rhs > std::numeric_limits<size_t>::max() - lhs ? std::numeric_limits<size_t>::max()
+                                                            : lhs + rhs;
+    };
+    return saturated_add(
+        saturated_add(relay_qualification_work_consumed, fallback_setup_work_consumed),
+        feasibility_scan_work_consumed);
+  }
 };
 
 struct BranchOnlyRelayBatchPlan : BranchOnlyRelayPlanOutcome {

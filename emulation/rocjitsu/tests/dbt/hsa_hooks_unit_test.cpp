@@ -1694,6 +1694,9 @@ TEST(HsaHooksUnitTest, ConSanLogsCompleteBranchRoutingTelemetrySchema) {
       .scan_work_count = 19u,
       .route_optimization_search_work_count = 23u,
       .route_optimization_scan_work_count = 29u,
+      .relay_qualification_work_count = 2u,
+      .fallback_setup_work_count = 3u,
+      .feasibility_scan_work_count = 14u,
   };
   selection.branch_only_reservoir_telemetry = {
       .planned_reservoir_count = 5u,
@@ -1721,6 +1724,9 @@ TEST(HsaHooksUnitTest, ConSanLogsCompleteBranchRoutingTelemetrySchema) {
       .scan_work_count = 83u,
       .route_optimization_search_work_count = 103u,
       .route_optimization_scan_work_count = 113u,
+      .relay_qualification_work_count = 11u,
+      .fallback_setup_work_count = 13u,
+      .feasibility_scan_work_count = 59u,
   };
   selection.discarded_branch_only_reservoir_telemetry = {
       .planned_reservoir_count = 13u,
@@ -1750,6 +1756,9 @@ TEST(HsaHooksUnitTest, ConSanLogsCompleteBranchRoutingTelemetrySchema) {
       .scan_work_count = 193u,
       .route_optimization_search_work_count = 197u,
       .route_optimization_scan_work_count = 199u,
+      .relay_qualification_work_count = 17u,
+      .fallback_setup_work_count = 19u,
+      .feasibility_scan_work_count = 157u,
   };
   g_transform_override_result.moi_branch_only_routing_telemetry = {
       .pair_attempt_count = 197u,
@@ -1769,6 +1778,9 @@ TEST(HsaHooksUnitTest, ConSanLogsCompleteBranchRoutingTelemetrySchema) {
       .scan_work_count = 269u,
       .route_optimization_search_work_count = 271u,
       .route_optimization_scan_work_count = 277u,
+      .relay_qualification_work_count = 23u,
+      .fallback_setup_work_count = 29u,
+      .feasibility_scan_work_count = 217u,
   };
   g_transform_override_result.lds_relay_reservoir_telemetry = {
       .planned_reservoir_count = 2u,
@@ -1810,6 +1822,8 @@ TEST(HsaHooksUnitTest, ConSanLogsCompleteBranchRoutingTelemetrySchema) {
                      "exact_pair_fallback_attempts=41 greedy_pair_fallback_attempts=37 "
                      "pair_attempts=47 plan_calls=43 search_work=17 scan_work=19 "
                      "route_optimization_search_work=23 route_optimization_scan_work=29 "
+                     "relay_qualification_work=2 fallback_setup_work=3 "
+                     "feasibility_scan_work=14 "
                      "reservoirs_planned=5 reservoirs_used=3 reservoirs_unused=2 "
                      "reservoir_planned_appended_bytes=1536 "
                      "reservoir_used_appended_bytes=1024 "
@@ -1826,6 +1840,8 @@ TEST(HsaHooksUnitTest, ConSanLogsCompleteBranchRoutingTelemetrySchema) {
                      "exact_pair_fallback_attempts=101 greedy_pair_fallback_attempts=97 "
                      "search_work=79 scan_work=83 route_optimization_search_work=103 "
                      "route_optimization_scan_work=113 "
+                     "relay_qualification_work=11 fallback_setup_work=13 "
+                     "feasibility_scan_work=59 "
                      "reservoirs_planned=13 reservoirs_used=5 reservoirs_unused=8 "
                      "reservoir_planned_appended_bytes=8192 "
                      "reservoir_used_appended_bytes=3072 "
@@ -1841,7 +1857,8 @@ TEST(HsaHooksUnitTest, ConSanLogsCompleteBranchRoutingTelemetrySchema) {
                      "route_optimization_invariant_failures=171 reservation_failed=173 "
                      "exact_pair_fallback_attempts=179 greedy_pair_fallback_attempts=181 "
                      "search_work=191 scan_work=193 route_optimization_search_work=197 "
-                     "route_optimization_scan_work=199"),
+                     "route_optimization_scan_work=199 relay_qualification_work=17 "
+                     "fallback_setup_work=19 feasibility_scan_work=157"),
             std::string::npos)
       << log;
   EXPECT_NE(log.find("lds_relay_reservoirs_planned=2 lds_relay_reservoirs_used=1 "
@@ -1859,7 +1876,9 @@ TEST(HsaHooksUnitTest, ConSanLogsCompleteBranchRoutingTelemetrySchema) {
                      "route_optimization_invariant_failures=243 reservation_failed=241 "
                      "exact_pair_fallback_attempts=251 "
                      "greedy_pair_fallback_attempts=257 search_work=263 scan_work=269 "
-                     "route_optimization_search_work=271 route_optimization_scan_work=277"),
+                     "route_optimization_search_work=271 route_optimization_scan_work=277 "
+                     "relay_qualification_work=23 fallback_setup_work=29 "
+                     "feasibility_scan_work=217"),
             std::string::npos)
       << log;
   EXPECT_NE(log.find("reservoirs_planned=17 reservoirs_used=11 reservoirs_unused=6 "

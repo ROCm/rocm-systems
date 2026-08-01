@@ -1072,6 +1072,9 @@ target_link_libraries(
         Threads::Threads
         GTest::gtest_main
 )
+# The unit binary loads this library at runtime through dlopen, so ensure the
+# runtime test dependency is rebuilt even though there is no link edge.
+add_dependencies(hsa_hooks_unit_test rocjitsu_dbi_hooks)
 rj_configure_target(hsa_hooks_unit_test TEST)
 gtest_discover_tests(hsa_hooks_unit_test)
 

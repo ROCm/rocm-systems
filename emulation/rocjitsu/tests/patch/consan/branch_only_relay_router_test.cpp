@@ -192,10 +192,13 @@ void expect_same_batch_plan(const BranchOnlyRelayBatchPlan &lhs,
   EXPECT_EQ(lhs.route_optimization_exhausted, rhs.route_optimization_exhausted);
   EXPECT_EQ(lhs.route_optimization_invariant_failed, rhs.route_optimization_invariant_failed);
   EXPECT_EQ(lhs.search_work_consumed, rhs.search_work_consumed);
-  EXPECT_EQ(lhs.scan_work_consumed, rhs.scan_work_consumed);
+  EXPECT_EQ(lhs.scan_work_consumed(), rhs.scan_work_consumed());
   EXPECT_EQ(lhs.route_optimization_search_work_consumed,
             rhs.route_optimization_search_work_consumed);
   EXPECT_EQ(lhs.route_optimization_scan_work_consumed, rhs.route_optimization_scan_work_consumed);
+  EXPECT_EQ(lhs.relay_qualification_work_consumed, rhs.relay_qualification_work_consumed);
+  EXPECT_EQ(lhs.fallback_setup_work_consumed, rhs.fallback_setup_work_consumed);
+  EXPECT_EQ(lhs.feasibility_scan_work_consumed, rhs.feasibility_scan_work_consumed);
   EXPECT_EQ(lhs.rejected_pair_indices, rhs.rejected_pair_indices);
   EXPECT_EQ(lhs.rejection_reasons, rhs.rejection_reasons);
   EXPECT_EQ(lhs.pair_strategies, rhs.pair_strategies);
@@ -784,7 +787,7 @@ TEST(ConSanBranchOnlyRelayRouter, ManyOwnerGroupsPreserveExactTierAndBoundedOpti
   EXPECT_FALSE(outcome.route_optimization_exhausted);
   ASSERT_EQ(route->claims.size(), 2u);
   EXPECT_EQ(route->claims[0].owner_affinity, route->claims[1].owner_affinity);
-  EXPECT_LT(outcome.scan_work_consumed, 20'000u);
+  EXPECT_LT(outcome.scan_work_consumed(), 20'000u);
   // With no zero-cost relay, one owner is a proved lower bound. The first
   // exact route already meets it, so no branch-and-bound search is needed.
   EXPECT_EQ(outcome.route_optimization_search_work_consumed, 0u);
@@ -819,7 +822,7 @@ TEST(ConSanBranchOnlyRelayRouter, OwnerTierClassificationPreservesRoutingSearchW
   EXPECT_EQ(tagged.search_work_consumed, untagged.search_work_consumed);
   // Owner grouping and minimization use their independent meters, so tagging
   // the same routing inventory cannot shrink the feasibility window.
-  EXPECT_EQ(tagged.scan_work_consumed, untagged.scan_work_consumed);
+  EXPECT_EQ(tagged.scan_work_consumed(), untagged.scan_work_consumed());
   // An untagged router knows at offer time that it has no owner groups to
   // optimize, so it does not spend the independent minimization allowance.
   EXPECT_EQ(untagged.route_optimization_scan_work_consumed, 0u);
@@ -1600,7 +1603,7 @@ TEST(ConSanBranchOnlyRelayRouter, InfeasibleCorridorBatchStopsAtDeterministicWor
                 2u * requests.size() * limits.batch_search_work_per_demand +
                 requests.size() * limits.pair_search_work);
   constexpr size_t kRelayCount = 29u;
-  EXPECT_LE(plan.scan_work_consumed,
+  EXPECT_LE(plan.scan_work_consumed(),
             limits.batch_base_scan_work +
                 2u * requests.size() * kRelayCount * limits.batch_scan_work_per_demand_relay +
                 limits.batch_relay_qualification_work +
@@ -1644,8 +1647,12 @@ TEST(ConSanBranchOnlyRelayRouter, TinyLimitsExerciseObservableGreedyFallback) {
   EXPECT_TRUE(outcome.work_budget_exhausted);
   EXPECT_EQ(route->entry_relay_offsets, (std::vector<uint64_t>{100'000u}));
   EXPECT_EQ(outcome.search_work_consumed, 2u);
-  EXPECT_GT(outcome.scan_work_consumed, 0u);
-  EXPECT_LE(outcome.scan_work_consumed, 300u);
+  EXPECT_GT(outcome.scan_work_consumed(), 0u);
+  EXPECT_LE(outcome.scan_work_consumed(), 300u);
+  EXPECT_GT(outcome.relay_qualification_work_consumed, 0u);
+  EXPECT_GT(outcome.fallback_setup_work_consumed, 0u);
+  EXPECT_GT(outcome.search_work_consumed, 0u);
+  EXPECT_GT(outcome.feasibility_scan_work_consumed, 0u);
 
   const std::array requests = {
       BranchOnlyRelayPairRequest{0u, 200'000u, 200'004u, 100'004u},
@@ -1659,11 +1666,14 @@ TEST(ConSanBranchOnlyRelayRouter, TinyLimitsExerciseObservableGreedyFallback) {
   EXPECT_EQ(outcome.routing_invariant_failed, batch.routing_invariant_failed);
   EXPECT_EQ(outcome.route_optimization_invariant_failed, batch.route_optimization_invariant_failed);
   EXPECT_EQ(outcome.search_work_consumed, batch.search_work_consumed);
-  EXPECT_EQ(outcome.scan_work_consumed, batch.scan_work_consumed);
+  EXPECT_EQ(outcome.scan_work_consumed(), batch.scan_work_consumed());
   EXPECT_EQ(outcome.route_optimization_search_work_consumed,
             batch.route_optimization_search_work_consumed);
   EXPECT_EQ(outcome.route_optimization_scan_work_consumed,
             batch.route_optimization_scan_work_consumed);
+  EXPECT_EQ(outcome.relay_qualification_work_consumed, batch.relay_qualification_work_consumed);
+  EXPECT_EQ(outcome.fallback_setup_work_consumed, batch.fallback_setup_work_consumed);
+  EXPECT_EQ(outcome.feasibility_scan_work_consumed, batch.feasibility_scan_work_consumed);
   EXPECT_EQ(batch.pair_strategies, (std::vector{BranchOnlyRelayPlanStrategy::GreedyPairFallback}));
 }
 
@@ -1677,9 +1687,11 @@ TEST(ConSanBranchOnlyRelayRouter, RecordsBatchedPlanAndFailureTelemetryWithShare
   outcome.route_optimization_exhausted = true;
   outcome.route_optimization_invariant_failed = true;
   outcome.search_work_consumed = 17u;
-  outcome.scan_work_consumed = 23u;
   outcome.route_optimization_search_work_consumed = 29u;
   outcome.route_optimization_scan_work_consumed = 31u;
+  outcome.relay_qualification_work_consumed = 5u;
+  outcome.fallback_setup_work_consumed = 7u;
+  outcome.feasibility_scan_work_consumed = 11u;
   const std::array strategies = {
       BranchOnlyRelayPlanStrategy::ExactBatch,
       BranchOnlyRelayPlanStrategy::ExactPairFallback,
@@ -1702,6 +1714,9 @@ TEST(ConSanBranchOnlyRelayRouter, RecordsBatchedPlanAndFailureTelemetryWithShare
   EXPECT_EQ(telemetry.scan_work_count, 23u);
   EXPECT_EQ(telemetry.route_optimization_search_work_count, 29u);
   EXPECT_EQ(telemetry.route_optimization_scan_work_count, 31u);
+  EXPECT_EQ(telemetry.relay_qualification_work_count, 5u);
+  EXPECT_EQ(telemetry.fallback_setup_work_count, 7u);
+  EXPECT_EQ(telemetry.feasibility_scan_work_count, 11u);
   EXPECT_EQ(telemetry.reservation_failure_count, 1u);
   EXPECT_EQ(telemetry.entry_route_failure_count, 1u);
   EXPECT_EQ(telemetry.return_route_failure_count, 0u);
@@ -1726,6 +1741,9 @@ TEST(ConSanBranchOnlyRelayRouter, ComputesTelemetryDeltaAcrossEveryCounter) {
       .scan_work_count = 13u,
       .route_optimization_search_work_count = 14u,
       .route_optimization_scan_work_count = 15u,
+      .relay_qualification_work_count = 18u,
+      .fallback_setup_work_count = 19u,
+      .feasibility_scan_work_count = 21u,
   };
   const ConSanBranchOnlyRoutingTelemetry after{
       .pair_attempt_count = 13u,
@@ -1745,6 +1763,9 @@ TEST(ConSanBranchOnlyRelayRouter, ComputesTelemetryDeltaAcrossEveryCounter) {
       .scan_work_count = 37u,
       .route_optimization_search_work_count = 39u,
       .route_optimization_scan_work_count = 41u,
+      .relay_qualification_work_count = 43u,
+      .fallback_setup_work_count = 47u,
+      .feasibility_scan_work_count = 59u,
   };
 
   const ConSanBranchOnlyRoutingTelemetry delta = branch_only_relay_telemetry_delta(after, before);
@@ -1766,6 +1787,9 @@ TEST(ConSanBranchOnlyRelayRouter, ComputesTelemetryDeltaAcrossEveryCounter) {
   EXPECT_EQ(delta.scan_work_count, 24u);
   EXPECT_EQ(delta.route_optimization_search_work_count, 25u);
   EXPECT_EQ(delta.route_optimization_scan_work_count, 26u);
+  EXPECT_EQ(delta.relay_qualification_work_count, 25u);
+  EXPECT_EQ(delta.fallback_setup_work_count, 28u);
+  EXPECT_EQ(delta.feasibility_scan_work_count, 38u);
   EXPECT_FALSE(branch_only_relay_telemetry_is_empty(delta));
   EXPECT_TRUE(branch_only_relay_telemetry_is_empty({}));
 }
@@ -1775,6 +1799,7 @@ TEST(ConSanBranchOnlyRelayRouter, ClampsRegressiveTelemetryDeltaFieldsInReleaseB
   const ConSanBranchOnlyRoutingTelemetry before{
       .plan_call_count = 7u,
       .scan_work_count = 100u,
+      .relay_qualification_work_count = 100u,
   };
   const ConSanBranchOnlyRoutingTelemetry after{
       .pair_attempt_count = 3u,
@@ -1786,6 +1811,7 @@ TEST(ConSanBranchOnlyRelayRouter, ClampsRegressiveTelemetryDeltaFieldsInReleaseB
   EXPECT_EQ(delta.pair_attempt_count, 3u);
   EXPECT_EQ(delta.plan_call_count, 0u);
   EXPECT_EQ(delta.scan_work_count, 0u);
+  EXPECT_EQ(delta.relay_qualification_work_count, 0u);
 }
 #endif
 
@@ -1901,8 +1927,12 @@ TEST(ConSanBranchOnlyRelayRouter, ScanBudgetBoundsLargeRelayInventory) {
   // Qualification and fallback inventory construction are precharged. The
   // exact, pair, and greedy tiers refuse their first precharge and bill none.
   const size_t qualification_work = kRelayCount * (1u + std::bit_width(size_t{4u}));
-  EXPECT_EQ(plan.scan_work_consumed,
-            qualification_work + kRelayCount * std::bit_width(kRelayCount));
+  const size_t fallback_setup_work = kRelayCount * std::bit_width(kRelayCount);
+  EXPECT_EQ(plan.relay_qualification_work_consumed, qualification_work);
+  EXPECT_EQ(plan.fallback_setup_work_consumed, fallback_setup_work);
+  EXPECT_EQ(plan.search_work_consumed, 0u);
+  EXPECT_EQ(plan.feasibility_scan_work_consumed, 0u);
+  EXPECT_EQ(plan.scan_work_consumed(), qualification_work + fallback_setup_work);
 }
 
 TEST(ConSanBranchOnlyRelayRouter, IneligibleRelayTraversalConsumesSearchBudget) {
@@ -1983,7 +2013,13 @@ TEST(ConSanBranchOnlyRelayRouter, OwnedQualificationDoesNotChargePlacementOccupa
 
   ASSERT_TRUE(empty_plan.complete());
   ASSERT_TRUE(occupied_plan.complete());
-  EXPECT_EQ(occupied_plan.scan_work_consumed, empty_plan.scan_work_consumed);
+  EXPECT_EQ(occupied_plan.scan_work_consumed(), empty_plan.scan_work_consumed());
+  EXPECT_EQ(occupied_plan.relay_qualification_work_consumed,
+            empty_plan.relay_qualification_work_consumed);
+  EXPECT_GT(occupied_plan.relay_qualification_work_consumed, 0u);
+  EXPECT_EQ(occupied_plan.fallback_setup_work_consumed, 0u);
+  EXPECT_GT(occupied_plan.search_work_consumed, 0u);
+  EXPECT_GT(occupied_plan.feasibility_scan_work_consumed, 0u);
   EXPECT_FALSE(occupied_plan.work_budget_exhausted);
 }
 
@@ -2051,7 +2087,10 @@ TEST(ConSanBranchOnlyRelayRouter, PristineQualificationWorkScalesWithRangeTreeDe
   ASSERT_TRUE(small_plan.complete());
   ASSERT_TRUE(large_plan.complete());
   constexpr size_t kPristineRelayCount = 2u;
-  EXPECT_EQ(large_plan.scan_work_consumed - small_plan.scan_work_consumed,
+  EXPECT_EQ(
+      large_plan.relay_qualification_work_consumed - small_plan.relay_qualification_work_consumed,
+      kPristineRelayCount * (std::bit_width(kLargeRangeCount) - std::bit_width(kSmallRangeCount)));
+  EXPECT_EQ(large_plan.scan_work_consumed() - small_plan.scan_work_consumed(),
             kPristineRelayCount *
                 (std::bit_width(kLargeRangeCount) - std::bit_width(kSmallRangeCount)));
 }

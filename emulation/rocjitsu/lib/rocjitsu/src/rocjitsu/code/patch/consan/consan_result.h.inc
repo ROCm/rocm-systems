@@ -121,6 +121,10 @@ struct ConSanPatchedImageGrowthRejection {
 /// the feasibility route after detecting inconsistent minimizer inputs. They
 /// are distinct from work-budget exhaustion because raising a limit cannot
 /// repair them.
+///
+/// The compatibility search/scan totals remain stable. All search work is
+/// feasibility work. The scan phase counters expose the composition of scan
+/// work, while route-optimization work remains outside both totals.
 struct ConSanBranchOnlyRoutingTelemetry {
   size_t pair_attempt_count = 0;
   size_t plan_call_count = 0;
@@ -139,6 +143,9 @@ struct ConSanBranchOnlyRoutingTelemetry {
   size_t scan_work_count = 0;
   size_t route_optimization_search_work_count = 0;
   size_t route_optimization_scan_work_count = 0;
+  size_t relay_qualification_work_count = 0;
+  size_t fallback_setup_work_count = 0;
+  size_t feasibility_scan_work_count = 0;
 
   bool operator==(const ConSanBranchOnlyRoutingTelemetry &) const = default;
 };

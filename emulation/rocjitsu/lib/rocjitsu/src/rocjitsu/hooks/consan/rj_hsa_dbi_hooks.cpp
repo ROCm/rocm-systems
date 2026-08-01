@@ -3683,6 +3683,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
           "pair_attempts=%zu plan_calls=%zu search_work=%zu scan_work=%zu "
           "route_optimization_search_work=%zu route_optimization_scan_work=%zu "
+          "relay_qualification_work=%zu fallback_setup_work=%zu "
+          "feasibility_scan_work=%zu "
           "reservoirs_planned=%zu reservoirs_used=%zu reservoirs_unused=%zu "
           "reservoir_planned_appended_bytes=%zu reservoir_used_appended_bytes=%zu "
           "reservoir_unused_appended_bytes=%zu "
@@ -3712,6 +3714,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           selection.branch_only_routing.scan_work_count,
           selection.branch_only_routing.route_optimization_search_work_count,
           selection.branch_only_routing.route_optimization_scan_work_count,
+          selection.branch_only_routing.relay_qualification_work_count,
+          selection.branch_only_routing.fallback_setup_work_count,
+          selection.branch_only_routing.feasibility_scan_work_count,
           flat_reservoirs.planned_reservoir_count, flat_reservoirs.used_reservoir_count,
           flat_reservoirs.unused_reservoir_count, flat_reservoirs.planned_appended_bytes,
           flat_reservoirs.used_appended_bytes, flat_reservoirs.unused_appended_bytes,
@@ -3739,6 +3744,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
             "search_work=%zu scan_work=%zu "
             "route_optimization_search_work=%zu route_optimization_scan_work=%zu "
+            "relay_qualification_work=%zu fallback_setup_work=%zu "
+            "feasibility_scan_work=%zu "
             "reservoirs_planned=%zu reservoirs_used=%zu reservoirs_unused=%zu "
             "reservoir_planned_appended_bytes=%zu reservoir_used_appended_bytes=%zu "
             "reservoir_unused_appended_bytes=%zu",
@@ -3759,6 +3766,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             discarded_routing.search_work_count, discarded_routing.scan_work_count,
             discarded_routing.route_optimization_search_work_count,
             discarded_routing.route_optimization_scan_work_count,
+            discarded_routing.relay_qualification_work_count,
+            discarded_routing.fallback_setup_work_count,
+            discarded_routing.feasibility_scan_work_count,
             discarded_reservoirs.planned_reservoir_count, discarded_reservoirs.used_reservoir_count,
             discarded_reservoirs.unused_reservoir_count,
             discarded_reservoirs.planned_appended_bytes, discarded_reservoirs.used_appended_bytes,
@@ -3782,6 +3792,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
           "search_work=%zu scan_work=%zu route_optimization_search_work=%zu "
           "route_optimization_scan_work=%zu "
+          "relay_qualification_work=%zu fallback_setup_work=%zu "
+          "feasibility_scan_work=%zu "
           "lds_relay_reservoirs_planned=%zu lds_relay_reservoirs_used=%zu "
           "lds_relay_reservoirs_unused=%zu "
           "lds_relay_reservoir_planned_appended_bytes=%zu "
@@ -3797,7 +3809,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           lds_routing.reservation_failure_count, lds_routing.exact_pair_fallback_attempt_count,
           lds_routing.greedy_pair_fallback_attempt_count, lds_routing.search_work_count,
           lds_routing.scan_work_count, lds_routing.route_optimization_search_work_count,
-          lds_routing.route_optimization_scan_work_count, lds_reservoirs.planned_reservoir_count,
+          lds_routing.route_optimization_scan_work_count,
+          lds_routing.relay_qualification_work_count, lds_routing.fallback_setup_work_count,
+          lds_routing.feasibility_scan_work_count, lds_reservoirs.planned_reservoir_count,
           lds_reservoirs.used_reservoir_count, lds_reservoirs.unused_reservoir_count,
           lds_reservoirs.planned_appended_bytes, lds_reservoirs.used_appended_bytes,
           lds_reservoirs.unused_appended_bytes);
@@ -3821,6 +3835,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
           "search_work=%zu scan_work=%zu route_optimization_search_work=%zu "
           "route_optimization_scan_work=%zu "
+          "relay_qualification_work=%zu fallback_setup_work=%zu "
+          "feasibility_scan_work=%zu "
           "reservoirs_planned=%zu reservoirs_used=%zu reservoirs_unused=%zu "
           "reservoir_planned_appended_bytes=%zu reservoir_used_appended_bytes=%zu "
           "reservoir_unused_appended_bytes=%zu",
@@ -3835,7 +3851,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           moi_routing.reservation_failure_count, moi_routing.exact_pair_fallback_attempt_count,
           moi_routing.greedy_pair_fallback_attempt_count, moi_routing.search_work_count,
           moi_routing.scan_work_count, moi_routing.route_optimization_search_work_count,
-          moi_routing.route_optimization_scan_work_count, moi_reservoirs.planned_reservoir_count,
+          moi_routing.route_optimization_scan_work_count,
+          moi_routing.relay_qualification_work_count, moi_routing.fallback_setup_work_count,
+          moi_routing.feasibility_scan_work_count, moi_reservoirs.planned_reservoir_count,
           moi_reservoirs.used_reservoir_count, moi_reservoirs.unused_reservoir_count,
           moi_reservoirs.planned_appended_bytes, moi_reservoirs.used_appended_bytes,
           moi_reservoirs.unused_appended_bytes);
