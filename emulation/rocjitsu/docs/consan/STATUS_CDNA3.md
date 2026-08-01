@@ -113,6 +113,8 @@ Promote one cell only from a retained result bundle at one revision containing:
    provenance.
 
 The CDNA3 hip-moi artifact enablement is complete and retained under
-`bd-1w9.1.1`. Physical gfx942 execution and four-engine result bundles remain
-open qualification work; this ledger continues to fail closed rather than
-infer those results from simulator or other-target evidence.
+`bd-1w9.1.1`. Physical gfx942 execution is unavailable in this workspace and
+is outside the semantic feature-parity closure scope. This ledger therefore
+continues to fail closed rather than infer physical result bundles from the
+simulator or other-target evidence; a future hardware qualification campaign
+can promote cells without changing the supported-form contract.
