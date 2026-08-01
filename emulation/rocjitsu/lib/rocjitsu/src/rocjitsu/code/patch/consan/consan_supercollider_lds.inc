@@ -2764,7 +2764,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         branch_reservoir_candidates.size() <= std::numeric_limits<size_t>::max() - 2u
             ? branch_reservoir_candidates.size() + 2u
             : std::numeric_limits<size_t>::max();
-    [[maybe_unused]] bool convergence_terminated = false;
+    bool convergence_terminated = false;
     for (size_t iteration = 0u; iteration < convergence_attempt_limit; ++iteration) {
       const bool initial_iteration = iteration == 0u;
       std::vector<LdsCheckTrapCandidate> tentative_candidates;
@@ -2954,6 +2954,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         break;
       }
     }
+    result.lds_relay_reservoir_telemetry.lds_replay_limit_reached_count =
+        convergence_terminated ? 0u : 1u;
     assert(convergence_terminated &&
            "branch-only reservoir replay must converge before its defensive limit");
     std::optional<ScSelectedSpillState> accepted_spills;
@@ -3528,7 +3530,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                  branch_only_claimed_relay_slots.contains(offset);
         });
   }
-  ConSanBranchOnlyReservoirTelemetry lds_reservoir_telemetry;
+  ConSanBranchOnlyReservoirTelemetry lds_reservoir_telemetry =
+      result.lds_relay_reservoir_telemetry;
   for (const ScRelayReservoir &reservoir : selected_relay_reservoirs) {
     // Derive the footprint from the same structural inputs as planning and
     // emission. The final overhead word is the return-control word; keeping it

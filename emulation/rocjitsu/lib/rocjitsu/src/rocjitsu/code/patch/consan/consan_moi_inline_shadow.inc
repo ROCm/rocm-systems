@@ -933,8 +933,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           // Inline routing exposes banks shared by the complete object, so its
           // useful fallback window is larger than the generic router default.
           // Fixed ceilings keep every pair bounded independently of inventory.
-          relay_limits.batch_fallback_setup_work = 1'000'000u;
-          relay_limits.pair_greedy_work = 1'000'000u;
+          relay_limits.batch.fallback_setup = 1'000'000u;
+          relay_limits.pair.greedy = 1'000'000u;
           branch_only_route = tentative_router.plan_pair(
               tentative_planner, candidate.text_offset, reservation->body_offset,
               reservation->body_offset + patch_bytes, candidate.text_offset + candidate.size,

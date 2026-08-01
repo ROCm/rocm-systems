@@ -90,18 +90,21 @@ struct ConSanPatchedImageGrowthRejection {
 /// Fallback counters count pairs that reached the corresponding tier, whether
 /// or not that tier produced a route. Greedy fallback attempts are a subset of
 /// exact-pair fallback attempts; the two counters must not be summed.
-/// Work-limit exhaustion counts plan calls whose routing, setup, or greedy tier
-/// reached its configured limit, including calls recovered by fallback. The
-/// work counters may remain zero when an initial setup precharge exceeds the
-/// whole allowance. Greedy fallback is owner-oblivious and therefore
-/// identifies pairs whose retained route has no exact minimization guarantee,
-/// even when an earlier exact-pair minimization ran before an independent
-/// removal limit forced fallback. Reservation failures count failed
-/// reservations and commits. Unavailable pristine relay storage is excluded
-/// during qualification, so it contributes to the appropriate unreachable
-/// route counter instead of a reservation failure. LDS convergence iterations
-/// remain in this aggregate; a losing FLAT direct-reservoir retry is moved to
-/// `discarded_branch_only_routing`.
+/// Work-limit exhaustion counts plan calls whose qualification, routing,
+/// setup, or greedy tier reached its configured limit, including calls
+/// recovered by fallback. Qualification and routing exhaustion are also
+/// counted separately; one call may increment both phase counters. The work
+/// counters may remain zero when an initial setup precharge exceeds the whole
+/// allowance. Pristine occupancy rejections count otherwise valid offers that
+/// the placement planner filtered before routing. Greedy fallback is owner-
+/// oblivious and therefore identifies pairs whose retained route has no exact
+/// minimization guarantee, even when an earlier exact-pair minimization ran
+/// before an independent removal limit forced fallback. Reservation failures
+/// count failed reservations and commits. Unavailable pristine relay storage
+/// is excluded during qualification, so it contributes to the appropriate
+/// unreachable route counter instead of a reservation failure. LDS convergence
+/// iterations remain in this aggregate; a losing FLAT direct-reservoir retry
+/// is moved to `discarded_branch_only_routing`.
 ///
 /// Route-optimization exhaustion separately counts plan calls in which at
 /// least one bounded lexicographic minimization pass reached its own limit and
@@ -120,7 +123,8 @@ struct ConSanPatchedImageGrowthRejection {
 /// Route-optimization invariant failures count defensive fallbacks that retain
 /// the feasibility route after detecting inconsistent minimizer inputs. They
 /// are distinct from work-budget exhaustion because raising a limit cannot
-/// repair them.
+/// repair them. Excess relay claims count only relays retained above the first
+/// exact feasibility route while improving the primary owner-group objective.
 ///
 /// The compatibility search/scan totals remain stable. All search work is
 /// feasibility work. The scan phase counters expose the composition of scan
@@ -133,9 +137,13 @@ struct ConSanBranchOnlyRoutingTelemetry {
   size_t relay_contention_failure_count = 0;
   size_t work_budget_failure_count = 0;
   size_t work_budget_exhaustion_count = 0;
+  size_t relay_qualification_exhaustion_count = 0;
+  size_t routing_work_exhaustion_count = 0;
   size_t routing_invariant_failure_count = 0;
   size_t route_optimization_exhaustion_count = 0;
   size_t route_optimization_invariant_failure_count = 0;
+  size_t pristine_relay_occupancy_rejection_count = 0;
+  size_t route_optimization_excess_relay_claim_count = 0;
   size_t reservation_failure_count = 0;
   size_t exact_pair_fallback_attempt_count = 0;
   size_t greedy_pair_fallback_attempt_count = 0;
@@ -163,12 +171,16 @@ struct ConSanBranchOnlyReservoirTelemetry {
   size_t planned_appended_bytes = 0;
   size_t used_appended_bytes = 0;
   size_t unused_appended_bytes = 0;
+  /// Release-visible defensive signal owned by the LDS reservoir replay loop.
+  /// Correct convergence leaves this zero; other reservoir producers cannot
+  /// set it and do not log it.
+  size_t lds_replay_limit_reached_count = 0;
 
   bool operator==(const ConSanBranchOnlyReservoirTelemetry &) const = default;
 };
 
-static_assert(sizeof(ConSanBranchOnlyReservoirTelemetry) == 6u * sizeof(size_t),
-              "add new reservoir counters to every producer and hook log site");
+static_assert(sizeof(ConSanBranchOnlyReservoirTelemetry) == 7u * sizeof(size_t),
+              "update the reservoir telemetry schema tests");
 
 /// Records one complete reserved appended footprint. Keeping the payload and
 /// final return-control bytes separate makes the shared normalization

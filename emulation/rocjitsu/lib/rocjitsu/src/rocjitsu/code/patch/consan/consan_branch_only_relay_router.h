@@ -132,25 +132,17 @@ enum class BranchOnlyRelayPlanStrategy : uint8_t {
   GreedyPairFallback,
 };
 
-struct BranchOnlyRelaySearchLimits {
-  /// Search states and feasible alternatives allowed for a complete batch.
-  size_t batch_base_search_work = 100'000u;
-  size_t batch_search_work_per_demand = 4'096u;
-  /// Polynomial relay inspections allowed for a complete batch. Per-input
-  /// headroom keeps a larger request/relay inventory from shrinking the
-  /// useful exact-search window solely because its summaries cost more.
-  size_t batch_base_scan_work = 2'000'000u;
-  size_t batch_scan_work_per_demand_relay = 256u;
-  /// A separate bounded pass may improve the first exact route
-  /// lexicographically: newly activated owner groups first, then relay count
-  /// for capped exact-pair fallback. Exhausting this allowance retains the
-  /// exact route instead of degrading the routing tier. Per-input headroom
-  /// keeps the minimization window useful as the number of demands and relay
-  /// slots grows.
-  size_t batch_route_optimization_search_work = 25'000u;
-  size_t batch_route_optimization_search_work_per_demand = 1'024u;
-  size_t batch_route_optimization_scan_work = 500'000u;
-  size_t batch_route_optimization_scan_work_per_demand_relay = 64u;
+struct BranchOnlyRelayScaledWorkLimit {
+  size_t base = 0u;
+  size_t per_input = 0u;
+};
+
+struct BranchOnlyRelayOptimizationWorkLimits {
+  BranchOnlyRelayScaledWorkLimit search;
+  BranchOnlyRelayScaledWorkLimit scan;
+};
+
+struct BranchOnlyRelayQualificationWorkLimits {
   /// Base allowance for endpoint lookup and placement-occupancy inspections
   /// while qualifying the offered relay inventory. This phase is separate
   /// from routing because every later tier consumes the same filtered set.
@@ -158,40 +150,75 @@ struct BranchOnlyRelaySearchLimits {
   /// occupied-range query for each relay; only pristine relays consume the
   /// latter. The per-relay default covers the traversal plus the maximum
   /// endpoint-lookup depth for a size_t-sized coordinate set.
-  size_t batch_relay_qualification_work = 2'000'000u;
-  size_t batch_relay_qualification_work_per_relay = 1u + std::numeric_limits<size_t>::digits;
-  size_t batch_relay_qualification_work_per_relay_range_level = 1u;
-  /// One-time construction of the ordered fallback inventory. Selected-route
-  /// removal and rollback work is charged by the per-pair meters. The default
-  /// preserves the original useful inventory window.
-  size_t batch_fallback_setup_work = 100'000u;
-  /// Per-pair fallback allowances. Setup, exact routing, greedy routing, and
-  /// classification are all metered, so total fallback work remains linear in
-  /// the number of pairs. Each recursive frame charges its first complete
-  /// inventory traversal; a bounded second owner-cost traversal deliberately
-  /// reuses that charge to preserve the established one-traversal limits and
-  /// telemetry scale. Physical inspections are therefore at most twice the
-  /// charged traversal units. Zero base/tier limits are normalized to one
-  /// unit; zero per-input headroom is allowed.
-  size_t pair_search_work = 8'192u;
-  size_t pair_base_scan_work = 100'000u;
-  size_t pair_scan_work_per_relay = 64u;
-  size_t pair_route_optimization_search_work = 2'048u;
-  size_t pair_route_optimization_search_work_per_demand = 512u;
-  size_t pair_route_optimization_scan_work = 25'000u;
-  size_t pair_route_optimization_scan_work_per_demand_relay = 16u;
-  /// Allowance for one greedy routing or independent-classification phase.
-  size_t pair_greedy_work = 8'192u;
+  size_t base = 2'000'000u;
+  size_t per_relay = 1u + std::numeric_limits<size_t>::digits;
+  size_t per_relay_range_level = 1u;
 };
 
+struct BranchOnlyRelayBatchWorkLimits {
+  /// Search states and feasible alternatives allowed for a complete batch.
+  BranchOnlyRelayScaledWorkLimit feasibility_search{100'000u, 4'096u};
+  /// Polynomial relay inspections allowed for a complete batch. Per-input
+  /// headroom keeps a larger request/relay inventory from shrinking the
+  /// useful exact-search window solely because its summaries cost more.
+  BranchOnlyRelayScaledWorkLimit feasibility_scan{2'000'000u, 256u};
+  /// A separate bounded pass may improve the first exact route
+  /// lexicographically. Search headroom scales with demands and scan headroom
+  /// with demand-relay pairs.
+  BranchOnlyRelayOptimizationWorkLimits optimization{{25'000u, 1'024u}, {500'000u, 64u}};
+  /// One-time construction of the ordered fallback inventory. Selected-route
+  /// removal and rollback work is charged by the per-pair meters.
+  size_t fallback_setup = 100'000u;
+};
+
+struct BranchOnlyRelayPairWorkLimits {
+  /// Exact routing, minimization, greedy routing, and classification are all
+  /// metered, so total fallback work remains linear in the number of pairs.
+  /// Each recursive frame charges its first complete inventory traversal; a
+  /// bounded second owner-cost traversal reuses that charge. Physical
+  /// inspections are therefore at most twice the charged traversal units.
+  /// Zero base/tier limits are normalized to one unit; zero per-input
+  /// headroom is allowed.
+  ///
+  /// Fixed per-pair allowance. Keeping this unscaled preserves a total bound
+  /// linear in the number of pairs.
+  size_t feasibility_search = 8'192u;
+  BranchOnlyRelayScaledWorkLimit feasibility_scan{100'000u, 64u};
+  BranchOnlyRelayOptimizationWorkLimits optimization{{2'048u, 512u}, {25'000u, 16u}};
+  /// Fixed allowance for one greedy routing or independent-classification
+  /// phase. Each pair can consume at most one allowance for each phase.
+  size_t greedy = 8'192u;
+};
+
+struct BranchOnlyRelaySearchLimits {
+  BranchOnlyRelayQualificationWorkLimits qualification;
+  BranchOnlyRelayBatchWorkLimits batch;
+  BranchOnlyRelayPairWorkLimits pair;
+};
+
+static_assert(sizeof(BranchOnlyRelayQualificationWorkLimits) == 3u * sizeof(size_t));
+static_assert(sizeof(BranchOnlyRelayBatchWorkLimits) == 9u * sizeof(size_t));
+static_assert(sizeof(BranchOnlyRelayPairWorkLimits) == 8u * sizeof(size_t));
 static_assert(sizeof(BranchOnlyRelaySearchLimits) == 20u * sizeof(size_t),
-              "update all-field relay search-limit tests");
+              "update the phase-scoped relay search-limit tests");
+
+/// Returns a saturating conservative bound for one plan call. It includes
+/// qualification, exact-batch routing and minimization, fallback setup, and
+/// every per-pair exact, minimization, greedy, and classification allowance.
+/// Some tiers are mutually exclusive, so the actual charged work cannot
+/// exceed this discoverable configuration bound.
+[[nodiscard]] size_t
+branch_only_relay_conservative_work_limit(const BranchOnlyRelaySearchLimits &limits,
+                                          size_t pair_count, size_t relay_count,
+                                          size_t occupied_range_count);
 
 struct BranchOnlyRelayPlanFlags {
-  /// True when a routing search, scan, setup, or greedy tier reached its
-  /// limit, including successful plans recovered by a later fallback tier.
-  /// The independent route-minimization allowance is reported separately.
-  bool work_budget_exhausted = false;
+  /// True when the ordered relay-qualification pass retained only a sound
+  /// prefix after reaching its own allowance.
+  bool relay_qualification_exhausted = false;
+  /// True when exact routing, fallback setup, greedy routing, or rejection
+  /// classification reached a routing allowance.
+  bool routing_work_exhausted = false;
   /// True when defensive validation rejected inconsistent exact-routing
   /// inputs or output. A later exact-pair or greedy tier may still recover the
   /// plan. This is not a budget event.
@@ -203,9 +230,16 @@ struct BranchOnlyRelayPlanFlags {
   /// True when defensive validation found inconsistent route-minimization
   /// inputs and retained the feasibility route. This is not a budget event.
   bool route_optimization_invariant_failed = false;
+
+  /// True when qualification or a routing tier reached its configured limit,
+  /// including successful plans recovered by a later fallback tier. The
+  /// independent route-minimization allowance is reported separately.
+  [[nodiscard]] bool work_budget_exhausted() const {
+    return relay_qualification_exhausted || routing_work_exhausted;
+  }
 };
 
-static_assert(sizeof(BranchOnlyRelayPlanFlags) == 4u * sizeof(bool),
+static_assert(sizeof(BranchOnlyRelayPlanFlags) == 5u * sizeof(bool),
               "map new plan flags in record_branch_only_relay_plan");
 
 struct BranchOnlyRelayPlanOutcome : BranchOnlyRelayPlanFlags {
@@ -223,6 +257,12 @@ struct BranchOnlyRelayPlanOutcome : BranchOnlyRelayPlanFlags {
   size_t relay_qualification_work_consumed = 0u;
   size_t fallback_setup_work_consumed = 0u;
   size_t feasibility_scan_work_consumed = 0u;
+  /// Pristine offers rejected by placement occupancy before routing.
+  size_t pristine_relay_occupancy_rejection_count = 0u;
+  /// Exact-batch claims retained above the first feasibility route while
+  /// improving the primary owner-group objective. Exact-pair minimization is
+  /// relay-count capped and therefore cannot contribute.
+  size_t route_optimization_excess_relay_claim_count = 0u;
 
   [[nodiscard]] size_t scan_work_consumed() const {
     const auto saturated_add = [](size_t lhs, size_t rhs) {
@@ -232,6 +272,16 @@ struct BranchOnlyRelayPlanOutcome : BranchOnlyRelayPlanFlags {
     return saturated_add(
         saturated_add(relay_qualification_work_consumed, fallback_setup_work_consumed),
         feasibility_scan_work_consumed);
+  }
+
+  [[nodiscard]] size_t total_work_consumed() const {
+    const auto saturated_add = [](size_t lhs, size_t rhs) {
+      return rhs > std::numeric_limits<size_t>::max() - lhs ? std::numeric_limits<size_t>::max()
+                                                            : lhs + rhs;
+    };
+    return saturated_add(saturated_add(search_work_consumed, scan_work_consumed()),
+                         saturated_add(route_optimization_search_work_consumed,
+                                       route_optimization_scan_work_consumed));
   }
 };
 

@@ -3677,8 +3677,11 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           "branch_only_candidates=%zu branch_only_selected=%zu placement_failed=%zu "
           "entry_route_failed=%zu return_route_failed=%zu relay_contention_failed=%zu "
           "work_budget_failed=%zu work_budget_exhaustions=%zu "
+          "relay_qualification_exhaustions=%zu routing_work_exhaustions=%zu "
           "routing_invariant_failures=%zu "
           "route_optimization_exhaustions=%zu route_optimization_invariant_failures=%zu "
+          "pristine_relay_occupancy_rejections=%zu "
+          "route_optimization_excess_relay_claims=%zu "
           "reservation_failed=%zu "
           "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
           "pair_attempts=%zu plan_calls=%zu search_work=%zu scan_work=%zu "
@@ -3702,9 +3705,13 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           selection.branch_only_routing.relay_contention_failure_count,
           selection.branch_only_routing.work_budget_failure_count,
           selection.branch_only_routing.work_budget_exhaustion_count,
+          selection.branch_only_routing.relay_qualification_exhaustion_count,
+          selection.branch_only_routing.routing_work_exhaustion_count,
           selection.branch_only_routing.routing_invariant_failure_count,
           selection.branch_only_routing.route_optimization_exhaustion_count,
           selection.branch_only_routing.route_optimization_invariant_failure_count,
+          selection.branch_only_routing.pristine_relay_occupancy_rejection_count,
+          selection.branch_only_routing.route_optimization_excess_relay_claim_count,
           selection.branch_only_routing.reservation_failure_count,
           selection.branch_only_routing.exact_pair_fallback_attempt_count,
           selection.branch_only_routing.greedy_pair_fallback_attempt_count,
@@ -3738,8 +3745,11 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             "pair_attempts=%zu plan_calls=%zu "
             "entry_route_failed=%zu return_route_failed=%zu relay_contention_failed=%zu "
             "work_budget_failed=%zu work_budget_exhaustions=%zu "
+            "relay_qualification_exhaustions=%zu routing_work_exhaustions=%zu "
             "routing_invariant_failures=%zu "
             "route_optimization_exhaustions=%zu route_optimization_invariant_failures=%zu "
+            "pristine_relay_occupancy_rejections=%zu "
+            "route_optimization_excess_relay_claims=%zu "
             "reservation_failed=%zu "
             "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
             "search_work=%zu scan_work=%zu "
@@ -3757,9 +3767,13 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             discarded_routing.relay_contention_failure_count,
             discarded_routing.work_budget_failure_count,
             discarded_routing.work_budget_exhaustion_count,
+            discarded_routing.relay_qualification_exhaustion_count,
+            discarded_routing.routing_work_exhaustion_count,
             discarded_routing.routing_invariant_failure_count,
             discarded_routing.route_optimization_exhaustion_count,
             discarded_routing.route_optimization_invariant_failure_count,
+            discarded_routing.pristine_relay_occupancy_rejection_count,
+            discarded_routing.route_optimization_excess_relay_claim_count,
             discarded_routing.reservation_failure_count,
             discarded_routing.exact_pair_fallback_attempt_count,
             discarded_routing.greedy_pair_fallback_attempt_count,
@@ -3786,14 +3800,19 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           "ConSan SC LDS branch routing reader=%llu pair_attempts=%zu plan_calls=%zu "
           "entry_route_failed=%zu "
           "return_route_failed=%zu relay_contention_failed=%zu work_budget_failed=%zu "
-          "work_budget_exhaustions=%zu routing_invariant_failures=%zu "
+          "work_budget_exhaustions=%zu relay_qualification_exhaustions=%zu "
+          "routing_work_exhaustions=%zu routing_invariant_failures=%zu "
           "route_optimization_exhaustions=%zu "
-          "route_optimization_invariant_failures=%zu reservation_failed=%zu "
+          "route_optimization_invariant_failures=%zu "
+          "pristine_relay_occupancy_rejections=%zu "
+          "route_optimization_excess_relay_claims=%zu "
+          "reservation_failed=%zu "
           "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
           "search_work=%zu scan_work=%zu route_optimization_search_work=%zu "
           "route_optimization_scan_work=%zu "
           "relay_qualification_work=%zu fallback_setup_work=%zu "
           "feasibility_scan_work=%zu "
+          "lds_replay_limit_reached=%zu "
           "lds_relay_reservoirs_planned=%zu lds_relay_reservoirs_used=%zu "
           "lds_relay_reservoirs_unused=%zu "
           "lds_relay_reservoir_planned_appended_bytes=%zu "
@@ -3803,18 +3822,22 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           lds_routing.pair_attempt_count, lds_routing.plan_call_count,
           lds_routing.entry_route_failure_count, lds_routing.return_route_failure_count,
           lds_routing.relay_contention_failure_count, lds_routing.work_budget_failure_count,
-          lds_routing.work_budget_exhaustion_count, lds_routing.routing_invariant_failure_count,
+          lds_routing.work_budget_exhaustion_count,
+          lds_routing.relay_qualification_exhaustion_count,
+          lds_routing.routing_work_exhaustion_count, lds_routing.routing_invariant_failure_count,
           lds_routing.route_optimization_exhaustion_count,
           lds_routing.route_optimization_invariant_failure_count,
+          lds_routing.pristine_relay_occupancy_rejection_count,
+          lds_routing.route_optimization_excess_relay_claim_count,
           lds_routing.reservation_failure_count, lds_routing.exact_pair_fallback_attempt_count,
           lds_routing.greedy_pair_fallback_attempt_count, lds_routing.search_work_count,
           lds_routing.scan_work_count, lds_routing.route_optimization_search_work_count,
           lds_routing.route_optimization_scan_work_count,
           lds_routing.relay_qualification_work_count, lds_routing.fallback_setup_work_count,
-          lds_routing.feasibility_scan_work_count, lds_reservoirs.planned_reservoir_count,
-          lds_reservoirs.used_reservoir_count, lds_reservoirs.unused_reservoir_count,
-          lds_reservoirs.planned_appended_bytes, lds_reservoirs.used_appended_bytes,
-          lds_reservoirs.unused_appended_bytes);
+          lds_routing.feasibility_scan_work_count, lds_reservoirs.lds_replay_limit_reached_count,
+          lds_reservoirs.planned_reservoir_count, lds_reservoirs.used_reservoir_count,
+          lds_reservoirs.unused_reservoir_count, lds_reservoirs.planned_appended_bytes,
+          lds_reservoirs.used_appended_bytes, lds_reservoirs.unused_appended_bytes);
     }
     const rocjitsu::ConSanBranchOnlyRoutingTelemetry &moi_routing =
         patch_result.moi_branch_only_routing_telemetry;
@@ -3829,8 +3852,11 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           "pair_attempts=%zu plan_calls=%zu "
           "entry_route_failed=%zu return_route_failed=%zu relay_contention_failed=%zu "
           "work_budget_failed=%zu work_budget_exhaustions=%zu "
+          "relay_qualification_exhaustions=%zu routing_work_exhaustions=%zu "
           "routing_invariant_failures=%zu "
           "route_optimization_exhaustions=%zu route_optimization_invariant_failures=%zu "
+          "pristine_relay_occupancy_rejections=%zu "
+          "route_optimization_excess_relay_claims=%zu "
           "reservation_failed=%zu "
           "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
           "search_work=%zu scan_work=%zu route_optimization_search_work=%zu "
@@ -3845,9 +3871,12 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           moi_routing.plan_call_count, moi_routing.entry_route_failure_count,
           moi_routing.return_route_failure_count, moi_routing.relay_contention_failure_count,
           moi_routing.work_budget_failure_count, moi_routing.work_budget_exhaustion_count,
-          moi_routing.routing_invariant_failure_count,
+          moi_routing.relay_qualification_exhaustion_count,
+          moi_routing.routing_work_exhaustion_count, moi_routing.routing_invariant_failure_count,
           moi_routing.route_optimization_exhaustion_count,
           moi_routing.route_optimization_invariant_failure_count,
+          moi_routing.pristine_relay_occupancy_rejection_count,
+          moi_routing.route_optimization_excess_relay_claim_count,
           moi_routing.reservation_failure_count, moi_routing.exact_pair_fallback_attempt_count,
           moi_routing.greedy_pair_fallback_attempt_count, moi_routing.search_work_count,
           moi_routing.scan_work_count, moi_routing.route_optimization_search_work_count,
