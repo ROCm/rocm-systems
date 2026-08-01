@@ -2860,33 +2860,11 @@ tool_fini(void* callback_data)
     // deleting tool_data, which those callbacks may still be accessing.
     // rocprofiler_destroy_buffer returns BUFFER_BUSY if a flush is still
     // in progress, so retry until it succeeds or buffer is not found.
-    //
-    // When we are in the Finalized state the PTL buffer workers may be
-    // stalled (e.g. inside the causal blocking_gotcha delay path), making
-    // the buffer permanently busy.  In that case we still attempt the
-    // destroy – giving the workers a fair chance to drain – but we cap the
-    // wait at 5 seconds so that shutdown does not hang indefinitely.  If
-    // the destroy times out a warning is logged and we move on; the
-    // process is exiting anyway, so leaking the buffer handle is harmless.
     for(auto itr : tool_data->get_buffers())
     {
-        // Snapshot the state once: if already Finalized we use the
-        // bounded-wait path, otherwise keep the original infinite spin.
-        const bool _finalizing = (get_state() >= State::Finalized);
-        const auto _deadline =
-            std::chrono::steady_clock::now() + std::chrono::seconds{ 5 };
-
         while(itr.handle > 0 &&
               rocprofiler_destroy_buffer(itr) == ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
         {
-            if(_finalizing && std::chrono::steady_clock::now() > _deadline)
-            {
-                LOG_WARNING("rocprofiler buffer (handle={:d}) still busy after 5s "
-                            "during finalization; skipping destroy to avoid "
-                            "indefinite hang.",
-                            itr.handle);
-                break;
-            }
             std::this_thread::yield();
         }
     }

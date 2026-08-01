@@ -114,7 +114,17 @@ rocpd_processor_t::handle(const kernel_dispatch_sample& kds)
         n_info.id, process.pid, kds.thread_id, agent_ref, kds.queue_id_handle,
         kds.stream_handle);
 
-    m_writer->insert_kernel_dispatch_data(kernel_dispatch, env);
+    // Same shutdown race as in handle(scratch_memory_sample): guard against
+    // the queue being deregistered before this dispatch event is flushed.
+    try
+    {
+        m_writer->insert_kernel_dispatch_data(kernel_dispatch, env);
+    }
+    catch(const std::runtime_error& e)
+    {
+        LOG_WARNING("Dropping kernel_dispatch_sample (queue_id={}): {}",
+                    kds.queue_id_handle, e.what());
+    }
 }
 
 void
@@ -149,7 +159,19 @@ rocpd_processor_t::handle(const scratch_memory_sample& sms)
         n_info.id, process.pid, sms.thread_id, agent_ref, sms.queue_id_handle,
         sms.stream_handle);
 
-    m_writer->insert_memory_alloc_data(ma, env);
+    // The GPU queue may be deregistered before pending scratch memory events
+    // are fully flushed during shutdown.  Catch the runtime error thrown by
+    // profiler-hub when it cannot find the queue, and drop the event rather
+    // than crashing — the data loss is minor and the process is exiting.
+    try
+    {
+        m_writer->insert_memory_alloc_data(ma, env);
+    }
+    catch(const std::runtime_error& e)
+    {
+        LOG_WARNING("Dropping scratch_memory_sample (queue_id={}): {}",
+                    sms.queue_id_handle, e.what());
+    }
 }
 
 void

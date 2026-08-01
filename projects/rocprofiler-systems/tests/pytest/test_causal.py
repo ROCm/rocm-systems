@@ -95,9 +95,6 @@ class TestCausal(RocprofsysTest):
             if causal_mode == "line":
                 causal_args.append("-S")
                 causal_args.append("lulesh.cc")
-            # Limit OMP threads to keep causal experiment durations predictable
-            # within the CI timeout on machines with many cores.
-            env.setdefault("OMP_NUM_THREADS", "4")
         else:
             run_args = ["70", "10", "432525", "1000000000"]
             causal_args = []
