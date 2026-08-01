@@ -24,6 +24,22 @@ struct KdTranslation;
 struct TextOffsetRelocation {
   uint64_t source_offset = 0;
   uint64_t target_offset = 0;
+
+  /// True when @c source_offset is an instruction start rather than a block end.
+  ///
+  /// @details One source offset can be both: a block's end abuts the next
+  /// block's first instruction, and translation frequently places those two
+  /// bodies apart. A symbol names an entry, so resolving it through the end
+  /// mapping would attach it to the neighbouring body. Starts therefore win.
+  bool is_instruction_start = false;
+
+  /// Translation scope that emitted this record.
+  ///
+  /// @details A helper block is copied into every scope that reaches it, so one
+  /// source offset can yield a record per scope. A symbol's value and its extent
+  /// have to describe the same copy: pairing one scope's entry with another's
+  /// end measures across everything translation placed between them.
+  uint32_t scope_index = 0;
 };
 
 /// @brief One relocated literal64 PC builder whose target is outside `.text`.

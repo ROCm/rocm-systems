@@ -197,9 +197,62 @@ void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
   return arch_descriptor_sgpr_allocation_limit(arch);
 }
 
-/// @brief Find the next even SGPR pair that can be descriptor-backed for a branch thunk.
-[[nodiscard]] std::optional<uint16_t> next_long_branch_sgpr_pair(const TranslationContext &context,
-                                                                 rj_code_arch_t arch) {
+/// @brief Find an even-aligned SGPR pair that no instruction in the scope names.
+///
+/// @details A usage scan, not a dataflow query: it needs no CFG and holds at every point in the
+/// decoded scope, which is what a layout reusing one pair for every long branch requires. Search is
+/// lowest-first, so the pair lands just above whatever the kernel actually uses.
+///
+/// The scan runs before semantic expansion, so it does not cover registers an expander allocates
+/// for itself. That is sound only while every such allocation is consumed by the instruction that
+/// follows it, because the branch thunk likewise writes and consumes its pair within one generated
+/// sequence and nothing can be interleaved between the two. An expansion that held a value across
+/// more than its own sequence would need this pair excluded from its search.
+///
+/// The scalar relative-move family resolves its register number from M0 at run time, so scanning
+/// encoded operands cannot enumerate what it reaches; a scope containing one yields no pair. The
+/// vector relative moves index VGPRs and leave the scalar conclusion intact.
+[[nodiscard]] std::optional<uint16_t> scope_unused_sgpr_pair(std::span<BasicBlock *const> blocks,
+                                                             uint32_t limit) {
+  // Out-of-range queries answer "not present", so a limit past the tracked width would report
+  // registers as free without ever consulting the scan.
+  limit = std::min<uint32_t>(limit, REGISTER_SET_MAX_SGPRS);
+  RegisterSet used;
+  for (BasicBlock *block : blocks) {
+    if (block == nullptr)
+      continue;
+    for (const Instruction &inst : block->instructions()) {
+      if (inst.mnemonic().starts_with("s_movrel"))
+        return std::nullopt;
+      const InstDefUse def_use(inst);
+      used |= def_use.defs;
+      used |= def_use.uses;
+    }
+  }
+
+  for (uint32_t base = 0; base + 2 <= limit; base += 2) {
+    const auto lo = static_cast<uint16_t>(base);
+    const auto hi = static_cast<uint16_t>(base + 1);
+    if (!used.contains({RegClass::SGPR, lo, 1}) && !used.contains({RegClass::SGPR, hi, 1}))
+      return lo;
+  }
+  return std::nullopt;
+}
+
+/// @brief Find the next even SGPR pair usable for a branch thunk.
+///
+/// @details Where the descriptor encodes an SGPR count, the pair is chosen immediately above the
+/// kernel's current count and made safe by growing the descriptor to cover it. That argument does
+/// not hold on a target with a fixed scalar file: GRANULATED_WAVEFRONT_SGPR_COUNT is unused there,
+/// so the decoded count is a constant floor rather than a measurement of the kernel, and
+/// require_sgprs() reserves nothing -- the chosen pair would be registers the kernel already uses.
+/// Such targets supply @p scope_unused_pair instead, proven free by scanning the scope.
+[[nodiscard]] std::optional<uint16_t>
+next_long_branch_sgpr_pair(const TranslationContext &context, rj_code_arch_t arch,
+                           std::optional<uint16_t> scope_unused_pair) {
+  if (!isa_properties(arch).descriptor_sgpr_count_encoded)
+    return scope_unused_pair;
+
   const uint32_t current = std::max(context.num_sgprs, context.required_sgpr_count);
   const uint32_t base = (current + 1u) & ~1u;
   if (base > 126)
@@ -1278,6 +1331,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   }
 
   const auto relocation_function_tables = discover_relocation_function_tables(obj);
+  // The same entry set the scope walk treats as kernel roots, including the firmware-skip entries,
+  // so no offset can be a kernel to one and a device function to the other.
+  const auto device_function_extents =
+      discover_device_function_extents(obj, kernel_hardware_entry_offsets(descriptor_translations));
+  const auto text_relocation_targets = discover_text_relocation_targets(obj);
   auto block_leaders = kernel_block_leaders(descriptor_translations, text);
   for (const RelocationFunctionTable &table : relocation_function_tables) {
     for (const RelocationFunctionPointer &entry : table.entries)
@@ -1579,15 +1637,19 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return emit_skipped_kernel(restored_scope, std::move(failure));
   };
 
-  auto reserve_long_branch_sgpr_pair = [&](TranslationContext &context) -> std::optional<uint16_t> {
-    auto base = next_long_branch_sgpr_pair(context, host_arch_);
+  auto reserve_long_branch_sgpr_pair =
+      [&](TranslationContext &context,
+          std::optional<uint16_t> scope_unused_pair) -> std::optional<uint16_t> {
+    auto base = next_long_branch_sgpr_pair(context, host_arch_, scope_unused_pair);
     if (!base)
       return std::nullopt;
     context.require_sgprs(static_cast<uint32_t>(*base) + 2);
     return base;
   };
 
+  uint32_t scope_index = 0;
   for (const KernelTranslationScope &scope : scopes) {
+    const uint32_t this_scope_index = scope_index++;
     if (scope.blocks.empty())
       continue;
     assert(scope.translation != nullptr && "kernel scope should have descriptor translation");
@@ -1718,8 +1780,17 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         continue;
       return leave_unchanged();
     }
+    // Targets with a fixed scalar file cannot reserve an SGPR through the descriptor, so the
+    // thunk borrows a pair proven unused across this scope. Computed once: the layout reuses one
+    // pair for every long branch it emits, and the scan is valid at all of them.
+    const std::optional<uint16_t> scope_long_branch_sgpr_pair =
+        isa_properties(host_arch_).descriptor_sgpr_count_encoded
+            ? std::nullopt
+            : scope_unused_sgpr_pair(scope.blocks,
+                                     arch_descriptor_sgpr_allocation_limit(host_arch_));
     const bool can_use_long_direct_branches =
-        next_long_branch_sgpr_pair(kernel_context, host_arch_).has_value();
+        next_long_branch_sgpr_pair(kernel_context, host_arch_, scope_long_branch_sgpr_pair)
+            .has_value();
     LivenessAnalysisOptions liveness_options;
     liveness_options.max_free_vgpr =
         static_cast<uint16_t>(isa_properties(host_arch_).max_addressable_vgprs_per_wf);
@@ -2054,7 +2125,17 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     kernel_text.reserve(static_cast<size_t>(std::min<uint64_t>(
         source_body_size + recovered_window_growth, std::numeric_limits<size_t>::max())));
 
+    // Two questions share this key space and must not share one map: "where did the instruction
+    // starting here land" and "where does the body ending here stop". The keys collide wherever one
+    // block abuts the next, and the answers diverge whenever anything is appended between the two
+    // bodies -- a branch island pool, for instance. Keep them apart at the producer so neither
+    // question can be answered with the other's value.
     std::unordered_map<uint64_t, uint64_t> target_offset_by_source_offset;
+    std::unordered_map<uint64_t, uint64_t> end_offset_by_source_offset;
+    // Source offsets that name an instruction rather than a block end. A symbol
+    // resolves through these in preference, because the two collide wherever one
+    // body abuts the next.
+    std::unordered_set<uint64_t> instruction_start_sources;
     target_offset_by_source_offset.reserve(
         static_cast<size_t>(source_body_size / sizeof(uint32_t)) + scope.blocks.size());
     layout.body_begin = 0;
@@ -2201,7 +2282,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           const RecoveredConsumer &consumer = *marked->second;
           const IndirectCallFixup &source_fixup = consumer.window_fixup;
           const uint64_t window_bytes = consumer.marked_window_end - consumer.marked_window_begin;
-          target_offset_by_source_offset.emplace(offset, target_offset);
+          // Assign for the same reason as the ordinary instruction-start record below.
+          target_offset_by_source_offset[offset] = target_offset;
+          instruction_start_sources.insert(offset);
           layout.recovered_indirect_fixups.push_back(
               {.source_call_offset = source_fixup.source_call_offset,
                .source_target_offset = source_fixup.source_target_offset,
@@ -2229,7 +2312,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // Record every instruction start, not just recovered-PC builder
         // boundaries. The same final map keeps ELF labels attached to the
         // relocated instruction stream after semantic expansions change sizes.
-        target_offset_by_source_offset.emplace(offset, target_offset);
+        //
+        // Assign rather than emplace. The preceding block's end was recorded at this same source
+        // offset, and the two targets diverge whenever anything was appended between the bodies --
+        // a branch island pool, for instance. A symbol here names this instruction, so the start
+        // must be the value that survives, and the flag below has to describe the value actually
+        // stored or it would rank a block-end target above a genuine start.
+        target_offset_by_source_offset[offset] = target_offset;
+        instruction_start_sources.insert(offset);
 
         const auto recovered_it = recovered_indirect_by_call.find(offset);
         const bool has_recovered_indirect_call = recovered_it != recovered_indirect_by_call.end();
@@ -2551,6 +2641,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
               : kernel_text.size();
       layout.blocks.push_back(placement);
       target_offset_by_source_offset.emplace(block->end_offset(), placement.target_end);
+      end_offset_by_source_offset.emplace(block->end_offset(), placement.target_end);
       if (!can_use_long_direct_branches && !preserve_generated_branch_island_pools &&
           block != scope.blocks.back() && kernel_text.size() >= next_branch_island_pool_offset) {
         append_direct_branch_island_pool(kernel_text, layout, host_arch_);
@@ -2567,10 +2658,22 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     for (IndirectCallFixup fixup : pending_builder_fixups) {
       const auto getpc_it = target_offset_by_source_offset.find(fixup.source_getpc_offset);
       const auto begin_it = target_offset_by_source_offset.find(fixup.source_recovery_begin_offset);
-      const auto end_it = target_offset_by_source_offset.find(fixup.source_recovery_end_offset);
+      // One-past-end of the builder, so resolve it as an end. When the builder's last instruction
+      // is also the block's last, this offset is simultaneously the next block's first instruction;
+      // taking that start would place the end beyond anything appended in between and the window
+      // fill would erase it. Only mid-block ends, which no append can cross, fall back to the start
+      // map -- there the following instruction's start is exactly the end.
+      std::optional<uint64_t> recovery_end;
+      if (const auto it = end_offset_by_source_offset.find(fixup.source_recovery_end_offset);
+          it != end_offset_by_source_offset.end()) {
+        recovery_end = it->second;
+      } else if (const auto start =
+                     target_offset_by_source_offset.find(fixup.source_recovery_end_offset);
+                 start != target_offset_by_source_offset.end()) {
+        recovery_end = start->second;
+      }
       if (getpc_it == target_offset_by_source_offset.end() ||
-          begin_it == target_offset_by_source_offset.end() ||
-          end_it == target_offset_by_source_offset.end()) {
+          begin_it == target_offset_by_source_offset.end() || !recovery_end) {
         auto failure = make_kernel_failure(
             DiagnosticKind::Legalization,
             "recovered indirect branch builder is not fully present in the relocated body",
@@ -2585,7 +2688,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
       fixup.target_getpc_offset = getpc_it->second;
       fixup.target_recovery_begin_offset = begin_it->second;
-      fixup.target_recovery_end_offset = end_it->second;
+      fixup.target_recovery_end_offset = *recovery_end;
       layout.recovered_builder_fixups.push_back(fixup);
     }
     if (skip_scope)
@@ -2694,11 +2797,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           (void)source_offset;
           rebase_text_offset(target_offset, *insertions);
         }
+        for (auto &[source_offset, target_offset] : end_offset_by_source_offset) {
+          (void)source_offset;
+          rebase_text_offset(target_offset, *insertions);
+        }
         for (PendingTrace &trace : pending_traces)
           rebase_text_offset(trace.target_offset, *insertions);
         remaining_growth_words -= requested_growth_words;
       } else if (!layout.long_branch_sgpr) {
-        auto sgpr = reserve_long_branch_sgpr_pair(kernel_context);
+        auto sgpr = reserve_long_branch_sgpr_pair(kernel_context, scope_long_branch_sgpr_pair);
         if (!sgpr) {
           patched_control_flow = {
               .ok = false,
@@ -2751,7 +2858,20 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     const uint64_t target_delta = materialized.target_delta;
     for (const auto &[source_offset, target_offset] : target_offset_by_source_offset) {
       text_relocations.push_back(
-          {.source_offset = source_offset, .target_offset = target_offset + target_delta});
+          {.source_offset = source_offset,
+           .target_offset = target_offset + target_delta,
+           .is_instruction_start = instruction_start_sources.contains(source_offset),
+           .scope_index = this_scope_index});
+    }
+    // Emit the end answer separately wherever a start displaced it. A symbol whose body stops
+    // exactly where the next one begins needs both, and one record cannot carry both values.
+    for (const auto &[source_offset, target_offset] : end_offset_by_source_offset) {
+      if (!instruction_start_sources.contains(source_offset))
+        continue;
+      text_relocations.push_back({.source_offset = source_offset,
+                                  .target_offset = target_offset + target_delta,
+                                  .is_instruction_start = false,
+                                  .scope_index = this_scope_index});
     }
     for (const RelocationTableDispatch &dispatch : relocation_table_dispatches) {
       if (!target_offset_by_source_offset.contains(dispatch.source_call_offset))
@@ -2906,6 +3026,65 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         continue;
       translation.target_entry_text_offset = layout.target_entry;
       translation.target_body_entry_text_offset = layout.target_body_entry;
+    }
+  }
+
+  // Translated text replaces .text wholesale, so a decoded body that reached no scope is not
+  // preserved -- its address range is reoccupied by other kernels' relocated code. A device
+  // function has no descriptor of its own and is translated only because some kernel scope reaches
+  // it, so proving every function body was reached is what separates "this callee is unused" from
+  // "this callee was silently dropped and its bytes now decode as something else". Kernel bodies
+  // need no such proof: their descriptors make them roots.
+  {
+    std::unordered_set<const BasicBlock *> emitted_blocks;
+    std::unordered_set<const BasicBlock *> skipped_blocks;
+    for (const KernelTranslationScope &scope : scopes) {
+      const bool skipped = scope.translation != nullptr && scope.translation->skipped;
+      for (const BasicBlock *block : scope.blocks)
+        (skipped ? skipped_blocks : emitted_blocks).insert(block);
+    }
+
+    // Keyed on the entry block alone, never on st_size. A symbol's recorded size is rewritten by
+    // relocation and is not reliable on a second pass over translated text, and it is not needed:
+    // scope reachability starts at the entry, so a covered entry brings the rest of the body with
+    // it, and blocks a function's own entry cannot reach are dead by construction.
+    for (const DeviceFunctionExtent &function : device_function_extents) {
+      // Resolve the block containing the entry rather than one starting exactly on it. A symbol
+      // whose offset falls inside a larger block, or inside a decode gap, would otherwise match
+      // nothing. A null result means the body was never decoded at all, so it is certainly absent
+      // from translated text -- which is the very case this is meant to catch, not a reason to
+      // pass.
+      const BasicBlock *entry = block_for_offset(block_index, function.text_offset);
+      if (entry != nullptr && emitted_blocks.contains(entry))
+        continue;
+
+      // Having its address land in a relocated data word is the only property that makes an
+      // uncovered body dangerous. Scope reachability closes over successors *and* call edges, so
+      // every predecessor of an uncovered block is itself uncovered -- an uncovered body's in-edges
+      // therefore say nothing about whether anything live can arrive there, and a body's own loop
+      // latch would read as "referenced". Only a relocation names an address that no decoded edge
+      // accounts for.
+      //
+      // Asked of the raw relocations rather than of discovered dispatch tables. Table discovery
+      // additionally requires a qualifying STT_OBJECT around the slot, which a stripped or
+      // compiler-anonymous pointer array does not have -- yet its addend is still rewritten, to a
+      // body that is no longer there.
+      if (std::ranges::binary_search(text_relocation_targets, function.text_offset)) {
+        append_error(result.diagnostics, DiagnosticKind::Legalization,
+                     "device function body reached no kernel scope; translated text would drop it",
+                     function.text_offset);
+        return leave_unchanged();
+      }
+      // Linkers routinely retain unused locals in device libraries. Refusing those would reject
+      // objects that translate correctly, and over-refusal has its own failure mode: the operator
+      // turns the whole feature off, which is worse than the case being guarded. A body reached
+      // only from kernels that were skipped is not even worth reporting: those kernels are
+      // s_endpgm stubs now, so nothing calls it.
+      if (entry == nullptr || !skipped_blocks.contains(entry)) {
+        append_warning(result.diagnostics, DiagnosticKind::NothingToTranslate,
+                       "unreferenced device function body is not carried into translated text",
+                       function.text_offset);
+      }
     }
   }
 

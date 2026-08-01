@@ -19,6 +19,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstddef>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <numeric>
 // Standard library
 #include <optional>
@@ -433,16 +434,50 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
   if (relocations.empty())
     return true;
 
-  std::unordered_map<uint64_t, uint64_t> target_by_source;
+  struct ScopedOffset {
+    uint64_t target_offset = 0;
+    uint32_t scope_index = 0;
+  };
+  std::unordered_map<uint64_t, ScopedOffset> target_by_source;
+  std::unordered_set<uint64_t> start_backed_sources;
+  // A symbol's value and its extent ask opposite questions of the same offset. `st_value` names an
+  // instruction, so starts win above. `st_size` measures to where the body *ends*, and at an
+  // abutting boundary that offset is also the next body's start -- taking the start there would
+  // measure across whatever translation placed between them. Keep a second, end-preferring view.
+  //
+  // The end view is keyed by scope as well as offset. First-wins is decided per offset, so a single
+  // end map would let one scope win the start while another wins the end, and subtracting those
+  // measures across every body translation placed between the two copies. Keeping each scope's
+  // answer lets the extent be read back in whichever scope supplied the symbol's value.
+  std::map<std::pair<uint32_t, uint64_t>, uint64_t> end_by_scope_and_source;
   target_by_source.reserve(relocations.size());
   for (const TextOffsetRelocation &relocation : relocations) {
     if (relocation.source_offset > old_text_size || relocation.target_offset > new_text_size)
       return false;
+    const ScopedOffset scoped{.target_offset = relocation.target_offset,
+                              .scope_index = relocation.scope_index};
+    const auto scope_key = std::pair{relocation.scope_index, relocation.source_offset};
     // A helper block can be copied into more than one kernel-local body. ELF
     // has only one value for its local label, so retain the first deterministic
     // placement. Control-flow fixups remain kernel-local and do not depend on
     // this tooling/debug symbol choice.
-    target_by_source.try_emplace(relocation.source_offset, relocation.target_offset);
+    //
+    // An instruction start does displace a block end at the same source offset.
+    // The two coincide wherever one body abuts the next, and translation may
+    // place those bodies far apart, so only the start describes the body that a
+    // symbol at that offset names. Among starts the first still wins.
+    auto [entry, inserted] = target_by_source.try_emplace(relocation.source_offset, scoped);
+    if (!relocation.is_instruction_start) {
+      // Within a scope an end is authoritative and displaces a start's fallback answer.
+      end_by_scope_and_source[scope_key] = relocation.target_offset;
+      continue;
+    }
+    // A start fills the end view only where that scope recorded no end, so an offset that is purely
+    // an instruction start still resolves for an extent measurement.
+    end_by_scope_and_source.try_emplace(scope_key, relocation.target_offset);
+    if (!inserted && !start_backed_sources.contains(relocation.source_offset))
+      entry->second = scoped;
+    start_backed_sources.insert(relocation.source_offset);
   }
 
   const Elf64_Shdr &text = shdrs[text_index];
@@ -526,14 +561,19 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
 
       const uint64_t old_size = symbol.st_size;
       if (old_size <= old_text_size - source_text_offset) {
-        const auto relocated_end = target_by_source.find(source_text_offset + old_size);
-        if (relocated_end != target_by_source.end() &&
-            relocated_end->second >= relocated_start->second) {
-          symbol.st_size = relocated_end->second - relocated_start->second;
+        // Read the end back in the scope that supplied the value, so both describe one copy of the
+        // body. Where that scope recorded no end the source size stays: wrong against a resized
+        // section, but bounded and visible, unlike a subtraction across two different copies.
+        const auto relocated_end = end_by_scope_and_source.find(
+            {relocated_start->second.scope_index, source_text_offset + old_size});
+        if (relocated_end != end_by_scope_and_source.end() &&
+            relocated_end->second >= relocated_start->second.target_offset) {
+          symbol.st_size = relocated_end->second - relocated_start->second.target_offset;
         }
       }
-      symbol.st_value =
-          ehdr.e_type == ET_REL ? relocated_start->second : text.sh_addr + relocated_start->second;
+      symbol.st_value = ehdr.e_type == ET_REL
+                            ? relocated_start->second.target_offset
+                            : text.sh_addr + relocated_start->second.target_offset;
       std::memcpy(image.data() + symbol_offset, &symbol, sizeof(symbol));
     }
   }
@@ -566,6 +606,26 @@ relocate_relative_text_addends(std::vector<uint8_t> &image, const Elf64_Ehdr &eh
   for (const TextOffsetRelocation &relocation : relocations) {
     if (relocation.source_offset > old_text_size || relocation.target_offset > new_text_size)
       return false;
+  }
+  // Compare starts against starts. A block end recorded at the same source offset describes the
+  // preceding body, and the two targets diverge whenever anything was appended between them, so
+  // treating that pair as a disagreement would report an abutting boundary as two clones landing
+  // in different places and reject an object that is fine. Ends still fill offsets no start covers.
+  std::unordered_set<uint64_t> start_backed_sources;
+  for (const TextOffsetRelocation &relocation : relocations) {
+    if (!relocation.is_instruction_start)
+      continue;
+    auto [it, inserted] =
+        target_by_source.try_emplace(relocation.source_offset, relocation.target_offset);
+    if (!inserted && it->second != relocation.target_offset)
+      conflicting_sources.insert(relocation.source_offset);
+    start_backed_sources.insert(relocation.source_offset);
+  }
+  for (const TextOffsetRelocation &relocation : relocations) {
+    // Where a start already decided the offset it is authoritative, so an end there is not a
+    // disagreement. Everywhere else two records that disagree still are.
+    if (relocation.is_instruction_start || start_backed_sources.contains(relocation.source_offset))
+      continue;
     auto [it, inserted] =
         target_by_source.try_emplace(relocation.source_offset, relocation.target_offset);
     if (!inserted && it->second != relocation.target_offset)

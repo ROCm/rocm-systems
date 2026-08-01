@@ -191,9 +191,15 @@ if(CLANG_OFFLOAD_BUNDLER)
             gfx1250
             OUTPUT_NAME relocation_function_table_dispatch_gfx1250
         )
+        rj_add_probe_object(
+            device_function_direct_call
+            gfx1250
+            OUTPUT_NAME device_function_direct_call_gfx1250
+        )
         set(HAS_GFX1250_DBT_FIXTURE TRUE)
         set(RJ_GFX1250_DBT_FIXTURE_TARGET
             probe_relocation_function_table_dispatch_gfx1250
+            probe_device_function_direct_call_gfx1250
         )
     endif()
 
@@ -210,6 +216,7 @@ if(CLANG_OFFLOAD_BUNDLER)
             install(
                 FILES
                     ${KERNEL_OUTPUT_DIR}/relocation_function_table_dispatch_gfx1250.hsaco
+                    ${KERNEL_OUTPUT_DIR}/device_function_direct_call_gfx1250.hsaco
                 DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/tests/kernels
             )
         endif()

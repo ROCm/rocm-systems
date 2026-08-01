@@ -582,10 +582,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             gfx1250_b0_to_a0_library_test
             PRIVATE
                 GFX1250_B0_TO_A0_FIXTURE="${KERNEL_OUTPUT_DIR}/relocation_function_table_dispatch_gfx1250.hsaco"
+                GFX1250_DEVICE_FUNCTION_FIXTURE="${KERNEL_OUTPUT_DIR}/device_function_direct_call_gfx1250.hsaco"
         )
         add_dependencies(
             gfx1250_b0_to_a0_library_test
             probe_relocation_function_table_dispatch_gfx1250
+            probe_device_function_direct_call_gfx1250
         )
     endif()
     rj_configure_target(

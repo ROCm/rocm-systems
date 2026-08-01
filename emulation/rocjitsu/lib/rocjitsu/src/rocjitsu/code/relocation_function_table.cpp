@@ -239,26 +239,201 @@ meet_predecessors(const BasicBlock &block,
   return nullptr;
 }
 
+/// @brief The one `.text` section and the section table around it.
+struct SingleTextSectionView {
+  Elf64_Ehdr ehdr{};
+  std::vector<Elf64_Shdr> sections;
+  size_t text_index = 0;
+  uint64_t text_vaddr = 0;
+  uint64_t text_size = 0;
+};
+
+/// @brief Read the section table and locate the sole `.text`, or fail.
+///
+/// @details Every discovery pass here reasons in `.text`-relative offsets, which only means
+/// anything when exactly one executable section owns them.
+[[nodiscard]] std::optional<SingleTextSectionView>
+read_single_text_section(const AmdGpuCodeObject &object) {
+  const auto *bytes = reinterpret_cast<const uint8_t *>(object.image_data());
+  const std::span<const uint8_t> image(bytes, object.image_size());
+  SingleTextSectionView view;
+  if (!read_object(image, 0, view.ehdr) || view.ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
+      !range_in_image(image, view.ehdr.e_shoff,
+                      static_cast<uint64_t>(view.ehdr.e_shnum) * sizeof(Elf64_Shdr)))
+    return std::nullopt;
+
+  view.sections.resize(view.ehdr.e_shnum);
+  std::memcpy(view.sections.data(), image.data() + view.ehdr.e_shoff,
+              view.sections.size() * sizeof(Elf64_Shdr));
+
+  if (object.text_sections().size() != 1)
+    return std::nullopt;
+  const Section &text = *object.text_sections().front();
+  view.text_vaddr = text.vaddr();
+  view.text_size = text.size();
+
+  // Identify the section by its file extent rather than its address: in a relocatable object every
+  // sh_addr is zero, so an address match would alias onto any other section.
+  const auto found = std::ranges::find_if(view.sections, [&](const Elf64_Shdr &section) {
+    return (section.sh_flags & SHF_EXECINSTR) != 0 && section.sh_offset == text.sectionOffset() &&
+           section.sh_size == text.size();
+  });
+  if (found == view.sections.end())
+    return std::nullopt;
+  view.text_index = static_cast<size_t>(std::distance(view.sections.begin(), found));
+  return view;
+}
+
+/// @brief Resolve a relocation's symbol reference plus addend to an absolute address.
+///
+/// @param image Whole code object image.
+/// @param linked_symbols Symbol section named by the relocation section's `sh_link`.
+/// @param rela Relocation record.
+/// @param symbol_type Required `st_info` type; anything else is rejected.
+/// @returns The resolved address, or nothing when the reference does not qualify.
+[[nodiscard]] std::optional<uint64_t> resolve_reloc_symbol_target(std::span<const uint8_t> image,
+                                                                  const Elf64_Shdr *linked_symbols,
+                                                                  const Elf64_Rela &rela,
+                                                                  uint8_t symbol_type) {
+  if (linked_symbols == nullptr ||
+      (linked_symbols->sh_type != SHT_SYMTAB && linked_symbols->sh_type != SHT_DYNSYM) ||
+      linked_symbols->sh_entsize != sizeof(Elf64_Sym) ||
+      !range_in_image(image, linked_symbols->sh_offset, linked_symbols->sh_size))
+    return std::nullopt;
+  const uint32_t symbol_index = elf_reloc_sym(rela.r_info);
+  if (symbol_index >= linked_symbols->sh_size / sizeof(Elf64_Sym))
+    return std::nullopt;
+  Elf64_Sym symbol{};
+  if (!read_object(image,
+                   linked_symbols->sh_offset +
+                       static_cast<uint64_t>(symbol_index) * sizeof(Elf64_Sym),
+                   symbol) ||
+      elf_symbol_type(symbol.st_info) != symbol_type)
+    return std::nullopt;
+
+  const uint64_t target = symbol.st_value;
+  if (rela.r_addend >= 0) {
+    const auto addend = static_cast<uint64_t>(rela.r_addend);
+    if (addend > std::numeric_limits<uint64_t>::max() - target)
+      return std::nullopt;
+    return target + addend;
+  }
+  // Avoid negating INT64_MIN in signed arithmetic.
+  const uint64_t magnitude = uint64_t{0} - static_cast<uint64_t>(rela.r_addend);
+  if (magnitude > target)
+    return std::nullopt;
+  return target - magnitude;
+}
+
 } // namespace
+
+std::vector<DeviceFunctionExtent>
+discover_device_function_extents(const AmdGpuCodeObject &object,
+                                 std::span<const uint64_t> kernel_entry_offsets) {
+  const auto *bytes = reinterpret_cast<const uint8_t *>(object.image_data());
+  const std::span<const uint8_t> image(bytes, object.image_size());
+  const auto view = read_single_text_section(object);
+  if (!view)
+    return {};
+  const uint64_t text_vaddr = view->text_vaddr;
+  const uint64_t text_size = view->text_size;
+
+  std::vector<DeviceFunctionExtent> extents;
+  for (const Elf64_Shdr &symtab : view->sections) {
+    if ((symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM) ||
+        symtab.sh_entsize != sizeof(Elf64_Sym) ||
+        !range_in_image(image, symtab.sh_offset, symtab.sh_size))
+      continue;
+    const size_t count = symtab.sh_size / sizeof(Elf64_Sym);
+    for (size_t index = 0; index < count; ++index) {
+      Elf64_Sym symbol{};
+      if (!read_object(image, symtab.sh_offset + index * sizeof(Elf64_Sym), symbol))
+        continue;
+      // Owned by the one `.text`, not merely by some executable section: the offset below is
+      // relative to it, and in a relocatable object every section starts at address zero, so a
+      // body in a second executable section would alias onto an unrelated `.text` offset.
+      if (elf_symbol_type(symbol.st_info) != kElfSymbolTypeFunc || symbol.st_size == 0 ||
+          symbol.st_shndx != view->text_index)
+        continue;
+      if (symbol.st_value < text_vaddr)
+        continue;
+      const uint64_t offset = symbol.st_value - text_vaddr;
+      // A symbol whose recorded body runs past the section cannot be trusted to
+      // bound anything, so it is not used to make a coverage claim.
+      if (offset >= text_size || symbol.st_size > text_size - offset)
+        continue;
+      if (std::ranges::find(kernel_entry_offsets, offset) != kernel_entry_offsets.end())
+        continue;
+      extents.push_back({.text_offset = offset, .size = symbol.st_size});
+    }
+  }
+
+  std::ranges::sort(extents, {}, &DeviceFunctionExtent::text_offset);
+  const auto duplicates = std::ranges::unique(extents, [](const auto &lhs, const auto &rhs) {
+    return lhs.text_offset == rhs.text_offset && lhs.size == rhs.size;
+  });
+  extents.erase(duplicates.begin(), extents.end());
+  return extents;
+}
+
+std::vector<uint64_t> discover_text_relocation_targets(const AmdGpuCodeObject &object) {
+  const auto *bytes = reinterpret_cast<const uint8_t *>(object.image_data());
+  const std::span<const uint8_t> image(bytes, object.image_size());
+  const auto view = read_single_text_section(object);
+  if (!view)
+    return {};
+  const uint64_t text_vaddr = view->text_vaddr;
+  const uint64_t text_size = view->text_size;
+  // The addend rewrite this mirrors only runs for a shared object, so for anything else a
+  // symbol-less addend cannot retarget a body and claiming otherwise would refuse for no reason.
+  const bool addends_are_rewritten = view->ehdr.e_type == ET_DYN;
+
+  std::vector<uint64_t> targets;
+  for (const Elf64_Shdr &relocations : view->sections) {
+    if (relocations.sh_type != SHT_RELA || relocations.sh_entsize != sizeof(Elf64_Rela) ||
+        !range_in_image(image, relocations.sh_offset, relocations.sh_size))
+      continue;
+    const Elf64_Shdr *linked_symbols = relocations.sh_link < view->sections.size()
+                                           ? &view->sections[relocations.sh_link]
+                                           : nullptr;
+    const size_t count = relocations.sh_size / sizeof(Elf64_Rela);
+    for (size_t index = 0; index < count; ++index) {
+      Elf64_Rela rela{};
+      if (!read_object(image, relocations.sh_offset + index * sizeof(Elf64_Rela), rela))
+        continue;
+      const uint32_t type = elf_reloc_type(rela.r_info);
+      std::optional<uint64_t> target;
+      if (type == R_AMDGPU_RELATIVE64) {
+        // Mirrors the addend rewrite: it retargets every in-text RELATIVE64 regardless of what
+        // object encloses the slot, so the reachability claim has to cover the same set.
+        if (!addends_are_rewritten || rela.r_addend < 0)
+          continue;
+        target = static_cast<uint64_t>(rela.r_addend);
+      } else if (type == R_AMDGPU_ABS64) {
+        // A symbol-backed absolute reference to a function body is the same claim by another
+        // encoding: some data word will hold this code address once the loader is done.
+        target = resolve_reloc_symbol_target(image, linked_symbols, rela, kElfSymbolTypeFunc);
+      }
+      if (target && *target >= text_vaddr && *target - text_vaddr < text_size)
+        targets.push_back(*target - text_vaddr);
+    }
+  }
+
+  std::ranges::sort(targets);
+  targets.erase(std::ranges::unique(targets).begin(), targets.end());
+  return targets;
+}
 
 std::vector<RelocationFunctionTable>
 discover_relocation_function_tables(const AmdGpuCodeObject &object) {
   const auto *bytes = reinterpret_cast<const uint8_t *>(object.image_data());
   const std::span<const uint8_t> image(bytes, object.image_size());
-  Elf64_Ehdr ehdr{};
-  if (!read_object(image, 0, ehdr) || ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
-      !range_in_image(image, ehdr.e_shoff,
-                      static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr)))
+  const auto view = read_single_text_section(object);
+  if (!view)
     return {};
-
-  std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
-  std::memcpy(sections.data(), image.data() + ehdr.e_shoff, sections.size() * sizeof(Elf64_Shdr));
-
-  if (object.text_sections().size() != 1)
-    return {};
-  const Section &text = *object.text_sections().front();
-  const uint64_t text_vaddr = text.vaddr();
-  const uint64_t text_size = text.size();
+  const std::span<const Elf64_Shdr> sections = view->sections;
+  const uint64_t text_vaddr = view->text_vaddr;
+  const uint64_t text_size = view->text_size;
 
   std::vector<ObjectCandidate> candidates;
   for (const Elf64_Shdr &symtab : sections) {
@@ -310,34 +485,13 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object) {
             {.slot_vaddr = rela.r_offset, .target_text_offset = target - text_vaddr});
         continue;
       }
-      if (type != R_AMDGPU_ABS64 || linked_symbols == nullptr ||
-          (linked_symbols->sh_type != SHT_SYMTAB && linked_symbols->sh_type != SHT_DYNSYM) ||
-          linked_symbols->sh_entsize != sizeof(Elf64_Sym) ||
-          !range_in_image(image, linked_symbols->sh_offset, linked_symbols->sh_size))
+      if (type != R_AMDGPU_ABS64)
         continue;
-      const uint32_t symbol_index = elf_reloc_sym(rela.r_info);
-      if (symbol_index >= linked_symbols->sh_size / sizeof(Elf64_Sym))
+      const auto resolved =
+          resolve_reloc_symbol_target(image, linked_symbols, rela, kElfSymbolTypeObject);
+      if (!resolved)
         continue;
-      Elf64_Sym symbol{};
-      if (!read_object(image,
-                       linked_symbols->sh_offset +
-                           static_cast<uint64_t>(symbol_index) * sizeof(Elf64_Sym),
-                       symbol) ||
-          elf_symbol_type(symbol.st_info) != kElfSymbolTypeObject)
-        continue;
-      uint64_t target = symbol.st_value;
-      if (rela.r_addend >= 0) {
-        const uint64_t addend = static_cast<uint64_t>(rela.r_addend);
-        if (addend > std::numeric_limits<uint64_t>::max() - target)
-          continue;
-        target += addend;
-      } else {
-        // Avoid negating INT64_MIN in signed arithmetic.
-        const uint64_t magnitude = uint64_t{0} - static_cast<uint64_t>(rela.r_addend);
-        if (magnitude > target)
-          continue;
-        target -= magnitude;
-      }
+      const uint64_t target = *resolved;
       const auto candidate = std::ranges::find_if(
           candidates, [&](const ObjectCandidate &item) { return item.vaddr == target; });
       if (candidate != candidates.end())

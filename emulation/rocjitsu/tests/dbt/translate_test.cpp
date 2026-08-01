@@ -61,6 +61,7 @@
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
+#include "rocjitsu/code/relocation_function_table.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/code/rj_code_internal.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
@@ -450,14 +451,21 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_load_segments() {
 
 std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
     const std::vector<uint32_t> &text_words,
-    std::optional<size_t> text_function_words = std::nullopt) {
-  if (text_function_words && *text_function_words > text_words.size())
+    std::optional<size_t> text_function_words = std::nullopt, size_t text_function_offset_words = 0,
+    std::optional<size_t> function_pointer_table_target_words = std::nullopt,
+    bool name_function_pointer_table_with_symbol = true) {
+  if (text_function_words && text_function_offset_words + *text_function_words > text_words.size())
     throw std::invalid_argument("text function extent exceeds .text fixture");
+  if (function_pointer_table_target_words &&
+      *function_pointer_table_target_words >= text_words.size())
+    throw std::invalid_argument("function pointer target exceeds .text fixture");
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
   const uint64_t text_size = text_words.size() * sizeof(uint32_t);
   constexpr uint64_t load_align = 0x1000;
   constexpr uint64_t rodata_size = kKernelDescriptorSize;
+  const bool has_table = function_pointer_table_target_words.has_value();
+  constexpr uint64_t table_size = sizeof(uint64_t);
 
   std::vector<uint8_t> shstrtab{'\0'};
   const uint32_t text_name = add_elf_name(shstrtab, ".text");
@@ -465,10 +473,13 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
   const uint32_t symtab_name = add_elf_name(shstrtab, ".symtab");
   const uint32_t strtab_name = add_elf_name(shstrtab, ".strtab");
   const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
+  const uint32_t table_name = has_table ? add_elf_name(shstrtab, ".data.rel.ro") : 0;
+  const uint32_t rela_name = has_table ? add_elf_name(shstrtab, ".rela.dyn") : 0;
 
   std::vector<uint8_t> strtab{'\0'};
   const uint32_t kd_symbol_name = add_elf_name(strtab, "kernel.kd");
   const uint32_t text_symbol_name = text_function_words ? add_elf_name(strtab, "kernel") : 0;
+  const uint32_t table_symbol_name = has_table ? add_elf_name(strtab, "function_table") : 0;
 
   // The kernel descriptor requires 8-byte alignment (tests reinterpret_cast the
   // .rodata bytes to TestKernelDescriptor). An odd text_words count leaves
@@ -477,12 +488,15 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
   // padding both keeps the PT_LOAD p_offset == p_vaddr (mod p_align) congruence.
   const uint64_t rodata_offset = align_up_for_test(text_offset + text_size, 8);
   const uint64_t rodata_vaddr = align_up_for_test(text_vaddr + text_size, 8) + load_align;
+  const uint64_t table_vaddr = rodata_vaddr + load_align;
   const uint64_t strtab_offset = rodata_offset + rodata_size;
   const uint64_t symtab_offset = align_up_for_test(strtab_offset + strtab.size(), 8);
-  const size_t sym_count = text_function_words ? 3 : 2;
-  const uint64_t shstrtab_offset = symtab_offset + sym_count * sizeof(Elf64_Sym);
+  const size_t sym_count = (text_function_words ? 3 : 2) + (has_table ? 1 : 0);
+  const uint64_t table_offset = symtab_offset + sym_count * sizeof(Elf64_Sym);
+  const uint64_t rela_offset = has_table ? table_offset + table_size : table_offset;
+  const uint64_t shstrtab_offset = rela_offset + (has_table ? sizeof(Elf64_Rela) : 0);
   const uint64_t shoff = align_up_for_test(shstrtab_offset + shstrtab.size(), 8);
-  constexpr uint16_t section_count = 6;
+  const uint16_t section_count = has_table ? 8 : 6;
   constexpr uint16_t phdr_count = 2;
 
   std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
@@ -540,16 +554,39 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
   syms[1].st_size = kKernelDescriptorSize;
   if (text_function_words) {
     syms[2].st_name = text_symbol_name;
-    syms[2].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
+    // Real device functions are LOCAL and appear only in .symtab. Offset zero is the kernel entry,
+    // which function discovery excludes; a non-zero offset names a callee body.
+    syms[2].st_info = elf_symbol_info(text_function_offset_words == 0 ? kElfSymbolBindGlobal
+                                                                      : kElfSymbolBindLocal,
+                                      kElfSymbolTypeFunc);
     syms[2].st_shndx = 1;
-    syms[2].st_value = text_vaddr;
+    syms[2].st_value = text_vaddr + text_function_offset_words * sizeof(uint32_t);
     syms[2].st_size = *text_function_words * sizeof(uint32_t);
+  }
+  if (has_table) {
+    // A function-pointer table is an STT_OBJECT in a non-executable allocated section, with one
+    // R_AMDGPU_RELATIVE64 slot whose addend is the callee's virtual address.
+    if (name_function_pointer_table_with_symbol) {
+      Elf64_Sym &table_symbol = syms.back();
+      table_symbol.st_name = table_symbol_name;
+      table_symbol.st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
+      table_symbol.st_shndx = 6;
+      table_symbol.st_value = table_vaddr;
+      table_symbol.st_size = table_size;
+    }
+
+    Elf64_Rela rela{};
+    rela.r_offset = table_vaddr;
+    rela.r_info = (uint64_t{0} << 32) | rocjitsu::R_AMDGPU_RELATIVE64;
+    rela.r_addend =
+        static_cast<int64_t>(text_vaddr + *function_pointer_table_target_words * sizeof(uint32_t));
+    std::memcpy(image.data() + rela_offset, &rela, sizeof(rela));
   }
   std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
 
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
 
-  std::array<Elf64_Shdr, section_count> shdrs{};
+  std::vector<Elf64_Shdr> shdrs(section_count);
   shdrs[1].sh_name = text_name;
   shdrs[1].sh_type = SHT_PROGBITS;
   shdrs[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
@@ -565,6 +602,24 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
   shdrs[2].sh_offset = rodata_offset;
   shdrs[2].sh_size = rodata_size;
   shdrs[2].sh_addralign = 64;
+
+  if (has_table) {
+    shdrs[6].sh_name = table_name;
+    shdrs[6].sh_type = SHT_PROGBITS;
+    shdrs[6].sh_flags = SHF_ALLOC;
+    shdrs[6].sh_addr = table_vaddr;
+    shdrs[6].sh_offset = table_offset;
+    shdrs[6].sh_size = table_size;
+    shdrs[6].sh_addralign = 8;
+
+    shdrs[7].sh_name = rela_name;
+    shdrs[7].sh_type = SHT_RELA;
+    shdrs[7].sh_offset = rela_offset;
+    shdrs[7].sh_size = sizeof(Elf64_Rela);
+    shdrs[7].sh_link = 3;
+    shdrs[7].sh_addralign = 8;
+    shdrs[7].sh_entsize = sizeof(Elf64_Rela);
+  }
 
   shdrs[3].sh_name = symtab_name;
   shdrs[3].sh_type = SHT_SYMTAB;
@@ -1958,6 +2013,49 @@ TEST(CodeObjectPatcher, ReplaceTextRelocatesTextSymbolsWithExactOffsetMap) {
   ASSERT_GE(symbols.size(), 3u);
   EXPECT_EQ(symbols[2].st_value, 0x1104u);
   EXPECT_EQ(symbols[2].st_size, 12u);
+}
+
+// A helper block is copied into every scope that reaches it, so one source offset yields a record
+// per scope and "first wins" is decided independently for the entry and for the end. Here scope 0
+// records offset 8 as an instruction start while scope 1 records it as a body end: resolving the
+// extent globally would take scope 1's end against scope 0's entry and report a body spanning
+// everything translation placed between the two copies.
+TEST(CodeObjectPatcher, TextSymbolExtentIsMeasuredWithinOneTranslationScope) {
+  auto image = make_minimal_amdgpu_elf_with_load_segments();
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+
+  CodeObjectPatcher patcher(co);
+  const std::vector<uint32_t> text_words(128, 0xBF800000u);
+  const auto *text_bytes = reinterpret_cast<const uint8_t *>(text_words.data());
+  constexpr std::array<TextOffsetRelocation, 4> relocations = {
+      TextOffsetRelocation{
+          .source_offset = 0, .target_offset = 4, .is_instruction_start = true, .scope_index = 0},
+      TextOffsetRelocation{
+          .source_offset = 8, .target_offset = 16, .is_instruction_start = true, .scope_index = 0},
+      TextOffsetRelocation{
+          .source_offset = 0, .target_offset = 200, .is_instruction_start = true, .scope_index = 1},
+      TextOffsetRelocation{.source_offset = 8,
+                           .target_offset = 300,
+                           .is_instruction_start = false,
+                           .scope_index = 1},
+  };
+  ASSERT_TRUE(
+      patcher.replace_text({text_bytes, text_words.size() * sizeof(uint32_t)}, relocations));
+
+  const auto patched_bytes = patcher.emit();
+  const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(patched_bytes, 0);
+  const auto shdrs = read_elf_array_for_test<Elf64_Shdr>(patched_bytes, ehdr.e_shoff, ehdr.e_shnum);
+  const auto symtab = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
+    return shdr.sh_type == SHT_SYMTAB;
+  });
+  ASSERT_NE(symtab, shdrs.end());
+  const auto symbols = read_elf_array_for_test<Elf64_Sym>(patched_bytes, symtab->sh_offset,
+                                                          symtab->sh_size / symtab->sh_entsize);
+  ASSERT_GE(symbols.size(), 3u);
+  EXPECT_EQ(symbols[2].st_value, 0x1104u) << "the entry must come from the first scope to place it";
+  EXPECT_EQ(symbols[2].st_size, 12u)
+      << "the extent must be read back in the scope that supplied the entry";
 }
 
 TEST(CodeObjectPatcher, AppendsNonAllocSectionWithoutMovingLoadableSegments) {
@@ -4959,11 +5057,15 @@ TEST(BinaryTranslatorE2E, Gfx1250LongDirectBranchGrowthIsIdempotent) {
   EXPECT_EQ(second.elf_bytes, result.elf_bytes);
 }
 
+// gfx1250 has a fixed scalar file, so the descriptor's granulated SGPR count is not a measurement
+// of the kernel and cannot be grown to reserve a thunk pair. The pair is instead proven unused by
+// scanning the scope, so exhausting it requires the body to actually name every scalar register.
+// The descriptor count below is left high deliberately: it must not influence the choice.
 TEST(BinaryTranslatorE2E, Gfx1250LongBranchReportsSgprExhaustionAfterSemanticExpansion) {
   using namespace rocr::llvm::amdhsa;
 
   constexpr size_t kTargetWord = 0x8000;
-  constexpr uint16_t kLiveSgprs = 104;
+  constexpr uint16_t kLiveSgprs = 106;
   constexpr auto conversion =
       gfx1250::build_vop3(gfx1250::kVCvtF32Fp8Vop3, {.vdst = 30, .clamp = 1, .src0 = 256 + 22});
   constexpr uint32_t kGfx1250SNop = 0xBF800000u;
@@ -5010,6 +5112,110 @@ TEST(BinaryTranslatorE2E, Gfx1250LongBranchReportsSgprExhaustionAfterSemanticExp
   ASSERT_NE(diagnostic, result.diagnostics.end());
   EXPECT_EQ(diagnostic->guest_offset, std::optional<uint64_t>(0))
       << "the resource diagnostic must identify the branch that could not be expanded";
+}
+
+// The companion to the exhaustion case: which pair gets chosen, not merely that some choice is
+// reachable. The body names s0 through s5, so the lowest free even-aligned pair is s[6:7]. The
+// descriptor's granulated count is set high on purpose -- on a fixed scalar file it is not a
+// measurement of the kernel, and a pair derived from it would land at s8 and overwrite live state.
+TEST(BinaryTranslatorE2E, Gfx1250LongBranchTakesTheLowestSgprPairTheScopeLeavesFree) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr size_t kTargetWord = 0x8000;
+  constexpr uint16_t kNamedSgprs = 6;
+  constexpr uint16_t kExpectedPair = kNamedSgprs;
+  constexpr auto conversion =
+      gfx1250::build_vop3(gfx1250::kVCvtF32Fp8Vop3, {.vdst = 30, .clamp = 1, .src0 = 256 + 22});
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+
+  std::vector<uint32_t> words;
+  words.reserve(kTargetWord + 1);
+  words.push_back(gfx1250::build_sopp(gfx1250::kSCbranchScc0Sopp,
+                                      {.simm16 = static_cast<uint16_t>(kTargetWord - 1u)})[0]);
+  words.insert(words.end(), conversion.begin(), conversion.end());
+  for (uint16_t sgpr = 0; sgpr < kNamedSgprs; ++sgpr) {
+    words.push_back(
+        gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = static_cast<uint8_t>(sgpr),
+                                                    .sdst = static_cast<uint8_t>(sgpr)})[0]);
+  }
+  words.resize(kTargetWord, kGfx1250SNop);
+  words.push_back(kGfx1250SEndpgm);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  auto descriptor = rocjitsu::read_kernel_descriptor_for_test(rodata->data());
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  12);
+  rocjitsu::write_kernel_descriptor_for_test(image.data() + rodata->sectionOffset(), descriptor);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const auto translated_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  const uint32_t marker = rocjitsu::build_s_nop(rocjitsu::kLongDirectBranchMarkerNopImmediate,
+                                                ROCJITSU_CODE_ARCH_GFX1250);
+  const auto *found = std::find(target_words, target_words + translated_word_count, marker);
+  ASSERT_NE(found, target_words + translated_word_count)
+      << "the branch must have been expanded into a long transfer";
+  ASSERT_LT(found + 1, target_words + translated_word_count);
+  EXPECT_EQ(found[1], rocjitsu::build_s_getpc_b64(kExpectedPair, ROCJITSU_CODE_ARCH_GFX1250))
+      << "the thunk must hold its address in the lowest pair the scope leaves free";
+  for (uint16_t sgpr = 0; sgpr < kNamedSgprs; sgpr += 2) {
+    EXPECT_NE(found[1], rocjitsu::build_s_getpc_b64(sgpr, ROCJITSU_CODE_ARCH_GFX1250))
+        << "a pair the body names would be clobbered by the thunk";
+  }
+}
+
+// The scalar relative-move family resolves its register number from M0 at run time, so scanning
+// encoded operands cannot enumerate what it reaches and no pair can be proven free. Refuse rather
+// than pick one that a run-time index may land on.
+TEST(BinaryTranslatorE2E, Gfx1250RefusesLongBranchSgprPairWhenScopeIndexesScalarsAtRuntime) {
+  constexpr size_t kTargetWord = 0x8000;
+  constexpr auto conversion =
+      gfx1250::build_vop3(gfx1250::kVCvtF32Fp8Vop3, {.vdst = 30, .clamp = 1, .src0 = 256 + 22});
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+
+  std::vector<uint32_t> words;
+  words.reserve(kTargetWord + 1);
+  words.push_back(gfx1250::build_sopp(gfx1250::kSCbranchScc0Sopp,
+                                      {.simm16 = static_cast<uint16_t>(kTargetWord - 1u)})[0]);
+  words.insert(words.end(), conversion.begin(), conversion.end());
+  words.push_back(gfx1250::build_sop1(gfx1250::kSMovrelsB32Sop1, {.ssrc0 = 4, .sdst = 10})[0]);
+  words.resize(kTargetWord, kGfx1250SNop);
+  words.push_back(kGfx1250SEndpgm);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(rocjitsu::has_error_containing(
+      result, rocjitsu::DiagnosticKind::ResourceLimit,
+      "long direct branch requires an additional descriptor-backed SGPR pair after semantic "
+      "expansion"));
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250CompactConditionalLayoutIsIdempotent) {
@@ -10596,6 +10802,115 @@ TEST(BinaryTranslatorE2E, Gfx1250MaterializesDsAddtidAddressForA0) {
   // is the field width (inline 20 -> 148). Together: (value >> 0) & ((1<<20)-1).
   EXPECT_EQ(((*v_bfe)->raw_encoding()[1] >> 9) & 0x1ffu, kInline);
   EXPECT_EQ(((*v_bfe)->raw_encoding()[1] >> 18) & 0x1ffu, static_cast<uint16_t>(kInline + 20));
+}
+
+// Translated text replaces .text wholesale, so a device function body that reaches no kernel scope
+// is not preserved: its address range is reoccupied by relocated code and a call arriving there
+// runs something else with no fault. Refuse instead. Kernel bodies need no such proof because their
+// descriptors make them roots.
+TEST(BinaryTranslatorE2E, Gfx1250RefusesDeviceFunctionBodyReachedByNoScope) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  // The kernel ends at word 0, so nothing below it lands in a scope. A function-pointer table names
+  // the body at word 3, so an address the decoded graph never accounts for can still arrive there.
+  // That is what separates this from a dead local a linker merely retained: the identical object
+  // without the table is accepted by the test below, so the table is the only thing being pinned.
+  const std::vector<uint32_t> words = {
+      kGfx1250SEndpgm, kGfx1250SNop, kGfx1250SNop, kGfx1250SNop, kGfx1250SEndpgm,
+  };
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      words, /*text_function_words=*/2, /*text_function_offset_words=*/3,
+      /*function_pointer_table_target_words=*/3);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                             "device function body reached no kernel scope"));
+}
+
+// The same shape with the pointer array's own symbol stripped. Table discovery needs a qualifying
+// `STT_OBJECT` around the slot and finds nothing here, yet the addend is still rewritten -- to a
+// body that would no longer exist -- so reachability has to be asked of the raw relocation.
+TEST(BinaryTranslatorE2E, Gfx1250RefusesDeviceFunctionBodyHeldByAnUnnamedPointerSlot) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  const std::vector<uint32_t> words = {
+      kGfx1250SEndpgm, kGfx1250SNop, kGfx1250SNop, kGfx1250SNop, kGfx1250SEndpgm,
+  };
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      words, /*text_function_words=*/2, /*text_function_offset_words=*/3,
+      /*function_pointer_table_target_words=*/3,
+      /*name_function_pointer_table_with_symbol=*/false);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  ASSERT_TRUE(rocjitsu::discover_relocation_function_tables(source).empty())
+      << "the slot must not qualify as a table, or this covers the same path as the test above";
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                             "device function body reached no kernel scope"));
+}
+
+// The same body with no table naming it is genuinely dead. Linkers retain such locals in device
+// libraries, so refusing them would reject objects that translate correctly, and an operator facing
+// that would disable the feature entirely -- a worse outcome than the case being guarded.
+TEST(BinaryTranslatorE2E, Gfx1250AcceptsUnreferencedDeviceFunctionBody) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  const std::vector<uint32_t> words = {
+      kGfx1250SEndpgm, kGfx1250SNop, kGfx1250SNop, kGfx1250SNop, kGfx1250SEndpgm,
+  };
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      words, /*text_function_words=*/2, /*text_function_offset_words=*/3);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+}
+
+// The same object without the function symbol must still translate: the refusal is keyed on a body
+// a symbol names, not on every unreached byte, so ordinary padding stays acceptable.
+TEST(BinaryTranslatorE2E, Gfx1250AcceptsUnreachedBytesThatNameNoDeviceFunction) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  const std::vector<uint32_t> words = {kGfx1250SEndpgm, kGfx1250SNop, kGfx1250SEndpgm};
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnExcludedBarrierSignalIsfirst) {

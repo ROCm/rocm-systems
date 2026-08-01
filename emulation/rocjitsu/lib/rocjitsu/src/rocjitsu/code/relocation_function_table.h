@@ -87,6 +87,53 @@ struct RelocationTableDispatch {
   uint64_t source_table_address_vaddr = 0;
 };
 
+/// @brief Source `.text` extent of one non-kernel function symbol.
+struct DeviceFunctionExtent {
+  /// `.text`-relative byte offset of the function entry.
+  uint64_t text_offset = 0;
+
+  /// Function body size from `st_size`.
+  uint64_t size = 0;
+};
+
+/// @brief Discover `STT_FUNC` symbols in `.text` that are not kernel entries.
+///
+/// @details A kernel's body is reachable through its descriptor, so it is
+/// already a translation root. Anything else named by a function symbol is a
+/// device function, whose body is only translated when some kernel scope
+/// reaches it. Callers use these extents to prove that no such body was left
+/// out of every scope, because `.text` is replaced wholesale and an omitted
+/// body is not preserved -- its address range is reoccupied by other translated
+/// code.
+///
+/// Symbols are matched structurally rather than by name and are accepted at any
+/// binding: device functions are frequently `STB_LOCAL` and appear only in
+/// `.symtab`. Extents are returned sorted by `text_offset` with duplicates
+/// removed, which a compiler emitting one body per caller does produce.
+///
+/// @param object Source code object.
+/// @param kernel_entry_offsets `.text`-relative kernel entries to exclude.
+[[nodiscard]] std::vector<DeviceFunctionExtent>
+discover_device_function_extents(const AmdGpuCodeObject &object,
+                                 std::span<const uint64_t> kernel_entry_offsets);
+
+/// @brief Discover `.text` offsets that a relocated data word will hold at run time.
+///
+/// @details Deliberately broader than table discovery, and asks a different
+/// question: not "is this a dispatch table rocjitsu can model" but "will some
+/// address of this code exist in memory". A pointer array whose own symbol was
+/// stripped, or one the linker never gave an `STT_OBJECT`, still emits its
+/// relocation, so qualifying the containing object would miss it -- and the
+/// relocated addend is rewritten regardless of whether the table qualified.
+///
+/// The same predicate the addend rewrite itself uses, plus symbol-backed
+/// references to function bodies.
+///
+/// @param object Source code object.
+/// @returns `.text`-relative offsets, sorted, with duplicates removed.
+[[nodiscard]] std::vector<uint64_t>
+discover_text_relocation_targets(const AmdGpuCodeObject &object);
+
 /// @brief Discover finite device-call tables from ELF symbols and relocations.
 ///
 /// @details A candidate must be a non-empty `STT_OBJECT` whose size is a
