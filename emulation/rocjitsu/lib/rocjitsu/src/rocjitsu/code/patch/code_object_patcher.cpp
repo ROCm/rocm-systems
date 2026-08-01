@@ -1135,11 +1135,15 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
   for (const PcRelativeTextRelocation &relocation : code_relocations) {
     // Subtract from the size only after proving the offset is inside it: a text shorter than the
     // field being written would otherwise wrap the subtraction and admit an out-of-bounds write.
+    // The target is a branch destination, so it must be a whole instruction inside the new text.
+    // Allowing it to equal the size would name the byte one past the end, which is not an
+    // instruction and would leave the literal pointing outside `.text`.
     if (relocation.target_getpc_offset > new_text.size() ||
         sizeof(uint32_t) > new_text.size() - relocation.target_getpc_offset ||
         relocation.target_literal_offset > new_text.size() ||
         sizeof(uint64_t) > new_text.size() - relocation.target_literal_offset ||
-        relocation.target_text_offset > new_text.size()) {
+        relocation.target_text_offset > new_text.size() ||
+        sizeof(uint32_t) > new_text.size() - relocation.target_text_offset) {
       return false;
     }
     const uint64_t getpc_result = relocation.target_getpc_offset + sizeof(uint32_t);

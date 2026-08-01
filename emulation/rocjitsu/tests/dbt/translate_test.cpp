@@ -1788,6 +1788,33 @@ TEST(BinaryTranslatorE2E, DescriptorlessExecutableTextIsSuccessfulNoOp) {
   EXPECT_NE(warning->message.find("no kernel descriptors"), std::string::npos);
 }
 
+// A code relocation names a branch destination inside the text being written, so it has to be a
+// whole instruction there. An offset equal to the size names the byte one past the end, which
+// would still compute a literal and leave it pointing outside `.text`.
+TEST(CodeObjectPatcher, ReplaceTextRejectsCodeRelocationTargetPastEndOfText) {
+  const std::array<uint32_t, 4> text_words = {0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u};
+  const auto bytes = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text_words.data()),
+                                              sizeof(text_words));
+  const auto attempt = [&](uint64_t target_text_offset) {
+    auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
+    AmdGpuCodeObject co(image.data(), image.size());
+    EXPECT_TRUE(co.is_valid());
+    CodeObjectPatcher patcher(co);
+    const std::array<PcRelativeTextRelocation, 1> code_relocations = {
+        PcRelativeTextRelocation{.target_getpc_offset = 0,
+                                 .target_literal_offset = 4,
+                                 .target_text_offset = target_text_offset}};
+    return patcher.replace_text(bytes, {}, {}, code_relocations);
+  };
+
+  EXPECT_FALSE(attempt(sizeof(text_words)))
+      << "a target one past the end of .text is not an instruction";
+  EXPECT_FALSE(attempt(sizeof(text_words) - 2))
+      << "a target without room for a whole instruction word is not an instruction";
+  EXPECT_TRUE(attempt(sizeof(text_words) - sizeof(uint32_t)))
+      << "the last instruction in .text is a legitimate branch destination";
+}
+
 TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
   auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
   AmdGpuCodeObject co(image.data(), image.size());
