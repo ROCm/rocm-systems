@@ -360,6 +360,32 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     rj_add_plugin_loader_fixture(missing PLUGIN_FIXTURE_MISSING_DESTROY=1)
     rj_add_plugin_loader_fixture(duplicate)
+
+    # This module deliberately compiles against a preserved v2
+    # ExecutionPlugin layout rather than the current plugin headers.
+    add_library(
+        plugin_loader_fixture_legacy_v2
+        MODULE
+        plugin_loader_v2_fixture.cpp
+    )
+    target_include_directories(
+        plugin_loader_fixture_legacy_v2
+        PRIVATE
+            ${ROCJITSU_INCLUDE_DIR}
+            ${ROCJITSU_SRC_DIR}
+            ${HSA_INCLUDE_DIR}
+            $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
+            $<TARGET_PROPERTY:simdojo,INTERFACE_INCLUDE_DIRECTORIES>
+    )
+    set_target_properties(
+        plugin_loader_fixture_legacy_v2
+        PROPERTIES
+            OUTPUT_NAME rocjitsu_plugin_legacy_v2
+            LIBRARY_OUTPUT_DIRECTORY ${PLUGIN_LOADER_FIXTURE_DIR}
+            CXX_VISIBILITY_PRESET hidden
+            VISIBILITY_INLINES_HIDDEN ON
+    )
+    rj_configure_target(plugin_loader_fixture_legacy_v2 TEST)
 endif()
 
 add_executable(
@@ -520,6 +546,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_tests
         plugin_loader_fixture_good
         plugin_loader_fixture_badabi
+        plugin_loader_fixture_legacy_v2
         plugin_loader_fixture_missing
         plugin_loader_fixture_duplicate
     )

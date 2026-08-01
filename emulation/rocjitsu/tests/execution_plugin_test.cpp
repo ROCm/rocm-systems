@@ -73,6 +73,9 @@ namespace {
 
 using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
+
+static_assert(std::is_final_v<ExecutionPluginGroup>);
+static_assert(!std::is_polymorphic_v<ExecutionPluginGroup>);
 using namespace rocjitsu::plugins::race_detector;
 
 static_assert(!std::is_default_constructible_v<ExecutionPluginGroup>);

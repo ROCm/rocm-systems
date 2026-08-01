@@ -228,9 +228,17 @@ command-processor callbacks when any contained plugin requires them.
 
 Plugins conservatively require serial callbacks by default because concurrent
 hook ordering is undefined and plugins may contain unsynchronized mutable
-state. A plugin may override `requires_serial_execution()` to return `false`
-only after its complete callback path has been audited and tested for
-concurrent command-processor callbacks.
+state. For example, callbacks from different command processors can race while
+updating dispatch maps or counters, interleave a before/after correlation, or
+concurrently use output and profiling state that assumed a single callback
+stream. Defaulting to parallel execution would make existing plugins silently
+unsafe; requiring every plugin to declare a policy would add source churn
+without making an omitted audit safe.
+
+A plugin may override `requires_serial_execution()` to return `false` only
+after its complete callback path has been audited and tested for concurrent
+command-processor callbacks. That audit includes lifecycle and ordering
+assumptions as well as all state and sinks reached from its hooks.
 
 Hook profiling is implemented as `ProfiledExecutionPlugin`, a serial decorator
 around another plugin group. It therefore participates in the same

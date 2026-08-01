@@ -45,6 +45,8 @@ TEST_F(PluginLoaderTest, LoadsMatchingAbi) {
   EXPECT_EQ(load("good", group), 1);
   EXPECT_EQ(group.num_plugins(), 1u);
   EXPECT_NE(trace().find("good:create\n"), std::string::npos);
+  group.onInit();
+  EXPECT_NE(trace().find("good:init\n"), std::string::npos);
 }
 
 TEST_F(PluginLoaderTest, RejectsAbiMismatchBeforeCreate) {
@@ -52,6 +54,13 @@ TEST_F(PluginLoaderTest, RejectsAbiMismatchBeforeCreate) {
   EXPECT_EQ(load("badabi", group), 0);
   EXPECT_TRUE(group.empty());
   EXPECT_EQ(trace().find("badabi:create\n"), std::string::npos);
+}
+
+TEST_F(PluginLoaderTest, RejectsLegacyV2InterfaceBeforeCreate) {
+  rocjitsu::ExecutionPluginGroup group;
+  EXPECT_EQ(load("legacy_v2", group), 0);
+  EXPECT_TRUE(group.empty());
+  EXPECT_EQ(trace().find("legacy_v2:create\n"), std::string::npos);
 }
 
 TEST_F(PluginLoaderTest, RejectsMissingRequiredExport) {

@@ -54,7 +54,8 @@ public:
   PluginSink &sink() { return *sink_; }
 
   /// Whether concurrent command-processor callbacks are unsafe for this plugin.
-  /// Plugins are serial by default because hook ordering is otherwise undefined.
+  /// Plugins are serial by default because hooks may share mutable state or
+  /// depend on callback ordering. Return false only after auditing every hook.
   virtual bool requires_serial_execution() const { return true; }
 
   // -- Lifecycle hooks ------------------------------------------------------

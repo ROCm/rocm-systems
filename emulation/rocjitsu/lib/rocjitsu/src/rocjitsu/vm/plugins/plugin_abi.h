@@ -59,7 +59,7 @@ namespace rocjitsu {
 /// This is not a stable ABI version: it only detects mismatched in-tree
 /// builds, not compatibility across toolchains or releases (see the
 /// "Toolchain contract" note above).
-inline constexpr int kPluginAbiVersion = 2;
+inline constexpr int kPluginAbiVersion = 3;
 
 /// @brief Opaque handle to a plugin instance returned by the create export.
 ///
