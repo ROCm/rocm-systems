@@ -37,7 +37,7 @@ for frag in rocm ompi rocshmem rccl; do
   [[ -f "${f}" ]] && source "${f}"
 done
 
-: "${ROCM_PATH:?run-gin-ci.sh: ROCM_PATH unset (run fetch-rocm.sh / via sbatch)}"
+: "${ROCM_PATH:?run-gin-ci.sh: ROCM_PATH unset (provisioned via rocm.env / sbatch)}"
 : "${MPI_HOME:?run-gin-ci.sh: MPI_HOME unset (run build-ompi.sh / via sbatch)}"
 : "${ROCSHMEM_INSTALL_DIR:?run-gin-ci.sh: ROCSHMEM_INSTALL_DIR unset (run build-rocshmem.sh)}"
 : "${RCCL_INSTALL_PREFIX:?run-gin-ci.sh: RCCL_INSTALL_PREFIX unset (set by gin.sbatch)}"
