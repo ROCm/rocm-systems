@@ -548,7 +548,14 @@ Software targets may add `--launcher-json` with the same exact argv prefix used
 by `run`. Inventory applies it to the workload process. `fault` applies it to
 the mutation payload and, unless explicit paired health overrides are present,
 to the default discovery and target-smoke commands as well. All retained
-commands include the prefix verbatim.
+commands record the prefix verbatim wherever it was applied. For example:
+
+```bash
+python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
+  --target gfx1250 inventory --workload jakub-attention \
+  --artifact-root "$CONSAN_ARTIFACT_ROOT" \
+  --launcher-json '["rocjitsu", "--config", "gfx1250.json", "--"]'
+```
 
 This runs each admitted fault family separately with
 `RJ_CONSAN_FAULT_DRY_RUN=1`. Family-specific analysis is enabled, but no site

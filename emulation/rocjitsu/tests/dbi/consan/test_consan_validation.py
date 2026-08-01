@@ -239,8 +239,28 @@ class ConSanValidationTest(unittest.TestCase):
                 launcher_json,
             ]
         )
-        self.assertEqual(inventory.launcher_json, launcher_json)
-        self.assertEqual(fault.launcher_json, launcher_json)
+        launcher = ["rocjitsu", "--config", "gfx1250.json", "--"]
+        self.assertEqual(inventory.launcher, launcher)
+        self.assertEqual(fault.launcher, launcher)
+
+    def test_launcher_is_validated_during_argument_parsing(self) -> None:
+        with temporary_root() as root:
+            artifact_root = root / "artifacts"
+            with self.assertRaises(SystemExit):
+                validation._parse_args(
+                    [
+                        "--target",
+                        "gfx1250",
+                        "inventory",
+                        "--workload",
+                        "jakub-attention",
+                        "--artifact-root",
+                        str(artifact_root),
+                        "--launcher-json",
+                        "not-json",
+                    ]
+                )
+            self.assertFalse(artifact_root.exists())
 
     def test_run_process_timeout_contains_descendants(self) -> None:
         parent = (
@@ -4303,7 +4323,7 @@ class ConSanValidationTest(unittest.TestCase):
                 ]
             )
 
-    def test_fault_launcher_covers_payload_and_default_health_checks(self) -> None:
+    def test_fault_launcher_covers_payload_and_only_default_health_checks(self) -> None:
         workload = validation.WORKLOAD_BY_ID["jakub-attention"]
         fault = {
             "id": "barrier-drop",
@@ -4316,13 +4336,17 @@ class ConSanValidationTest(unittest.TestCase):
                 "supercollider": {"detector": "not_detected", "oracle": "any"}
             },
         }
-        with temporary_root() as root:
-            spec = root / "fault.json"
-            spec.write_text("{}", encoding="utf-8")
-            hook = root / "hook.so"
-            hook.write_bytes(b"hook")
-            args = validation._parse_args(
-                [
+        launcher = ["rocjitsu", "--config", "gfx1250.json", "--"]
+        for explicit_probes in (False, True):
+            with (
+                self.subTest(explicit_probes=explicit_probes),
+                temporary_root() as root,
+            ):
+                spec = root / "fault.json"
+                spec.write_text("{}", encoding="utf-8")
+                hook = root / "hook.so"
+                hook.write_bytes(b"hook")
+                argv = [
                     "--target",
                     "gfx1250",
                     "fault",
@@ -4338,51 +4362,72 @@ class ConSanValidationTest(unittest.TestCase):
                     str(root / "artifacts"),
                     "--allow-destructive",
                     "--launcher-json",
-                    '["rocjitsu", "--config", "gfx1250.json", "--"]',
+                    json.dumps(launcher),
                 ]
-            )
-            with (
-                mock.patch.object(
-                    validation, "_workspace_from_environment", return_value=root
-                ),
-                mock.patch.object(validation, "_doctor", return_value={"ok": True}),
-                mock.patch.object(validation, "_load_fault", return_value=fault),
-                mock.patch.object(validation, "_hook_path", return_value=hook),
-                mock.patch.object(
-                    validation,
-                    "_write_provenance",
-                    return_value=root / "provenance.json",
-                ),
-                mock.patch.object(
-                    validation, "_workload_command", return_value=["payload"]
-                ),
-                mock.patch.object(
-                    validation, "_health_smoke_command", return_value=["smoke"]
-                ),
-                mock.patch.object(
-                    validation.shutil, "which", return_value="/bin/rocminfo"
-                ),
-                mock.patch.object(validation.subprocess, "run") as run,
-                redirect_stdout(io.StringIO()),
-            ):
-                self.assertEqual(validation._fault(args), 1)
+                if explicit_probes:
+                    argv.extend(
+                        [
+                            "--health-command-json",
+                            '["explicit-health"]',
+                            "--smoke-command-json",
+                            '["explicit-smoke"]',
+                        ]
+                    )
+                args = validation._parse_args(argv)
+                with (
+                    mock.patch.object(
+                        validation, "_workspace_from_environment", return_value=root
+                    ),
+                    mock.patch.object(validation, "_doctor", return_value={"ok": True}),
+                    mock.patch.object(validation, "_load_fault", return_value=fault),
+                    mock.patch.object(validation, "_hook_path", return_value=hook),
+                    mock.patch.object(
+                        validation,
+                        "_write_provenance",
+                        return_value=root / "provenance.json",
+                    ),
+                    mock.patch.object(
+                        validation, "_workload_command", return_value=["payload"]
+                    ),
+                    mock.patch.object(
+                        validation, "_health_smoke_command", return_value=["smoke"]
+                    ),
+                    mock.patch.object(
+                        validation.shutil, "which", return_value="/bin/rocminfo"
+                    ),
+                    mock.patch.object(validation.subprocess, "run") as run,
+                    redirect_stdout(io.StringIO()),
+                ):
+                    self.assertEqual(validation._fault(args), 1)
 
-        invocation = run.call_args.args[0]
-        runner_separator = invocation.index("--")
-        self.assertEqual(
-            invocation[runner_separator + 1 :],
-            ["rocjitsu", "--config", "gfx1250.json", "--", "payload"],
-        )
-        health_index = invocation.index("--health-command-json") + 1
-        smoke_index = invocation.index("--smoke-command-json") + 1
-        self.assertEqual(
-            json.loads(invocation[health_index]),
-            ["rocjitsu", "--config", "gfx1250.json", "--", "/bin/rocminfo"],
-        )
-        self.assertEqual(
-            json.loads(invocation[smoke_index]),
-            ["rocjitsu", "--config", "gfx1250.json", "--", "smoke"],
-        )
+                invocation = run.call_args.args[0]
+                runner_separator = invocation.index("--")
+                self.assertEqual(
+                    invocation[runner_separator + 1 :], [*launcher, "payload"]
+                )
+                health_index = invocation.index("--health-command-json") + 1
+                smoke_index = invocation.index("--smoke-command-json") + 1
+                expected_health = (
+                    ["explicit-health"]
+                    if explicit_probes
+                    else [*launcher, "/bin/rocminfo"]
+                )
+                expected_smoke = (
+                    ["explicit-smoke"] if explicit_probes else [*launcher, "smoke"]
+                )
+                self.assertEqual(json.loads(invocation[health_index]), expected_health)
+                self.assertEqual(json.loads(invocation[smoke_index]), expected_smoke)
+                summary = json.loads(
+                    (
+                        root
+                        / "artifacts"
+                        / workload.id
+                        / "faults"
+                        / fault["id"]
+                        / "summary.json"
+                    ).read_text(encoding="utf-8")
+                )
+                self.assertEqual(summary["launcher"], launcher)
 
     def test_marker_smoke_stops_after_independent_success_marker(self) -> None:
         script = Path(__file__).with_name("consan_marker_smoke.py")
@@ -4720,6 +4765,11 @@ class ConSanValidationTest(unittest.TestCase):
                         "RJ_CONSAN_FAULT_SITE_IDENTITY": "site-a",
                         "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "sequence-a",
                     },
+                    "site_provenance": {
+                        "corpus_commit": "a" * 40,
+                        "executable": "workload",
+                        "inventory_run": "inventory-20260801",
+                    },
                 }
             ],
         }
@@ -4728,6 +4778,14 @@ class ConSanValidationTest(unittest.TestCase):
             path.write_text(json.dumps(document), encoding="utf-8")
             loaded = validation._load_fault(path, "gfx1201", workload, "drop")
         self.assertEqual(loaded["id"], "drop")
+        self.assertEqual(loaded["site_provenance"]["corpus_commit"], "a" * 40)
+
+        document["faults"][0]["site_provenance"]["corpus_commit"] = "short"
+        with temporary_root() as root:
+            path = root / "faults.json"
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(validation.ValidationError, "site_provenance"):
+                validation._load_fault(path, "gfx1201", workload, "drop")
 
     def test_checked_in_gfx1201_fault_reference_is_a_valid_manifest_subset(
         self,

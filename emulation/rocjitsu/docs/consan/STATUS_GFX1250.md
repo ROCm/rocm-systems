@@ -55,7 +55,7 @@ preserve an earlier green claim.
 | **P4 hip-moi WMMA attention** | 🟩 Current paired 1.78x; 18/18 accesses | 🟩 At `fff5f3597b`: spot rerun exact in 7.81 seconds; 18/18 accesses and 4/4 barriers; paired 1.17x retained | 🟩 Current paired 1.15x; 18/18 accesses, 8/8 applicable barriers | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers |
 | **P4 hip-moi Stream-K arrival** | 🟩 Current paired 7.38x; 4/4 accesses | 🟩 Fresh clean run exact and complete at 4/4 accesses, 4/4 barriers, 10/10 atomics, and 16/16 fences; prior paired 2.41x retained | 🟩 Current paired 2.72x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.62x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
 | **P4 hip-moi tree atomic-OR** | 🟩 Current paired 6.55x; 4/4 accesses | 🟩 Fresh clean run exact and complete at 4/4 accesses, 4/4 barriers, 10/10 atomics, and 16/16 fences; prior paired 2.04x retained | 🟩 Current paired 2.57x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.19x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
-| **P4 Jakub matmul** | 🟩 Exact host oracle; clean 16/16 accesses; reviewed drop is a qualified miss; paired 1.047x | 🟩 Exact oracle; clean 16/16 accesses + 8/8 barriers; reviewed drop emits a diagnostic while the oracle is schedule-masked; paired 2.104x | 🟩 Exact oracle; clean 16/16 accesses + 8/8 applicable barrier members; reviewed drop is a qualified miss; paired 1.268x | 🟩 Exact oracle; clean 16/16 accesses + 4/4 barriers; reviewed drop emits a diagnostic while the oracle is schedule-masked; paired 1.149x |
+| **P4 Jakub cooperative matmul** | 🟩 Exact arithmetic oracle; clean 20/20 accesses; exact-one drop is schedule-masked and tracked by `bd-1w9.86`; paired 1.130x | 🟩 Exact arithmetic oracle; clean 20/20 accesses + 8/8 barriers; reviewed drop emits a diagnostic while the oracle is schedule-masked; paired 2.497x | 🟩 Exact arithmetic oracle; clean 20/20 accesses + 8/8 applicable barrier members; exact-one drop is schedule-masked and tracked by `bd-1w9.86`; paired 1.122x | 🟩 Exact arithmetic oracle; clean 20/20 accesses + 4/4 barriers; reviewed drop emits a diagnostic while the oracle is schedule-masked; paired 1.126x |
 
 CLIP BF16 is intentionally omitted from the current acceptance matrix.  Its
 uninstrumented execution is not presently practical in the software GPU
@@ -67,22 +67,33 @@ until baseline execution becomes suitable for end-to-end validation.
 
 ### Target-native Jakub matmul
 
-hip-moi commit `6a25f44` adds the missing
+hip-moi commits `6a25f44` and `f06db81` add and strengthen the missing
 `hip_moi_reference_gfx1250_jakub_matmul` executable. Its two parameterized
-cases use the gfx1250 wave32 16x16x32 FP16 WMMA layout, cooperative cross-wave
-LDS operand handoff, and independent logical-coordinate host oracles. The
-mixed-architecture build gate pins this binary to gfx1250 rather than relabeling
-the RDNA4 executable.
+cases use the gfx1250 wave32 16x16x32 FP16 WMMA layout, a cooperative cross-wave
+LDS producer/consumer handoff, and a real two-buffer K=128 ping-pong schedule.
+The logical-coordinate oracle independently checks arithmetic, contraction
+length, and accumulator placement; as documented in the source, it is invariant
+to a bijective shared A/B K-slot permutation. The mixed-architecture build gate
+pins this binary to gfx1250 rather than relabeling the RDNA4 executable.
 
-`gfx1250-jakub-native-clean-20260801` is exact and static/dynamic-complete for
-all four profiles. `gfx1250-jakub-native-final-inventory-20260801` retains the
-current `fnv1a64:1789aed140b5cec0` barrier inventory. The reviewed first
-barrier drop is schedule-masked by the workload oracle; Record/Replay and
-Inline Shadow diagnose it, while SuperCollider and Sampled retain qualified
-misses. The contained all-profile campaign
-`gfx1250-jakub-native-final-fault-20260801` accepts the four precommitted
-outcomes with exact-one installation and healthy pre/post simulator probes.
-The paired baseline in `gfx1250-jakub-native-overhead-20260801` is 676 ms.
+`gfx1250-jakub-native-reviewed-final2-clean-20260801` is exact and
+static/dynamic-complete for all four profiles.
+`gfx1250-jakub-native-reviewed-final2-inventory-20260801` retains the current
+`fnv1a64:157798994827a43c` barrier inventory and records the source commit in
+the reviewed spec. The first barrier drop is schedule-masked by the workload
+oracle; Record/Replay and Inline Shadow diagnose it, while SuperCollider and
+Sampled retain qualified misses tracked by `bd-1w9.86`. These are not accepted
+no-ops: the gate requires one requested, planned, applied, and installed
+mutation plus healthy pre/post simulator probes. The exact committed spec hash
+is retained by `gfx1250-jakub-native-reviewed-final2-fault-20260801`, whose
+top-level summary also carries the launcher and site provenance.
+`gfx1250-jakub-native-reviewed-final-overhead-20260801` uses an 821.5 ms paired
+baseline.
+
+This row is the target-native cooperative LDS/WMMA qualification role, not an
+inherited instruction-site denominator. gfx1250 evidence comes only from the
+gfx1250 binary and its own oracle, inventory, fault campaign, and timings; the
+larger RDNA4 schedule retains its separate target ledger.
 
 ### Current large Qwen translation boundary
 

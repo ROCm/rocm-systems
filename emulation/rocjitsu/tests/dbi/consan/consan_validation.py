@@ -3190,6 +3190,17 @@ def _launcher_from_json(value: str | None) -> list[str]:
     return launcher
 
 
+def _launcher_argument(value: str) -> list[str]:
+    try:
+        return _launcher_from_json(value)
+    except ValidationError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
+def _with_launcher(launcher: list[str], command: list[str]) -> list[str]:
+    return [*launcher, *command]
+
+
 def _target_outer_repetitions(target: str, phase: str, workload: Workload) -> int:
     if target in SINGLE_REPETITION_TARGETS or phase != "overhead":
         return 1
@@ -3931,8 +3942,7 @@ def _run_profile(
     for index in range(repetitions):
         benchmark_path = row_dir / f"benchmark-{index}.json"
         command = _workload_command(workspace, target, workload, phase, benchmark_path)
-        if launcher:
-            command = [*launcher, *command]
+        command = _with_launcher(launcher or [], command)
         log_path = row_dir / f"run-{index}.log"
         environment = _run_environment(profile, workload, hook, target, phase)
         if result_phase == "coverage-output":
@@ -4294,9 +4304,7 @@ def _inventory(args: argparse.Namespace) -> int:
     command = _workload_command(
         workspace, target, workload, "fault", root / "unused.json"
     )
-    launcher = _launcher_from_json(args.launcher_json)
-    if launcher:
-        command = [*launcher, *command]
+    command = _with_launcher(args.launcher, command)
     family_runs = []
     aggregate_records = {"sites": set(), "sequences": set(), "destinations": set()}
     for family in _fault_families(target, workload):
@@ -4434,6 +4442,23 @@ def _load_fault(
         raise ValidationError("fault spec must select an exact site identity")
     if any("REPLACE_FROM_INVENTORY" in value for value in environment.values()):
         raise ValidationError("fault spec still contains an inventory placeholder")
+    site_provenance = fault.get("site_provenance")
+    if site_provenance is not None:
+        required_keys = {"corpus_commit", "executable", "inventory_run"}
+        if (
+            not isinstance(site_provenance, dict)
+            or set(site_provenance) != required_keys
+            or re.fullmatch(
+                r"[0-9a-f]{40}", str(site_provenance.get("corpus_commit", ""))
+            )
+            is None
+            or not isinstance(site_provenance.get("executable"), str)
+            or not site_provenance["executable"]
+            or Path(site_provenance["executable"]).name != site_provenance["executable"]
+            or not isinstance(site_provenance.get("inventory_run"), str)
+            or not site_provenance["inventory_run"]
+        ):
+            raise ValidationError("fault site_provenance is invalid")
     return fault
 
 
@@ -5080,7 +5105,7 @@ def _fault(args: argparse.Namespace) -> int:
     spec_path = args.spec.resolve()
     fault = _load_fault(spec_path, target, workload, args.fault)
     profiles = PROFILE_IDS if args.profile == "all" else (args.profile,)
-    launcher = _launcher_from_json(args.launcher_json)
+    launcher = args.launcher
     hook = _hook_path(workspace)
     fault_root = args.artifact_root.resolve() / workload.id / "faults" / fault["id"]
     fault_root.mkdir(parents=True, exist_ok=False)
@@ -5092,13 +5117,15 @@ def _fault(args: argparse.Namespace) -> int:
     )
     if args.smoke_command_json is not None:
         smoke = args.smoke_command_json
-    health_command = args.health_command_json or [
-        shutil.which("rocminfo") or "rocminfo"
-    ]
-    if launcher and args.smoke_command_json is None:
-        smoke = [*launcher, *smoke]
-    if launcher and args.health_command_json is None:
-        health_command = [*launcher, *health_command]
+    health_command = (
+        args.health_command_json
+        if args.health_command_json is not None
+        else [shutil.which("rocminfo") or "rocminfo"]
+    )
+    if args.smoke_command_json is None:
+        smoke = _with_launcher(launcher, smoke)
+    if args.health_command_json is None:
+        health_command = _with_launcher(launcher, health_command)
     runner = Path(__file__).with_name("consan_fault_runner.py")
     summaries = []
     profile_summaries = []
@@ -5162,8 +5189,7 @@ def _fault(args: argparse.Namespace) -> int:
             )
             if workload.kind == "sharktank":
                 command.append("--allow-oracle-failure")
-            if launcher:
-                command = [*launcher, *command]
+            command = _with_launcher(launcher, command)
             identities = sorted(
                 value
                 for key, value in environment.items()
@@ -5270,11 +5296,14 @@ def _fault(args: argparse.Namespace) -> int:
             "path": str(spec_path),
             "sha256": sha256_file(spec_path),
         },
+        "launcher": launcher,
         "provenance": str(provenance),
         "rows": summaries,
         "profiles": profile_summaries,
         "accepted": all(profile["accepted"] for profile in profile_summaries),
     }
+    if "site_provenance" in fault:
+        summary["site_provenance"] = fault["site_provenance"]
     summary_path = fault_root / "summary.json"
     atomic_write_json(summary_path, summary)
     print(json.dumps(summary, indent=2, sort_keys=True))
@@ -5291,7 +5320,7 @@ def _run(args: argparse.Namespace) -> int:
     if not doctor["ok"]:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
     artifact_root = args.artifact_root.resolve()
-    launcher = _launcher_from_json(args.launcher_json)
+    launcher = args.launcher
     artifact_root.mkdir(parents=True, exist_ok=True)
     _write_provenance(
         workspace,
@@ -5394,6 +5423,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     run.add_argument("--include-baseline", action="store_true")
     run.add_argument(
         "--launcher-json",
+        dest="launcher",
+        type=_launcher_argument,
+        default=[],
         help="JSON argv prefix used to launch each workload process",
     )
 
@@ -5413,6 +5445,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     inventory.add_argument("--timeout", type=int, default=TIMEOUT_SECONDS)
     inventory.add_argument(
         "--launcher-json",
+        dest="launcher",
+        type=_launcher_argument,
+        default=[],
         help="JSON argv prefix used to launch the workload process",
     )
 
@@ -5439,9 +5474,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     fault.add_argument("--allow-destructive", action="store_true")
     fault.add_argument(
         "--launcher-json",
+        dest="launcher",
+        type=_launcher_argument,
+        default=[],
         help=(
             "JSON argv prefix used for the workload and default health/smoke "
-            "commands"
+            "commands; explicit paired health/smoke commands remain verbatim"
         ),
     )
     fault.add_argument(
