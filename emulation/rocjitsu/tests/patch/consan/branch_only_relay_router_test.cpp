@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstring>
@@ -2559,6 +2560,196 @@ TEST(ConSanBranchOnlyRelayRouter, BoundedSolverMatchesBruteForceOnSmallRandomBat
   // a standard library's uniform-distribution mapping.
   EXPECT_GT(feasible_trials, kTrialCount * 3u / 10u);
   EXPECT_LT(feasible_trials, kTrialCount * 7u / 10u);
+}
+
+TEST(ConSanBranchOnlyRelayRouter,
+     RandomizedGreedyFallbackIsPairAtomicDeterministicAndProvenanceSafe) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr size_t kTrialCount = 96u;
+  std::mt19937_64 rng(0x91ee5eedu);
+  size_t oracle_feasible_trials = 0u;
+  size_t trials_selecting_extra_relays = 0u;
+  bool saw_selected_pristine_relay = false;
+  bool saw_selected_owned_relay = false;
+  ConSanBranchOnlyRoutingTelemetry telemetry;
+  size_t expected_qualification_work = 0u;
+  size_t expected_fallback_setup_work = 0u;
+  size_t expected_feasibility_scan_work = 0u;
+
+  for (size_t trial = 0u; trial < kTrialCount; ++trial) {
+    SCOPED_TRACE(::testing::Message() << "trial=" << trial);
+    const uint64_t jitter = (rng() % 1'024u) * sizeof(uint32_t);
+    const bool has_disjoint_relay_layout = (rng() & 1u) != 0u;
+    const std::array requests = {
+        BranchOnlyRelayPairRequest{
+            .entry_source = jitter,
+            .entry_target = 300'000u + jitter,
+            .return_source = 300'004u + jitter,
+            .return_target = 4u + jitter,
+        },
+    };
+    std::set<uint64_t> relay_set = {
+        100'000u + jitter,
+        200'000u + jitter,
+    };
+    if (has_disjoint_relay_layout) {
+      relay_set.insert(100'004u + jitter);
+      relay_set.insert(200'004u + jitter);
+    }
+    const std::set<uint64_t> fixed_relays = relay_set;
+    const size_t extra_relay_count = rng() % 9u;
+    for (size_t extra = 0u; extra < extra_relay_count; ++extra) {
+      if (!has_disjoint_relay_layout) {
+        // Vary the rejected inventory without changing its pair feasibility:
+        // words beyond both sources are qualified but cannot route either demand.
+        relay_set.insert(requests[0].return_source + (1u + rng() % 1'024u) * sizeof(uint32_t));
+        continue;
+      }
+      const bool add_return_relay = (rng() & 1u) != 0u;
+      const uint64_t lower =
+          add_return_relay ? requests[0].return_target : requests[0].entry_source;
+      const uint64_t upper =
+          add_return_relay ? requests[0].return_source : requests[0].entry_target;
+      const uint64_t interior_word_count = (upper - lower) / sizeof(uint32_t) - 1u;
+      ASSERT_GT(interior_word_count, 0u);
+      relay_set.insert(lower + (1u + rng() % interior_word_count) * sizeof(uint32_t));
+    }
+    const std::vector<uint64_t> relays(relay_set.begin(), relay_set.end());
+    const bool oracle_feasible = brute_force_fixed_relay_batch(requests, relays);
+    EXPECT_EQ(oracle_feasible, has_disjoint_relay_layout);
+    oracle_feasible_trials += oracle_feasible ? 1u : 0u;
+
+    std::vector<BranchOnlyRelayProvenance> relay_provenances;
+    std::vector<std::optional<BranchOnlyRelayOwnerIdentity>> relay_owners;
+    relay_provenances.reserve(relays.size());
+    relay_owners.reserve(relays.size());
+    for (size_t relay = 0u; relay < relays.size(); ++relay) {
+      BranchOnlyRelayProvenance provenance;
+      if (relays[relay] == 100'000u + jitter) {
+        provenance = BranchOnlyRelayProvenance::PristineNop;
+      } else if (relays[relay] == 200'000u + jitter) {
+        provenance = BranchOnlyRelayProvenance::OwnedReservoir;
+      } else {
+        provenance = static_cast<BranchOnlyRelayProvenance>(rng() % 4u);
+      }
+      relay_provenances.push_back(provenance);
+      const uint64_t owner = rng() % 5u;
+      relay_owners.push_back(
+          owner == 0u ? std::nullopt
+                      : std::optional<BranchOnlyRelayOwnerIdentity>(lds_relay_owner(owner)));
+    }
+    std::vector<size_t> offer_order(relays.size());
+    std::iota(offer_order.begin(), offer_order.end(), 0u);
+    std::vector<size_t> shuffled_offer_order = offer_order;
+    std::shuffle(shuffled_offer_order.begin(), shuffled_offer_order.end(), rng);
+    const std::vector<std::optional<BranchOnlyRelayOwnerIdentity>> ownerless(relays.size());
+
+    BranchOnlyRelaySearchLimits limits;
+    limits.batch_base_search_work = 1u;
+    limits.batch_search_work_per_demand = 0u;
+    limits.pair_search_work = 1u;
+    limits.pair_base_scan_work = 1u;
+    limits.pair_scan_work_per_relay = 0u;
+    // Exhaust both exact tiers so the generated inventory is handled by the
+    // pair-atomic greedy tier. The two base relays can route either half alone,
+    // but without the offset-by-one pair they cannot route both halves disjointly.
+    const auto plan_once =
+        [&](std::span<const size_t> order,
+            std::span<const std::optional<BranchOnlyRelayOwnerIdentity>> owners) {
+          BranchOnlyRelayRouter router;
+          for (size_t relay : order) {
+            if (owners[relay]) {
+              EXPECT_TRUE(router.offer(relays[relay], relay_provenances[relay], *owners[relay]));
+            } else {
+              EXPECT_TRUE(router.offer(relays[relay], relay_provenances[relay]));
+            }
+          }
+          DbiPatchPlacementPlanner planner(kArch, 400'000u + jitter);
+          const std::vector<std::pair<uint64_t, uint64_t>> occupied_before(
+              planner.occupied_ranges().begin(), planner.occupied_ranges().end());
+          std::string error;
+          BranchOnlyRelayBatchPlan plan = router.plan_pairs(planner, requests, &error, limits);
+          if (!plan.complete()) {
+            EXPECT_TRUE(std::ranges::equal(planner.occupied_ranges(), occupied_before));
+          }
+          return std::pair{std::move(plan), std::move(error)};
+        };
+
+    auto [plan, error] = plan_once(offer_order, relay_owners);
+    auto [repeated, repeated_error] = plan_once(shuffled_offer_order, relay_owners);
+    auto [ownerless_plan, ownerless_error] = plan_once(offer_order, ownerless);
+    EXPECT_EQ(error, repeated_error);
+    ASSERT_NO_FATAL_FAILURE(expect_same_batch_plan(plan, repeated));
+    EXPECT_EQ(error, ownerless_error);
+    EXPECT_EQ(plan.failure, ownerless_plan.failure);
+    EXPECT_EQ(plan.strategy, ownerless_plan.strategy);
+    EXPECT_EQ(plan.rejected_pair_indices, ownerless_plan.rejected_pair_indices);
+    EXPECT_EQ(plan.rejection_reasons, ownerless_plan.rejection_reasons);
+    ASSERT_EQ(plan.routes.size(), ownerless_plan.routes.size());
+    EXPECT_EQ(plan.routes[0].entry_relay_offsets, ownerless_plan.routes[0].entry_relay_offsets);
+    EXPECT_EQ(plan.routes[0].return_relay_offsets, ownerless_plan.routes[0].return_relay_offsets);
+    EXPECT_EQ(plan.failure, oracle_feasible ? BranchOnlyRelayPlanFailure::None
+                                            : BranchOnlyRelayPlanFailure::RelayContention);
+    EXPECT_EQ(plan.strategy, BranchOnlyRelayPlanStrategy::GreedyPairFallback);
+    EXPECT_TRUE(plan.work_budget_exhausted);
+    ASSERT_EQ(plan.pair_strategies, (std::vector{BranchOnlyRelayPlanStrategy::GreedyPairFallback}));
+    ASSERT_EQ(plan.routes.size(), 1u);
+    EXPECT_EQ(plan.scan_work_consumed(), plan.relay_qualification_work_consumed +
+                                             plan.fallback_setup_work_consumed +
+                                             plan.feasibility_scan_work_consumed);
+    record_branch_only_relay_plan(telemetry, plan, plan.pair_strategies);
+    expected_qualification_work += plan.relay_qualification_work_consumed;
+    expected_fallback_setup_work += plan.fallback_setup_work_consumed;
+    expected_feasibility_scan_work += plan.feasibility_scan_work_consumed;
+
+    if (oracle_feasible) {
+      ASSERT_TRUE(plan.complete()) << error;
+      EXPECT_TRUE(plan.rejected_pair_indices.empty());
+      EXPECT_EQ(plan.rejection_reasons, (std::vector{BranchOnlyRelayPairRejection::None}));
+      ASSERT_NO_FATAL_FAILURE(expect_valid_complete_batch(requests, relays, plan));
+    } else {
+      EXPECT_FALSE(plan.complete());
+      EXPECT_EQ(plan.rejected_pair_indices, (std::vector<size_t>{0u}));
+      // The return half is reachable in isolation over the two base relays;
+      // rejection is contention because the entry half needs the same capacity.
+      EXPECT_EQ(plan.rejection_reasons,
+                (std::vector{BranchOnlyRelayPairRejection::RelayContention}));
+      EXPECT_TRUE(plan.routes[0].entry_relay_offsets.empty());
+      EXPECT_TRUE(plan.routes[0].return_relay_offsets.empty());
+      EXPECT_TRUE(plan.routes[0].claims.empty());
+    }
+
+    bool selected_extra_relay = false;
+    for (const BranchOnlyRelayClaim &claim : plan.routes[0].claims) {
+      const auto relay = std::ranges::lower_bound(relays, claim.offset);
+      ASSERT_NE(relay, relays.end());
+      ASSERT_EQ(*relay, claim.offset);
+      const size_t relay_index = static_cast<size_t>(std::distance(relays.begin(), relay));
+      EXPECT_EQ(claim.provenance, relay_provenances[relay_index]);
+      EXPECT_EQ(claim.owner_affinity, relay_owners[relay_index]);
+      EXPECT_EQ(claim.owner_materialization, relay_owners[relay_index]
+                                                 ? BranchOnlyRelayOwnerMaterialization::Deferred
+                                                 : BranchOnlyRelayOwnerMaterialization::Paid);
+      saw_selected_pristine_relay |= claim.provenance == BranchOnlyRelayProvenance::PristineNop;
+      saw_selected_owned_relay |= claim.provenance != BranchOnlyRelayProvenance::PristineNop;
+      selected_extra_relay |= !fixed_relays.contains(claim.offset);
+    }
+    trials_selecting_extra_relays += selected_extra_relay ? 1u : 0u;
+  }
+
+  EXPECT_GT(oracle_feasible_trials, kTrialCount * 3u / 10u);
+  EXPECT_LT(oracle_feasible_trials, kTrialCount * 7u / 10u);
+  EXPECT_GT(trials_selecting_extra_relays, 0u);
+  EXPECT_TRUE(saw_selected_pristine_relay);
+  EXPECT_TRUE(saw_selected_owned_relay);
+  EXPECT_EQ(telemetry.pair_attempt_count, kTrialCount);
+  EXPECT_EQ(telemetry.plan_call_count, kTrialCount);
+  EXPECT_EQ(telemetry.work_budget_exhaustion_count, kTrialCount);
+  EXPECT_EQ(telemetry.exact_pair_fallback_attempt_count, kTrialCount);
+  EXPECT_EQ(telemetry.greedy_pair_fallback_attempt_count, kTrialCount);
+  EXPECT_EQ(telemetry.relay_qualification_work_count, expected_qualification_work);
+  EXPECT_EQ(telemetry.fallback_setup_work_count, expected_fallback_setup_work);
+  EXPECT_EQ(telemetry.feasibility_scan_work_count, expected_feasibility_scan_work);
 }
 
 TEST(ConSanBranchOnlyRelayRouter, PlansMultipleDisjointEntryAndReturnPairsAtomically) {
