@@ -87,20 +87,35 @@ Against `all_reduce_perf -b 1M -e 64M -f 8 -g 4 -n 50 -w 10`, with
   runtime: **+0.06%** at 8 MB and **+0.02%** at 64 MB. At 1 MB the drain API
   reports 3.6 us *less* than rocprof (33.0 vs 36.6 us) — small collectives are
   where rocprof's own perturbation shows up.
-- Cost of leaving it enabled, by message size: +5 us at 8 KB, +2.5 us at 64 KB,
-  and nothing measurable from 512 KB up. Harvesting must stay off the launch
-  path to get this: querying an event per launch makes the runtime flush the
-  queue and cost ~190 us per dispatch.
+- Harvesting must stay off the launch path: querying an event per launch makes
+  the runtime flush the queue and cost ~190 us per dispatch.
+
+### What it costs, and why the process shape decides that
+
+Measure this one rank per process, the way collectives are actually run. Under
+`mpirun -np 7` with `-g 1` on gfx950, the whole cost is a fraction of a
+microsecond:
+
+| size | 8 B | 32 B | 128 B | 8 KB | 64 KB | 512 KB | >= 4 MB |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| overhead | +0.4 us | +0.35 us | ~0 | +0.6 us | +0.35 us | +0.1 us | none measurable |
+
+Single-process multi-GPU (`-g N`) reads several times worse -- +3.4 us at
+8-128 B, +5 us at 8 KB -- because one host thread issues all N launches per
+iteration, so each iteration pays N times the per-launch cost instead of once.
+Neither number is wrong; they answer different questions, and the per-rank one
+is what a deployment sees.
+
+Two further ways to overstate it. The first timed loop in a process is slower
+with timing on than later ones (+7 us vs +3.4 in the `-g 4` shape), so a
+single-size run charges one-time setup to per-dispatch cost. And a caller that
+never drains fills the in-flight queue, after which timing costs far more than
+it saves.
+
+Capture holds up in this shape: 31520 of 31521 dispatches over 7 processes at
+32 B, the one loss being a window that failed the launch-to-now check.
 
 ### Latency-bound sizes (8-128 B)
-
-An all-reduce this small is ~20 us of pure latency, so the cost of attaching the
-event is at its most visible: **+3.4 us, about 17%**, steady-state across 8, 32
-and 128 B. Two things make that number easy to get wrong. The first timed loop
-in a process is slower with timing on than later ones (+7 us vs +3.4), so a
-single-size run measures one-time cost as if it were per-dispatch. And a caller
-that never drains fills the in-flight queue, after which timing costs far more
-than it saves.
 
 Sampling does not help. Timing 1 dispatch in 2, 4, 16 or 64 gives no consistent
 reduction and 1-in-4 measured *worse* than timing everything, which suggests the
@@ -112,9 +127,14 @@ This is also where the drain API is worth the most. Against rocprof on the same
 workload it reports 17.6 us median where rocprof reports 23.9 us, i.e. rocprof
 inflates these collectives by **27%** -- at this scale a rank spends most of its
 kernel waiting for peers, so anything that delays a launch lengthens the kernel
-it is trying to measure. The per-rank medians the drain API records for one
-32 B run were 11.2, 14.9, 18.6 and 22.7 us: real skew that a single aggregate
-number hides.
+it is trying to measure.
+
+Per-rank medians show what the aggregate hides, and also show how much of the
+spread the harness itself creates. A 32 B `-g 4` run recorded 11.2, 14.9, 18.6
+and 22.7 us across ranks -- a 2x spread produced by one thread launching the
+four ranks in order. The same collective under `mpirun -np 7` records 14.40,
+14.40, 14.44, 14.44, 14.44, 14.44, 14.44 us: once each rank has its own process,
+the ranks are symmetric to within 0.04 us.
 
 ## `evtstamp.h`
 

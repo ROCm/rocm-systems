@@ -10,8 +10,11 @@ import sys
 from collections import defaultdict
 
 
-def main(path):
-    rows = list(csv.DictReader(open(path)))
+def main(paths):
+    """Takes one trace per process, so a run under mpirun passes all of them."""
+    rows = []
+    for p in paths:
+        rows += list(csv.DictReader(open(p)))
     if not rows:
         print("no records")
         return 1
@@ -22,7 +25,7 @@ def main(path):
 
     lo = min(int(r["Start_Timestamp"]) for r in rows)
     hi = max(int(r["End_Timestamp"]) for r in rows)
-    print(f"{len(rows)} records, {len(byrank)} ranks, span {(hi-lo)/1e6:.1f} ms")
+    print(f"{len(rows)} records from {len(paths)} process(es), {len(byrank)} ranks, span {(hi-lo)/1e6:.1f} ms")
 
     bad = 0
     for rank in sorted(byrank):
@@ -60,4 +63,4 @@ def main(path):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1]))
+    sys.exit(main(sys.argv[1:]))
