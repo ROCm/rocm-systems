@@ -1656,22 +1656,6 @@ TEST(InstrumentorSpill, PlanSgprSpillsFailsWhenNoBridgeWithinVgprCount) {
   EXPECT_NE(err.find("bridge VGPR"), std::string::npos) << "error was: " << err;
 }
 
-// The orchestrator passes min(kernel_vgpr_count, accum_base) as the bridge bound so
-// the bridge never lands in the AccVGPR window. Here every ordinary VGPR below the
-// accumulator base (v0-v3) is live, so no bridge exists and the spill fails closed
-// rather than picking v4 (= acc0 on a gfx90a kernel whose accum_base is 4).
-TEST(InstrumentorSpill, PlanSgprSpillsBridgeStaysBelowAccumBase) {
-  SpillManager spills(0, 4096);
-  std::vector<SpillSlot> out;
-  uint16_t bridge = 0xFFFF;
-  std::string err;
-  const RegisterSet live = make_vgpr_set({0, 1, 2, 3});
-  ASSERT_FALSE(plan_sgpr_spills(make_sgpr_set({7}), live, {}, /*kernel_vgpr_count=*/4, spills,
-                                ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err));
-  EXPECT_TRUE(out.empty());
-  EXPECT_NE(err.find("bridge VGPR"), std::string::npos) << "error was: " << err;
-}
-
 // A non-SGPR register in the spill set fails closed and is named.
 TEST(InstrumentorSpill, PlanSgprSpillsRejectsNonSgpr) {
   SpillManager spills(0, 4096);
@@ -2587,6 +2571,23 @@ TEST_F(Cdna4ProbeSpill, SpillsLiveClobberedVgprSgprAndAccVgpr) {
 
   // Three 4-byte slots on top of the 16-aligned base: 64 -> 76.
   EXPECT_EQ(caved.scratch, 76u);
+}
+
+// End-to-end guard for the orchestrator-derived bridge bound. With the default CDNA4
+// descriptor (kernel_vgpr_count=8, accum_base=4) v0-v3 are the entire ordinary-VGPR
+// prefix; here all four are live at the anchor and s8 must spill. The bridge is bounded
+// to min(kernel_vgpr_count, accum_base)=4, so no ordinary VGPR is free and the patch
+// fails closed. A regression that used kernel_vgpr_count as the bound would pick v4,
+// which aliases acc0 -- silently corrupting an AGPR outside acc_spills. Exercises the
+// orchestrator's own accum_base computation, unlike a unit call given a clamped bound.
+TEST_F(Cdna4ProbeSpill, SgprBridgeBoundedToOrdinaryVgprPrefix) {
+  // Anchor (v_mov v5,v0) reads v0; the next three read v1,v2,v3 and then s8, so v0-v3
+  // and s8 are all live at the anchor. v5/v6 are dead sinks, not spill candidates.
+  const InstrumentedCodeObject result = patch_expecting_result(
+      kernel_elf({kMovV5V0, kMovV5V1, kMovV5V2, kMovV5V3, kMovV6S8, endpgm()},
+                 /*private_bytes=*/64),
+      probe_elf({kMovS8Zero, setpc()}));
+  expect_failure_containing(result, "bridge VGPR");
 }
 
 // Two live+clobbered SGPRs spill through a single shared bridge VGPR (v0), each to

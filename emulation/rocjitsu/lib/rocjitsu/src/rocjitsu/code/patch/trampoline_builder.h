@@ -36,14 +36,15 @@ struct InlineAsmItem {
 /// @brief One saved register live at the anchor and clobbered by instrumentation,
 ///        with its stable per-lane byte offset in the DBI spill zone (assigned by
 ///        SpillManager). @ref cls selects the emit path in build_spill_bracket: a
-///        VGPR spills straight to scratch; an SGPR is bridged through a VGPR lane
+///        VGPR spills straight to scratch; an AccVGPR likewise spills straight to
+///        scratch via the CDNA `acc` bit; an SGPR is bridged through a VGPR lane
 ///        (writelane/readlane) because SGPRs cannot reach scratch directly.
 ///
-/// VGPR and SGPR slots are held in separate vectors (TrampolinePlan::vgpr_spills /
-/// sgpr_spills), so @ref cls is redundant with the owning vector but records the
-/// register file explicitly for the emitter and future classes (AccVGPR).
+/// VGPR, SGPR, and AccVGPR slots are held in separate vectors (TrampolinePlan::
+/// vgpr_spills / sgpr_spills / acc_spills), so @ref cls is redundant with the owning
+/// vector but records the register file explicitly for the emitter.
 struct SpillSlot {
-  RegClass cls = RegClass::VGPR; ///< Register file: VGPR (direct) or SGPR (bridged).
+  RegClass cls = RegClass::VGPR; ///< Register file: VGPR/AccVGPR (direct) or SGPR (bridged).
   uint16_t reg = 0;              ///< Register index to save before / restore after the call.
   uint32_t byte_offset = 0;      ///< Per-lane scratch byte offset for this slot.
 };

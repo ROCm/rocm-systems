@@ -126,11 +126,34 @@ uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
   }
 }
 
-// CDNA (gfx90a family) is the only family with an AccVGPR file and a gfx90a
-// ACCUM_OFFSET split of the unified VGPR allocation. RDNA/gfx1250 have none.
+// TODO: these two arch predicates duplicate logic that also lives in DBT
+// (kernel_descriptor_translator.cpp's arch_has_accvgpr / uses_gfx90a_accum_offset)
+// and code_object_patcher.cpp (target_uses_gfx90a_accum_offset). They should be
+// consolidated into isa/isa_traits.h alongside arch_is_cdna/arch_is_rdna, but the
+// arch_has_accvgpr copies disagree on CDNA1 (this one follows the physical AGPR file;
+// DBT's follows the HasAccVgpr trait, which models CDNA1 as zero), so unifying needs a
+// deliberate CDNA1-semantics decision. Kept DBI-local until then.
+
+// All CDNA generations (gfx908/gfx90a/gfx942/gfx950) have an AccVGPR file.
+// RDNA/gfx1250 have none.
 bool arch_has_accvgpr(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// CDNA2-4 (gfx90a/gfx942/gfx950) carve the AccVGPR file out of a single unified VGPR
+// allocation, split at the descriptor's ACCUM_OFFSET field. CDNA1/gfx908 allocates
+// AGPRs separately and has no such field, so its accumulator window is not derivable
+// from ACCUM_OFFSET -- distinct from merely having an AccVGPR file.
+bool arch_has_unified_vgpr_allocation(rj_code_arch_t arch) {
+  switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA2:
   case ROCJITSU_CODE_ARCH_CDNA3:
   case ROCJITSU_CODE_ARCH_CDNA4:
@@ -456,14 +479,14 @@ bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count, SpillMana
   });
   if (!non_acc.empty()) {
     report(error_out,
-           ("probe-call spill of non-AccVGPR registers not yet supported:" + non_acc).c_str());
+           ("AccVGPR spill planning received non-AccVGPR registers:" + non_acc).c_str());
     return false;
   }
   if (spill_set.none())
     return true;
 
   if (!arch_has_accvgpr(arch)) {
-    report(error_out, "AccVGPR spilling is only supported on CDNA targets");
+    report(error_out, "AccVGPR spilling is only supported on CDNA1-4 targets");
     return false;
   }
 
@@ -915,11 +938,12 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                             rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
         const uint32_t kernel_vgpr_count =
             (granulated_vgpr_count + 1) * vgpr_encoding_granule(arch_);
-        // On CDNA the unified VGPR allocation splits at the ACCUM_OFFSET base
-        // ((encoded+1)*4) into an ordinary-VGPR prefix and the AccVGPR window;
-        // non-CDNA arches have no AccVGPRs, so the whole allocation is ordinary.
+        // On a unified-allocation arch the VGPR allocation splits at the ACCUM_OFFSET
+        // base ((encoded+1)*4) into an ordinary-VGPR prefix and the AccVGPR window.
+        // Arches without that split (non-CDNA, and CDNA1/gfx908 whose AGPRs allocate
+        // separately) have no ACCUM_OFFSET field, so the whole allocation is ordinary.
         const uint32_t accum_base =
-            arch_has_accvgpr(arch_)
+            arch_has_unified_vgpr_allocation(arch_)
                 ? (AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc3,
                                    rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
                    1) *

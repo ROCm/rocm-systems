@@ -46,7 +46,10 @@ inline constexpr uint32_t kMovV3S8 = 0x7E060208u;   // v_mov_b32 v3, s8 -> reads
 inline constexpr uint32_t kMovS8Zero = 0xbe880080u; // s_mov_b32 s8, 0  -> clobbers s8.
 inline constexpr uint32_t kMovV4S9 = 0x7E080209u;   // v_mov_b32 v4, s9 -> reads s9 (s9 live).
 inline constexpr uint32_t kMovS9Zero = 0xbe890080u; // s_mov_b32 s9, 0  -> clobbers s9.
+inline constexpr uint32_t kMovV5V0 = 0x7E0A0300u;   // v_mov_b32 v5, v0 -> reads v0 into v5.
+inline constexpr uint32_t kMovV5V1 = 0x7E0A0301u;   // v_mov_b32 v5, v1 -> reads v1 into v5.
 inline constexpr uint32_t kMovV5V2 = 0x7E0A0302u;   // v_mov_b32 v5, v2 -> reads v2 into v5.
+inline constexpr uint32_t kMovV5V3 = 0x7E0A0303u;   // v_mov_b32 v5, v3 -> reads v3 into v5.
 inline constexpr uint32_t kMovV6S8 = 0x7E0C0208u;   // v_mov_b32 v6, s8 -> reads s8 into v6.
 
 // v_mov_b32 v2, <inline const K> for K in [0, 64]. Inline constant 0 is encoded

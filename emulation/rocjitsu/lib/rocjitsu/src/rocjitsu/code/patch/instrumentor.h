@@ -284,9 +284,10 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// AccVGPR count (unified VGPR budget minus the ACCUM_OFFSET window base); an index
 /// at or past it is rejected so we never spill an AGPR the kernel did not allocate.
 ///
-/// Fails closed (returns false, @p out empty) on a non-AccVGPR register, an AGPR
-/// index past @p acc_count, an arch with no scratch emitter, a slot past the
-/// scratch limit, or an offset that does not fit the scratch offset field.
+/// Fails closed (returns false, @p out empty) on a non-AccVGPR register, a target
+/// with no AccVGPR file (non-CDNA), an AGPR index past @p acc_count, an arch with no
+/// scratch emitter, a slot past the scratch limit, or an offset that does not fit the
+/// scratch offset field.
 [[nodiscard]] bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count,
                                    SpillManager &spills, rj_code_arch_t arch,
                                    std::vector<SpillSlot> &out, std::string *error_out = nullptr);

@@ -695,11 +695,16 @@ protected:
     const uint32_t mov_s8_0 = build_s_mov_b32(kSpilledSgpr, 128, a_.arch);
     // v_mov v2,K ; s_mov s8,K ; v_accvgpr_write a0,K ; (ANCHOR at offset 16)
     // v_mov v5,v2 ; v_mov v6,s8 ; v_accvgpr_read v7,a0 ; s_endpgm.
+    // 16 VGPRs with ACCUM_OFFSET=1 puts the accumulator window at v8-v15, so v2 and
+    // the v5/v6/v7 dests are genuine ordinary VGPRs and acc0 sits in a nonempty
+    // window -- the same layout as the static twin
+    // (InstrumentorProbeSpill.Cdna4SpillsLiveClobberedVgprSgprAndAccVgpr).
     auto target = test::make_amdgpu_kernel_elf(
         {test::make_mov_v2_inline(kSentinel), mov_s8_k, kAccWriteA0ZeroLo,
          test::make_accvgpr_write_a0_inline_hi(kSentinel), kMovV5V2, kMovV6S8, kAccReadV7A0Lo,
          kAccReadV7A0Hi, endpgm},
-        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags,
+        /*granulated_vgpr_count=*/1, /*accum_offset=*/1);
     auto probe = test::make_amdgpu_probe_elf(
         "rj_test_probe", {kMovV2Zero, mov_s8_0, kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc},
         a_.e_flags);
