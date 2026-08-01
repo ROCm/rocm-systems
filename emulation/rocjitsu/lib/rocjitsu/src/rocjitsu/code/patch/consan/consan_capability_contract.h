@@ -55,7 +55,6 @@ enum class ConSanCapabilityForm : uint8_t {
 enum class ConSanCapabilityDisposition : uint8_t {
   OutOfContract,
   NotApplicable,
-  Unsupported,
   Supported,
   MutationOnly,
   AccessOnly,
@@ -137,6 +136,14 @@ template <typename Enum, std::size_t N>
   return consan_arch_for_target(target) != ROCJITSU_CODE_ARCH_INVALID;
 }
 
+[[nodiscard]] constexpr bool consan_is_capability_arch(rj_code_arch_t arch) {
+  for (const ConSanCapabilityTarget &supported : kConSanCapabilityTargets) {
+    if (arch == supported.arch)
+      return true;
+  }
+  return false;
+}
+
 /// RDNA ConSan probes use the code-object dispatch identity literal instead
 /// of reserving a guest SGPR pair. This is an instrumentation policy, not an
 /// instruction-encoding property.
@@ -171,11 +178,7 @@ template <typename Enum, std::size_t N>
 /// inventory and lowerers.
 [[nodiscard]] constexpr bool consan_arch_supports_capability_form(rj_code_arch_t arch,
                                                                   ConSanCapabilityForm form) {
-  const bool supported_arch =
-      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-      arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-      arch == ROCJITSU_CODE_ARCH_GFX1250;
-  if (!supported_arch)
+  if (!consan_is_capability_arch(arch))
     return false;
 
   switch (form) {
@@ -298,8 +301,6 @@ consan_capability_disposition_name(ConSanCapabilityDisposition disposition) {
     return "out of contract";
   case ConSanCapabilityDisposition::NotApplicable:
     return "not applicable";
-  case ConSanCapabilityDisposition::Unsupported:
-    return "unsupported";
   case ConSanCapabilityDisposition::Supported:
     return "supported";
   case ConSanCapabilityDisposition::MutationOnly:

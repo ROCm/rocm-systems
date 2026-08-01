@@ -1,6 +1,14 @@
 ROCJITSU_WAITCHECK_1.0 {
   global:
-    rj_waitcheck_*;
+    # The header ABI version governs sized structures. This node and the
+    # library soname govern the dynamic-link surface.
+    rj_waitcheck_options_init;
+    rj_waitcheck_result_init;
+    rj_waitcheck_target_name;
+    rj_waitcheck_diagnostic_code_name;
+    rj_waitcheck_counter_parity_kind_name;
+    rj_waitcheck_analyze;
+    rj_waitcheck_analyze_kernel;
   local:
     *;
 };

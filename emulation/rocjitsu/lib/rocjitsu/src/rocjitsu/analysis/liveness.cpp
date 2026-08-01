@@ -51,6 +51,8 @@ void dfs_reverse_post_order(const BasicBlock &start,
 
 [[nodiscard]] bool any_live_in_range(const RegisterSet &live, RegClass cls, uint16_t base,
                                      uint16_t count) {
+  // Treat malformed zero-width references as one register so the query fails
+  // closed instead of incorrectly reporting an empty range as unused.
   const uint16_t normalized_count = std::max<uint16_t>(1u, count);
   for (uint16_t i = 0; i < normalized_count; ++i) {
     if (live.contains({cls, static_cast<uint16_t>(base + i), 1}))

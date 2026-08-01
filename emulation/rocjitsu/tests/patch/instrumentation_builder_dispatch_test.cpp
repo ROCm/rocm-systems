@@ -145,6 +145,10 @@ TEST(InstrumentationBuilderDispatch, UnsupportedArchitectureFailsClosed) {
   EXPECT_FALSE(ib::is_admitted_arch(ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(ib::build_s_mov_b64(20, 22, ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(ib::build_s_getreg_b32(20, 0x2804u, ROCJITSU_CODE_ARCH_CDNA2));
+  EXPECT_FALSE(ib::build_s_cmp_lg_u32(20, 22, ROCJITSU_CODE_ARCH_CDNA2));
+  EXPECT_FALSE(ib::build_s_cselect_b32(20, 22, 24, ROCJITSU_CODE_ARCH_CDNA2));
+  EXPECT_FALSE(ib::build_s_cmp_lg_u32(20, 22, ROCJITSU_CODE_ARCH_INVALID));
+  EXPECT_FALSE(ib::build_s_cselect_b32(20, 22, 24, ROCJITSU_CODE_ARCH_INVALID));
   EXPECT_FALSE(ib::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(ib::build_s_and_saveexec_b64(20, 22, ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(

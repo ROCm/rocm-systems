@@ -252,7 +252,8 @@ public_counter_parity_diagnostic(const WaitcheckCounterUnderaccountingDiagnostic
 }
 
 void populate_result(const WaitcheckReport &report, size_t diagnostics_reported,
-                     size_t counter_parity_diagnostics_reported, rj_waitcheck_result_t &result) {
+                     size_t counter_parity_diagnostics_reported, bool counter_parity_evaluated,
+                     rj_waitcheck_result_t &result) {
   result.instructions_analyzed = report.instructions_analyzed;
   result.memory_events_tracked = report.memory_events_tracked;
   result.kernels_discovered = report.kernels_discovered;
@@ -271,6 +272,7 @@ void populate_result(const WaitcheckReport &report, size_t diagnostics_reported,
   result.counter_parity_diagnostics_reported = counter_parity_diagnostics_reported;
   result.counter_parity_diagnostics_truncated =
       report.counter_parity_diagnostics_truncated ? 1U : 0U;
+  result.counter_parity_evaluated = counter_parity_evaluated ? 1U : 0U;
 }
 
 } // namespace
@@ -278,7 +280,7 @@ void populate_result(const WaitcheckReport &report, size_t diagnostics_reported,
 rj_status_t rj_waitcheck_options_init(rj_waitcheck_options_t *options, size_t options_size) {
   if (!options || options_size < kOptionsV1Size)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  std::memset(options, 0, std::min(options_size, sizeof(*options)));
+  std::memset(options, 0, options_size);
   options->struct_size = options_size;
   options->abi_version = ROCJITSU_WAITCHECK_ABI_VERSION;
   return ROCJITSU_STATUS_SUCCESS;
@@ -287,7 +289,7 @@ rj_status_t rj_waitcheck_options_init(rj_waitcheck_options_t *options, size_t op
 rj_status_t rj_waitcheck_result_init(rj_waitcheck_result_t *result, size_t result_size) {
   if (!result || result_size < kResultV1Size)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  std::memset(result, 0, std::min(result_size, sizeof(*result)));
+  std::memset(result, 0, result_size);
   result->struct_size = result_size;
   result->abi_version = ROCJITSU_WAITCHECK_ABI_VERSION;
   result->target = ROCJITSU_WAITCHECK_TARGET_UNKNOWN;
@@ -445,8 +447,12 @@ namespace {
     if (local_options.diagnostic_callback) {
       for (const WaitcheckDiagnostic &diagnostic : report.diagnostics) {
         const rj_waitcheck_diagnostic_t public_view = public_diagnostic(diagnostic);
-        local_options.diagnostic_callback(&public_view, local_options.user_data);
         ++diagnostics_reported;
+        try {
+          local_options.diagnostic_callback(&public_view, local_options.user_data);
+        } catch (...) {
+          // Callback failures belong to the consumer, not the analysis result.
+        }
       }
     }
     size_t counter_parity_diagnostics_reported = 0;
@@ -454,12 +460,18 @@ namespace {
       for (const auto &diagnostic : report.counter_underaccounting_diagnostics) {
         const rj_waitcheck_counter_parity_diagnostic_t public_view =
             public_counter_parity_diagnostic(diagnostic);
-        local_options.counter_parity_callback(&public_view, local_options.user_data);
         ++counter_parity_diagnostics_reported;
+        try {
+          local_options.counter_parity_callback(&public_view, local_options.user_data);
+        } catch (...) {
+          // Callback failures belong to the consumer, not the analysis result.
+        }
       }
     }
+    const bool counter_parity_evaluated = local_options.check_counter_parity != 0 &&
+                                          parsed.target_id() == ROCJITSU_CODE_TARGET_GFX950;
     populate_result(report, diagnostics_reported, counter_parity_diagnostics_reported,
-                    local_result);
+                    counter_parity_evaluated, local_result);
     return finish(ROCJITSU_STATUS_SUCCESS);
   } catch (const std::bad_alloc &) {
     report_error(local_options, "waitcheck analysis ran out of memory");

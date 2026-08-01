@@ -113,16 +113,19 @@ jobs:
             enable_assertions: 0
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
-          - name: tsan-sparse-memory
+          - name: tsan-concurrency-surfaces
             allow_failure: false
             verify_dbt_idempotence: 0
             dbt_timeout: 30
             dbt_memory_limit_mib: 4096
             dbt_job_timeout: 20
             run_static_asan_launch: true
-            # The simulator-wide stress tests exceed TSan's fixed lock-tracker
-            # capacity; keep this gate on the concurrent SparseMemory surface.
-            test_regex: '^SparseMemory(Threading)?Test\.'
+            # Simulator-wide stress tests exceed TSan's fixed lock-tracker
+            # capacity. Keep the required gate on focused concurrent storage,
+            # standalone Waitcheck, and HSA-hook unit surfaces. The unload test
+            # has an exact process-thread-count oracle that is incompatible
+            # with TSan's persistent helper thread.
+            test_regex: '^(SparseMemory(Threading)?Test|Waitcheck(CApi|Hooks|HooksValidation)Test|HsaHooksUnitTest|ConSanTransformMemoryTest|ProcessByteBudgetTest)\.|^RjWaitcheck\.CHeader$'
             build_type: RelWithDebInfo
             enable_asan: 0
             enable_ubsan: 0

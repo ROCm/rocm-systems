@@ -64,6 +64,13 @@ TEST(PrivateSegmentCursor, FailedAllocationDoesNotAdvance) {
   EXPECT_EQ(cursor.high_water_mark(), 64u);
 }
 
+TEST(PrivateSegmentCursor, RejectsNonPowerOfTwoAlignmentWithoutAdvancing) {
+  PrivateSegmentCursor cursor(/*first_byte=*/18);
+  EXPECT_EQ(cursor.preview(/*byte_count=*/8, /*alignment=*/3, /*limit=*/64), std::nullopt);
+  EXPECT_EQ(cursor.allocate(/*byte_count=*/8, /*alignment=*/3, /*limit=*/64), std::nullopt);
+  EXPECT_EQ(cursor.high_water_mark(), 18u);
+}
+
 std::vector<uint8_t> make_metadata_note_elf() {
   std::vector<uint8_t> payload;
   auto append_string = [&](std::string_view value) {

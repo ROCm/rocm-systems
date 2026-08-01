@@ -131,22 +131,28 @@ build_s_sub_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t ar
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_cselect_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch) {
+  if (!is_admitted_arch(arch))
+    return std::nullopt;
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
     return build_rdna3_s_cselect_b32(sdst, ssrc0, ssrc1, arch);
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
     return build_cdna3_s_cselect_b32(sdst, ssrc0, ssrc1, arch);
-  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_cselect_b32(sdst, ssrc0, ssrc1, arch)
-                                          : rocjitsu::build_s_cselect_b32(sdst, ssrc0, ssrc1, arch);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return build_cdna4_s_cselect_b32(sdst, ssrc0, ssrc1, arch);
+  return build_rdna4_s_cselect_b32(sdst, ssrc0, ssrc1, arch);
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_cmp_lg_u32(uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch) {
+  if (!is_admitted_arch(arch))
+    return std::nullopt;
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
     return build_rdna3_s_cmp_lg_u32(ssrc0, ssrc1, arch);
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
     return build_cdna3_s_cmp_lg_u32(ssrc0, ssrc1, arch);
-  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_cmp_lg_u32(ssrc0, ssrc1, arch)
-                                          : rocjitsu::build_s_cmp_lg_u32(ssrc0, ssrc1, arch);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return build_cdna4_s_cmp_lg_u32(ssrc0, ssrc1, arch);
+  return build_rdna4_s_cmp_lg_u32(ssrc0, ssrc1, arch);
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>

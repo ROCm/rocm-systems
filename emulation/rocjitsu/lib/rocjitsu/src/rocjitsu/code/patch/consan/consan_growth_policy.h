@@ -5,10 +5,10 @@
 
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/consan/consan.h"
+#include "util/bit.h"
 
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -27,11 +27,6 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
            ", original-input-image-bytes=" + std::to_string(input_image_bytes);
   }
   return "invalid-kind=" + std::to_string(static_cast<unsigned int>(policy.kind));
-}
-
-[[nodiscard]] inline size_t consan_saturating_size_add(size_t lhs, size_t rhs) {
-  return rhs > std::numeric_limits<size_t>::max() - lhs ? std::numeric_limits<size_t>::max()
-                                                        : lhs + rhs;
 }
 
 /// Apply the common ConSan patched-image growth policy and report an exact
@@ -78,7 +73,7 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
   if (replacement.outcome() == TextReplacementOutcome::FileGrowthLimitExceeded) {
     const size_t transaction_growth = *replacement.required_file_growth();
     const size_t required_total =
-        consan_saturating_size_add(budget->existing_growth_bytes, transaction_growth);
+        util::saturating_add(budget->existing_growth_bytes, transaction_growth);
     result.patched_image_growth_rejections.push_back(
         {.operation = std::string(operation),
          .policy = options.patched_image_growth_limit,

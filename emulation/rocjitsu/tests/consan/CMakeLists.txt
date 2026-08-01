@@ -229,6 +229,26 @@ function(rj_add_consan_hip_case)
         )
     endif()
 
+    if(_case_PASS_REGEX)
+        # CMake list elements cannot safely carry every regex spelling (for
+        # example, an element ending in an escaped parenthesis can absorb the
+        # following list separators). Store the pattern in the build tree and
+        # pass only its stable path to the checked-output runner.
+        string(MD5 _case_pass_regex_id "${_case_PASS_REGEX}")
+        set(_case_pass_regex_file
+            "${CMAKE_CURRENT_BINARY_DIR}/consan-expected-${_case_pass_regex_id}.txt"
+        )
+        file(WRITE "${_case_pass_regex_file}" "${_case_PASS_REGEX}")
+        set(_case_command
+            ${CMAKE_COMMAND}
+            "-DRJ_EXPECTED_REGEX_FILE=${_case_pass_regex_file}"
+            -P
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/run_checked_test.cmake"
+            --
+            ${_case_command}
+        )
+    endif()
+
     set(_test_args
         NAME
         "${_case_NAME}"
@@ -244,14 +264,8 @@ function(rj_add_consan_hip_case)
     endif()
     rj_add_test(${_test_args})
 
-    if(_case_PASS_REGEX)
-        set_property(
-            TEST "${_case_NAME}"
-            PROPERTY PASS_REGULAR_EXPRESSION "${_case_PASS_REGEX}"
-        )
-    endif()
-    # CTest's PASS_REGULAR_EXPRESSION can otherwise override a nonzero GTest
-    # exit status. Never let an expected diagnostic hide a failed assertion.
+    # The checked-output wrapper above keeps an expected diagnostic from
+    # overriding a nonzero child exit status.
     set(_case_fail_regex "\\[  FAILED  \\]|FAILED TEST")
     if(_case_FAIL_REGEX)
         list(APPEND _case_fail_regex "${_case_FAIL_REGEX}")
@@ -2112,6 +2126,8 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_MOI_FULL_VGPR_FILE_TEST}"
                 TIMEOUT 30
+                PASS_REGEX
+                    "source=spill reason=none.*current_vgprs=256 max_referenced_vgprs=256"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
@@ -2122,17 +2138,12 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )
-        set_tests_properties(
-            "ConSanMoiHipTest.DbiFullVgprFileForcedSpillPreservesOutput"
-            PROPERTIES
-                PASS_REGULAR_EXPRESSION
-                    "source=spill reason=none.*current_vgprs=256 max_referenced_vgprs=256"
-        )
         rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.DbiSharedNoinlineHelperPatchPreservesOutput"
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_MOI_SHARED_NOINLINE_HELPER_TEST}"
                 TIMEOUT 30
+                PASS_REGEX "site=access.*source=descriptor-growth reason=none owners=2"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
@@ -2141,17 +2152,12 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )
-        set_tests_properties(
-            "ConSanMoiHipTest.DbiSharedNoinlineHelperPatchPreservesOutput"
-            PROPERTIES
-                PASS_REGULAR_EXPRESSION
-                    "site=access.*source=descriptor-growth reason=none owners=2"
-        )
         rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.DbiSharedNoinlineHelperSpillPreservesOutput"
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_MOI_SHARED_NOINLINE_HELPER_TEST}"
                 TIMEOUT 30
+                PASS_REGEX "site=access.*source=spill reason=none owners=2"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
@@ -2162,17 +2168,12 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )
-        set_tests_properties(
-            "ConSanMoiHipTest.DbiSharedNoinlineHelperSpillPreservesOutput"
-            PROPERTIES
-                PASS_REGULAR_EXPRESSION
-                    "site=access.*source=spill reason=none owners=2"
-        )
         rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.DbiSharedAtomicHelperRecordReplayForcedSpill"
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_MOI_SHARED_ATOMIC_HELPER_TEST}"
                 TIMEOUT 30
+                PASS_REGEX "site=atomic.*source=spill reason=none owners=2"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
@@ -2184,17 +2185,12 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )
-        set_tests_properties(
-            "ConSanMoiHipTest.DbiSharedAtomicHelperRecordReplayForcedSpill"
-            PROPERTIES
-                PASS_REGULAR_EXPRESSION
-                    "site=atomic.*source=spill reason=none owners=2"
-        )
         rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.DbiSharedAtomicHelperInlineShadowForcedSpill"
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_MOI_SHARED_ATOMIC_HELPER_TEST}"
                 TIMEOUT 30
+                PASS_REGEX "ConSan MOI auto inline-atomic-release.*address=0x[1-9a-fA-F]"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=inline-shadow"
@@ -2207,12 +2203,6 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )
-        set_tests_properties(
-            "ConSanMoiHipTest.DbiSharedAtomicHelperInlineShadowForcedSpill"
-            PROPERTIES
-                PASS_REGULAR_EXPRESSION
-                    "ConSan MOI auto inline-atomic-release.*address=0x[1-9a-fA-F]"
-        )
         rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.BaselineStaticPrivateStackPreservesOutput"
                 TARGET hip_consan_moi_test
@@ -2224,6 +2214,7 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_MOI_STATIC_PRIVATE_STACK_TEST}"
                 TIMEOUT 30
+                PASS_REGEX "owner_names=.*moi_static_private_stack.*private_bytes=[1-9][0-9]*"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
@@ -2232,12 +2223,6 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_LOG=3"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
-        )
-        set_tests_properties(
-            "ConSanMoiHipTest.DbiStaticPrivateStackForcedSpillPreservesOutput"
-            PROPERTIES
-                PASS_REGULAR_EXPRESSION
-                    "owner_names=.*moi_static_private_stack.*private_bytes=[1-9][0-9]*"
         )
         rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.BaselineDynamicPrivateStackPreservesOutput"
@@ -2396,6 +2381,8 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_inline_shadow_test
                 FILTER "${RJ_CONSAN_LDS_INLINE_SHADOW_RACY_TEST}"
                 TIMEOUT 30
+                PASS_REGEX
+                    "second_lanes=0x[1-9a-fA-F].*first_lds=\\[0,4\\) second_lds=\\[0,4\\)"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=inline-shadow"
@@ -2404,17 +2391,13 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )
-        set_tests_properties(
-            "ConSanInlineShadowTest.DbiReportsCrossWaveRace"
-            PROPERTIES
-                PASS_REGULAR_EXPRESSION
-                    "second_lanes=0x[1-9a-fA-F].*first_lds=\\[0,4\\) second_lds=\\[0,4\\)"
-        )
         rj_add_consan_hip_case(
                 NAME "ConSanInlineShadowTest.DbiOddExactSlotFailsClosed"
                 TARGET hip_consan_inline_shadow_test
                 FILTER "${RJ_CONSAN_LDS_INLINE_SHADOW_RACY_TEST}"
                 TIMEOUT 30
+                PASS_REGEX
+                    "ConSan MOI exact snapshot unusable: incomplete=[1-9][0-9]* changed=0 malformed=0"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=inline-shadow"
@@ -2425,17 +2408,14 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )
-        set_tests_properties(
-            "ConSanInlineShadowTest.DbiOddExactSlotFailsClosed"
-            PROPERTIES
-                PASS_REGULAR_EXPRESSION
-                    "ConSan MOI exact snapshot unusable: incomplete=[1-9][0-9]* changed=0 malformed=0"
-        )
         rj_add_consan_hip_case(
                 NAME "ConSanInlineShadowTest.DbiVersionedPublicationVisibilityConflict"
                 TARGET hip_consan_inline_shadow_test
                 FILTER "${RJ_CONSAN_LDS_INLINE_SHADOW_RACY_TEST}"
                 TIMEOUT 60
+                PASS_REGEX
+                    "second_lanes=0x[1-9a-fA-F].*first_lds=\\[0,4\\) second_lds=\\[0,4\\)"
+                RUN_SERIAL
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=inline-shadow"
@@ -2446,13 +2426,6 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MAX_PATCHES=4"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
                     "CONSAN_INLINE_VERSIONED_LAUNCHES=100"
-        )
-        set_tests_properties(
-            "ConSanInlineShadowTest.DbiVersionedPublicationVisibilityConflict"
-            PROPERTIES
-                RUN_SERIAL TRUE
-                PASS_REGULAR_EXPRESSION
-                    "second_lanes=0x[1-9a-fA-F].*first_lds=\\[0,4\\) second_lds=\\[0,4\\)"
         )
         rj_add_consan_hip_case(
                 NAME "ConSanInlineShadowTest.DbiReportsCrossWaveB128Race"
@@ -2903,6 +2876,7 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_LDS_MOI_AUTO_REPLAY_CONFLICT_TEST}"
                 TIMEOUT 30
+                PASS_REGEX "sampled_immediate_conflicts=[1-9]"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=sampled"
@@ -2913,11 +2887,6 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_MAX_PATCHES=2"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
-        )
-        set_tests_properties(
-            "ConSanMoiHipTest.DbiAutoBufferReportsImmediateSampledConflict"
-            PROPERTIES
-                PASS_REGULAR_EXPRESSION "sampled_immediate_conflicts=[1-9]"
         )
         rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.DbiSampledAutoBufferReportsConflict"
@@ -2939,6 +2908,8 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_moi_test
                 FILTER "ConSanMoiHipTest.DirectSampledRetainsExactMultiWorkgroupWindows"
                 TIMEOUT 30
+                PASS_REGEX
+                    "SA2C sampled evidence ready_windows=2 live_entries=2 workgroups=0,1 dropped_windows=0"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=sampled"
@@ -2950,17 +2921,12 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MAX_PATCHES=4"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )
-        set_tests_properties(
-            "ConSanMoiHipTest.DbiSampledCausalMultiWorkgroupClean"
-            PROPERTIES
-                PASS_REGULAR_EXPRESSION
-                    "SA2C sampled evidence ready_windows=2 live_entries=2 workgroups=0,1 dropped_windows=0"
-        )
         rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.DbiSampledCausalFaultReportsConflict"
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_LDS_MOI_AUTO_REPLAY_CONFLICT_TEST}"
                 TIMEOUT 30
+                PASS_REGEX "visible_sampled=[1-9].*sampled_conflicts=[1-9]"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=sampled"
@@ -2971,12 +2937,6 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_MAX_PATCHES=2"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
-        )
-        set_tests_properties(
-            "ConSanMoiHipTest.DbiSampledCausalFaultReportsConflict"
-            PROPERTIES
-                PASS_REGULAR_EXPRESSION
-                    "visible_sampled=[1-9].*sampled_conflicts=[1-9]"
         )
         rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.DbiDynamicAccessRecordsAppendActiveLanes"
@@ -3012,6 +2972,9 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_LDS_MOI_AUTO_REPEATED_DISPATCH_TEST}"
                 TIMEOUT 30
+                PASS_REGEX
+                    "committed_records=8.*dispatch_tokens=4/2048.*record_replay_flags=0x0"
+                FAIL_REGEX "record_replay_bank_saturated=true"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
@@ -3021,13 +2984,6 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_MAX_PATCHES=2"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
-        )
-        set_tests_properties(
-            "ConSanMoiHipTest.DbiAutoReportRetainsRepeatedDispatches"
-            PROPERTIES
-                PASS_REGULAR_EXPRESSION
-                    "committed_records=8.*dispatch_tokens=4/2048.*record_replay_flags=0x0"
-                FAIL_REGULAR_EXPRESSION "record_replay_bank_saturated=true"
         )
         rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.DbiSampledSaturationPreservesRepeatedDispatchOutput"
@@ -3068,6 +3024,7 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_LDS_MOI_AUTO_REPLAY_CONFLICT_TEST}"
                 TIMEOUT 30
+                PASS_REGEX "ConSan MOI report overflow: dropped"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
@@ -3079,11 +3036,6 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_MAX_PATCHES=2"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
-        )
-        set_tests_properties(
-            "ConSanMoiHipTest.DbiOverflowIsVisible"
-            PROPERTIES
-                PASS_REGULAR_EXPRESSION "ConSan MOI report overflow: dropped"
         )
         rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.DbiOneRecordCapacityLimitsAccessPatches"
@@ -3132,6 +3084,8 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_moi_test
                 FILTER "${RJ_CONSAN_LDS_MOI_ATOMIC_HANDOFF_TEST}"
                 TIMEOUT 30
+                PASS_REGEX
+                    "RR3C5C fence evidence release_token=0x[0-9a-fA-F]*[1-9a-fA-F][0-9a-fA-F]* acquire_token=0x[0-9a-fA-F]*[1-9a-fA-F][0-9a-fA-F]*"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
@@ -3185,17 +3139,13 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
                     "RJ_CONSAN_LOG=2"
         )
-        set_tests_properties(
-            "ConSanMoiHipTest.DbiAtomicHandoffOrdersTwoWaveAccesses"
-            PROPERTIES
-                PASS_REGULAR_EXPRESSION
-                    "RR3C5C fence evidence release_token=0x[0-9a-fA-F]*[1-9a-fA-F][0-9a-fA-F]* acquire_token=0x[0-9a-fA-F]*[1-9a-fA-F][0-9a-fA-F]*"
-        )
         rj_add_consan_hip_case(
                 NAME "ConSanMoiHipTest.DbiAtomicHandoffAutoReportReplaysFences"
                 TARGET hip_consan_moi_test
                 FILTER "ConSanMoiHipTest.AtomicHandoffRunsWithAutoReportBuffer"
                 TIMEOUT 30
+                PASS_REGEX
+                    "processed_fences=[1-9][0-9]*.*unsupported_fences=0.*conflict=false"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
@@ -3209,12 +3159,6 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_MAX_PATCHES=8"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
-        )
-        set_tests_properties(
-            "ConSanMoiHipTest.DbiAtomicHandoffAutoReportReplaysFences"
-            PROPERTIES
-                PASS_REGULAR_EXPRESSION
-                    "processed_fences=[1-9][0-9]*.*unsupported_fences=0.*conflict=false"
         )
     endif()
 endfunction()

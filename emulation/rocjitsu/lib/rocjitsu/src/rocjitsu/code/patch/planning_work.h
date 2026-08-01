@@ -3,21 +3,19 @@
 
 #pragma once
 
+#include "util/bit.h"
+
 #include <algorithm>
 #include <cstddef>
-#include <limits>
 
 namespace rocjitsu {
 
 [[nodiscard]] constexpr size_t saturated_add(size_t lhs, size_t rhs) {
-  return rhs > std::numeric_limits<size_t>::max() - lhs ? std::numeric_limits<size_t>::max()
-                                                        : lhs + rhs;
+  return util::saturating_add(lhs, rhs);
 }
 
 [[nodiscard]] constexpr size_t saturated_multiply(size_t lhs, size_t rhs) {
-  return lhs != 0u && rhs > std::numeric_limits<size_t>::max() / lhs
-             ? std::numeric_limits<size_t>::max()
-             : lhs * rhs;
+  return util::saturating_mul(lhs, rhs);
 }
 
 inline void accumulate_saturated(size_t &total, size_t value) {

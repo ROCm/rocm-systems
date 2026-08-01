@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 /// @file trampoline_builder.h
-/// @brief Lowers a TrampolinePlan into patched-anchor bytes and trampoline
-///        words for the DBI relocation-only path.
+/// @brief Plans relay placement and lowers DBI trampolines into patched bytes.
 ///
-/// This is the byte emitter; it owns SOPP branch math and basic plan
-/// well-formedness checks (original_size 4 or 8, original_words count
-/// matches, branch ranges fit). It does not touch the ELF, does not own
-/// layout assignment, and does not enforce milestone-scoped restrictions
+/// This module owns SOPP branch math, bounded relay routing, transactional
+/// placement, and basic plan well-formedness checks (original_size 4 or 8,
+/// original_words count matches, branch ranges fit). It does not touch the
+/// ELF and does not enforce milestone-scoped restrictions
 /// (e.g. "only emit s_nop placeholder bodies" — that lives in the
 /// orchestrator as `validate_inline_nop_plan` in instrumentor.h).
 /// See code_object_patcher.h for the ELF mutation layer.

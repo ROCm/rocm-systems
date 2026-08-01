@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/register_set.h"
 #include "util/bit.h"
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -42,7 +43,7 @@ public:
   [[nodiscard]] std::optional<uint32_t>
   preview(uint32_t byte_count, uint32_t alignment,
           uint32_t limit = std::numeric_limits<uint32_t>::max()) const {
-    if (byte_count == 0 || alignment == 0)
+    if (byte_count == 0 || !std::has_single_bit(alignment))
       return std::nullopt;
     const uint64_t base =
         util::align_up(static_cast<uint64_t>(cursor_), static_cast<uint64_t>(alignment));

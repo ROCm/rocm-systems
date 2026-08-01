@@ -11,6 +11,8 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -116,6 +118,14 @@ void capture_counter_parity(const rj_waitcheck_counter_parity_diagnostic_t *diag
   });
 }
 
+void throw_from_diagnostic(const rj_waitcheck_diagnostic_t *, void *) {
+  throw std::runtime_error("consumer diagnostic callback failed");
+}
+
+void throw_from_counter_parity(const rj_waitcheck_counter_parity_diagnostic_t *, void *) {
+  throw std::runtime_error("consumer counter-parity callback failed");
+}
+
 void capture_error(const char *message, void *user_data) {
   static_cast<CallbackState *>(user_data)->errors.emplace_back(message);
 }
@@ -182,6 +192,7 @@ TEST(WaitcheckCApiTest, ReportsGfx950CounterParityWithoutChangingPassStatus) {
   EXPECT_EQ(result.counter_parity_indeterminate_groups, 0u);
   EXPECT_EQ(result.counter_parity_diagnostics_reported, 1u);
   EXPECT_EQ(result.counter_parity_diagnostics_truncated, 0u);
+  EXPECT_EQ(result.counter_parity_evaluated, 1u);
   ASSERT_EQ(state.counter_parity_diagnostics.size(), 1u);
   EXPECT_TRUE(state.diagnostics.empty());
   EXPECT_TRUE(state.errors.empty());
@@ -210,6 +221,19 @@ TEST(WaitcheckCApiTest, ReportsGfx950CounterParityWithoutChangingPassStatus) {
   EXPECT_FALSE(diagnostic.wait_instruction.empty());
   EXPECT_FALSE(diagnostic.consumer_instruction.empty());
   EXPECT_FALSE(diagnostic.producer_instruction.empty());
+}
+
+TEST(WaitcheckCApiTest, CounterParityReportsWhenTheRequestedModelDidNotRun) {
+  const auto image = rocjitsu::waitcheck_test::make_gfx1200_correct_wait_code_object();
+  rj_waitcheck_options_t options{};
+  ASSERT_EQ(rj_waitcheck_options_init(&options, sizeof(options)), ROCJITSU_STATUS_SUCCESS);
+  options.check_counter_parity = 1;
+  rj_waitcheck_result_t result = initialized_result();
+
+  ASSERT_EQ(rj_waitcheck_analyze(image.data(), image.size(), &options, &result),
+            ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(result.target, ROCJITSU_WAITCHECK_TARGET_GFX1200);
+  EXPECT_EQ(result.counter_parity_evaluated, 0u);
 }
 
 TEST(WaitcheckCApiTest, ReportsStructuredDiagnosticFromHazardousBuffer) {
@@ -452,16 +476,20 @@ TEST(WaitcheckCApiTest, SizedStructuresPreserveCallerExtensions) {
     rj_waitcheck_options_t value;
     std::array<uint8_t, 32> extension;
   } options;
+  std::memset(&options, 0xa5, sizeof(options));
   ASSERT_EQ(rj_waitcheck_options_init(&options.value, sizeof(options)), ROCJITSU_STATUS_SUCCESS);
   EXPECT_EQ(options.value.struct_size, sizeof(options));
+  EXPECT_TRUE(std::ranges::all_of(options.extension, [](uint8_t byte) { return byte == 0; }));
   options.extension.fill(0xa5);
 
   struct ExtendedResult {
     rj_waitcheck_result_t value;
     std::array<uint8_t, 32> extension;
   } result;
+  std::memset(&result, 0x5a, sizeof(result));
   ASSERT_EQ(rj_waitcheck_result_init(&result.value, sizeof(result)), ROCJITSU_STATUS_SUCCESS);
   EXPECT_EQ(result.value.struct_size, sizeof(result));
+  EXPECT_TRUE(std::ranges::all_of(result.extension, [](uint8_t byte) { return byte == 0; }));
   result.extension.fill(0x5a);
 
   const auto image = rocjitsu::waitcheck_test::make_gfx1200_correct_wait_code_object();
@@ -469,6 +497,36 @@ TEST(WaitcheckCApiTest, SizedStructuresPreserveCallerExtensions) {
             ROCJITSU_STATUS_SUCCESS);
   EXPECT_TRUE(std::ranges::all_of(options.extension, [](uint8_t byte) { return byte == 0xa5; }));
   EXPECT_TRUE(std::ranges::all_of(result.extension, [](uint8_t byte) { return byte == 0x5a; }));
+}
+
+TEST(WaitcheckCApiTest, ConsumerCallbackExceptionsDoNotChangeAnalysisStatus) {
+  const auto hazardous = rocjitsu::waitcheck_test::make_gfx1200_missing_wait_code_object();
+  rj_waitcheck_options_t diagnostic_options{};
+  ASSERT_EQ(rj_waitcheck_options_init(&diagnostic_options, sizeof(diagnostic_options)),
+            ROCJITSU_STATUS_SUCCESS);
+  diagnostic_options.diagnostic_callback = throw_from_diagnostic;
+  rj_waitcheck_result_t diagnostic_result = initialized_result();
+  ASSERT_EQ(rj_waitcheck_analyze(hazardous.data(), hazardous.size(), &diagnostic_options,
+                                 &diagnostic_result),
+            ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(diagnostic_result.diagnostics_reported, 1u);
+  EXPECT_EQ(diagnostic_result.passed, 0u);
+
+  const auto parity = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"strong_wait",
+        {0xE0501000u, 0x80000008u, 0xE05D1000u, 0x80100008u, 0xBF8C0F70u, 0x7E020300u,
+         0xBF810000u}}},
+      rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950);
+  rj_waitcheck_options_t parity_options{};
+  ASSERT_EQ(rj_waitcheck_options_init(&parity_options, sizeof(parity_options)),
+            ROCJITSU_STATUS_SUCCESS);
+  parity_options.check_counter_parity = 1;
+  parity_options.counter_parity_callback = throw_from_counter_parity;
+  rj_waitcheck_result_t parity_result = initialized_result();
+  ASSERT_EQ(rj_waitcheck_analyze(parity.data(), parity.size(), &parity_options, &parity_result),
+            ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(parity_result.counter_parity_diagnostics_reported, 1u);
+  EXPECT_EQ(parity_result.counter_parity_evaluated, 1u);
 }
 
 TEST(WaitcheckCApiTest, RejectsUninitializedOrWrongVersionStructures) {
