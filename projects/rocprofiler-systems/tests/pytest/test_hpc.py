@@ -43,6 +43,7 @@ def hpc_hip_environment() -> dict[str, str]:
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count,peak_rss",
         "ROCPROFSYS_COUT_OUTPUT": "ON",
+        "ROCPROFSYS_ROCM_DOMAINS": "hip_api,kernel_dispatch,memory_copy",
     }
 
 
