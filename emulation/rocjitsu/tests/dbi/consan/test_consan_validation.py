@@ -2005,14 +2005,35 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("iree-test-suites-build", doctor["paths"])
         self.assertEqual(doctor["tools"], {"rocminfo": "/tool"})
 
-    def test_health_smoke_falls_back_to_ready_selected_workload(self) -> None:
+    def test_health_smoke_falls_back_when_qwen_tool_is_missing(self) -> None:
         workload = validation.WORKLOAD_BY_ID["d128-block"]
         with temporary_root() as workspace:
-            command = validation._health_smoke_command(
-                workspace, "gfx950", workload, workspace / "health.json"
-            )
+            qwen = validation.WORKLOAD_BY_ID["qwen-prefill"]
+            for path in validation._input_files(workspace, "gfx950", qwen).values():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"fixture")
+            with mock.patch.object(validation.shutil, "which", return_value=None):
+                command = validation._health_smoke_command(
+                    workspace, "gfx950", workload, workspace / "health.json"
+                )
         self.assertTrue(command[0].endswith("cdna4_d128_attention_block_test"))
         self.assertEqual(command[1], "--gtest_filter=HipMoiCdna4D128AttentionBlock.*")
+
+    def test_health_smoke_uses_qwen_when_inputs_and_tool_are_ready(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["d128-block"]
+        with temporary_root() as workspace:
+            qwen = validation.WORKLOAD_BY_ID["qwen-prefill"]
+            for path in validation._input_files(workspace, "gfx950", qwen).values():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"fixture")
+            with mock.patch.object(
+                validation.shutil, "which", return_value="/tool/iree-run-module"
+            ):
+                command = validation._health_smoke_command(
+                    workspace, "gfx950", workload, workspace / "health.json"
+                )
+        self.assertEqual(command[0], "iree-run-module")
+        self.assertIn("--function=main", command)
 
     def test_profile_environment_scrubs_controls_and_relies_on_sync_defaults(
         self,
@@ -3287,6 +3308,7 @@ class ConSanValidationTest(unittest.TestCase):
             )
         self.assertEqual(command[0], "/workspace/venv/bin/python")
         self.assertTrue(command[1].endswith("consan_tensile_validation.py"))
+        self.assertEqual(command[command.index("--gpu-target") + 1], "gfx1250")
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
         self.assertEqual(
             command[command.index("--config") + 1],
@@ -3730,6 +3752,28 @@ class ConSanValidationTest(unittest.TestCase):
                 "sequences": ["h|event=barrier|pc=2"],
                 "destinations": [],
             },
+        )
+
+    def test_lds_inventory_uses_lds_access_sites_and_matching_coverage(self) -> None:
+        output = "\n".join(
+            (
+                "ConSan fault site reader=7 "
+                "identity=h|kind=atomic|pc=1 kind=atomic sync_sequence=-",
+                "ConSan fault site reader=8 "
+                "identity=h|kind=lds-access|pc=2 kind=lds-access sync_sequence=-",
+                "ConSan coverage reader=8 analysis_complete=true",
+            )
+        )
+        self.assertEqual(
+            validation._inventory_records(output, "lds-wrong-address"),
+            {
+                "sites": ["h|kind=lds-access|pc=2"],
+                "sequences": [],
+                "destinations": [],
+            },
+        )
+        self.assertTrue(
+            validation._inventory_collection_complete(output, "lds-wrong-address")
         )
 
     def test_atomic_inventory_completion_rejects_barrier_only_reader(self) -> None:
@@ -4261,6 +4305,44 @@ class ConSanValidationTest(unittest.TestCase):
             "pc=0x0000000000001824",
             fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
         )
+
+    def test_checked_in_gfx950_tensile_lds_control_policy_and_provenance(self) -> None:
+        path = Path(__file__).with_name(
+            "consan_validation_faults_gfx950_tensile_lds_positive.json"
+        )
+        document = json.loads(path.read_text(encoding="utf-8"))
+        workload = validation.WORKLOAD_BY_ID["tensile-gfx950-lds-positive"]
+        fault = validation._load_fault(path, "gfx950", workload, "lds-wrong-address")
+        expected_detectors = {
+            "supercollider": "detected",
+            "record-replay": "not_detected",
+            "sampled": "not_detected",
+            "inline-shadow": "not_detected",
+        }
+        for profile, detector in expected_detectors.items():
+            policy, trials = validation._fault_trials(fault, profile)
+            self.assertEqual(policy["detector"], detector)
+            self.assertEqual(policy["oracle"], "fail")
+            self.assertEqual(trials, [{}])
+            environment = validation._fault_trial_environment(
+                profile,
+                workload,
+                Path("/hook.so"),
+                "gfx950",
+                fault,
+                policy,
+                {},
+            )
+            self.assertEqual(environment["RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE"], "1")
+        self.assertEqual(fault["environment"]["RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR"], "54")
+        self.assertIn(
+            "pc=0x0000000000001344",
+            fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
+        )
+        provenance = document["provenance"]
+        self.assertEqual(provenance["rocm_sdk_version"], "7.15.0a20260720")
+        self.assertIn(" inventory", provenance["inventory_command"])
+        self.assertIn("v54", provenance["replacement_vgpr_basis"])
 
 
 if __name__ == "__main__":

@@ -125,7 +125,24 @@ FAULT_FAMILY_ENVIRONMENTS = {
         "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE": "1",
         "RJ_CONSAN_FAULT_SITE_IDENTITY": "REPLACE_FROM_INVENTORY",
     },
+    "lds-wrong-address": {
+        "RJ_CONSAN_FAULT_LDS_WRONG_ADDRESS": "1",
+        "RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR": "0",
+        "RJ_CONSAN_FAULT_SITE_IDENTITY": "REPLACE_FROM_INVENTORY",
+    },
 }
+
+FAULT_FAMILY_SITE_KINDS = {
+    "barrier-drop": "barrier",
+    "barrier-move": "barrier",
+    "atomic-weaken-order": "atomic",
+    "atomic-weaken-scope": "atomic",
+    "lds-wrong-address": "lds-access",
+}
+
+assert (
+    FAULT_FAMILY_SITE_KINDS.keys() == FAULT_FAMILY_ENVIRONMENTS.keys()
+), "every ConSan fault family must declare both its environment and inventory site kind"
 
 
 def _fault_family_environment(target: str, family: str) -> dict[str, str]:
@@ -407,6 +424,28 @@ WORKLOADS = (
         tensile_expected_numeric_rows=1,
         tensile_streamk_fixed_grid=4,
         tensile_streamk_mode=3,
+    ),
+    Workload(
+        id="tensile-gfx950-lds-positive",
+        priority="P2",
+        corpus="rocm-systems",
+        kind="tensile",
+        relative_path=(
+            "emulation/rocjitsu/tests/dbi/consan/fixtures/"
+            "gfx950_tensile_lds_positive.yaml"
+        ),
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        fault_families=("lds-wrong-address",),
+        targets=("gfx950",),
+        run_timeout_seconds=60,
+        tensile_inner_timeout_seconds=55,
+        tensile_expected_numeric_rows=1,
     ),
     Workload(
         id="tensile-sk-sgemm-quick",
@@ -1555,7 +1594,7 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
             "workload-source": Path(__file__).with_name(workload.relative_path),
         }
     if workload.kind == "tensile":
-        paths = resolve_tensile_validation_paths(workspace)
+        paths = resolve_tensile_validation_paths(workspace, target)
         return {
             "python": _tensile_python(),
             "workload-source": Path(__file__).with_name("consan_tensile_validation.py"),
@@ -1942,8 +1981,11 @@ def _health_smoke_command(
     workspace: Path, target: str, workload: Workload, output: Path
 ) -> list[str]:
     qwen = WORKLOAD_BY_ID["qwen-prefill"]
-    if all(path.is_file() for path in _input_files(workspace, target, qwen).values()):
-        return _qwen_command(workspace, target, False, output)
+    qwen_command = _qwen_command(workspace, target, False, output)
+    if shutil.which(qwen_command[0]) and all(
+        path.is_file() for path in _input_files(workspace, target, qwen).values()
+    ):
+        return qwen_command
     # A workload-scoped doctor permits an independently ready row to proceed
     # when unrelated Qwen artifacts are absent. Its destructive health gate
     # must honor the same contract instead of manufacturing an unhealthy GPU
@@ -2011,6 +2053,8 @@ def _workload_command(
             str(workspace),
             "--config",
             str(workspace / workload.corpus / workload.relative_path),
+            "--gpu-target",
+            target,
             "--output-dir",
             str(output.parent / "tensile-work"),
             "--repetitions",
@@ -3323,9 +3367,7 @@ def _overhead_summary(results: list[dict]) -> dict:
 def _inventory_records(
     log_text: str, family: str | None = None
 ) -> dict[str, list[str]]:
-    event_kind = None
-    if family:
-        event_kind = "barrier" if family.startswith("barrier-") else "atomic"
+    event_kind = FAULT_FAMILY_SITE_KINDS.get(family) if family else None
     prefixes = {
         "sites": "ConSan fault site ",
         "sequences": "ConSan sync sequence ",
@@ -3365,7 +3407,7 @@ def _inventory_line_completes(
     line: str, family: str, relevant_readers: set[str]
 ) -> bool:
     """Tracks a relevant site through the matching code-object coverage record."""
-    site_kind = "barrier" if family.startswith("barrier-") else "atomic"
+    site_kind = FAULT_FAMILY_SITE_KINDS[family]
     if "ConSan fault site " in line and f" kind={site_kind} " in line:
         match = re.search(r"\breader=(\S+)", line)
         if match:
@@ -3665,6 +3707,7 @@ def _load_fault(
             "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER",
             "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE",
             "RJ_CONSAN_FAULT_ATOMIC_WRONG_ADDRESS",
+            "RJ_CONSAN_FAULT_LDS_WRONG_ADDRESS",
         }
     ]
     if len(mutations) != 1:
@@ -4378,6 +4421,7 @@ def _fault(args: argparse.Namespace) -> int:
                     "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER",
                     "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE",
                     "RJ_CONSAN_FAULT_ATOMIC_WRONG_ADDRESS",
+                    "RJ_CONSAN_FAULT_LDS_WRONG_ADDRESS",
                 )
                 if environment.get(key) == "1"
             ]

@@ -871,8 +871,9 @@ rocjitsu::ConSanResult transform_override(std::span<const uint8_t> bytes,
       options.fault_drop_barrier || options.fault_move_barrier ||
       options.fault_mutate_barrier_id_scope || options.fault_mutate_barrier_participants ||
       options.fault_atomic_wrong_address || options.fault_atomic_weaken_order ||
-      options.fault_atomic_weaken_scope || options.fault_ordinary_wrong_address ||
-      options.fault_ordinary_weaken_order || options.fault_ordinary_weaken_scope;
+      options.fault_atomic_weaken_scope || options.fault_lds_wrong_address ||
+      options.fault_ordinary_wrong_address || options.fault_ordinary_weaken_order ||
+      options.fault_ordinary_weaken_scope;
   std::optional<rocjitsu::ConSanResult> queued_result;
   {
     std::lock_guard lock(g_transform_observation_mutex);
@@ -4669,6 +4670,7 @@ TEST(HsaHooksUnitTest, ConSanAutoReportLiveFaultUsesPristineSizingAndLateBoundLi
       "RJ_CONSAN_FAULT_ATOMIC_WRONG_ADDRESS",
       "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER",
       "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE",
+      "RJ_CONSAN_FAULT_LDS_WRONG_ADDRESS",
       "RJ_CONSAN_FAULT_ORDINARY_WRONG_ADDRESS",
       "RJ_CONSAN_FAULT_ORDINARY_WEAKEN_ORDER",
       "RJ_CONSAN_FAULT_ORDINARY_WEAKEN_SCOPE",
@@ -4688,6 +4690,7 @@ TEST(HsaHooksUnitTest, ConSanAutoReportLiveFaultUsesPristineSizingAndLateBoundLi
     ScopedEnvVar barrier_target_id("RJ_CONSAN_FAULT_BARRIER_TARGET_ID", "1");
     ScopedEnvVar participant_count("RJ_CONSAN_FAULT_BARRIER_TARGET_PARTICIPANT_COUNT", "64");
     ScopedEnvVar atomic_address_delta("RJ_CONSAN_FAULT_ATOMIC_VALID_ADDRESS_DELTA", "4");
+    ScopedEnvVar lds_address_vgpr("RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR", "6");
     ScopedEnvVar ordinary_address_delta("RJ_CONSAN_FAULT_ORDINARY_VALID_ADDRESS_DELTA", "4");
 
     reset_code_object_observations();

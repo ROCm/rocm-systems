@@ -405,11 +405,14 @@ struct ConSanOptions {
   bool fault_atomic_weaken_order = false;
   ConSanAtomicOrderEdge fault_atomic_order_edge = ConSanAtomicOrderEdge::Any;
   bool fault_atomic_weaken_scope = false;
+  bool fault_lds_wrong_address = false;
   bool fault_ordinary_wrong_address = false;
   bool fault_ordinary_weaken_order = false;
   bool fault_ordinary_weaken_scope = false;
   /// Caller-validated, aligned byte delta to a distinct valid atomic target.
   uint32_t fault_atomic_address_delta = 4;
+  /// Explicit replacement for the decoded VGPR address operand of one LDS access.
+  std::optional<uint16_t> fault_lds_address_vgpr;
   /// Caller-validated, aligned byte delta to a distinct valid ordinary-load target.
   uint32_t fault_ordinary_address_delta = 4;
   bool fault_dry_run = false;
@@ -511,6 +514,7 @@ struct ConSanOptions {
   std::vector<ConSanPreappliedReservedRange> preapplied_reserved_ranges;
   uint32_t fault_barrier_index = 0;
   uint32_t fault_atomic_index = 0;
+  uint32_t fault_lds_index = 0;
   uint32_t fault_ordinary_index = 0;
   /// Exact stable identity from ConSanResult::fault_sites. When set, this
   /// supersedes the legacy per-kind global index.
@@ -615,7 +619,7 @@ struct ConSanOptions {
 }
 
 using ConSanFaultMutationMember = bool ConSanOptions::*;
-inline constexpr std::array<ConSanFaultMutationMember, 10> kConSanFaultMutationMembers = {
+inline constexpr std::array<ConSanFaultMutationMember, 11> kConSanFaultMutationMembers = {
     &ConSanOptions::fault_drop_barrier,
     &ConSanOptions::fault_move_barrier,
     &ConSanOptions::fault_mutate_barrier_id_scope,
@@ -623,6 +627,7 @@ inline constexpr std::array<ConSanFaultMutationMember, 10> kConSanFaultMutationM
     &ConSanOptions::fault_atomic_wrong_address,
     &ConSanOptions::fault_atomic_weaken_order,
     &ConSanOptions::fault_atomic_weaken_scope,
+    &ConSanOptions::fault_lds_wrong_address,
     &ConSanOptions::fault_ordinary_wrong_address,
     &ConSanOptions::fault_ordinary_weaken_order,
     &ConSanOptions::fault_ordinary_weaken_scope,
@@ -671,14 +676,17 @@ struct ConSanFaultMutationRetryConfig {
   bool atomic_weaken_order = false;
   ConSanAtomicOrderEdge atomic_order_edge = ConSanAtomicOrderEdge::Any;
   bool atomic_weaken_scope = false;
+  bool lds_wrong_address = false;
   bool ordinary_wrong_address = false;
   bool ordinary_weaken_order = false;
   bool ordinary_weaken_scope = false;
   uint32_t atomic_address_delta = 4;
+  std::optional<uint16_t> lds_address_vgpr;
   uint32_t ordinary_address_delta = 4;
   bool require_exactly_one = false;
   uint32_t barrier_index = 0;
   uint32_t atomic_index = 0;
+  uint32_t lds_index = 0;
   uint32_t ordinary_index = 0;
   std::string site_identity;
   std::string barrier_destination_identity;
@@ -696,7 +704,8 @@ struct ConSanFaultMutationRetryConfig {
   [[nodiscard]] bool enabled() const {
     return drop_barrier || move_barrier || mutate_barrier_id_scope || mutate_barrier_participants ||
            atomic_wrong_address || atomic_weaken_order || atomic_weaken_scope ||
-           ordinary_wrong_address || ordinary_weaken_order || ordinary_weaken_scope;
+           lds_wrong_address || ordinary_wrong_address || ordinary_weaken_order ||
+           ordinary_weaken_scope;
   }
 
   [[nodiscard]] static ConSanFaultMutationRetryConfig from_options(const ConSanOptions &options) {
@@ -716,14 +725,17 @@ struct ConSanFaultMutationRetryConfig {
         .atomic_weaken_order = options.fault_atomic_weaken_order,
         .atomic_order_edge = options.fault_atomic_order_edge,
         .atomic_weaken_scope = options.fault_atomic_weaken_scope,
+        .lds_wrong_address = options.fault_lds_wrong_address,
         .ordinary_wrong_address = options.fault_ordinary_wrong_address,
         .ordinary_weaken_order = options.fault_ordinary_weaken_order,
         .ordinary_weaken_scope = options.fault_ordinary_weaken_scope,
         .atomic_address_delta = options.fault_atomic_address_delta,
+        .lds_address_vgpr = options.fault_lds_address_vgpr,
         .ordinary_address_delta = options.fault_ordinary_address_delta,
         .require_exactly_one = options.fault_require_exactly_one,
         .barrier_index = options.fault_barrier_index,
         .atomic_index = options.fault_atomic_index,
+        .lds_index = options.fault_lds_index,
         .ordinary_index = options.fault_ordinary_index,
         .site_identity = options.fault_site_identity,
         .barrier_destination_identity = options.fault_barrier_destination_identity,
@@ -754,14 +766,17 @@ struct ConSanFaultMutationRetryConfig {
     options.fault_atomic_weaken_order = atomic_weaken_order;
     options.fault_atomic_order_edge = atomic_order_edge;
     options.fault_atomic_weaken_scope = atomic_weaken_scope;
+    options.fault_lds_wrong_address = lds_wrong_address;
     options.fault_ordinary_wrong_address = ordinary_wrong_address;
     options.fault_ordinary_weaken_order = ordinary_weaken_order;
     options.fault_ordinary_weaken_scope = ordinary_weaken_scope;
     options.fault_atomic_address_delta = atomic_address_delta;
+    options.fault_lds_address_vgpr = lds_address_vgpr;
     options.fault_ordinary_address_delta = ordinary_address_delta;
     options.fault_require_exactly_one = require_exactly_one;
     options.fault_barrier_index = barrier_index;
     options.fault_atomic_index = atomic_index;
+    options.fault_lds_index = lds_index;
     options.fault_ordinary_index = ordinary_index;
     options.fault_site_identity = site_identity;
     options.fault_barrier_destination_identity = barrier_destination_identity;

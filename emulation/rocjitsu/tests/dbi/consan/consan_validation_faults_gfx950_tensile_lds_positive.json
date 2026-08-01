@@ -1,0 +1,42 @@
+{
+  "schema_version": 2,
+  "target": "gfx950",
+  "evidence_model": "reviewed against a fresh target-native Tensile inventory and contained per-engine fault trials",
+  "review_required": false,
+  "provenance": {
+    "rocm_libraries_commit": "0a323b74932c57d6d1a94af4a009dd7676b8f695",
+    "rocm_sdk_version": "7.15.0a20260720",
+    "inventory_command": "python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py --target gfx950 --workload tensile-gfx950-lds-positive --artifact-root ARTIFACT_ROOT inventory",
+    "replacement_vgpr_basis": "The generated kernel declares 55 ordinary VGPRs, so v54 is allocated; production disassembly initializes v54 from v0 before the selected v2-addressed ds_write_b128. Replacing v2 with v54 therefore uses a target-native runtime value rather than an uninitialized register."
+  },
+  "workload": "tensile-gfx950-lds-positive",
+  "faults": [
+    {
+      "id": "lds-wrong-address",
+      "family": "lds-wrong-address",
+      "environment": {
+        "RJ_CONSAN_FAULT_LDS_WRONG_ADDRESS": "1",
+        "RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR": "54",
+        "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:d245fc968fd8967b|kernel=Cijk_Alik_Bljk_BBS_BH_UserArgs_MT64x64x64_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CB0_CD1_1_CLR1_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_2_MXLIBL_MXSFNS_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SIP1_SGRO0_TDMI0_TDMS0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1|kind=lds-access|pc=0x0000000000001344|mnemonic=ds_write_b128|occurrence=0"
+      },
+      "profiles": {
+        "supercollider": {
+          "detector": "detected",
+          "oracle": "fail"
+        },
+        "record-replay": {
+          "detector": "not_detected",
+          "oracle": "fail"
+        },
+        "sampled": {
+          "detector": "not_detected",
+          "oracle": "fail"
+        },
+        "inline-shadow": {
+          "detector": "not_detected",
+          "oracle": "fail"
+        }
+      }
+    }
+  ]
+}

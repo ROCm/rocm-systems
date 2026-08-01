@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runs one bounded, numerically validated gfx1250 Tensile workload."""
+"""Runs one bounded, numerically validated Tensile workload."""
 
 from __future__ import annotations
 
@@ -16,11 +16,11 @@ import tempfile
 import time
 
 from consan_tensile_support import (
+    DEFAULT_TARGET,
     TensileValidationPaths,
     resolve_tensile_validation_paths,
 )
 
-TARGET = "gfx1250"
 DEFAULT_TIMEOUT_SECONDS = 55
 CODE_OBJECT_BUDGET_SECONDS = 5
 OUTPUT_DRAIN_SECONDS = 2
@@ -294,6 +294,7 @@ def _code_object_errors(
     output_dir: Path,
     llvm_readelf: Path,
     *,
+    target: str = DEFAULT_TARGET,
     deadline: float | None = None,
 ) -> tuple[list[Path], list[str]]:
     discovered = sorted(
@@ -306,7 +307,7 @@ def _code_object_errors(
 
     errors = []
     verified = []
-    target_pattern = re.compile(rf"^  Flags:.*\b{TARGET}\b", re.MULTILINE)
+    target_pattern = re.compile(rf"^  Flags:.*\b{re.escape(target)}\b", re.MULTILINE)
     for artifact in discovered:
         remaining = 10.0 if deadline is None else deadline - time.monotonic()
         if remaining <= 0:
@@ -334,7 +335,7 @@ def _code_object_errors(
             errors.append(f"code object is not AMDGPU ELF: {artifact}")
             valid = False
         if target_pattern.search(header.stdout) is None:
-            errors.append(f"code object does not declare {TARGET}: {artifact}")
+            errors.append(f"code object does not declare {target}: {artifact}")
             valid = False
         if valid:
             verified.append(artifact)
@@ -348,11 +349,18 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _gpu_target(value: str) -> str:
+    if re.fullmatch(r"gfx[0-9a-z]+", value) is None:
+        raise argparse.ArgumentTypeError("must name a gfx target")
+    return value
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--gpu-target", type=_gpu_target, default=DEFAULT_TARGET)
     parser.add_argument("--repetitions", type=int, choices=(1,), default=1)
     parser.add_argument("--label", required=True)
     parser.add_argument(
@@ -374,7 +382,7 @@ def main() -> int:
         config = _resolve_config(workspace, args.config)
     except ValueError as error:
         parser.error(str(error))
-    paths = resolve_tensile_validation_paths(workspace)
+    paths = resolve_tensile_validation_paths(workspace, args.gpu_target)
     prerequisite_errors = _prerequisite_errors(
         paths,
         config,
@@ -419,7 +427,7 @@ def main() -> int:
         str(config),
         str(work_dir),
         "--gpu-targets",
-        TARGET,
+        args.gpu_target,
         "--prebuilt-client",
         str(paths.wrapper),
         "--global-parameters",
@@ -454,6 +462,7 @@ def main() -> int:
         artifacts, artifact_errors = _code_object_errors(
             work_dir,
             paths.llvm_readelf,
+            target=args.gpu_target,
             deadline=time.monotonic() + CODE_OBJECT_BUDGET_SECONDS,
         )
     elapsed_seconds = time.monotonic() - started
@@ -481,7 +490,7 @@ def main() -> int:
         "rocjitsu_executable": str(paths.rocjitsu),
         "required_streamk_mode": args.require_streamk_mode,
         "requested_streamk_fixed_grid": args.streamk_fixed_grid,
-        "target": TARGET,
+        "target": args.gpu_target,
         "timeout_seconds": args.timeout_seconds,
         "transcript": str(transcript),
         "verified_code_objects": [str(path) for path in artifacts],

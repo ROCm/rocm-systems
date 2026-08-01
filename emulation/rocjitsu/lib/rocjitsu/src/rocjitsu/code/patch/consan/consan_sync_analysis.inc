@@ -39,6 +39,24 @@ enum class AtomicFaultEncoding : uint8_t {
          encoding == AtomicFaultEncoding::Ds;
 }
 
+[[nodiscard]] bool lds_address_fault_arch_supported(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
+}
+
+[[nodiscard]] bool lds_address_fault_site_supported(const ConSanLdsSite &site,
+                                                    rj_code_arch_t arch) {
+  if (!lds_address_fault_arch_supported(arch) || !site.supported_mvp || !site.addr_vgpr ||
+      site.size != 2u * sizeof(uint32_t) ||
+      (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)) {
+    return false;
+  }
+  // gfx1250 two-address accesses are split during instrumentation, so there is
+  // no single relocated instruction against which to prove this exact rewrite.
+  return arch != ROCJITSU_CODE_ARCH_GFX1250 ||
+         (!is_two_address_lds_load(site) && !is_two_address_lds_store(site));
+}
+
 template <typename Container>
 void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::string_view fingerprint,
                                       const Container &container, bool in_kernel,
@@ -96,6 +114,35 @@ void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::strin
     site.decoded_operands = atomic_decoded_operands(atomic);
     site.identity = std::string(fingerprint) + "|" + container_kind + "=" + container.name +
                     "|kind=atomic|pc=0x" + fixed_hex(site.text_offset, 16) +
+                    "|mnemonic=" + site.mnemonic + "|occurrence=" + std::to_string(site.occurrence);
+    sites.push_back(std::move(site));
+  }
+
+  uint32_t lds_occurrence = 0;
+  for (const ConSanLdsSite &lds : container.lds_sites) {
+    if (!lds_address_fault_site_supported(lds, arch)) {
+      continue;
+    }
+    ConSanFaultSite site;
+    site.kind = ConSanFaultSiteKind::LdsAccess;
+    site.code_object_fingerprint = fingerprint;
+    site.container_name = container.name;
+    site.in_kernel = in_kernel;
+    site.occurrence = lds_occurrence++;
+    site.text_offset = lds.text_offset;
+    site.file_offset = lds.file_offset;
+    site.size = lds.size;
+    site.width_bits = lds.width_bits;
+    site.address_vgpr = lds.addr_vgpr;
+    if (arch == ROCJITSU_CODE_ARCH_GFX1250 && lds.file_offset >= lds.text_offset) {
+      site.gfx1250_vgpr_msb_mode = consan_gfx1250_vgpr_msb_mode_at(
+          bytes, container.text_file_offset, container.entry_text_offset, lds.file_offset);
+    }
+    site.mnemonic = lds.mnemonic;
+    site.semantic_role = lds.kind == ConSanLdsAccessKind::Read ? "lds-read" : "lds-write";
+    site.decoded_operands = lds_decoded_operands(lds);
+    site.identity = std::string(fingerprint) + "|" + container_kind + "=" + container.name +
+                    "|kind=lds-access|pc=0x" + fixed_hex(site.text_offset, 16) +
                     "|mnemonic=" + site.mnemonic + "|occurrence=" + std::to_string(site.occurrence);
     sites.push_back(std::move(site));
   }
@@ -527,8 +574,8 @@ build_original_proof_basic_blocks(const AmdGpuCodeObject &code_object, Decoder &
   return false;
 }
 
-void build_singleton_sync_sequences(
-    const std::vector<std::unique_ptr<BasicBlock>> &blocks, ConSanResult &result) {
+void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                    ConSanResult &result) {
   const BlockOffsetIndex block_offset_index = build_block_offset_index(blocks);
   std::unordered_map<const BasicBlock *, uint32_t> block_indices;
   block_indices.reserve(blocks.size());
@@ -767,9 +814,8 @@ is_safe_cluster_triangle_barrier_pair(const ConSanSyncSequence &signal,
   return expected_offset == wait.begin_text_offset;
 }
 
-void associate_barrier_sync_sequences(
-    const std::vector<std::unique_ptr<BasicBlock>> &blocks, bool allow_extended_pairs,
-    ConSanResult &result) {
+void associate_barrier_sync_sequences(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                      bool allow_extended_pairs, ConSanResult &result) {
   const auto has_unresolved_preceding_signal = [&](size_t signal_index) {
     for (size_t cursor = signal_index; cursor > 0; --cursor) {
       const ConSanSyncSequence &prior = result.sync_sequences[cursor - 1u];
@@ -968,8 +1014,7 @@ void build_barrier_lifecycle_group_inventory(ConSanResult &result) {
   }
 }
 
-using SyncEventIdentityIndex =
-    std::unordered_map<std::string_view, const ConSanSyncEvent *>;
+using SyncEventIdentityIndex = std::unordered_map<std::string_view, const ConSanSyncEvent *>;
 
 [[nodiscard]] SyncEventIdentityIndex build_sync_event_identity_index(const ConSanResult &result) {
   SyncEventIdentityIndex index;
@@ -979,15 +1024,14 @@ using SyncEventIdentityIndex =
   return index;
 }
 
-[[nodiscard]] const ConSanSyncEvent *
-find_sync_event(const SyncEventIdentityIndex &index, std::string_view identity) {
+[[nodiscard]] const ConSanSyncEvent *find_sync_event(const SyncEventIdentityIndex &index,
+                                                     std::string_view identity) {
   const auto event = index.find(identity);
   return event == index.end() ? nullptr : event->second;
 }
 
-[[nodiscard]] const ConSanSyncEvent *
-first_sequence_event(const SyncEventIdentityIndex &events,
-                     const ConSanSyncSequence &sequence);
+[[nodiscard]] const ConSanSyncEvent *first_sequence_event(const SyncEventIdentityIndex &events,
+                                                          const ConSanSyncSequence &sequence);
 
 [[nodiscard]] bool is_relocatable_barrier_move_destination(const Instruction &instruction,
                                                            uint64_t offset,
@@ -1214,8 +1258,7 @@ prove_completing_structured_diamond(const std::vector<std::unique_ptr<BasicBlock
 }
 
 void build_barrier_move_destination_inventory(
-    const AmdGpuCodeObject &code_object,
-    const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+    const AmdGpuCodeObject &code_object, const std::vector<std::unique_ptr<BasicBlock>> &blocks,
     const SyncEventIdentityIndex &events, rj_code_arch_t arch, ConSanResult &result) {
   result.barrier_move_destinations.clear();
   if (code_object.text_sections().size() != 1u)
@@ -1357,9 +1400,8 @@ void build_barrier_move_destination_inventory(
   return false;
 }
 
-[[nodiscard]] const ConSanSyncEvent *
-first_sequence_event(const SyncEventIdentityIndex &events,
-                     const ConSanSyncSequence &sequence) {
+[[nodiscard]] const ConSanSyncEvent *first_sequence_event(const SyncEventIdentityIndex &events,
+                                                          const ConSanSyncSequence &sequence) {
   if (sequence.member_event_identities.empty())
     return nullptr;
   return find_sync_event(events, sequence.member_event_identities.front());
@@ -1595,9 +1637,9 @@ atomic_release_wait_boundary(const ConSanSyncSequence &atomic,
   return std::nullopt;
 }
 
-void associate_atomic_sync_sequences(
-    const std::vector<std::unique_ptr<BasicBlock>> &blocks, rj_code_arch_t arch,
-    const SyncEventIdentityIndex &events, ConSanResult &result) {
+void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                     rj_code_arch_t arch, const SyncEventIdentityIndex &events,
+                                     ConSanResult &result) {
   std::vector<ConSanSyncSequence> associated;
   associated.reserve(result.sync_sequences.size());
   for (size_t i = 0; i < result.sync_sequences.size();) {
@@ -2063,8 +2105,8 @@ void associate_ordinary_release_sync_sequences(
 }
 
 void associate_ordinary_acquire_sync_sequences(
-    const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-    const SyncEventIdentityIndex &events, ConSanResult &result) {
+    const std::vector<std::unique_ptr<BasicBlock>> &blocks, const SyncEventIdentityIndex &events,
+    ConSanResult &result) {
   const std::vector<size_t> fence_indices = fence_sequence_indices_by_begin(result);
   std::unordered_map<size_t, size_t> associations;
   std::unordered_set<size_t> claimed_cache_sequences;
@@ -2236,10 +2278,10 @@ communication_address_operands(const ConSanResult &result, const ConSanSyncEvent
          role == ConSanSyncMemoryRole::SequentiallyConsistent;
 }
 
-void build_communication_address_recipes(
-    const AmdGpuCodeObject &code_object,
-    const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-    const SyncEventIdentityIndex &events, rj_code_arch_t arch, ConSanResult &result) {
+void build_communication_address_recipes(const AmdGpuCodeObject &code_object,
+                                         const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                         const SyncEventIdentityIndex &events, rj_code_arch_t arch,
+                                         ConSanResult &result) {
   result.communication_address_recipes.clear();
   const std::vector<BasicBlock *> block_ptrs = block_ptrs_for(blocks);
   if (block_ptrs.empty())
@@ -2399,9 +2441,8 @@ void build_communication_address_recipes(
   return !sequence.member_event_identities.empty();
 }
 
-[[nodiscard]] bool
-sequence_has_exact_members(const SyncEventIdentityIndex &events,
-                           const ConSanSyncSequence &sequence) {
+[[nodiscard]] bool sequence_has_exact_members(const SyncEventIdentityIndex &events,
+                                              const ConSanSyncSequence &sequence) {
   uint64_t prior_end = sequence.begin_text_offset;
   for (const std::string &identity : sequence.member_event_identities) {
     const ConSanSyncEvent *event = find_sync_event(events, identity);
@@ -2416,9 +2457,8 @@ sequence_has_exact_members(const SyncEventIdentityIndex &events,
   return !sequence.member_event_identities.empty();
 }
 
-[[nodiscard]] bool
-sequence_atomic_has_device_or_system_scope(const SyncEventIdentityIndex &events,
-                                           const ConSanSyncSequence &sequence) {
+[[nodiscard]] bool sequence_atomic_has_device_or_system_scope(const SyncEventIdentityIndex &events,
+                                                              const ConSanSyncSequence &sequence) {
   const ConSanSyncEvent *atomic = nullptr;
   for (const std::string &identity : sequence.member_event_identities) {
     const ConSanSyncEvent *event = find_sync_event(events, identity);
@@ -2435,10 +2475,10 @@ sequence_atomic_has_device_or_system_scope(const SyncEventIdentityIndex &events,
          (*atomic->raw_scope == 2u || *atomic->raw_scope == 3u);
 }
 
-[[nodiscard]] std::string
-perturbation_rejection_reason(const SyncEventIdentityIndex &events,
-                              const ConSanSyncSequence &sequence, ConSanPerturbationKind kind,
-                              ConSanPerturbationEdge edge) {
+[[nodiscard]] std::string perturbation_rejection_reason(const SyncEventIdentityIndex &events,
+                                                        const ConSanSyncSequence &sequence,
+                                                        ConSanPerturbationKind kind,
+                                                        ConSanPerturbationEdge edge) {
   if (!sequence.basic_block_index)
     return "missing-exact-basic-block";
   if (sequence.in_cyclic_cfg_component)
@@ -2954,8 +2994,8 @@ void annotate_fault_sites_with_sync_sequences(ConSanResult &result) {
   struct PhysicalEventKeyHash {
     size_t operator()(const PhysicalEventKey &key) const {
       size_t value = std::hash<uint64_t>{}(key.text_offset);
-      value ^= std::hash<uint8_t>{}(static_cast<uint8_t>(key.kind)) + 0x9e3779b9u +
-               (value << 6u) + (value >> 2u);
+      value ^= std::hash<uint8_t>{}(static_cast<uint8_t>(key.kind)) + 0x9e3779b9u + (value << 6u) +
+               (value >> 2u);
       return value;
     }
   };
@@ -2965,8 +3005,8 @@ void annotate_fault_sites_with_sync_sequences(ConSanResult &result) {
   for (const ConSanSyncEvent &event : result.sync_events) {
     event_by_site.emplace(
         EventKey{event.kind, event.in_kernel, event.container_name, event.text_offset}, &event);
-    const auto [entry, inserted] = event_by_physical_site.emplace(
-        PhysicalEventKey{event.kind, event.text_offset}, &event);
+    const auto [entry, inserted] =
+        event_by_physical_site.emplace(PhysicalEventKey{event.kind, event.text_offset}, &event);
     if (!inserted)
       entry->second = nullptr;
   }
@@ -3085,9 +3125,9 @@ void annotate_fault_sites_with_sync_sequences(ConSanResult &result) {
   return ConSanOwnerProofKind::RecoveredIndirectCall;
 }
 
-[[nodiscard]] std::vector<ConSanExecutionOwner>
-execution_owners_for_offset(
-    const std::unordered_map<const BasicBlock *, std::vector<ConSanExecutionOwner>> &owners_by_block,
+[[nodiscard]] std::vector<ConSanExecutionOwner> execution_owners_for_offset(
+    const std::unordered_map<const BasicBlock *, std::vector<ConSanExecutionOwner>>
+        &owners_by_block,
     const BlockOffsetIndex &block_index, uint64_t offset) {
   const BasicBlock *block = block_for_offset(block_index, offset);
   if (block == nullptr)
@@ -3179,9 +3219,8 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
         kernel_entries, text);
     if (scope) {
       for (const auto &[block, proof] : scope->owner_proofs) {
-        owners_by_block[block].push_back(
-            {.descriptor_file_offset = kernel.descriptor_file_offset,
-             .proof = owner_proof_kind(proof)});
+        owners_by_block[block].push_back({.descriptor_file_offset = kernel.descriptor_file_offset,
+                                          .proof = owner_proof_kind(proof)});
       }
     }
   }

@@ -767,7 +767,10 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
 build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSanLdsSite &site,
                            rj_code_arch_t arch, const ConSanOptions &options, uint32_t delay_words,
                            uint16_t scratch_vgpr, uint16_t vcc_save_sgpr,
-                           uint16_t gfx1250_vgpr_msb_mode, std::vector<std::string> &errors) {
+                           uint16_t gfx1250_vgpr_msb_mode,
+                           std::optional<uint32_t> &guest_instruction_word_offset,
+                           std::vector<std::string> &errors) {
+  guest_instruction_word_offset.reset();
   auto required_vgprs = lds_dword_count(site);
   if (!required_vgprs) {
     errors.emplace_back("ConSan LDS check/trap proof selected unsupported width");
@@ -932,6 +935,7 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
     }
     words.insert(words.end(), split->begin(), split->end());
   } else {
+    guest_instruction_word_offset = static_cast<uint32_t>(words.size());
     words.push_back(original_access[0]);
     words.push_back(original_access[1]);
   }

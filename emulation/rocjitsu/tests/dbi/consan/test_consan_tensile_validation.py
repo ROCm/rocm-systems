@@ -188,6 +188,15 @@ class TensileValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(argparse.ArgumentTypeError, "must be positive"):
             tensile_validation._positive_int("0")
 
+    def test_gpu_target_parser_accepts_architecture_names(self) -> None:
+        self.assertEqual(tensile_validation._gpu_target("gfx950"), "gfx950")
+        self.assertEqual(tensile_validation._gpu_target("gfx1250"), "gfx1250")
+        for invalid in ("950", "gfx", "gfx950:xnack-", "gfx9_50"):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                argparse.ArgumentTypeError, "must name a gfx target"
+            ):
+                tensile_validation._gpu_target(invalid)
+
     def test_numeric_validation_requires_a_real_passed_row(self) -> None:
         passed = (
             "noise\n"
@@ -502,6 +511,42 @@ class TensileValidationTest(unittest.TestCase):
         self.assertEqual(paths.rocjitsu, root / "rocjitsu")
         self.assertEqual(paths.rocjitsu_config, root / "gfx1250.json")
         self.assertEqual(paths.llvm_readelf, root / "llvm-readelf")
+
+    def test_target_selects_matching_default_rocjitsu_config(self) -> None:
+        with temporary_root() as root:
+            overrides = {
+                tensile_support.TENSILELITE_ROOT_ENV: str(root / "tensile"),
+                tensile_support.ROCM_ROOT_ENV: str(root / "rocm"),
+                tensile_support.TENSILE_CLIENT_ENV: str(root / "client"),
+                tensile_support.TENSILE_WRAPPER_ENV: str(root / "wrapper"),
+                tensile_support.ROCJITSU_EXE_ENV: str(root / "rocjitsu"),
+                tensile_support.LLVM_READELF_ENV: str(root / "llvm-readelf"),
+            }
+            with mock.patch.dict(os.environ, overrides, clear=True):
+                paths = tensile_support.resolve_tensile_validation_paths(root, "gfx950")
+        self.assertEqual(
+            paths.rocjitsu_config,
+            root
+            / "rocm-systems"
+            / "emulation"
+            / "rocjitsu"
+            / "configs"
+            / "gfx950_cdna4.json",
+        )
+
+    def test_unknown_target_requires_an_explicit_rocjitsu_config(self) -> None:
+        with temporary_root() as root:
+            overrides = {
+                tensile_support.TENSILELITE_ROOT_ENV: str(root / "tensile"),
+                tensile_support.ROCM_ROOT_ENV: str(root / "rocm"),
+                tensile_support.TENSILE_CLIENT_ENV: str(root / "client"),
+                tensile_support.TENSILE_WRAPPER_ENV: str(root / "wrapper"),
+                tensile_support.ROCJITSU_EXE_ENV: str(root / "rocjitsu"),
+                tensile_support.LLVM_READELF_ENV: str(root / "llvm-readelf"),
+            }
+            with mock.patch.dict(os.environ, overrides, clear=True):
+                with self.assertRaisesRegex(ValueError, "no default RocJITsu config"):
+                    tensile_support.resolve_tensile_validation_paths(root, "gfx1100")
 
     def test_launcher_discovery_matches_the_hook_build_order(self) -> None:
         with temporary_root() as root:

@@ -90,9 +90,11 @@ struct HookConfig {
   bool fault_atomic_weaken_order = false;
   rocjitsu::ConSanAtomicOrderEdge fault_atomic_order_edge = rocjitsu::ConSanAtomicOrderEdge::Any;
   bool fault_atomic_weaken_scope = false;
+  bool fault_lds_wrong_address = false;
   bool fault_ordinary_weaken_order = false;
   bool fault_ordinary_weaken_scope = false;
   uint32_t fault_atomic_address_delta = 0;
+  uint32_t fault_lds_address_vgpr = 0;
   bool fault_ordinary_wrong_address = false;
   uint32_t fault_ordinary_address_delta = 0;
   bool fault_dry_run = false;
@@ -123,6 +125,7 @@ struct HookConfig {
   bool moi_forbid_overflow = false;
   uint32_t fault_barrier_index = 0;
   uint32_t fault_atomic_index = 0;
+  uint32_t fault_lds_index = 0;
   uint32_t fault_ordinary_index = 0;
   std::string fault_site_identity;
   rocjitsu::ConSanDelayMode delay_mode = rocjitsu::ConSanDelayMode::Nop;
@@ -255,6 +258,8 @@ constexpr uint32_t kMoiSampledStandardRuntimeStride = 256u;
     return "inline-atomic-order-rewrite";
   case rocjitsu::ConSanPatchKind::InlineAtomicScopeRewrite:
     return "inline-atomic-scope-rewrite";
+  case rocjitsu::ConSanPatchKind::InlineLdsAddressRewrite:
+    return "inline-lds-address-rewrite";
   case rocjitsu::ConSanPatchKind::InlineOrdinaryOrderRewrite:
     return "inline-ordinary-order-rewrite";
   case rocjitsu::ConSanPatchKind::InlineOrdinaryAddressRewrite:
@@ -329,6 +334,8 @@ moi_resource_site_kind_name(rocjitsu::ConSanResourceSiteKind site_kind) {
     return "barrier";
   case rocjitsu::ConSanFaultSiteKind::Atomic:
     return "atomic";
+  case rocjitsu::ConSanFaultSiteKind::LdsAccess:
+    return "lds-access";
   case rocjitsu::ConSanFaultSiteKind::OrdinaryMemory:
     return "ordinary-memory";
   }
@@ -376,6 +383,8 @@ ordinary_memory_support_reason_name(rocjitsu::ConSanOrdinaryMemorySupportReason 
     return "atomic-weaken-order";
   case rocjitsu::ConSanFaultMutationKind::AtomicWeakenScope:
     return "atomic-weaken-scope";
+  case rocjitsu::ConSanFaultMutationKind::LdsWrongAddress:
+    return "lds-wrong-address";
   case rocjitsu::ConSanFaultMutationKind::OrdinaryWeakenOrder:
     return "ordinary-weaken-order";
   case rocjitsu::ConSanFaultMutationKind::OrdinaryWrongAddress:

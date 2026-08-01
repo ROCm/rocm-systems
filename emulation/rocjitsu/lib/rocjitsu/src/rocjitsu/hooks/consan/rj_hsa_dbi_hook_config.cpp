@@ -815,6 +815,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (!parse_bool_env("RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE", false,
                       &config.fault_atomic_weaken_scope))
     return std::nullopt;
+  if (!parse_bool_env("RJ_CONSAN_FAULT_LDS_WRONG_ADDRESS", false, &config.fault_lds_wrong_address))
+    return std::nullopt;
   if (!parse_bool_env("RJ_CONSAN_FAULT_ORDINARY_WEAKEN_ORDER", false,
                       &config.fault_ordinary_weaken_order))
     return std::nullopt;
@@ -838,6 +840,15 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       std::fprintf(stderr,
                    "[rocjitsu-dbi-hooks] RJ_CONSAN_FAULT_ATOMIC_VALID_ADDRESS_DELTA must be a "
                    "positive aligned signed-24-bit byte offset\n");
+      return std::nullopt;
+    }
+  }
+  if (config.fault_lds_wrong_address) {
+    if (std::getenv("RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR") == nullptr ||
+        !parse_u32_env("RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR", 0, &config.fault_lds_address_vgpr) ||
+        config.fault_lds_address_vgpr > 255u) {
+      std::fprintf(stderr, "[rocjitsu-dbi-hooks] RJ_CONSAN_FAULT_LDS_WRONG_ADDRESS requires "
+                           "RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR in the range 0..255\n");
       return std::nullopt;
     }
   }
@@ -933,6 +944,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (!parse_u32_env("RJ_CONSAN_FAULT_BARRIER_INDEX", 0, &config.fault_barrier_index))
     return std::nullopt;
   if (!parse_u32_env("RJ_CONSAN_FAULT_ATOMIC_INDEX", 0, &config.fault_atomic_index))
+    return std::nullopt;
+  if (!parse_u32_env("RJ_CONSAN_FAULT_LDS_INDEX", 0, &config.fault_lds_index))
     return std::nullopt;
   if (!parse_u32_env("RJ_CONSAN_FAULT_ORDINARY_INDEX", 0, &config.fault_ordinary_index))
     return std::nullopt;

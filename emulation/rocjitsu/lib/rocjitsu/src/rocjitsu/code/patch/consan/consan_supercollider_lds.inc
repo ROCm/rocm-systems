@@ -926,10 +926,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       if (!action_words)
         return;
       const uint32_t report_alignment_padding =
-          options.report_buffer_address &&
-                  consan_arch_requires_even_vgpr_tuples(arch)
-              ? 1u
-              : 0u;
+          options.report_buffer_address && consan_arch_requires_even_vgpr_tuples(arch) ? 1u : 0u;
       const Instruction *site_inst = site_context.instruction;
       if (site_inst == nullptr) {
         ++missing_instruction_site_count;
@@ -1456,8 +1453,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   const bool is_large_majority_stranded =
       indirect_island_unreachable_site_count >= kDenseCallMinimumStrandedSites &&
       indirect_island_unreachable_site_count > supported_candidate_count / 2u;
-  if (is_rdna4_family_arch(arch) &&
-      (exceeds_absolute_relay_bound || is_large_majority_stranded)) {
+  if (is_rdna4_family_arch(arch) && (exceeds_absolute_relay_bound || is_large_majority_stranded)) {
     struct DenseSeedGroup {
       uint64_t container_entry_text_offset = 0;
       uint64_t descriptor_file_offset = 0;
@@ -1545,9 +1541,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       ++dense_seed_group_count;
       uint64_t container_begin = 0;
       uint64_t container_size = 0;
-      const auto kernel =
-          std::ranges::find(result.kernels, seed_group.container_entry_text_offset,
-                            &ConSanKernelInfo::entry_text_offset);
+      const auto kernel = std::ranges::find(result.kernels, seed_group.container_entry_text_offset,
+                                            &ConSanKernelInfo::entry_text_offset);
       const auto function =
           std::ranges::find(result.functions, seed_group.container_entry_text_offset,
                             &ConSanFunctionInfo::entry_text_offset);
@@ -3068,6 +3063,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     std::vector<uint32_t> cave_words;
     std::vector<uint32_t> entry_island_words;
     std::array<uint32_t, 2> anchor_words{};
+    std::optional<uint32_t> guest_instruction_word_offset;
     ConSanPatchInfo info;
     bool use_local_cave = false;
     bool use_appended_cave = false;
@@ -3085,11 +3081,12 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   planned_patches.reserve(selected_candidates.size());
   for (const LdsCheckTrapCandidate &candidate : selected_candidates) {
     const ConSanLdsSite &site = *candidate.site;
-    const auto gfx1250_two_address =
-        gfx1250_two_address_expansion_plan(original_bytes, site, arch);
+    const auto gfx1250_two_address = gfx1250_two_address_expansion_plan(original_bytes, site, arch);
+    std::optional<uint32_t> guest_instruction_word_offset;
     auto words = build_lds_check_trap_words(
         original_bytes, site, arch, options, *delay_words, candidate.scratch_vgpr,
-        candidate.vcc_save_sgpr, candidate.gfx1250_vgpr_msb_mode.value_or(0u), result.errors);
+        candidate.vcc_save_sgpr, candidate.gfx1250_vgpr_msb_mode.value_or(0u),
+        guest_instruction_word_offset, result.errors);
     if (!words)
       return;
     const auto spill = selected_spills.sequences.find(&site);
@@ -3138,11 +3135,24 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         wrapped.push_back(*restore_guest);
       }
       if (lds_load_clobbers_address(site)) {
+        if (guest_instruction_word_offset) {
+          if (*guest_instruction_word_offset == 0u) {
+            result.errors.emplace_back(
+                "ConSan LDS check/trap proof lost its preserved-address guest offset");
+            return;
+          }
+          guest_instruction_word_offset = static_cast<uint32_t>(
+              wrapped.size() + 3u + *guest_instruction_word_offset - 1u);
+        }
         wrapped.push_back(*select_low);
         wrapped.push_back(words->front());
         wrapped.push_back(*restore_guest);
         wrapped.insert(wrapped.end(), words->begin() + 1u, words->begin() + guest_prefix_words);
       } else {
+        if (guest_instruction_word_offset) {
+          guest_instruction_word_offset =
+              static_cast<uint32_t>(wrapped.size() + *guest_instruction_word_offset);
+        }
         wrapped.insert(wrapped.end(), words->begin(), words->begin() + guest_prefix_words);
       }
       wrapped.push_back(*select_low);
@@ -3163,6 +3173,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                      spill->second.save_words.end());
       if (scalar_vcc_save_words)
         wrapped.insert(wrapped.end(), scalar_vcc_save_words->begin(), scalar_vcc_save_words->end());
+      if (guest_instruction_word_offset) {
+        guest_instruction_word_offset =
+            static_cast<uint32_t>(wrapped.size() + *guest_instruction_word_offset);
+      }
       wrapped.insert(wrapped.end(), words->begin(), words->end());
       if (scalar_vcc_restore_words)
         wrapped.insert(wrapped.end(), scalar_vcc_restore_words->begin(),
@@ -3174,6 +3188,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       std::vector<uint32_t> wrapped;
       wrapped.reserve(words->size() + 4u);
       wrapped.insert(wrapped.end(), scalar_vcc_save_words->begin(), scalar_vcc_save_words->end());
+      if (guest_instruction_word_offset) {
+        guest_instruction_word_offset =
+            static_cast<uint32_t>(wrapped.size() + *guest_instruction_word_offset);
+      }
       wrapped.insert(wrapped.end(), words->begin(), words->end());
       wrapped.insert(wrapped.end(), scalar_vcc_restore_words->begin(),
                      scalar_vcc_restore_words->end());
@@ -3185,6 +3203,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     planned.local_cave = candidate.local_cave;
     planned.entry_island = candidate.entry_island;
     planned.words = std::move(*words);
+    planned.guest_instruction_word_offset = guest_instruction_word_offset;
     planned.use_local_cave = candidate.use_local_cave;
     planned.use_appended_cave = candidate.use_appended_cave;
     planned.descriptor_file_offset = candidate.descriptor_file_offset;
@@ -3399,6 +3418,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       planned.info.trampoline_size =
           static_cast<uint32_t>(planned.cave_words.size() * sizeof(uint32_t) +
                                 planned.trailing_relay_offsets.size() * sizeof(uint32_t));
+      if (planned.guest_instruction_word_offset) {
+        planned.info.relocated_guest_instruction_offset =
+            trampoline_text_offset +
+            *planned.guest_instruction_word_offset * sizeof(uint32_t);
+      }
     } else {
       const uint64_t patch_bytes = static_cast<uint64_t>(planned.words.size() * sizeof(uint32_t));
       if (site.file_offset > original_bytes.size() ||
@@ -3409,6 +3433,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       planned.info.trampoline_offset = site.text_offset + site.size;
       planned.info.original_size = static_cast<uint32_t>(patch_bytes);
       planned.info.trampoline_size = 0;
+      if (planned.guest_instruction_word_offset) {
+        planned.info.relocated_guest_instruction_offset =
+            site.text_offset + *planned.guest_instruction_word_offset * sizeof(uint32_t);
+      }
     }
 
     planned_patches.push_back(std::move(planned));

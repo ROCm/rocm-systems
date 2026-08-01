@@ -530,14 +530,18 @@ suspect runs.
 
 ### Fault and perturbation composition
 
-Barrier and atomic fault injection compose with SuperCollider perturbation as a
-staged transaction. ConSan inventories the pristine image and retains the exact
-selected candidate, sequence, anchor, container, and descriptor owner in a
-private internal plan. It validates the mutation, instruments that staged
-image, and then validates the complete pristine-to-output transformation. The
-internal carrier is not a public option and cannot be supplied by host controls.
-If either stage is unsupported or invalid, ConSan rolls back the mutation and
-returns no replacement image.
+Barrier, atomic, and LDS address fault injection compose with instrumentation as
+a staged transaction. ConSan inventories the pristine image and retains the
+exact selected candidate, sequence, anchor, container, and descriptor owner in
+a private internal plan. It validates the mutation, instruments that staged
+image, and then validates the complete pristine-to-output transformation. For
+an LDS address rewrite, each engine records the final relocated guest offset;
+the proof decodes those bytes and requires that only the address VGPR changed.
+Forms that are rebuilt as multiple instructions, currently gfx1250 two-address
+DS accesses, are not advertised for this fault family. The internal carrier is
+not a public option and cannot be supplied by host controls. If either stage is
+unsupported or invalid, ConSan rolls back the mutation and returns no
+replacement image.
 
 Barrier moves translate the selected edge into the owned whole-pair trampoline;
 barrier drops fail closed if they destroy that edge. Atomic address and scope

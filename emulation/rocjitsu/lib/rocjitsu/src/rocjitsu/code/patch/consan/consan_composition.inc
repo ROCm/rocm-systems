@@ -330,6 +330,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
        options.fault_atomic_weaken_scope) &&
       result.errors.empty())
     try_apply_atomic_fault_patch(code_object, arch, options, result);
+  if (options.fault_lds_wrong_address && result.errors.empty())
+    try_apply_lds_fault_patch(code_object, arch, options, result);
   if ((options.fault_ordinary_wrong_address || options.fault_ordinary_weaken_order ||
        options.fault_ordinary_weaken_scope) &&
       result.errors.empty())
@@ -351,12 +353,13 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     std::optional<ConSanPristineMutationInventory> pristine_inventory = std::nullopt) {
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
-  const bool has_fault =
-      options.fault_drop_barrier || options.fault_move_barrier ||
-      options.fault_mutate_barrier_id_scope || options.fault_mutate_barrier_participants ||
-      options.fault_atomic_wrong_address || options.fault_atomic_weaken_order ||
-      options.fault_atomic_weaken_scope || options.fault_ordinary_wrong_address ||
-      options.fault_ordinary_weaken_order || options.fault_ordinary_weaken_scope;
+  const bool has_fault = options.fault_drop_barrier || options.fault_move_barrier ||
+                         options.fault_mutate_barrier_id_scope ||
+                         options.fault_mutate_barrier_participants ||
+                         options.fault_atomic_wrong_address || options.fault_atomic_weaken_order ||
+                         options.fault_atomic_weaken_scope || options.fault_lds_wrong_address ||
+                         options.fault_ordinary_wrong_address ||
+                         options.fault_ordinary_weaken_order || options.fault_ordinary_weaken_scope;
   const bool has_perturbation = options.sc_perturb_kind != ConSanPerturbationKind::None;
   const bool has_atomic_fault = options.fault_atomic_wrong_address ||
                                 options.fault_atomic_weaken_order ||
@@ -465,6 +468,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     instrument_options.fault_atomic_wrong_address = false;
     instrument_options.fault_atomic_weaken_order = false;
     instrument_options.fault_atomic_weaken_scope = false;
+    instrument_options.fault_lds_wrong_address = false;
     instrument_options.fault_ordinary_wrong_address = false;
     instrument_options.fault_ordinary_weaken_order = false;
     instrument_options.fault_ordinary_weaken_scope = false;

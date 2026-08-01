@@ -6,6 +6,27 @@
 namespace rocjitsu {
 namespace {
 
+std::vector<uint8_t> make_lds_address_fault_code_object(rj_code_arch_t arch) {
+  const auto access =
+      instrumentation::build_ds_store_b32(/*vaddr=*/2u, /*vdata=*/3u, /*byte_offset=*/4u, arch);
+  if (!access)
+    return {};
+  std::vector<uint32_t> words(access->begin(), access->end());
+  words.push_back(build_s_endpgm(arch));
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return make_cdna3_lds_code_object(words, "lds_address_fault");
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return make_cdna4_lds_code_object(words, "lds_address_fault");
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return make_rdna4_lds_code_object(words, "lds_address_fault");
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return make_gfx1250_code_object(words, "lds_address_fault");
+  default:
+    return {};
+  }
+}
+
 TEST(ConSan, FaultInventoryProvesDirectSharedHelperOwnersAndFiltersExactDispatch) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.helper_has_ordered_atomic = true;
@@ -139,6 +160,199 @@ TEST(ConSan, FaultMutationCardinalityExcludesRetiredThOrderMutation) {
   EXPECT_EQ(guarded.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_EQ(guarded.requested_fault_mutations, 2u);
   EXPECT_EQ(guarded.applied_fault_mutations, 2u);
+}
+
+TEST(ConSan, LdsAddressFaultInventoryAndExactMutationAreTargetNeutral) {
+  constexpr std::array targets = {
+      ROCJITSU_CODE_ARCH_CDNA3,
+      ROCJITSU_CODE_ARCH_CDNA4,
+      ROCJITSU_CODE_ARCH_RDNA4,
+      ROCJITSU_CODE_ARCH_GFX1250,
+  };
+  for (rj_code_arch_t arch : targets) {
+    SCOPED_TRACE(static_cast<uint32_t>(arch));
+    const std::vector<uint8_t> bytes = make_lds_address_fault_code_object(arch);
+    ASSERT_FALSE(bytes.empty());
+
+    ConSanOptions inventory_options;
+    inventory_options.flavor = ConSanFlavor::SuperCollider;
+    inventory_options.probe_lds_check_trap = true;
+    inventory_options.scratch_vgpr = 8u;
+    inventory_options.delay_nops = 1u;
+    inventory_options.fault_lds_wrong_address = true;
+    inventory_options.fault_lds_address_vgpr = 6u;
+    inventory_options.fault_dry_run = true;
+    const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+    const auto site = std::ranges::find(inventory.fault_sites, ConSanFaultSiteKind::LdsAccess,
+                                        &ConSanFaultSite::kind);
+    ASSERT_NE(site, inventory.fault_sites.end());
+    EXPECT_EQ(site->address_vgpr, 2u);
+    EXPECT_EQ(site->semantic_role, "lds-write");
+    ASSERT_EQ(site->execution_owners.size(), 1u);
+    ASSERT_EQ(inventory.fault_plans.size(), 1u);
+    EXPECT_EQ(inventory.fault_plans.front().kind, ConSanFaultMutationKind::LdsWrongAddress);
+    EXPECT_EQ(inventory.fault_plans.front().primary_identity, site->identity);
+
+    ConSanOptions live_options = inventory_options;
+    live_options.fault_dry_run = false;
+    live_options.fault_require_exactly_one = true;
+    live_options.fault_site_identity = site->identity;
+    const ConSanResult result = try_patch_consan(bytes, live_options);
+    ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+        << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
+    EXPECT_EQ(result.requested_fault_mutations, 1u);
+    EXPECT_EQ(result.planned_fault_mutations, 1u);
+    EXPECT_EQ(result.applied_fault_mutations, 1u);
+    EXPECT_EQ(result.applied_fault_logical_identity, site->identity);
+    const auto mutation = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+      return patch.phase == ConSanPatchPhase::Mutation &&
+             patch.kind == ConSanPatchKind::InlineLdsAddressRewrite;
+    });
+    ASSERT_NE(mutation, result.patches.end());
+    EXPECT_EQ(mutation->fault_primary_identity, site->identity);
+    EXPECT_EQ(mutation->fault_original_address_vgpr, 2u);
+    EXPECT_EQ(mutation->fault_target_address_vgpr, 6u);
+    EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
+  }
+}
+
+TEST(ConSan, LdsAddressFaultRejectsSameRegisterAndFinalProofRejectsOtherFieldDrift) {
+  const std::vector<uint8_t> bytes = make_lds_address_fault_code_object(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_FALSE(bytes.empty());
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 8u;
+  options.delay_nops = 1u;
+  options.fault_lds_wrong_address = true;
+  options.fault_lds_address_vgpr = 2u;
+  options.fault_require_exactly_one = true;
+  const ConSanResult rejected = try_patch_consan(bytes, options);
+  EXPECT_EQ(rejected.outcome, ConSanTransformOutcome::Invalid);
+  EXPECT_EQ(rejected.applied_fault_mutations, 0u);
+  EXPECT_TRUE(std::ranges::any_of(rejected.errors, [](const std::string &error) {
+    return error.find("requires a distinct 8-bit replacement VGPR") != std::string::npos;
+  }));
+
+  options.fault_lds_address_vgpr = 6u;
+  const ConSanResult valid = try_patch_consan(bytes, options);
+  ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(valid.errors);
+  ASSERT_EQ(valid.text_sections.size(), 1u);
+  const auto mutation = std::ranges::find_if(valid.patches, [](const ConSanPatchInfo &patch) {
+    return patch.phase == ConSanPatchPhase::Mutation &&
+           patch.kind == ConSanPatchKind::InlineLdsAddressRewrite;
+  });
+  ASSERT_NE(mutation, valid.patches.end());
+  const auto instrumentation_patch =
+      std::ranges::find_if(valid.patches, [&](const ConSanPatchInfo &patch) {
+        return patch.phase == ConSanPatchPhase::Instrumentation &&
+               patch.anchor_offset == mutation->anchor_offset &&
+               patch.relocated_guest_instruction_offset.has_value();
+      });
+  ASSERT_NE(instrumentation_patch, valid.patches.end());
+
+  ConSanResult corrupted = valid;
+  const uint64_t word1_file_offset = valid.text_sections.front().file_offset +
+                                     *instrumentation_patch->relocated_guest_instruction_offset +
+                                     sizeof(uint32_t);
+  uint32_t word1 = 0;
+  std::memcpy(&word1, corrupted.elf_bytes.data() + word1_file_offset, sizeof(word1));
+  word1 ^= 1u << 8u;
+  std::memcpy(corrupted.elf_bytes.data() + word1_file_offset, &word1, sizeof(word1));
+  const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
+  EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {
+    return error.find("fields other than the selected LDS address VGPR") != std::string::npos;
+  })) << testing::PrintToString(errors);
+}
+
+TEST(ConSan, LdsAddressFaultRequiresExplicitAllocatedReplacement) {
+  const auto access = instrumentation::build_ds_store_b32(
+      /*vaddr=*/2u, /*vdata=*/3u, /*byte_offset=*/4u, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(access);
+  std::vector<uint32_t> words(access->begin(), access->end());
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(words, "lds_address_allocation", /*vgpr_granulated=*/0u);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.fault_lds_wrong_address = true;
+  options.fault_require_exactly_one = true;
+
+  const ConSanResult missing = try_patch_consan(bytes, options);
+  EXPECT_EQ(missing.outcome, ConSanTransformOutcome::Invalid);
+  EXPECT_TRUE(std::ranges::any_of(missing.errors, [](const std::string &error) {
+    return error.find("requires an explicit replacement VGPR") != std::string::npos;
+  })) << testing::PrintToString(missing.errors);
+
+  // A zero-granulated RDNA4 wave64 descriptor allocates v0..v3. The boundary
+  // register v4 must be rejected rather than read as undefined input.
+  options.fault_lds_address_vgpr = 4u;
+  const ConSanResult outside_allocation = try_patch_consan(bytes, options);
+  EXPECT_EQ(outside_allocation.outcome, ConSanTransformOutcome::Invalid);
+  EXPECT_EQ(outside_allocation.applied_fault_mutations, 0u);
+  EXPECT_TRUE(std::ranges::any_of(outside_allocation.errors, [](const std::string &error) {
+    return error.find("outside an execution owner's allocated VGPR window") != std::string::npos;
+  })) << testing::PrintToString(outside_allocation.errors);
+}
+
+TEST(ConSan, Gfx1250TwoAddressLdsAccessIsNotAdvertisedForExactAddressRewrite) {
+  constexpr auto load =
+      gfx1250::build_vds(gfx1250::kDsLoad2addrStride64B32Vds, {.addr = 0, .vdst = 1});
+  const std::array<uint32_t, 3> words = {load[0], load[1],
+                                         build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+  const std::vector<uint8_t> bytes = make_gfx1250_code_object(words, "two_address_fault_inventory");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.fault_lds_wrong_address = true;
+  options.fault_lds_address_vgpr = 4u;
+  options.fault_dry_run = true;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+  EXPECT_TRUE(std::ranges::none_of(result.fault_sites, [](const ConSanFaultSite &site) {
+    return site.kind == ConSanFaultSiteKind::LdsAccess;
+  }));
+  EXPECT_TRUE(result.fault_plans.empty());
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("found no site for the requested mutation") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+}
+
+TEST(ConSanMoi, LdsAddressFaultComposesWithEveryMoiAccessEngine) {
+  const std::vector<uint8_t> bytes = make_lds_address_fault_code_object(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_FALSE(bytes.empty());
+  constexpr std::array engines = {
+      ConSanMoiEngine::RecordReplay,
+      ConSanMoiEngine::Sampled,
+      ConSanMoiEngine::InlineShadow,
+  };
+  for (ConSanMoiEngine engine : engines) {
+    SCOPED_TRACE(static_cast<uint32_t>(engine));
+    ConSanOptions options = moi_options(engine);
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+    options.max_patches = 4u;
+    options.fault_lds_wrong_address = true;
+    options.fault_lds_address_vgpr = 6u;
+    options.fault_require_exactly_one = true;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+    ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+        << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
+    EXPECT_TRUE(result.staged_composition_validated);
+    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.applied_fault_mutations, 1u);
+    const auto mutation = std::ranges::find(
+        result.patches, ConSanPatchKind::InlineLdsAddressRewrite, &ConSanPatchInfo::kind);
+    ASSERT_NE(mutation, result.patches.end());
+    const auto relocated = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+      return patch.phase == ConSanPatchPhase::Instrumentation &&
+             patch.anchor_offset == mutation->anchor_offset &&
+             patch.relocated_guest_instruction_offset.has_value();
+    });
+    ASSERT_NE(relocated, result.patches.end());
+    EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
+  }
 }
 
 TEST(ConSan, BarrierMutationQualificationSeparatesHostLiveAndTopologyEvidence) {

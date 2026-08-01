@@ -1663,6 +1663,34 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       return std::nullopt;
     return replacement_text.subspan(body_offset, mutation.original_size);
   };
+  const auto composed_lds_bytes =
+      [&](const ConSanPatchInfo &mutation) -> std::optional<std::span<const uint8_t>> {
+    if (!result.staged_composition_validated)
+      return std::nullopt;
+    const ConSanPatchInfo *match = nullptr;
+    for (const ConSanPatchInfo &candidate : result.patches) {
+      if (candidate.phase != ConSanPatchPhase::Instrumentation ||
+          candidate.anchor_offset != mutation.anchor_offset ||
+          !candidate.relocated_guest_instruction_offset)
+        continue;
+      if (match != nullptr)
+        return std::nullopt;
+      match = &candidate;
+    }
+    if (match == nullptr)
+      return std::nullopt;
+    const uint64_t relocated = *match->relocated_guest_instruction_offset;
+    const uint64_t region_begin =
+        match->trampoline_size == 0u ? match->anchor_offset : match->trampoline_offset;
+    const uint64_t region_size =
+        match->trampoline_size == 0u ? match->original_size : match->trampoline_size;
+    if (region_begin > replacement_text.size() ||
+        region_size > replacement_text.size() - region_begin || relocated < region_begin ||
+        relocated > region_begin + region_size ||
+        mutation.original_size > region_begin + region_size - relocated)
+      return std::nullopt;
+    return replacement_text.subspan(relocated, mutation.original_size);
+  };
   const auto composed_inline_barrier = [&](const ConSanPatchInfo &mutation) {
     const ConSanPatchInfo *match = nullptr;
     for (const ConSanPatchInfo &candidate : result.patches) {
@@ -1814,6 +1842,58 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
           after[1] != expected_scope_word || before[2] != after[2]) {
         errors.emplace_back(
             "ConSan mutation proof changed fields other than the exact ordinary load scope");
+      }
+      continue;
+    }
+    if (patch.kind == ConSanPatchKind::InlineLdsAddressRewrite) {
+      ConSanOptions selection;
+      selection.fault_site_identity = patch.fault_primary_identity;
+      const ConSanFaultSite *target = select_fault_site_for_plan(
+          pristine_inventory, selection, ConSanFaultSiteKind::LdsAccess, 0u);
+      const bool identities_match =
+          target != nullptr && !patch.fault_primary_identity.empty() &&
+          patch.fault_primary_identity == target->identity &&
+          result.applied_fault_logical_identity == patch.fault_primary_identity &&
+          patch.owner_descriptor_file_offsets.size() == target->execution_owners.size() &&
+          std::ranges::equal(patch.owner_descriptor_file_offsets, target->execution_owners, {},
+                             std::identity{}, &ConSanExecutionOwner::descriptor_file_offset);
+      if (!identities_match) {
+        errors.emplace_back(
+            "ConSan mutation proof could not rederive the exact LDS access identity and owners");
+        continue;
+      }
+      if (!patch.fault_companion_identity.empty() || !patch.fault_sequence_identity.empty() ||
+          patch.anchor_offset != target->text_offset || patch.original_size != target->size ||
+          patch.original_size != 2u * sizeof(uint32_t) || !target->address_vgpr ||
+          patch.fault_original_address_vgpr != target->address_vgpr ||
+          !patch.fault_target_address_vgpr ||
+          *patch.fault_target_address_vgpr == *target->address_vgpr) {
+        errors.emplace_back("ConSan mutation proof found stale LDS address metadata");
+        continue;
+      }
+      std::array<uint32_t, 2> before{};
+      std::array<uint32_t, 2> after{};
+      std::memcpy(before.data(), original_text.data() + patch.anchor_offset, patch.original_size);
+      std::span<const uint8_t> after_bytes;
+      if (result.staged_composition_validated) {
+        const auto staged = composed_lds_bytes(patch);
+        if (!staged) {
+          errors.emplace_back(
+              "ConSan mutation proof could not locate one exact relocated LDS access");
+          continue;
+        }
+        after_bytes = *staged;
+      } else {
+        after_bytes = replacement_text.subspan(patch.anchor_offset, patch.original_size);
+      }
+      std::memcpy(after.data(), after_bytes.data(), patch.original_size);
+      const bool exact_operand_rewrite = (before[1] & 0xffu) == *target->address_vgpr &&
+                                         before[0] == after[0] &&
+                                         (before[1] & ~0xffu) == (after[1] & ~0xffu) &&
+                                         (after[1] & 0xffu) == *patch.fault_target_address_vgpr;
+      if (!exact_operand_rewrite) {
+        errors.emplace_back(
+            "ConSan mutation proof changed fields other than the selected LDS address VGPR");
       }
       continue;
     }
@@ -2747,8 +2827,8 @@ validate_entry_scalar_backup_semantics(const AmdGpuCodeObject &original,
     std::vector<uint32_t> expected_restore;
     for (uint16_t index = 0; index < patch.entry_scalar_backup_sgpr_count; ++index) {
       const uint16_t sgpr = static_cast<uint16_t>(*patch.entry_scalar_backup_sgpr_base + index);
-      const auto save =
-          instrumentation::build_v_writelane_b32(*patch.entry_scalar_backup_vgpr, sgpr, index, arch);
+      const auto save = instrumentation::build_v_writelane_b32(*patch.entry_scalar_backup_vgpr,
+                                                               sgpr, index, arch);
       const auto restore =
           instrumentation::build_v_readlane_b32(sgpr, *patch.entry_scalar_backup_vgpr, index, arch);
       if (!save || !restore) {
@@ -2882,8 +2962,7 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
       capture_prefix.insert(capture_prefix.end(), successor->begin(), successor->end());
     }
     const uint64_t scalar_backup_prefix_words =
-        patch.entry_scalar_backup_vgpr ? 2u * patch.entry_scalar_backup_sgpr_count
-                                       : 0u;
+        patch.entry_scalar_backup_vgpr ? 2u * patch.entry_scalar_backup_sgpr_count : 0u;
     const uint64_t required_words =
         scalar_backup_prefix_words + capture_prefix.size() +
         2u * (restore_count + patch.dispatch_id_shifted_system_sgpr_count) + reload_words;
@@ -3945,8 +4024,7 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
       if (replacement_encoded_accum_offset != original_encoded_accum_offset) {
         const auto unified_vgpr_count = [](const KernelDescriptor &descriptor) {
           const uint32_t granulated = AMDHSA_BITS_GET(
-              descriptor.compute_pgm_rsrc1,
-              kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+              descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
           constexpr uint32_t kCdnaVgprGranularity = 8u;
           return (granulated + 1u) * kCdnaVgprGranularity;
         };

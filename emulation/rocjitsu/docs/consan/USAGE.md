@@ -360,6 +360,7 @@ Supported mutation families are:
 | Move a barrier | `RJ_CONSAN_FAULT_MOVE_BARRIER=1` | Set the direction and an exact suitable destination identity. |
 | Change barrier ID/scope or participants | `RJ_CONSAN_FAULT_MUTATE_BARRIER_ID_SCOPE=1` or `RJ_CONSAN_FAULT_MUTATE_BARRIER_PARTICIPANTS=1` | Set the exact sequence and target ID/scope, count, or mask required by the selected form. |
 | Change an atomic address | `RJ_CONSAN_FAULT_ATOMIC_WRONG_ADDRESS=1` | Declare a nonzero aligned `RJ_CONSAN_FAULT_ATOMIC_VALID_ADDRESS_DELTA` backed by valid padded storage. |
+| Change an LDS address register | `RJ_CONSAN_FAULT_LDS_WRONG_ADDRESS=1` | Set `RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR` to a distinct, already allocated and workload-initialized VGPR selected from the production kernel. gfx1250 two-address DS forms are excluded until their split relocation has an exact proof. |
 | Weaken atomic ordering or scope | `RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER=1` or `RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE=1` | Order weakening can select `release`, `acquire`, or `any` through `RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE`. |
 | Change an ordinary access | `RJ_CONSAN_FAULT_ORDINARY_WRONG_ADDRESS=1`, `RJ_CONSAN_FAULT_ORDINARY_WEAKEN_ORDER=1`, or `RJ_CONSAN_FAULT_ORDINARY_WEAKEN_SCOPE=1` | Wrong-address injection requires explicitly padded valid storage and its aligned delta. |
 
@@ -367,6 +368,12 @@ Barrier sequence, companion, and destination identities are printed by the
 dry-run inventory when the selected family needs them. If an exact site occurs
 in more than one code-object load, `RJ_CONSAN_FAULT_LOAD_OCCURRENCE=N` selects
 the one-based occurrence for a live exactly-one run.
+
+The LDS wrong-address family rewrites only the decoded DS address operand. It
+does not grow a kernel's VGPR allocation or synthesize a register value: doing
+either would turn a controlled workload mutation into undefined input. The
+replacement must fit every execution owner's descriptor allocation, and a
+checked-in control should record how production code initializes that register.
 
 Live exactly-one mutations are reserved process-wide so concurrent code-object
 loads cannot install the same fault twice. A contender waits up to 30000 ms by

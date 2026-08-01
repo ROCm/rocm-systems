@@ -18,6 +18,13 @@ TENSILE_WRAPPER_ENV = "CONSAN_VALIDATION_TENSILE_WRAPPER"
 ROCJITSU_EXE_ENV = "CONSAN_VALIDATION_ROCJITSU_EXE"
 ROCJITSU_CONFIG_ENV = "CONSAN_VALIDATION_ROCJITSU_CONFIG"
 LLVM_READELF_ENV = "CONSAN_VALIDATION_LLVM_READELF"
+DEFAULT_TARGET = "gfx1250"
+TARGET_CONFIG_NAMES = {
+    "gfx942": "gfx942_cdna3.json",
+    "gfx950": "gfx950_cdna4.json",
+    "gfx1201": "gfx1201_r9700.json",
+    "gfx1250": "gfx1250.json",
+}
 
 
 @dataclass(frozen=True)
@@ -67,7 +74,9 @@ def _rocm_sdk_root(workspace: Path) -> Path | None:
     return Path(root) if completed.returncode == 0 and root else None
 
 
-def resolve_tensile_validation_paths(workspace: Path) -> TensileValidationPaths:
+def resolve_tensile_validation_paths(
+    workspace: Path, target: str = DEFAULT_TARGET
+) -> TensileValidationPaths:
     """Resolves one coherent local Tensile, ROCm, and RocJITsu toolchain."""
     workspace = workspace.resolve()
     tensilelite = _configured_path(TENSILELITE_ROOT_ENV)
@@ -107,14 +116,23 @@ def resolve_tensile_validation_paths(workspace: Path) -> TensileValidationPaths:
             ),
             directory=False,
         )
-    rocjitsu_config = _configured_path(ROCJITSU_CONFIG_ENV) or (
-        workspace
-        / "rocm-systems"
-        / "emulation"
-        / "rocjitsu"
-        / "configs"
-        / "gfx1250.json"
-    )
+    rocjitsu_config = _configured_path(ROCJITSU_CONFIG_ENV)
+    if rocjitsu_config is None:
+        try:
+            config_name = TARGET_CONFIG_NAMES[target]
+        except KeyError as error:
+            supported = ", ".join(sorted(TARGET_CONFIG_NAMES))
+            raise ValueError(
+                f"target {target!r} has no default RocJITsu config; supported targets: {supported}"
+            ) from error
+        rocjitsu_config = (
+            workspace
+            / "rocm-systems"
+            / "emulation"
+            / "rocjitsu"
+            / "configs"
+            / config_name
+        )
     llvm_readelf = _configured_path(LLVM_READELF_ENV)
     if llvm_readelf is None:
         on_path = shutil.which("llvm-readelf")

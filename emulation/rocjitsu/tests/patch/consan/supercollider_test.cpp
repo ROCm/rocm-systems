@@ -3275,7 +3275,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250B96VdsLoadInPlace) {
   EXPECT_EQ(rewritten_words[5], duplicate[1]);
 }
 
-TEST(ConSan, ProbeLdsCheckTrapModeSpillsLiveGfx1250ScratchWindow) {
+TEST(ConSan, LdsAddressFaultTracksGuestAfterGfx1250PrivateSpillPrologue) {
   constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> text_words = {load[0], load[1]};
   text_words.insert(text_words.end(), 24u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
@@ -3290,6 +3290,9 @@ TEST(ConSan, ProbeLdsCheckTrapModeSpillsLiveGfx1250ScratchWindow) {
   options.flavor = ConSanFlavor::SuperCollider;
   options.probe_lds_check_trap = true;
   options.delay_nops = 1;
+  options.fault_lds_wrong_address = true;
+  options.fault_lds_address_vgpr = 3u;
+  options.fault_require_exactly_one = true;
 
   const auto result = try_patch_consan(bytes, options);
 
@@ -3304,13 +3307,16 @@ TEST(ConSan, ProbeLdsCheckTrapModeSpillsLiveGfx1250ScratchWindow) {
   ASSERT_TRUE(patch->scratch_vgpr);
   EXPECT_EQ(*patch->scratch_vgpr, 0u);
   EXPECT_TRUE(result.final_validation_passed);
+  ASSERT_TRUE(patch->relocated_guest_instruction_offset);
+  EXPECT_GT(*patch->relocated_guest_instruction_offset, patch->trampoline_offset);
+  EXPECT_EQ(result.applied_fault_mutations, 1u);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 1u);
   EXPECT_EQ(patch->owner_descriptor_file_offsets.front(),
-            patched.kernels().front().descriptor_file_offset);
+            result.kernels.front().descriptor_file_offset);
   KD descriptor{};
   std::memcpy(&descriptor,
               result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
@@ -3319,6 +3325,53 @@ TEST(ConSan, ProbeLdsCheckTrapModeSpillsLiveGfx1250ScratchWindow) {
   EXPECT_EQ(
       AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT),
       1u);
+}
+
+TEST(ConSan, Gfx1250BankedLdsRelocationTracksGuestAfterScalarSpillPrologue) {
+  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr uint32_t kSelectGuestVgprBank = 0xBF860001u;
+  std::vector<uint32_t> text_words = {kSelectGuestVgprBank, load[0], load[1]};
+  for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+    text_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "gfx1250_banked_lds_scalar_spill");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.delay_mode = ConSanDelayMode::SleepVar;
+  options.delay_nops = 1u;
+  options.delay_var_ssrc = 0u;
+  options.scratch_vgpr = 3u;
+  options.fault_lds_wrong_address = true;
+  options.fault_lds_address_vgpr = 8u;
+  options.fault_require_exactly_one = true;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
+    return candidate.phase == ConSanPatchPhase::Instrumentation &&
+           candidate.anchor_offset == sizeof(uint32_t);
+  });
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.patches) << "\n"
+                                         << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(patch->scalar_vcc_spill_vgpr);
+  ASSERT_TRUE(patch->relocated_guest_instruction_offset);
+  EXPECT_GT(*patch->relocated_guest_instruction_offset, patch->trampoline_offset);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  std::array<uint32_t, 2> relocated{};
+  std::memcpy(relocated.data(),
+              patched.text_sections().front()->data() + *patch->relocated_guest_instruction_offset,
+              sizeof(relocated));
+  constexpr auto expected = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 8, .vdst = 1});
+  EXPECT_EQ(relocated, expected);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250VdsStoreInPlace) {

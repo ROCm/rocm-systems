@@ -100,6 +100,7 @@ enum class ConSanPatchKind : uint8_t {
   InlineAtomicAddressRewrite,
   InlineAtomicOrderRewrite,
   InlineAtomicScopeRewrite,
+  InlineLdsAddressRewrite,
   InlineOrdinaryAddressRewrite,
   InlineOrdinaryOrderRewrite,
   InlineOrdinaryScopeRewrite,
@@ -567,4 +568,9 @@ struct ConSanPatchInfo {
   std::string fault_primary_identity;
   std::string fault_companion_identity;
   std::string fault_sequence_identity;
+  /// Decoder-derived source and explicitly requested replacement operands for
+  /// an LDS address mutation. Final validation re-derives the source from the
+  /// pristine object and proves that no other instruction field changed.
+  std::optional<uint16_t> fault_original_address_vgpr;
+  std::optional<uint16_t> fault_target_address_vgpr;
 };

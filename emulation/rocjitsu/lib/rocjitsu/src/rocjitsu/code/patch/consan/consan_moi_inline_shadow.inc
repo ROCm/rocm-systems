@@ -1656,6 +1656,14 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                                      result.errors, body_options);
         if (!cave_words)
           return;
+        const auto insert_deferred_guest = [&](size_t word_offset) {
+          if (deferred_guest_words.empty())
+            return;
+          info.relocated_guest_instruction_offset =
+              cave_text_offset + word_offset * sizeof(uint32_t);
+          cave_words->insert(cave_words->begin() + static_cast<ptrdiff_t>(word_offset),
+                             deferred_guest_words.begin(), deferred_guest_words.end());
+        };
         // An anchor-resident indirect island may displace instructions after
         // the memory access. Those instructions are the access's continuation
         // and must remain after the deferred guest operation. In particular,
@@ -1700,8 +1708,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             return;
           }
           cave_words->front() = *skip_empty_wave;
-          cave_words->insert(cave_words->end(), deferred_guest_words.begin(),
-                             deferred_guest_words.end());
+          insert_deferred_guest(cave_words->size());
           cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
                              displaced_tail_words.end());
           if (cave_words->size() * sizeof(uint32_t) != planned_patch.placement.body_size) {
@@ -1723,8 +1730,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           cave_words->push_back(build_s_branch(*ret, arch));
         } else if (planned_patch.dense_call_anchor) {
           if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
-            cave_words->insert(cave_words->end(), deferred_guest_words.begin(),
-                               deferred_guest_words.end());
+            insert_deferred_guest(cave_words->size());
             cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
                                displaced_tail_words.end());
             const uint16_t call_return_sgpr =
@@ -1752,8 +1758,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
               return;
             }
             cave_words->insert(cave_words->end() - 1, *wait_pc);
-            cave_words->insert(cave_words->end() - 1, deferred_guest_words.begin(),
-                               deferred_guest_words.end());
+            insert_deferred_guest(cave_words->size() - 1u);
             cave_words->insert(cave_words->end() - 1, displaced_tail_words.begin(),
                                displaced_tail_words.end());
           }
@@ -1779,8 +1784,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             return;
           }
           cave_words->insert(cave_words->end() - 1, *wait_pc);
-          cave_words->insert(cave_words->end() - 1, deferred_guest_words.begin(),
-                             deferred_guest_words.end());
+          insert_deferred_guest(cave_words->size() - 1u);
           cave_words->insert(cave_words->end() - 1, displaced_tail_words.begin(),
                              displaced_tail_words.end());
         } else {
@@ -1791,8 +1795,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                 "ConSan MOI inline-shadow probe appended cave return is out of range");
             return;
           }
-          cave_words->insert(cave_words->end(), deferred_guest_words.begin(),
-                             deferred_guest_words.end());
+          insert_deferred_guest(cave_words->size());
           cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
                              displaced_tail_words.end());
           cave_words->push_back(build_s_branch(*ret, arch));
@@ -1818,6 +1821,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         info.trampoline_offset = candidate.text_offset + candidate.size;
         info.original_size = static_cast<uint32_t>(patch_bytes);
         info.trampoline_size = 0;
+        if (planned_patch.guest_instruction_word_count != 0u &&
+            planned_patch.guest_instruction_word_count <= words->size()) {
+          info.relocated_guest_instruction_offset =
+              candidate.text_offset +
+              (words->size() - planned_patch.guest_instruction_word_count) * sizeof(uint32_t);
+        }
       }
       patches.push_back(info);
       if (planned_patch.branch_only_route) {

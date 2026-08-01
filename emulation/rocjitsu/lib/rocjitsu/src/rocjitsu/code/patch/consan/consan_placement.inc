@@ -522,12 +522,12 @@ two_address_lds_offset_scale_bytes(const ConSanLdsSite &site) {
       site.mnemonic == "ds_read2_b64" || site.mnemonic == "ds_write2_b64")
     return 8u;
   if (site.mnemonic == "ds_load_2addr_stride64_b32" ||
-      site.mnemonic == "ds_store_2addr_stride64_b32" ||
-      site.mnemonic == "ds_read2st64_b32" || site.mnemonic == "ds_write2st64_b32")
+      site.mnemonic == "ds_store_2addr_stride64_b32" || site.mnemonic == "ds_read2st64_b32" ||
+      site.mnemonic == "ds_write2st64_b32")
     return 256u;
   if (site.mnemonic == "ds_load_2addr_stride64_b64" ||
-      site.mnemonic == "ds_store_2addr_stride64_b64" ||
-      site.mnemonic == "ds_read2st64_b64" || site.mnemonic == "ds_write2st64_b64")
+      site.mnemonic == "ds_store_2addr_stride64_b64" || site.mnemonic == "ds_read2st64_b64" ||
+      site.mnemonic == "ds_write2st64_b64")
     return 512u;
   return std::nullopt;
 }
@@ -590,8 +590,8 @@ two_address_lds_byte_offsets(const ConSanLdsSite &site, uint32_t word0) {
   return instrumentation::is_cdna_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250;
 }
 
-[[nodiscard]] bool lds_scratch_tuple_base_is_valid(const ConSanLdsSite &site,
-                                                   rj_code_arch_t arch, uint16_t candidate) {
+[[nodiscard]] bool lds_scratch_tuple_base_is_valid(const ConSanLdsSite &site, rj_code_arch_t arch,
+                                                   uint16_t candidate) {
   const auto dword_count = lds_dword_count(site);
   if (!dword_count || *dword_count <= 1u || !consan_arch_requires_even_vgpr_tuples(arch))
     return true;
@@ -676,12 +676,10 @@ required_descriptor_vgpr_allocation_for_scratch(const ConSanLdsSite &site, uint1
   return static_cast<uint16_t>(required_count);
 }
 
-[[nodiscard]] std::optional<uint16_t>
-find_liveness_scratch_vgpr(const ConSanLdsSite &site, const Instruction *inst,
-                           const LivenessAnalysis *liveness,
-                           std::optional<uint16_t> min_auto_scratch_vgpr,
-                           std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs,
-                           rj_code_arch_t arch) {
+[[nodiscard]] std::optional<uint16_t> find_liveness_scratch_vgpr(
+    const ConSanLdsSite &site, const Instruction *inst, const LivenessAnalysis *liveness,
+    std::optional<uint16_t> min_auto_scratch_vgpr, std::optional<uint16_t> max_auto_scratch_vgpr,
+    uint16_t required_vgprs, rj_code_arch_t arch) {
   if (inst == nullptr || liveness == nullptr)
     return std::nullopt;
 
@@ -708,12 +706,10 @@ find_liveness_scratch_vgpr(const ConSanLdsSite &site, const Instruction *inst,
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<uint16_t>
-choose_scratch_vgpr(const ConSanLdsSite &site, const ConSanOptions &options,
-                    const Instruction *inst, const LivenessAnalysis *liveness,
-                    std::optional<uint16_t> min_auto_scratch_vgpr,
-                    std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs,
-                    rj_code_arch_t arch) {
+[[nodiscard]] std::optional<uint16_t> choose_scratch_vgpr(
+    const ConSanLdsSite &site, const ConSanOptions &options, const Instruction *inst,
+    const LivenessAnalysis *liveness, std::optional<uint16_t> min_auto_scratch_vgpr,
+    std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs, rj_code_arch_t arch) {
   if (options.scratch_vgpr) {
     if (static_cast<uint32_t>(*options.scratch_vgpr) + required_vgprs <= 256 &&
         lds_scratch_tuple_base_is_valid(site, arch, *options.scratch_vgpr) &&
@@ -965,6 +961,16 @@ void append_decoded_operand(std::string &summary, std::string_view name,
   append_decoded_operand(result, "raw_soffset", site.raw_soffset);
   if (site.returns_old_value)
     append_decoded_operand(result, "returns_old", *site.returns_old_value ? 1 : 0);
+  return result.empty() ? "-" : result;
+}
+
+[[nodiscard]] std::string lds_decoded_operands(const ConSanLdsSite &site) {
+  std::string result;
+  append_decoded_operand(result, "dst_vgpr", site.dst_vgpr);
+  append_decoded_operand(result, "dst_accvgpr", site.dst_accvgpr);
+  append_decoded_operand(result, "addr_vgpr", site.addr_vgpr);
+  append_decoded_operand(result, "data_vgpr", site.data_vgpr);
+  append_decoded_operand(result, "second_data_vgpr", site.second_data_vgpr);
   return result.empty() ? "-" : result;
 }
 

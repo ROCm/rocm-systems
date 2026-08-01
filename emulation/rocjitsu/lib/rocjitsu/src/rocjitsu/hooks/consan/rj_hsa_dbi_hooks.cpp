@@ -3036,10 +3036,12 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     patch_options.fault_atomic_weaken_order = config->fault_atomic_weaken_order;
     patch_options.fault_atomic_order_edge = config->fault_atomic_order_edge;
     patch_options.fault_atomic_weaken_scope = config->fault_atomic_weaken_scope;
+    patch_options.fault_lds_wrong_address = config->fault_lds_wrong_address;
     patch_options.fault_ordinary_wrong_address = config->fault_ordinary_wrong_address;
     patch_options.fault_ordinary_weaken_order = config->fault_ordinary_weaken_order;
     patch_options.fault_ordinary_weaken_scope = config->fault_ordinary_weaken_scope;
     patch_options.fault_atomic_address_delta = config->fault_atomic_address_delta;
+    patch_options.fault_lds_address_vgpr = config->fault_lds_address_vgpr;
     patch_options.fault_ordinary_address_delta = config->fault_ordinary_address_delta;
     patch_options.fault_dry_run = config->fault_dry_run;
     // Exact fault selection is process-scoped in the HSA hook: workloads can
@@ -3069,6 +3071,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     patch_options.test_kernel_name_filter = config->test_kernel_name_filter;
     patch_options.fault_barrier_index = config->fault_barrier_index;
     patch_options.fault_atomic_index = config->fault_atomic_index;
+    patch_options.fault_lds_index = config->fault_lds_index;
     patch_options.fault_ordinary_index = config->fault_ordinary_index;
     patch_options.fault_site_identity = config->fault_site_identity;
     patch_options.delay_mode = config->delay_mode;

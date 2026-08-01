@@ -282,6 +282,7 @@ void mark_participant_mutation_unsupported(ConSanResult &result, std::string_vie
          static_cast<size_t>(options.fault_atomic_wrong_address) +
          static_cast<size_t>(options.fault_atomic_weaken_order) +
          static_cast<size_t>(options.fault_atomic_weaken_scope) +
+         static_cast<size_t>(options.fault_lds_wrong_address) +
          static_cast<size_t>(options.fault_ordinary_wrong_address) +
          static_cast<size_t>(options.fault_ordinary_weaken_order) +
          static_cast<size_t>(options.fault_ordinary_weaken_scope);
@@ -317,6 +318,7 @@ void mark_participant_mutation_unsupported(ConSanResult &result, std::string_vie
       }
       break;
     case ConSanPatchKind::InlineAtomicScopeRewrite:
+    case ConSanPatchKind::InlineLdsAddressRewrite:
     case ConSanPatchKind::InlineOrdinaryAddressRewrite:
     case ConSanPatchKind::InlineOrdinaryOrderRewrite:
     case ConSanPatchKind::InlineOrdinaryScopeRewrite:
@@ -761,6 +763,11 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
     } else {
       append_primary(ConSanFaultMutationKind::AtomicWeakenScope, atomic);
     }
+  }
+  if (options.fault_lds_wrong_address) {
+    const ConSanFaultSite *lds = select_fault_site_for_plan(
+        result, options, ConSanFaultSiteKind::LdsAccess, options.fault_lds_index);
+    append_primary(ConSanFaultMutationKind::LdsWrongAddress, lds);
   }
   if (options.fault_ordinary_wrong_address || options.fault_ordinary_weaken_order ||
       options.fault_ordinary_weaken_scope) {
@@ -1823,6 +1830,103 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
   }
 }
 
+void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
+                               const ConSanOptions &options, ConSanResult &result) {
+  if (!lds_address_fault_arch_supported(arch)) {
+    result.errors.emplace_back("ConSan LDS address fault is unsupported for the selected target");
+    return;
+  }
+  const ConSanFaultSite *selected = select_fault_site_for_plan(
+      result, options, ConSanFaultSiteKind::LdsAccess, options.fault_lds_index);
+  if (selected == nullptr) {
+    if (!options.fault_site_identity.empty()) {
+      result.warnings.emplace_back("ConSan LDS fault found no site with exact identity '" +
+                                   options.fault_site_identity + "'");
+    } else {
+      result.warnings.emplace_back("ConSan LDS fault found no supported access at index " +
+                                   std::to_string(options.fault_lds_index));
+    }
+    return;
+  }
+  if (!selected->address_vgpr || selected->size != 2u * sizeof(uint32_t)) {
+    result.errors.emplace_back(
+        "ConSan LDS address fault selected an unsupported decoded instruction shape");
+    return;
+  }
+  if (!options.fault_lds_address_vgpr) {
+    result.errors.emplace_back("ConSan LDS address fault requires an explicit replacement VGPR");
+    return;
+  }
+  const uint16_t target_address_vgpr = *options.fault_lds_address_vgpr;
+  if (target_address_vgpr == *selected->address_vgpr) {
+    result.errors.emplace_back(
+        "ConSan LDS address fault requires a distinct 8-bit replacement VGPR");
+    return;
+  }
+
+  const auto original_bytes = std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(code_object.image_data()), code_object.image_size());
+  if (selected->execution_owners.empty()) {
+    result.errors.emplace_back("ConSan LDS address fault selected an access without an execution owner");
+    return;
+  }
+  const uint32_t address_bank =
+      arch == ROCJITSU_CODE_ARCH_GFX1250
+          ? static_cast<uint32_t>(selected->gfx1250_vgpr_msb_mode.value_or(0u) & 0x3u)
+          : 0u;
+  const uint32_t physical_target_address_vgpr = address_bank * 256u + target_address_vgpr;
+  for (const ConSanExecutionOwner &owner : selected->execution_owners) {
+    const auto allocated =
+        descriptor_vgpr_allocation_count(original_bytes, owner.descriptor_file_offset, arch);
+    if (!allocated) {
+      result.errors.emplace_back(
+          "ConSan LDS address fault could not read an execution-owner descriptor");
+      return;
+    }
+    if (physical_target_address_vgpr >= *allocated) {
+      result.errors.emplace_back("ConSan LDS address fault replacement v" +
+                                 std::to_string(physical_target_address_vgpr) +
+                                 " is outside an execution owner's allocated VGPR window");
+      return;
+    }
+  }
+  if (selected->file_offset > original_bytes.size() ||
+      selected->size > original_bytes.size() - selected->file_offset) {
+    result.errors.emplace_back("ConSan LDS address fault selected an invalid instruction range");
+    return;
+  }
+  if (result.elf_bytes.empty())
+    result.elf_bytes.assign(original_bytes.begin(), original_bytes.end());
+  std::array<uint32_t, 2> words{};
+  std::memcpy(words.data(), result.elf_bytes.data() + selected->file_offset, selected->size);
+  // Every supported target encodes the DS address VGPR in the low byte of
+  // word one. Cross-check the decoder before rewriting that operand alone.
+  if ((words[1] & 0xffu) != *selected->address_vgpr) {
+    result.errors.emplace_back("ConSan LDS address fault found a stale decoded address operand");
+    return;
+  }
+  words[1] = (words[1] & ~0xffu) | target_address_vgpr;
+  std::memcpy(result.elf_bytes.data() + selected->file_offset, words.data(), selected->size);
+
+  ConSanPatchInfo info;
+  info.phase = ConSanPatchPhase::Mutation;
+  info.kind = ConSanPatchKind::InlineLdsAddressRewrite;
+  info.anchor_offset = selected->text_offset;
+  info.trampoline_offset = selected->text_offset;
+  info.original_size = selected->size;
+  info.fault_primary_identity = selected->identity;
+  info.fault_original_address_vgpr = selected->address_vgpr;
+  info.fault_target_address_vgpr = target_address_vgpr;
+  for (const ConSanExecutionOwner &owner : selected->execution_owners)
+    info.owner_descriptor_file_offsets.push_back(owner.descriptor_file_offset);
+  result.patches.push_back(std::move(info));
+  result.applied_fault_logical_identity = selected->identity;
+  result.modified = true;
+  result.warnings.emplace_back("ConSan LDS fault rewrote " + selected->mnemonic +
+                               " address from v" + std::to_string(*selected->address_vgpr) +
+                               " to v" + std::to_string(target_address_vgpr));
+}
+
 void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
                                     const ConSanOptions &options, ConSanResult &result) {
   const auto target = select_ordinary_acquire_mutation_target(result, options);
@@ -2087,11 +2191,11 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
   return std::nullopt;
 }
 
-[[nodiscard]] bool flat_scratch_tuple_base_is_valid(const ConSanFlatSite &site,
-                                                    rj_code_arch_t arch, uint16_t candidate) {
+[[nodiscard]] bool flat_scratch_tuple_base_is_valid(const ConSanFlatSite &site, rj_code_arch_t arch,
+                                                    uint16_t candidate) {
   const auto dword_count = flat_dword_count(site);
-  return !dword_count || *dword_count <= 1u ||
-         !consan_arch_requires_even_vgpr_tuples(arch) || candidate % 2u == 0u;
+  return !dword_count || *dword_count <= 1u || !consan_arch_requires_even_vgpr_tuples(arch) ||
+         candidate % 2u == 0u;
 }
 
 [[nodiscard]] bool is_supported_flat_check_trap_site(const ConSanFlatSite &site,
@@ -2157,12 +2261,10 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
   return *first_after_operands <= 255 ? static_cast<uint16_t>(*first_after_operands) : 256;
 }
 
-[[nodiscard]] std::optional<uint16_t>
-choose_flat_scratch_vgpr(const ConSanFlatSite &site, const ConSanOptions &options,
-                         const Instruction *inst, const LivenessAnalysis *liveness,
-                         std::optional<uint16_t> min_auto_scratch_vgpr,
-                         std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs,
-                         rj_code_arch_t arch) {
+[[nodiscard]] std::optional<uint16_t> choose_flat_scratch_vgpr(
+    const ConSanFlatSite &site, const ConSanOptions &options, const Instruction *inst,
+    const LivenessAnalysis *liveness, std::optional<uint16_t> min_auto_scratch_vgpr,
+    std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs, rj_code_arch_t arch) {
   if (options.scratch_vgpr) {
     if (static_cast<uint32_t>(*options.scratch_vgpr) + required_vgprs <= 256 &&
         flat_scratch_tuple_base_is_valid(site, arch, *options.scratch_vgpr) &&
@@ -2198,12 +2300,12 @@ choose_flat_scratch_vgpr(const ConSanFlatSite &site, const ConSanOptions &option
 /// guest access operands. Liveness is intentionally irrelevant here: the
 /// caller saves and restores the complete selected window through private
 /// memory before using it.
-[[nodiscard]] std::optional<uint16_t>
-choose_flat_spill_scratch_vgpr(const ConSanFlatSite &site, uint16_t allocation_count,
-                               uint16_t required_vgprs, rj_code_arch_t arch) {
-  for (uint32_t candidate = 0;
-       candidate + required_vgprs <= allocation_count &&
-       candidate + required_vgprs <= REGISTER_SET_MAX_VGPRS;
+[[nodiscard]] std::optional<uint16_t> choose_flat_spill_scratch_vgpr(const ConSanFlatSite &site,
+                                                                     uint16_t allocation_count,
+                                                                     uint16_t required_vgprs,
+                                                                     rj_code_arch_t arch) {
+  for (uint32_t candidate = 0; candidate + required_vgprs <= allocation_count &&
+                               candidate + required_vgprs <= REGISTER_SET_MAX_VGPRS;
        ++candidate) {
     if (flat_scratch_tuple_base_is_valid(site, arch, static_cast<uint16_t>(candidate)) &&
         !is_forbidden_flat_scratch_vgpr_run(site, static_cast<uint16_t>(candidate),

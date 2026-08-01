@@ -53,6 +53,7 @@ _MUTATION_PATCH_KINDS = {
     "inline-atomic-address-rewrite",
     "inline-atomic-order-rewrite",
     "inline-atomic-scope-rewrite",
+    "inline-lds-address-rewrite",
 }
 
 _RESOURCE_PLAN_ALTERNATIVE_KINDS = {

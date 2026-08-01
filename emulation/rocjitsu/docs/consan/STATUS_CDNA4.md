@@ -187,6 +187,18 @@ post-fault SuperCollider health run then passes the same exact oracle and
 host-dominated end-to-end timings that include Tensile generation and
 simulator startup; they are not kernel-overhead measurements.
 
+The registered `tensile-gfx950-lds-positive` row is the separate detector-hit
+control. It uses a generated `[64,64,1,129]` BF16 GEMM from rocm-libraries
+`0a323b74932c57d6d1a94af4a009dd7676b8f695`, selects the first target-native
+`ds_write_b128` at kernel-relative PC `0x1344`, and rewrites its address from v2
+to v54. The generated kernel declares 55 ordinary VGPRs and initializes v54
+from v0 before the selected access, so the mutation uses an allocated runtime
+value. The frozen profile policy requires an exact-one installed mutation and a
+failing numerical oracle for every engine; SuperCollider additionally requires
+a detector diagnostic. The checked-in JSON records the regeneration command,
+toolchain version, selector identity, and register basis so a rebuilt kernel
+fails loudly instead of silently reusing stale coordinates.
+
 Artifact paths in this section are relative to the workspace root.  The
 paired clean artifacts and retained fault bundle are:
 
@@ -540,7 +552,7 @@ instrumentation acceptance evidence.
 | RocJitsu test corpus | Local commit `0db836e7bd8c6400b7ffd187d749225899875d7c`; gfx950 enables source-built HIP matmul, HipKittens, HIP Stream-K, and rocBLAS cases and packages the bounded `gfx950_sk_sgemm_streamk` runtime row.  Commits `61b5af0b5ee9ef9221391f5f81550b5e295e7e59` and `46a4c58a7be89b4118c2e3f94081591783d5391a` introduced the Stream-K and Tensile rows, respectively; commits after the earlier `f88d4583022d438ea72fb82c0e89143ccbf61843` snapshot harden Tensile runner provenance and isolation.  No fetched remote ref contains the current commit, so clean remote reproduction requires publishing or transferring it.  The historical pre-generated Tensile artifact tree remains gfx1250-only. |
 | gfx950 Tensile source pool | The 36-YAML pool was surveyed and the bounded Stream-K candidate selected at `rocm-libraries` `c2fafc16393d0ce47a0a5801d827d43f0d3714a4`; the packaged `gfx950_sk_sgemm_streamk` row was reduced from `a8f0845f87ab50adc3dc8d0edd86693cb31065b1`.  The remaining source pool is not part of the validation denominator. |
 | PyTorch discovery | The gfx1250-only thin-wheel mismatch is diagnosed and isolated.  The separate official nightly environment passes `torch.arange` plus all six portable one-repetition exact oracles on gfx950.  Workload-scoped doctor confirms gfx950 numeric dispatch and exact-hook mapping. |
-| Registry boundary | The six portable PyTorch rows and six hip-moi campaign roles are registered validation IDs for gfx950. Seven additional hip-moi binaries are offline simulator prerequisites, not campaign workload IDs. The bounded Tensile and HIP Stream-K rows are external corpus executable denominators, not yet `consan_validation.py` workloads. Remaining source-built rows stay planned expansion until they are built and registered. |
+| Registry boundary | The six portable PyTorch rows, six hip-moi campaign roles, and `tensile-gfx950-lds-positive` are registered validation IDs for gfx950. Seven additional hip-moi binaries are offline simulator prerequisites, not campaign workload IDs. The earlier bounded Tensile Stream-K and HIP Stream-K rows remain external corpus executable denominators. Remaining source-built rows stay planned expansion until they are built and registered. |
 
 ## Implementation evidence
 
@@ -663,6 +675,13 @@ a ConSan detection.
   baseline-before/all-profiles/baseline-after campaign replaces the earlier
   single-baseline quotients with true paired ratios of 1.13x, 1.35x, and
   5.98x.  Every individual row stays below one minute.
+
+- 2026-07-31: Added the registered `tensile-gfx950-lds-positive` detector-hit
+  control for `bd-1w9.43`. A production-derived LDS address mutation makes the
+  exact numerical oracle fail in all four profiles; SuperCollider reports the
+  required diagnostic. The control records exact-one installation and clean
+  pre/post containment, while the reusable implementation validates target,
+  instruction form, execution-owner allocation, and final relocated bytes.
 
 - 2026-07-25: Completed `bd-1w9.9.8` at rocm-libraries `0a323b7493`.
   The general grouped-user-argument loader now retires real non-preloaded

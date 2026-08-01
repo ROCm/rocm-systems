@@ -62,14 +62,17 @@ TEST(ConSanMoi, FaultRetryConfigProjectsOnlyLateBoundMutationState) {
   live.fault_atomic_weaken_order = false;
   live.fault_atomic_order_edge = ConSanAtomicOrderEdge::Acquire;
   live.fault_atomic_weaken_scope = true;
+  live.fault_lds_wrong_address = true;
   live.fault_ordinary_wrong_address = false;
   live.fault_ordinary_weaken_order = true;
   live.fault_ordinary_weaken_scope = false;
   live.fault_atomic_address_delta = 16;
+  live.fault_lds_address_vgpr = 24;
   live.fault_ordinary_address_delta = 32;
   live.fault_require_exactly_one = true;
   live.fault_barrier_index = 3;
   live.fault_atomic_index = 5;
+  live.fault_lds_index = 6;
   live.fault_ordinary_index = 7;
   live.fault_site_identity = "site";
   live.fault_barrier_destination_identity = "destination";
@@ -520,7 +523,9 @@ TEST(ConSanMoi, PristineAutoReportInventoryCoversLiveBarrierMoveComposition) {
   ConSanOptions selection_options;
   selection_options.flavor = ConSanFlavor::SuperCollider;
   const ConSanResult selection = try_patch_consan(bytes, selection_options);
-  ASSERT_EQ(selection.fault_sites.size(), 2u);
+  ASSERT_EQ(std::ranges::count(selection.fault_sites, ConSanFaultSiteKind::Barrier,
+                               &ConSanFaultSite::kind),
+            2u);
   const auto destination = std::ranges::find(selection.barrier_move_destinations, 0u,
                                              &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(destination, selection.barrier_move_destinations.end());
@@ -706,7 +711,9 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.test_kernel_name_filter = "lds_probe";
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  ASSERT_EQ(inventory.fault_sites.size(), 2u);
+  ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
+                               &ConSanFaultSite::kind),
+            2u);
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 16u,
                                              &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
@@ -1033,7 +1040,9 @@ TEST(ConSanMoi, Gfx1250DenseInlineHostPreservesPreappliedBarrierDrop) {
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
   ASSERT_EQ(inventory.sync_sequences.size(), 2u);
-  ASSERT_EQ(inventory.fault_sites.size(), 4u);
+  ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
+                               &ConSanFaultSite::kind),
+            4u);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.scratch_vgpr = 82;
