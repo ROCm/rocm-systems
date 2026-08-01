@@ -448,6 +448,8 @@ std::unordered_map<std::string, FactoryFn> &factories() {
       amdgpu::SdmaPacketDialect sdma_dialect = amdgpu::SdmaPacketDialect::Legacy;
       if (arch == ROCJITSU_CODE_ARCH_GFX1250)
         sdma_dialect = amdgpu::SdmaPacketDialect::Gfx1250;
+      else if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+        sdma_dialect = amdgpu::SdmaPacketDialect::Oss7;
       else if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
                arch == ROCJITSU_CODE_ARCH_RDNA4)
         sdma_dialect = amdgpu::SdmaPacketDialect::Gfx11Plus;

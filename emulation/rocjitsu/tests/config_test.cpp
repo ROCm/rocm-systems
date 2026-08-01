@@ -59,6 +59,7 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   auto *xcd = soc->xcd(0);
   EXPECT_EQ(xcd->num_shader_engines(), 4u);
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 8u);
+  EXPECT_EQ(xcd->command_processor()->sdma_packet_dialect(), amdgpu::SdmaPacketDialect::Oss7);
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {

@@ -2018,9 +2018,10 @@ constexpr uint32_t COPY_LINEAR_FIXED_DWORDS =
 static_assert(COPY_LINEAR_FIXED_DWORDS == 19);
 constexpr uint32_t COPY_LINEAR_INDIRECT_SRC_FLAG = 1u << 20;
 constexpr uint32_t COPY_LINEAR_INDIRECT_DST_FLAG = 1u << 21;
-constexpr uint32_t FENCE_64B_GFX11_PLUS_SIZE = 5;
-constexpr uint32_t POLL_MEM_64B_GFX11_PLUS_SIZE = 8;
-constexpr uint32_t COPY_LINEAR_BROADCAST_FLAG = 1u << 27;
+constexpr uint32_t COPY_LINEAR_SIGNAL_OP_ADD64 = 0x6F;
+constexpr uint32_t COPY_LINEAR_SIGNAL_OP_SUB64 = 0x70;
+constexpr uint32_t FENCE_64B_EXTENDED_SIZE = 5;
+constexpr uint32_t POLL_MEM_64B_EXTENDED_SIZE = 8;
 // NOP_BASE_SIZE intentionally omitted — NOP is handled inline.
 } // namespace sdma
 
@@ -2079,6 +2080,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
 
   uint64_t rpos = read_idx / sizeof(uint32_t);
   uint64_t wpos = write_idx / sizeof(uint32_t);
+  const auto sdma_caps = sdma_packet_capabilities(sdma_packet_dialect_);
 
   auto dw = [&](uint64_t off) -> uint32_t {
     uint64_t addr = queue.ring_base_va + (((rpos + off) & ring_mask) * sizeof(uint32_t));
@@ -2135,24 +2137,25 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       break;
     }
     case sdma::OP_COPY: {
-      if (uses_gfx11_plus_sdma_packets() && sub_op == sdma::SUBOP_COPY_LINEAR &&
+      if (sdma_caps.wait_signal_copy && sub_op == sdma::SUBOP_COPY_LINEAR &&
           ((header & ((1u << 30) | (1u << 31))) ||
-           (uses_gfx1250_sdma_packets() && (header & (sdma::COPY_LINEAR_INDIRECT_SRC_FLAG |
-                                                      sdma::COPY_LINEAR_INDIRECT_DST_FLAG))))) {
-        const bool gfx1250_layout = uses_gfx1250_sdma_packets();
+           (sdma_caps.compact_wait_signal_copy &&
+            (header &
+             (sdma::COPY_LINEAR_INDIRECT_SRC_FLAG | sdma::COPY_LINEAR_INDIRECT_DST_FLAG))))) {
+        const bool compact_layout = sdma_caps.compact_wait_signal_copy;
         const bool has_wait = (header & (1u << 30)) != 0;
         const bool has_signal = (header & (1u << 31)) != 0;
         // projects/rocr-runtime/runtime/hsa-runtime/core/inc/sdma_registers.h
         // defines the gfx1250 packet as a maximum-size layout and explicitly
         // states that disabled WAIT/SIGNAL blocks are absent. Its
         // BuildWaitSignalCopyCommand producer emits the same compact framing.
-        // Preserve the existing fixed 19-DWORD contract for other gfx11+
-        // dialects, where disabled blocks retain their slots.
+        // GFX11/GFX12 and OSS7 use a fixed 19-DWORD layout instead: disabled
+        // blocks retain their reserved slots and COPY stays at DW8.
         const uint32_t copy_base =
-            1 + ((gfx1250_layout && !has_wait) ? 0 : sdma::COPY_LINEAR_WAIT_DWORDS);
+            1 + ((compact_layout && !has_wait) ? 0 : sdma::COPY_LINEAR_WAIT_DWORDS);
         const uint32_t signal_base = copy_base + sdma::COPY_LINEAR_BODY_DWORDS;
         const uint32_t packet_dwords =
-            gfx1250_layout ? signal_base + (has_signal ? sdma::COPY_LINEAR_SIGNAL_DWORDS : 0)
+            compact_layout ? signal_base + (has_signal ? sdma::COPY_LINEAR_SIGNAL_DWORDS : 0)
                            : sdma::COPY_LINEAR_FIXED_DWORDS;
         if (rpos + packet_dwords > wpos) {
           rpos = wpos;
@@ -2178,10 +2181,11 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           }
         }
 
-        int64_t *signal_ptr = nullptr;
+        uint64_t *signal_ptr = nullptr;
         uint64_t signal_addr = 0;
         uint64_t signal_data = 0;
-        bool signal_decrement = false;
+        enum class SignalUpdate { None, Add, Subtract };
+        SignalUpdate signal_update = SignalUpdate::None;
         if (has_signal) {
           uint32_t signal_op = dw(signal_base) & 0x7F;
           signal_addr = (static_cast<uint64_t>(dw(signal_base + 1) & ~0x7u)) |
@@ -2189,12 +2193,18 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           signal_data = static_cast<uint64_t>(dw(signal_base + 3)) |
                         (static_cast<uint64_t>(dw(signal_base + 4)) << 32);
 
-          if (signal_addr > 0x1000 && signal_op == 0x70) {
-            signal_ptr = static_cast<int64_t *>(resolve(signal_addr));
+          if (signal_op == sdma::COPY_LINEAR_SIGNAL_OP_ADD64)
+            signal_update = SignalUpdate::Add;
+          else if (signal_op == sdma::COPY_LINEAR_SIGNAL_OP_SUB64)
+            signal_update = SignalUpdate::Subtract;
+
+          // Preserve the existing behavior for unsupported operations: perform
+          // the copy but leave the signal untouched.
+          if (signal_addr > 0x1000 && signal_update != SignalUpdate::None) {
+            signal_ptr = static_cast<uint64_t *>(resolve(signal_addr));
             if (!signal_ptr) {
               return stop_and_retry_current_packet();
             }
-            signal_decrement = true;
           }
         }
 
@@ -2214,9 +2224,9 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           return resolve(read_gpu_u64(packet_va, queue.process_id));
         };
         const bool indirect_src =
-            gfx1250_layout && (header & sdma::COPY_LINEAR_INDIRECT_SRC_FLAG) != 0;
+            compact_layout && (header & sdma::COPY_LINEAR_INDIRECT_SRC_FLAG) != 0;
         const bool indirect_dst =
-            gfx1250_layout && (header & sdma::COPY_LINEAR_INDIRECT_DST_FLAG) != 0;
+            compact_layout && (header & sdma::COPY_LINEAR_INDIRECT_DST_FLAG) != 0;
         auto *src_ptr = resolve_copy_address(src_va, indirect_src);
         auto *dst_ptr = resolve_copy_address(dst_va, indirect_dst);
         if (!src_ptr || !dst_ptr) {
@@ -2235,9 +2245,12 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         flush_gpu_caches();
         std::memcpy(dst_ptr, src_ptr, count);
 
-        if (signal_decrement) {
-          std::atomic_ref<int64_t>(*signal_ptr)
-              .fetch_sub(static_cast<int64_t>(signal_data), std::memory_order_release);
+        if (signal_ptr) {
+          auto signal = std::atomic_ref<uint64_t>(*signal_ptr);
+          if (signal_update == SignalUpdate::Add)
+            signal.fetch_add(signal_data, std::memory_order_release);
+          else if (signal_update == SignalUpdate::Subtract)
+            signal.fetch_sub(signal_data, std::memory_order_release);
         }
 
         pkt_dwords = packet_dwords;
@@ -2258,11 +2271,10 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       if (!src_ptr || !dst_ptr) {
         return stop_and_retry_current_packet();
       }
-      // GFX11+ COPY_LINEAR uses bit 28 for NPD metadata. The two-destination
-      // broadcast form is marked by bit 27 and extends the packet with DW7/DW8.
-      bool is_broadcast_copy = uses_gfx11_plus_sdma_packets()
-                                   ? (header & sdma::COPY_LINEAR_BROADCAST_FLAG) != 0
-                                   : (header & (1u << 28)) != 0;
+      // GFX11+ and OSS7 COPY_LINEAR use bit 28 for NPD metadata. ROCr's
+      // two-destination producer marks the 9-DWORD broadcast form with the
+      // dialect capability below (bit 27 for both families).
+      const bool is_broadcast_copy = (header & sdma_caps.copy_broadcast_flag) != 0;
       if (is_broadcast_copy) {
         uint64_t dst2_va = static_cast<uint64_t>(dw(7)) | (static_cast<uint64_t>(dw(8)) << 32);
         auto *dst2_ptr = resolve(dst2_va);
@@ -2284,8 +2296,8 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       break;
     }
     case sdma::OP_FENCE: {
-      if (uses_gfx11_plus_sdma_packets() && sub_op == sdma::SUBOP_FENCE_64B) {
-        if (rpos + sdma::FENCE_64B_GFX11_PLUS_SIZE > wpos) {
+      if (sdma_caps.fence64 && sub_op == sdma::SUBOP_FENCE_64B) {
+        if (rpos + sdma::FENCE_64B_EXTENDED_SIZE > wpos) {
           rpos = wpos;
           continue;
         }
@@ -2300,7 +2312,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           flush_gpu_caches();
           std::atomic_ref<uint64_t>(*ptr).store(data, std::memory_order_release);
         }
-        pkt_dwords = sdma::FENCE_64B_GFX11_PLUS_SIZE;
+        pkt_dwords = sdma::FENCE_64B_EXTENDED_SIZE;
         break;
       }
 
@@ -2322,8 +2334,8 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       break;
     }
     case sdma::OP_POLL_REGMEM: {
-      if (uses_gfx11_plus_sdma_packets() && sub_op == sdma::SUBOP_POLL_MEM_64B) {
-        if (rpos + sdma::POLL_MEM_64B_GFX11_PLUS_SIZE > wpos) {
+      if (sdma_caps.poll64 && sub_op == sdma::SUBOP_POLL_MEM_64B) {
+        if (rpos + sdma::POLL_MEM_64B_EXTENDED_SIZE > wpos) {
           rpos = wpos;
           continue;
         }
@@ -2342,7 +2354,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
             return stop_and_retry_current_packet();
           }
         }
-        pkt_dwords = sdma::POLL_MEM_64B_GFX11_PLUS_SIZE;
+        pkt_dwords = sdma::POLL_MEM_64B_EXTENDED_SIZE;
         break;
       }
 
@@ -2472,7 +2484,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       // dirty L2 lines to backing (flush), while invalidate/discard drop them.
       // Treating every GCR as an invalidate would silently lose simulator data
       // that a writeback-only packet was meant to publish.
-      const bool gfx1250 = uses_gfx1250_sdma_packets();
+      const bool gfx1250 = sdma_caps.gfx1250_gcr;
       const uint32_t control =
           gfx1250 ? dw(sdma::GCR_GFX1250_CONTROL_DW) : dw(sdma::GCR_LEGACY_CONTROL_DW);
       const uint32_t wb_bit = gfx1250 ? sdma::GCR_GFX1250_GL2_WB_BIT : sdma::GCR_LEGACY_GL2_WB_BIT;

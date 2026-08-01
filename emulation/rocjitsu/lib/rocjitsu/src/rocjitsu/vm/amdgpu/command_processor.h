@@ -74,10 +74,54 @@ struct HwQueue {
 };
 
 enum class SdmaPacketDialect {
-  Legacy,
-  Gfx11Plus,
-  Gfx1250,
+  Legacy,    ///< Pre-GFX11 packet framing.
+  Gfx11Plus, ///< Fixed-layout GFX11/GFX12 packet framing.
+  Gfx1250,   ///< Variable-length GFX12.5 wait/signal copy framing.
+  Oss7,      ///< Fixed-layout CDNA4 packet framing and ADD64 signaling.
 };
+
+struct SdmaPacketCapabilities {
+  bool wait_signal_copy;
+  bool compact_wait_signal_copy;
+  bool fence64;
+  bool poll64;
+  uint32_t copy_broadcast_flag;
+  bool gfx1250_gcr;
+};
+
+constexpr SdmaPacketCapabilities sdma_packet_capabilities(SdmaPacketDialect dialect) {
+  switch (dialect) {
+  case SdmaPacketDialect::Legacy:
+    return {/*wait_signal_copy=*/false,
+            /*compact_wait_signal_copy=*/false,
+            /*fence64=*/false,
+            /*poll64=*/false,
+            /*copy_broadcast_flag=*/1u << 28,
+            /*gfx1250_gcr=*/false};
+  case SdmaPacketDialect::Gfx11Plus:
+    return {/*wait_signal_copy=*/true,
+            /*compact_wait_signal_copy=*/false,
+            /*fence64=*/true,
+            /*poll64=*/true,
+            /*copy_broadcast_flag=*/1u << 27,
+            /*gfx1250_gcr=*/false};
+  case SdmaPacketDialect::Gfx1250:
+    return {/*wait_signal_copy=*/true,
+            /*compact_wait_signal_copy=*/true,
+            /*fence64=*/true,
+            /*poll64=*/true,
+            /*copy_broadcast_flag=*/1u << 27,
+            /*gfx1250_gcr=*/true};
+  case SdmaPacketDialect::Oss7:
+    return {/*wait_signal_copy=*/true,
+            /*compact_wait_signal_copy=*/false,
+            /*fence64=*/true,
+            /*poll64=*/false,
+            /*copy_broadcast_flag=*/1u << 27,
+            /*gfx1250_gcr=*/false};
+  }
+  return {};
+}
 
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
 ///
@@ -297,15 +341,6 @@ private:
     return false;
   }
 
-  bool uses_gfx11_plus_sdma_packets() const {
-    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx11Plus ||
-           sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
-  }
-
-  bool uses_gfx1250_sdma_packets() const {
-    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
-  }
-
   GpuMemory *memory_ = nullptr;
   std::vector<ShaderProcessorInput *> spis_;
   std::vector<L2Cache *> l2_caches_;
@@ -326,8 +361,8 @@ private:
   uint32_t workgroup_id_offset_ = 0;
   uint32_t vgpr_granularity_ = 8;
   bool packed_tid_ = false;
-  // GFX11+ SDMA GCR keeps the same opcode but changes packet size/layout, so
-  // the decoder cannot infer this dialect from the packet header alone.
+  // Several SDMA generations reuse opcodes while changing framing or field
+  // semantics, so the decoder cannot infer this dialect from packet headers.
   SdmaPacketDialect sdma_packet_dialect_ = SdmaPacketDialect::Legacy;
   std::atomic<uint64_t> local_next_dispatch_id_{1};
   std::atomic<uint64_t> *dispatch_id_allocator_ = &local_next_dispatch_id_;

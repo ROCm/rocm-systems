@@ -419,6 +419,7 @@ add_executable(
     config_test.cpp
     matmul_test.cpp
     vector_add_test.cpp
+    cdna4_sim_test.cpp
     gfx1250_sim_test.cpp
     sparse_memory_test.cpp
     simdojo_sim_test.cpp
