@@ -2719,8 +2719,9 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
         NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
         comm->forcePatEnable = false;
-        size_t tempBufSize =
-          (comm->nNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
+        size_t tempBufSize = (comm->nNodes >= 32) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE
+                             : (comm->nNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2
+                                                    : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 4;
         NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalAGTempBuffer), tempBufSize, comm->memManager), res, fail);
         comm->hierarchicalCommsInitialized = true;
         INFO(NCCL_INIT, "Hierarchical AllGather: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
