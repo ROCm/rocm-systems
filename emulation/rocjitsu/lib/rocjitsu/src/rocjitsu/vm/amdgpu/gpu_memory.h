@@ -566,20 +566,27 @@ private:
     if (generation_ptr == nullptr)
       return effective_host_backed_bytes(pte);
 
-    // HIP installs ASan poison before returning the allocation to its caller,
-    // so the first GPU access observes the final addressable prefix. Free,
-    // remap, and unmap operations mutate the page table and invalidate this
-    // entry before the backing allocation can change.
+    // HIP can update ASan shadow state without changing the KFD page table.
+    // Cache the prefix scan, but recheck its two transition bytes on every hit
+    // so both growth and shrinkage become visible before mapped memory is used.
     static thread_local std::array<HostExtentCacheEntry, kHostExtentCacheEntries> cache;
     const uintptr_t table_key = reinterpret_cast<uintptr_t>(page_table) >> PAGE_SHIFT;
     HostExtentCacheEntry &cache_entry =
         cache[(page_key ^ table_key ^ instance_id_) & (cache.size() - 1)];
     const uint64_t generation = *generation_ptr;
-    const bool cache_hit =
+    bool cache_hit =
         cache_entry.memory == this && cache_entry.memory_instance == instance_id_ &&
         cache_entry.page_table == page_table && cache_entry.generation_ptr == generation_ptr &&
         cache_entry.generation == generation && cache_entry.page_key == page_key &&
         cache_entry.host_ptr == pte.host_ptr && cache_entry.declared_bytes == pte.host_backed_bytes;
+    if (cache_hit) {
+      const size_t cached_bytes = cache_entry.host_backed_bytes;
+      const bool cached_tail_is_addressable =
+          cached_bytes == 0 || addressable_prefix(pte.host_ptr + cached_bytes - 1, 1) == 1;
+      const bool next_byte_is_poisoned = cached_bytes == pte.host_backed_bytes ||
+                                         addressable_prefix(pte.host_ptr + cached_bytes, 1) == 0;
+      cache_hit = cached_tail_is_addressable && next_byte_is_poisoned;
+    }
     if (!cache_hit) {
       cache_entry = {
           .memory = this,

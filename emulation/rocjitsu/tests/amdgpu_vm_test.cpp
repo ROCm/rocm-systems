@@ -800,6 +800,35 @@ TEST(GpuMemoryTest, SanitizedCacheLineAccessClipsRoundedMapping) {
   EXPECT_TRUE(std::all_of(cache_line.begin() + kRemappedAllocationSize, cache_line.end(),
                           [](uint8_t value) { return value == 0; }));
 }
+
+TEST(GpuMemoryTest, SanitizedMappedExtentTracksShadowChanges) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kInitialBytes = 256;
+  constexpr size_t kShrunkBytes = 1024;
+  constexpr size_t kAllocationSize = KfdProcess::kPageSize;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(kAllocationSize);
+  std::fill_n(allocation.get(), kAllocationSize, 0);
+  process.map_pages(kBaseVa, allocation.get(), kAllocationSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  __asan_poison_memory_region(allocation.get() + kInitialBytes, kAllocationSize - kInitialBytes);
+  memory.write32(kBaseVa + 128, 0x11111111, kPid);
+
+  __asan_unpoison_memory_region(allocation.get() + kInitialBytes, kAllocationSize - kInitialBytes);
+  memory.write32(kBaseVa + 512, 0x22222222, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + 512, kPid), 0x22222222u);
+
+  __asan_poison_memory_region(allocation.get() + kShrunkBytes, kAllocationSize - kShrunkBytes);
+  memory.write32(kBaseVa + 1536, 0x33333333, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + 1536, kPid), 0u);
+
+  __asan_unpoison_memory_region(allocation.get() + kShrunkBytes, kAllocationSize - kShrunkBytes);
+}
 #endif
 
 TEST(GpuMemoryTest, ReusedMemoryInstanceInvalidatesThreadLocalTranslationCaches) {
