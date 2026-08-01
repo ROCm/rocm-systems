@@ -16,7 +16,7 @@
 set -euo pipefail
 
 # Default versions to build/test (subset of installed)
-DEFAULT_VERSIONS="6.3.3 7.0.2 7.2.4 7.13"
+DEFAULT_VERSIONS="6.3.3 7.0.2 7.2.4 7.13 7.14"
 
 BUILD_ONLY=false
 ALL_VERSIONS=false
@@ -140,8 +140,11 @@ for rocm_dir in "${ROCM_VERSIONS[@]}"; do
         continue
     fi
 
-    run_step "$version" "cmake install" \
-        cmake --install "$builddir" || true
+    if ! run_step "$version" "cmake install" \
+        cmake --install "$builddir"; then
+        FAIL+=("$version:install")
+        continue
+    fi
 
     # Show NUMA detection result
     echo "--- [$version] NUMA detection ---"
@@ -149,13 +152,35 @@ for rocm_dir in "${ROCM_VERSIONS[@]}"; do
         | grep -v "ADVANCED\|^#" || true
 
     # -----------------------------------------------------------------
-    # 2. Functional smoke test (ping-pong, 2 PEs)
+    # 2. Examples build (external package smoke test)
+    # Builds the examples directory as a standalone CMake project against
+    # the installed rocshmem, validating the exported cmake config.
+    # -----------------------------------------------------------------
+    examplesdir="/app/build-examples-${version}"
+    if ! run_step "$version" "examples build" \
+        env PATH="${rocm_dir}/bin:${rocm_dir}/llvm/bin:${PATH}" \
+            LD_LIBRARY_PATH="${rocm_dir}/lib:${LD_LIBRARY_PATH:-}" \
+        cmake -S "$SRC/examples" -B "$examplesdir" \
+            -Drocshmem_ROOT="${installdir}" \
+            -DCMAKE_PREFIX_PATH="${installdir};${rocm_dir}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DMPI_ROOT="$OMPI"; then
+        FAIL+=("$version:examples-configure")
+        ok=false
+    elif ! run_step "$version" "examples compile" \
+        cmake --build "$examplesdir" --parallel "$(nproc)"; then
+        FAIL+=("$version:examples-compile")
+        ok=false
+    fi
+
+    # -----------------------------------------------------------------
+    # 3. Functional smoke test (ping-pong, 2 PEs)
     # -----------------------------------------------------------------
     if [[ "$BUILD_ONLY" == false && "$HAS_GPU" == true ]]; then
         run_step "$version" "putnbi test" \
             env LD_LIBRARY_PATH="${rocm_dir}/lib:${LD_LIBRARY_PATH}" \
             mpiexec -n 2 "$builddir/tests/functional_tests/rocshmem_functional_tests" \
-                -a 3 -w 1 -z 256 \
+                -a 31 -w 1 -z 256 \
             || { FAIL+=("$version:putnbi"); ok=false; }
     fi
 
