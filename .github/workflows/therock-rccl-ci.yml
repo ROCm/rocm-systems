@@ -96,6 +96,7 @@ jobs:
         -DTHEROCK_ENABLE_COMM_LIBS=ON
         -DTHEROCK_ENABLE_ROCPROFV3=ON
         -DTHEROCK_ENABLE_MPI=ON
+        -DTHEROCK_TEST_AMDGPU_FAMILIES=${{ matrix.amdgpu_family }}
 
   therock_ci_summary:
     name: TheRock CI Summary
