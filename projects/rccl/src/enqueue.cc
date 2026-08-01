@@ -477,7 +477,8 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
     if (ncclDevFuncIsLL128RegVariant(task->func, task->protocol)) {
       int accFlag = (task->func == ncclFuncAllReduce && task->acc != nullptr) ? 1 : 0;
       int regMode = (devWork.regUsed || devWork.netRegUsed) ? 1 : 2;
-      int id = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol, accFlag, task->pipeline, regMode);
+      int id = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol, accFlag,
+                             task->pipeline, regMode);
       if (id >= 0) task->devFuncId = id;
     }
 
