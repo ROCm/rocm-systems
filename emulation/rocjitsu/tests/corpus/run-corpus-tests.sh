@@ -68,6 +68,44 @@ done
 
 corpus_test_status=0
 corpus_work_dir="$(pwd -P)"
+rocjitsu_launcher="$(command -v rocjitsu)"
+run_wrapper_prefix=()
+
+launcher_dependencies="$(readelf -d "${rocjitsu_launcher}" 2>/dev/null)"
+asan_enabled=false
+clang_asan_enabled=false
+if [[ "${launcher_dependencies}" == *"libclang_rt.asan"* ]]; then
+  asan_enabled=true
+  clang_asan_enabled=true
+elif [[ "${launcher_dependencies}" == *"libasan.so"* ]]; then
+  asan_enabled=true
+fi
+
+if [[ "${asan_enabled}" == true ]]; then
+  lsan_suppressions="${ROCJITSU_SOURCE_DIR}/tests/corpus/lsan.supp"
+  asan_symbolizer="${ROCM_PATH}/lib/llvm/bin/llvm-symbolizer"
+  if [[ ! -f "${lsan_suppressions}" || ! -x "${asan_symbolizer}" ]]; then
+    echo "Could not resolve LSan suppressions or the ASan symbolizer for corpus tests" >&2
+    exit 1
+  fi
+  corpus_lsan_options="${LSAN_OPTIONS:+${LSAN_OPTIONS}:}suppressions=${lsan_suppressions}"
+  run_wrapper_prefix=(
+    env
+    "LSAN_OPTIONS=${corpus_lsan_options}"
+    "ASAN_SYMBOLIZER_PATH=${asan_symbolizer}"
+  )
+fi
+
+# Clang's shared ASan runtime needs HIP loaded when the child process starts.
+# Keep the preload child-only so the launcher does not initialize HIP itself.
+if [[ "${clang_asan_enabled}" == true ]]; then
+  hip_runtime="${ROCM_PATH}/lib/libamdhip64.so.7"
+  if [[ ! -f "${hip_runtime}" ]]; then
+    echo "Could not resolve HIP runtime for Clang ASan corpus preload" >&2
+    exit 1
+  fi
+  run_wrapper_prefix+=("RJ_LAUNCH_PRELOAD=${hip_runtime}")
+fi
 
 for target in "${targets[@]}"; do
   read -r name rocjitsu_config skip_tests_config <<< "${target}"
@@ -77,11 +115,19 @@ for target in "${targets[@]}"; do
   skip_tests_config_path="${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}"
   artifact_dir="${corpus_work_dir}/.pytest-artifacts/${name}"
   cache_dir="${corpus_work_dir}/.pytest-cache/${name}"
+  run_wrapper=(
+    "${run_wrapper_prefix[@]}"
+    "${rocjitsu_launcher}"
+    --config "${rocjitsu_config_path}"
+    --
+  )
+  printf -v run_wrapper_command '%q ' "${run_wrapper[@]}"
 
   pytest_cmd=(
-    rocjitsu --config "${rocjitsu_config_path}" -- pytest tests/test_corpus.py
+    pytest tests/test_corpus.py
     --target "${name}"
     --suite iree,kernels,cts
+    --run-wrapper "${run_wrapper_command% }"
     --skip-tests-config "${skip_tests_config_path}"
     --artifact-directory "${artifact_dir}"
     --durations=0

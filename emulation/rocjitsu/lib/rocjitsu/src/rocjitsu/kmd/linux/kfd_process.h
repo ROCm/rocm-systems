@@ -16,6 +16,7 @@
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "util/unique_handle.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
@@ -173,6 +174,9 @@ public:
     pid_t debugger_pid = 0;
   };
 
+  static constexpr uint64_t kPageShift = 12;
+  static constexpr uint64_t kPageSize = 1ULL << kPageShift;
+
   /// @brief Per-page translation entry, mirroring HW PTE fields.
   /// @details Stores the host pointer for VA→PA translation and the PTE MTYPE
   /// that the GPU MMU uses to override instruction-level caching. On real
@@ -180,6 +184,8 @@ public:
   struct PageTableEntry {
     uint8_t *host_ptr = nullptr;
     amdgpu::Mtype mtype = amdgpu::Mtype::RW;
+    /// Number of allocation-backed bytes starting at host_ptr on this page.
+    size_t valid_bytes = kPageSize;
   };
 
   /// @brief Per-process GPU page table (GPU VA page number → PTE).
@@ -188,17 +194,16 @@ public:
   ///          on each memory access (TLB-like role).
   using PageTable = std::unordered_map<uint64_t, PageTableEntry>;
 
-  static constexpr uint64_t kPageShift = 12;
-  static constexpr uint64_t kPageSize = 1ULL << kPageShift;
-
   /// @brief Map host pages into this process's GPU page table.
   /// @param mtype PTE MTYPE for these pages (derived from allocation flags).
   void map_pages(uint64_t gpu_va, void *host_ptr, size_t size,
                  amdgpu::Mtype mtype = amdgpu::Mtype::RW) {
     std::unique_lock lock(page_table_mutex_);
     auto *base = static_cast<uint8_t *>(host_ptr);
-    for (size_t off = 0; off < size; off += kPageSize)
-      page_table_[(gpu_va + off) >> kPageShift] = {base + off, mtype};
+    for (size_t off = 0; off < size; off += kPageSize) {
+      const size_t valid_bytes = std::min<size_t>(kPageSize, size - off);
+      page_table_[(gpu_va + off) >> kPageShift] = {base + off, mtype, valid_bytes};
+    }
     // Keep publication in the page-table critical section. Cached readers
     // validate this generation while holding the shared side of the same lock;
     // publishing after unlock would permit a stale-cache hit in between.

@@ -29,6 +29,18 @@
 #include <unordered_map>
 #include <utility>
 
+#if defined(__SANITIZE_ADDRESS__)
+#define RJ_GPU_MEMORY_WITH_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define RJ_GPU_MEMORY_WITH_ASAN 1
+#endif
+#endif
+
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+#include <sanitizer/asan_interface.h>
+#endif
+
 namespace rocjitsu {
 namespace amdgpu {
 
@@ -185,10 +197,18 @@ public:
     std::shared_lock page_table_lock(*entry.mutex);
     auto pte = entry.page_table->find(addr >> PAGE_SHIFT);
     if (pte != entry.page_table->end()) {
-      if (pte->second.host_ptr != nullptr)
+      const size_t page_offset = addr & PAGE_MASK;
+      const bool allocation_backed =
+          pte->second.host_ptr != nullptr && page_offset < pte->second.valid_bytes &&
+          size <= pte->second.valid_bytes - page_offset &&
+          addressable_prefix(pte->second.host_ptr + page_offset, size) == size;
+      if (allocation_backed) {
         atomic_rmw_mapped(addr, pte->second.host_ptr, fn);
-      else
+      } else if (pte->second.host_ptr == nullptr) {
         atomic_rmw_fallback(addr, size, entry.client_pid, fn);
+      } else {
+        atomic_rmw_fallback(addr, size, 0, fn);
+      }
       return;
     }
 
@@ -413,6 +433,15 @@ private:
 
   static constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
 
+  static size_t addressable_prefix(const uint8_t *ptr, size_t len) {
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+    if (auto *poisoned = static_cast<const uint8_t *>(
+            __asan_region_is_poisoned(const_cast<uint8_t *>(ptr), len)))
+      return static_cast<size_t>(poisoned - ptr);
+#endif
+    return len;
+  }
+
   struct VmidEntry {
     KfdProcess::PageTable *page_table = nullptr;
     std::shared_mutex *mutex = nullptr;
@@ -486,7 +515,7 @@ private:
       auto *page = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
       if (!passthrough_ || addr >= kUserSpaceLimit || page == nullptr)
         return false;
-      fn(page);
+      fn(page, PAGE_SIZE);
       return true;
     }
 
@@ -495,14 +524,14 @@ private:
       if (pte) {
         if (pte->host_ptr == nullptr)
           return false;
-        fn(pte->host_ptr);
+        fn(pte->host_ptr, pte->valid_bytes);
         return true;
       }
       if (passthrough_ && addr < kUserSpaceLimit) {
         auto *page = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
         if (page == nullptr)
           return false;
-        fn(page);
+        fn(page, PAGE_SIZE);
         return true;
       }
       return false;
@@ -512,20 +541,35 @@ private:
   bool read_mapped(uint64_t addr, void *dst, size_t len, uint32_t vmid) const {
     if ((addr & PAGE_MASK) + len > PAGE_SIZE)
       return false;
-    return with_host_ptr(
-        addr, vmid, [&](const uint8_t *page) { std::memcpy(dst, page + (addr & PAGE_MASK), len); });
+    return with_host_ptr(addr, vmid, [&](const uint8_t *page, size_t valid_bytes) {
+      const size_t page_offset = addr & PAGE_MASK;
+      size_t mapped_bytes =
+          page_offset < valid_bytes ? std::min(len, valid_bytes - page_offset) : 0;
+      if (mapped_bytes > 0) {
+        mapped_bytes = addressable_prefix(page + page_offset, mapped_bytes);
+        std::memcpy(dst, page + page_offset, mapped_bytes);
+      }
+      std::memset(static_cast<uint8_t *>(dst) + mapped_bytes, 0, len - mapped_bytes);
+    });
   }
 
   bool write_mapped(uint64_t addr, const void *src, size_t len, uint32_t vmid) {
     if ((addr & PAGE_MASK) + len > PAGE_SIZE)
       return false;
-    return with_host_ptr(addr, vmid,
-                         [&](uint8_t *page) { std::memcpy(page + (addr & PAGE_MASK), src, len); });
+    return with_host_ptr(addr, vmid, [&](uint8_t *page, size_t valid_bytes) {
+      const size_t page_offset = addr & PAGE_MASK;
+      size_t mapped_bytes =
+          page_offset < valid_bytes ? std::min(len, valid_bytes - page_offset) : 0;
+      if (mapped_bytes > 0) {
+        mapped_bytes = addressable_prefix(page + page_offset, mapped_bytes);
+        std::memcpy(page + page_offset, src, mapped_bytes);
+      }
+    });
   }
 
   uint8_t *translate(uint64_t addr, uint32_t vmid) const {
     uint8_t *host_ptr = nullptr;
-    with_host_ptr(addr, vmid, [&](uint8_t *page) { host_ptr = page; });
+    with_host_ptr(addr, vmid, [&](uint8_t *page, size_t) { host_ptr = page; });
     return host_ptr;
   }
 
@@ -585,5 +629,7 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
+
+#undef RJ_GPU_MEMORY_WITH_ASAN
 
 #endif // ROCJITSU_VM_AMDGPU_GPU_MEMORY_H_
