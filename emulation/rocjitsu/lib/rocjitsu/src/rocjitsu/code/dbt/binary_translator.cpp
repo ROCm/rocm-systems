@@ -1915,6 +1915,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // scope happens to hold a clone.
   std::unordered_map<uint64_t, uint64_t> canonical_placement;
 
+  // Set when a scope hosting a canonical copy had to grow its own descriptor to lower it. See the
+  // assignment for why that combination cannot be made safe from inside the scope loop.
+  bool canonical_host_outgrew_its_descriptor = false;
+
   // What one scope added to the three code-address containers, so a skipped scope can take it back.
   // The two vectors only ever grow within a scope, so a length restores them; canonical_placement
   // is keyed by source offset and needs the inserted keys named.
@@ -3328,6 +3332,20 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         kernel_context.private_segment_fixed_size)
       scope.translation->target_private_size = kernel_context.required_private_segment_fixed_size;
 
+    // Only this scope's descriptor is grown from the values above, but a canonical copy this scope
+    // hosts is entered through a pointer any kernel can dereference. If lowering that copy needed
+    // resources beyond what this descriptor started with, another kernel would enter it under a
+    // budget that was never raised. Nothing here can raise that kernel's descriptor -- it may
+    // already be translated, and its own recompute happens inside its own scope -- so record the
+    // condition and refuse below rather than emit a descriptor that under-provisions a real caller.
+    if (!relocation_snapshot.canonical_placements_added.empty() &&
+        (kernel_context.required_vgpr_count > kernel_context.num_vgprs ||
+         kernel_context.required_sgpr_count > kernel_context.num_sgprs ||
+         kernel_context.required_private_segment_fixed_size >
+             kernel_context.private_segment_fixed_size)) {
+      canonical_host_outgrew_its_descriptor = true;
+    }
+
     if (scope.translation->target_vgpr_count != kernel_context.num_vgprs ||
         scope.translation->target_sgpr_count != kernel_context.num_sgprs ||
         scope.translation->target_private_size != kernel_context.private_segment_fixed_size) {
@@ -3460,6 +3478,17 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       translation.target_entry_text_offset = layout.target_entry;
       translation.target_body_entry_text_offset = layout.target_body_entry;
     }
+  }
+
+  // A canonical copy is reached through a pointer, so any kernel in the object is a possible
+  // caller, but only the hosting scope's descriptor was grown to cover it. One kernel scope means
+  // the host is the only caller and the grown descriptor already covers it.
+  if (canonical_host_outgrew_its_descriptor && scopes.size() > 1) {
+    append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                 "a body reached through a code address needs resources beyond its hosting "
+                 "kernel's descriptor, which would under-provision every other kernel that can "
+                 "reach it");
+    return leave_unchanged();
   }
 
   // Every scope has been placed, so a code-target builder can finally be told where its target
