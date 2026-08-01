@@ -7,7 +7,6 @@ import argparse
 import functools
 import os
 import shutil
-import sys
 from abc import abstractmethod
 from collections.abc import Iterator
 from pathlib import Path
@@ -15,7 +14,7 @@ from typing import Any, Optional
 
 import config
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
-from utils import amdsmi_interface
+from utils import amdsmi_interface, rocprofv3_avail_interface
 from utils.logger import (
     console_debug,
     console_error,
@@ -36,7 +35,6 @@ from utils.utils_common import (
     is_only_pc_sampling,
     is_tcc_channel_counter,
     parse_sets_yaml,
-    resolve_rocm_library_path,
     validate_roofline_csv,
 )
 from utils.utils_counter_defs import (
@@ -675,46 +673,9 @@ class OmniSoC_Base:
             sdk_config
         )
 
-        # Backward compatibility support for sdk avail module moved from
-        # <rocm_path>/bin/rocprofv3_avail_module/avail.py to
-        # <rocm_path>/lib/python3/site-packages/rocprofv3/avail.py
-        new_path = str(
-            Path(args.rocprofiler_sdk_tool_path).parents[1] / "python3/site-packages"
+        counters = rocprofv3_avail_interface.get_counters(
+            args.rocprofiler_sdk_tool_path
         )
-        old_path = str(Path(args.rocprofiler_sdk_tool_path).parents[2] / "bin")
-        try:
-            sys.path.append(new_path)
-            from rocprofv3 import avail
-        except ImportError:
-            console_debug(
-                f"Could not import rocprofiler-sdk avail module from {new_path}, "
-                f"trying {old_path}"
-            )
-            try:
-                sys.path.remove(new_path)
-                sys.path.append(old_path)
-                from rocprofv3_avail_module import avail
-            except ImportError:
-                console_error("Failed to import rocprofiler-sdk avail module.")
-
-        # librocprofv3-list-avail.so location varies by ROCm version:
-        #   ROCm >= 7.1: <rocm_path>/lib/rocprofiler-sdk/
-        #   ROCm 7.0.x:  <rocm_path>/libexec/rocprofiler-sdk/
-        avail_lib_name = "librocprofv3-list-avail.so"
-        avail_lib_path = resolve_rocm_library_path(
-            str(Path(args.rocprofiler_sdk_tool_path).parent / avail_lib_name)
-        )
-        if not Path(avail_lib_path).exists():
-            avail_lib_path = resolve_rocm_library_path(
-                str(
-                    Path(args.rocprofiler_sdk_tool_path).parents[2]
-                    / "libexec"
-                    / "rocprofiler-sdk"
-                    / avail_lib_name
-                )
-            )
-        avail.loadLibrary.libname = avail_lib_path
-        counters = avail.get_counters()
         rocprof_counters = {
             counter.name
             for counter in counters[list(counters.keys())[0]]
