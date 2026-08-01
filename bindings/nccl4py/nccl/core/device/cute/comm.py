@@ -45,10 +45,19 @@ def _materialize_dev_comm(value, *, loc=None, ip=None) -> ir.Value:
     """Materialize a by-value DevComm in the device function entry block."""
     entry_block = _device_function_entry_block()
     struct_value = value.__extract_mlir_values__()[0]
-    # ip is not forwarded: the alloca/store must land at entry-block begin
-    # so the pointer dominates every use, not at the caller's position.
+    # ip is not forwarded: the alloca must land at entry-block begin so the
+    # pointer dominates every use, not at the caller's position.
     with ir.InsertionPoint.at_block_begin(entry_block):
         ptr = _alloca_struct(DevCommValue, alignment=8, loc=loc)
+
+    # The store has to follow both operands. The struct is a block argument
+    # while it stays within one block, and then it already dominates the
+    # alloca. But a DevComm used on both sides of a conditional is threaded
+    # through the region by the DSL, making the value an scf.if result — so
+    # anchor the store to whatever defines it.
+    owner = struct_value.owner
+    after = ptr.owner if isinstance(owner, ir.Block) else owner
+    with ir.InsertionPoint.after(after):
         llvm.store(struct_value, ptr, loc=loc)
     return ptr
 
