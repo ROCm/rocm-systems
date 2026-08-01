@@ -636,6 +636,46 @@ relocate_relative_text_addends(std::vector<uint8_t> &image, const Elf64_Ehdr &eh
   return false;
 }
 
+/// @brief Shift `R_AMDGPU_RELATIVE64` addends that name an address past the growing `.text`.
+///
+/// @details Growing `.text` moves every allocated section above it, and the loader computes a
+/// relative relocation as load bias plus addend -- so an addend naming a moved section still names
+/// where that section used to be. The sibling pass above moves the relocation's *place*; this moves
+/// what it *points at*. Without it a C++ object's vptr slot is written with the pre-growth vtable
+/// address, and the first virtual call reads its function pointers out of whatever now occupies
+/// that memory.
+///
+/// Addends into `.text` are deliberately untouched: those name code, which does not simply shift,
+/// and relocate_relative_text_addends() rewrites them through the block placement map instead. The
+/// two are disjoint because a `.text` addend is below @p old_text_end_vaddr by construction.
+void shift_relative_addends_into_moved_sections(std::vector<uint8_t> &image,
+                                                const Elf64_Ehdr &ehdr,
+                                                std::span<const Elf64_Shdr> shdrs,
+                                                uint64_t old_text_end_vaddr, uint64_t delta) {
+  if (delta == 0)
+    return;
+  for (const Elf64_Shdr &relocs : shdrs) {
+    if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
+        !image_contains_range(image.size(), relocs.sh_offset, relocs.sh_size)) {
+      continue;
+    }
+    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    for (size_t i = 0; i < count; ++i) {
+      const uint64_t place = relocs.sh_offset + i * sizeof(Elf64_Rela);
+      Elf64_Rela rela{};
+      std::memcpy(&rela, image.data() + place, sizeof(rela));
+      if (elf_reloc_type(rela.r_info) != R_AMDGPU_RELATIVE64 || rela.r_addend < 0)
+        continue;
+      const auto addend = static_cast<uint64_t>(rela.r_addend);
+      if (addend < old_text_end_vaddr || addend > std::numeric_limits<uint64_t>::max() - delta)
+        continue;
+      rela.r_addend = static_cast<int64_t>(addend + delta);
+      std::memcpy(image.data() + place, &rela, sizeof(rela));
+    }
+  }
+  (void)ehdr;
+}
+
 void shift_relocation_offsets_in_moved_sections(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
                                                 std::span<const Elf64_Shdr> shdrs,
                                                 const std::vector<bool> &shift_section_vaddr,
@@ -953,7 +993,8 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
 
 bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
                                      std::span<const TextOffsetRelocation> text_relocations,
-                                     std::span<const PcRelativeDataRelocation> data_relocations) {
+                                     std::span<const PcRelativeDataRelocation> data_relocations,
+                                     std::span<const PcRelativeTextRelocation> code_relocations) {
   // Keep fail-closed behavior for callers that assume word-aligned executable
   // sections; accepting a non-word-aligned replacement can break downstream
   // PC-relative patching and branch-distance checks.
@@ -1050,6 +1091,8 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
     shift_symbols_in_moved_sections(image_, header, shdrs, shift_section_vaddr, padded_file_delta);
     shift_relocation_offsets_in_moved_sections(image_, header, shdrs, shift_section_vaddr,
                                                padded_file_delta);
+    shift_relative_addends_into_moved_sections(image_, header, shdrs, old_text_end_vaddr,
+                                               padded_file_delta);
     adjust_kernel_descriptor_entry_offsets_in_moved_sections(image_, shdrs, shift_section_vaddr,
                                                              padded_file_delta);
 
@@ -1084,6 +1127,21 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
         text_header.sh_addr + resolved.relocation.target_getpc_offset + sizeof(uint32_t);
     const uint64_t delta = target_vaddr - getpc_result;
     std::memcpy(image_.data() + text_offset_ + resolved.relocation.target_literal_offset, &delta,
+                sizeof(delta));
+  }
+
+  // A code target needs no section lookup: both ends are offsets in the text just written, so the
+  // literal is their difference. `s_get_pc_i64` leaves the address of the following instruction, so
+  // the distance to make up is measured from one word past the getpc.
+  for (const PcRelativeTextRelocation &relocation : code_relocations) {
+    if (relocation.target_getpc_offset > new_text.size() - sizeof(uint32_t) ||
+        relocation.target_literal_offset > new_text.size() - sizeof(uint64_t) ||
+        relocation.target_text_offset > new_text.size()) {
+      return false;
+    }
+    const uint64_t getpc_result = relocation.target_getpc_offset + sizeof(uint32_t);
+    const uint64_t delta = relocation.target_text_offset - getpc_result;
+    std::memcpy(image_.data() + text_offset_ + relocation.target_literal_offset, &delta,
                 sizeof(delta));
   }
   shdrs[*text_index].sh_size = new_text.size();

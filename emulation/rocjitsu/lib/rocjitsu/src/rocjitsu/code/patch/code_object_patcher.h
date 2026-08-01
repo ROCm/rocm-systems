@@ -33,6 +33,19 @@ struct PcRelativeDataRelocation {
   uint64_t source_target_vaddr = 0;
 };
 
+/// @brief One relocated literal64 PC builder whose target is inside `.text`.
+///
+/// @details Separate from PcRelativeDataRelocation because the target is named by a final `.text`
+/// offset rather than a virtual address: a code target moves with the body that holds it, so it
+/// cannot be resolved by locating the section that contains a fixed address. The literal is
+/// recomputed as @c target_text_offset - (target_getpc_offset + 4), the distance an `s_get_pc_i64`
+/// leaves to be made up, using only offsets within the emitted text.
+struct PcRelativeTextRelocation {
+  uint64_t target_getpc_offset = 0;
+  uint64_t target_literal_offset = 0;
+  uint64_t target_text_offset = 0;
+};
+
 /// @brief Location of a sidecar kernel descriptor appended into a loaded ELF segment.
 struct AppendedSidecarDescriptor {
   uint64_t file_offset = 0;
@@ -58,7 +71,8 @@ public:
   /// entries coherent with explicit descriptor patches applied by DBT.
   [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text,
                                   std::span<const TextOffsetRelocation> text_relocations = {},
-                                  std::span<const PcRelativeDataRelocation> data_relocations = {});
+                                  std::span<const PcRelativeDataRelocation> data_relocations = {},
+                                  std::span<const PcRelativeTextRelocation> code_relocations = {});
 
   /// @brief True if any relocation's place (r_offset) falls inside .text.
   ///

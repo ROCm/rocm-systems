@@ -97,12 +97,19 @@ table_for_got_slot(std::span<const RelocationFunctionTable> tables, uint64_t vad
   return std::nullopt;
 }
 
+/// @details Matched by containment rather than by an exact base, because the address code holds is
+/// not always the object's first byte. The Itanium ABI's vptr points sixteen bytes into the vtable,
+/// past the offset-to-top and typeinfo words, so a dispatch materializing a vptr names the table
+/// from the middle. The callee set is the whole table either way -- the slot index is not tracked --
+/// so widening the match cannot admit a callee that an exact match would have excluded.
 [[nodiscard]] std::optional<size_t>
 table_at_address(std::span<const RelocationFunctionTable> tables, uint64_t vaddr) {
-  const auto table = std::ranges::find(tables, vaddr, &RelocationFunctionTable::table_vaddr);
-  if (table == tables.end())
-    return std::nullopt;
-  return static_cast<size_t>(table - tables.begin());
+  for (size_t table_index = 0; table_index < tables.size(); ++table_index) {
+    const RelocationFunctionTable &table = tables[table_index];
+    if (vaddr >= table.table_vaddr && vaddr - table.table_vaddr < table.table_size)
+      return table_index;
+  }
+  return std::nullopt;
 }
 
 void transfer_instruction(PairState &state, const Instruction &inst,
@@ -317,15 +324,24 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object) {
         continue;
       const uint32_t type = elf_reloc_type(rela.r_info);
       if (type == R_AMDGPU_RELATIVE64) {
-        ObjectCandidate *candidate = containing_candidate(candidates, rela.r_offset);
-        if (candidate == nullptr || ((rela.r_offset - candidate->vaddr) % sizeof(uint64_t)) != 0 ||
-            rela.r_addend < 0)
+        if (rela.r_addend < 0)
           continue;
         const uint64_t target = static_cast<uint64_t>(rela.r_addend);
-        if (target < text_vaddr || target - text_vaddr >= text_size)
+        if (target >= text_vaddr && target - text_vaddr < text_size) {
+          ObjectCandidate *candidate = containing_candidate(candidates, rela.r_offset);
+          if (candidate == nullptr || ((rela.r_offset - candidate->vaddr) % sizeof(uint64_t)) != 0)
+            continue;
+          candidate->entries.push_back(
+              {.slot_vaddr = rela.r_offset, .target_text_offset = target - text_vaddr});
           continue;
-        candidate->entries.push_back(
-            {.slot_vaddr = rela.r_offset, .target_text_offset = target - text_vaddr});
+        }
+        // A slot the loader initializes to the address of another candidate names that object, the
+        // same way a GOT slot does. A C++ vptr is exactly this shape: an eight-byte word in a
+        // statically constructed object, relocated to its class's vtable. Recording it is what lets
+        // a dispatch that loads the pointer out of the object resolve to the vtable's callees;
+        // without it the load produces no fact and the call is refused as unrecoverable.
+        if (ObjectCandidate *pointed = containing_candidate(candidates, target))
+          pointed->got_slots.push_back(rela.r_offset);
         continue;
       }
       if (type != R_AMDGPU_ABS64 || linked_symbols == nullptr ||

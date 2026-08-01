@@ -976,6 +976,7 @@ scoped_call_liveness_edges(std::span<BasicBlock *const> blocks, std::span<const 
     CodeObjectPatcher patcher, std::vector<uint8_t> translated_text, uint64_t original_text_size,
     std::span<const TextOffsetRelocation> text_relocations,
     std::span<const PcRelativeDataRelocation> data_relocations,
+    std::span<const PcRelativeTextRelocation> code_relocations,
     std::span<const KdTranslation> translations, rj_code_arch_t host_arch, uint32_t target_mach,
     std::vector<TranslationDiagnostic> &diagnostics) {
   if (translated_text.size() < original_text_size)
@@ -999,7 +1000,8 @@ scoped_call_liveness_edges(std::span<BasicBlock *const> blocks, std::span<const 
     }
   }
 
-  if (!patcher.replace_text(translated_text, text_relocations, data_relocations)) {
+  if (!patcher.replace_text(translated_text, text_relocations, data_relocations,
+                            code_relocations)) {
     append_error(diagnostics, DiagnosticKind::ResourceLimit,
                  "relocated .text could not be materialized safely; leaving code object unchanged");
     return std::nullopt;
@@ -1445,10 +1447,69 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   const auto relocation_table_calls = attach_relocation_table_call_edges(
       block_index, relocation_function_tables, relocation_table_dispatches);
 
-  // Address materializations that must survive relocation. See the use site for why a non-.text
-  // target has to be rewritten and a .text one must not be.
+  // Address materializations that must survive relocation. See the use sites for how a data target
+  // and a code target are each rewritten.
   const auto pc_relative_address_builders =
       discover_pc_relative_address_builders(blocks, text_vaddr);
+
+  // Whether every code address this object can produce is one this translation will relocate.
+  //
+  // The translator's usual discipline is consumer-side: prove an indirect transfer's target or
+  // refuse. That cannot see a target loaded from memory, because the value was placed there by a
+  // relocation or by a store the transfer's scope never executed. The complementary producer-side
+  // question is answerable: a code address can only enter this object as an ELF relocation addend
+  // or as a getpc computation, so if every one of those is rewritten, then whatever a load yields
+  // is relocation-correct by construction and there is nothing left for the consumer to prove.
+  //
+  // Relocation addends are discharged by relocate_relative_text_addends(), which already fails
+  // closed on an addend it cannot map. What remains is the getpc side, and the denominator has to
+  // be the discovery pass rather than the lattice: the lattice only models the 64-bit-literal add,
+  // while a long-branch expansion builds its address from a split 32-bit pair the lattice never
+  // sees. Requiring the lattice to have matched every discovered builder is what keeps that form
+  // from silently falling outside the claim.
+  // The claim below is "every code address THIS OBJECT PRODUCES is relocated", so it is worth
+  // nothing unless the object produces some. An object holding no function-pointer table and
+  // computing no code address can still reach an indirect transfer -- through a kernarg, or a
+  // pointer handed over by a separately translated object -- and about those the claim is silent.
+  // Requiring a producer keeps the permission from resting on a vacuous truth.
+  const bool object_produces_code_addresses =
+      std::ranges::any_of(relocation_function_tables,
+                          [](const RelocationFunctionTable &table) {
+                            return !table.entries.empty();
+                          }) ||
+      std::ranges::any_of(pc_relative_address_builders,
+                          [&](const PcRelativeAddressBuilder &builder) {
+                            return builder.target_vaddr >= text_vaddr &&
+                                   builder.target_vaddr - text_vaddr < text.size();
+                          });
+
+  const bool code_addresses_fully_accounted = [&] {
+    std::unordered_set<uint64_t> lattice_getpc_offsets;
+    for (const PcRelativeAddressBuilder &builder : pc_relative_address_builders)
+      lattice_getpc_offsets.insert(builder.source_getpc_offset);
+    for (const auto &block : blocks) {
+      if (block == nullptr)
+        continue;
+      for (const PcAddressBuilder &builder : block->static_pc_address_builders()) {
+        // The lattice owning this builder is what matters: it is the analysis that drives both the
+        // data and the code rewrite, so a builder it matched is rewritten regardless of what the
+        // indirect-branch pass made of it. The two passes resolve independently and disagree
+        // routinely -- the branch pass gives up on anything that does not reach a setpc.
+        if (lattice_getpc_offsets.contains(builder.source_getpc_offset))
+          continue;
+        // Otherwise the value has to be known here, or it may be a code address left stale.
+        if (!builder.resolved || !builder.contiguous)
+          return false;
+        // A known non-code target needs nothing: it cannot be a stale jump destination.
+        if (builder.source_target_offset < 0 ||
+            static_cast<uint64_t>(builder.source_target_offset) >= text.size())
+          continue;
+        // A code target the lattice never saw is one this translation cannot rewrite.
+        return false;
+      }
+    }
+    return true;
+  }();
   // Read the section headers straight from the image rather than through all_sections(), which
   // drops SHT_NOBITS. A zero-initialized device global lives in .bss, so that omission would hide
   // the most ordinary target there is. This must also agree with replace_text(): it resolves a data
@@ -1551,15 +1612,28 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     for (const KernelTranslationScope &scope : scopes)
       covered.insert(scope.blocks.begin(), scope.blocks.end());
 
+    const auto adopt = [&](uint64_t text_offset) {
+      const BasicBlock *entry = block_for_offset(block_index, text_offset);
+      // A body that is already reached is left alone. Adopting it would add a second placement of
+      // the same source offset, and a runtime-dereferenced pointer cannot choose between them.
+      if (entry == nullptr || covered.contains(entry))
+        return;
+      adopted_roots.push_back(text_offset);
+    };
+
     for (const RelocationFunctionTable &table : relocation_function_tables) {
-      for (const RelocationFunctionPointer &slot : table.entries) {
-        const BasicBlock *entry = block_for_offset(block_index, slot.target_text_offset);
-        // A body that is already reached is left alone. Adopting it would add a second placement of
-        // the same source offset, and a runtime-dereferenced pointer cannot choose between them.
-        if (entry == nullptr || covered.contains(entry))
-          continue;
-        adopted_roots.push_back(slot.target_text_offset);
-      }
+      for (const RelocationFunctionPointer &slot : table.entries)
+        adopt(slot.target_text_offset);
+    }
+    // A getpc that computes a code address makes that body address-taken just as surely as a
+    // relocation slot does -- the value can be stored, passed, or returned, and the body must exist
+    // at a known place for the literal to be rewritten to. Unlike a relocation target this one is
+    // named only by instructions, so nothing else in the pipeline would keep it alive: a body
+    // reached by no call is dropped, and its address then has no placement to resolve against.
+    for (const PcRelativeAddressBuilder &builder : pc_relative_address_builders) {
+      if (builder.target_vaddr < text_vaddr || builder.target_vaddr - text_vaddr >= text.size())
+        continue;
+      adopt(builder.target_vaddr - text_vaddr);
     }
     std::ranges::sort(adopted_roots);
     adopted_roots.erase(std::ranges::unique(adopted_roots).begin(), adopted_roots.end());
@@ -1747,6 +1821,16 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // then applies to the replacement stub or a later kernel.
   std::vector<TextOffsetRelocation> text_relocations;
   std::vector<PcRelativeDataRelocation> data_relocations;
+  // A code-target builder cannot be finished inside the scope loop: its target may belong to a
+  // scope not yet emitted, and a body reached from several kernels is cloned once per scope, so the
+  // final offset is only knowable once every placement is recorded. Hold the source-side answer and
+  // resolve against the completed map below.
+  struct PendingCodeRelocation {
+    uint64_t target_getpc_offset = 0;
+    uint64_t target_literal_offset = 0;
+    uint64_t source_target_text_offset = 0;
+  };
+  std::vector<PendingCodeRelocation> pending_code_relocations;
 
   auto fail_or_skip_kernel =
       [&](const KernelTranslationScope &scope, KernelFailure failure, size_t output_begin,
@@ -2470,9 +2554,18 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         const bool has_relocation_table_call = relocation_table_calls.contains(offset);
         const bool recovered_indirect_return = valid_call_return_offsets.contains(offset);
         const auto direct_branch_delta = inst.branch_offset_bytes();
+        // A transfer through a value this object loaded from memory needs no per-target proof once
+        // every code address the object can produce is relocated: the loaded word is either a
+        // rewritten relocation addend or a rewritten getpc result, so it already names the body's
+        // new home. This is what makes a C++ virtual call translatable -- its target comes out of a
+        // vtable slot that no dataflow fact can name, and no amount of consumer-side analysis will
+        // ever name it.
+        const bool target_is_relocated_by_construction =
+            object_produces_code_addresses && code_addresses_fully_accounted;
         if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
             !has_recovered_indirect_call && !has_relocation_table_call &&
-            !recovered_indirect_return && !direct_branch_delta) {
+            !recovered_indirect_return && !direct_branch_delta &&
+            !target_is_relocated_by_construction) {
           auto failure = make_kernel_failure(
               DiagnosticKind::Legalization,
               "indirect branch or call target recovery is not implemented for relocated kernel "
@@ -2997,6 +3090,19 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       text_relocations.push_back(
           {.source_offset = source_offset, .target_offset = target_offset + target_delta});
     }
+    // patch_recovered_builder_fixups NOPs and regenerates a builder's whole source range, so a
+    // literal it owns must not also be written here -- the later write would land in a range the
+    // other model has already rebuilt.
+    std::unordered_set<uint64_t> recovered_builder_getpc_offsets;
+    for (const IndirectCallFixup &fixup : layout.recovered_builder_fixups)
+      recovered_builder_getpc_offsets.insert(fixup.source_getpc_offset);
+    for (const auto &[source_call_offset, consumer] : recovered_indirect_by_call) {
+      (void)source_call_offset;
+      recovered_builder_getpc_offsets.insert(consumer.window_fixup.source_getpc_offset);
+      for (const IndirectCallFixup &fixup : consumer.fixups)
+        recovered_builder_getpc_offsets.insert(fixup.source_getpc_offset);
+    }
+
     std::unordered_set<uint64_t> patched_address_add_offsets;
     for (const RelocationTableDispatch &dispatch : relocation_table_dispatches) {
       if (!target_offset_by_source_offset.contains(dispatch.source_call_offset))
@@ -3024,13 +3130,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     // at the old distance. The instructions are copied verbatim, so nothing else in the pipeline
     // notices. Recompute the literal from the getpc's final placement instead.
     //
-    // Only non-executable targets are taken. A `.text` target is a code address, which the
-    // recovered-builder fixups already rewrite through the block placement map, and routing it
-    // here as well would write the same literal twice from two different models.
+    // A `.text` target is a code address and is handled below rather than here, because it moves
+    // with the body that holds it and so cannot be named by a fixed virtual address.
     for (const PcRelativeAddressBuilder &builder : pc_relative_address_builders) {
       if (patched_address_add_offsets.contains(builder.source_address_add_offset))
-        continue;
-      if (!addresses_loadable_data(builder.target_vaddr))
         continue;
       const auto getpc = target_offset_by_source_offset.find(builder.source_getpc_offset);
       const auto add = target_offset_by_source_offset.find(builder.source_address_add_offset);
@@ -3040,10 +3143,26 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           add == target_offset_by_source_offset.end()) {
         continue;
       }
-      data_relocations.push_back(
+      if (addresses_loadable_data(builder.target_vaddr)) {
+        data_relocations.push_back(
+            {.target_getpc_offset = getpc->second + target_delta,
+             .target_literal_offset = add->second + target_delta + sizeof(uint32_t),
+             .source_target_vaddr = builder.target_vaddr});
+        continue;
+      }
+      // A code address the builder merely computes -- stored to a function pointer, passed as an
+      // argument -- reaches no indirect transfer here, so the recovered-builder path never claims
+      // it and it would otherwise be copied verbatim with a literal measuring the distance the body
+      // used to be at. Record it and resolve after every scope has been placed: the target may be
+      // emitted by a different scope, so this scope's placement map cannot answer for it yet.
+      if (builder.target_vaddr < text_vaddr || builder.target_vaddr - text_vaddr >= text.size())
+        continue;
+      if (recovered_builder_getpc_offsets.contains(builder.source_getpc_offset))
+        continue;
+      pending_code_relocations.push_back(
           {.target_getpc_offset = getpc->second + target_delta,
            .target_literal_offset = add->second + target_delta + sizeof(uint32_t),
-           .source_target_vaddr = builder.target_vaddr});
+           .source_target_text_offset = builder.target_vaddr - text_vaddr});
     }
 
     if (kernel_context.required_vgpr_count > kernel_context.num_vgprs)
@@ -3183,6 +3302,35 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
   }
 
+  // Every scope has been placed, so a code-target builder can finally be told where its target
+  // landed. A source offset emitted more than once has no single answer -- a runtime-dereferenced
+  // code address cannot choose between clones -- so that fails closed rather than picking one,
+  // matching how relocate_relative_text_addends treats a conflicting relocation addend.
+  std::vector<PcRelativeTextRelocation> code_relocations;
+  if (!pending_code_relocations.empty()) {
+    std::unordered_map<uint64_t, uint64_t> placement;
+    std::unordered_set<uint64_t> conflicting;
+    for (const TextOffsetRelocation &relocation : text_relocations) {
+      auto [it, inserted] =
+          placement.try_emplace(relocation.source_offset, relocation.target_offset);
+      if (!inserted && it->second != relocation.target_offset)
+        conflicting.insert(relocation.source_offset);
+    }
+    for (const PendingCodeRelocation &pending : pending_code_relocations) {
+      const auto placed = placement.find(pending.source_target_text_offset);
+      if (placed == placement.end() || conflicting.contains(pending.source_target_text_offset)) {
+        append_error(result.diagnostics, DiagnosticKind::Legalization,
+                     "PC-relative code address has no single relocated target; leaving code "
+                     "object unchanged",
+                     pending.source_target_text_offset);
+        return leave_unchanged();
+      }
+      code_relocations.push_back({.target_getpc_offset = pending.target_getpc_offset,
+                                  .target_literal_offset = pending.target_literal_offset,
+                                  .target_text_offset = placed->second});
+    }
+  }
+
   if (continue_after_failure && has_error_diagnostic(result.diagnostics))
     return leave_unchanged();
 
@@ -3190,7 +3338,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // and sidecar metadata construction into the per-kernel lowering transaction.
   auto materialized = materialize_translated_code_object(
       std::move(patcher), std::move(translated_text), text.size(), text_relocations,
-      data_relocations, descriptor_translations, host_arch_, target_mach_, result.diagnostics);
+      data_relocations, code_relocations, descriptor_translations, host_arch_, target_mach_,
+      result.diagnostics);
   if (!materialized)
     return leave_unchanged();
   result.elf_bytes = std::move(*materialized);
