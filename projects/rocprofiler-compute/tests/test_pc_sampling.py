@@ -50,7 +50,15 @@ def is_pc_sampling_not_supported(output):
     To be called with the stdout + stderr after profiling.
     Check whether profiling output said PC sampling is not supported on the machine
     """
-    return "Given PC sampling configuration is not supported" in output
+    return any(
+        marker in output
+        for marker in (
+            # rocprof-compute's own pre-flight check against the agent configs
+            "is not supported on any of the agents on this system",
+            # rocprofiler-sdk, when it accepts the run and then rejects the config
+            "Given PC sampling configuration is not supported",
+        )
+    )
 
 
 def _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir):

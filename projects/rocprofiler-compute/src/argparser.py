@@ -634,9 +634,11 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="PC Sampling",
         help=(
-            "\t\t\tSet the interval of pc sampling.\n"
-            "\t\t\t  For stochastic sampling, the interval is in cycles; it "
-            "must be a power of 2 and at least 65536 (DEFAULT: 1048576).\n"
+            "\t\t\tSet the interval of pc sampling. The accepted range is "
+            "read from the device; see 'rocprofv3-avail info --pc-sampling'. "
+            "When the device cannot be queried, 1 to 1048576 is accepted.\n"
+            "\t\t\t  For stochastic sampling, the interval is in cycles and "
+            "must be a power of 2 (DEFAULT: 1048576).\n"
             "\t\t\t  For host_trap sampling, the interval is in microseconds "
             "(DEFAULT: 512)."
         ),
