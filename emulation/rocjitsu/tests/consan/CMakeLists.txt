@@ -1375,6 +1375,88 @@ function(rj_add_consan_gfx1250_sim_cases)
     )
 endfunction()
 
+function(rj_add_consan_rdna3_sim_cases)
+    set(_one_value_args PREFIX LDS_TARGET MOI_TARGET CONFIG)
+    cmake_parse_arguments(PARSE_ARGV 0 _sim "" "${_one_value_args}" "")
+    if(_sim_UNPARSED_ARGUMENTS)
+        message(
+            FATAL_ERROR
+            "unknown ConSan RDNA3 simulator arguments: ${_sim_UNPARSED_ARGUMENTS}"
+        )
+    endif()
+    foreach(_required IN ITEMS PREFIX LDS_TARGET MOI_TARGET CONFIG)
+        if(NOT _sim_${_required})
+            message(
+                FATAL_ERROR
+                "ConSan RDNA3 simulator cases require ${_required}"
+            )
+        endif()
+    endforeach()
+
+    rj_add_consan_hip_case(
+        NAME "${_sim_PREFIX}.SuperColliderAllSupportedSites"
+        TARGET ${_sim_LDS_TARGET}
+        FILTER "ConSanLdsTest.PaddedRacyStoreReportsMarker"
+        CONFIG "${_sim_CONFIG}"
+        TIMEOUT 60
+        RUN_SERIAL
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=supercollider"
+            "RJ_CONSAN_DELAY=2"
+            "RJ_CONSAN_LOG=1"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+
+    set(_sim_clean_test
+        "ConSanMoiRdna3Test.BarrierOrderedAccessesPreserveOutput"
+    )
+    foreach(_sim_mode IN ITEMS record-replay sampled inline-shadow)
+        string(REPLACE "-" "_" _sim_mode_name "${_sim_mode}")
+        rj_add_consan_hip_case(
+            NAME "${_sim_PREFIX}.Moi_${_sim_mode_name}"
+            TARGET ${_sim_MOI_TARGET}
+            FILTER "${_sim_clean_test}"
+            CONFIG "${_sim_CONFIG}"
+            TIMEOUT 60
+            RUN_SERIAL
+            PASS_REGEX "kind=trampoline-moi-"
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_MODE=${_sim_mode}"
+                "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=moi_rdna3_barrier_ordered_accesses_for_instrumentation"
+                "RJ_CONSAN_LOG=3"
+                "RJ_CONSAN_MAX_PATCHES=3"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+        )
+    endforeach()
+
+    rj_add_consan_hip_case(
+        NAME "${_sim_PREFIX}.InlineShadowDetectsRace"
+        TARGET ${_sim_MOI_TARGET}
+        FILTER "ConSanMoiRdna3Test.TwoWaveRacyStoresComplete"
+        CONFIG "${_sim_CONFIG}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX
+            "ConSan MOI auto diagnostic.*first_owner=[1-9][0-9]* second_owner=[1-9][0-9]*"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=inline-shadow"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=moi_rdna3_two_wave_racy_stores_for_instrumentation"
+            "RJ_CONSAN_LOG=2"
+            "RJ_CONSAN_MAX_PATCHES=1"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+            "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+            "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+    )
+endfunction()
+
 function(rj_add_consan_fuzzers)
     if(RJ_BUILD_FUZZERS)
         set(_rj_consan_transform_fuzz_targets)
@@ -1648,6 +1730,12 @@ function(rj_add_consan_hip_tests)
         )
         add_dependencies(hip_consan_lds_gfx1100_test_target rocjitsu_dbi_hooks)
         add_dependencies(hip_consan_moi_gfx1100_test_target rocjitsu_dbi_hooks)
+        rj_add_consan_rdna3_sim_cases(
+            PREFIX "ConSanGfx1100Sim"
+            LDS_TARGET hip_consan_lds_gfx1100_test
+            MOI_TARGET hip_consan_moi_gfx1100_test
+            CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1100_w7900.json"
+        )
         if(HAS_GFX1100_GPU AND GFX1100_GPU_UUID)
             set(_rj_consan_gfx1100_device
                 "ROCR_VISIBLE_DEVICES=${GFX1100_GPU_UUID}"

@@ -553,6 +553,8 @@ TEST(ResidentWaveHardwareIdTest, SGetregDistinguishesEveryResidentWaveOnSupporte
   const std::array targets = {
       Target{"cdna3", 0xB8822804u, 256u, 256u, {0u, 16u, 32u, 48u, 1u, 17u, 33u, 49u}},
       Target{"cdna4", 0xB8822804u, 256u, 256u, {0u, 16u, 32u, 48u, 1u, 17u, 33u, 49u}},
+      Target{"rdna3", 0xB8824817u, 128u, 32u, {0u, 512u, 1u, 513u, 2u, 514u, 3u, 515u}},
+      Target{"rdna3_5", 0xB8824817u, 128u, 32u, {0u, 512u, 1u, 513u, 2u, 514u, 3u, 515u}},
       Target{"rdna4", 0xB8824817u, 128u, 32u, {0u, 512u, 1u, 513u, 2u, 514u, 3u, 515u}},
       Target{"gfx1250", 0xB8824817u, 128u, 32u, {0u, 256u, 512u, 768u, 1u, 257u, 513u, 769u}},
   };

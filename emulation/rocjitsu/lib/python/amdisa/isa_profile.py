@@ -54,6 +54,14 @@ class MemoryCoherencyModel(Enum):
     GFX12_SCOPE_TH = auto()  # RDNA4 — 2-bit SCOPE + TH hint
 
 
+class HwregIdentityModel(Enum):
+    """Selects how generated HW_ID1/HW_ID2 reads identify a resident wave."""
+
+    COMPUTE_UNIT = auto()
+    LEGACY = auto()
+    TOPOLOGY = auto()
+
+
 @dataclass
 class EncodingModifier:
     """A disassembly modifier to append to an encoding's mnemonic output.
@@ -333,6 +341,11 @@ class IsaProfile(ABC):
     def hwreg_hw_id2_id(self) -> int:
         """GFX9 hardware-register ID for HW_ID2 in generated getreg code."""
         return 5
+
+    @property
+    def hwreg_identity_model(self) -> HwregIdentityModel:
+        """Resident-wave identity representation used by generated HWREG reads."""
+        return HwregIdentityModel.COMPUTE_UNIT
 
     @property
     def hwreg_ib_sts2_id(self) -> int | None:
@@ -1034,6 +1047,10 @@ class CdnaProfile(_AmdgpuProfileBase):
     # uses the correct name; the rename is a no-op there.
     _VOP3P_FIELD_RENAMES: dict[str, str] = {'pad_14': 'op_sel_hi_2'}
 
+    @property
+    def hwreg_identity_model(self) -> HwregIdentityModel:
+        return HwregIdentityModel.LEGACY
+
     def field_renames(self, enc_name: str) -> dict[str, str]:
         upper = enc_name.upper()
         if upper == 'ENC_FLAT':
@@ -1126,6 +1143,10 @@ class Cdna1Profile(CdnaProfile):
         return False
 
     @property
+    def hwreg_identity_model(self) -> HwregIdentityModel:
+        return HwregIdentityModel.COMPUTE_UNIT
+
+    @property
     def acc_vgpr_encoding_base(self) -> int:
         return 0
 
@@ -1175,6 +1196,10 @@ class Cdna2Profile(CdnaProfile):
     @property
     def acc_vgpr_encoding_base(self) -> int:
         return 512  # CDNA2: AccVGPR range starts at encoding 512
+
+    @property
+    def hwreg_identity_model(self) -> HwregIdentityModel:
+        return HwregIdentityModel.COMPUTE_UNIT
 
     @property
     def flat_scratch_mechanism(self) -> str:
@@ -1381,6 +1406,22 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def use_hwreg_helpers(self) -> bool:
+        return True
+
+    @property
+    def hwreg_hw_id1_id(self) -> int:
+        return 23
+
+    @property
+    def hwreg_hw_id2_id(self) -> int:
+        return 24
+
+    @property
+    def hwreg_identity_model(self) -> HwregIdentityModel:
+        return HwregIdentityModel.TOPOLOGY
+
+    @property
     def descriptor_sgpr_count_encoded(self) -> bool:
         return False
 
@@ -1484,6 +1525,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def hwreg_hw_id2_id(self) -> int:
         return 24
+
+    @property
+    def hwreg_identity_model(self) -> HwregIdentityModel:
+        return HwregIdentityModel.TOPOLOGY
 
     @property
     def waitcnt_lgkmcnt_mask(self) -> str:

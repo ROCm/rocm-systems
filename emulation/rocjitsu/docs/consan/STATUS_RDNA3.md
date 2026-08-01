@@ -36,6 +36,13 @@ time and scopes each process with that stable identifier. The gate does not
 assume a device ordinal. Runtime instrumentation takes LDS capacity from that
 active agent; the gfx1100 JSON is used only for simulator and offline work.
 
+The complementary `ConSanGfx1100Sim.*` gate runs the same native gfx1100 code
+objects through RocJITsu with `gfx1100_w7900.json`. Its five compact cases
+cover a no-filter all-supported-site SuperCollider pass, clean Record/Replay,
+Sampled, and Inline Shadow execution, and required Inline Shadow conflict
+attribution. This simulator evidence uses JSON-declared LDS capacity and is
+reported separately from the physical results above.
+
 ## Semantic boundary
 
 - Native LDS, admitted group-FLAT, and singleton `s_barrier` forms have
@@ -68,4 +75,5 @@ unassessed and must not borrow status from the gfx1201 ledger.
 
 The bring-up also retains a no-regression gate: the complete host ConSan suite,
 the generated capability-documentation check, physical gfx1201 smoke cases,
-and compact gfx942, gfx950, and gfx1250 simulator slices must remain green.
+and compact gfx942, gfx950, gfx1100, and gfx1250 simulator slices must remain
+green.

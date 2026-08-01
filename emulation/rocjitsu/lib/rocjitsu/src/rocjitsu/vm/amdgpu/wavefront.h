@@ -161,15 +161,16 @@ public:
     return wave_id | (simd_id << 4u);
   }
 
-  /// @brief Return the GFX12 HW_ID1 topology and resident-wave fields.
+  /// @brief Return the GFX11/GFX12 HW_ID1 topology and resident-wave fields.
   ///
-  /// The GFX12.0 and GFX12.1 simulator profiles have different SIMD/CU
-  /// topology. The implementation derives the architectural WAVE_ID, SIMD_ID,
-  /// WGP_ID, SA_ID, and (when present) SE_ID fields from the owning component
-  /// tree rather than from globally allocated simulator component IDs.
+  /// The GFX11, GFX12.0, and GFX12.1 simulator profiles have target-specific
+  /// SIMD/CU topology. The implementation derives the architectural WAVE_ID,
+  /// SIMD_ID, WGP_ID, SA_ID, and (when present) SE_ID fields from the owning
+  /// component tree rather than from globally allocated simulator component
+  /// IDs.
   uint32_t hw_id1_raw() const;
 
-  /// @brief Return the modeled GFX12 HW_ID2 dispatch fields.
+  /// @brief Return the modeled GFX11/GFX12 HW_ID2 dispatch fields.
   ///
   /// Queue, workgroup, and VM identity come from dispatch state. Pipeline,
   /// micro-engine, and state-context fields are currently unmodeled and read as

@@ -36,6 +36,7 @@ from amdisa.isa_profile import (
     Cdna2Profile,
     CdnaProfile,
     Gfx1250Profile,
+    HwregIdentityModel,
     Rdna1Profile,
     Rdna2Profile,
     Rdna3_5Profile,
@@ -2369,6 +2370,30 @@ def test_gfx1250_helper_blocks_emit_hwreg_and_scaled_wmma_hooks():
     assert 'isWmmaScaleF32Vop3px2' in (
         codegen._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers()
     )
+
+
+def test_rdna3_helper_block_reads_gfx11_resident_wave_identity():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='rdna3',
+        profile=Rdna3Profile(),
+    )
+
+    hwreg = codegen._emit_hwreg_helpers()
+    assert 'HW_REG_HW_ID1 = 23' in hwreg
+    assert 'HW_REG_HW_ID2 = 24' in hwreg
+    assert 'wf.hw_id1_raw()' in hwreg
+    assert 'wf.hw_id2_raw()' in hwreg
+
+
+def test_hwreg_identity_models_preserve_each_family_representation():
+    assert Cdna1Profile().hwreg_identity_model == HwregIdentityModel.COMPUTE_UNIT
+    assert Cdna2Profile().hwreg_identity_model == HwregIdentityModel.COMPUTE_UNIT
+    assert CdnaProfile().hwreg_identity_model == HwregIdentityModel.LEGACY
+    assert Rdna3Profile().hwreg_identity_model == HwregIdentityModel.TOPOLOGY
+    assert Rdna3_5Profile().hwreg_identity_model == HwregIdentityModel.TOPOLOGY
+    assert Rdna4Profile().hwreg_identity_model == HwregIdentityModel.TOPOLOGY
+    assert Gfx1250Profile().hwreg_identity_model == HwregIdentityModel.TOPOLOGY
 
 
 def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):

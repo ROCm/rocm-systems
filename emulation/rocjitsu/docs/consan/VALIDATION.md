@@ -30,6 +30,19 @@ fixture code object, required Inline Shadow conflict attribution, cleanup, and
 ordered post-run device health. Broader workload status remains in
 [STATUS_RDNA3.md](STATUS_RDNA3.md).
 
+The complementary target-native simulator gate uses the selected W7900 JSON
+as its offline source of truth:
+
+```sh
+ctest --test-dir "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build" \
+  -R '^ConSanGfx1100Sim\\.' --output-on-failure -j1
+```
+
+It covers the no-filter SuperCollider path, clean execution through all three
+MOI engines, and required Inline Shadow conflict attribution. Simulator and
+physical results remain separate evidence because only the physical path gets
+LDS capacity from the active runtime agent.
+
 The status table began as a cumulative ledger: its rows were promoted at
 different frozen checkpoints and some predated today's stronger completeness
 and overhead wording. These scripts define one-tip requalification; they do

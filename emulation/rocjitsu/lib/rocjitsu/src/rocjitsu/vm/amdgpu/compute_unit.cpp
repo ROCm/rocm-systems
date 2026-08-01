@@ -37,6 +37,8 @@ namespace {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3:
   case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
     return 64u;
   case ROCJITSU_CODE_ARCH_GFX1250:

@@ -20,6 +20,53 @@
 namespace rocjitsu {
 namespace rdna3_5 {
 
+namespace {
+constexpr uint32_t HW_REG_STATUS = 1;
+constexpr uint32_t HW_REG_HW_ID1 = 23;
+constexpr uint32_t HW_REG_HW_ID2 = 24;
+constexpr uint32_t HW_REG_GPR_ALLOC = 6;
+constexpr uint32_t HW_REG_VGPR_ALLOC = 7;
+
+[[maybe_unused]] uint32_t insert_hwreg_field(uint32_t reg_val, uint32_t src, uint32_t offset,
+                                             uint32_t mask) {
+  return (reg_val & ~(mask << offset)) | ((src & mask) << offset);
+}
+
+[[maybe_unused]] bool read_hwreg(amdgpu::Wavefront &wf, uint32_t reg_id, uint32_t &reg_val) {
+  switch (reg_id) {
+  case HW_REG_STATUS:
+    reg_val = wf.status_raw();
+    return true;
+  case HW_REG_HW_ID1:
+    reg_val = wf.hw_id1_raw();
+    return true;
+  case HW_REG_HW_ID2:
+    reg_val = wf.hw_id2_raw();
+    return true;
+  case HW_REG_GPR_ALLOC:
+    reg_val = (wf.sgpr_alloc().count & 0xFFu) | ((wf.sgpr_alloc().base & 0xFFu) << 8);
+    return true;
+  case HW_REG_VGPR_ALLOC:
+    reg_val = (wf.vgpr_alloc().count & 0xFFu) | ((wf.vgpr_alloc().base & 0xFFu) << 8);
+    return true;
+  default:
+    return false;
+  }
+}
+
+[[maybe_unused]] bool write_hwreg(amdgpu::Wavefront &wf, uint32_t reg_id, uint32_t offset,
+                                  uint32_t mask, uint32_t src) {
+  switch (reg_id) {
+  case HW_REG_STATUS:
+    wf.set_status_raw(insert_hwreg_field(wf.status_raw(), src, offset, mask));
+    return true;
+  default:
+    return false;
+  }
+}
+
+} // namespace
+
 SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
     : Sopk("s_movk_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMovkI32Sopk>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -305,26 +352,8 @@ void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t offset = (hwreg >> 6) & 0x1Fu;
   uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;
   uint32_t reg_val = 0;
-  switch (reg_id) {
-  case 1:
-    reg_val = wf.status_raw();
-    break;
-  case 4:
-    reg_val = static_cast<uint32_t>(wf.cu().id());
-    break;
-  case 5:
-    reg_val = static_cast<uint32_t>(wf.cu().id() >> 16);
-    break;
-  case 6:
-    reg_val = (wf.sgpr_alloc().count & 0xFFu) | ((wf.sgpr_alloc().base & 0xFFu) << 8);
-    break;
-  case 7:
-    reg_val = (wf.vgpr_alloc().count & 0xFFu) | ((wf.vgpr_alloc().base & 0xFFu) << 8);
-    break;
-  default:
+  if (!read_hwreg(wf, reg_id, reg_val))
     util::Logger::warn("s_getreg_b32: unhandled hwreg id=", reg_id);
-    break;
-  }
   if (offset + size > 32)
     size = 32 - offset;
   uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
@@ -358,17 +387,8 @@ void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
     size = 32 - offset;
   uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
   uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(sdst);
-  switch (reg_id) {
-  case 1: {
-    uint32_t s = wf.status_raw();
-    s = (s & ~(mask << offset)) | ((src & mask) << offset);
-    wf.set_status_raw(s);
-    break;
-  }
-  default:
+  if (!write_hwreg(wf, reg_id, offset, mask, src))
     util::Logger::warn("s_setreg_b32: unhandled hwreg id=", reg_id);
-    break;
-  }
 }
 
 SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
@@ -396,17 +416,8 @@ void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
     size = 32 - offset;
   uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
   uint32_t src = literal_;
-  switch (reg_id) {
-  case 1: {
-    uint32_t s = wf.status_raw();
-    s = (s & ~(mask << offset)) | ((src & mask) << offset);
-    wf.set_status_raw(s);
-    break;
-  }
-  default:
+  if (!write_hwreg(wf, reg_id, offset, mask, src))
     util::Logger::warn("s_setreg_imm32_b32: unhandled hwreg id=", reg_id);
-    break;
-  }
 }
 
 SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)

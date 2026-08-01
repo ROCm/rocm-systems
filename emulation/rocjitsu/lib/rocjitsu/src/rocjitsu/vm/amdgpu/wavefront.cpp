@@ -14,13 +14,13 @@ namespace amdgpu {
 
 namespace {
 
-struct Gfx12TopologyLocation {
+struct HwId1TopologyLocation {
   uint32_t compute_unit = 0;
   uint32_t shader_engine = 0;
 };
 
-[[nodiscard]] Gfx12TopologyLocation topology_location(const ComputeUnitCore &cu) {
-  Gfx12TopologyLocation location;
+[[nodiscard]] HwId1TopologyLocation topology_location(const ComputeUnitCore &cu) {
+  HwId1TopologyLocation location;
   const auto *shader_engine = dynamic_cast<const ShaderEngine *>(cu.parent());
   if (!shader_engine)
     return location;
@@ -70,9 +70,11 @@ uint32_t Wavefront::hw_id1_raw() const {
   constexpr uint32_t kShaderEngineIdLimit = 8u;
 
   const rj_code_arch_t arch = cu_.arch();
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250)
-    throw std::runtime_error("HW_ID1 is only modeled for GFX12-family targets");
-  const Gfx12TopologyLocation location = topology_location(cu_);
+  if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5 &&
+      arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250) {
+    throw std::runtime_error("HW_ID1 is only modeled for GFX11/GFX12-family targets");
+  }
+  const HwId1TopologyLocation location = topology_location(cu_);
 
   uint32_t wave_id = 0;
   uint32_t simd_id = 0;
@@ -89,9 +91,9 @@ uint32_t Wavefront::hw_id1_raw() const {
     shader_array_id = location.compute_unit / kCusPerShaderArray;
     wgp_id = location.compute_unit % kCusPerShaderArray;
   } else {
-    // GFX12.0 SIMD_ID is within the WGP: bit 0 selects the CU and bit 1
-    // selects one of the two SIMDs in that CU. Each shader array has four
-    // two-CU WGPs.
+    // GFX11 and GFX12.0 SIMD_ID are within the WGP: bit 0 selects the CU and
+    // bit 1 selects one of the two SIMDs in that CU. Each shader array has
+    // four two-CU WGPs.
     constexpr uint32_t kSimdsPerCu = 2u;
     constexpr uint32_t kCusPerShaderArray = 8u;
     const uint32_t cu_within_shader_array = location.compute_unit % kCusPerShaderArray;

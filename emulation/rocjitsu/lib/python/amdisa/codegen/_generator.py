@@ -38,6 +38,7 @@ from amdisa.gpuisa import (
     REGISTER_ONLY_OPERAND_TYPES,
 )
 from amdisa.semantics import InstructionSemantics, SemanticsSpec
+from amdisa.isa_profile import HwregIdentityModel
 
 from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.cpp_file import CppFile
@@ -3048,6 +3049,7 @@ class CodeGenerator:
         hw_id2_id = profile.hwreg_hw_id2_id
         wave_sched_id = profile.hwreg_wave_sched_mode_id
         ib_sts2_id = profile.hwreg_ib_sts2_id
+        hw_id1_expr, hw_id2_expr = self._hwreg_identity_expressions(profile)
         constexprs = []
         if mode_id is not None:
             constexprs.append(f'constexpr uint32_t HW_REG_MODE = {mode_id};')
@@ -3088,10 +3090,10 @@ class CodeGenerator:
                 '    reg_val = wf.status_raw();\n'
                 '    return true;',
                 '  case HW_REG_HW_ID1:\n'
-                '    reg_val = wf.hw_id1_raw();\n'
+                f'    reg_val = {hw_id1_expr};\n'
                 '    return true;',
                 '  case HW_REG_HW_ID2:\n'
-                '    reg_val = wf.hw_id2_raw();\n'
+                f'    reg_val = {hw_id2_expr};\n'
                 '    return true;',
                 '  case HW_REG_GPR_ALLOC:\n'
                 '    reg_val = (wf.sgpr_alloc().count & 0xFFu) | ((wf.sgpr_alloc().base & 0xFFu) << 8);\n'
@@ -3159,6 +3161,21 @@ class CodeGenerator:
             '}\n'
             '\n'
             '} // namespace'
+        )
+
+    @staticmethod
+    def _hwreg_identity_expressions(profile) -> tuple[str, str]:
+        """Return generated C++ expressions for the profile's HW_ID registers."""
+        if profile.hwreg_identity_model == HwregIdentityModel.LEGACY:
+            return (
+                'wf.legacy_hw_id_raw()',
+                'static_cast<uint32_t>(wf.cu().id() >> 16)',
+            )
+        if profile.hwreg_identity_model == HwregIdentityModel.TOPOLOGY:
+            return 'wf.hw_id1_raw()', 'wf.hw_id2_raw()'
+        return (
+            'static_cast<uint32_t>(wf.cu().id())',
+            'static_cast<uint32_t>(wf.cu().id() >> 16)',
         )
 
     @staticmethod
@@ -4103,6 +4120,9 @@ class CodeGenerator:
             mode_id = profile.hwreg_mode_id
             status_id = profile.hwreg_status_id
             ib_sts2_id = profile.hwreg_ib_sts2_id
+            hw_id1_id = profile.hwreg_hw_id1_id
+            hw_id2_id = profile.hwreg_hw_id2_id
+            hw_id1_expr, hw_id2_expr = self._hwreg_identity_expressions(profile)
             L.append(f'  uint16_t hwreg = {src_ops[0]}.encoding_value_;')
             L.append('  uint32_t reg_id = hwreg & 0x3Fu;')
             L.append('  uint32_t offset = (hwreg >> 6) & 0x1Fu;')
@@ -4118,12 +4138,8 @@ class CodeGenerator:
                 if mode_id is not None:
                     L.append(f'  case {mode_id}: reg_val = wf.mode_raw(); break;')
                 L.append(f'  case {status_id}: reg_val = wf.status_raw(); break;')
-                L.append(
-                    '  case 4: reg_val = static_cast<uint32_t>(wf.cu().id()); break;'
-                )
-                L.append(
-                    '  case 5: reg_val = static_cast<uint32_t>(wf.cu().id() >> 16); break;'
-                )
+                L.append(f'  case {hw_id1_id}: reg_val = {hw_id1_expr}; break;')
+                L.append(f'  case {hw_id2_id}: reg_val = {hw_id2_expr}; break;')
                 L.append(
                     '  case 6: reg_val = (wf.sgpr_alloc().count & 0xFFu) | ((wf.sgpr_alloc().base & 0xFFu) << 8); break;'
                 )

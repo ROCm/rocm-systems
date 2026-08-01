@@ -159,6 +159,9 @@ The registered execution gates use native code objects for each target:
   all three MOI detection engines, a no-filter all-supported-site
   SuperCollider pass, a required same-site two-wave race diagnostic,
   sequential consistency, and ordered post-instrumentation health;
+- simulated `gfx1100`: `ConSanGfx1100Sim.*`, using the target-native W7900
+  JSON to cover the no-filter SuperCollider path, all three MOI engines, clean
+  ordered communication, and required Inline Shadow conflict attribution;
 - physical `gfx1201`: `ConSanMoiHipTest.*` and `ConSanInlineShadowTest.*`;
 - simulated `gfx1250`: `ConSanGfx1250Sim.*`;
 - simulated `gfx950`: `ConSanGfx950Sim.*` and the opted-in
