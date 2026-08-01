@@ -5,7 +5,7 @@ This dictionary is used to map specific file directory changes to the correspond
 subtree_to_project_map = {
     "emulation/rocjitsu": "emulation",
     "emulation/mirage": "emulation",
-    "projects/amdsmi": "core",
+    "projects/amdsmi": "amdsmi",  # amdsmi changes run amdsmi + its downstream dependents
     "projects/aqlprofile": "profiler",
     "projects/clr": "runtimes",
     "projects/cuid": "rdc",
@@ -35,7 +35,13 @@ subtree_to_project_map = {
 project_map = {
     "core": {
         "cmake_options": ["-DTHEROCK_ENABLE_CORE=ON", "-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_PROFILER=ON"],
-        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems",  # will run sanity test to cover rocminfo and amdsmi
+        "projects_to_test": "amdsmi, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems",  # will run sanity test to cover rocminfo
+    },
+    # amdsmi changes fan out to its downstream dependents across rocm-systems
+    # and rocm-libraries, so build everything and test amdsmi plus those consumers.
+    "amdsmi": {
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
+        "projects_to_test": "amdsmi, rocblas, hipblas, hipblaslt, rccl, rocprofiler-systems, rocrtst",
     },
     "emulation": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_EMULATION=ON"],
@@ -85,7 +91,7 @@ project_map = {
     },
     "all": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
-        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu",
+        "projects_to_test": "amdsmi, hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu",
     },
     # Same test coverage as TheRock submodule-bump PRs (rocm-systems scope).
     # Nightly (schedule) uses this entry explicitly for alignment.
@@ -93,7 +99,7 @@ project_map = {
     # instead of above blanket addition of all tests, we can add logic to determine which mathlibs to test, based on file changes from last nightly run. Can be handled once the tests scripts move to component/monorepo src
     "nightly": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu, rocprim, rocthrust, rocrand, hiprand, hipblaslt, rocblas, hipblas, rocroller, miopen, miopenprovider, hipfft, rocfft, rocsparse, hipsparse, hipsparselt, rocsolver, hipsolver, rocwmma",
+        "projects_to_test": "amdsmi, hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu, rocprim, rocthrust, rocrand, hiprand, hipblaslt, rocblas, hipblas, rocroller, miopen, miopenprovider, hipfft, rocfft, rocsparse, hipsparse, hipsparselt, rocsolver, hipsolver, rocwmma",
     },
 }
 
