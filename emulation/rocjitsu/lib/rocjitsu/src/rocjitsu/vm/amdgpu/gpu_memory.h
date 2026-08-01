@@ -195,20 +195,21 @@ public:
 
     auto &entry = vmid_entry->second;
     std::shared_lock page_table_lock(*entry.mutex);
-    auto pte = entry.page_table->find(addr >> PAGE_SHIFT);
+    const uint64_t page_key = addr >> PAGE_SHIFT;
+    auto pte = entry.page_table->find(page_key);
     if (pte != entry.page_table->end()) {
       const size_t page_offset = addr & PAGE_MASK;
-      const size_t valid_bytes =
-          std::min(pte->second.valid_bytes,
-                   addressable_prefix(pte->second.host_ptr, pte->second.valid_bytes));
-      const bool allocation_backed = pte->second.host_ptr != nullptr && page_offset < valid_bytes &&
-                                     size <= valid_bytes - page_offset;
+      const size_t host_backed_bytes =
+          cached_host_backed_bytes(page_key, pte->second, entry.page_table, entry.generation);
+      const bool allocation_backed = pte->second.host_ptr != nullptr &&
+                                     page_offset < host_backed_bytes &&
+                                     size <= host_backed_bytes - page_offset;
       if (allocation_backed) {
         atomic_rmw_mapped(addr, pte->second.host_ptr, fn);
       } else if (pte->second.host_ptr == nullptr) {
         atomic_rmw_fallback(addr, size, entry.client_pid, fn);
       } else {
-        atomic_rmw_fallback(addr, size, 0, fn);
+        atomic_rmw_discarded(addr, fn);
       }
       return;
     }
@@ -239,7 +240,11 @@ public:
     std::shared_lock page_table_lock(*entry.mutex);
     const uint64_t page = addr >> PAGE_SHIFT;
     auto page_entry = entry.page_table->find(page);
-    if (page_entry == entry.page_table->end())
+    if (page_entry == entry.page_table->end() || page_entry->second.host_ptr == nullptr)
+      return {0, 0};
+
+    const size_t page_host_backed_bytes = effective_host_backed_bytes(page_entry->second);
+    if ((addr & PAGE_MASK) >= page_host_backed_bytes)
       return {0, 0};
 
     uint64_t first_page = page;
@@ -247,6 +252,8 @@ public:
     while (first_page > 0) {
       auto previous_page_entry = entry.page_table->find(first_page - 1);
       if (previous_page_entry == entry.page_table->end() ||
+          previous_page_entry->second.host_ptr == nullptr ||
+          effective_host_backed_bytes(previous_page_entry->second) != PAGE_SIZE ||
           previous_page_entry->second.host_ptr + PAGE_SIZE != first_host_page)
         break;
       --first_page;
@@ -255,16 +262,24 @@ public:
 
     uint64_t last_page = page;
     uint8_t *last_host_page = page_entry->second.host_ptr;
+    size_t last_host_backed_bytes = page_host_backed_bytes;
     while (true) {
+      if (last_host_backed_bytes != PAGE_SIZE)
+        break;
       auto next_page_entry = entry.page_table->find(last_page + 1);
       if (next_page_entry == entry.page_table->end() ||
+          next_page_entry->second.host_ptr == nullptr ||
           next_page_entry->second.host_ptr != last_host_page + PAGE_SIZE)
+        break;
+      const size_t next_host_backed_bytes = effective_host_backed_bytes(next_page_entry->second);
+      if (next_host_backed_bytes == 0)
         break;
       ++last_page;
       last_host_page = next_page_entry->second.host_ptr;
+      last_host_backed_bytes = next_host_backed_bytes;
     }
 
-    const uint64_t range_size = ((last_page - first_page) + 1) << PAGE_SHIFT;
+    const uint64_t range_size = ((last_page - first_page) << PAGE_SHIFT) + last_host_backed_bytes;
     return {reinterpret_cast<uint64_t>(first_host_page), range_size};
   }
 
@@ -422,6 +437,14 @@ private:
       simdojo::SparseMemory::write8(addr + i, value[i]);
   }
 
+  template <typename F> void atomic_rmw_discarded(uint64_t addr, F &fn) {
+    uintptr_t key = static_cast<uintptr_t>(addr ^ (addr >> 32));
+    key ^= reinterpret_cast<uintptr_t>(this);
+    std::lock_guard lock(backing_atomic_mutex(key));
+    std::array<uint8_t, sizeof(uint64_t)> value{};
+    fn(value.data());
+  }
+
   template <typename F> static void for_each_page_chunk(uint64_t addr, size_t len, F &&fn) {
     size_t offset = 0;
     while (offset < len) {
@@ -435,14 +458,18 @@ private:
   static constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
 
   static size_t addressable_prefix(const uint8_t *ptr, size_t len) {
+    if (ptr == nullptr)
+      return 0;
 #if defined(RJ_GPU_MEMORY_WITH_ASAN)
-    if (ptr) {
-      if (auto *poisoned = static_cast<const uint8_t *>(
-              __asan_region_is_poisoned(const_cast<uint8_t *>(ptr), len)))
-        return static_cast<size_t>(poisoned - ptr);
-    }
+    if (auto *poisoned = static_cast<const uint8_t *>(
+            __asan_region_is_poisoned(const_cast<uint8_t *>(ptr), len)))
+      return static_cast<size_t>(poisoned - ptr);
 #endif
     return len;
+  }
+
+  static size_t effective_host_backed_bytes(const KfdProcess::PageTableEntry &pte) {
+    return addressable_prefix(pte.host_ptr, pte.host_backed_bytes);
   }
 
   struct VmidEntry {
@@ -464,9 +491,64 @@ private:
     KfdProcess::PageTable *page_table = nullptr;
     std::shared_mutex *mutex = nullptr;
     const uint64_t *generation_ptr = nullptr;
-    size_t addressable_bytes = 0;
-    bool addressable_bytes_cached = false;
+    size_t host_backed_bytes = 0;
+    bool host_backed_bytes_cached = false;
   };
+
+  struct HostExtentCacheEntry {
+    const GpuMemory *memory = nullptr;
+    uint64_t memory_instance = 0;
+    KfdProcess::PageTable *page_table = nullptr;
+    const uint64_t *generation_ptr = nullptr;
+    uint64_t generation = 0;
+    uint64_t page_key = 0;
+    uint8_t *host_ptr = nullptr;
+    size_t declared_bytes = 0;
+    size_t host_backed_bytes = 0;
+  };
+
+  static constexpr size_t kHostExtentCacheEntries = 256;
+  static_assert((kHostExtentCacheEntries & (kHostExtentCacheEntries - 1)) == 0,
+                "host extent cache size must be a power of two");
+
+  size_t cached_host_backed_bytes(uint64_t page_key, const KfdProcess::PageTableEntry &pte,
+                                  KfdProcess::PageTable *page_table,
+                                  const uint64_t *generation_ptr) const {
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+    if (generation_ptr == nullptr)
+      return effective_host_backed_bytes(pte);
+
+    static thread_local std::array<HostExtentCacheEntry, kHostExtentCacheEntries> cache;
+    const uintptr_t table_key = reinterpret_cast<uintptr_t>(page_table) >> PAGE_SHIFT;
+    HostExtentCacheEntry &cache_entry =
+        cache[(page_key ^ table_key ^ instance_id_) & (cache.size() - 1)];
+    const uint64_t generation = *generation_ptr;
+    const bool cache_hit =
+        cache_entry.memory == this && cache_entry.memory_instance == instance_id_ &&
+        cache_entry.page_table == page_table && cache_entry.generation_ptr == generation_ptr &&
+        cache_entry.generation == generation && cache_entry.page_key == page_key &&
+        cache_entry.host_ptr == pte.host_ptr && cache_entry.declared_bytes == pte.host_backed_bytes;
+    if (!cache_hit) {
+      cache_entry = {
+          .memory = this,
+          .memory_instance = instance_id_,
+          .page_table = page_table,
+          .generation_ptr = generation_ptr,
+          .generation = generation,
+          .page_key = page_key,
+          .host_ptr = pte.host_ptr,
+          .declared_bytes = pte.host_backed_bytes,
+          .host_backed_bytes = effective_host_backed_bytes(pte),
+      };
+    }
+    return cache_entry.host_backed_bytes;
+#else
+    (void)page_key;
+    (void)page_table;
+    (void)generation_ptr;
+    return pte.host_backed_bytes;
+#endif
+  }
 
   /// @brief Walk a VMID page table with a generation-keyed thread-local cache.
   /// @details The callback runs while both VMID registration and the selected
@@ -508,7 +590,7 @@ private:
       cache.page_key = page_key;
       cache.generation = generation;
       cache.found = it != cache.page_table->end();
-      cache.addressable_bytes_cached = false;
+      cache.host_backed_bytes_cached = false;
       if (cache.found)
         cache.pte = it->second;
     }
@@ -530,17 +612,19 @@ private:
       if (pte) {
         if (pte->host_ptr == nullptr)
           return false;
-        size_t valid_bytes = pte->valid_bytes;
+        size_t host_backed_bytes = pte->host_backed_bytes;
 #if defined(RJ_GPU_MEMORY_WITH_ASAN)
-        // HIP registers the allocation redzone after the KFD map call returns,
-        // so discover the usable tail lazily and cache it off the hot path.
-        if (!cache.addressable_bytes_cached) {
-          cache.addressable_bytes = addressable_prefix(pte->host_ptr, valid_bytes);
-          cache.addressable_bytes_cached = true;
+        // HIP installs ASan poison before returning the allocation to its caller,
+        // so the first GPU access observes the final addressable prefix. Free,
+        // remap, and unmap operations mutate the page table and invalidate this
+        // cached PTE and prefix before the backing allocation can change.
+        if (!cache.host_backed_bytes_cached) {
+          cache.host_backed_bytes = effective_host_backed_bytes(*pte);
+          cache.host_backed_bytes_cached = true;
         }
-        valid_bytes = std::min(valid_bytes, cache.addressable_bytes);
+        host_backed_bytes = cache.host_backed_bytes;
 #endif
-        fn(pte->host_ptr, valid_bytes);
+        fn(pte->host_ptr, host_backed_bytes);
         return true;
       }
       if (passthrough_ && addr < kUserSpaceLimit) {
@@ -557,10 +641,10 @@ private:
   bool read_mapped(uint64_t addr, void *dst, size_t len, uint32_t vmid) const {
     if ((addr & PAGE_MASK) + len > PAGE_SIZE)
       return false;
-    return with_host_ptr(addr, vmid, [&](const uint8_t *page, size_t valid_bytes) {
+    return with_host_ptr(addr, vmid, [&](const uint8_t *page, size_t host_backed_bytes) {
       const size_t page_offset = addr & PAGE_MASK;
       size_t mapped_bytes =
-          page_offset < valid_bytes ? std::min(len, valid_bytes - page_offset) : 0;
+          page_offset < host_backed_bytes ? std::min(len, host_backed_bytes - page_offset) : 0;
       if (mapped_bytes > 0)
         std::memcpy(dst, page + page_offset, mapped_bytes);
       std::memset(static_cast<uint8_t *>(dst) + mapped_bytes, 0, len - mapped_bytes);
@@ -570,10 +654,10 @@ private:
   bool write_mapped(uint64_t addr, const void *src, size_t len, uint32_t vmid) {
     if ((addr & PAGE_MASK) + len > PAGE_SIZE)
       return false;
-    return with_host_ptr(addr, vmid, [&](uint8_t *page, size_t valid_bytes) {
+    return with_host_ptr(addr, vmid, [&](uint8_t *page, size_t host_backed_bytes) {
       const size_t page_offset = addr & PAGE_MASK;
       size_t mapped_bytes =
-          page_offset < valid_bytes ? std::min(len, valid_bytes - page_offset) : 0;
+          page_offset < host_backed_bytes ? std::min(len, host_backed_bytes - page_offset) : 0;
       if (mapped_bytes > 0)
         std::memcpy(page + page_offset, src, mapped_bytes);
     });
@@ -581,7 +665,10 @@ private:
 
   uint8_t *translate(uint64_t addr, uint32_t vmid) const {
     uint8_t *host_ptr = nullptr;
-    with_host_ptr(addr, vmid, [&](uint8_t *page, size_t) { host_ptr = page; });
+    with_host_ptr(addr, vmid, [&](uint8_t *page, size_t host_backed_bytes) {
+      if ((addr & PAGE_MASK) < host_backed_bytes)
+        host_ptr = page;
+    });
     return host_ptr;
   }
 

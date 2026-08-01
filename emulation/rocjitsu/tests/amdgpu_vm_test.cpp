@@ -610,6 +610,40 @@ TEST(GpuMemoryTest, PartialMappedPageReadsZeroFillAndWritesClipToAllocation) {
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kAllocationSize - 1, kPid), allocation.data());
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kAllocationSize, kPid), nullptr);
+  EXPECT_EQ(memory.find_host_range(kBaseVa + kAllocationSize - 1, kPid),
+            std::make_pair(reinterpret_cast<uint64_t>(allocation.data()),
+                           static_cast<uint64_t>(kAllocationSize)));
+  EXPECT_EQ(memory.find_host_range(kBaseVa + kAllocationSize, kPid),
+            (std::pair<uint64_t, uint64_t>{0, 0}));
+
+  constexpr size_t kAtomicOffset = 8;
+  uint32_t atomic_value = 7;
+  std::memcpy(allocation.data() + kAtomicOffset, &atomic_value, sizeof(atomic_value));
+  memory.atomic_rmw(
+      kBaseVa + kAtomicOffset, sizeof(atomic_value),
+      [](uint8_t *storage) {
+        uint32_t value = 0;
+        std::memcpy(&value, storage, sizeof(value));
+        ++value;
+        std::memcpy(storage, &value, sizeof(value));
+      },
+      kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kAtomicOffset, kPid), 8u);
+
+  uint32_t invalid_atomic_read = std::numeric_limits<uint32_t>::max();
+  memory.atomic_rmw(
+      kBaseVa + kAllocationSize, sizeof(invalid_atomic_read),
+      [&](uint8_t *storage) {
+        std::memcpy(&invalid_atomic_read, storage, sizeof(invalid_atomic_read));
+        const uint32_t replacement = 0xa5a5a5a5;
+        std::memcpy(storage, &replacement, sizeof(replacement));
+      },
+      kPid);
+  EXPECT_EQ(invalid_atomic_read, 0u);
+  EXPECT_EQ(memory.read32(kBaseVa + kAllocationSize, kPid), 0u);
+
   std::array<uint8_t, kCacheLineSize> cache_line{};
   memory.read_block(kBaseVa, std::span<uint8_t>(cache_line), kPid);
   EXPECT_TRUE(std::equal(allocation.begin(), allocation.end(), cache_line.begin()));
@@ -638,6 +672,41 @@ TEST(GpuMemoryTest, SanitizedCacheLineAccessClipsRoundedMapping) {
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kAllocationSize - 1, kPid), allocation.get());
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kAllocationSize, kPid), nullptr);
+  EXPECT_EQ(memory.find_host_range(kBaseVa + kAllocationSize - 1, kPid),
+            std::make_pair(reinterpret_cast<uint64_t>(allocation.get()),
+                           static_cast<uint64_t>(kAllocationSize)));
+  EXPECT_EQ(memory.find_host_range(kBaseVa + kAllocationSize, kPid),
+            (std::pair<uint64_t, uint64_t>{0, 0}));
+
+  constexpr size_t kAtomicOffset = 8;
+  uint32_t atomic_value = 7;
+  std::memcpy(allocation.get() + kAtomicOffset, &atomic_value, sizeof(atomic_value));
+  memory.atomic_rmw(
+      kBaseVa + kAtomicOffset, sizeof(atomic_value),
+      [](uint8_t *storage) {
+        uint32_t value = 0;
+        std::memcpy(&value, storage, sizeof(value));
+        ++value;
+        std::memcpy(storage, &value, sizeof(value));
+      },
+      kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kAtomicOffset, kPid), 8u);
+
+  uint32_t invalid_atomic_read = std::numeric_limits<uint32_t>::max();
+  memory.atomic_rmw(
+      kBaseVa + kAllocationSize, sizeof(invalid_atomic_read),
+      [&](uint8_t *storage) {
+        std::memcpy(&invalid_atomic_read, storage, sizeof(invalid_atomic_read));
+        const uint32_t replacement = 0xa5a5a5a5;
+        std::memcpy(storage, &replacement, sizeof(replacement));
+      },
+      kPid);
+  EXPECT_EQ(invalid_atomic_read, 0u);
+  EXPECT_EQ(memory.read32(kBaseVa + kAllocationSize, kPid), 0u);
+
+  std::fill_n(allocation.get(), kAllocationSize, 0x5a);
   std::array<uint8_t, kCacheLineSize> cache_line{};
   memory.read_block(kBaseVa, std::span<uint8_t>(cache_line), kPid);
   EXPECT_TRUE(std::all_of(cache_line.begin(), cache_line.begin() + kAllocationSize,
@@ -649,6 +718,19 @@ TEST(GpuMemoryTest, SanitizedCacheLineAccessClipsRoundedMapping) {
   memory.write_block(kBaseVa, std::span<const uint8_t>(cache_line), kPid);
   EXPECT_TRUE(std::all_of(allocation.get(), allocation.get() + kAllocationSize,
                           [](uint8_t value) { return value == 0xa5; }));
+
+  constexpr size_t kRemappedAllocationSize = 8;
+  auto remapped_allocation = std::make_unique<uint8_t[]>(kRemappedAllocationSize);
+  std::fill_n(remapped_allocation.get(), kRemappedAllocationSize, 0x3c);
+  process.remap_page_host_ptrs(kBaseVa, allocation.get(), remapped_allocation.get(),
+                               KfdProcess::kPageSize);
+
+  cache_line.fill(0xff);
+  memory.read_block(kBaseVa, std::span<uint8_t>(cache_line), kPid);
+  EXPECT_TRUE(std::all_of(cache_line.begin(), cache_line.begin() + kRemappedAllocationSize,
+                          [](uint8_t value) { return value == 0x3c; }));
+  EXPECT_TRUE(std::all_of(cache_line.begin() + kRemappedAllocationSize, cache_line.end(),
+                          [](uint8_t value) { return value == 0; }));
 }
 #endif
 

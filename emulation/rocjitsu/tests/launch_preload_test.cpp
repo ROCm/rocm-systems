@@ -78,6 +78,7 @@ void expect_no_sanitizer_preload_order() {
   rocjitsu::cli::prepend_launch_preloads(environment, interposer);
 
   expect_ld_preload_eq(environment, interposer + ":" + extra + ":" + existing);
+  EXPECT_EQ(nullptr, environment.get("RJ_LAUNCH_PRELOAD"));
 }
 #endif
 
@@ -100,7 +101,7 @@ TEST(LaunchPreloadTest, EnvpCacheRebuildsAfterSet) {
   EXPECT_NE(rebuilt.end(), std::find(rebuilt.begin(), rebuilt.end(), after));
 }
 
-TEST(LaunchPreloadTest, NoAsanPrependsInterposerBeforeExistingPreload) {
+TEST(LaunchPreloadTest, NoAsanOrdersInterposerCallerAndExistingPreloads) {
 #if defined(RJ_EXPECT_SHARED_ASAN_RUNTIME) || defined(RJ_EXPECT_SHARED_TSAN_RUNTIME)
   GTEST_SKIP() << "shared sanitizer builds exercise sanitizer ordering cases";
 #else
@@ -182,7 +183,7 @@ TEST(LaunchPreloadTest, SanitizerNamedExecutableAliasDoesNotPreloadExecutable) {
 #endif
 }
 
-TEST(LaunchPreloadTest, SharedAsanPrependsAsanBeforeInterposerAndExistingPreload) {
+TEST(LaunchPreloadTest, SharedAsanOrdersRuntimeInterposerCallerAndExistingPreloads) {
 #if !defined(RJ_EXPECT_SHARED_ASAN_RUNTIME)
   GTEST_SKIP() << "requires a shared-ASan build";
 #else
@@ -201,10 +202,11 @@ TEST(LaunchPreloadTest, SharedAsanPrependsAsanBeforeInterposerAndExistingPreload
 
   expect_ld_preload_eq(environment,
                        expected_asan + ":" + interposer + ":" + extra + ":" + existing);
+  EXPECT_EQ(nullptr, environment.get("RJ_LAUNCH_PRELOAD"));
 #endif
 }
 
-TEST(LaunchPreloadTest, SharedTsanPrependsTsanBeforeInterposerAndExistingPreload) {
+TEST(LaunchPreloadTest, SharedTsanOrdersRuntimeInterposerCallerAndExistingPreloads) {
 #if !defined(RJ_EXPECT_SHARED_TSAN_RUNTIME)
   GTEST_SKIP() << "requires a shared-TSan build";
 #else
@@ -223,5 +225,6 @@ TEST(LaunchPreloadTest, SharedTsanPrependsTsanBeforeInterposerAndExistingPreload
 
   expect_ld_preload_eq(environment,
                        expected_tsan + ":" + interposer + ":" + extra + ":" + existing);
+  EXPECT_EQ(nullptr, environment.get("RJ_LAUNCH_PRELOAD"));
 #endif
 }

@@ -68,10 +68,22 @@ done
 
 corpus_test_status=0
 corpus_work_dir="$(pwd -P)"
-rocjitsu_launcher="$(command -v rocjitsu)"
+# Direct simulator tests must bypass ROCr's built-in translation so every lane,
+# including release, executes the requested architecture semantics unchanged.
 run_wrapper_prefix=(env "HSA_HOTSWAP_DISABLE=1")
 
-launcher_dependencies="$(readelf -d "${rocjitsu_launcher}" 2>/dev/null)"
+if ! rocjitsu_launcher="$(command -v rocjitsu)"; then
+  echo "Could not resolve rocjitsu on PATH for corpus tests" >&2
+  exit 1
+fi
+if ! command -v readelf >/dev/null; then
+  echo "Could not resolve readelf on PATH for sanitizer detection" >&2
+  exit 1
+fi
+if ! launcher_dependencies="$(readelf -d "${rocjitsu_launcher}")"; then
+  echo "Could not inspect rocjitsu dependencies for sanitizer detection" >&2
+  exit 1
+fi
 asan_enabled=false
 clang_asan_enabled=false
 if [[ "${launcher_dependencies}" == *"libclang_rt.asan"* ]]; then
@@ -87,6 +99,8 @@ if [[ "${asan_enabled}" == true ]]; then
     echo "Could not resolve the ASan symbolizer for corpus tests" >&2
     exit 1
   fi
+  # LeakSanitizer's stop-the-world teardown scan stalls on multi-gigabyte HIP
+  # process mappings. Keep ASan and UBSan enabled while omitting that final scan.
   corpus_asan_options="${ASAN_OPTIONS:+${ASAN_OPTIONS}:}detect_leaks=0"
   run_wrapper_prefix+=(
     "ASAN_OPTIONS=${corpus_asan_options}"
@@ -95,9 +109,10 @@ if [[ "${asan_enabled}" == true ]]; then
 fi
 
 # Clang's shared ASan runtime needs HIP loaded when the child process starts.
-# Keep the preload child-only so the launcher does not initialize HIP itself.
+# Keep the preload in the launched subtree so the launcher does not initialize
+# HIP itself.
 if [[ "${clang_asan_enabled}" == true ]]; then
-  hip_runtime="${ROCM_PATH}/lib/libamdhip64.so.7"
+  hip_runtime="${ROCM_PATH}/lib/libamdhip64.so"
   if [[ ! -f "${hip_runtime}" ]]; then
     echo "Could not resolve HIP runtime for Clang ASan corpus preload" >&2
     exit 1

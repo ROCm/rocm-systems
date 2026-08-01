@@ -87,7 +87,7 @@ jobs:
           - name: asan-ubsan
             allow_failure: true
             # Sanitized simulator cases need extra headroom for large FPSan
-            # modules and one retry before the job is considered failed.
+            # modules. A failed-test rerun preserves extra diagnostics.
             verify_dbt_idempotence: 0
             dbt_timeout: 180
             dbt_memory_limit_mib: 4096
@@ -207,11 +207,11 @@ jobs:
           ROCMINFO=RocminfoTest
           RCCL_DAEMON=RcclDaemonTest
           EXCLUDED_TESTS="${ROCMINFO}|${RCCL_DAEMON}"
-          ASAN_UBSAN_EXCLUDED_TESTS=(
+          SANITIZER_EXCLUDED_TESTS=(
             "HsaTest\.InitSucceeded"
             "HsaTest\.GpuAgentFound"
             # The hardware-backed tools-hook test cannot initialize ROCR when
-            # the launcher and hook are both instrumented with ASan.
+            # the launcher and hook use a sanitizer-instrumented process image.
             "HsaHooksTest\.TranslateGfx950Mfma16x16ThroughToolsLib"
             "Cdna4ToCdna3SimulatedDispatchTest\..*"
             "Cdna4ToCdna3DbtGuestTest\..*"
@@ -232,7 +232,7 @@ jobs:
             "RaceTest\..*"
           )
           TSAN_EXCLUDED_TESTS=(
-            "${ASAN_UBSAN_EXCLUDED_TESTS[@]}"
+            "${SANITIZER_EXCLUDED_TESTS[@]}"
             # This test has a five-second wall-clock assertion that becomes
             # load-sensitive at the TSan job's CI-level parallelism.
             "DaemonApi\.FullListenerQueueDoesNotBlockOrRemoveSocket"
@@ -241,7 +241,7 @@ jobs:
           TEST_REGEX="${{ matrix.test_regex }}"
           CMAKE_CONFIG_FLAGS=()
           if [[ "${{ matrix.enable_asan }}" == "1" && "${{ matrix.enable_ubsan }}" == "1" ]]; then
-            EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${ASAN_UBSAN_EXCLUDED_TESTS[*]}")"
+            EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${SANITIZER_EXCLUDED_TESTS[*]}")"
             CMAKE_CONFIG_FLAGS+=(
               -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -g"
               -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O2 -g"
@@ -337,6 +337,7 @@ jobs:
 
       - name: Run corpus tests
         if: matrix.run_simulator_corpus
+        timeout-minutes: 60
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         env:

@@ -16,6 +16,7 @@ public:
 
   const char *get(const std::string &name) const;
   void set(const std::string &name, const std::string &value);
+  void erase(const std::string &name);
   void prepend_path(const std::string &name, const std::string &value);
   char *const *envp();
 

@@ -184,8 +184,9 @@ public:
   struct PageTableEntry {
     uint8_t *host_ptr = nullptr;
     amdgpu::Mtype mtype = amdgpu::Mtype::RW;
-    /// Number of allocation-backed bytes starting at host_ptr on this page.
-    size_t valid_bytes = kPageSize;
+    /// Number of host-allocation-backed bytes starting at host_ptr on this page.
+    /// This simulator-side extent is independent of the hardware PTE encoding.
+    size_t host_backed_bytes = kPageSize;
   };
 
   /// @brief Per-process GPU page table (GPU VA page number → PTE).
@@ -201,8 +202,8 @@ public:
     std::unique_lock lock(page_table_mutex_);
     auto *base = static_cast<uint8_t *>(host_ptr);
     for (size_t off = 0; off < size; off += kPageSize) {
-      const size_t valid_bytes = std::min<size_t>(kPageSize, size - off);
-      page_table_[(gpu_va + off) >> kPageShift] = {base + off, mtype, valid_bytes};
+      const size_t host_backed_bytes = std::min<size_t>(kPageSize, size - off);
+      page_table_[(gpu_va + off) >> kPageShift] = {base + off, mtype, host_backed_bytes};
     }
     // Keep publication in the page-table critical section. Cached readers
     // validate this generation while holding the shared side of the same lock;
