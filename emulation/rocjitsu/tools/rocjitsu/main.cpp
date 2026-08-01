@@ -435,7 +435,8 @@ expanded_rocr_visible_devices(const rocjitsu::config::DbtGuestConfig &dbt_guest)
 
 void print_usage() {
   std::cerr
-      << "Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]\n"
+      << "Usage: rocjitsu --config <config.json> [--daemon|--attach] "
+         "[--preload <library>]... -- <app> [args...]\n"
          "\n"
          "Modes:\n"
          "  rocjitsu --config foo.json -- ./app          Local mode (in-process simulation)\n"
@@ -445,6 +446,7 @@ void print_usage() {
          "\n"
          "Options:\n"
          "  --config <path>   Simulation config JSON (required)\n"
+         "  --preload <path>  Preload an additional child library (repeatable)\n"
          "  --version, -v     Print version and exit\n"
          "  --help, -h        Print this help and exit\n";
 }
@@ -457,6 +459,7 @@ int main(int argc, char *argv[]) {
   const char *config_path = nullptr;
   bool daemon_mode = false;
   bool attach_mode = false;
+  std::vector<std::string> extra_preloads;
   int separator_idx = -1;
 
   for (int i = 1; i < argc; ++i) {
@@ -467,6 +470,11 @@ int main(int argc, char *argv[]) {
     }
     if (arg == "--config" && i + 1 < argc) {
       config_path = argv[++i];
+    } else if (arg == "--preload" && i + 1 < argc) {
+      extra_preloads.emplace_back(argv[++i]);
+    } else if (arg == "--preload") {
+      std::cerr << "rocjitsu: --preload requires a library path\n";
+      return 1;
     } else if (arg == "--daemon") {
       daemon_mode = true;
     } else if (arg == "--attach") {
@@ -615,7 +623,7 @@ int main(int argc, char *argv[]) {
   }
 
   rocjitsu::cli::LaunchEnvironment launch_environment;
-  rocjitsu::cli::prepend_launch_preloads(launch_environment, lib_path);
+  rocjitsu::cli::prepend_launch_preloads(launch_environment, lib_path, extra_preloads);
   if (dbt_guest_mode) {
     if (std::optional<std::string> rocr_visible_devices =
             expanded_rocr_visible_devices(dbt_guest_config))

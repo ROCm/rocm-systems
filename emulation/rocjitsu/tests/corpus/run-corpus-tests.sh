@@ -13,6 +13,7 @@
 #   --workers N          Number of pytest-xdist workers (default: 8)
 #   --soft-timeout N     Per-test timeout for the first run (default: 30)
 #   --hard-timeout N     Per-test timeout for failed-test reruns (default: 60)
+#   --sanitizer MODE     Launcher instrumentation: none, clang-asan, or gcc-asan
 #   --rerun-failed       Rerun only tests that failed the first pass
 #
 # Environment variables:
@@ -28,9 +29,11 @@ worker_count=8
 soft_timeout_seconds=30
 hard_timeout_seconds=60
 rerun_failed=false
+sanitizer_mode=none
 
 usage() {
-  echo "Usage: $0 [--workers N] [--soft-timeout N] [--hard-timeout N] [--rerun-failed]" >&2
+  echo "Usage: $0 [--workers N] [--soft-timeout N] [--hard-timeout N]" \
+    "[--sanitizer none|clang-asan|gcc-asan] [--rerun-failed]" >&2
 }
 
 targets=(
@@ -55,6 +58,17 @@ while (( $# )); do
       hard_timeout_seconds="$2"
       shift 2
       ;;
+    --sanitizer)
+      sanitizer_mode="$2"
+      case "${sanitizer_mode}" in
+        none|clang-asan|gcc-asan) ;;
+        *)
+          echo "Unknown sanitizer mode: ${sanitizer_mode}" >&2
+          exit 1
+          ;;
+      esac
+      shift 2
+      ;;
     --rerun-failed)
       rerun_failed=true
       shift
@@ -70,30 +84,19 @@ corpus_test_status=0
 corpus_work_dir="$(pwd -P)"
 # Direct simulator tests must bypass ROCr's built-in translation so every lane,
 # including release, executes the requested architecture semantics unchanged.
-run_wrapper_prefix=(env "HSA_HOTSWAP_DISABLE=1")
+run_wrapper_prefix=(
+  env
+  -u LD_PRELOAD
+  -u HSA_HOTSWAP_ENABLE
+  "HSA_HOTSWAP_DISABLE=1"
+)
 
 if ! rocjitsu_launcher="$(command -v rocjitsu)"; then
   echo "Could not resolve rocjitsu on PATH for corpus tests" >&2
   exit 1
 fi
-if ! command -v readelf >/dev/null; then
-  echo "Could not resolve readelf on PATH for sanitizer detection" >&2
-  exit 1
-fi
-if ! launcher_dependencies="$(readelf -d "${rocjitsu_launcher}")"; then
-  echo "Could not inspect rocjitsu dependencies for sanitizer detection" >&2
-  exit 1
-fi
-asan_enabled=false
-clang_asan_enabled=false
-if [[ "${launcher_dependencies}" == *"libclang_rt.asan"* ]]; then
-  asan_enabled=true
-  clang_asan_enabled=true
-elif [[ "${launcher_dependencies}" == *"libasan.so"* ]]; then
-  asan_enabled=true
-fi
 
-if [[ "${asan_enabled}" == true ]]; then
+if [[ "${sanitizer_mode}" != none ]]; then
   asan_symbolizer="${ROCM_PATH}/lib/llvm/bin/llvm-symbolizer"
   if [[ ! -x "${asan_symbolizer}" ]]; then
     echo "Could not resolve the ASan symbolizer for corpus tests" >&2
@@ -108,16 +111,17 @@ if [[ "${asan_enabled}" == true ]]; then
   )
 fi
 
-# Clang's shared ASan runtime needs HIP loaded when the child process starts.
+# Clang ASan launches need HIP loaded when the child process starts.
 # Keep the preload in the launched subtree so the launcher does not initialize
 # HIP itself.
-if [[ "${clang_asan_enabled}" == true ]]; then
+launcher_preload_args=()
+if [[ "${sanitizer_mode}" == clang-asan ]]; then
   hip_runtime="${ROCM_PATH}/lib/libamdhip64.so"
   if [[ ! -f "${hip_runtime}" ]]; then
     echo "Could not resolve HIP runtime for Clang ASan corpus preload" >&2
     exit 1
   fi
-  run_wrapper_prefix+=("RJ_LAUNCH_PRELOAD=${hip_runtime}")
+  launcher_preload_args=(--preload "${hip_runtime}")
 fi
 
 for target in "${targets[@]}"; do
@@ -132,6 +136,7 @@ for target in "${targets[@]}"; do
     "${run_wrapper_prefix[@]}"
     "${rocjitsu_launcher}"
     --config "${rocjitsu_config_path}"
+    "${launcher_preload_args[@]}"
     --
   )
   printf -v run_wrapper_command '%q ' "${run_wrapper[@]}"

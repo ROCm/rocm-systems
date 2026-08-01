@@ -84,6 +84,7 @@ jobs:
             run_simulator_corpus: true
             corpus_soft_timeout: 15
             corpus_hard_timeout: 30
+            corpus_sanitizer: none
           - name: asan-ubsan
             allow_failure: true
             # Sanitized simulator cases need extra headroom for large FPSan
@@ -102,6 +103,7 @@ jobs:
             run_simulator_corpus: true
             corpus_soft_timeout: 240
             corpus_hard_timeout: 480
+            corpus_sanitizer: clang-asan
           - name: tsan
             allow_failure: false
             verify_dbt_idempotence: 0
@@ -119,6 +121,7 @@ jobs:
             run_simulator_corpus: false
             corpus_soft_timeout: 0
             corpus_hard_timeout: 0
+            corpus_sanitizer: none
           - name: asan-ubsan-gcc
             allow_failure: true
             verify_dbt_idempotence: 0
@@ -139,6 +142,7 @@ jobs:
             run_simulator_corpus: true
             corpus_soft_timeout: 240
             corpus_hard_timeout: 480
+            corpus_sanitizer: gcc-asan
 
     steps:
       - name: Install base dependencies
@@ -359,10 +363,20 @@ jobs:
             --workers "${WORKERS}" \
             --soft-timeout ${{ matrix.corpus_soft_timeout }} \
             --hard-timeout ${{ matrix.corpus_hard_timeout }} \
+            --sanitizer ${{ matrix.corpus_sanitizer }} \
             --rerun-failed \
           )
           bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-corpus-tests.sh" "${corpus_test_flags[@]}" || corpus_test_status=$?
           exit "${corpus_test_status}"
+
+      - name: Upload simulator corpus diagnostics
+        if: ${{ always() && matrix.run_simulator_corpus }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rocjitsu-corpus-diagnostics-${{ matrix.name }}
+          path: ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Compare plain and translated gfx1250 simulator runs
         if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' }}

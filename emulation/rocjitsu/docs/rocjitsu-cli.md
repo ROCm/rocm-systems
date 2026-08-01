@@ -18,7 +18,7 @@ and NCCL --- workloads where multiple processes share a single simulated GPU.
 ## Command-Line Options
 
 ```
-Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
+Usage: rocjitsu --config <config.json> [--daemon|--attach] [--preload <library>]... -- <app> [args...]
 ```
 
 | Option | Description |
@@ -26,6 +26,7 @@ Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
 | `--config <path>` | Path to simulation config JSON (required) |
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only. |
 | `--attach` | Attach to a running daemon. The socket path is resolved as `$ROCJITSU_RUNTIME_DIR/daemon.sock`, then `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`, falling back to `/tmp/rocjitsu-<uid>/daemon.sock`. |
+| `--preload <library>` | Preload an additional library in the child after the simulator interposer. Repeat the option to preserve multiple libraries in command-line order. Sanitizer runtimes, when present, remain first. |
 | `--help`, `-h` | Print usage and exit |
 | `--version`, `-v` | Print version and exit |
 | `--` | Separator between rocjitsu options and the target application command line |
@@ -44,6 +45,10 @@ rocjitsu --daemon --config configs/gfx950_cdna4_kmd.json
 
 # Attach to running daemon
 rocjitsu --attach --config configs/gfx950_cdna4_kmd.json -- ./app
+
+# Make HIP available before a sanitized child starts
+rocjitsu --config configs/gfx950_cdna4_kmd.json \
+  --preload "${ROCM_PATH}/lib/libamdhip64.so" -- ./app
 ```
 
 ## Architecture

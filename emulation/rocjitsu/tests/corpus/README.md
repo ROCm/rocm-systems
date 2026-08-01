@@ -15,3 +15,10 @@ until their translations are implemented:
 
 The offline translator currently rejects those forms as unsupported. They are
 not silently accepted or treated as passing translations.
+
+## gfx1201 simulator exclusions
+
+`fpsan_global_load_tr_gfx12_w64_test` is excluded because its wave64
+`global_load_tr` path currently attempts to write a lane outside the gfx1201
+simulator wavefront. This is a simulator modeling gap, not a change introduced
+by the corpus SDK nightly.

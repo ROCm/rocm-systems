@@ -16,7 +16,6 @@ public:
 
   const char *get(const std::string &name) const;
   void set(const std::string &name, const std::string &value);
-  void erase(const std::string &name);
   void prepend_path(const std::string &name, const std::string &value);
   char *const *envp();
 
@@ -30,7 +29,8 @@ std::string find_loaded_asan_runtime();
 
 std::string find_loaded_tsan_runtime();
 
-void prepend_launch_preloads(LaunchEnvironment &environment, const std::string &interposer_path);
+void prepend_launch_preloads(LaunchEnvironment &environment, const std::string &interposer_path,
+                             const std::vector<std::string> &extra_preloads = {});
 
 int execvp_with_environment(const char *file, char *const argv[], LaunchEnvironment &environment);
 
