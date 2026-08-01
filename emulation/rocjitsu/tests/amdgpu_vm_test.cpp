@@ -801,13 +801,17 @@ TEST(GpuMemoryTest, SanitizedCacheLineAccessClipsRoundedMapping) {
                           [](uint8_t value) { return value == 0; }));
 }
 
-TEST(GpuMemoryTest, SanitizedMappedExtentTracksShadowChanges) {
+TEST(GpuMemoryTest, SanitizedMappedExtentTracksTrailingShadowBoundary) {
   amdgpu::GpuMemory memory("memory");
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kBaseVa = 0x40000000;
-  constexpr size_t kInitialBytes = 256;
-  constexpr size_t kShrunkBytes = 1024;
+  constexpr size_t kInitialExtentBytes = 256;
+  constexpr size_t kReducedExtentBytes = 1024;
   constexpr size_t kAllocationSize = KfdProcess::kPageSize;
+  constexpr size_t kInitialInsideOffset = kInitialExtentBytes / 2;
+  constexpr size_t kGrowthProbeOffset = kInitialExtentBytes * 2;
+  constexpr size_t kReducedInsideOffset = kReducedExtentBytes - sizeof(uint32_t);
+  constexpr size_t kReducedOutsideOffset = kReducedExtentBytes + 512;
 
   KfdProcess process(kPid);
   auto allocation = std::make_unique<uint8_t[]>(kAllocationSize);
@@ -816,18 +820,32 @@ TEST(GpuMemoryTest, SanitizedMappedExtentTracksShadowChanges) {
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
 
-  __asan_poison_memory_region(allocation.get() + kInitialBytes, kAllocationSize - kInitialBytes);
-  memory.write32(kBaseVa + 128, 0x11111111, kPid);
+  __asan_poison_memory_region(allocation.get() + kInitialExtentBytes,
+                              kAllocationSize - kInitialExtentBytes);
+  memory.write32(kBaseVa + kInitialInsideOffset, 0x11111111, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kInitialInsideOffset, kPid), 0x11111111u);
+  memory.write32(kBaseVa + kGrowthProbeOffset, 0xeeeeeeee, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kGrowthProbeOffset, kPid), 0u);
 
-  __asan_unpoison_memory_region(allocation.get() + kInitialBytes, kAllocationSize - kInitialBytes);
-  memory.write32(kBaseVa + 512, 0x22222222, kPid);
-  EXPECT_EQ(memory.read32(kBaseVa + 512, kPid), 0x22222222u);
+  __asan_unpoison_memory_region(allocation.get() + kInitialExtentBytes,
+                                kAllocationSize - kInitialExtentBytes);
+  memory.write32(kBaseVa + kGrowthProbeOffset, 0x22222222, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kGrowthProbeOffset, kPid), 0x22222222u);
 
-  __asan_poison_memory_region(allocation.get() + kShrunkBytes, kAllocationSize - kShrunkBytes);
-  memory.write32(kBaseVa + 1536, 0x33333333, kPid);
-  EXPECT_EQ(memory.read32(kBaseVa + 1536, kPid), 0u);
+  __asan_poison_memory_region(allocation.get() + kReducedExtentBytes,
+                              kAllocationSize - kReducedExtentBytes);
+  memory.write32(kBaseVa + kReducedInsideOffset, 0x33333333, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kReducedInsideOffset, kPid), 0x33333333u);
+  memory.write32(kBaseVa + kReducedOutsideOffset, 0xeeeeeeee, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kReducedOutsideOffset, kPid), 0u);
 
-  __asan_unpoison_memory_region(allocation.get() + kShrunkBytes, kAllocationSize - kShrunkBytes);
+  __asan_poison_memory_region(allocation.get(), kAllocationSize);
+  memory.write32(kBaseVa + kInitialInsideOffset, 0xeeeeeeee, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kInitialInsideOffset, kPid), 0u);
+
+  __asan_unpoison_memory_region(allocation.get(), kAllocationSize);
+  memory.write32(kBaseVa + kInitialInsideOffset, 0x44444444, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kInitialInsideOffset, kPid), 0x44444444u);
 }
 #endif
 

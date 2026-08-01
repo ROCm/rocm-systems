@@ -566,9 +566,12 @@ private:
     if (generation_ptr == nullptr)
       return effective_host_backed_bytes(pte);
 
-    // HIP can update ASan shadow state without changing the KFD page table.
-    // Cache the prefix scan, but recheck its two transition bytes on every hit
-    // so both growth and shrinkage become visible before mapped memory is used.
+    // A mapped HIP allocation's ASan state is modeled as one addressable prefix
+    // followed by one poisoned tail. Allocation lifetime changes can move that
+    // boundary without changing the KFD page table. The identity comparisons
+    // below cover PTE changes; on an identity hit, rechecking the two transition
+    // bytes detects trailing-boundary growth and shrinkage without rescanning the
+    // whole declared extent on every memory access.
     static thread_local std::array<HostExtentCacheEntry, kHostExtentCacheEntries> cache;
     const uintptr_t table_key = reinterpret_cast<uintptr_t>(page_table) >> PAGE_SHIFT;
     HostExtentCacheEntry &cache_entry =
