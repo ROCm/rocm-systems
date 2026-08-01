@@ -137,6 +137,14 @@ template <typename Enum, std::size_t N>
   return consan_arch_for_target(target) != ROCJITSU_CODE_ARCH_INVALID;
 }
 
+/// RDNA ConSan probes use the code-object dispatch identity literal instead
+/// of reserving a guest SGPR pair. This is an instrumentation policy, not an
+/// instruction-encoding property.
+[[nodiscard]] constexpr bool consan_arch_uses_literal_dispatch_identity(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_GFX1250;
+}
+
 [[nodiscard]] constexpr ConSanCapabilityDomain consan_capability_domain(ConSanCapabilityForm form) {
   switch (form) {
   case ConSanCapabilityForm::NativeLdsAccess:

@@ -3397,7 +3397,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       } else {
         if (planned.words.size() * sizeof(uint32_t) != candidate.placement->body_size) {
           result.errors.emplace_back(
-              "ConSan LDS check/trap proof body size changed after placement");
+              "ConSan LDS check/trap proof body size changed after placement at text offset " +
+              std::to_string(site.text_offset) + ": planned " +
+              std::to_string(candidate.placement->body_size) + " bytes, emitted " +
+              std::to_string(planned.words.size() * sizeof(uint32_t)) + " bytes");
           return;
         }
         const auto ret = compute_sopp_branch_simm16(candidate.placement->return_branch_offset,

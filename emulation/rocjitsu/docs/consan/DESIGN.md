@@ -125,10 +125,11 @@ Test anchors:
 - `tests/consan/CMakeLists.txt`
   - ConSan unit, fuzz, HIP-binary, and live-GPU test registration. The shared
     test manifest only invokes the focused registration helpers.
-- `tests/patch/{cdna3,cdna4,gfx1250,rdna4}_instrumentation_builder_test.cpp`
+- `tests/patch/{cdna3,cdna4,gfx1250,rdna3,rdna4}_instrumentation_builder_test.cpp`
   - Exact encoding and rejection coverage for the target-specific builders.
 - `tests/patch/instrumentation_builder_dispatch_test.cpp`
-  - Exact RDNA3 encoding and architecture-dispatch coverage for gfx1100.
+  - Architecture-facade routing coverage; target-native encoding truth remains
+    in the architecture-specific builder tests.
 - `tests/patch/consan/`
   - Shared synthetic ELF fixtures plus feature-centric core, analysis,
     resource, fault-injection, SuperCollider, Record/Replay, Inline Shadow, and

@@ -8,7 +8,7 @@ RDNA4 target. The normative semantic boundary is the
 
 ## Current qualification
 
-The compact fixture uses native gfx1100 LDS instructions, a singleton
+The compact fixture uses native gfx1100 wave32 LDS instructions, a singleton
 workgroup barrier, and target-specific code caves. Its clean case has two
 waves communicate through LDS across the barrier. Its conflict case has both
 waves write the same per-lane LDS cells without synchronization.
@@ -17,13 +17,16 @@ waves write the same per-lane LDS cells without synchronization.
 | --- | --- | --- | --- | --- |
 | Clean exact output | Passed; required a native patch and preserved every output word | Passed; required visible records, forbade diagnostics, and preserved every output word | Passed; required visible records, forbade diagnostics, and preserved every output word | Passed; required visible records, forbade diagnostics, and preserved every output word |
 | Conflict sensitivity | The compact gate proves mutation and output containment; it does not claim causal race attribution | Not used as the compact conflict oracle | Not used as the compact conflict oracle | Passed; the same-site two-wave conflict produced an attributed diagnostic with distinct resident-wave owners and overlapping LDS ranges |
-| Latest test time | 0.10 seconds | 0.10 seconds | 0.10 seconds | 0.10 seconds clean; 0.10 seconds conflict |
+| Latest test time | 0.09 seconds clean; 0.10 seconds all-supported-site pass | 0.10 seconds | 0.10 seconds | 0.10 seconds clean; 0.10 seconds conflict |
 
 The complete physical gate is `ConSanGfx1100Physical.*`. At the current
-checkpoint all seven cases pass in 0.75 seconds:
+checkpoint all eight cases pass in 2.28 seconds, including cold baseline
+startup:
 
 - baseline exact output;
 - SuperCollider clean mutation;
+- a no-filter SuperCollider pass that patches every supported site in the
+  fixture code object;
 - Record/Replay, Sampled, and Inline Shadow clean execution;
 - required Inline Shadow conflict attribution; and
 - an uninstrumented post-run health check.
@@ -42,7 +45,13 @@ active agent; the gfx1100 JSON is used only for simulator and offline work.
   and 513; this is architecture state, not a preserved guest SGPR range.
 - The complete compiler-emitted gfx11 acquire sequence is recognized. A
   release is not inferred from an atomic instruction that lacks sufficient
-  ordering evidence.
+  ordering evidence. Missing, reversed, or interrupted cache-operation pairs
+  remain unassociated.
+- gfx11 has no qualified dispatch-ID preload/user-SGPR contract. ConSan uses
+  the established RDNA code-object/report identity literal instead of
+  reserving a guest SGPR pair. This separates loaded-image/report generations;
+  it is not a claim of a hardware-unique token for simultaneous launches of
+  the same loaded image.
 - Native 96-bit LDS, cluster barriers, and ordered LDS atomics are not claimed
   for the current gfx1100 subset.
 - Register and spill paths use RDNA3 encodings for fixed private frames,

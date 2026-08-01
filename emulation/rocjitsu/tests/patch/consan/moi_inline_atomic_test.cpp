@@ -162,6 +162,170 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireUsesCompleteGfx11CacheSequence) {
             ConSanCapabilityDisposition::Supported);
 }
 
+TEST(ConSanMoi, Gfx1100VglobalAtomicAcquireCoversVectorAndScalarAddressForms) {
+  const InlineReleaseSequenceTarget target{ROCJITSU_CODE_ARCH_RDNA3, "gfx1100/rdna3",
+                                           /*release_transaction_vsrc=*/12,
+                                           /*token_transaction_vsrc=*/26};
+  struct AddressCase {
+    std::string_view label;
+    std::array<uint32_t, 2> words;
+    ConSanMoiAtomicAddressKind address_kind;
+    uint16_t input_vgpr_count;
+    std::optional<uint16_t> scalar_base_sgpr;
+    int32_t signed_byte_offset;
+  };
+  constexpr std::array cases = {
+      AddressCase{
+          "vector-only",
+          {0xdcd64000u, 0x007c0604u},
+          ConSanMoiAtomicAddressKind::VglobalGuestPair,
+          2u,
+          std::nullopt,
+          0,
+      },
+      AddressCase{
+          "scalar-base",
+          {0xdcd64014u, 0x00140604u},
+          ConSanMoiAtomicAddressKind::VglobalMaterialized,
+          1u,
+          20u,
+          20,
+      },
+  };
+
+  for (const AddressCase &test_case : cases) {
+    SCOPED_TRACE(test_case.label);
+    std::vector<uint32_t> atomic_words;
+    const std::vector<uint8_t> bytes = make_inline_atomic_sequence_fixture(
+        target, atomic_words, test_case.words, InlineAtomicSequenceKind::Acquire);
+    ASSERT_FALSE(bytes.empty());
+    ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+    options.moi_track_atomics = true;
+    options.scratch_vgpr = 8;
+    options.moi_exec_save_sgpr = 80;
+    options.moi_owner_vgpr = 40;
+    options.moi_epoch_vgpr = 41;
+    options.moi_dispatch_id_sgpr = 20;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+    options.max_patches = 1;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_EQ(result.kernels.size(), 1u);
+    const auto site = std::ranges::find_if(result.kernels.front().atomic_sites,
+                                           [](const ConSanAtomicSite &candidate) {
+                                             return candidate.mnemonic == "global_atomic_add_u32";
+                                           });
+    ASSERT_NE(site, result.kernels.front().atomic_sites.end());
+    EXPECT_EQ(classify_consan_moi_inline_atomic_support(*site, ConSanMoiAtomicEventKind::Acquire,
+                                                        ROCJITSU_CODE_ARCH_RDNA3),
+              ConSanMoiInlineAtomicSupport::Supported);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.final_validation_passed);
+    const auto patch = std::ranges::find(
+        result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
+    ASSERT_NE(patch, result.patches.end());
+    ASSERT_TRUE(patch->scratch_vgpr);
+    const auto resource_plan = std::ranges::find_if(
+        result.resource_plans, [](const ConSanCandidateResourcePlan &candidate) {
+          return candidate.site_kind == ConSanResourceSiteKind::Atomic;
+        });
+    ASSERT_NE(resource_plan, result.resource_plans.end());
+    const ConSanMoiAtomicAddressPlan address_plan = plan_consan_moi_atomic_address(
+        *site, *patch->scratch_vgpr, resource_plan->scratch_vgpr_count,
+        ConSanRegisterAllocationSource::Explicit, ROCJITSU_CODE_ARCH_RDNA3);
+    ASSERT_TRUE(address_plan.supported())
+        << consan_moi_atomic_address_support_name(address_plan.support);
+    EXPECT_EQ(address_plan.kind, test_case.address_kind);
+    EXPECT_EQ(address_plan.input_address_vgpr_count, test_case.input_vgpr_count);
+    EXPECT_EQ(address_plan.scalar_base_sgpr, test_case.scalar_base_sgpr);
+    EXPECT_EQ(address_plan.signed_byte_offset, test_case.signed_byte_offset);
+  }
+}
+
+TEST(ConSanMoi, Gfx1100VglobalAtomicRejectsInvalidScalarBase) {
+  const InlineReleaseSequenceTarget target{ROCJITSU_CODE_ARCH_RDNA3, "gfx1100/rdna3",
+                                           /*release_transaction_vsrc=*/12,
+                                           /*token_transaction_vsrc=*/26};
+  constexpr std::array<uint32_t, 2> atomic = {
+      0xdcd64000u,
+      0x00690604u, // global_atomic_add_u32 v0, v4, v6, invalid odd saddr=105 glc
+  };
+  std::vector<uint32_t> atomic_words;
+  const std::vector<uint8_t> bytes = make_inline_atomic_sequence_fixture(
+      target, atomic_words, atomic, InlineAtomicSequenceKind::Acquire);
+  ASSERT_FALSE(bytes.empty());
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 8;
+  options.max_patches = 1;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  const auto site = std::ranges::find_if(result.kernels.front().atomic_sites,
+                                         [](const ConSanAtomicSite &candidate) {
+                                           return candidate.mnemonic == "global_atomic_add_u32";
+                                         });
+  ASSERT_NE(site, result.kernels.front().atomic_sites.end());
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(*site, ConSanMoiAtomicEventKind::Acquire,
+                                                      ROCJITSU_CODE_ARCH_RDNA3),
+            ConSanMoiInlineAtomicSupport::UnsupportedEncoding);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
+                               &ConSanPatchInfo::kind),
+            0u);
+}
+
+TEST(ConSanMoi, Gfx1100AcquireAssociationRequiresExactOrderedCachePair) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA3;
+  const auto atomic = build_rdna3_flat_atomic_add_u32(
+      /*vaddr=*/2, /*vsrc=*/4, /*vdst=*/0, /*return_old_value=*/true,
+      /*scope=*/2, kArch);
+  const auto wait = build_rdna3_s_wait_vmcnt0(kArch);
+  const auto gl1 = rdna3::build_mubuf(rdna3::kBufferGl1InvMubuf, {});
+  const auto gl0 = rdna3::build_mubuf(rdna3::kBufferGl0InvMubuf, {});
+  ASSERT_TRUE(atomic && wait);
+
+  const auto fixture = [&](std::span<const uint32_t> cache_words, std::string_view kernel_name) {
+    std::vector<uint32_t> text_words(atomic->begin(), atomic->end());
+    text_words.push_back(*wait);
+    text_words.insert(text_words.end(), cache_words.begin(), cache_words.end());
+    text_words.resize(200, build_s_nop(0, kArch));
+    text_words.push_back(build_s_endpgm(kArch));
+    return make_rdna3_lds_code_object(text_words, kernel_name);
+  };
+  const auto acquire_count = [&](std::span<const uint32_t> cache_words,
+                                 std::string_view kernel_name) {
+    ConSanOptions options;
+    options.flavor = ConSanFlavor::SuperCollider;
+    const ConSanResult result = try_patch_consan(fixture(cache_words, kernel_name), options);
+    EXPECT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    return std::ranges::count_if(result.sync_sequences, [](const ConSanSyncSequence &sequence) {
+      return sequence.kind == ConSanSyncSequenceKind::Atomic &&
+             sequence.memory_role == ConSanSyncMemoryRole::Acquire;
+    });
+  };
+
+  std::vector<uint32_t> exact;
+  exact.insert(exact.end(), gl1.begin(), gl1.end());
+  exact.insert(exact.end(), gl0.begin(), gl0.end());
+  std::vector<uint32_t> reversed;
+  reversed.insert(reversed.end(), gl0.begin(), gl0.end());
+  reversed.insert(reversed.end(), gl1.begin(), gl1.end());
+  std::vector<uint32_t> intervened(gl1.begin(), gl1.end());
+  intervened.push_back(build_s_nop(0, kArch));
+  intervened.insert(intervened.end(), gl0.begin(), gl0.end());
+
+  EXPECT_EQ(acquire_count(exact, "gfx1100_exact_acquire"), 1u);
+  EXPECT_EQ(acquire_count(gl1, "gfx1100_missing_gl0"), 0u);
+  EXPECT_EQ(acquire_count(gl0, "gfx1100_missing_gl1"), 0u);
+  EXPECT_EQ(acquire_count(reversed, "gfx1100_reversed_acquire"), 0u);
+  EXPECT_EQ(acquire_count(intervened, "gfx1100_intervened_acquire"), 0u);
+}
+
 TEST(ConSanMoi, InlineShadowSkipsUnusedAtomicTransactionScratch) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
@@ -1862,6 +2026,8 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
                           2u * sizeof(uint32_t), kCdnaGlobalNoSaddrEncoding},
       VglobalContractCase{ROCJITSU_CODE_TARGET_GFX950, ROCJITSU_CODE_ARCH_CDNA4,
                           2u * sizeof(uint32_t), kCdnaGlobalNoSaddrEncoding},
+      VglobalContractCase{ROCJITSU_CODE_TARGET_GFX1100, ROCJITSU_CODE_ARCH_RDNA3,
+                          2u * sizeof(uint32_t), kRdna3GlobalNoSaddrEncoding},
       VglobalContractCase{ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_ARCH_RDNA4,
                           3u * sizeof(uint32_t), 4u},
       VglobalContractCase{ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_ARCH_GFX1250,

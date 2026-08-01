@@ -144,6 +144,41 @@ TEST(ConSan, Gfx1250PreflightIgnoresRegisterLaneBpermute) {
   EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
 }
 
+TEST(ConSan, Gfx1100InventoriesEveryClaimedNativeLdsWidth) {
+  constexpr std::array instructions = {
+      rdna3::build_ds(rdna3::kDsStoreB8Ds, {.addr = 0, .data0 = 1}),
+      rdna3::build_ds(rdna3::kDsStoreB16Ds, {.addr = 0, .data0 = 1}),
+      rdna3::build_ds(rdna3::kDsStoreB32Ds, {.addr = 0, .data0 = 1}),
+      rdna3::build_ds(rdna3::kDsStoreB64Ds, {.addr = 0, .data0 = 2}),
+      rdna3::build_ds(rdna3::kDsStoreB128Ds, {.addr = 0, .data0 = 4}),
+      rdna3::build_ds(rdna3::kDsLoadU8Ds, {.addr = 0, .vdst = 1}),
+      rdna3::build_ds(rdna3::kDsLoadU16Ds, {.addr = 0, .vdst = 1}),
+      rdna3::build_ds(rdna3::kDsLoadB32Ds, {.addr = 0, .vdst = 1}),
+      rdna3::build_ds(rdna3::kDsLoadB64Ds, {.addr = 0, .vdst = 2}),
+      rdna3::build_ds(rdna3::kDsLoadB128Ds, {.addr = 0, .vdst = 4}),
+  };
+  std::vector<uint32_t> text_words;
+  for (const auto &instruction : instructions)
+    text_words.insert(text_words.end(), instruction.begin(), instruction.end());
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3));
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+
+  const ConSanResult result = try_patch_consan(
+      make_rdna3_lds_code_object(text_words, "gfx1100_native_lds_widths"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  const auto &sites = result.kernels.front().lds_sites;
+  ASSERT_EQ(sites.size(), instructions.size());
+  EXPECT_EQ(std::ranges::count(sites, ConSanLdsAccessKind::Write, &ConSanLdsSite::kind), 5u);
+  EXPECT_EQ(std::ranges::count(sites, ConSanLdsAccessKind::Read, &ConSanLdsSite::kind), 5u);
+  for (uint32_t width : std::array{8u, 16u, 32u, 64u, 128u}) {
+    EXPECT_EQ(std::ranges::count(sites, width, &ConSanLdsSite::width_bits), 2u) << width;
+  }
+  EXPECT_TRUE(std::ranges::all_of(sites, &ConSanLdsSite::supported_mvp));
+}
+
 TEST(ConSan, CountsFlatGlobalAndScratchMemoryInstructions) {
   const std::vector<uint8_t> bytes = make_rdna4_flat_memory_code_object();
   ConSanOptions options;
@@ -1427,84 +1462,89 @@ struct FlatSubwordTarget {
   size_t target_index;
 };
 
-constexpr std::array<FlatSubwordTarget, 4> kFlatSubwordTargets = {{
+constexpr std::array<FlatSubwordTarget, 5> kFlatSubwordTargets = {{
     {ROCJITSU_CODE_ARCH_RDNA4, "gfx1201", 0},
     {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", 1},
     {ROCJITSU_CODE_ARCH_CDNA3, "gfx942", 2},
     {ROCJITSU_CODE_ARCH_CDNA4, "gfx950", 3},
+    {ROCJITSU_CODE_ARCH_RDNA3, "gfx1100", 4},
 }};
 
 struct FlatD16LoadForm {
-  std::array<uint16_t, 4> opcodes;
-  std::array<std::string_view, 4> mnemonics;
+  std::array<uint16_t, 5> opcodes;
+  std::array<std::string_view, 5> mnemonics;
   uint32_t memory_width_bits;
   ConSanFlatSubwordPlacement placement;
 };
 
 constexpr std::array<FlatD16LoadForm, 6> kFlatD16LoadForms = {{
     {{rdna4::kFlatLoadD16U8Vflat, gfx1250::kFlatLoadD16U8Vflat, cdna3::kFlatLoadUbyteD16Flat,
-      cdna4::kFlatLoadUbyteD16Flat},
-     {"flat_load_d16_u8", "flat_load_d16_u8", "flat_load_ubyte_d16", "flat_load_ubyte_d16"},
+      cdna4::kFlatLoadUbyteD16Flat, rdna3::kFlatLoadD16U8Flat},
+     {"flat_load_d16_u8", "flat_load_d16_u8", "flat_load_ubyte_d16", "flat_load_ubyte_d16",
+      "flat_load_d16_u8"},
      8,
      ConSanFlatSubwordPlacement::Low16},
     {{rdna4::kFlatLoadD16I8Vflat, gfx1250::kFlatLoadD16I8Vflat, cdna3::kFlatLoadSbyteD16Flat,
-      cdna4::kFlatLoadSbyteD16Flat},
-     {"flat_load_d16_i8", "flat_load_d16_i8", "flat_load_sbyte_d16", "flat_load_sbyte_d16"},
+      cdna4::kFlatLoadSbyteD16Flat, rdna3::kFlatLoadD16I8Flat},
+     {"flat_load_d16_i8", "flat_load_d16_i8", "flat_load_sbyte_d16", "flat_load_sbyte_d16",
+      "flat_load_d16_i8"},
      8,
      ConSanFlatSubwordPlacement::Low16},
     {{rdna4::kFlatLoadD16B16Vflat, gfx1250::kFlatLoadD16B16Vflat, cdna3::kFlatLoadShortD16Flat,
-      cdna4::kFlatLoadShortD16Flat},
-     {"flat_load_d16_b16", "flat_load_d16_b16", "flat_load_short_d16", "flat_load_short_d16"},
+      cdna4::kFlatLoadShortD16Flat, rdna3::kFlatLoadD16B16Flat},
+     {"flat_load_d16_b16", "flat_load_d16_b16", "flat_load_short_d16", "flat_load_short_d16",
+      "flat_load_d16_b16"},
      16,
      ConSanFlatSubwordPlacement::Low16},
     {{rdna4::kFlatLoadD16HiU8Vflat, gfx1250::kFlatLoadD16HiU8Vflat, cdna3::kFlatLoadUbyteD16HiFlat,
-      cdna4::kFlatLoadUbyteD16HiFlat},
+      cdna4::kFlatLoadUbyteD16HiFlat, rdna3::kFlatLoadD16HiU8Flat},
      {"flat_load_d16_hi_u8", "flat_load_d16_hi_u8", "flat_load_ubyte_d16_hi",
-      "flat_load_ubyte_d16_hi"},
+      "flat_load_ubyte_d16_hi", "flat_load_d16_hi_u8"},
      8,
      ConSanFlatSubwordPlacement::High16},
     {{rdna4::kFlatLoadD16HiI8Vflat, gfx1250::kFlatLoadD16HiI8Vflat, cdna3::kFlatLoadSbyteD16HiFlat,
-      cdna4::kFlatLoadSbyteD16HiFlat},
+      cdna4::kFlatLoadSbyteD16HiFlat, rdna3::kFlatLoadD16HiI8Flat},
      {"flat_load_d16_hi_i8", "flat_load_d16_hi_i8", "flat_load_sbyte_d16_hi",
-      "flat_load_sbyte_d16_hi"},
+      "flat_load_sbyte_d16_hi", "flat_load_d16_hi_i8"},
      8,
      ConSanFlatSubwordPlacement::High16},
     {{rdna4::kFlatLoadD16HiB16Vflat, gfx1250::kFlatLoadD16HiB16Vflat,
-      cdna3::kFlatLoadShortD16HiFlat, cdna4::kFlatLoadShortD16HiFlat},
+      cdna3::kFlatLoadShortD16HiFlat, cdna4::kFlatLoadShortD16HiFlat, rdna3::kFlatLoadD16HiB16Flat},
      {"flat_load_d16_hi_b16", "flat_load_d16_hi_b16", "flat_load_short_d16_hi",
-      "flat_load_short_d16_hi"},
+      "flat_load_short_d16_hi", "flat_load_d16_hi_b16"},
      16,
      ConSanFlatSubwordPlacement::High16},
 }};
 
 struct FlatSubwordStoreForm {
-  std::array<uint16_t, 4> opcodes;
-  std::array<std::string_view, 4> mnemonics;
+  std::array<uint16_t, 5> opcodes;
+  std::array<std::string_view, 5> mnemonics;
   uint32_t memory_width_bits;
   ConSanFlatSubwordPlacement placement;
 };
 
 constexpr std::array<FlatSubwordStoreForm, 4> kFlatSubwordStoreForms = {{
     {{rdna4::kFlatStoreB8Vflat, gfx1250::kFlatStoreB8Vflat, cdna3::kFlatStoreByteFlat,
-      cdna4::kFlatStoreByteFlat},
-     {"flat_store_b8", "flat_store_b8", "flat_store_byte", "flat_store_byte"},
+      cdna4::kFlatStoreByteFlat, rdna3::kFlatStoreB8Flat},
+     {"flat_store_b8", "flat_store_b8", "flat_store_byte", "flat_store_byte", "flat_store_b8"},
      8,
      ConSanFlatSubwordPlacement::Low16},
     {{rdna4::kFlatStoreB16Vflat, gfx1250::kFlatStoreB16Vflat, cdna3::kFlatStoreShortFlat,
-      cdna4::kFlatStoreShortFlat},
-     {"flat_store_b16", "flat_store_b16", "flat_store_short", "flat_store_short"},
+      cdna4::kFlatStoreShortFlat, rdna3::kFlatStoreB16Flat},
+     {"flat_store_b16", "flat_store_b16", "flat_store_short", "flat_store_short", "flat_store_b16"},
      16,
      ConSanFlatSubwordPlacement::Low16},
     {{rdna4::kFlatStoreD16HiB8Vflat, gfx1250::kFlatStoreD16HiB8Vflat,
-      cdna3::kFlatStoreByteD16HiFlat, cdna4::kFlatStoreByteD16HiFlat},
+      cdna3::kFlatStoreByteD16HiFlat, cdna4::kFlatStoreByteD16HiFlat, rdna3::kFlatStoreD16HiB8Flat},
      {"flat_store_d16_hi_b8", "flat_store_d16_hi_b8", "flat_store_byte_d16_hi",
-      "flat_store_byte_d16_hi"},
+      "flat_store_byte_d16_hi", "flat_store_d16_hi_b8"},
      8,
      ConSanFlatSubwordPlacement::High16},
     {{rdna4::kFlatStoreD16HiB16Vflat, gfx1250::kFlatStoreD16HiB16Vflat,
-      cdna3::kFlatStoreShortD16HiFlat, cdna4::kFlatStoreShortD16HiFlat},
+      cdna3::kFlatStoreShortD16HiFlat, cdna4::kFlatStoreShortD16HiFlat,
+      rdna3::kFlatStoreD16HiB16Flat},
      {"flat_store_d16_hi_b16", "flat_store_d16_hi_b16", "flat_store_short_d16_hi",
-      "flat_store_short_d16_hi"},
+      "flat_store_short_d16_hi", "flat_store_d16_hi_b16"},
      16,
      ConSanFlatSubwordPlacement::High16},
 }};
@@ -1517,6 +1557,11 @@ std::vector<uint8_t> make_group_flat_load_code_object(const FlatSubwordTarget &t
       build_v_mov_b32_e32(/*vdst=*/1, /*scalar s1=*/1, target.arch),
   };
   switch (target.arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3: {
+    const auto load = rdna3::build_flat(opcode, {.addr = 0, .saddr = kRdna3FlatNoSaddr, .vdst = 2});
+    text_words.insert(text_words.end(), load.begin(), load.end());
+    break;
+  }
   case ROCJITSU_CODE_ARCH_RDNA4: {
     const auto load = rdna4::build_vflat(opcode, {.saddr = 124, .vdst = 2, .vaddr = 0});
     text_words.insert(text_words.end(), load.begin(), load.end());
@@ -1545,6 +1590,11 @@ std::vector<uint8_t> make_group_flat_load_code_object(const FlatSubwordTarget &t
   text_words.back() = build_s_endpgm(target.arch);
 
   switch (target.arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return make_rdna3_lds_code_object(text_words, "gfx1100_flat_d16_load",
+                                      /*vgpr_granulated=*/1u, /*wave32=*/false,
+                                      /*uses_dynamic_stack=*/false,
+                                      /*workgroup_id_dimension_mask=*/7u);
   case ROCJITSU_CODE_ARCH_RDNA4:
     return make_rdna4_lds_code_object(text_words, "gfx1201_flat_d16_load");
   case ROCJITSU_CODE_ARCH_GFX1250:
@@ -1574,6 +1624,12 @@ std::vector<uint8_t> make_group_flat_d16_store_code_object(const FlatSubwordTarg
   };
   const uint16_t opcode = form.opcodes[target.target_index];
   switch (target.arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3: {
+    const auto store =
+        rdna3::build_flat(opcode, {.addr = 0, .data = 2, .saddr = kRdna3FlatNoSaddr});
+    text_words.insert(text_words.end(), store.begin(), store.end());
+    break;
+  }
   case ROCJITSU_CODE_ARCH_RDNA4: {
     const auto store = rdna4::build_vflat(opcode, {.saddr = 124, .vsrc = 2, .vaddr = 0});
     text_words.insert(text_words.end(), store.begin(), store.end());
@@ -1602,6 +1658,11 @@ std::vector<uint8_t> make_group_flat_d16_store_code_object(const FlatSubwordTarg
   text_words.back() = build_s_endpgm(target.arch);
 
   switch (target.arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return make_rdna3_lds_code_object(text_words, "gfx1100_flat_d16_store",
+                                      /*vgpr_granulated=*/1u, /*wave32=*/false,
+                                      /*uses_dynamic_stack=*/false,
+                                      /*workgroup_id_dimension_mask=*/7u);
   case ROCJITSU_CODE_ARCH_RDNA4:
     return make_rdna4_lds_code_object(text_words, "gfx1201_flat_d16_store");
   case ROCJITSU_CODE_ARCH_GFX1250:
@@ -1621,6 +1682,14 @@ std::vector<uint32_t> expected_group_flat_store_readback(const FlatSubwordTarget
                                                          uint32_t memory_width_bits,
                                                          uint16_t scratch_vgpr) {
   switch (target.arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3: {
+    const uint16_t opcode =
+        memory_width_bits == 8u ? rdna3::kFlatLoadU8Flat : rdna3::kFlatLoadU16Flat;
+    const auto load = rdna3::build_flat(
+        opcode,
+        {.addr = 0, .saddr = kRdna3FlatNoSaddr, .vdst = static_cast<uint8_t>(scratch_vgpr)});
+    return {load.begin(), load.end()};
+  }
   case ROCJITSU_CODE_ARCH_RDNA4: {
     const uint16_t opcode =
         memory_width_bits == 8u ? rdna4::kFlatLoadU8Vflat : rdna4::kFlatLoadU16Vflat;
@@ -2135,7 +2204,10 @@ TEST(ConSanMoi, EveryEngineSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
 }
 
 TEST(ConSanMoi, UnsupportedGroupFlatLoadRemainsInPreFilterLedger) {
-  const FlatSubwordTarget &target = kFlatSubwordTargets.back();
+  const auto target_it =
+      std::ranges::find(kFlatSubwordTargets, ROCJITSU_CODE_ARCH_CDNA4, &FlatSubwordTarget::arch);
+  ASSERT_NE(target_it, kFlatSubwordTargets.end());
+  const FlatSubwordTarget &target = *target_it;
   const std::vector<uint8_t> bytes =
       make_group_flat_load_code_object(target, cdna4::kFlatLoadDwordx3Flat);
   ASSERT_FALSE(bytes.empty());

@@ -79,8 +79,11 @@ or GPU reset is not by itself a ConSan diagnostic.
   boundaries.
 - [CAPABILITIES.md](CAPABILITIES.md): normative target-by-engine access,
   barrier, atomic, fence, and typed-exclusion matrix.
-- [STATUS_RDNA3.md](STATUS_RDNA3.md): physical gfx1100 qualification and
-  explicit semantic boundaries.
+- Target qualification ledgers: [gfx942](STATUS_CDNA3.md),
+  [gfx950](STATUS_CDNA4.md), [gfx1100](STATUS_RDNA3.md),
+  [gfx1201](STATUS_RDNA4.md), and [gfx1250](STATUS_GFX1250.md).
+- [VALIDATION.md](VALIDATION.md): reproducible physical, simulator, and offline
+  gates behind those ledgers.
 - [SPILLING.md](SPILLING.md): ConSan register selection, ownership, private
   layout, and runtime integration.
 - [AMDGPU register spilling](../spilling.md): reusable RocJitsu allocation and

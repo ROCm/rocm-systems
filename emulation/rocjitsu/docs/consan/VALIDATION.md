@@ -25,8 +25,9 @@ ctest --test-dir "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build" \
 
 Configuration discovers the gfx1100 agent UUID through `rocminfo`; the tests
 do not assume a device ordinal. This gate covers exact output, all four
-engines, required Inline Shadow conflict attribution, cleanup, and post-run
-device health. Broader workload status remains in
+engines, a no-filter SuperCollider pass over every supported site in the
+fixture code object, required Inline Shadow conflict attribution, cleanup, and
+ordered post-run device health. Broader workload status remains in
 [STATUS_RDNA3.md](STATUS_RDNA3.md).
 
 The status table began as a cumulative ledger: its rows were promoted at

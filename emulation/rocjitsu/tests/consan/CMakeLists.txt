@@ -1677,6 +1677,19 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MAX_PATCHES=2"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
+            rj_add_consan_hip_case(
+                NAME "ConSanGfx1100Physical.SuperColliderAllSupportedSites"
+                TARGET hip_consan_lds_gfx1100_test
+                FILTER "ConSanLdsTest.PaddedRacyStoreReportsMarker"
+                RUN_SERIAL
+                ENVIRONMENT
+                    "${_rj_consan_gfx1100_device}"
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_MODE=supercollider"
+                    "RJ_CONSAN_DELAY=2"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
             foreach(
                 _rj_consan_gfx1100_mode
                 IN
@@ -1734,8 +1747,19 @@ function(rj_add_consan_hip_tests)
                 RUN_SERIAL
                 ENVIRONMENT "${_rj_consan_gfx1100_device}"
             )
+            set_tests_properties(
+                "ConSanGfx1100Physical.PostInstrumentationHealth"
+                PROPERTIES
+                    DEPENDS
+                        "ConSanGfx1100Physical.SuperColliderClean;ConSanGfx1100Physical.SuperColliderAllSupportedSites;ConSanGfx1100Physical.Moi_record_replay;ConSanGfx1100Physical.Moi_sampled;ConSanGfx1100Physical.Moi_inline_shadow;ConSanGfx1100Physical.InlineShadowDetectsRace"
+            )
             unset(_rj_consan_gfx1100_clean)
             unset(_rj_consan_gfx1100_device)
+        elseif(HAS_GFX1100_GPU)
+            message(
+                WARNING
+                "gfx1100 hardware was detected, but its stable UUID could not be resolved; physical ConSan tests will not be registered"
+            )
         endif()
     endif()
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX1250)

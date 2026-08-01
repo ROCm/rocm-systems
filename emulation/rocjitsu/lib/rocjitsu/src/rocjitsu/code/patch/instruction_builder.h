@@ -82,8 +82,10 @@ inline constexpr uint32_t kMaxAddressFreeScratchPrivateBytes = 0x800000u;
 /// 12-bit byte offset field, and the corresponding per-lane private extent.
 inline constexpr uint32_t kMaxCdnaAddressFreeScratchDwordOffset = 0xffcu;
 inline constexpr uint32_t kMaxCdnaAddressFreeScratchPrivateBytes = 0x1000u;
-inline constexpr uint32_t kMaxRdna3AddressFreeScratchDwordOffset = 0x1ffcu;
-inline constexpr uint32_t kMaxRdna3AddressFreeScratchPrivateBytes = 0x2000u;
+/// Largest non-negative, dword-aligned offset in gfx11 SCRATCH's signed
+/// 13-bit byte offset field, and the corresponding per-lane private extent.
+inline constexpr uint32_t kMaxRdna3AddressFreeScratchDwordOffset = 0xffcu;
+inline constexpr uint32_t kMaxRdna3AddressFreeScratchPrivateBytes = 0x1000u;
 
 /// @brief Return the per-lane private extent addressable by the architecture's
 /// address-free scratch form.

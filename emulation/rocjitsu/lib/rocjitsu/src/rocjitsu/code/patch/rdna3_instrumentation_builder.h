@@ -7,6 +7,8 @@
 #pragma once
 
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/operand_types.h"
 
 namespace rocjitsu {
@@ -19,7 +21,7 @@ namespace rocjitsu {
 build_rdna3_s_getreg_b32(uint16_t sdst, uint16_t hwreg, rj_code_arch_t arch) {
   if (!is_rdna3_arch(arch) || sdst > 127)
     return std::nullopt;
-  return build_sopk_encoding(arch, /*s_getreg_b32=*/17, sdst, hwreg);
+  return build_sopk_encoding(arch, rdna3::kSGetregB32Sopk, sdst, hwreg);
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
@@ -109,11 +111,12 @@ build_rdna3_s_cbranch(uint16_t opcode, int16_t offset_dwords, rj_code_arch_t arc
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
 build_rdna3_s_load_dword(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rj_code_arch_t arch) {
   if (!is_rdna3_arch(arch) || sdst > 105 || sbase > 104 || sbase % 2u != 0 ||
-      byte_offset > 0x1fffffu)
+      byte_offset > 0xfffffu || byte_offset % sizeof(uint32_t) != 0u)
     return std::nullopt;
   return rdna3::build_smem(rdna3::kSLoadB32Smem, {.sbase = static_cast<uint8_t>(sbase / 2u),
                                                   .sdata = static_cast<uint8_t>(sdst),
-                                                  .offset = byte_offset});
+                                                  .offset = byte_offset,
+                                                  .soffset = rdna3::OPR_SREG_NULL});
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
@@ -398,7 +401,7 @@ inline constexpr uint8_t kRdna3FlatNoSaddr = static_cast<uint8_t>(rdna3::OPR_SRE
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
 build_rdna3_flat_store_b32(uint16_t vaddr, uint16_t vsrc, uint16_t byte_offset,
                            rj_code_arch_t arch) {
-  if (!is_rdna3_arch(arch) || vaddr > 254 || vsrc > 255 || byte_offset > 0x1fffu)
+  if (!is_rdna3_arch(arch) || vaddr > 254 || vsrc > 255 || byte_offset > 0xfffu)
     return std::nullopt;
   return rdna3::build_flat(rdna3::kFlatStoreB32Flat, {.offset = byte_offset,
                                                       .addr = static_cast<uint8_t>(vaddr),
@@ -409,7 +412,7 @@ build_rdna3_flat_store_b32(uint16_t vaddr, uint16_t vsrc, uint16_t byte_offset,
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
 build_rdna3_flat_load_b32(uint16_t vaddr, uint16_t vdst, uint16_t byte_offset,
                           rj_code_arch_t arch) {
-  if (!is_rdna3_arch(arch) || vaddr > 254 || vdst > 255 || byte_offset > 0x1fffu)
+  if (!is_rdna3_arch(arch) || vaddr > 254 || vdst > 255 || byte_offset > 0xfffu)
     return std::nullopt;
   return rdna3::build_flat(rdna3::kFlatLoadB32Flat, {.offset = byte_offset,
                                                      .addr = static_cast<uint8_t>(vaddr),
@@ -552,8 +555,8 @@ build_rdna3_flat_atomic_add_u64(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bo
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
 build_rdna3_scratch_store_b32(uint16_t vsrc, uint16_t saddr, uint32_t byte_offset,
                               rj_code_arch_t arch) {
-  if (!is_rdna3_arch(arch) || vsrc > 255 || saddr > 124 || byte_offset > 0x1ffcu ||
-      byte_offset % sizeof(uint32_t) != 0)
+  if (!is_rdna3_arch(arch) || vsrc > 255 || saddr > 124 ||
+      byte_offset > kMaxRdna3AddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0)
     return std::nullopt;
   return rdna3::build_flat(rdna3::kFlatStoreB32Flat, {.offset = static_cast<uint16_t>(byte_offset),
                                                       .seg = 1u,
@@ -564,8 +567,8 @@ build_rdna3_scratch_store_b32(uint16_t vsrc, uint16_t saddr, uint32_t byte_offse
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
 build_rdna3_scratch_load_b32(uint16_t vdst, uint16_t saddr, uint32_t byte_offset,
                              rj_code_arch_t arch) {
-  if (!is_rdna3_arch(arch) || vdst > 255 || saddr > 124 || byte_offset > 0x1ffcu ||
-      byte_offset % sizeof(uint32_t) != 0)
+  if (!is_rdna3_arch(arch) || vdst > 255 || saddr > 124 ||
+      byte_offset > kMaxRdna3AddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0)
     return std::nullopt;
   return rdna3::build_flat(rdna3::kFlatLoadB32Flat, {.offset = static_cast<uint16_t>(byte_offset),
                                                      .seg = 1u,

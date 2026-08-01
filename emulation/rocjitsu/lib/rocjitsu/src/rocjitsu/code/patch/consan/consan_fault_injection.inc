@@ -2318,7 +2318,8 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
 
 [[nodiscard]] std::optional<std::array<uint32_t, 3>>
 retarget_flat_load_vdst(std::array<uint32_t, 3> words, uint16_t vdst, rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+      arch == ROCJITSU_CODE_ARCH_CDNA4) {
     words[1] = (words[1] & 0x00FFFFFFu) | (static_cast<uint32_t>(vdst) << 24u);
     return words;
   }
@@ -2371,6 +2372,34 @@ build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bi
                                 rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_RDNA4)
     return build_flat_load_from_flat_store(words, width_bits, vdst);
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+    uint16_t load_op = 0;
+    switch (width_bits) {
+    case 8:
+      load_op = rdna3::kFlatLoadU8Flat;
+      break;
+    case 16:
+      load_op = rdna3::kFlatLoadU16Flat;
+      break;
+    case 32:
+      load_op = rdna3::kFlatLoadB32Flat;
+      break;
+    case 64:
+      load_op = rdna3::kFlatLoadB64Flat;
+      break;
+    case 128:
+      load_op = rdna3::kFlatLoadB128Flat;
+      break;
+    default:
+      return std::nullopt;
+    }
+    constexpr uint32_t kRdna3FlatOpMask = 0x7fu << 18u;
+    constexpr uint32_t kRdna3FlatDataMask = 0xffu << 8u;
+    words[0] = (words[0] & ~kRdna3FlatOpMask) | (static_cast<uint32_t>(load_op) << 18u);
+    words[1] = (words[1] & ~kRdna3FlatDataMask & 0x00ffffffu) |
+               (static_cast<uint32_t>(vdst) << 24u);
+    return words;
+  }
   if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
     uint16_t load_op = 0;
     switch (width_bits) {

@@ -443,6 +443,7 @@ add_executable(
     patch/instrumentation_builder_dispatch_test.cpp
     patch/instruction_builder_test.cpp
     patch/instruction_sequence_test.cpp
+    patch/rdna3_instrumentation_builder_test.cpp
     patch/rdna4_instrumentation_builder_test.cpp
     patch/kernarg_extension_test.cpp
     patch/sidecar_metadata_test.cpp

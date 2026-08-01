@@ -1602,7 +1602,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     uint16_t workgroup_key_vgpr, uint64_t token_table_base, uint32_t token_table_capacity,
     uint64_t snapshot_table_base, uint32_t snapshot_table_capacity, rj_code_arch_t arch) {
   const bool has_dispatch_id = options.moi_dispatch_id_sgpr.has_value() ||
-                               instrumentation::is_consan_rdna_arch(arch);
+                               consan_arch_uses_literal_dispatch_identity(arch);
   if (!options.scratch_vgpr || !options.moi_exec_save_sgpr || !has_dispatch_id ||
       !options.moi_owner_vgpr || token_table_capacity == 0 || token_table_capacity > 64u ||
       snapshot_table_capacity != token_table_capacity)
@@ -2086,7 +2086,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     bool predicate_on_compare_exchange_success, uint32_t &guest_instruction_offset,
     std::vector<std::string> &errors) {
   const bool has_dispatch_id = options.moi_dispatch_id_sgpr.has_value() ||
-                               instrumentation::is_consan_rdna_arch(arch);
+                               consan_arch_uses_literal_dispatch_identity(arch);
   const uint16_t required_scratch_count = inline_shadow_atomic_scratch_count(arch);
   if (!options.scratch_vgpr || !options.moi_exec_save_sgpr || !options.moi_owner_vgpr ||
       !options.moi_epoch_vgpr || !has_dispatch_id ||

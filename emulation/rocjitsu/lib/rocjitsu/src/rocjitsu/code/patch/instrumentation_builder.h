@@ -39,12 +39,12 @@ build_s_call_i64(uint16_t sdst, int16_t simm16, rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
 
-[[nodiscard]] inline constexpr bool is_consan_rdna_arch(rj_code_arch_t arch) {
+[[nodiscard]] inline constexpr bool is_rdna_family_arch(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_RDNA3 || is_rdna4_family_arch(arch);
 }
 
 [[nodiscard]] inline constexpr bool is_admitted_arch(rj_code_arch_t arch) {
-  return is_cdna_family_arch(arch) || is_consan_rdna_arch(arch);
+  return is_cdna_family_arch(arch) || is_rdna_family_arch(arch);
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>

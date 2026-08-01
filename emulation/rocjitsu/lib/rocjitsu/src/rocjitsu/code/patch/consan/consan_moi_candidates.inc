@@ -18,6 +18,8 @@ inline constexpr uint16_t kLegacyHwRegHwId = 4;
 inline constexpr uint16_t kLegacyHwIdResidentWaveBits = 6;
 inline constexpr uint16_t kLegacyMaxResidentWaveOwner =
     (1u << kLegacyHwIdResidentWaveBits) - 1u;
+// Keep gfx11 and gfx12 fields separate even while their current values match:
+// they are independently qualified architectural facts and may diverge.
 inline constexpr uint16_t kGfx11HwRegHwId1 = 23;
 inline constexpr uint16_t kGfx11HwIdResidentWaveBits = 10;
 inline constexpr uint16_t kGfx11HwIdWaveMask = 0x1f;
@@ -990,7 +992,7 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
                                         rj_code_arch_t arch) {
   return source.sgpr || source.vgpr ||
          policy == ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture ||
-         instrumentation::is_consan_rdna_arch(arch);
+         consan_arch_uses_literal_dispatch_identity(arch);
 }
 
 [[nodiscard]] bool append_moi_report_dispatch_id_word(std::vector<uint32_t> &words,

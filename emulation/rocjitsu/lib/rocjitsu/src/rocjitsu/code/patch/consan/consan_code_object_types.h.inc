@@ -302,6 +302,9 @@ struct ConSanAtomicSite {
   std::optional<bool> raw_offen;
   std::optional<bool> raw_idxen;
   std::optional<int32_t> raw_ioffset;
+  /// Common scope code. This preserves an encoded field when one exists; for
+  /// target forms whose scope is implicit, analysis records the qualified
+  /// semantic scope so downstream engines do not invent target-specific rules.
   std::optional<uint32_t> raw_scope;
   std::optional<uint32_t> raw_th;
   std::optional<bool> returns_old_value;

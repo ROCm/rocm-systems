@@ -4234,9 +4234,10 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
       options.moi_dispatch_id_vgpr) {
     return false;
   }
+  // gfx11 has no qualified dispatch-ID preload/user-SGPR contract. Use the
+  // same code-object identity literal policy as the other admitted RDNA
+  // targets; this is the expected path, not a degraded fallback.
   if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
-    result.warnings.emplace_back(
-        "ConSan MOI is using the code-object dispatch identity directly on RDNA3");
     return false;
   }
 

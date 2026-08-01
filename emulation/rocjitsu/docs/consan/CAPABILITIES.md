@@ -121,8 +121,11 @@ HSA hook:
 - access decoding and normalization:
   `analysis_test.cpp`, `moi_record_replay_test.cpp`, and
   `supercollider_test.cpp`, including CDNA subword/transpose/dual-range,
-  gfx1100 native LDS and group-FLAT, gfx1250 subword/transpose/96-bit, and
-  group-FLAT D16 cases;
+  every claimed gfx1100 native-LDS width, gfx1100 group-FLAT subword forms,
+  gfx1250 subword/transpose/96-bit, and group-FLAT D16 cases;
+- target-native injected instruction encodings and operand limits:
+  `rdna3_instrumentation_builder_test.cpp`, independently of architecture
+  dispatch tests;
 - all-engine access placement:
   `moi_engine_conformance_test.cpp`, `moi_sampled_test.cpp`, and
   `moi_inline_shadow_test.cpp`;
@@ -140,7 +143,12 @@ HSA hook:
 - the CDNA3/CDNA4/RDNA4/gfx1250 Inline release transaction:
   `ConSanMoi.SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor`; and
 - the complete gfx1100 compiler acquire sequence:
-  `ConSanMoi.Gfx1100InlineAtomicAcquireUsesCompleteGfx11CacheSequence`; and
+  `ConSanMoi.Gfx1100InlineAtomicAcquireUsesCompleteGfx11CacheSequence`, with
+  missing, reversed, and intervened cache-operation rejection coverage; and
+- gfx1100 vector-only and scalar-base VGLOBAL address forms plus invalid-scalar
+  rejection:
+  `ConSanMoi.Gfx1100VglobalAtomicAcquireCoversVectorAndScalarAddressForms` and
+  `ConSanMoi.Gfx1100VglobalAtomicRejectsInvalidScalarBase`; and
 - CDNA3/CDNA4 Inline VGLOBAL release, acquire, returning compare-exchange,
   no-return fail-closed behavior, and native address lowering:
   `ConSanMoi.CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering`.
@@ -148,8 +156,9 @@ HSA hook:
 The registered execution gates use native code objects for each target:
 
 - physical `gfx1100`: `ConSanGfx1100Physical.*`, covering clean execution in
-  all three MOI detection engines, a required same-site two-wave race
-  diagnostic, sequential consistency, and post-instrumentation health;
+  all three MOI detection engines, a no-filter all-supported-site
+  SuperCollider pass, a required same-site two-wave race diagnostic,
+  sequential consistency, and ordered post-instrumentation health;
 - physical `gfx1201`: `ConSanMoiHipTest.*` and `ConSanInlineShadowTest.*`;
 - simulated `gfx1250`: `ConSanGfx1250Sim.*`;
 - simulated `gfx950`: `ConSanGfx950Sim.*` and the opted-in

@@ -663,7 +663,13 @@ build_v_mov_b32_e32_vgpr_word(uint16_t vdst, uint16_t src_vgpr, rj_code_arch_t a
     errors.emplace_back(std::string(context) + " report-buffer action has unsupported target");
     return std::nullopt;
   }
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 8u : 12u;
+  const auto literal = instrumentation::build_v_mov_b32_literal(0u, 0u, arch);
+  const auto store = instrumentation::build_flat_store_b32(0u, 2u, arch);
+  if (!literal || !store) {
+    errors.emplace_back(std::string(context) + " could not size report-buffer action");
+    return std::nullopt;
+  }
+  return static_cast<uint32_t>(3u * literal->size() + store->size());
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>>

@@ -399,7 +399,7 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
                                                                          bool two_address,
                                                                          rj_code_arch_t arch) {
   uint32_t base = 0;
-  if (instrumentation::is_consan_rdna_arch(arch)) {
+  if (instrumentation::is_rdna_family_arch(arch)) {
     if (two_address) {
       switch (word0 & 0xFFFF0000u) {
       case 0xD8380000u:

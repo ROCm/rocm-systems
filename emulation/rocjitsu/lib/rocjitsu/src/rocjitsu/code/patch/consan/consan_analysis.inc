@@ -1411,9 +1411,9 @@ void fill_cdna_flat_like_atomic_raw(ConSanAtomicSite &site, const Raw &raw) {
   site.raw_vaddr = static_cast<uint32_t>(raw.addr);
   site.raw_vsrc = static_cast<uint32_t>(raw.data);
   site.raw_vdst = static_cast<uint32_t>(raw.vdst);
-  // CDNA3/4 FLAT-like atomics do not carry gfx12's explicit scope field.
-  // ConSan's admitted FLAT and VGLOBAL forms are device-scoped, matching the
-  // builder contract.
+  // CDNA3/4 FLAT-like atomics do not carry gfx12's explicit scope field. The
+  // common field records the qualified device-scoped semantics of the admitted
+  // FLAT and VGLOBAL forms rather than claiming an encoded operand.
   site.raw_scope = 2u;
   // Preserve the target-native cache-policy bits in the common semantics
   // field. Unlike gfx12 TH, SC0 also selects whether the old value is returned.
@@ -1439,9 +1439,10 @@ void fill_rdna3_flat_like_atomic_raw(ConSanAtomicSite &site, const Raw &raw) {
   site.raw_vsrc = static_cast<uint32_t>(raw.data);
   site.raw_vdst = static_cast<uint32_t>(raw.vdst);
   site.raw_ioffset = sign_extend_13_bit_offset(static_cast<uint32_t>(raw.offset));
-  // gfx11 FLAT-like atomics have no explicit scope field. ConSan admits the
-  // device-scoped form used by its encoder and records GLC/SLC as the native
-  // ordering metadata. GLC also selects the returning form.
+  // gfx11 FLAT-like atomics have no explicit scope field. The common field
+  // records the qualified device-scoped semantics rather than claiming an
+  // encoded operand. GLC/SLC remain the native ordering metadata, and GLC also
+  // selects the returning form.
   site.raw_scope = 2u;
   site.raw_th = static_cast<uint32_t>(raw.glc) | (static_cast<uint32_t>(raw.slc) << 1u);
   site.returns_old_value = raw.glc != 0u;

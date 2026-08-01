@@ -913,7 +913,7 @@
     uint16_t address_lo_vgpr, uint16_t current_low_vgpr, uint16_t old_value_vgpr,
     uint16_t publisher_exec_sgpr, uint16_t committed_exec_sgpr, bool retry_contention) {
   const bool literal_dispatch_id =
-      instrumentation::is_consan_rdna_arch(arch) && !options.moi_dispatch_id_sgpr;
+      consan_arch_uses_literal_dispatch_identity(arch) && !options.moi_dispatch_id_sgpr;
   if (!options.scratch_vgpr || !options.moi_exec_save_sgpr ||
       (!options.moi_dispatch_id_sgpr && !literal_dispatch_id) || !options.moi_report_buffer_address)
     return false;
@@ -2385,7 +2385,7 @@
     return std::nullopt;
   }
   if (!options.moi_exec_save_sgpr ||
-      (!options.moi_dispatch_id_sgpr && !instrumentation::is_consan_rdna_arch(arch))) {
+      (!options.moi_dispatch_id_sgpr && !consan_arch_uses_literal_dispatch_identity(arch))) {
     errors.emplace_back(
         "ConSan MOI versioned exact-shadow probe requires EXEC-save and dispatch-ID state");
     return std::nullopt;

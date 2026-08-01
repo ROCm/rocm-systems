@@ -1413,13 +1413,9 @@ void build_barrier_move_destination_inventory(
 }
 
 [[nodiscard]] bool is_acquire_cache_event(const ConSanSyncEvent *event) {
-  return event != nullptr && (event->mnemonic == "global_inv" || event->mnemonic == "buffer_inv" ||
-                              event->mnemonic == "s_dcache_inv" ||
-                              event->mnemonic == "buffer_gl0_inv" ||
-                              event->mnemonic == "buffer_gl1_inv");
-}
-
-[[nodiscard]] bool is_single_acquire_cache_event(const ConSanSyncEvent *event) {
+  // gfx11 buffer_gl1_inv plus buffer_gl0_inv is admitted only by the exact
+  // ordered-pair matcher below. A lone gl0 operation is workgroup-local cache
+  // maintenance, not a complete addressed acquire boundary.
   return event != nullptr && (event->mnemonic == "global_inv" || event->mnemonic == "buffer_inv" ||
                               event->mnemonic == "s_dcache_inv");
 }
@@ -1684,11 +1680,12 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
         if (i + 2 < result.sync_sequences.size()) {
           const ConSanSyncSequence &candidate = result.sync_sequences[i + 2];
           if (candidate.kind == ConSanSyncSequenceKind::Fence &&
-              is_single_acquire_cache_event(first_sequence_event(events, candidate)) &&
+              is_acquire_cache_event(first_sequence_event(events, candidate)) &&
               prove_bounded_acquire_path(atomic, candidate, blocks)) {
             acquire = &candidate;
           } else if (arch == ROCJITSU_CODE_ARCH_RDNA3 &&
                      i + 3 < result.sync_sequences.size() &&
+                     candidate.kind == ConSanSyncSequenceKind::Fence &&
                      result.sync_sequences[i + 3].kind == ConSanSyncSequenceKind::Fence &&
                      prove_bounded_acquire_path(atomic, candidate, blocks) &&
                      is_rdna3_acquire_cache_pair(candidate, result.sync_sequences[i + 3], events,
@@ -1706,7 +1703,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
     if (current.kind == ConSanSyncSequenceKind::Atomic && i + 1 < result.sync_sequences.size()) {
       const ConSanSyncSequence &acquire = result.sync_sequences[i + 1];
       if (acquire.kind == ConSanSyncSequenceKind::Fence &&
-          is_single_acquire_cache_event(first_sequence_event(events, acquire)) &&
+          is_acquire_cache_event(first_sequence_event(events, acquire)) &&
           prove_bounded_acquire_path(current, acquire, blocks)) {
         associated.push_back(associate_atomic_cache_sequence(nullptr, current, &acquire));
         i += 2;
