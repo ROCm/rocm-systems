@@ -216,15 +216,13 @@ public:
     auto pte = entry.page_table->find(page_key);
     if (pte != entry.page_table->end()) {
       const size_t page_offset = addr & PAGE_MASK;
-      const size_t host_backed_bytes =
-          cached_host_backed_bytes(page_key, pte->second, entry.page_table, entry.generation);
       if (pte->second.host_ptr == nullptr) {
         atomic_rmw_fallback(addr, size, entry.client_pid, fn);
         return;
       }
 
       const size_t backed_begin = pte->second.gpu_page_offset;
-      const size_t backed_end = backed_begin + host_backed_bytes;
+      const size_t backed_end = backed_begin + pte->second.host_backed_bytes;
       const size_t access_end = page_offset + size;
       const size_t overlap_begin = std::max(page_offset, backed_begin);
       const size_t overlap_end = std::min(access_end, backed_end);
@@ -235,7 +233,12 @@ public:
 
       auto *target = pte->second.host_ptr + (overlap_begin - backed_begin);
       const size_t value_offset = overlap_begin - page_offset;
-      const size_t mapped_bytes = overlap_end - overlap_begin;
+      const size_t mapped_bytes =
+          mapped_addressable_prefix(pte->second, overlap_begin, overlap_end - overlap_begin);
+      if (mapped_bytes == 0) {
+        atomic_rmw_discarded(fn);
+        return;
+      }
       if (value_offset == 0 && mapped_bytes == size)
         atomic_rmw_mapped(target, fn);
       else
@@ -312,15 +315,11 @@ public:
       last_entry = &next_page_entry->second;
     }
 
-    // A host allocation can only acquire an ASan redzone at its final byte, so
-    // the contiguous PTE walk uses declared extents and probes that boundary
-    // once. This keeps per-dispatch symbol lookup linear in page-table entries
-    // without adding a shadow scan for every page.
-    const size_t last_host_backed_bytes =
-        cached_host_backed_bytes(last_page, *last_entry, entry.page_table, entry.generation);
     const uintptr_t first_host_address = reinterpret_cast<uintptr_t>(first_host_byte);
     const uintptr_t last_host_address = reinterpret_cast<uintptr_t>(last_entry->host_ptr);
-    const uint64_t range_size = last_host_address - first_host_address + last_host_backed_bytes;
+    const uint64_t declared_range_size =
+        last_host_address - first_host_address + last_entry->host_backed_bytes;
+    const uint64_t range_size = addressable_prefix(first_host_byte, declared_range_size);
     auto *host_byte =
         page_entry->second.host_ptr + (page_offset - page_entry->second.gpu_page_offset);
     if (reinterpret_cast<uintptr_t>(host_byte) - first_host_address >= range_size)
@@ -518,10 +517,6 @@ private:
     return len;
   }
 
-  static size_t effective_host_backed_bytes(const KfdProcess::PageTableEntry &pte) {
-    return addressable_prefix(pte.host_ptr, pte.host_backed_bytes);
-  }
-
   struct VmidEntry {
     KfdProcess::PageTable *page_table = nullptr;
     std::shared_mutex *mutex = nullptr;
@@ -543,73 +538,19 @@ private:
     const uint64_t *generation_ptr = nullptr;
   };
 
-  struct HostExtentCacheEntry {
-    const GpuMemory *memory = nullptr;
-    uint64_t memory_instance = 0;
-    KfdProcess::PageTable *page_table = nullptr;
-    const uint64_t *generation_ptr = nullptr;
-    uint64_t generation = 0;
-    uint64_t page_key = 0;
-    uint8_t *host_ptr = nullptr;
-    size_t declared_bytes = 0;
-    size_t host_backed_bytes = 0;
-  };
-
-  static constexpr size_t kHostExtentCacheEntries = 256;
-  static_assert((kHostExtentCacheEntries & (kHostExtentCacheEntries - 1)) == 0,
-                "host extent cache size must be a power of two");
-
-  size_t cached_host_backed_bytes(uint64_t page_key, const KfdProcess::PageTableEntry &pte,
-                                  KfdProcess::PageTable *page_table,
-                                  const uint64_t *generation_ptr) const {
-#if defined(RJ_GPU_MEMORY_WITH_ASAN)
-    if (generation_ptr == nullptr)
-      return effective_host_backed_bytes(pte);
-
-    // A mapped HIP allocation's ASan state is modeled as one addressable prefix
-    // followed by one poisoned tail. Allocation lifetime changes can move that
-    // boundary without changing the KFD page table. The identity comparisons
-    // below cover PTE changes; on an identity hit, rechecking the two transition
-    // bytes detects trailing-boundary growth and shrinkage without rescanning the
-    // whole declared extent on every memory access.
-    static thread_local std::array<HostExtentCacheEntry, kHostExtentCacheEntries> cache;
-    const uintptr_t table_key = reinterpret_cast<uintptr_t>(page_table) >> PAGE_SHIFT;
-    HostExtentCacheEntry &cache_entry =
-        cache[(page_key ^ table_key ^ instance_id_) & (cache.size() - 1)];
-    const uint64_t generation = *generation_ptr;
-    bool cache_hit =
-        cache_entry.memory == this && cache_entry.memory_instance == instance_id_ &&
-        cache_entry.page_table == page_table && cache_entry.generation_ptr == generation_ptr &&
-        cache_entry.generation == generation && cache_entry.page_key == page_key &&
-        cache_entry.host_ptr == pte.host_ptr && cache_entry.declared_bytes == pte.host_backed_bytes;
-    if (cache_hit) {
-      const size_t cached_bytes = cache_entry.host_backed_bytes;
-      const bool cached_tail_is_addressable =
-          cached_bytes == 0 || addressable_prefix(pte.host_ptr + cached_bytes - 1, 1) == 1;
-      const bool next_byte_is_poisoned = cached_bytes == pte.host_backed_bytes ||
-                                         addressable_prefix(pte.host_ptr + cached_bytes, 1) == 0;
-      cache_hit = cached_tail_is_addressable && next_byte_is_poisoned;
-    }
-    if (!cache_hit) {
-      cache_entry = {
-          .memory = this,
-          .memory_instance = instance_id_,
-          .page_table = page_table,
-          .generation_ptr = generation_ptr,
-          .generation = generation,
-          .page_key = page_key,
-          .host_ptr = pte.host_ptr,
-          .declared_bytes = pte.host_backed_bytes,
-          .host_backed_bytes = effective_host_backed_bytes(pte),
-      };
-    }
-    return cache_entry.host_backed_bytes;
-#else
-    (void)page_key;
-    (void)page_table;
-    (void)generation_ptr;
-    return pte.host_backed_bytes;
-#endif
+  static size_t mapped_addressable_prefix(const KfdProcess::PageTableEntry &pte, size_t page_offset,
+                                          size_t len) {
+    if (pte.host_ptr == nullptr || page_offset < pte.gpu_page_offset)
+      return 0;
+    const size_t host_offset = page_offset - pte.gpu_page_offset;
+    if (host_offset >= pte.host_backed_bytes)
+      return 0;
+    const size_t declared_bytes = std::min(len, pte.host_backed_bytes - host_offset);
+    // A declared KFD page can contain several live HIP suballocations separated
+    // by sanitizer redzones, and their lifetimes do not mutate the page table.
+    // Query from the actual access point so a later live suballocation remains
+    // accessible while a transaction crossing its trailing redzone is clipped.
+    return addressable_prefix(pte.host_ptr + host_offset, declared_bytes);
   }
 
   /// @brief Walk a VMID page table with a generation-keyed thread-local cache.
@@ -673,9 +614,7 @@ private:
       if (pte) {
         if (pte->host_ptr == nullptr)
           return false;
-        const size_t host_backed_bytes =
-            cached_host_backed_bytes(cache.page_key, *pte, cache.page_table, cache.generation_ptr);
-        fn(pte->host_ptr, pte->gpu_page_offset, host_backed_bytes);
+        fn(pte->host_ptr, pte->gpu_page_offset, pte->host_backed_bytes);
         return true;
       }
       if (passthrough_ && addr < kUserSpaceLimit) {
@@ -701,8 +640,10 @@ private:
           const size_t overlap_end = std::min(access_end, backed_end);
           std::memset(dst, 0, len);
           if (overlap_begin < overlap_end) {
+            const size_t mapped_bytes = addressable_prefix(
+                host_ptr + (overlap_begin - backed_begin), overlap_end - overlap_begin);
             std::memcpy(static_cast<uint8_t *>(dst) + (overlap_begin - access_begin),
-                        host_ptr + (overlap_begin - backed_begin), overlap_end - overlap_begin);
+                        host_ptr + (overlap_begin - backed_begin), mapped_bytes);
           }
         });
   }
@@ -718,9 +659,11 @@ private:
           const size_t overlap_begin = std::max(access_begin, backed_begin);
           const size_t overlap_end = std::min(access_end, backed_end);
           if (overlap_begin < overlap_end) {
+            const size_t mapped_bytes = addressable_prefix(
+                host_ptr + (overlap_begin - backed_begin), overlap_end - overlap_begin);
             std::memcpy(host_ptr + (overlap_begin - backed_begin),
                         static_cast<const uint8_t *>(src) + (overlap_begin - access_begin),
-                        overlap_end - overlap_begin);
+                        mapped_bytes);
           }
         });
   }
@@ -733,7 +676,8 @@ private:
         addr, vmid, [&](uint8_t *mapped_host_ptr, size_t backed_begin, size_t host_backed_bytes) {
           const size_t page_offset = addr & PAGE_MASK;
           if (page_offset >= backed_begin && page_offset - backed_begin < host_backed_bytes &&
-              size <= host_backed_bytes - (page_offset - backed_begin)) {
+              size <= host_backed_bytes - (page_offset - backed_begin) &&
+              addressable_prefix(mapped_host_ptr + (page_offset - backed_begin), size) == size) {
             host_ptr = mapped_host_ptr + (page_offset - backed_begin);
           }
         });

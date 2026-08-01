@@ -801,7 +801,7 @@ TEST(GpuMemoryTest, SanitizedCacheLineAccessClipsRoundedMapping) {
                           [](uint8_t value) { return value == 0; }));
 }
 
-TEST(GpuMemoryTest, SanitizedMappedExtentTracksTrailingShadowBoundary) {
+TEST(GpuMemoryTest, SanitizedMappedExtentTracksCurrentShadowState) {
   amdgpu::GpuMemory memory("memory");
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kBaseVa = 0x40000000;
@@ -812,6 +812,9 @@ TEST(GpuMemoryTest, SanitizedMappedExtentTracksTrailingShadowBoundary) {
   constexpr size_t kGrowthProbeOffset = kInitialExtentBytes * 2;
   constexpr size_t kReducedInsideOffset = kReducedExtentBytes - sizeof(uint32_t);
   constexpr size_t kReducedOutsideOffset = kReducedExtentBytes + 512;
+  constexpr size_t kInteriorPoisonOffset = kInitialExtentBytes * 2;
+  constexpr size_t kInteriorPoisonBytes = 256;
+  constexpr size_t kLaterLiveOffset = kInteriorPoisonOffset + kInteriorPoisonBytes + 256;
 
   KfdProcess process(kPid);
   auto allocation = std::make_unique<uint8_t[]>(kAllocationSize);
@@ -846,6 +849,13 @@ TEST(GpuMemoryTest, SanitizedMappedExtentTracksTrailingShadowBoundary) {
   __asan_unpoison_memory_region(allocation.get(), kAllocationSize);
   memory.write32(kBaseVa + kInitialInsideOffset, 0x44444444, kPid);
   EXPECT_EQ(memory.read32(kBaseVa + kInitialInsideOffset, kPid), 0x44444444u);
+
+  __asan_poison_memory_region(allocation.get() + kInteriorPoisonOffset, kInteriorPoisonBytes);
+  memory.write32(kBaseVa + kInteriorPoisonOffset, 0xeeeeeeee, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kInteriorPoisonOffset, kPid), 0u);
+  memory.write32(kBaseVa + kLaterLiveOffset, 0x55555555, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kLaterLiveOffset, kPid), 0x55555555u);
+  __asan_unpoison_memory_region(allocation.get() + kInteriorPoisonOffset, kInteriorPoisonBytes);
 }
 #endif
 
