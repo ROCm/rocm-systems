@@ -3,11 +3,22 @@
 
 from unittest.mock import Mock
 
+import pytest
 from common import patch_console
 
-from pc_sampling.pc_sampling_profile import PCSamplingProfile
+from pc_sampling.pc_sampling_profile import (
+    PCSamplingLimits,
+    PCSamplingProfile,
+    pc_sampling_interval_limits,
+)
 
 MODULE = "pc_sampling.pc_sampling_profile"
+AVAIL_MODULE = "utils.rocprofv3_avail_interface"
+
+# Limits pc_sampling_interval_limits() reports when no agent can be queried.
+STOCHASTIC_FALLBACK = PCSamplingLimits(
+    min_interval=1, max_interval=1048576, interval_pow2=True
+)
 
 
 class MockArgs:
@@ -22,6 +33,16 @@ def _make_pc_sampling_profile(profiler="rocprofiler-sdk", filter_blocks=("21",))
         args=MockArgs(filter_blocks=list(filter_blocks)),
         profiler=profiler,
     )
+
+
+def _patch_avail_configs(monkeypatch, configs_by_agent):
+    """Stub the avail interface with canned per-agent configurations.
+
+    Each config is (method, unit, min_interval, max_interval, flags) as
+    pc_sample_config() reports it. The interface flattens them across agents.
+    """
+    configs = [config for agent in configs_by_agent.values() for config in agent]
+    monkeypatch.setattr(f"{AVAIL_MODULE}.get_pc_sample_configs", lambda _path: configs)
 
 
 # ---------------------------------------------------------------------------
@@ -181,3 +202,74 @@ def test_run_launches_and_logs(monkeypatch):
     assert any(
         call.args and call.args[0] == "profiling" for call in mock_debug.call_args_list
     )
+
+
+# ---------------------------------------------------------------------------
+# device interval limits
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "configs_by_agent, method, expected",
+    [
+        pytest.param(
+            {0: [(1, 2, 256, 1048576, 1)]},
+            "stochastic",
+            PCSamplingLimits(256, 1048576, True),
+            id="stochastic_cycles_decoded",
+        ),
+        pytest.param(
+            {0: [(2, 3, 1, 1048576, 0)]},
+            "host_trap",
+            PCSamplingLimits(1, 1048576, False),
+            id="host_trap_time_decoded",
+        ),
+        pytest.param(
+            {0: [(1, 2, 512, 65536, 1)], 1: [(1, 2, 256, 1048576, 0)]},
+            "stochastic",
+            PCSamplingLimits(256, 1048576, True),
+            id="range_unioned_across_agents",
+        ),
+        pytest.param(
+            {0: [(1, 3, 256, 4096, 0)]},
+            "stochastic",
+            None,
+            id="mismatched_unit_unsupported",
+        ),
+        pytest.param(
+            {0: [(2, 3, 1, 1048576, 0)]},
+            "stochastic",
+            None,
+            id="method_absent_from_every_agent",
+        ),
+        pytest.param(
+            {0: []},
+            "host_trap",
+            None,
+            id="agent_reports_no_configs",
+        ),
+    ],
+)
+def test_interval_limits_from_agent_configs(
+    monkeypatch, configs_by_agent, method, expected
+):
+    """Agent configurations are merged into per-method limits."""
+    _patch_avail_configs(monkeypatch, configs_by_agent)
+
+    assert pc_sampling_interval_limits(method) == expected
+
+
+def test_interval_limits_fall_back_without_avail_library(monkeypatch):
+    """An unreachable avail library yields the SDK fallback limits."""
+    monkeypatch.setattr(f"{AVAIL_MODULE}.get_pc_sample_configs", lambda _path: None)
+
+    assert pc_sampling_interval_limits("stochastic") == STOCHASTIC_FALLBACK
+
+
+def test_interval_limits_fall_back_when_query_raises(monkeypatch):
+    """A failed query is unknown support, not unsupported."""
+
+    def raise_os_error(_path):
+        raise OSError("agent enumeration failed")
+
+    monkeypatch.setattr(f"{AVAIL_MODULE}.get_pc_sample_configs", raise_os_error)
+
+    assert pc_sampling_interval_limits("stochastic") == STOCHASTIC_FALLBACK

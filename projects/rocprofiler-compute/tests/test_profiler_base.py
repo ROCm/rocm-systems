@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 import common
 import pytest
 
+from pc_sampling.pc_sampling_profile import PCSamplingLimits
 from rocprof_compute_base import RocProfCompute
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_profile.profiler_rocprof_v3 import rocprof_v3_profiler
@@ -555,6 +556,15 @@ def _make_rpc_with_args(args: argparse.Namespace) -> RocProfCompute:
     return instance
 
 
+def _fake_pc_sampling_limits(method: str, _sdk_tool_path=None) -> PCSamplingLimits:
+    """Stub of the device query, using the limits a gfx950 reports."""
+    return PCSamplingLimits(
+        min_interval=256 if method == "stochastic" else 1,
+        max_interval=1048576,
+        interval_pow2=method == "stochastic",
+    )
+
+
 @pytest.mark.parametrize(
     "args, expect_error, expected_filter_blocks",
     [
@@ -764,18 +774,30 @@ def test_run_profiling_pc_sampling_gating(
     [
         pytest.param("host_trap", None, False, 512, id="host_trap_unset_default"),
         pytest.param("stochastic", None, False, 1048576, id="stochastic_unset_default"),
-        pytest.param("stochastic", 65536, False, 65536, id="stochastic_min_accepted"),
+        pytest.param("stochastic", 256, False, 256, id="stochastic_min_accepted"),
+        pytest.param(
+            "stochastic", 1048576, False, 1048576, id="stochastic_max_accepted"
+        ),
         pytest.param("stochastic", 12345, True, None, id="stochastic_not_pow2"),
-        pytest.param("stochastic", 32768, True, None, id="stochastic_below_min"),
+        pytest.param("stochastic", 128, True, None, id="stochastic_below_min"),
+        pytest.param("stochastic", 67108864, True, None, id="stochastic_above_max"),
         pytest.param("host_trap", 100, False, 100, id="host_trap_positive_accepted"),
+        pytest.param("host_trap", 2097152, True, None, id="host_trap_above_max"),
         pytest.param("host_trap", 0, True, None, id="host_trap_zero_rejected"),
         pytest.param("host_trap", -1, True, None, id="host_trap_negative_rejected"),
     ],
 )
 def test_sanitize_pc_sampling_interval(
-    method, interval, expect_error, expected_interval
+    method, interval, expect_error, expected_interval, monkeypatch
 ):
-    """Unit test: --pc-sampling-interval default and stochastic validation."""
+    """Unit test: --pc-sampling-interval default and range validation.
+
+    The device query is stubbed so the bounds do not depend on the host GPU.
+    """
+    monkeypatch.setattr(
+        "rocprof_compute_base.pc_sampling_interval_limits",
+        _fake_pc_sampling_limits,
+    )
     args = _make_rpc_args(
         pc_sampling=True,
         experimental=True,
@@ -790,6 +812,47 @@ def test_sanitize_pc_sampling_interval(
     else:
         instance.sanitize()
         assert args.pc_sampling_interval == expected_interval
+
+
+def test_sanitize_pc_sampling_default_interval_out_of_range(monkeypatch):
+    """The method default is validated too, not just a user-supplied value."""
+    monkeypatch.setattr(
+        "rocprof_compute_base.pc_sampling_interval_limits",
+        lambda _method, _sdk_tool_path=None: PCSamplingLimits(
+            min_interval=256, max_interval=65536, interval_pow2=True
+        ),
+    )
+    args = _make_rpc_args(
+        pc_sampling=True,
+        experimental=True,
+        filter_blocks=[],
+        pc_sampling_method="stochastic",
+        pc_sampling_interval=None,
+    )
+    instance = _make_rpc_with_args(args)
+
+    with pytest.raises(SystemExit):
+        instance.sanitize()
+
+
+@pytest.mark.parametrize("interval", [None, 262144], ids=["default", "explicit"])
+def test_sanitize_pc_sampling_method_unsupported(interval, monkeypatch):
+    """A method no agent reports is rejected before the workload launches."""
+    monkeypatch.setattr(
+        "rocprof_compute_base.pc_sampling_interval_limits",
+        lambda _method, _sdk_tool_path=None: None,
+    )
+    args = _make_rpc_args(
+        pc_sampling=True,
+        experimental=True,
+        filter_blocks=[],
+        pc_sampling_method="stochastic",
+        pc_sampling_interval=interval,
+    )
+    instance = _make_rpc_with_args(args)
+
+    with pytest.raises(SystemExit):
+        instance.sanitize()
 
 
 # ---------------------------------------------------------------------------

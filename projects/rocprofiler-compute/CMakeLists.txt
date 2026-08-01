@@ -544,6 +544,15 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+# rocprofv3 avail library interface — no GPU required
+add_test(
+    NAME test_rocprofv3_avail_interface
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_rocprofv3_avail_interface.xml ${COV_OPTION}
+        tests/test_rocprofv3_avail_interface.py ${WORKING_DIR_OPTION}
+)
+
 # Memory chart CLI renderers (gfx9 plotille + gfx11 Rich) — no GPU required
 add_test(
     NAME test_mem_chart
@@ -880,6 +889,7 @@ if(${ENABLE_COVERAGE})
         test_metric_validation
         test_native_tool_finder
         test_profiler_base
+        test_rocprofv3_avail_interface
         test_soc_base
         test_tty
         test_utils_profile_csv
