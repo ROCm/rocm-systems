@@ -45,14 +45,14 @@ own admitted-site model; in particular, Sampled reports split-barrier members
 where other engines report logical barriers.
 
 This checkpoint also admits native `ds_load_b96` and `ds_store_b96` on both
-gfx1201 and gfx1250 across Record/Replay, Sampled, and Inline Shadow. CDNA3/4
-remain explicitly unsupported. This changes the static supported-site
-denominator when a generated object contains those instructions; the much
-larger top-k counts also reflect a changed nightly object and are not
-attributed to B96 admission alone. The current top-k diagnostic classification
-must nevertheless disassemble the retained sites and rule in or out B96
-admission/lowering as a third hypothesis alongside a rocPRIM race and a generic
-ConSan model false positive.
+gfx1201 and gfx1250 across Record/Replay, Sampled, and Inline Shadow. gfx1100
+and CDNA3/4 remain explicitly unsupported. This changes the static
+supported-site denominator when a generated object contains those
+instructions; the much larger top-k counts also reflect a changed nightly
+object and are not attributed to B96 admission alone. The current top-k
+diagnostic classification must nevertheless disassemble the retained sites and
+rule in or out B96 admission/lowering as a third hypothesis alongside a rocPRIM
+race and a generic ConSan model false positive.
 
 | Priority workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|

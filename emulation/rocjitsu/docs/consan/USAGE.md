@@ -1,8 +1,8 @@
 # ConSan usage
 
 ConSan instruments final AMD GPU code objects through the rocJITsu HSA-tools
-hook. It has native support for `gfx942`, `gfx950`, `gfx1201`, and `gfx1250`
-and does not translate code objects between GPU architectures.
+hook. It has native support for `gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and
+`gfx1250` and does not translate code objects between GPU architectures.
 
 ConSan reads the active workgroup-LDS capacity from the runtime agent. It does
 not hard-code a gfx942 LDS size; simulator and offline tests use the selected
@@ -323,7 +323,7 @@ override: setting only one is rejected as unsupported instead of silently
 dropping instrumentation. Inline Shadow rejects an explicit `workitem_id`
 owner because `workitem_id_x` alone cannot distinguish resident waves in
 arbitrary multidimensional workgroups. Its `hw_id` path is supported on
-gfx942, gfx950, gfx1201, and gfx1250. See
+gfx942, gfx950, gfx1100, gfx1201, and gfx1250. See
 [SPILLING.md](SPILLING.md).
 
 ## Malformed-input guard
@@ -453,7 +453,7 @@ Interpret outcomes independently:
 ## Current boundaries
 
 - Native instrumentation is architecture-specific; the code object must target
-  a supported GPU (`gfx942`, `gfx950`, `gfx1201`, or `gfx1250`).
+  a supported GPU (`gfx942`, `gfx950`, `gfx1100`, `gfx1201`, or `gfx1250`).
 - ConSan is LDS/shared-memory focused. Selected atomics/fences provide ordering
   evidence; they are not general global-memory race instrumentation.
 - Flat/generic LDS classification is conservative. `MaybeGroup` is heuristic;

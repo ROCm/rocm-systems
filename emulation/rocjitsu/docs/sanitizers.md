@@ -14,7 +14,7 @@ code object is loaded:
 | --- | --- | --- |
 | `gfx942` | Yes | Yes |
 | `gfx950` | Yes | Yes |
-| `gfx1100` | Yes | — |
+| `gfx1100` | Yes | Yes |
 | `gfx1150` | Yes | — |
 | `gfx1151` | Yes | — |
 | `gfx1200` | Yes | — |

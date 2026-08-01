@@ -2,9 +2,10 @@
 
 This is the `gfx942` workload × instrumentation evidence ledger. It uses the
 same acceptance contract as the [gfx950](STATUS_CDNA4.md),
-[gfx1201](STATUS_RDNA4.md), and [gfx1250](STATUS_GFX1250.md) ledgers, but it
-inherits no artifact, coverage denominator, machine-code identity, fault
-expectation, timing, provenance, or green cell from another target.
+[gfx1100](STATUS_RDNA3.md), [gfx1201](STATUS_RDNA4.md), and
+[gfx1250](STATUS_GFX1250.md) ledgers, but it inherits no artifact, coverage
+denominator, machine-code identity, fault expectation, timing, provenance, or
+green cell from another target.
 
 The executable authority is
 [`consan_validation.py`](../../tests/dbi/consan/consan_validation.py), and the
