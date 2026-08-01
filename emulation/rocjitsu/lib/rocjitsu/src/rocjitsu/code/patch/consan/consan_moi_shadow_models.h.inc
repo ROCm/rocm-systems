@@ -638,6 +638,12 @@ public:
   access(const ConSanMoiExactByteAccess &current,
          std::span<const ConSanMoiAcquiredEpochToken> acquired_epoch_tokens = {});
 
+  /// Retires epochs strictly before first_live_epoch for one generation and
+  /// compacts provenance that is no longer referenced by any byte interval.
+  /// The caller must prove that no later access can name a retired epoch; the
+  /// model deliberately does not infer that proof from record arrival order.
+  void retire_before_epoch(uint64_t generation, uint32_t first_live_epoch);
+
 private:
   struct Interval {
     uint64_t end = 0;

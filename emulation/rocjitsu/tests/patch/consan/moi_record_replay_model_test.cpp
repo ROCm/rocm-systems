@@ -1644,6 +1644,93 @@ TEST(ConSanMoi, SparseExactByteShadowRetainsSelectivelyOrderedOwners) {
   EXPECT_EQ(conflict.prior->owner_id, first.owner_id);
 }
 
+TEST(ConSanMoi, SparseExactByteShadowRetiresOnlyProvenEpochsAndReclaimsCapacity) {
+  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/16, /*maximum_access_count=*/3);
+  ConSanMoiExactByteAccess retired{
+      /*generation=*/7,
+      /*owner_id=*/1,
+      /*epoch=*/0,
+      ConSanMoiShadowAccessKind::Write,
+      /*lds_byte_offset=*/0,
+      /*lds_byte_count=*/1,
+      /*instruction_offset=*/0x10,
+      /*lane_mask=*/0x1,
+  };
+  ConSanMoiExactByteAccess boundary = retired;
+  boundary.epoch = 1;
+  boundary.lds_byte_offset = 4;
+  boundary.instruction_offset = 0x20;
+  ConSanMoiExactByteAccess other_generation = retired;
+  other_generation.generation = 8;
+  other_generation.lds_byte_offset = 8;
+  other_generation.instruction_offset = 0x30;
+
+  EXPECT_FALSE(model.access(retired).capacity_exhausted);
+  EXPECT_FALSE(model.access(boundary).capacity_exhausted);
+  EXPECT_FALSE(model.access(other_generation).capacity_exhausted);
+
+  model.retire_before_epoch(/*generation=*/7, /*first_live_epoch=*/1);
+
+  ConSanMoiExactByteAccess reclaimed = boundary;
+  reclaimed.lds_byte_offset = 12;
+  reclaimed.instruction_offset = 0x40;
+  EXPECT_FALSE(model.access(reclaimed).capacity_exhausted);
+
+  ConSanMoiExactByteAccess boundary_probe = boundary;
+  boundary_probe.owner_id = 2;
+  boundary_probe.kind = ConSanMoiShadowAccessKind::Read;
+  boundary_probe.instruction_offset = 0x50;
+  const ConSanMoiExactByteAccessResult boundary_conflict = model.access(boundary_probe);
+  ASSERT_TRUE(boundary_conflict.conflict);
+  ASSERT_TRUE(boundary_conflict.prior);
+  EXPECT_EQ(boundary_conflict.prior->instruction_offset, boundary.instruction_offset);
+
+  ConSanMoiExactByteAccess generation_probe = other_generation;
+  generation_probe.owner_id = 2;
+  generation_probe.kind = ConSanMoiShadowAccessKind::Read;
+  generation_probe.instruction_offset = 0x60;
+  const ConSanMoiExactByteAccessResult generation_conflict = model.access(generation_probe);
+  ASSERT_TRUE(generation_conflict.conflict);
+  ASSERT_TRUE(generation_conflict.prior);
+  EXPECT_EQ(generation_conflict.prior->instruction_offset, other_generation.instruction_offset);
+
+  ConSanMoiExactByteAccess full = boundary;
+  full.lds_byte_offset = 1;
+  full.instruction_offset = 0x70;
+  EXPECT_TRUE(model.access(full).capacity_exhausted);
+}
+
+TEST(ConSanMoi, SparseExactByteShadowRetirementKeepsSameSiteLaneGroup) {
+  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/8, /*maximum_access_count=*/2);
+  ConSanMoiExactByteAccess retired{
+      /*generation=*/7,
+      /*owner_id=*/1,
+      /*epoch=*/0,
+      ConSanMoiShadowAccessKind::Write,
+      /*lds_byte_offset=*/0,
+      /*lds_byte_count=*/4,
+      /*instruction_offset=*/0x10,
+      /*lane_mask=*/0x1,
+      /*exact_address_group=*/true,
+  };
+  ConSanMoiExactByteAccess boundary = retired;
+  boundary.epoch = 1;
+  boundary.lds_byte_offset = 4;
+  boundary.instruction_offset = 0x20;
+
+  EXPECT_FALSE(model.access(retired).conflict);
+  EXPECT_FALSE(model.access(boundary).conflict);
+  model.retire_before_epoch(/*generation=*/7, /*first_live_epoch=*/1);
+
+  ConSanMoiExactByteAccess second_group = boundary;
+  second_group.lane_mask = 0x2;
+  const ConSanMoiExactByteAccessResult conflict = model.access(second_group);
+  ASSERT_TRUE(conflict.conflict);
+  ASSERT_TRUE(conflict.prior);
+  EXPECT_EQ(conflict.prior->instruction_offset, boundary.instruction_offset);
+  EXPECT_EQ(conflict.prior->lane_mask, boundary.lane_mask);
+}
+
 TEST(ConSanMoi, SparseExactByteShadowScalesAcrossLargeOrderedSiteInventory) {
   constexpr uint32_t site_count = 10000;
   ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4,
