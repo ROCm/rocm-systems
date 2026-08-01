@@ -1072,7 +1072,7 @@ TEST(ConSanBranchOnlyRelayRouter, OneOwnerBaselineStillFindsUnownedBatch) {
   }
 }
 
-TEST(ConSanBranchOnlyRelayRouter, LargeInventoryReservesScanWorkForOwnerMinimizer) {
+TEST(ConSanBranchOnlyRelayRouter, LargeMixedInventoryIgnoresOutOfCorridorLowerBoundNoise) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   BranchOnlyRelayRouter router;
   for (uint64_t relay : {41'020u, 86'852u, 98'216u, 140'780u, 196'020u, 285'788u})
@@ -1108,12 +1108,19 @@ TEST(ConSanBranchOnlyRelayRouter, LargeInventoryReservesScanWorkForOwnerMinimize
 
   ASSERT_TRUE(plan.complete()) << error;
   EXPECT_EQ(plan.strategy, BranchOnlyRelayPlanStrategy::ExactBatch);
-  // The optional lower-bound accelerator must leave enough of the shared scan
-  // allowance for the minimizer to enter its search, even when neither pass
-  // can traverse the full inventory.
+  // Ownerless relays outside every demand corridor must not consume the
+  // lower-bound accelerator's share or suppress the authoritative minimizer.
   EXPECT_GT(plan.route_optimization_search_work_consumed, 0u);
   EXPECT_TRUE(plan.route_optimization_exhausted);
-  EXPECT_LE(plan.route_optimization_scan_work_consumed, limits.batch.optimization.scan.base);
+  EXPECT_EQ(plan.route_optimization_scan_work_consumed, limits.batch.optimization.scan.base);
+  std::set<BranchOnlyRelayOwnerIdentity> selected_owners;
+  for (const BranchOnlyRelayRoute &route : plan.routes) {
+    for (const BranchOnlyRelayClaim &claim : route.claims) {
+      if (claim.owner_affinity)
+        selected_owners.insert(*claim.owner_affinity);
+    }
+  }
+  EXPECT_EQ(selected_owners.size(), 1u);
 }
 
 TEST(ConSanBranchOnlyRelayRouter, BoundedOwnerOptimizationRetainsExactFeasibleRoute) {
@@ -1144,6 +1151,56 @@ TEST(ConSanBranchOnlyRelayRouter, BoundedOwnerOptimizationRetainsExactFeasibleRo
   EXPECT_FALSE(outcome.work_budget_exhausted());
   EXPECT_TRUE(outcome.route_optimization_exhausted);
   EXPECT_EQ(route->entry_relay_offsets, (std::vector<uint64_t>{120'000u, 220'000u}));
+}
+
+TEST(ConSanBranchOnlyRelayRouter, ExhaustedOwnerOptimizationRetainsStrictIntermediateImprovement) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr std::array<uint64_t, 9> kRelays = {
+      40'000u, 80'000u, 120'000u, 160'000u, 200'000u, 240'000u, 280'000u, 320'000u, 360'000u,
+  };
+  constexpr std::array<size_t, kRelays.size()> kOwners = {1u, 2u, 2u, 5u, 5u, 4u, 1u, 5u, 3u};
+  const std::array requests = {
+      BranchOnlyRelayPairRequest{0u, 400'000u, 400'004u, 4u},
+  };
+  const auto owner_count = [](const BranchOnlyRelayBatchPlan &plan) {
+    std::set<BranchOnlyRelayOwnerIdentity> owners;
+    for (const BranchOnlyRelayRoute &route : plan.routes) {
+      for (const BranchOnlyRelayClaim &claim : route.claims) {
+        if (claim.owner_affinity)
+          owners.insert(*claim.owner_affinity);
+      }
+    }
+    return owners.size();
+  };
+  const auto plan = [&](size_t search_limit, size_t scan_limit) {
+    BranchOnlyRelayRouter router;
+    for (size_t relay = 0u; relay < kRelays.size(); ++relay) {
+      EXPECT_TRUE(router.offer(kRelays[relay], BranchOnlyRelayProvenance::OwnedReservoir,
+                               lds_relay_owner(kOwners[relay])));
+    }
+    BranchOnlyRelaySearchLimits limits;
+    limits.batch.optimization.search = {search_limit, 0u};
+    limits.batch.optimization.scan = {scan_limit, 0u};
+    DbiPatchPlacementPlanner planner(kArch, 400'008u);
+    return router.plan_pairs(planner, requests, nullptr, limits);
+  };
+
+  const BranchOnlyRelayBatchPlan feasibility_baseline = plan(1u, 1u);
+  const BranchOnlyRelayBatchPlan bounded_improvement = plan(64u, 10'000u);
+  const BranchOnlyRelayBatchPlan proven_optimum = plan(100'000u, 100'000u);
+
+  ASSERT_TRUE(feasibility_baseline.complete());
+  ASSERT_TRUE(bounded_improvement.complete());
+  ASSERT_TRUE(proven_optimum.complete());
+  EXPECT_EQ(owner_count(feasibility_baseline), 5u);
+  EXPECT_EQ(owner_count(bounded_improvement), 4u);
+  EXPECT_EQ(owner_count(proven_optimum), 3u);
+  // Exhausting the minimizer's own bound must retain its strict incumbent;
+  // only a completed lower-bound proof may establish that no search is needed.
+  EXPECT_TRUE(bounded_improvement.route_optimization_exhausted);
+  EXPECT_FALSE(proven_optimum.route_optimization_exhausted);
+  EXPECT_EQ(bounded_improvement.route_optimization_excess_relay_claim_count, 0u);
+  EXPECT_GT(bounded_improvement.route_optimization_search_work_consumed, 0u);
 }
 
 TEST(ConSanBranchOnlyRelayRouter, PartialBatchRetainsOwnerOptimizationExhaustion) {

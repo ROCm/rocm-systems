@@ -183,17 +183,27 @@ farthest_reachable_relay(const FixedRelayDemand &demand, uint64_t cursor,
 
 struct RelayOwnerGrouping {
   std::vector<size_t> group_by_relay;
+  std::vector<uint64_t> zero_cost_relays;
   size_t group_count = 0u;
 };
 
 [[nodiscard]] std::optional<RelayOwnerGrouping>
-group_relay_owners(std::span<const std::optional<BranchOnlyRelayOwnerIdentity>> owner_affinities,
+group_relay_owners(std::span<const uint64_t> relays,
+                   std::span<const std::optional<BranchOnlyRelayOwnerIdentity>> owner_affinities,
                    std::span<const BranchOnlyRelayOwnerMaterialization> owner_materializations,
                    const std::set<BranchOnlyRelayOwnerIdentity> &materialized_owner_affinities,
                    BoundedWorkMeter &scan_work) {
+  assert(relays.size() == owner_affinities.size());
   assert(owner_affinities.size() == owner_materializations.size());
-  if (owner_affinities.size() != owner_materializations.size())
+  if (relays.size() != owner_affinities.size() ||
+      owner_affinities.size() != owner_materializations.size()) {
     return std::nullopt;
+  }
+  RelayOwnerGrouping result{
+      .group_by_relay = std::vector<size_t>(relays.size(), kNoNewOwnerGroup),
+      .zero_cost_relays = {},
+  };
+  result.zero_cost_relays.reserve(relays.size());
   std::vector<std::pair<BranchOnlyRelayOwnerIdentity, size_t>> tagged_relays;
   tagged_relays.reserve(owner_affinities.size());
   for (size_t relay = 0u; relay < owner_affinities.size(); ++relay) {
@@ -201,6 +211,7 @@ group_relay_owners(std::span<const std::optional<BranchOnlyRelayOwnerIdentity>> 
       return std::nullopt;
     const std::optional<BranchOnlyRelayOwnerIdentity> owner = owner_affinities[relay];
     if (!owner || owner_materializations[relay] != BranchOnlyRelayOwnerMaterialization::Deferred) {
+      result.zero_cost_relays.push_back(relays[relay]);
       continue;
     }
     if (materialized_owner_affinities.empty()) {
@@ -211,19 +222,21 @@ group_relay_owners(std::span<const std::optional<BranchOnlyRelayOwnerIdentity>> 
             std::max<size_t>(std::bit_width(materialized_owner_affinities.size()), 1u))) {
       return std::nullopt;
     }
-    if (!materialized_owner_affinities.contains(*owner))
+    if (!materialized_owner_affinities.contains(*owner)) {
       tagged_relays.emplace_back(*owner, relay);
+    } else {
+      result.zero_cost_relays.push_back(relays[relay]);
+    }
   }
-  if (tagged_relays.empty())
-    return RelayOwnerGrouping{};
+  if (tagged_relays.empty()) {
+    result.group_by_relay.clear();
+    return result;
+  }
   const size_t sorting_work = multiply_saturated(
       tagged_relays.size(), std::max<size_t>(std::bit_width(tagged_relays.size()), 1u));
   if (!scan_work.consume(sorting_work))
     return std::nullopt;
   std::ranges::sort(tagged_relays);
-  RelayOwnerGrouping result{
-      .group_by_relay = std::vector<size_t>(owner_affinities.size(), kNoNewOwnerGroup),
-  };
   std::optional<BranchOnlyRelayOwnerIdentity> previous_owner;
   for (const auto &[owner, relay] : tagged_relays) {
     if (!previous_owner || *previous_owner != owner) {
@@ -801,41 +814,48 @@ struct ExactOwnerAffinitySolveResult {
 /// If even that sum exceeds the zero-cost inventory, at least one new owner is
 /// necessary. The relaxation proves only zero versus one; baselines above one
 /// still require the bounded branch-and-bound pass.
-[[nodiscard]] std::optional<size_t> provable_new_owner_lower_bound(
-    std::span<const FixedRelayDemand> demands, std::span<const uint64_t> relays,
-    std::span<const size_t> new_owner_group_by_relay, BoundedWorkMeter &scan_work) {
-  if (new_owner_group_by_relay.empty())
-    return 0u;
-  const bool owner_shape_valid = new_owner_group_by_relay.size() == relays.size();
-  const bool relays_sorted = std::ranges::is_sorted(relays);
-  const bool relays_unique = std::ranges::adjacent_find(relays) == relays.end();
-  assert(owner_shape_valid);
-  assert(relays_sorted);
-  assert(relays_unique);
-  if (!owner_shape_valid || !relays_sorted || !relays_unique)
-    return std::nullopt;
-  size_t zero_cost_relay_count = 0u;
-  for (size_t group : new_owner_group_by_relay) {
-    if (!scan_work.consume())
-      return std::nullopt;
-    zero_cost_relay_count += group == kNoNewOwnerGroup ? 1u : 0u;
+[[nodiscard]] std::optional<size_t>
+provable_new_owner_lower_bound(std::span<const FixedRelayDemand> demands,
+                               std::span<const uint64_t> zero_cost_relays,
+                               BoundedWorkMeter &scan_work) {
+  assert(std::ranges::is_sorted(zero_cost_relays));
+  assert(std::ranges::adjacent_find(zero_cost_relays) == zero_cost_relays.end());
+  if (zero_cost_relays.empty()) {
+    return std::ranges::all_of(demands,
+                               [](const FixedRelayDemand &demand) {
+                                 return fixed_relay_can_hop(demand.source, demand.target);
+                               })
+               ? 0u
+               : 1u;
   }
 
   size_t independently_required_relays = 0u;
   for (const FixedRelayDemand &demand : demands) {
     uint64_t cursor = demand.source;
+    if (fixed_relay_can_hop(cursor, demand.target))
+      continue;
+    const size_t lookup_work =
+        multiply_saturated(2u, std::max<size_t>(std::bit_width(zero_cost_relays.size()), 1u));
+    if (!scan_work.consume(lookup_work))
+      return std::nullopt;
+    const uint64_t corridor_begin = std::min(demand.source, demand.target);
+    const uint64_t corridor_end = std::max(demand.source, demand.target);
+    const auto first = std::ranges::upper_bound(zero_cost_relays, corridor_begin);
+    const auto last = std::ranges::lower_bound(zero_cost_relays, corridor_end);
+    const size_t first_index = static_cast<size_t>(std::distance(zero_cost_relays.begin(), first));
+    const size_t corridor_size = static_cast<size_t>(std::distance(first, last));
+    const std::span<const uint64_t> demand_relays =
+        zero_cost_relays.subspan(first_index, corridor_size);
     while (!fixed_relay_can_hop(cursor, demand.target)) {
       const auto best = farthest_reachable_relay(
-          demand, cursor, relays,
-          [&](size_t relay) { return new_owner_group_by_relay[relay] == kNoNewOwnerGroup; },
-          scan_work);
+          demand, cursor, demand_relays, [](size_t) { return true; }, scan_work);
       if (best.exhausted)
         return std::nullopt;
       if (!best.relay)
         return 1u;
-      cursor = relays[*best.relay];
+      cursor = demand_relays[*best.relay];
       independently_required_relays = saturated_sum(independently_required_relays, 1u);
-      if (independently_required_relays > zero_cost_relay_count)
+      if (independently_required_relays > zero_cost_relays.size())
         return 1u;
     }
   }
@@ -951,9 +971,9 @@ struct ExactOwnerAffinitySolveResult {
     optimization_owner_materializations = constrained_owner_materializations;
   }
 
-  const std::optional<RelayOwnerGrouping> owner_groups =
-      group_relay_owners(optimization_owner_affinities, optimization_owner_materializations,
-                         materialized_owner_affinities, optimization_scan_work);
+  const std::optional<RelayOwnerGrouping> owner_groups = group_relay_owners(
+      optimization_relays, optimization_owner_affinities, optimization_owner_materializations,
+      materialized_owner_affinities, optimization_scan_work);
   if (!owner_groups) {
     result.optimization_exhausted = true;
     record_optimization_work();
@@ -1007,15 +1027,16 @@ struct ExactOwnerAffinitySolveResult {
   // binary owner lower bound cannot prove its incumbent optimal.
   bool should_optimize = constrain_optimized_relay_count;
   if (!should_optimize) {
-    // The accelerator is optional: reserve at least half of the remaining scan
-    // allowance for the minimizer itself. If the accelerator cannot finish in
-    // its share, run the bounded minimizer instead of consuming its window.
+    // The accelerator is optional. Its zero-cost inventory was collected by
+    // owner grouping, and each demand scans only its source-target corridor.
+    // Still reserve at least half of the remaining scan allowance for the
+    // minimizer, which remains authoritative whenever the proof is incomplete.
     const size_t lower_bound_scan_limit = optimization_scan_work.remaining() / 2u;
     std::optional<size_t> lower_bound;
     if (lower_bound_scan_limit != 0u) {
       BoundedWorkMeter lower_bound_scan_work(lower_bound_scan_limit);
-      lower_bound = provable_new_owner_lower_bound(
-          demands, optimization_relays, owner_groups->group_by_relay, lower_bound_scan_work);
+      lower_bound = provable_new_owner_lower_bound(demands, owner_groups->zero_cost_relays,
+                                                   lower_bound_scan_work);
       const bool accounted = optimization_scan_work.consume(lower_bound_scan_work.consumed());
       assert(accounted);
       if (!accounted) {
