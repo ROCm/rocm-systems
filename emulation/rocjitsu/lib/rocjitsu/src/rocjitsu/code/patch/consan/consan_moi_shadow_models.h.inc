@@ -614,9 +614,13 @@ consan_moi_exact_byte_accesses_conflict(const ConSanMoiExactByteAccess &current,
 }
 
 /// Bounded sparse byte-range provenance for host-side Record/Replay detection.
-/// Storage scales with admitted accesses and interval boundaries, not the LDS
-/// extent multiplied by the number of workgroups. maximum_access_count is a
-/// structural input bound, not a second runtime policy budget.
+/// Cross-owner state is partitioned by generation, epoch, owner, and access
+/// kind. Same-owner exact-group state additionally retains the instruction
+/// site and lane group. An access replaces byte intervals only within a class
+/// that is equivalent for every future conflict and acquired-order decision.
+/// Storage stays linear in admitted accesses and interval boundaries rather
+/// than the LDS extent. maximum_access_count is a structural input bound, not
+/// a second runtime policy budget.
 class ConSanMoiSparseExactByteShadow {
 public:
   explicit ConSanMoiSparseExactByteShadow(uint64_t byte_capacity, uint32_t maximum_access_count);
@@ -631,10 +635,33 @@ private:
     uint32_t provenance_index = 0;
   };
 
+  struct CrossOwnerClass {
+    uint64_t generation = 0;
+    uint32_t epoch = 0;
+    ConSanMoiShadowAccessKind kind = ConSanMoiShadowAccessKind::Empty;
+    uint32_t owner_id = 0;
+
+    auto operator<=>(const CrossOwnerClass &) const = default;
+  };
+
+  struct SameSiteClass {
+    uint64_t generation = 0;
+    uint32_t epoch = 0;
+    ConSanMoiShadowAccessKind kind = ConSanMoiShadowAccessKind::Empty;
+    uint32_t owner_id = 0;
+    uint32_t instruction_offset = 0;
+    uint64_t lane_mask = 0;
+
+    auto operator<=>(const SameSiteClass &) const = default;
+  };
+
+  using IntervalMap = std::map<uint64_t, Interval>;
+
   uint64_t byte_capacity_ = 0;
   uint32_t maximum_access_count_ = 0;
-  std::map<uint64_t, Interval> intervals_;
   std::vector<ConSanMoiExactByteAccess> provenance_;
+  std::map<CrossOwnerClass, IntervalMap> cross_owner_intervals_;
+  std::map<SameSiteClass, IntervalMap> same_site_intervals_;
 };
 
 [[nodiscard]] constexpr uint32_t consan_moi_inline_acquired_epoch_token_value(uint32_t epoch) {

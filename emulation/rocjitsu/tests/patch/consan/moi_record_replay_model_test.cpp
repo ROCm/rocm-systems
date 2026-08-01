@@ -1386,6 +1386,137 @@ TEST(ConSanMoi, SparseExactByteShadowPreservesSplitProvenance) {
   EXPECT_EQ(right.prior->instruction_offset, outer.instruction_offset);
 }
 
+TEST(ConSanMoi, SparseExactByteShadowRetainsSameSiteGroupAcrossOrderedSite) {
+  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4, /*maximum_access_count=*/3);
+  ConSanMoiExactByteAccess first{
+      /*generation=*/7,
+      /*owner_id=*/1,
+      /*epoch=*/3,
+      ConSanMoiShadowAccessKind::Write,
+      /*lds_byte_offset=*/0,
+      /*lds_byte_count=*/4,
+      /*instruction_offset=*/0x10,
+      /*lane_mask=*/0x1,
+      /*exact_address_group=*/true,
+  };
+  ConSanMoiExactByteAccess ordered = first;
+  ordered.instruction_offset = 0x20;
+  ConSanMoiExactByteAccess second_group = first;
+  second_group.lane_mask = 0x2;
+
+  EXPECT_FALSE(model.access(first).conflict);
+  EXPECT_FALSE(model.access(ordered).conflict);
+  const ConSanMoiExactByteAccessResult conflict = model.access(second_group);
+  ASSERT_TRUE(conflict.conflict);
+  ASSERT_TRUE(conflict.prior);
+  EXPECT_EQ(conflict.prior->instruction_offset, first.instruction_offset);
+  EXPECT_EQ(conflict.prior->lane_mask, first.lane_mask);
+}
+
+TEST(ConSanMoi, SparseExactByteShadowRetainsEverySameSiteLaneGroup) {
+  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4, /*maximum_access_count=*/3);
+  ConSanMoiExactByteAccess first_group{
+      /*generation=*/7,
+      /*owner_id=*/1,
+      /*epoch=*/3,
+      ConSanMoiShadowAccessKind::Read,
+      /*lds_byte_offset=*/0,
+      /*lds_byte_count=*/4,
+      /*instruction_offset=*/0x10,
+      /*lane_mask=*/0x2,
+      /*exact_address_group=*/true,
+  };
+  ConSanMoiExactByteAccess second_group = first_group;
+  second_group.lane_mask = 0x1;
+  ConSanMoiExactByteAccess write = second_group;
+  write.kind = ConSanMoiShadowAccessKind::Write;
+
+  EXPECT_FALSE(model.access(first_group).conflict);
+  EXPECT_FALSE(model.access(second_group).conflict);
+  const ConSanMoiExactByteAccessResult conflict = model.access(write);
+  ASSERT_TRUE(conflict.conflict);
+  ASSERT_TRUE(conflict.prior);
+  EXPECT_EQ(conflict.prior->lane_mask, first_group.lane_mask);
+}
+
+TEST(ConSanMoi, SparseExactByteShadowRetainsSelectivelyOrderedOwners) {
+  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4, /*maximum_access_count=*/3);
+  ConSanMoiExactByteAccess first{
+      /*generation=*/7,
+      /*owner_id=*/1,
+      /*epoch=*/0,
+      ConSanMoiShadowAccessKind::Write,
+      /*lds_byte_offset=*/0,
+      /*lds_byte_count=*/4,
+      /*instruction_offset=*/0x10,
+      /*lane_mask=*/0x1,
+  };
+  ConSanMoiExactByteAccess ordered = first;
+  ordered.owner_id = 2;
+  ordered.instruction_offset = 0x20;
+  const std::array<ConSanMoiAcquiredEpochToken, 1> first_to_ordered{{
+      ConSanMoiAcquiredEpochToken{
+          /*valid=*/true,
+          /*generation=*/7,
+          /*consumer_owner_id=*/2,
+          /*producer_owner_id=*/1,
+          /*producer_epoch_plus_one=*/1,
+          /*acquire_instruction_offset=*/0x100,
+      },
+  }};
+  ConSanMoiExactByteAccess probe = first;
+  probe.owner_id = 3;
+  probe.instruction_offset = 0x30;
+  const std::array<ConSanMoiAcquiredEpochToken, 1> ordered_to_probe{{
+      ConSanMoiAcquiredEpochToken{
+          /*valid=*/true,
+          /*generation=*/7,
+          /*consumer_owner_id=*/3,
+          /*producer_owner_id=*/2,
+          /*producer_epoch_plus_one=*/1,
+          /*acquire_instruction_offset=*/0x200,
+      },
+  }};
+
+  EXPECT_FALSE(model.access(first).conflict);
+  EXPECT_FALSE(model.access(ordered, first_to_ordered).conflict);
+  const ConSanMoiExactByteAccessResult conflict = model.access(probe, ordered_to_probe);
+  ASSERT_TRUE(conflict.conflict);
+  ASSERT_TRUE(conflict.prior);
+  EXPECT_EQ(conflict.prior->owner_id, first.owner_id);
+}
+
+TEST(ConSanMoi, SparseExactByteShadowBoundsLargeOrderedSiteInventory) {
+  constexpr uint32_t site_count = 10000;
+  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4,
+                                       /*maximum_access_count=*/site_count + 1);
+  ConSanMoiExactByteAccess access{
+      /*generation=*/7,
+      /*owner_id=*/1,
+      /*epoch=*/3,
+      ConSanMoiShadowAccessKind::Write,
+      /*lds_byte_offset=*/0,
+      /*lds_byte_count=*/4,
+      /*instruction_offset=*/0,
+      /*lane_mask=*/0x1,
+      /*exact_address_group=*/true,
+  };
+  for (uint32_t site = 0; site < site_count; ++site) {
+    access.instruction_offset = site * 4;
+    const ConSanMoiExactByteAccessResult admitted = model.access(access);
+    ASSERT_FALSE(admitted.conflict) << site;
+    ASSERT_FALSE(admitted.capacity_exhausted) << site;
+  }
+
+  access.instruction_offset = 0;
+  access.lane_mask = 0x2;
+  const ConSanMoiExactByteAccessResult conflict = model.access(access);
+  ASSERT_TRUE(conflict.conflict);
+  ASSERT_TRUE(conflict.prior);
+  EXPECT_EQ(conflict.prior->instruction_offset, 0u);
+  EXPECT_EQ(conflict.prior->lane_mask, 0x1u);
+}
+
 TEST(ConSanMoi, SparseExactByteShadowFailsClosedAtStructuralAccessBound) {
   ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/8, /*maximum_access_count=*/1);
   ConSanMoiExactByteAccess first{
@@ -1464,7 +1595,7 @@ TEST(ConSanMoi, SparseExactByteShadowMatchesDenseByteOracle) {
     };
 
     ConSanMoiSparseExactByteShadow model(byte_capacity, access_count);
-    std::array<std::optional<ConSanMoiExactByteAccess>, byte_capacity> dense{};
+    std::vector<ConSanMoiExactByteAccess> dense;
     for (uint32_t access_index = 0; access_index < access_count; ++access_index) {
       SCOPED_TRACE(access_index);
       ConSanMoiExactByteAccess current;
@@ -1481,10 +1612,9 @@ TEST(ConSanMoi, SparseExactByteShadowMatchesDenseByteOracle) {
       current.exact_address_group = (next_random() & 1u) != 0;
 
       std::optional<ConSanMoiExactByteAccess> dense_prior;
-      const uint32_t byte_end = current.lds_byte_offset + current.lds_byte_count;
-      for (uint32_t byte = current.lds_byte_offset; byte < byte_end; ++byte) {
-        if (dense[byte] && consan_moi_exact_byte_accesses_conflict(current, *dense[byte])) {
-          dense_prior = dense[byte];
+      for (auto prior = dense.rbegin(); prior != dense.rend(); ++prior) {
+        if (consan_moi_exact_byte_accesses_conflict(current, *prior)) {
+          dense_prior = *prior;
           break;
         }
       }
@@ -1505,8 +1635,7 @@ TEST(ConSanMoi, SparseExactByteShadowMatchesDenseByteOracle) {
         EXPECT_EQ(sparse.prior->exact_address_group, dense_prior->exact_address_group);
         continue;
       }
-      for (uint32_t byte = current.lds_byte_offset; byte < byte_end; ++byte)
-        dense[byte] = current;
+      dense.push_back(current);
     }
   }
 }
@@ -1601,6 +1730,45 @@ TEST(ConSanMoi, RecordReplayDistinctSameWaveGroupsConflictOnlyOnByteOverlap) {
   const auto [same_group, also_ignored] = replay_ranges(/*second_offset=*/0, /*second_mask=*/0x1);
   (void)also_ignored;
   EXPECT_FALSE(same_group.conflict);
+}
+
+TEST(ConSanMoi, RecordReplayRetainsSameSiteGroupAcrossOrderedSite) {
+  ConSanMoiReportHeader header = make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/3,
+      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/1,
+      /*sampled_watchpoint_capacity=*/0);
+  header.access_record_count = 3;
+
+  std::array<ConSanMoiAccessRecord, 3> records{};
+  for (uint32_t index = 0; index < records.size(); ++index) {
+    records[index].wave_id = 3;
+    records[index].access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
+    records[index].lds_byte_offset = 0;
+    records[index].lds_byte_count = 4;
+    records[index].cell_count = 1;
+    records[index].flags = kConSanMoiAccessRecordFlagExactAddressGroupMask;
+    records[index].event_index = index + 1;
+  }
+  records[0].lane_mask = 0x1;
+  records[0].instruction_offset = 0x10;
+  records[1].lane_mask = 0x1;
+  records[1].instruction_offset = 0x20;
+  records[2].lane_mask = 0x2;
+  records[2].instruction_offset = 0x10;
+
+  std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
+  std::array<uint64_t, 1> shadow{};
+  const ConSanMoiRecordReplayResult replay =
+      consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
+
+  ASSERT_TRUE(replay.conflict);
+  ASSERT_EQ(replay.emitted_diagnostic_count, 1u);
+  EXPECT_EQ(diagnostics[0].first_owner_id, 3u);
+  EXPECT_EQ(diagnostics[0].second_owner_id, 3u);
+  EXPECT_EQ(diagnostics[0].first_instruction_offset, 0x10u);
+  EXPECT_EQ(diagnostics[0].second_instruction_offset, 0x10u);
+  EXPECT_EQ(diagnostics[0].first_lane_mask, 0x1u);
+  EXPECT_EQ(diagnostics[0].second_lane_mask, 0x2u);
 }
 
 TEST(ConSanMoi, RecordReplaySameWaveDifferentSitesAreProgramOrdered) {

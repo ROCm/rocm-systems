@@ -835,35 +835,88 @@ ConSanMoiExactByteAccessResult ConSanMoiSparseExactByteShadow::access(
       current.instruction_offset,
   };
 
-  auto overlap = intervals_.upper_bound(current.lds_byte_offset);
-  if (overlap != intervals_.begin()) {
-    auto prior_interval = std::prev(overlap);
-    if (prior_interval->second.end > current.lds_byte_offset)
-      overlap = prior_interval;
-  }
-  for (; overlap != intervals_.end() && overlap->first < byte_end; ++overlap) {
-    if (overlap->second.end <= current.lds_byte_offset)
-      continue;
-    const uint32_t prior_index = overlap->second.provenance_index;
-    if (prior_index == 0 || prior_index > provenance_.size()) {
-      result.capacity_exhausted = true;
-      return result;
+  std::optional<uint32_t> newest_conflict_index;
+  const auto consider_intervals = [&](const IntervalMap &intervals) {
+    auto overlap = intervals.upper_bound(current.lds_byte_offset);
+    if (overlap != intervals.begin()) {
+      auto prior_interval = std::prev(overlap);
+      if (prior_interval->second.end > current.lds_byte_offset)
+        overlap = prior_interval;
     }
-    const ConSanMoiExactByteAccess &prior = provenance_[prior_index - 1u];
-    if (!consan_moi_exact_byte_accesses_conflict(current, prior))
+    for (; overlap != intervals.end() && overlap->first < byte_end; ++overlap) {
+      if (overlap->second.end <= current.lds_byte_offset)
+        continue;
+      const uint32_t prior_index = overlap->second.provenance_index;
+      if (prior_index == 0 || prior_index > provenance_.size()) {
+        result.capacity_exhausted = true;
+        return false;
+      }
+      const ConSanMoiExactByteAccess &prior = provenance_[prior_index - 1u];
+      if (!consan_moi_exact_byte_accesses_conflict(current, prior))
+        continue;
+      const ConSanMoiExactShadowEntry prior_entry{
+          prior.kind,
+          prior.owner_id,
+          prior.epoch,
+          static_cast<uint32_t>(prior.generation),
+          prior.instruction_offset,
+      };
+      if (consan_moi_acquired_epoch_orders(acquired_epoch_tokens, current_entry, prior_entry))
+        continue;
+      if (!newest_conflict_index || prior_index > *newest_conflict_index)
+        newest_conflict_index = prior_index;
+    }
+    return true;
+  };
+  constexpr std::array access_kinds{
+      ConSanMoiShadowAccessKind::Read,
+      ConSanMoiShadowAccessKind::Write,
+      ConSanMoiShadowAccessKind::ReadWrite,
+      ConSanMoiShadowAccessKind::Atomic,
+  };
+  for (const ConSanMoiShadowAccessKind prior_kind : access_kinds) {
+    if (!consan_moi_shadow_kind_conflicts(current.kind, prior_kind))
       continue;
-    const ConSanMoiExactShadowEntry prior_entry{
-        prior.kind,
-        prior.owner_id,
-        prior.epoch,
-        static_cast<uint32_t>(prior.generation),
-        prior.instruction_offset,
+    const CrossOwnerClass first_class{
+        current.generation,
+        current.epoch,
+        prior_kind,
+        0,
     };
-    if (consan_moi_acquired_epoch_orders(acquired_epoch_tokens, current_entry, prior_entry))
+    for (auto prior_class = cross_owner_intervals_.lower_bound(first_class);
+         prior_class != cross_owner_intervals_.end() &&
+         prior_class->first.generation == current.generation &&
+         prior_class->first.epoch == current.epoch && prior_class->first.kind == prior_kind;
+         ++prior_class) {
+      if (prior_class->first.owner_id == current.owner_id)
+        continue;
+      if (!consider_intervals(prior_class->second))
+        return result;
+    }
+    if (!current.exact_address_group)
       continue;
-
+    const SameSiteClass first_site_class{
+        current.generation,
+        current.epoch,
+        prior_kind,
+        current.owner_id,
+        current.instruction_offset,
+        0,
+    };
+    for (auto prior_site = same_site_intervals_.lower_bound(first_site_class);
+         prior_site != same_site_intervals_.end() &&
+         prior_site->first.generation == current.generation &&
+         prior_site->first.epoch == current.epoch && prior_site->first.kind == prior_kind &&
+         prior_site->first.owner_id == current.owner_id &&
+         prior_site->first.instruction_offset == current.instruction_offset;
+         ++prior_site) {
+      if (!consider_intervals(prior_site->second))
+        return result;
+    }
+  }
+  if (newest_conflict_index) {
     result.conflict = true;
-    result.prior = prior;
+    result.prior = provenance_[*newest_conflict_index - 1u];
     return result;
   }
 
@@ -873,34 +926,52 @@ ConSanMoiExactByteAccessResult ConSanMoiSparseExactByteShadow::access(
   }
   provenance_.push_back(current);
   const uint32_t provenance_index = static_cast<uint32_t>(provenance_.size());
-  auto replace_begin = intervals_.lower_bound(current.lds_byte_offset);
-  if (replace_begin != intervals_.begin()) {
-    auto prior_interval = std::prev(replace_begin);
-    if (prior_interval->second.end > current.lds_byte_offset)
-      replace_begin = prior_interval;
-  }
-  std::optional<std::pair<uint64_t, Interval>> left_remainder;
-  std::optional<std::pair<uint64_t, Interval>> right_remainder;
-  auto replace_end = replace_begin;
-  for (; replace_end != intervals_.end() && replace_end->first < byte_end; ++replace_end) {
-    if (replace_end->second.end <= current.lds_byte_offset)
-      continue;
-    if (replace_end->first < current.lds_byte_offset) {
-      left_remainder =
-          std::pair{replace_end->first,
-                    Interval{current.lds_byte_offset, replace_end->second.provenance_index}};
+  const auto update_intervals = [&](IntervalMap &intervals) {
+    auto replace_begin = intervals.lower_bound(current.lds_byte_offset);
+    if (replace_begin != intervals.begin()) {
+      auto prior_interval = std::prev(replace_begin);
+      if (prior_interval->second.end > current.lds_byte_offset)
+        replace_begin = prior_interval;
     }
-    if (replace_end->second.end > byte_end) {
-      right_remainder = std::pair{
-          byte_end, Interval{replace_end->second.end, replace_end->second.provenance_index}};
+    std::optional<std::pair<uint64_t, Interval>> left_remainder;
+    std::optional<std::pair<uint64_t, Interval>> right_remainder;
+    auto replace_end = replace_begin;
+    for (; replace_end != intervals.end() && replace_end->first < byte_end; ++replace_end) {
+      if (replace_end->second.end <= current.lds_byte_offset)
+        continue;
+      if (replace_end->first < current.lds_byte_offset) {
+        left_remainder =
+            std::pair{replace_end->first,
+                      Interval{current.lds_byte_offset, replace_end->second.provenance_index}};
+      }
+      if (replace_end->second.end > byte_end) {
+        right_remainder = std::pair{
+            byte_end, Interval{replace_end->second.end, replace_end->second.provenance_index}};
+      }
     }
+    intervals.erase(replace_begin, replace_end);
+    if (left_remainder)
+      intervals.insert_or_assign(left_remainder->first, left_remainder->second);
+    intervals.insert_or_assign(current.lds_byte_offset, Interval{byte_end, provenance_index});
+    if (right_remainder)
+      intervals.insert_or_assign(right_remainder->first, right_remainder->second);
+  };
+  update_intervals(cross_owner_intervals_[CrossOwnerClass{
+      current.generation,
+      current.epoch,
+      current.kind,
+      current.owner_id,
+  }]);
+  if (current.exact_address_group) {
+    update_intervals(same_site_intervals_[SameSiteClass{
+        current.generation,
+        current.epoch,
+        current.kind,
+        current.owner_id,
+        current.instruction_offset,
+        current.lane_mask,
+    }]);
   }
-  intervals_.erase(replace_begin, replace_end);
-  if (left_remainder)
-    intervals_.insert_or_assign(left_remainder->first, left_remainder->second);
-  intervals_.insert_or_assign(current.lds_byte_offset, Interval{byte_end, provenance_index});
-  if (right_remainder)
-    intervals_.insert_or_assign(right_remainder->first, right_remainder->second);
   return result;
 }
 
