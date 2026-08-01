@@ -3154,6 +3154,67 @@ TEST(HsaHooksUnitTest, RecordReplayBankSaturationIsTypedByEngine) {
             0u);
 }
 
+TEST(HsaHooksUnitTest, RecordReplayPressureDistinguishesLowHighAndSaturatedFanout) {
+  rocjitsu::ConSanMoiReportHeader header;
+  header.access_record_capacity = 8;
+  header.record_replay_dispatch_token_capacity = 4;
+  std::array<rocjitsu::ConSanMoiAccessRecord, 7> records{};
+  std::array<uint32_t, 7> record_indices{};
+
+  const auto low = rocjitsu::consan_hook::record_replay_pressure_telemetry(
+      header, rocjitsu::ConSanMoiEngine::RecordReplay, records,
+      /*logical_access_range_count=*/2, record_indices);
+  EXPECT_TRUE(low.available);
+  EXPECT_FALSE(low.saturated);
+  EXPECT_EQ(low.occupied_access_record_count, 0u);
+  EXPECT_EQ(low.access_record_capacity, 8u);
+  EXPECT_EQ(low.observed_site_count, 0u);
+  EXPECT_EQ(low.maximum_site_owner_address_group_count, 0u);
+
+  for (size_t index = 0; index < 3; ++index) {
+    records[index].access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write);
+    records[index].site_token = 0;
+    records[index].lds_byte_offset = static_cast<uint32_t>(index) * 4u;
+  }
+  records[3].access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Read);
+  records[3].site_token = 0;
+  records[3].wave_id = 1;
+  records[4].access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write);
+  records[4].site_token = 1;
+  records[5].access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write);
+  records[5].site_token = 7;
+  records[6] = records[1];
+
+  const auto high = rocjitsu::consan_hook::record_replay_pressure_telemetry(
+      header, rocjitsu::ConSanMoiEngine::RecordReplay, records,
+      /*logical_access_range_count=*/2, record_indices);
+  EXPECT_TRUE(high.available);
+  EXPECT_FALSE(high.saturated);
+  EXPECT_EQ(high.occupied_access_record_count, 7u);
+  EXPECT_EQ(high.observed_site_count, 2u);
+  EXPECT_EQ(high.maximum_site_owner_address_group_count, 3u);
+  EXPECT_EQ(high.maximum_site_token, 0u);
+  EXPECT_EQ(high.invalid_site_token_count, 1u);
+
+  header.flags |= rocjitsu::kConSanMoiReportFlagRecordReplayBankSaturated;
+  const auto saturated = rocjitsu::consan_hook::record_replay_pressure_telemetry(
+      header, rocjitsu::ConSanMoiEngine::RecordReplay, records,
+      /*logical_access_range_count=*/2, record_indices);
+  EXPECT_TRUE(saturated.available);
+  EXPECT_TRUE(saturated.saturated);
+  EXPECT_EQ(saturated.occupied_access_record_count, high.occupied_access_record_count);
+  EXPECT_EQ(saturated.maximum_site_owner_address_group_count,
+            high.maximum_site_owner_address_group_count);
+
+  const auto unavailable = rocjitsu::consan_hook::record_replay_pressure_telemetry(
+      header, rocjitsu::ConSanMoiEngine::InlineShadow, records,
+      /*logical_access_range_count=*/2, record_indices);
+  EXPECT_FALSE(unavailable.available);
+  EXPECT_FALSE(unavailable.saturated);
+  EXPECT_EQ(unavailable.occupied_access_record_count, 0u);
+  EXPECT_EQ(unavailable.access_record_capacity, 0u);
+}
+
 TEST(HsaHooksUnitTest, ConSanLegacySelectionRemainsActive) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", nullptr);
   ScopedEnvVar flavor("RJ_CONSAN_FLAVOR", "moi");

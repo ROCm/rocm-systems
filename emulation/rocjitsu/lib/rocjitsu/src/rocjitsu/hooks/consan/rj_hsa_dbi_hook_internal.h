@@ -15,6 +15,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 namespace rocjitsu::consan_hook {
 
@@ -749,6 +750,12 @@ struct AutoMoiReportSummary {
   uint64_t dropped_fence_record_count = 0;
   uint64_t dropped_diagnostic_record_count = 0;
   uint64_t record_replay_bank_saturation_count = 0;
+  uint64_t record_replay_pressure_available_count = 0;
+  uint64_t record_replay_access_table_occupied_count = 0;
+  uint64_t record_replay_access_table_capacity = 0;
+  uint64_t record_replay_observed_site_count = 0;
+  uint64_t record_replay_max_site_owner_address_group_count = 0;
+  uint64_t record_replay_invalid_site_token_count = 0;
   uint64_t replay_conflict_count = 0;
   uint64_t replay_diagnostic_count = 0;
   uint64_t replay_dropped_access_count = 0;
@@ -799,6 +806,93 @@ record_replay_bank_saturation_count(const ConSanMoiReportHeader &header, ConSanM
                  (header.flags & kConSanMoiReportFlagRecordReplayBankSaturated) != 0u
              ? 1u
              : 0u;
+}
+
+struct RecordReplayPressureTelemetry {
+  bool available = false;
+  bool saturated = false;
+  uint64_t occupied_access_record_count = 0;
+  uint64_t access_record_capacity = 0;
+  uint64_t observed_site_count = 0;
+  uint64_t maximum_site_owner_address_group_count = 0;
+  uint32_t maximum_site_token = 0;
+  uint64_t invalid_site_token_count = 0;
+};
+
+/// Summarizes the bounded automatic Record/Replay access table. Dynamic
+/// address-group fanout is counted for each static-site, dispatch, workgroup,
+/// and wave identity, so launch size does not masquerade as divergence. A
+/// false available bit distinguishes engines and direct layouts that do not
+/// provide this telemetry from a valid automatic table with zero occupancy.
+[[nodiscard]] inline RecordReplayPressureTelemetry
+record_replay_pressure_telemetry(const ConSanMoiReportHeader &header, ConSanMoiEngine engine,
+                                 std::span<const ConSanMoiAccessRecord> records,
+                                 uint32_t logical_access_range_count,
+                                 std::span<uint32_t> committed_record_indices) {
+  RecordReplayPressureTelemetry result;
+  result.saturated = record_replay_bank_saturation_count(header, engine) != 0;
+  if (engine != ConSanMoiEngine::RecordReplay ||
+      header.record_replay_dispatch_token_capacity == 0 || header.access_record_capacity == 0 ||
+      logical_access_range_count == 0 || committed_record_indices.size() < records.size()) {
+    return result;
+  }
+
+  result.available = true;
+  result.access_record_capacity = header.access_record_capacity;
+  size_t committed_record_count = 0;
+  for (size_t index = 0; index < records.size(); ++index) {
+    const ConSanMoiAccessRecord &record = records[index];
+    if (record.access_kind == static_cast<uint32_t>(ConSanMoiShadowAccessKind::Empty))
+      continue;
+    ++result.occupied_access_record_count;
+    if (record.site_token >= logical_access_range_count) {
+      ++result.invalid_site_token_count;
+      continue;
+    }
+    committed_record_indices[committed_record_count++] = static_cast<uint32_t>(index);
+  }
+
+  const auto owner_key = [&](uint32_t index) {
+    const ConSanMoiAccessRecord &record = records[index];
+    return std::tuple{record.site_token,  record.generation,  record.workgroup_x,
+                      record.workgroup_y, record.workgroup_z, record.wave_id};
+  };
+  const auto address_group_key = [&](uint32_t index) {
+    const ConSanMoiAccessRecord &record = records[index];
+    return std::tuple{record.site_token,     record.generation,  record.workgroup_x,
+                      record.workgroup_y,    record.workgroup_z, record.wave_id,
+                      record.lds_byte_offset};
+  };
+  std::sort(committed_record_indices.begin(),
+            committed_record_indices.begin() + committed_record_count,
+            [&](uint32_t left, uint32_t right) {
+              return address_group_key(left) < address_group_key(right);
+            });
+  std::optional<decltype(owner_key(0u))> prior_owner;
+  std::optional<uint32_t> prior_site;
+  std::optional<uint32_t> prior_address;
+  uint64_t owner_address_group_count = 0;
+  for (size_t index = 0; index < committed_record_count; ++index) {
+    const uint32_t record_index = committed_record_indices[index];
+    const ConSanMoiAccessRecord &record = records[record_index];
+    const auto current_owner = owner_key(record_index);
+    if (!prior_site || *prior_site != record.site_token) {
+      ++result.observed_site_count;
+      prior_site = record.site_token;
+    }
+    if (!prior_owner || *prior_owner != current_owner) {
+      owner_address_group_count = 1;
+    } else if (!prior_address || *prior_address != record.lds_byte_offset) {
+      ++owner_address_group_count;
+    }
+    prior_owner = current_owner;
+    prior_address = record.lds_byte_offset;
+    if (owner_address_group_count > result.maximum_site_owner_address_group_count) {
+      result.maximum_site_owner_address_group_count = owner_address_group_count;
+      result.maximum_site_token = record.site_token;
+    }
+  }
+  return result;
 }
 
 void reject_auto_moi_report_plan(uint64_t reader, uint64_t required_size, uint64_t configured_cap,

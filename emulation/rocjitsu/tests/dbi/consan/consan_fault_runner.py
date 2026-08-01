@@ -418,6 +418,7 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
     }
     inline_diagnostics = 0
     replay_diagnostics = 0
+    record_replay_pressure_records: list[dict[str, object]] = []
     sampled_conflicts = 0
     sampled_immediate_conflicts = 0
     sampled_claimed_windows = 0
@@ -462,6 +463,7 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
                 "inline_snapshot_capacity": 0,
                 "inline_summary_records": 0,
                 "inline_summary_complete": True,
+                "record_replay_pressure": [],
                 "report_plans": [],
                 "report_buffers": [],
                 "spilled_vgpr_count": 0,
@@ -784,6 +786,31 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
                 "token_malformed_snapshots",
             )
             inline_diagnostics += _integer(fields, "visible_diagnostics")
+            pressure_available = fields.get("record_replay_pressure_available")
+            pressure = {
+                "reader": fields.get("reader", ""),
+                "status": (
+                    "missing"
+                    if pressure_available is None
+                    else "available" if pressure_available == "true" else "unavailable"
+                ),
+                "saturated": fields.get("record_replay_bank_saturated") == "true",
+                "access_table_occupied": _integer(
+                    fields, "record_replay_access_table_occupied"
+                ),
+                "access_table_capacity": _integer(
+                    fields, "record_replay_access_table_capacity"
+                ),
+                "observed_sites": _integer(fields, "record_replay_observed_sites"),
+                "max_site_owner_address_groups": _integer(
+                    fields, "record_replay_max_site_owner_address_groups"
+                ),
+                "max_site_token": _integer(fields, "record_replay_max_site_token"),
+                "invalid_site_tokens": _integer(
+                    fields, "record_replay_invalid_site_tokens"
+                ),
+            }
+            record_replay_pressure_records.append(pressure)
             sampled_conflicts += _integer(fields, "sampled_conflicts")
             sampled_immediate_conflicts += _integer(
                 fields, "sampled_immediate_conflicts"
@@ -858,6 +885,7 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             per_reader = reader_record(fields)
             if per_reader is not None:
                 per_reader["inline_summary_records"] += 1
+                per_reader["record_replay_pressure"].append(pressure)
                 per_reader["inline_summary_complete"] &= all(
                     _required_integer(fields, field) is not None
                     for field in required_inline_summary_fields
@@ -1611,6 +1639,44 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             "inline_atomic_release_capacity_entries": inline_atomic_release_capacity_entries,
             "inline_acquired_token_capacity_entries": inline_acquired_token_capacity_entries,
             "inline_causal_snapshot_capacity_entries": inline_causal_snapshot_capacity_entries,
+            "record_replay_pressure": {
+                "records": record_replay_pressure_records,
+                "available_reports": sum(
+                    record["status"] == "available"
+                    for record in record_replay_pressure_records
+                ),
+                "unavailable_reports": sum(
+                    record["status"] == "unavailable"
+                    for record in record_replay_pressure_records
+                ),
+                "missing_reports": sum(
+                    record["status"] == "missing"
+                    for record in record_replay_pressure_records
+                ),
+                "saturated_reports": sum(
+                    bool(record["saturated"])
+                    for record in record_replay_pressure_records
+                ),
+                "access_table_occupied": sum(
+                    int(record["access_table_occupied"])
+                    for record in record_replay_pressure_records
+                ),
+                "access_table_capacity": sum(
+                    int(record["access_table_capacity"])
+                    for record in record_replay_pressure_records
+                ),
+                "max_site_owner_address_groups": max(
+                    (
+                        int(record["max_site_owner_address_groups"])
+                        for record in record_replay_pressure_records
+                    ),
+                    default=0,
+                ),
+                "invalid_site_tokens": sum(
+                    int(record["invalid_site_tokens"])
+                    for record in record_replay_pressure_records
+                ),
+            },
             "spill_patch_count": spill_patch_count,
             "spill_slot_bytes": spill_slot_bytes,
             "resource_plan_alternative_counts": resource_plan_alternative_counts,
