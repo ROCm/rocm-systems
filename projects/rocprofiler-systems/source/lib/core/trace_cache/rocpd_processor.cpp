@@ -119,8 +119,7 @@ rocpd_processor_t::handle(const kernel_dispatch_sample& kds)
     try
     {
         m_writer->insert_kernel_dispatch_data(kernel_dispatch, env);
-    }
-    catch(const std::runtime_error& e)
+    } catch(const std::runtime_error& e)
     {
         LOG_WARNING("Dropping kernel_dispatch_sample (queue_id={}): {}",
                     kds.queue_id_handle, e.what());
@@ -166,8 +165,7 @@ rocpd_processor_t::handle(const scratch_memory_sample& sms)
     try
     {
         m_writer->insert_memory_alloc_data(ma, env);
-    }
-    catch(const std::runtime_error& e)
+    } catch(const std::runtime_error& e)
     {
         LOG_WARNING("Dropping scratch_memory_sample (queue_id={}): {}",
                     sms.queue_id_handle, e.what());
