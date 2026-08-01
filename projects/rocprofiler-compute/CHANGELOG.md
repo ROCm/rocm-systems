@@ -8,7 +8,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Added
 
 * Added multi-process PC sampling across profile and analyze modes.
-  * Profile mode writes one PID-prefixed `<pid>_ps_file_results.json` file per process, and analyze mode combines those files into a single analysis.
+  * Profile mode writes one PID-prefixed `<pid>_ps_file_results.json` per process.
+  * Analyze mode reports every process in a single run, with a `pid` column
+    identifying each one.
 
 ### Changed
 
@@ -16,14 +18,13 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Deprecated the `--join-type` profile mode option; it no longer has any effect and will be removed in a future release.
 
+* `--pc-sampling-rows` now caps the combined per-process rows of the PC sampling table.
 
 ### Removed
 
 * Removed the CSV profile output backend and the `--format-rocprof-output` profile mode option. Profiling now always uses the `rocpd` output format, which was already the default.
 
 * Removed analyze support for workloads produced by the CSV profile backend. Such workloads are now rejected with an error telling you to re-profile with a current release.
-
-* Removed analyze support for unprefixed or PID-less PC sampling result files; affected workloads must be re-profiled.
 
 ### Optimized
 
