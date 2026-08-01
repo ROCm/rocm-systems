@@ -271,7 +271,7 @@ append_cdna_full_workgroup_payload_restore(std::vector<uint32_t> &words,
   }
   const int64_t delta =
       static_cast<int64_t>(target_text_offset) - static_cast<int64_t>(pc_after_getpc);
-  if (!append_pc_delta_builder(words, arch, pc_sgpr, delta))
+  if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u))
     return false;
   const auto restore_scc =
       instrumentation::build_s_cmp_lg_u32(saved_scc_sgpr, scalar_positive_inline_u32(0), arch);
@@ -397,7 +397,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
       pc_after_getpc > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
       !append_pc_delta_builder(words, arch, kRdna4VccLo,
                                static_cast<int64_t>(cave_text_offset) -
-                                   static_cast<int64_t>(pc_after_getpc))) {
+                                   static_cast<int64_t>(pc_after_getpc),
+                               /*minimum_words=*/3u)) {
     errors.emplace_back(std::string(context) + " could not encode its indirect entry island");
     return false;
   }

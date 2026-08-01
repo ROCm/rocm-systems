@@ -15,10 +15,39 @@
 namespace rocjitsu {
 
 /// @brief Reserved dwords for a canonical recovered indirect transfer.
-inline constexpr size_t kMaxRecoveredIndirectTransferWords = 6;
+///
+/// The long form is marker + getpc + up to four delta-builder words + consumer.
+inline constexpr size_t kMaxRecoveredIndirectTransferWords = 7;
 
 /// @brief Reserved dwords for the largest direct long-branch sequence.
-inline constexpr size_t kMaxDirectBranchTransferWords = 7;
+inline constexpr size_t kMaxDirectBranchTransferWords = 8;
+
+/// @brief Private branch slots in one generated SGPR-free island pool.
+inline constexpr uint16_t kDirectBranchIslandPoolSlots = 16;
+
+/// @brief Header words before the private slots in a generated island pool.
+inline constexpr uint16_t kGeneratedIslandPoolHeaderWords = 2;
+
+/// @brief First immediate in the distinctive range reserved for DBT markers.
+///
+/// @details DBT owns s_nop immediates in [base, base + count) for generated
+/// artifact markers. Recognition still requires the marker-specific canonical
+/// instruction sequence.
+inline constexpr uint16_t kDbtMarkerImmediateBase = 0x1250;
+inline constexpr uint16_t kDbtMarkerImmediateCount = 2;
+
+/// @brief Executed no-op that marks a translator-generated long direct transfer.
+///
+/// @details A repeated translation recognizes this marker immediately before
+/// the canonical getpc/add/setpc-or-swappc sequence and preserves that sequence
+/// as one relocation window instead of wrapping its indirect consumer again.
+inline constexpr uint16_t kLongDirectBranchMarkerNopImmediate = kDbtMarkerImmediateBase;
+
+/// @brief Executed no-op that marks a generated branch-island pool header.
+inline constexpr uint16_t kBranchIslandPoolMarkerNopImmediate = kDbtMarkerImmediateBase + 1;
+static_assert(kLongDirectBranchMarkerNopImmediate != kBranchIslandPoolMarkerNopImmediate);
+static_assert(kBranchIslandPoolMarkerNopImmediate <
+              kDbtMarkerImmediateBase + kDbtMarkerImmediateCount);
 
 class BasicBlock;
 class Instruction;
@@ -46,25 +75,45 @@ struct BranchFixup {
   uint64_t source_target_offset = 0; ///< Original .text offset of the branch target.
   uint64_t target_inst_offset = 0;   ///< New .text offset of the branch patch window.
   uint64_t target_window_bytes = 0;  ///< Reserved bytes available for final branch encoding.
+  /// False when widening the window would invalidate a surrounding fixed-size artifact.
+  bool allow_window_growth = true;
+  /// Pristine target-ISA encoding used by every relocation attempt.
+  std::vector<uint32_t> translated_words;
 };
 
 /// @brief Pending recovered indirect branch/call window in one relocated kernel.
 ///
 /// @details Static recovery gives DBT one concrete source target for an indirect
-/// `s_setpc_b64` or `s_swappc_b64` consumer. The translated block reserves a fixed
-/// worst-case window at the consumer site; after all blocks have final target
-/// offsets, the patch layer rewrites that window to either a direct control
-/// transfer or a canonical long getpc/add/setpc-or-swappc sequence. Special
-/// carriers remain untouched by the long form; it uses an ordinary reserved
-/// scratch pair or a branch-island chain so the source carrier residue is stable.
+/// `s_setpc_b64` or `s_swappc_b64` consumer. The translated block starts with a
+/// compact one-word window at the consumer site. After all blocks have final
+/// target offsets, the patch layer either writes one direct control transfer or
+/// requests monotonic growth for a marked long getpc/add/setpc-or-swappc sequence.
 struct RecoveredIndirectFixup {
   uint64_t source_call_offset = 0;   ///< Original .text offset of setpc/swappc.
   uint64_t source_target_offset = 0; ///< Recovered original .text target offset.
   uint64_t target_window_offset = 0; ///< New .text offset of the reserved window.
-  uint16_t target_selector = 0;      ///< Raw SOP1 selector consumed by the source transfer.
+  /// Exact bytes reserved at @ref target_window_offset.
+  uint64_t target_window_bytes = sizeof(uint32_t);
+  uint16_t target_sreg = 0;     ///< Low SGPR pair used for the rebuilt target PC.
+  uint16_t return_sreg = 0;     ///< Low SGPR pair receiving return PC for calls.
+  uint16_t target_selector = 0; ///< Raw SOP1 selector consumed by the source transfer.
   RegisterRef target_carrier{RegClass::SGPR, 0, 2}; ///< Architectural source pair identity.
-  uint16_t return_selector = 0; ///< Raw SOP1 selector receiving return PC for calls.
+  uint16_t return_selector = 0; ///< Raw SOP1 selector receiving a call return PC.
   bool is_call = false;         ///< True for swappc-like calls, false for setpc jumps.
+  /// Preserve a marked generated long transfer instead of choosing a compact branch.
+  bool preserve_marked_long_transfer = false;
+};
+
+enum class ControlFlowWindowKind : uint8_t {
+  DirectBranch,
+  RecoveredIndirect,
+};
+
+/// @brief One control-flow window that must grow before fixups can be committed.
+struct ControlFlowWindowRequirement {
+  ControlFlowWindowKind kind = ControlFlowWindowKind::DirectBranch;
+  uint64_t source_inst_offset = 0;    ///< Source offset identifying the fixup.
+  uint64_t required_window_bytes = 0; ///< Exact new window size.
 };
 
 /// @brief Stable failure category returned across the text-layout boundary.
@@ -91,28 +140,35 @@ struct TextRelocationResult {
   TextLayoutFailureCategory failure = TextLayoutFailureCategory::None;
   TextLayoutFailureReason reason = TextLayoutFailureReason::None;
   uint64_t source_offset = 0;
+  std::vector<ControlFlowWindowRequirement> required_windows;
   std::string message;
+};
+
+/// @brief One insertion made while growing a direct-branch patch window.
+struct TextLayoutInsertion {
+  uint64_t offset = 0; ///< Original insertion point in the kernel-local body.
+  uint64_t size = 0;   ///< Number of bytes inserted.
 };
 
 /// @brief Descriptor-neutral entry layout requested by DBT or DBI.
 struct KernelEntryLayoutPlan {
   /// @brief True when hardware may enter again at source entry plus 256 bytes.
-  bool has_kernarg_preload = false;
+  bool has_kernarg_preload_firmware_skip = false;
 
   /// @brief Source `.text` offset of the compatible-firmware preload entry.
-  uint64_t kernarg_preload_entry_text_offset = 0;
+  uint64_t kernarg_preload_firmware_entry_text_offset = 0;
 
   /// @brief Target instructions that must execute before the relocated body.
   std::vector<uint32_t> prologue_words;
 };
 
-/// @brief Minimal placement facts needed to emit a skipped-kernel trap stub.
+/// @brief Minimal placement facts needed to emit a skipped-kernel no-op stub.
 struct SkippedKernelLayoutPlan {
   /// @brief Original entry offset whose 256-byte residue must be preserved.
   uint64_t source_entry = 0;
 
-  /// @brief Emit trap stubs at both legal preload firmware entry addresses.
-  bool has_kernarg_preload = false;
+  /// @brief Emit `s_endpgm` stubs at both legal preload firmware entry addresses.
+  bool has_kernarg_preload_firmware_skip = false;
 };
 
 /// @brief Result of appending descriptor-visible kernel text.
@@ -181,15 +237,29 @@ void append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count, rj_code
 /// @brief Return true if @p plan's preload launch stubs fit the ABI window.
 [[nodiscard]] bool kernarg_preload_launch_window_fits(const KernelEntryLayoutPlan &plan);
 
-/// @brief Choose the fixed patch-window size for a direct branch.
+/// @brief Choose the initial compact patch-window size for a direct branch.
 ///
-/// @details This centralizes patch-layer knowledge of long direct-branch
-/// windows and conditional branch-island windows. DBT records the source branch
-/// and reserves exactly the number of bytes the patch layer may later rewrite.
-[[nodiscard]] uint64_t direct_branch_patch_window_bytes(const Instruction &inst,
-                                                        uint64_t source_inst_offset,
-                                                        uint64_t source_target_offset,
-                                                        bool can_use_long_direct_branches);
+/// @details Every branch starts at its encoded size and grows monotonically only
+/// when final layout proves that a long transfer or two-word conditional island
+/// source is required.
+[[nodiscard]] uint64_t initial_direct_branch_patch_window_bytes(const Instruction &inst);
+
+/// @brief Grow control-flow windows in one kernel-local text rebuild.
+///
+/// @param text Kernel-local emitted body.
+/// @param layout Pre-materialization kernel-local layout matching @p text. Its
+/// descriptor entry fields must not have been rebased into final `.text`.
+/// @param requirements Exact monotonic window-growth requests.
+/// @param arch Target architecture used to initialize inserted words.
+/// @returns Insertions in the original @p text coordinate space, or
+/// std::nullopt without mutation when any request is invalid.
+[[nodiscard]] std::optional<std::vector<TextLayoutInsertion>>
+grow_control_flow_windows(std::vector<uint8_t> &text, KernelTextLayout &layout,
+                          std::span<const ControlFlowWindowRequirement> requirements,
+                          rj_code_arch_t arch);
+
+/// @brief Rebase one offset through a sorted set of text insertions.
+void rebase_text_offset(uint64_t &offset, std::span<const TextLayoutInsertion> insertions);
 
 /// @brief First body offset at which an SGPR-free branch-island pool should appear.
 [[nodiscard]] uint64_t first_direct_branch_island_pool_offset();
@@ -208,7 +278,7 @@ void append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text, KernelT
 /// final hardware entry location is known.
 void rebase_kernel_text_layout(KernelTextLayout &layout, uint64_t delta);
 
-/// @brief Append a target-ISA trap body for a skipped kernel.
+/// @brief Append a target-ISA `s_endpgm` body for a skipped kernel.
 ///
 /// @details The neutral plan contains only placement facts needed by the patch
 /// layer. DBT and DBI retain ownership of descriptor policy and diagnostics.
@@ -229,13 +299,17 @@ append_relocated_kernel_text(std::vector<uint8_t> &translated_text, KernelTextLa
 /// @brief Patch all direct PC-relative branches recorded in @p layout.
 [[nodiscard]] TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
                                                               const KernelTextLayout &layout,
-                                                              rj_code_arch_t arch,
-                                                              std::vector<uint8_t> &island_used);
+                                                              rj_code_arch_t arch);
 
 /// @brief Patch all recovered indirect branch/call windows recorded in @p layout.
+[[nodiscard]] TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
+                                                                   const KernelTextLayout &layout,
+                                                                   rj_code_arch_t arch);
+
+/// @brief Patch recovered transfers while exposing branch-island allocation state.
 [[nodiscard]] TextRelocationResult
 patch_recovered_indirect_fixups(std::vector<uint8_t> &text, const KernelTextLayout &layout,
-                                rj_code_arch_t arch, std::vector<uint8_t> &island_used);
+                                rj_code_arch_t arch, std::vector<uint8_t> &branch_island_used);
 
 /// @brief Patch recovered source-side PC builders for multi-target consumers.
 [[nodiscard]] TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,

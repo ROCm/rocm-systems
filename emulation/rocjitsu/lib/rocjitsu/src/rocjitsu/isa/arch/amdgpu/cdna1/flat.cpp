@@ -28,10 +28,13 @@ FlatLoadUbyteFlat::FlatLoadUbyteFlat(const MachineInst *inst)
            make_exec_fn<FlatLoadUbyteFlat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -44,6 +47,8 @@ FlatLoadUbyteFlat::FlatLoadUbyteFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -66,10 +71,13 @@ FlatLoadSbyteFlat::FlatLoadSbyteFlat(const MachineInst *inst)
            make_exec_fn<FlatLoadSbyteFlat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -82,6 +90,8 @@ FlatLoadSbyteFlat::FlatLoadSbyteFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -105,10 +115,13 @@ FlatLoadUshortFlat::FlatLoadUshortFlat(const MachineInst *inst)
            make_exec_fn<FlatLoadUshortFlat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -121,6 +134,8 @@ FlatLoadUshortFlat::FlatLoadUshortFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -143,10 +158,13 @@ FlatLoadSshortFlat::FlatLoadSshortFlat(const MachineInst *inst)
            make_exec_fn<FlatLoadSshortFlat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -159,6 +177,8 @@ FlatLoadSshortFlat::FlatLoadSshortFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -182,10 +202,13 @@ FlatLoadDwordFlat::FlatLoadDwordFlat(const MachineInst *inst)
            make_exec_fn<FlatLoadDwordFlat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -198,6 +221,8 @@ FlatLoadDwordFlat::FlatLoadDwordFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -220,10 +245,13 @@ FlatLoadDwordx2Flat::FlatLoadDwordx2Flat(const MachineInst *inst)
            make_exec_fn<FlatLoadDwordx2Flat>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -236,6 +264,8 @@ FlatLoadDwordx2Flat::FlatLoadDwordx2Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -258,10 +288,13 @@ FlatLoadDwordx3Flat::FlatLoadDwordx3Flat(const MachineInst *inst)
            make_exec_fn<FlatLoadDwordx3Flat>()),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -274,6 +307,8 @@ FlatLoadDwordx3Flat::FlatLoadDwordx3Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -296,10 +331,13 @@ FlatLoadDwordx4Flat::FlatLoadDwordx4Flat(const MachineInst *inst)
            make_exec_fn<FlatLoadDwordx4Flat>()),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -312,6 +350,8 @@ FlatLoadDwordx4Flat::FlatLoadDwordx4Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -334,10 +374,13 @@ FlatStoreByteFlat::FlatStoreByteFlat(const MachineInst *inst)
            make_exec_fn<FlatStoreByteFlat>()),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -350,6 +393,8 @@ FlatStoreByteFlat::FlatStoreByteFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -381,10 +426,13 @@ FlatStoreByteD16HiFlat::FlatStoreByteD16HiFlat(const MachineInst *inst)
            make_exec_fn<FlatStoreByteD16HiFlat>()),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -397,6 +445,8 @@ FlatStoreByteD16HiFlat::FlatStoreByteD16HiFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -429,10 +479,13 @@ FlatStoreShortFlat::FlatStoreShortFlat(const MachineInst *inst)
            make_exec_fn<FlatStoreShortFlat>()),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -445,6 +498,8 @@ FlatStoreShortFlat::FlatStoreShortFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -476,10 +531,13 @@ FlatStoreShortD16HiFlat::FlatStoreShortD16HiFlat(const MachineInst *inst)
            make_exec_fn<FlatStoreShortD16HiFlat>()),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -492,6 +550,8 @@ FlatStoreShortD16HiFlat::FlatStoreShortD16HiFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -524,10 +584,13 @@ FlatStoreDwordFlat::FlatStoreDwordFlat(const MachineInst *inst)
            make_exec_fn<FlatStoreDwordFlat>()),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -540,6 +603,8 @@ FlatStoreDwordFlat::FlatStoreDwordFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -571,10 +636,13 @@ FlatStoreDwordx2Flat::FlatStoreDwordx2Flat(const MachineInst *inst)
            make_exec_fn<FlatStoreDwordx2Flat>()),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -587,6 +655,8 @@ FlatStoreDwordx2Flat::FlatStoreDwordx2Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -620,10 +690,13 @@ FlatStoreDwordx3Flat::FlatStoreDwordx3Flat(const MachineInst *inst)
            make_exec_fn<FlatStoreDwordx3Flat>()),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -636,6 +709,8 @@ FlatStoreDwordx3Flat::FlatStoreDwordx3Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -671,10 +746,13 @@ FlatStoreDwordx4Flat::FlatStoreDwordx4Flat(const MachineInst *inst)
            make_exec_fn<FlatStoreDwordx4Flat>()),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -687,6 +765,8 @@ FlatStoreDwordx4Flat::FlatStoreDwordx4Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -724,10 +804,13 @@ FlatLoadUbyteD16Flat::FlatLoadUbyteD16Flat(const MachineInst *inst)
            make_exec_fn<FlatLoadUbyteD16Flat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -740,6 +823,8 @@ FlatLoadUbyteD16Flat::FlatLoadUbyteD16Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -763,10 +848,13 @@ FlatLoadUbyteD16HiFlat::FlatLoadUbyteD16HiFlat(const MachineInst *inst)
            make_exec_fn<FlatLoadUbyteD16HiFlat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -779,6 +867,8 @@ FlatLoadUbyteD16HiFlat::FlatLoadUbyteD16HiFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -802,10 +892,13 @@ FlatLoadSbyteD16Flat::FlatLoadSbyteD16Flat(const MachineInst *inst)
            make_exec_fn<FlatLoadSbyteD16Flat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -818,6 +911,8 @@ FlatLoadSbyteD16Flat::FlatLoadSbyteD16Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -842,10 +937,13 @@ FlatLoadSbyteD16HiFlat::FlatLoadSbyteD16HiFlat(const MachineInst *inst)
            make_exec_fn<FlatLoadSbyteD16HiFlat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -858,6 +956,8 @@ FlatLoadSbyteD16HiFlat::FlatLoadSbyteD16HiFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -882,10 +982,13 @@ FlatLoadShortD16Flat::FlatLoadShortD16Flat(const MachineInst *inst)
            make_exec_fn<FlatLoadShortD16Flat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -898,6 +1001,8 @@ FlatLoadShortD16Flat::FlatLoadShortD16Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -921,10 +1026,13 @@ FlatLoadShortD16HiFlat::FlatLoadShortD16HiFlat(const MachineInst *inst)
            make_exec_fn<FlatLoadShortD16HiFlat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -937,6 +1045,8 @@ FlatLoadShortD16HiFlat::FlatLoadShortD16HiFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -961,10 +1071,13 @@ FlatAtomicSwapFlat::FlatAtomicSwapFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -979,6 +1092,8 @@ FlatAtomicSwapFlat::FlatAtomicSwapFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1013,10 +1128,13 @@ FlatAtomicCmpswapFlat::FlatAtomicCmpswapFlat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1031,6 +1149,8 @@ FlatAtomicCmpswapFlat::FlatAtomicCmpswapFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1067,10 +1187,13 @@ FlatAtomicAddFlat::FlatAtomicAddFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1085,6 +1208,8 @@ FlatAtomicAddFlat::FlatAtomicAddFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1119,10 +1244,13 @@ FlatAtomicSubFlat::FlatAtomicSubFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1137,6 +1265,8 @@ FlatAtomicSubFlat::FlatAtomicSubFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1171,10 +1301,13 @@ FlatAtomicSminFlat::FlatAtomicSminFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1189,6 +1322,8 @@ FlatAtomicSminFlat::FlatAtomicSminFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1223,10 +1358,13 @@ FlatAtomicUminFlat::FlatAtomicUminFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1241,6 +1379,8 @@ FlatAtomicUminFlat::FlatAtomicUminFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1275,10 +1415,13 @@ FlatAtomicSmaxFlat::FlatAtomicSmaxFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1293,6 +1436,8 @@ FlatAtomicSmaxFlat::FlatAtomicSmaxFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1327,10 +1472,13 @@ FlatAtomicUmaxFlat::FlatAtomicUmaxFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1345,6 +1493,8 @@ FlatAtomicUmaxFlat::FlatAtomicUmaxFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1379,10 +1529,13 @@ FlatAtomicAndFlat::FlatAtomicAndFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1397,6 +1550,8 @@ FlatAtomicAndFlat::FlatAtomicAndFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1431,10 +1586,13 @@ FlatAtomicOrFlat::FlatAtomicOrFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1449,6 +1607,8 @@ FlatAtomicOrFlat::FlatAtomicOrFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1483,10 +1643,13 @@ FlatAtomicXorFlat::FlatAtomicXorFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1501,6 +1664,8 @@ FlatAtomicXorFlat::FlatAtomicXorFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1535,10 +1700,13 @@ FlatAtomicIncFlat::FlatAtomicIncFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1553,6 +1721,8 @@ FlatAtomicIncFlat::FlatAtomicIncFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1587,10 +1757,13 @@ FlatAtomicDecFlat::FlatAtomicDecFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1605,6 +1778,8 @@ FlatAtomicDecFlat::FlatAtomicDecFlat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1639,10 +1814,13 @@ FlatAtomicSwapX2Flat::FlatAtomicSwapX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1657,6 +1835,8 @@ FlatAtomicSwapX2Flat::FlatAtomicSwapX2Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1693,10 +1873,13 @@ FlatAtomicCmpswapX2Flat::FlatAtomicCmpswapX2Flat(const MachineInst *inst)
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1711,6 +1894,8 @@ FlatAtomicCmpswapX2Flat::FlatAtomicCmpswapX2Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1751,10 +1936,13 @@ FlatAtomicAddX2Flat::FlatAtomicAddX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1769,6 +1957,8 @@ FlatAtomicAddX2Flat::FlatAtomicAddX2Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1805,10 +1995,13 @@ FlatAtomicSubX2Flat::FlatAtomicSubX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1823,6 +2016,8 @@ FlatAtomicSubX2Flat::FlatAtomicSubX2Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1859,10 +2054,13 @@ FlatAtomicSminX2Flat::FlatAtomicSminX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1877,6 +2075,8 @@ FlatAtomicSminX2Flat::FlatAtomicSminX2Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1913,10 +2113,13 @@ FlatAtomicUminX2Flat::FlatAtomicUminX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1931,6 +2134,8 @@ FlatAtomicUminX2Flat::FlatAtomicUminX2Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -1967,10 +2172,13 @@ FlatAtomicSmaxX2Flat::FlatAtomicSmaxX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -1985,6 +2193,8 @@ FlatAtomicSmaxX2Flat::FlatAtomicSmaxX2Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -2021,10 +2231,13 @@ FlatAtomicUmaxX2Flat::FlatAtomicUmaxX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -2039,6 +2252,8 @@ FlatAtomicUmaxX2Flat::FlatAtomicUmaxX2Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -2075,10 +2290,13 @@ FlatAtomicAndX2Flat::FlatAtomicAndX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -2093,6 +2311,8 @@ FlatAtomicAndX2Flat::FlatAtomicAndX2Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -2129,10 +2349,13 @@ FlatAtomicOrX2Flat::FlatAtomicOrX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -2147,6 +2370,8 @@ FlatAtomicOrX2Flat::FlatAtomicOrX2Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -2183,10 +2408,13 @@ FlatAtomicXorX2Flat::FlatAtomicXorX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -2201,6 +2429,8 @@ FlatAtomicXorX2Flat::FlatAtomicXorX2Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -2237,10 +2467,13 @@ FlatAtomicIncX2Flat::FlatAtomicIncX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -2255,6 +2488,8 @@ FlatAtomicIncX2Flat::FlatAtomicIncX2Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
@@ -2291,10 +2526,13 @@ FlatAtomicDecX2Flat::FlatAtomicDecX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdst;
@@ -2309,6 +2547,8 @@ FlatAtomicDecX2Flat::FlatAtomicDecX2Flat(const MachineInst *inst)
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }

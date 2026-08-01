@@ -54,17 +54,6 @@ class MemoryCoherencyModel(Enum):
     GFX12_SCOPE_TH = auto()  # RDNA4 — 2-bit SCOPE + TH hint
 
 
-class HwregIdentityModel(Enum):
-    """Selects the representation emitted for generated hardware-ID reads."""
-
-    # Compatibility mode for profiles whose architectural topology fields are
-    # not modeled yet. This preserves their existing simulator component-ID
-    # behavior, but deliberately does not present it as a hardware encoding.
-    UNMODELED_COMPONENT_ID = auto()
-    LEGACY = auto()
-    TOPOLOGY = auto()
-
-
 @dataclass
 class EncodingModifier:
     """A disassembly modifier to append to an encoding's mnemonic output.
@@ -321,46 +310,6 @@ class IsaProfile(ABC):
         return False
 
     @property
-    def use_hwreg_helpers(self) -> bool:
-        """True when generated SOPK getreg/setreg should use target hwreg helpers."""
-        return False
-
-    @property
-    def hwreg_mode_id(self) -> int | None:
-        """Hardware-register ID for MODE, when modeled by generated setreg code."""
-        return None
-
-    @property
-    def hwreg_status_id(self) -> int:
-        """Hardware-register ID for STATUS in generated getreg/setreg code."""
-        return 1
-
-    @property
-    def hwreg_hw_id1_id(self) -> int:
-        """GFX9 hardware-register ID for HW_ID1 in generated getreg code."""
-        return 4
-
-    @property
-    def hwreg_hw_id2_id(self) -> int:
-        """GFX9 hardware-register ID for HW_ID2 in generated getreg code."""
-        return 5
-
-    @property
-    def hwreg_identity_model(self) -> HwregIdentityModel:
-        """Resident-wave identity representation used by generated HWREG reads."""
-        return HwregIdentityModel.UNMODELED_COMPONENT_ID
-
-    @property
-    def hwreg_ib_sts2_id(self) -> int | None:
-        """Hardware-register ID for IB_STS2, when exposed by the target."""
-        return None
-
-    @property
-    def hwreg_wave_sched_mode_id(self) -> int | None:
-        """Hardware-register ID for WAVE_SCHED_MODE, when exposed by the target."""
-        return None
-
-    @property
     def generate_scaled_wmma_vop3px2(self) -> bool:
         """True when generator should synthesize scaled-WMMA VOP3PX2 support."""
         return False
@@ -385,6 +334,22 @@ class IsaProfile(ABC):
         conventions diverge from the common AMD pattern).
         """
         return {}
+
+    @property
+    def semantic_class_overrides(self) -> dict[str, str]:
+        """Per-instruction semantic-class refinements for this ISA.
+
+        Unlike :attr:`semantic_overrides`, these preserve the generic
+        derivation's operation, element size, and other metadata. Use this
+        when an ISA-specific instruction shape needs a different codegen
+        template but the remaining mnemonic-derived metadata is still valid.
+        """
+        return {}
+
+    @property
+    def ds_addtid_uses_m0_byte_base(self) -> bool:
+        """True when DS ADDTID addresses use M0 as a byte-address base."""
+        return False
 
     @property
     def cmpx_writes_vcc(self) -> bool:
@@ -1050,10 +1015,6 @@ class CdnaProfile(_AmdgpuProfileBase):
     # uses the correct name; the rename is a no-op there.
     _VOP3P_FIELD_RENAMES: dict[str, str] = {'pad_14': 'op_sel_hi_2'}
 
-    @property
-    def hwreg_identity_model(self) -> HwregIdentityModel:
-        return HwregIdentityModel.LEGACY
-
     def field_renames(self, enc_name: str) -> dict[str, str]:
         upper = enc_name.upper()
         if upper == 'ENC_FLAT':
@@ -1146,10 +1107,6 @@ class Cdna1Profile(CdnaProfile):
         return False
 
     @property
-    def hwreg_identity_model(self) -> HwregIdentityModel:
-        return HwregIdentityModel.UNMODELED_COMPONENT_ID
-
-    @property
     def acc_vgpr_encoding_base(self) -> int:
         return 0
 
@@ -1199,10 +1156,6 @@ class Cdna2Profile(CdnaProfile):
     @property
     def acc_vgpr_encoding_base(self) -> int:
         return 512  # CDNA2: AccVGPR range starts at encoding 512
-
-    @property
-    def hwreg_identity_model(self) -> HwregIdentityModel:
-        return HwregIdentityModel.UNMODELED_COMPONENT_ID
 
     @property
     def flat_scratch_mechanism(self) -> str:
@@ -1409,26 +1362,6 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
-    def hwreg_hw_id1_id(self) -> int:
-        return 23
-
-    @property
-    def hwreg_hw_id2_id(self) -> int:
-        return 24
-
-    @property
-    def hwreg_mode_id(self) -> int | None:
-        return 1
-
-    @property
-    def hwreg_status_id(self) -> int:
-        return 2
-
-    @property
-    def hwreg_identity_model(self) -> HwregIdentityModel:
-        return HwregIdentityModel.TOPOLOGY
-
-    @property
     def descriptor_sgpr_count_encoded(self) -> bool:
         return False
 
@@ -1524,18 +1457,6 @@ class Rdna4Profile(_AmdgpuProfileBase):
 
     _SKIP_DPP_SDWA = True
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
-
-    @property
-    def hwreg_hw_id1_id(self) -> int:
-        return 23
-
-    @property
-    def hwreg_hw_id2_id(self) -> int:
-        return 24
-
-    @property
-    def hwreg_identity_model(self) -> HwregIdentityModel:
-        return HwregIdentityModel.TOPOLOGY
 
     @property
     def waitcnt_lgkmcnt_mask(self) -> str:
@@ -1684,6 +1605,20 @@ class Gfx1250Profile(Rdna4Profile):
     def generated_arch_name(self) -> str | None:
         return 'gfx1250'
 
+    @property
+    def semantic_class_overrides(self) -> dict[str, str]:
+        return {
+            'DS_STORE_ADDTID_B32': 'ds_write_addtid',
+            'DS_STOREXCHG_2ADDR_RTN_B32': 'ds_atomic2',
+            'DS_STOREXCHG_2ADDR_RTN_B64': 'ds_atomic2',
+            'DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32': 'ds_atomic2',
+            'DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64': 'ds_atomic2',
+        }
+
+    @property
+    def ds_addtid_uses_m0_byte_base(self) -> bool:
+        return True
+
     _SKIP = frozenset(
         {
             'ENC_VOP3PX2',
@@ -1768,26 +1703,6 @@ class Gfx1250Profile(Rdna4Profile):
     @property
     def vbuffer_store_data_uses_dst_vgpr_msb_role(self) -> bool:
         return True
-
-    @property
-    def use_hwreg_helpers(self) -> bool:
-        return True
-
-    @property
-    def hwreg_mode_id(self) -> int | None:
-        return 1
-
-    @property
-    def hwreg_status_id(self) -> int:
-        return 2
-
-    @property
-    def hwreg_ib_sts2_id(self) -> int | None:
-        return 28
-
-    @property
-    def hwreg_wave_sched_mode_id(self) -> int | None:
-        return 26
 
     @property
     def generate_scaled_wmma_vop3px2(self) -> bool:

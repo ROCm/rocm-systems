@@ -121,10 +121,10 @@ public:
     mode_raw_ = (mode_raw_ & ~VGPR_MSB_MODE_MASK) | mode_bits;
   }
 
-  /// @brief Read the raw WAVE_SCHED_MODE register value.
+  /// @brief Reserved raw WAVE_SCHED_MODE state for future WGP scheduling model.
   uint32_t wave_sched_mode_raw() const { return wave_sched_mode_raw_; }
 
-  /// @brief Write the raw WAVE_SCHED_MODE register value.
+  /// @brief Reserved raw WAVE_SCHED_MODE state for future WGP scheduling model.
   void set_wave_sched_mode_raw(uint32_t val) { wave_sched_mode_raw_ = val; }
 
   /// @brief Return the two-bit VGPR high-bank selector for an operand role.
@@ -280,8 +280,13 @@ public:
   /// @param val New M0 value.
   void set_m0(uint32_t val) { m0_ = val; }
 
+  static constexpr uint32_t DX10_CLAMP_BIT = 1u << 8;
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
-  bool gpr_idx_en() const { return mode_raw_ & GPR_IDX_EN_BIT; }
+  static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
+
+  bool dx10_clamp() const { return (mode_raw_ & DX10_CLAMP_BIT) != 0; }
+  bool gpr_idx_en() const { return mode_has_gpr_idx_en_ && ((mode_raw_ & GPR_IDX_EN_BIT) != 0); }
+  bool fp16_ovfl() const { return (mode_raw_ & FP16_OVFL_BIT) != 0; }
   uint32_t gpr_idx_offset() const { return m0_ & 0xFF; }
   uint32_t gpr_idx_mode() const { return (m0_ >> 8) & 0xF; }
 
@@ -534,10 +539,11 @@ protected:
   /// @param wf_size Lanes per wavefront (ISA-fixed).
   /// @param max_sgprs Maximum SGPRs per wavefront (ISA-fixed).
   /// @param max_vgprs Maximum VGPRs per wavefront (ISA-fixed).
+  /// @param mode_has_gpr_idx_en Whether MODE bit 27 enables GPR indexing.
   Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t wf_size, uint32_t max_sgprs,
-            uint32_t max_vgprs)
+            uint32_t max_vgprs, bool mode_has_gpr_idx_en)
       : cu_(cu), cu_view_(cu), wf_id_(wf_id), wf_size_(wf_size), max_sgprs_(max_sgprs),
-        max_vgprs_(max_vgprs) {}
+        max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en) {}
 
   ComputeUnitCore &cu_; ///< Parent CU (permanent, set at construction).
   InstructionComputeUnitView cu_view_;
@@ -570,6 +576,7 @@ private:
   uint64_t vcc_ = 0;                 ///< Vector condition code (per-lane comparison result).
   uint32_t m0_ = 0;                  ///< M0 special register (misc addressing).
   uint32_t mode_raw_ = 0;            ///< MODE register state.
+  bool mode_has_gpr_idx_en_ = false; ///< True when MODE[27] is GPR_IDX_EN.
   uint8_t vgpr_msb_mode_ = 0;        ///< S_SET_VGPR_MSB layout for MODE VGPR_MSB bits.
   uint32_t wave_sched_mode_raw_ = 0; ///< WAVE_SCHED_MODE register state.
   uint64_t scratch_base_ = 0;        ///< Per-wavefront scratch (private segment) base address.
@@ -640,7 +647,8 @@ public:
   /// @param cu Parent compute unit.
   /// @param wf_id Slot index within the CU.
   IsaWavefront(ComputeUnitCore &cu, uint32_t wf_id)
-      : Wavefront(cu, wf_id, Isa::WF_SIZE, Isa::MAX_SGPRS_PER_WF, Isa::MAX_VGPRS_PER_WF) {}
+      : Wavefront(cu, wf_id, Isa::WF_SIZE, Isa::MAX_SGPRS_PER_WF, Isa::MAX_VGPRS_PER_WF,
+                  Isa::MODE_HAS_GPR_IDX_EN) {}
 
   /// @brief Return the raw status register value.
   /// @returns Raw status register value.

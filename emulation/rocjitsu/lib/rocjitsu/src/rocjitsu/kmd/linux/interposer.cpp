@@ -24,8 +24,7 @@
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
-#include "rocjitsu/vm/plugins/plugin_sink.h"
-#include "rocjitsu/vm/plugins/profiled_execution_plugin_group.h"
+#include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 
@@ -81,9 +80,6 @@ RJ_DIAGNOSTIC_POP
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-extern "C" rocjitsu::ExecutionPlugin *createKernelLoggingPlugin();
-extern "C" rocjitsu::ExecutionPlugin *createRaceDetectorPlugin();
 
 using rocjitsu::GuestKfd;
 using rocjitsu::LinuxKfd;
@@ -956,40 +952,12 @@ public:
       return false;
     }
 
-    if (rj_vm_->soc) {
-      std::shared_ptr<rocjitsu::ExecutionPluginGroup> pg;
-      if (std::getenv("RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP"))
-        pg = std::make_shared<rocjitsu::ProfiledExecutionPluginGroup>();
-      else
-        pg = std::make_shared<rocjitsu::ExecutionPluginGroup>();
-
-      std::string sinks_str = "stderr";
-      if (const char *s = std::getenv("RJ_SINKS"))
-        sinks_str = s;
-      std::istringstream ss(sinks_str);
-      std::string token;
-      while (std::getline(ss, token, ',')) {
-        if (token == "stderr")
-          pg->add_sink(&rocjitsu::StderrSink::instance());
-        else if (token == "stdout")
-          pg->add_sink(&rocjitsu::StdoutSink::instance());
-        else if (token == "file") {
-          const char *dir = std::getenv("RJ_SINK_DIR");
-          if (dir)
-            pg->set_sink_dir(dir);
-        }
-      }
-
-      if (const char *rj_log = std::getenv("RJ_LOG"); rj_log && std::string(rj_log) == "1") {
-        pg->add(std::unique_ptr<rocjitsu::ExecutionPlugin>(createKernelLoggingPlugin()));
-        fprintf(stderr, "[rocjitsu] Logging enabled (RJ_LOG)\n");
-      }
-
-      if (const char *race = std::getenv("RJ_RACE"); race && std::string(race) == "1") {
-        pg->add(std::unique_ptr<rocjitsu::ExecutionPlugin>(createRaceDetectorPlugin()));
-        fprintf(stderr, "[rocjitsu] Race detection enabled (RJ_RACE)\n");
-      }
-      rj_vm_->soc->set_plugin_group(pg);
+    std::string config_json = read_file_passthrough(config_path.c_str());
+    if (rj_vm_load_plugins(rj_vm_, config_json.c_str(), nullptr) != ROCJITSU_STATUS_SUCCESS) {
+      util::Logger::debug_print("rocjitsu: failed to configure execution plugins");
+      rj_vm_destroy(rj_vm_);
+      rj_vm_ = nullptr;
+      return false;
     }
     return true;
   }
@@ -1471,6 +1439,39 @@ public:
       in_construction = false;
     }
     return driver();
+  }
+
+  /// @brief Read an entire file via the libc passthrough (real openat/read/
+  /// close), retrying on EINTR.
+  /// @details Used during driver construction where re-entering our interposed
+  /// I/O path could recurse. Read errors (other than EINTR) are reported and
+  /// yield an empty string, distinct from a successfully read empty file.
+  static std::string read_file_passthrough(const char *path) {
+    if (!real().ready())
+      return {};
+    int fd;
+    do {
+      fd = real().openat(AT_FDCWD, path, O_RDONLY, 0);
+    } while (fd < 0 && errno == EINTR);
+    if (fd < 0)
+      return {};
+    std::string out;
+    char buf[4096] = {};
+    for (;;) {
+      ssize_t n = real().read(fd, buf, sizeof(buf));
+      if (n < 0) {
+        if (errno == EINTR)
+          continue;
+        util::Logger::warn("rocjitsu: read error on '", path, "': ", std::strerror(errno));
+        real().close(fd);
+        return {};
+      }
+      if (n == 0)
+        break; // EOF.
+      out.append(buf, static_cast<size_t>(n));
+    }
+    real().close(fd);
+    return out;
   }
 
   static int fopen_flags_from_mode(const char *mode) {

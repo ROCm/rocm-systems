@@ -8,6 +8,7 @@
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include "hsa/AMDHSAKernelDescriptor.h" // Check SGPR allocation
 
@@ -68,11 +69,6 @@ static_assert(sizeof(HsaSection) + sizeof(std::unique_ptr<Section>) + sizeof(con
 bool is_elf(const Elf64_Ehdr &ehdr) { return !std::memcmp(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE); }
 
 using detail::fits_in_bounds;
-
-/*
- * \NPI new GPU: map its MACH value and its gfxNNNN triple to a target id in \
- * both target_from_machine_flags() and target_from_triple() below.
- */
 
 struct FunctionSymbolInfo {
   uint64_t entry_text_offset = 0;
@@ -227,48 +223,15 @@ read_kernel_metadata(std::span<const uint8_t> image, const Elf64_Ehdr &header,
 }
 
 rj_code_target_id_t target_from_machine_flags(uint32_t flags) {
-  uint32_t mach = flags & EF_AMDGPU_MACH;
-  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX90A)
-    return ROCJITSU_CODE_TARGET_GFX90A;
-  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX942)
-    return ROCJITSU_CODE_TARGET_GFX942;
-  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX950)
-    return ROCJITSU_CODE_TARGET_GFX950;
-  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX1100)
-    return ROCJITSU_CODE_TARGET_GFX1100;
-  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX1150)
-    return ROCJITSU_CODE_TARGET_GFX1150;
-  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX1151)
-    return ROCJITSU_CODE_TARGET_GFX1151;
-  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX1200)
-    return ROCJITSU_CODE_TARGET_GFX1200;
-  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX1201)
-    return ROCJITSU_CODE_TARGET_GFX1201;
-  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX1250)
-    return ROCJITSU_CODE_TARGET_GFX1250;
-  return ROCJITSU_CODE_TARGET_INVALID;
+  const IsaGpuTargetDescription *binding =
+      default_isa_target_registry().find_gpu_target_by_elf_machine(flags & EF_AMDGPU_MACH);
+  return binding == nullptr ? ROCJITSU_CODE_TARGET_INVALID : binding->public_id;
 }
 
-rj_code_target_id_t target_from_triple(const std::string &triple) {
-  if (triple == "gfx90a")
-    return ROCJITSU_CODE_TARGET_GFX90A;
-  if (triple == "gfx942")
-    return ROCJITSU_CODE_TARGET_GFX942;
-  if (triple == "gfx950")
-    return ROCJITSU_CODE_TARGET_GFX950;
-  if (triple == "gfx1100")
-    return ROCJITSU_CODE_TARGET_GFX1100;
-  if (triple == "gfx1150")
-    return ROCJITSU_CODE_TARGET_GFX1150;
-  if (triple == "gfx1151")
-    return ROCJITSU_CODE_TARGET_GFX1151;
-  if (triple == "gfx1200")
-    return ROCJITSU_CODE_TARGET_GFX1200;
-  if (triple == "gfx1201")
-    return ROCJITSU_CODE_TARGET_GFX1201;
-  if (triple == "gfx1250")
-    return ROCJITSU_CODE_TARGET_GFX1250;
-  return ROCJITSU_CODE_TARGET_INVALID;
+rj_code_target_id_t target_from_code_object_id(std::string_view id) {
+  const IsaGpuTargetDescription *binding =
+      default_isa_target_registry().find_gpu_target_by_code_object_id(id);
+  return binding == nullptr ? ROCJITSU_CODE_TARGET_INVALID : binding->public_id;
 }
 
 } // namespace
@@ -327,7 +290,7 @@ AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size,
                 reinterpret_cast<const char *>(elf_bytes) + elf_size);
   initialize_image_parser();
   if (is_valid_)
-    target_id_ = target_from_triple(target_triple_);
+    target_id_ = target_from_code_object_id(target_triple_);
 }
 
 AmdGpuCodeObject::~AmdGpuCodeObject() { major_image_ownership::unregister_owner(this); }

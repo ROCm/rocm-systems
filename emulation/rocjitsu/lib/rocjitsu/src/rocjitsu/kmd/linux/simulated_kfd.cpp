@@ -416,7 +416,8 @@ int SimulatedKfd::open() {
   proc->event_state_.reset();
   for (auto &g : gpus_) {
     if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
-      mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_);
+      mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_,
+                            proc->page_table_generation());
       if (!daemon_mode_)
         mem->set_passthrough(true);
     }
@@ -477,7 +478,8 @@ uint32_t SimulatedKfd::open_process(pid_t client_pid) {
     proc->event_state_.reset();
     for (auto &g : gpus_) {
       if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
-        mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_);
+        mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_,
+                              proc->page_table_generation());
         if (client_pid > 0)
           mem->set_process_client_pid(pid, client_pid);
       }
@@ -1946,17 +1948,7 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
                          "true sharing)");
       }
 
-      {
-        std::unique_lock ptlk(proc.page_table_mutex_);
-        auto *old_base = static_cast<uint8_t *>(alloc.host_ptr);
-        auto *new_base = static_cast<uint8_t *>(new_host_ptr);
-        for (size_t off = 0; off < alloc.size; off += KfdProcess::kPageSize) {
-          uint64_t page_num = (alloc.gpu_va + off) >> KfdProcess::kPageShift;
-          auto pt_it = proc.page_table_.find(page_num);
-          if (pt_it != proc.page_table_.end() && pt_it->second.host_ptr == old_base + off)
-            pt_it->second.host_ptr = new_base + off;
-        }
-      }
+      proc.remap_page_host_ptrs(alloc.gpu_va, alloc.host_ptr, new_host_ptr, alloc.size);
 
       if (alloc.host_ptr_owned)
         libc_passthrough().munmap(alloc.host_ptr, alloc.size);
@@ -1988,15 +1980,7 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
     // the local GPU sees writes from the importing GPU.  On real hardware
     // xGMI snoops handle this; in the simulator CC forces L2 invalidate
     // before every refetch, emulating the cross-GPU coherence protocol.
-    {
-      std::unique_lock ptlk(proc.page_table_mutex_);
-      for (size_t off = 0; off < alloc.size; off += KfdProcess::kPageSize) {
-        uint64_t page_num = (alloc.gpu_va + off) >> KfdProcess::kPageShift;
-        auto pt_it = proc.page_table_.find(page_num);
-        if (pt_it != proc.page_table_.end())
-          pt_it->second.mtype = amdgpu::Mtype::CC;
-      }
-    }
+    proc.set_page_mtype(alloc.gpu_va, alloc.size, amdgpu::Mtype::CC);
 
     alloc_size = alloc.size;
     alloc_flags = alloc.flags;
@@ -2336,7 +2320,7 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     // RAII (on DISABLE or process teardown). In local mode dbg_fd is the
     // debugger's own descriptor, left for the debugger to close.
     if (daemon_mode_)
-      sess.owned_dbg_fd = UniqueFd(dbg_fd);
+      sess.owned_dbg_fd = util::UniqueHandle(dbg_fd);
     sess.exception_enable_mask = args->enable.exception_mask;
 
     // Snapshot the runtime-enable state under a single lock so the marshaled
@@ -2363,7 +2347,7 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   }
   case KFD_IOC_DBG_TRAP_DISABLE:
     // Resetting the session releases the debugger notifier: in daemon mode the
-    // session's UniqueFd closes the SCM_RIGHTS-transferred fd it owns; in local
+    // session's UniqueHandle closes the SCM_RIGHTS-transferred fd it owns; in local
     // mode nothing is owned, so the debugger's own fd is left untouched.
     sess = KfdProcess::DebugSession{};
     return 0;

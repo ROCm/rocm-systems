@@ -2055,6 +2055,15 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
     }
   }
 
+  // Some generated decoder profiles model a returning atomic's encoded VDST
+  // only as an in/out source operand. The raw target-native field is still the
+  // authoritative destination selector, so normalize it for downstream atomic
+  // engines without inventing a destination for non-returning forms.
+  if (!site.dst_vgpr && site.returns_old_value.value_or(false) && site.raw_vdst &&
+      *site.raw_vdst <= std::numeric_limits<uint16_t>::max()) {
+    site.dst_vgpr = static_cast<uint16_t>(*site.raw_vdst);
+  }
+
   // Some decoder revisions expose VGLOBAL's scalar address only through the
   // raw instruction field. Normalize that equivalent register selector so
   // downstream address consumers do not depend on operand-list presentation.

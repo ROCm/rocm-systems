@@ -9,7 +9,8 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-KernelLoggingPlugin::KernelLoggingPlugin() : ExecutionPlugin("logging") {}
+KernelLoggingPlugin::KernelLoggingPlugin(const char * /*config_json*/)
+    : ExecutionPlugin("logging") {}
 
 KernelLoggingPlugin::~KernelLoggingPlugin() {}
 
@@ -80,8 +81,3 @@ void KernelLoggingPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-// extern "C" + raw new: needed for planned dlsym-based dynamic loading (#6628).
-extern "C" rocjitsu::ExecutionPlugin *createKernelLoggingPlugin() {
-  return new rocjitsu::amdgpu::KernelLoggingPlugin();
-}

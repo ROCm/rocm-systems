@@ -1735,6 +1735,33 @@ TEST(ConSan, Gfx1250FlatStoreCheckTrapSpillsLiveVccSavePairThroughVgprsInBothWav
   }
 }
 
+void append_gfx1250_full_vgpr_pressure(std::vector<uint32_t> &words) {
+  constexpr uint16_t kVgprsPerBank = 256u;
+  static_assert(REGISTER_SET_MAX_VGPRS == 4u * kVgprsPerBank);
+  uint8_t previous_mode = 0u;
+  for (uint8_t bank = 0u; bank < 4u; ++bank) {
+    // VGPR_MSB independently selects a 256-register bank for each operand
+    // role. Use the same bank for every role and valid eight-bit VOP1
+    // selectors, then restore the architectural default before returning.
+    const uint8_t mode = static_cast<uint8_t>(bank * 0x55u);
+    words.push_back(
+        *build_gfx1250_s_set_vgpr_msb_transition(previous_mode, mode, ROCJITSU_CODE_ARCH_GFX1250));
+    previous_mode = mode;
+    for (uint16_t vgpr = 0; vgpr < kVgprsPerBank; ++vgpr) {
+      words.push_back(
+          build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_GFX1250));
+    }
+  }
+  words.push_back(
+      *build_gfx1250_s_set_vgpr_msb_transition(previous_mode, 0u, ROCJITSU_CODE_ARCH_GFX1250));
+}
+
+void append_rdna4_full_vgpr_pressure(std::vector<uint32_t> &words) {
+  constexpr uint16_t kRdna4VgprCount = 256u;
+  for (uint16_t vgpr = 0; vgpr < kRdna4VgprCount; ++vgpr)
+    words.push_back(build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_RDNA4));
+}
+
 [[nodiscard]] std::vector<uint32_t>
 make_gfx1250_full_pressure_flat_store_words(bool append_endpgm = true) {
   constexpr auto store =
@@ -1749,10 +1776,7 @@ make_gfx1250_full_pressure_flat_store_words(bool append_endpgm = true) {
   };
   for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
     words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
-  for (uint16_t vgpr = 0; vgpr < REGISTER_SET_MAX_VGPRS; ++vgpr) {
-    words.push_back(
-        build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_GFX1250));
-  }
+  append_gfx1250_full_vgpr_pressure(words);
   if (append_endpgm)
     words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
   return words;
@@ -1772,8 +1796,7 @@ make_rdna4_full_pressure_flat_store_words(bool keep_all_sgprs_live = true) {
     for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
       words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
   }
-  for (uint16_t vgpr = 0; vgpr < REGISTER_SET_MAX_VGPRS; ++vgpr)
-    words.push_back(build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_RDNA4));
+  append_rdna4_full_vgpr_pressure(words);
   words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
   return words;
 }
@@ -6425,10 +6448,7 @@ TEST(ConSan, Gfx1250SharedLdsAutoScratchUsesAllOwnersAndGrowsEveryDescriptor) {
 [[nodiscard]] std::vector<uint32_t> make_gfx1250_full_pressure_lds_load_words() {
   constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> words = {load[0], load[1]};
-  for (uint16_t vgpr = 0; vgpr < REGISTER_SET_MAX_VGPRS; ++vgpr) {
-    words.push_back(
-        build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_GFX1250));
-  }
+  append_gfx1250_full_vgpr_pressure(words);
   return words;
 }
 
@@ -6439,10 +6459,7 @@ make_gfx1250_two_full_pressure_lds_loads(uint32_t private_bytes) {
       gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 18, .vdst = 16});
   std::vector<uint32_t> words(first_load.begin(), first_load.end());
   words.insert(words.end(), second_load.begin(), second_load.end());
-  for (uint16_t vgpr = 0; vgpr < REGISTER_SET_MAX_VGPRS; ++vgpr) {
-    words.push_back(
-        build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_GFX1250));
-  }
+  append_gfx1250_full_vgpr_pressure(words);
   words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
   std::vector<uint8_t> bytes = make_gfx1250_code_object(words, "two_selected_spill_layouts");
   if (private_bytes == 0u)
@@ -6543,10 +6560,7 @@ TEST(ConSan, Gfx1250OverlappingSharedLdsSpillsAccumulateEveryOwnerRequirement) {
   constexpr auto load_bc = gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 18, .vdst = 16});
   const auto make_full_pressure_helper = [](const auto &load) {
     std::vector<uint32_t> words(load.begin(), load.end());
-    for (uint16_t vgpr = 0; vgpr < REGISTER_SET_MAX_VGPRS; ++vgpr) {
-      words.push_back(
-          build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_GFX1250));
-    }
+    append_gfx1250_full_vgpr_pressure(words);
     return words;
   };
   const std::vector<uint32_t> helper_ab = make_full_pressure_helper(load_ab);
@@ -6831,12 +6845,7 @@ TEST(ConSan, Gfx1250RejectedLdsSpillCandidateDoesNotGrowSelectedLayout) {
       rejected_load[0],
       rejected_load[1],
   };
-  const auto append_full_pressure = [&] {
-    for (uint16_t vgpr = 0; vgpr < REGISTER_SET_MAX_VGPRS; ++vgpr) {
-      text_words.push_back(
-          build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_GFX1250));
-    }
-  };
+  const auto append_full_pressure = [&] { append_gfx1250_full_vgpr_pressure(text_words); };
   const uint64_t selected_anchor = text_words.size() * sizeof(uint32_t);
   text_words.insert(text_words.end(), selected_load.begin(), selected_load.end());
   append_full_pressure();

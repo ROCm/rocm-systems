@@ -21,11 +21,13 @@ SCmpEqI32Sopc::SCmpEqI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_eq_i32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpEqI32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -34,6 +36,7 @@ SCmpEqI32Sopc::SCmpEqI32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -45,11 +48,13 @@ SCmpLgI32Sopc::SCmpLgI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lg_i32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpLgI32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -58,6 +63,7 @@ SCmpLgI32Sopc::SCmpLgI32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -69,11 +75,13 @@ SCmpGtI32Sopc::SCmpGtI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_gt_i32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpGtI32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -82,6 +90,7 @@ SCmpGtI32Sopc::SCmpGtI32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -93,11 +102,13 @@ SCmpGeI32Sopc::SCmpGeI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_ge_i32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpGeI32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -106,6 +117,7 @@ SCmpGeI32Sopc::SCmpGeI32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -117,11 +129,13 @@ SCmpLtI32Sopc::SCmpLtI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lt_i32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpLtI32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -130,6 +144,7 @@ SCmpLtI32Sopc::SCmpLtI32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -141,11 +156,13 @@ SCmpLeI32Sopc::SCmpLeI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_le_i32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpLeI32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -154,6 +171,7 @@ SCmpLeI32Sopc::SCmpLeI32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -165,11 +183,13 @@ SCmpEqU32Sopc::SCmpEqU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_eq_u32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpEqU32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -178,6 +198,7 @@ SCmpEqU32Sopc::SCmpEqU32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -189,11 +210,13 @@ SCmpLgU32Sopc::SCmpLgU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lg_u32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpLgU32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -202,6 +225,7 @@ SCmpLgU32Sopc::SCmpLgU32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -213,11 +237,13 @@ SCmpGtU32Sopc::SCmpGtU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_gt_u32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpGtU32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -226,6 +252,7 @@ SCmpGtU32Sopc::SCmpGtU32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -237,11 +264,13 @@ SCmpGeU32Sopc::SCmpGeU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_ge_u32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpGeU32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -250,6 +279,7 @@ SCmpGeU32Sopc::SCmpGeU32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -261,11 +291,13 @@ SCmpLtU32Sopc::SCmpLtU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lt_u32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpLtU32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -274,6 +306,7 @@ SCmpLtU32Sopc::SCmpLtU32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -285,11 +318,13 @@ SCmpLeU32Sopc::SCmpLeU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_le_u32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpLeU32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -298,6 +333,7 @@ SCmpLeU32Sopc::SCmpLeU32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -309,11 +345,13 @@ SBitcmp0B32Sopc::SBitcmp0B32Sopc(const MachineInst *inst)
     : Sopc("s_bitcmp0_b32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SBitcmp0B32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -322,6 +360,7 @@ SBitcmp0B32Sopc::SBitcmp0B32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -333,11 +372,13 @@ SBitcmp1B32Sopc::SBitcmp1B32Sopc(const MachineInst *inst)
     : Sopc("s_bitcmp1_b32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SBitcmp1B32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -346,6 +387,7 @@ SBitcmp1B32Sopc::SBitcmp1B32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -357,11 +399,13 @@ SBitcmp0B64Sopc::SBitcmp0B64Sopc(const MachineInst *inst)
     : Sopc("s_bitcmp0_b64", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SBitcmp0B64Sopc>()),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -370,6 +414,7 @@ SBitcmp0B64Sopc::SBitcmp0B64Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -381,11 +426,13 @@ SBitcmp1B64Sopc::SBitcmp1B64Sopc(const MachineInst *inst)
     : Sopc("s_bitcmp1_b64", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SBitcmp1B64Sopc>()),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -394,6 +441,7 @@ SBitcmp1B64Sopc::SBitcmp1B64Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -405,11 +453,13 @@ SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)
     : Sopc("s_cmp_eq_u64", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpEqU64Sopc>()),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -418,6 +468,7 @@ SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -429,11 +480,13 @@ SCmpLgU64Sopc::SCmpLgU64Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lg_u64", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpLgU64Sopc>()),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -442,6 +495,7 @@ SCmpLgU64Sopc::SCmpLgU64Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -453,11 +507,13 @@ SCmpLtF32Sopc::SCmpLtF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lt_f32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpLtF32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -466,6 +522,7 @@ SCmpLtF32Sopc::SCmpLtF32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -477,11 +534,13 @@ SCmpLtF16Sopc::SCmpLtF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lt_f16", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpLtF16Sopc>()),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -492,6 +551,7 @@ SCmpLtF16Sopc::SCmpLtF16Sopc(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -503,11 +563,13 @@ SCmpEqF32Sopc::SCmpEqF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_eq_f32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpEqF32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -516,6 +578,7 @@ SCmpEqF32Sopc::SCmpEqF32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -527,11 +590,13 @@ SCmpEqF16Sopc::SCmpEqF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_eq_f16", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpEqF16Sopc>()),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -542,6 +607,7 @@ SCmpEqF16Sopc::SCmpEqF16Sopc(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -553,11 +619,13 @@ SCmpLeF32Sopc::SCmpLeF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_le_f32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpLeF32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -566,6 +634,7 @@ SCmpLeF32Sopc::SCmpLeF32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -577,11 +646,13 @@ SCmpLeF16Sopc::SCmpLeF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_le_f16", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpLeF16Sopc>()),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -592,6 +663,7 @@ SCmpLeF16Sopc::SCmpLeF16Sopc(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -603,11 +675,13 @@ SCmpGtF32Sopc::SCmpGtF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_gt_f32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpGtF32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -616,6 +690,7 @@ SCmpGtF32Sopc::SCmpGtF32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -627,11 +702,13 @@ SCmpGtF16Sopc::SCmpGtF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_gt_f16", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpGtF16Sopc>()),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -642,6 +719,7 @@ SCmpGtF16Sopc::SCmpGtF16Sopc(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -653,11 +731,13 @@ SCmpLgF32Sopc::SCmpLgF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lg_f32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpLgF32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -666,6 +746,7 @@ SCmpLgF32Sopc::SCmpLgF32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -677,11 +758,13 @@ SCmpLgF16Sopc::SCmpLgF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lg_f16", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpLgF16Sopc>()),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -692,6 +775,7 @@ SCmpLgF16Sopc::SCmpLgF16Sopc(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -703,11 +787,13 @@ SCmpGeF32Sopc::SCmpGeF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_ge_f32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpGeF32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -716,6 +802,7 @@ SCmpGeF32Sopc::SCmpGeF32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -727,11 +814,13 @@ SCmpGeF16Sopc::SCmpGeF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_ge_f16", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpGeF16Sopc>()),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -742,6 +831,7 @@ SCmpGeF16Sopc::SCmpGeF16Sopc(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -752,11 +842,13 @@ void SCmpGeF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
 SCmpOF32Sopc::SCmpOF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_o_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SCmpOF32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -765,6 +857,7 @@ SCmpOF32Sopc::SCmpOF32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -775,11 +868,13 @@ void SCmpOF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
 SCmpOF16Sopc::SCmpOF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_o_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SCmpOF16Sopc>()),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -790,6 +885,7 @@ SCmpOF16Sopc::SCmpOF16Sopc(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -800,11 +896,13 @@ void SCmpOF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
 SCmpUF32Sopc::SCmpUF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_u_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SCmpUF32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -813,6 +911,7 @@ SCmpUF32Sopc::SCmpUF32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -823,11 +922,13 @@ void SCmpUF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
 SCmpUF16Sopc::SCmpUF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_u_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SCmpUF16Sopc>()),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -838,6 +939,7 @@ SCmpUF16Sopc::SCmpUF16Sopc(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -849,11 +951,13 @@ SCmpNgeF32Sopc::SCmpNgeF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_nge_f32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpNgeF32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -862,6 +966,7 @@ SCmpNgeF32Sopc::SCmpNgeF32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -873,11 +978,13 @@ SCmpNgeF16Sopc::SCmpNgeF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_nge_f16", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpNgeF16Sopc>()),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -888,6 +995,7 @@ SCmpNgeF16Sopc::SCmpNgeF16Sopc(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -899,11 +1007,13 @@ SCmpNlgF32Sopc::SCmpNlgF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_nlg_f32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpNlgF32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -912,6 +1022,7 @@ SCmpNlgF32Sopc::SCmpNlgF32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -923,11 +1034,13 @@ SCmpNlgF16Sopc::SCmpNlgF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_nlg_f16", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpNlgF16Sopc>()),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -938,6 +1051,7 @@ SCmpNlgF16Sopc::SCmpNlgF16Sopc(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -949,11 +1063,13 @@ SCmpNgtF32Sopc::SCmpNgtF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_ngt_f32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpNgtF32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -962,6 +1078,7 @@ SCmpNgtF32Sopc::SCmpNgtF32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -973,11 +1090,13 @@ SCmpNgtF16Sopc::SCmpNgtF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_ngt_f16", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpNgtF16Sopc>()),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -988,6 +1107,7 @@ SCmpNgtF16Sopc::SCmpNgtF16Sopc(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -999,11 +1119,13 @@ SCmpNleF32Sopc::SCmpNleF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_nle_f32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpNleF32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1012,6 +1134,7 @@ SCmpNleF32Sopc::SCmpNleF32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1023,11 +1146,13 @@ SCmpNleF16Sopc::SCmpNleF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_nle_f16", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpNleF16Sopc>()),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -1038,6 +1163,7 @@ SCmpNleF16Sopc::SCmpNleF16Sopc(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1049,11 +1175,13 @@ SCmpNeqF32Sopc::SCmpNeqF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_neq_f32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpNeqF32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1062,6 +1190,7 @@ SCmpNeqF32Sopc::SCmpNeqF32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1073,11 +1202,13 @@ SCmpNeqF16Sopc::SCmpNeqF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_neq_f16", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpNeqF16Sopc>()),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -1088,6 +1219,7 @@ SCmpNeqF16Sopc::SCmpNeqF16Sopc(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1099,11 +1231,13 @@ SCmpNltF32Sopc::SCmpNltF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_nlt_f32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpNltF32Sopc>()),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1112,6 +1246,7 @@ SCmpNltF32Sopc::SCmpNltF32Sopc(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1123,11 +1258,13 @@ SCmpNltF16Sopc::SCmpNltF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_nlt_f16", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmpNltF16Sopc>()),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[0] = &scc;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -1138,6 +1275,7 @@ SCmpNltF16Sopc::SCmpNltF16Sopc(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  scc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 

@@ -28,7 +28,7 @@ real hardware. Supports three execution strategies:
 | RDNA3.5&trade; | gfx1150 | GFX11 | Experimental | Experimental | Planned |
 | RDNA4&trade; | gfx1200 | GFX12 | Experimental | Experimental | Planned |
 | gfx1250      | gfx1250 | GFX12 | Experimental | Experimental | Planned |
-| RISC-V | RV32IMAFDC | RV | Experimental | &mdash; | &mdash; |
+| RISC-V | RV64I | RV | Experimental | &mdash; | &mdash; |
 
 <!-- \NPI new GPU: add a row to the supported-architectures table above. -->
 
@@ -89,6 +89,20 @@ rocjitsu --daemon --config configs/gfx950_cdna4_kmd.json -- ./my_hip_app
 
 See [docs/rocjitsu-cli.md](docs/rocjitsu-cli.md) for all CLI modes.
 
+## VGPR observation contract
+
+Execution plugins observe architectural instruction-level VGPR reads and
+writes. Callback lane and byte masks describe the architectural register
+effect, including masked and sub-dword operations. Internal storage operations
+used to preserve unaffected register state are not reported as additional
+instruction effects.
+
+Asynchronous memory operations use a separate lifecycle. The race detector
+records register dependencies when the operation is issued. Later completion
+updates register storage without reporting the same instruction effect again.
+See
+[docs/plugins.md](docs/plugins.md) for the plugin contract.
+
 ## Running PyTorch
 
 ```bash
@@ -122,6 +136,7 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | [DBI Design](docs/dbi-design.md) | Binary instrumentation (in progress) |
 | [AMDGPU Register Spilling](docs/spilling.md) | Reusable DBI private-layout and VGPR save/restore backend |
 | [Codegen](docs/codegen.md) | ISA codegen pipeline and regen commands |
+| [ISA Target Providers](docs/isa-target-providers.md) | Static target registration and per-component subsets |
 
 ### Reference
 

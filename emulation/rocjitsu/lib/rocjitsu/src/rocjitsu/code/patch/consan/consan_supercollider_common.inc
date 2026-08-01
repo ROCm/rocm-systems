@@ -480,7 +480,7 @@ constexpr uint16_t kRdna4ExecHi = 127u;
   }
   const int64_t delta =
       static_cast<int64_t>(target_text_offset) - static_cast<int64_t>(pc_after_getpc);
-  if (!append_pc_delta_builder(words, arch, pc_sgpr, delta))
+  if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u))
     return false;
   const auto restore_scc =
       instrumentation::build_s_cmp_lg_u32(saved_scc_sgpr, scalar_positive_inline_u32(0), arch);
@@ -508,7 +508,7 @@ append_lds_check_trap_indirect_return(std::vector<uint32_t> &words, uint64_t wor
   }
   const int64_t delta =
       static_cast<int64_t>(target_text_offset) - static_cast<int64_t>(pc_after_getpc);
-  if (!append_pc_delta_builder(words, arch, pc_sgpr, delta))
+  if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u))
     return false;
   const auto restore_scc =
       instrumentation::build_s_cmp_lg_u32(captured_scc_sgpr, scalar_positive_inline_u32(0), arch);

@@ -9,8 +9,10 @@ rj_add_object_library(rocjitsu_code
     file_io.cpp
     kernel_symbol.cpp
     major_image_ownership.cpp
+    relocation_function_table.cpp
     rj_code.cpp
     dbt/binary_translator.cpp
+    dbt/legalization/gfx1250_b0_to_a0.cpp
     dbt/rj_code_translate.cpp
     dbt/hazard_tracker.cpp
     dbt/kernel_descriptor_translator.cpp
@@ -23,6 +25,8 @@ rj_add_object_library(rocjitsu_code
     dbt/semantic/cdna4_to_rdna_common.cpp
     dbt/semantic/cdna4_to_rdna3.cpp
     dbt/semantic/cdna4_to_rdna4.cpp
+    dbt/semantic/gfx1250_b0_to_a0.cpp
+    dbt/semantic/gfx1250_flat_scratch_base.cpp
     dbt/semantic_translator.cpp
     dbt/semantic_scratch.cpp
     dbt/virtual_lds.cpp

@@ -3325,13 +3325,6 @@ private:
       du.has_exec_masked_vector_def = true;
   }
 
-  [[nodiscard]] static bool is_vop3_carry_out(std::string_view mnemonic) {
-    return mnemonic == "v_add_co_u32" || mnemonic == "v_add_co_ci_u32" ||
-           mnemonic == "v_sub_co_u32" || mnemonic == "v_sub_co_ci_u32" ||
-           mnemonic == "v_subrev_co_u32" || mnemonic == "v_subrev_co_ci_u32" ||
-           mnemonic == "v_mad_co_u64_u32" || mnemonic == "v_mad_co_i64_i32";
-  }
-
   [[nodiscard]] static bool is_vop3_carry_in(std::string_view mnemonic) {
     return mnemonic == "v_add_co_ci_u32" || mnemonic == "v_sub_co_ci_u32" ||
            mnemonic == "v_subrev_co_ci_u32";
@@ -3342,35 +3335,7 @@ private:
                                                          const VgprMsbState &state,
                                                          rj_code_arch_t arch,
                                                          uint32_t wavefront_size) {
-    // LLVM models VOPC's i1 destination as SReg_1, whose physical width is
-    // selected by wave mode: one SGPR for Wave32 and an SGPR pair for Wave64.
-    // Generated operands may retain either a fixed target width or the maximum
-    // encoding width, so normalize the physical def to the kernel's wave mode.
-    if (operand_index == 0 && starts_with(inst.mnemonic(), "v_cmp")) {
-      if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::SGPR) {
-        ref->width = wavefront_size == 32 ? 1 : 2;
-        add_def(du, *ref, op, state, arch);
-        return true;
-      }
-    }
-
-    // VOP3 integer carry instructions use LLVM's wave-sized BoolRC for their
-    // scalar carry-out. Generated operands retain the maximum two-SGPR width,
-    // which would spuriously clobber the adjacent SGPR in Wave32 kernels.
-    if (operand_index == 1 && is_vop3_carry_out(inst.mnemonic())) {
-      if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::SGPR) {
-        ref->width = wavefront_size == 32 ? 1 : 2;
-        add_def(du, *ref, op, state, arch);
-        return true;
-      }
-    }
-
-    // V_DIV_SCALE's scalar destination is a wave mask. The encoded/disassembled
-    // operand is an SGPR pair, but Wave32 kernels only define its low half.
-    if (wavefront_size != 32 || operand_index != 1 || !starts_with(inst.mnemonic(), "v_div_scale_"))
-      return false;
-    if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::SGPR && ref->width == 2) {
-      ref->width = 1;
+    if (auto ref = wave_mode_destination_ref(inst, op, operand_index, wavefront_size)) {
       add_def(du, *ref, op, state, arch);
       return true;
     }

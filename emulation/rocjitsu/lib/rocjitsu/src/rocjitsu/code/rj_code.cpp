@@ -4,64 +4,34 @@
 #include "rocjitsu/code/rj_code_internal.h"
 
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <cstring>
+#include <unordered_map>
 
 using namespace rocjitsu;
 
 namespace {
 
-/*
- * \NPI a new ISA family needs a Decoder cache below. New targets that use an \
- * existing family require only the exhaustive rj_code_arch_for_target() map.
- */
 Decoder *create_decoder_for_target(rj_code_target_id_t target) {
-  static thread_local std::unique_ptr<Decoder> cdna2_decoder;
-  static thread_local std::unique_ptr<Decoder> cdna3_decoder;
-  static thread_local std::unique_ptr<Decoder> cdna4_decoder;
-  static thread_local std::unique_ptr<Decoder> rdna3_decoder;
-  static thread_local std::unique_ptr<Decoder> rdna3_5_decoder;
-  static thread_local std::unique_ptr<Decoder> rdna4_decoder;
-  static thread_local std::unique_ptr<Decoder> gfx1250_decoder;
+  const IsaTargetRegistry &registry = default_isa_target_registry();
+  const IsaTargetDescriptor *descriptor = registry.find(target);
+  if (descriptor == nullptr)
+    return nullptr;
 
-  switch (rj_code_arch_for_target(target)) {
-  case ROCJITSU_CODE_ARCH_CDNA2:
-    if (!cdna2_decoder)
-      cdna2_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
-    return cdna2_decoder.get();
-  case ROCJITSU_CODE_ARCH_CDNA3:
-    if (!cdna3_decoder)
-      cdna3_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
-    return cdna3_decoder.get();
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    if (!cdna4_decoder)
-      cdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
-    return cdna4_decoder.get();
-  case ROCJITSU_CODE_ARCH_RDNA3:
-    if (!rdna3_decoder)
-      rdna3_decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
-    return rdna3_decoder.get();
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-    if (!rdna3_5_decoder)
-      rdna3_5_decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
-    return rdna3_5_decoder.get();
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    if (!rdna4_decoder)
-      rdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
-    return rdna4_decoder.get();
-  case ROCJITSU_CODE_ARCH_GFX1250:
-    if (!gfx1250_decoder)
-      gfx1250_decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
-    return gfx1250_decoder.get();
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RV32I:
-  case ROCJITSU_CODE_ARCH_RV64I:
-  case ROCJITSU_CODE_ARCH_INVALID:
-    break;
-  }
-  return nullptr;
+  static thread_local std::unordered_map<const IsaTargetDescriptor *, std::unique_ptr<Decoder>>
+      decoders;
+  std::unique_ptr<Decoder> &decoder = decoders[descriptor];
+  if (!decoder)
+    decoder = descriptor->decoder_factory();
+  return decoder.get();
+}
+
+rj_code_arch_t arch_for_target(rj_code_target_id_t target) {
+  const IsaTargetDescriptor *descriptor = default_isa_target_registry().find(target);
+  if (descriptor == nullptr)
+    return ROCJITSU_CODE_ARCH_INVALID;
+  return descriptor->architecture_id;
 }
 
 } // namespace
@@ -117,6 +87,8 @@ rj_status_t rj_code_executable_get_code_object(const rj_code_executable_t *exec,
 
   *obj = new rj_code_object_t{};
   (*obj)->co = co;
+  (*obj)->parent_exec = const_cast<rj_code_executable_t *>(exec);
+  (*obj)->parent_exec->retain();
   (*obj)->retain();
   return ROCJITSU_STATUS_SUCCESS;
 }
@@ -200,7 +172,7 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
   if (!decoder)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  const rj_code_arch_t arch = rj_code_arch_for_target(target_id);
+  const rj_code_arch_t arch = arch_for_target(target_id);
   if (arch == ROCJITSU_CODE_ARCH_INVALID)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
@@ -243,6 +215,8 @@ rj_status_t rj_code_basic_block_list_get(const rj_code_basic_block_list_t *list,
 
   *block = new rj_code_basic_block_t{};
   (*block)->block = list->blocks[index].get();
+  (*block)->parent_list = const_cast<rj_code_basic_block_list_t *>(list);
+  (*block)->parent_list->retain();
   (*block)->retain();
   return ROCJITSU_STATUS_SUCCESS;
 }

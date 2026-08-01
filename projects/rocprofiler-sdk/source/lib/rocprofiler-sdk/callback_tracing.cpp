@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
+#include "lib/rocprofiler-sdk/hipfile/hipfile.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
@@ -43,6 +44,7 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip/table_id.h>
+#include <rocprofiler-sdk/hipfile/table_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
 #include <rocprofiler-sdk/marker/table_id.h>
 #include <rocprofiler-sdk/rccl/table_id.h>
@@ -101,6 +103,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_STREAM)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MARKER_CORE_RANGE_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_GRAPH)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCSHMEM_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIPFILE_API)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -316,6 +319,11 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
             val = rocprofiler::rocshmem::name_by_id<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>(operation);
             break;
         }
+        case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
+        {
+            val = rocprofiler::hipfile::name_by_id<ROCPROFILER_HIPFILE_TABLE_ID_CORE>(operation);
+            break;
+        }
     }
 
     if(!val)
@@ -475,6 +483,11 @@ rocprofiler_iterate_callback_tracing_kind_operations(
             ops = rocprofiler::rocshmem::get_ids<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>();
             break;
         }
+        case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
+        {
+            ops = rocprofiler::hipfile::get_ids<ROCPROFILER_HIPFILE_TABLE_ID_CORE>();
+            break;
+        }
     }
 
     for(const auto& itr : ops)
@@ -628,6 +641,16 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
                 record.operation,
                 static_cast<rocprofiler_callback_tracing_rocshmem_api_data_t*>(record.payload)
                     ->args,
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
+        {
+            rocprofiler::hipfile::iterate_args<ROCPROFILER_HIPFILE_TABLE_ID_CORE>(
+                record.operation,
+                static_cast<rocprofiler_callback_tracing_hipfile_api_data_t*>(record.payload)->args,
                 callback,
                 max_deref,
                 user_data);

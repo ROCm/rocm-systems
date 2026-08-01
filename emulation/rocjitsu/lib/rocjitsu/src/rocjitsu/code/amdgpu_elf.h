@@ -185,6 +185,12 @@ inline constexpr uint32_t SHT_NOBITS = 8; // ELF spec: section occupies no file 
 inline constexpr uint32_t SHT_REL = 9;
 inline constexpr uint32_t SHT_DYNSYM = 11;
 
+// AMDGPU ELF relocation types used by linked code-object function tables.
+// Keep the numeric values local to the ELF layer so DBT does not depend on
+// LLVM's ELF headers merely to inspect loader relocations.
+inline constexpr uint32_t R_AMDGPU_ABS64 = 3;
+inline constexpr uint32_t R_AMDGPU_RELATIVE64 = 13;
+
 inline constexpr uint8_t kElfSymbolBindGlobal = 1;
 inline constexpr uint8_t kElfSymbolTypeNone = 0;    // STT_NOTYPE
 inline constexpr uint8_t kElfSymbolTypeObject = 1;  // STT_OBJECT
@@ -204,11 +210,9 @@ inline constexpr uint32_t elf_reloc_type(uint64_t info) {
   return static_cast<uint32_t>(info & 0xffffffffu);
 }
 
-// AMDGPU relocation types (subset), values per the AMDGPU ELF ABI.
 // R_AMDGPU_RELATIVE64 uses symbol index 0 and forms its value from the load bias
 // plus r_addend, so its addend can name an in-.text virtual address with no
 // owning symbol.
-inline constexpr uint32_t R_AMDGPU_RELATIVE64 = 13;
 
 inline constexpr uint64_t SHF_WRITE = 1u << 0;
 inline constexpr uint64_t SHF_ALLOC = 1u << 1;

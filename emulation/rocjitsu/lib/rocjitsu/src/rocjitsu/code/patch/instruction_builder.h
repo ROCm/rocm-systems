@@ -607,6 +607,8 @@ inline constexpr uint64_t kSoppBranchMaximumBackwardReachBytes =
     return rdna3_5::kSCallB64Sopk;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::kSCallB64Sopk;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::kSCallI64Sopk;
   default:
     throw util::UnimplementedInst("s_call_b64 for target architecture");
   }
@@ -807,7 +809,8 @@ inline constexpr uint64_t kSoppBranchMaximumBackwardReachBytes =
 /// relocated target. Static PC recovery only records address-builder ranges that
 /// have enough instruction words for this replacement to be written in place.
 [[nodiscard]] bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch,
-                                           uint16_t pc_sreg, int64_t delta);
+                                           uint16_t pc_sreg, int64_t delta,
+                                           size_t minimum_words = 0);
 
 /// @brief Encode an s_nop instruction for the given target ISA.
 ///
@@ -829,9 +832,7 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 
 /// @brief Encode an s_trap instruction for the given target ISA.
 ///
-/// @details The immediate is a trap code, not a printable message. Runtime DBT
-/// uses a rocjitsu-specific value for skipped-kernel stubs so a surfaced trap
-/// code can be distinguished from guest code traps.
+/// @details The immediate is a caller-defined trap code, not a printable message.
 [[nodiscard]] inline constexpr uint32_t build_s_trap(rj_code_arch_t arch, uint16_t simm16 = 0) {
   return build_sopp_encoding(arch, sopp_op_trap(arch), simm16);
 }

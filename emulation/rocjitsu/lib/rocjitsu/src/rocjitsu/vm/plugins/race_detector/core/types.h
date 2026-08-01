@@ -36,7 +36,11 @@ struct WaveSize {
 /// retirement. Strongly typed to prevent accidental mixing with wave IDs,
 /// register indices, or byte addresses.
 struct EventId {
-  int value;
+  static constexpr int kInvalidValue = -1;
+
+  int value = kInvalidValue;
+
+  bool isValid() const { return value != kInvalidValue; }
   bool operator==(EventId o) const { return value == o.value; }
   bool operator!=(EventId o) const { return value != o.value; }
   bool operator<(EventId o) const { return value < o.value; }
@@ -67,7 +71,14 @@ struct RaceViolation {
   int lane;     ///< Lane within the wave, or -1 for scalar.
   bool isWrite; ///< True if the violating access was a write.
   Dim3d workgroupId;
-  EventId conflictEvent{-1}; ///< Exact conflicting event when already known.
+  EventId conflictingEvent; ///< Exact pending memory event that caused the violation.
+  EventId conflictEvent;    ///< Compatibility alias for the exact conflicting event.
+
+  RaceViolation(Space space, int index, int wave, int lane, bool isWrite, Dim3d workgroupId,
+                EventId conflictingEvent)
+      : space(space), index(index), wave(wave), lane(lane), isWrite(isWrite),
+        workgroupId(workgroupId), conflictingEvent(conflictingEvent),
+        conflictEvent(conflictingEvent) {}
 };
 
 /// Pending memory event data dispatched to WaveRaceState by the plugin adapter.

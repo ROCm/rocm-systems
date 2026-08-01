@@ -1237,12 +1237,15 @@ BufferLoadLdsU8Mubuf::BufferLoadLdsU8Mubuf(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+              reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1258,12 +1261,15 @@ BufferLoadLdsI8Mubuf::BufferLoadLdsI8Mubuf(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+              reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1279,12 +1285,15 @@ BufferLoadLdsU16Mubuf::BufferLoadLdsU16Mubuf(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+              reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1300,12 +1309,15 @@ BufferLoadLdsI16Mubuf::BufferLoadLdsI16Mubuf(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+              reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1321,12 +1333,15 @@ BufferLoadLdsB32Mubuf::BufferLoadLdsB32Mubuf(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+              reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1342,12 +1357,15 @@ BufferLoadLdsFormatXMubuf::BufferLoadLdsFormatXMubuf(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       soffset(32, OperandType::OPR_SREG_M0_INL,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+              reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 0;
+  m0.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
