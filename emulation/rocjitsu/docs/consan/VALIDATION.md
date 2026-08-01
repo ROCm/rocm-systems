@@ -451,25 +451,26 @@ the hook, workload inputs, source identities, and manifest match byte for byte;
 drift fails instead of silently relabeling existing results.
 
 Coverage-output rows have an additional retained-artifact gate. Collection
-automatically writes each process log and its original/transformed code-object
+automatically writes each process log and its original/patched code-object
 dumps below the row, records their sizes and SHA-256 hashes, and references the
-shared workload provenance with a relative path. Before `accepted` can be true,
-the gate reparses every command log, reproduces the coverage and diagnostic
-decision, checks the hook identity and source revisions against workload
-provenance, and verifies that the contracted diagnostic reader has a
-fingerprint-matched original/transformed dump pair. Missing files, redirected
-storage outside the workload artifact tree, stale hashes, or a non-relocatable
-provenance reference reject the row. The pre-artifact runtime decision remains
-available as `coverage_acceptance`; the final `accepted` value also requires
-`artifact_verification.accepted`.
+shared workload provenance through the relative
+`retained_artifacts.workload_provenance.path` record. The top-level
+`provenance` value remains the absolute execution-time path for compatibility;
+the verifier uses the retained relative record so the workload artifact tree
+can be relocated. Before `accepted` can be true, the gate reparses every command
+log using the contract from the retained executable manifest, reproduces the
+coverage and diagnostic decision, checks the hook identity and source revisions
+against workload provenance, and verifies that the contracted diagnostic reader
+has a fingerprint-matched original/patched dump pair. Missing files, redirected
+storage outside the workload artifact tree, stale hashes, incomplete dump pairs,
+or a malformed retained contract reject the row. The pre-artifact runtime
+decision remains available as `coverage_acceptance`; the final `accepted` value
+also requires `artifact_verification.accepted`.
 
-For every diagnostic instruction, collection disassembles the retained
-original object and stores the exported kernel symbol and mnemonic beside the
-raw offset and code-object fingerprint. That semantic identity lets a reviewer
-compare a regenerated object with the previously qualified structure while the
-exact fingerprint gate remains in force. The harness prefers the LLVM tools in
-`/home/jakub/llvm/main/build/bin`; set `CONSAN_VALIDATION_LLVM_BIN` to another
-directory containing `llvm-nm`, `llvm-objdump`, and `llvm-readelf` when needed.
+The gate deliberately retains raw code objects and diagnostic offsets without
+making disassembly tooling part of collection acceptance. Reviewers can perform
+target-aware instruction analysis from the retained originals without turning a
+missing or mismatched local LLVM installation into a qualification failure.
 
 Recheck a retained or relocated row without configuring a validation target or
 workspace:
