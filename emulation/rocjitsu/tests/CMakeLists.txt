@@ -409,6 +409,9 @@ rj_add_consan_cdna_hip_moi_sim_tests(
     RJ_CONSAN_GFX950_HIP_MOI_BUILD_DIR
     "${RJ_CONSAN_GFX950_HIP_MOI_BUILD_DIR}"
 )
+rj_add_consan_gfx1250_jakub_sim_test(
+    "${RJ_CONSAN_GFX1250_HIP_MOI_BUILD_DIR}"
+)
 
 # --- Unit / integration test suite ---
 

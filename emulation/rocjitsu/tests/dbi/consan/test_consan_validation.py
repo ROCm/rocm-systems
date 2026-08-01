@@ -2009,6 +2009,20 @@ class ConSanValidationTest(unittest.TestCase):
             d128_block_oracle = (
                 f"HipMoi{shape.suite}D128AttentionBlock." f"{shape.d128_block_oracle}"
             )
+            jakub_prefix = (
+                f"SafeFp16Packed/Jakub{shape.suite}MatmulReference."
+                "MatchesHostReference"
+            )
+            jakub_filters = (f"{jakub_prefix}/*",) * 3
+            if target == "gfx1250":
+                jakub_filters = (
+                    f"{jakub_prefix}/*",
+                    (
+                        f"{jakub_prefix}/CooperativeLdsK32:"
+                        f"{jakub_prefix}/DoubleBufferedLdsK128"
+                    ),
+                    f"{jakub_prefix}/ProducerSkewLdsK128",
+                )
             expected_filters = {
                 "d128-block": (
                     d128_block_clean,
@@ -2041,11 +2055,7 @@ class ConSanValidationTest(unittest.TestCase):
                     f"AcqRelBitmaskOrders{shape.matrix_operation}Partials",
                 )
                 * 3,
-                "jakub-attention": (
-                    f"SafeFp16Packed/Jakub{shape.suite}MatmulReference."
-                    "MatchesHostReference/*",
-                )
-                * 3,
+                "jakub-attention": jakub_filters,
             }
             with self.subTest(target=target), temporary_root() as workspace:
                 (workspace / "hip-moi").mkdir()
@@ -4063,6 +4073,41 @@ class ConSanValidationTest(unittest.TestCase):
             rdna_command[1],
             "--gtest_filter=HipMoiRdna4D128AttentionBlock.*",
         )
+
+    def test_gfx1250_jakub_barrier_drop_policy_uses_numeric_oracle(self) -> None:
+        path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
+        workload = validation.WORKLOAD_BY_ID["jakub-attention"]
+        fault = validation._load_fault(path, "gfx1250", workload, "barrier-drop")
+        expected_detectors = {
+            "supercollider": "not_detected",
+            "record-replay": "detected",
+            "sampled": "detected",
+            "inline-shadow": "detected",
+        }
+        for profile, detector in expected_detectors.items():
+            policy, trials = validation._fault_trials(fault, profile)
+            self.assertEqual(policy["detector"], detector)
+            self.assertEqual(policy["oracle"], "fail")
+            self.assertEqual(trials, [{}])
+        self.assertEqual(
+            fault["profiles"]["supercollider"]["tracking_issue"],
+            "bd-2sjm.1",
+        )
+        self.assertNotIn("tracking_issue", fault["profiles"]["sampled"])
+        sampled_environment = fault["profiles"]["sampled"]["environment"]
+        self.assertEqual(
+            sampled_environment["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"], "1"
+        )
+        self.assertEqual(
+            sampled_environment["RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET"], "0"
+        )
+
+        resolved = validation._resolved_workload("gfx1250", workload)
+        self.assertIn("ProducerSkewLdsK128", resolved.fault_filter)
+        self.assertNotIn("ProducerSkewLdsK128", resolved.overhead_filter)
+        self.assertIn("CooperativeLdsK32", resolved.overhead_filter)
+        self.assertIn("DoubleBufferedLdsK128", resolved.overhead_filter)
+        self.assertTrue(resolved.clean_filter.endswith("/*"))
 
     def test_overhead_uses_bracketing_baseline_mean_and_maximum_mode(self) -> None:
         results = [

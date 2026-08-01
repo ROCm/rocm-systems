@@ -1212,6 +1212,33 @@ def _single_oracle_override(
     }
 
 
+def _jakub_override(target: _NativeGtestTarget) -> dict[str, str]:
+    relative_path = _native_gtest_path(
+        target,
+        "jakub-matmul",
+        f"hip_moi_reference_{target.executable_family}_jakub_matmul",
+    )
+    oracle_prefix = (
+        f"SafeFp16Packed/Jakub{target.suite_family}MatmulReference."
+        "MatchesHostReference"
+    )
+    if target.id != "gfx1250":
+        return _single_oracle_override(relative_path, f"{oracle_prefix}/*")
+
+    # The producer-skew case is a schedule discriminator, not a timing row.
+    # Keep clean coverage broad, measure only ordinary variants, and mutate
+    # only the case whose exact oracle is designed to expose a missing handoff.
+    return {
+        "relative_path": relative_path,
+        "clean_filter": f"{oracle_prefix}/*",
+        "overhead_filter": (
+            f"{oracle_prefix}/CooperativeLdsK32:"
+            f"{oracle_prefix}/DoubleBufferedLdsK128"
+        ),
+        "fault_filter": f"{oracle_prefix}/ProducerSkewLdsK128",
+    }
+
+
 STREAMK_WORKLOAD_SHAPES = {
     "streamk-arrival": (
         "streamk_arrival_counter_test",
@@ -1303,14 +1330,7 @@ def _native_gtest_overrides(
             "ExactContextMatchesHostReference",
         ),
         **streamk,
-        "jakub-attention": _single_oracle_override(
-            _native_gtest_path(
-                target,
-                "jakub-matmul",
-                f"hip_moi_reference_{base}_jakub_matmul",
-            ),
-            f"SafeFp16Packed/Jakub{suite}MatmulReference." "MatchesHostReference/*",
-        ),
+        "jakub-attention": _jakub_override(target),
     }
 
 

@@ -9,6 +9,11 @@ set(RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR
     CACHE PATH
     "Exact hip-moi-build-gfx942-tests directory for simulator CTest coverage"
 )
+set(RJ_CONSAN_GFX1250_HIP_MOI_BUILD_DIR
+    ""
+    CACHE PATH
+    "Exact hip-moi-build-gfx1250-tests directory for simulator CTest coverage"
+)
 set(RJ_CONSAN_GFX950_HIP_MOI_BUILD_DIR
     ""
     CACHE PATH
@@ -70,6 +75,51 @@ function(rj_add_consan_unit_sources target)
             patch/consan_moi_adversarial_test.cpp
             patch/consan_moi_report_plan_test.cpp
     )
+endfunction()
+
+function(rj_add_consan_gfx1250_jakub_sim_test build_dir)
+    if(NOT build_dir)
+        return()
+    endif()
+    if(NOT IS_ABSOLUTE "${build_dir}")
+        message(
+            FATAL_ERROR
+            "RJ_CONSAN_GFX1250_HIP_MOI_BUILD_DIR must be absolute"
+        )
+    endif()
+    if(NOT IS_DIRECTORY "${build_dir}")
+        message(
+            FATAL_ERROR
+            "RJ_CONSAN_GFX1250_HIP_MOI_BUILD_DIR is not a directory: ${build_dir}"
+        )
+    endif()
+    get_filename_component(_build_dir_name "${build_dir}" NAME)
+    if(NOT _build_dir_name STREQUAL "hip-moi-build-gfx1250-tests")
+        message(
+            FATAL_ERROR
+            "RJ_CONSAN_GFX1250_HIP_MOI_BUILD_DIR must name hip-moi-build-gfx1250-tests"
+        )
+    endif()
+    get_filename_component(_workspace "${build_dir}" DIRECTORY)
+    set(_runner
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../dbi/consan/consan_gfx1250_jakub_fault_sim.py"
+    )
+    set(_test_name "ConSanGfx1250HipMoiSim.JakubProducerSkewBarrierDrop")
+    rj_add_test(
+        NAME "${_test_name}"
+        COMMAND
+            "${_runner}"
+            --workspace
+            "${_workspace}"
+            --rocjitsu
+            "$<TARGET_FILE:rocjitsu_bin>"
+            --config
+            "${CMAKE_SOURCE_DIR}/configs/gfx1250.json"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        TIMEOUT 75
+        LABELS consan gfx1250 hip-moi simulator fault
+    )
+    set_property(TEST "${_test_name}" PROPERTY RUN_SERIAL TRUE)
 endfunction()
 
 # Registers one HIP fixture case through a single typed path. Keeping command

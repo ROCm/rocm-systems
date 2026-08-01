@@ -245,35 +245,39 @@
           "family": "barrier-drop",
           "environment": {
             "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:157798994827a43c|function=_ZL20__work_group_barrierj|kind=barrier|pc=0x0000000000007e10|mnemonic=s_barrier_wait|occurrence=1",
-            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:157798994827a43c|function=_ZL20__work_group_barrierj|event=barrier|pc=0x0000000000007e0c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:157798994827a43c|function=_ZL20__work_group_barrierj|event=barrier|pc=0x0000000000007e10|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:71c39178e2c3786a|function=_ZL20__work_group_barrierj|kind=barrier|pc=0x0000000000007e10|mnemonic=s_barrier_wait|occurrence=1",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:71c39178e2c3786a|function=_ZL20__work_group_barrierj|event=barrier|pc=0x0000000000007e0c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:71c39178e2c3786a|function=_ZL20__work_group_barrierj|event=barrier|pc=0x0000000000007e10|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
           },
           "site_provenance": {
-            "corpus_commit": "f06db811069aaed3e4201d02ea432f1cba57d1d9",
+            "corpus_commit": "0fcd57def36188500a19abaf3b6bca3a6e773034",
             "executable": "hip_moi_reference_gfx1250_jakub_matmul",
-            "inventory_run": "gfx1250-jakub-native-reviewed-final2-inventory-20260801"
+            "inventory_run": "gfx1250-jakub-skew-volatile16k-inventory-20260801"
           },
           "profiles": {
             "supercollider": {
               "detector": "not_detected",
-              "oracle": "pass",
-              "tracking_issue": "bd-1w9.86"
+              "oracle": "fail",
+              "tracking_issue": "bd-2sjm.1"
             },
             "record-replay": {
               "detector": "detected",
-              "oracle": "pass",
+              "oracle": "fail",
               "environment": {
                 "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
               }
             },
             "sampled": {
-              "detector": "not_detected",
-              "oracle": "pass",
-              "tracking_issue": "bd-1w9.86"
+              "detector": "detected",
+              "oracle": "fail",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
+                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE": "1",
+                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "0"
+              }
             },
             "inline-shadow": {
               "detector": "detected",
-              "oracle": "pass",
+              "oracle": "fail",
               "environment": {
                 "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
               }

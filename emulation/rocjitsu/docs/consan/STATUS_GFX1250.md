@@ -55,7 +55,7 @@ preserve an earlier green claim.
 | **P4 hip-moi WMMA attention** | 🟩 Current paired 1.78x; 18/18 accesses | 🟩 At `fff5f3597b`: spot rerun exact in 7.81 seconds; 18/18 accesses and 4/4 barriers; paired 1.17x retained | 🟩 Current paired 1.15x; 18/18 accesses, 8/8 applicable barriers | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers |
 | **P4 hip-moi Stream-K arrival** | 🟩 Current paired 7.38x; 4/4 accesses | 🟩 Fresh clean run exact and complete at 4/4 accesses, 4/4 barriers, 10/10 atomics, and 16/16 fences; prior paired 2.41x retained | 🟩 Current paired 2.72x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.62x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
 | **P4 hip-moi tree atomic-OR** | 🟩 Current paired 6.55x; 4/4 accesses | 🟩 Fresh clean run exact and complete at 4/4 accesses, 4/4 barriers, 10/10 atomics, and 16/16 fences; prior paired 2.04x retained | 🟩 Current paired 2.57x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.19x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
-| **P4 Jakub cooperative matmul** | 🟩 Exact arithmetic oracle; clean 20/20 accesses; exact-one drop is schedule-masked and tracked by `bd-1w9.86`; paired 1.130x | 🟩 Exact arithmetic oracle; clean 20/20 accesses + 8/8 barriers; reviewed drop emits a diagnostic while the oracle is schedule-masked; paired 2.497x | 🟩 Exact arithmetic oracle; clean 20/20 accesses + 8/8 applicable barrier members; exact-one drop is schedule-masked and tracked by `bd-1w9.86`; paired 1.122x | 🟩 Exact arithmetic oracle; clean 20/20 accesses + 4/4 barriers; reviewed drop emits a diagnostic while the oracle is schedule-masked; paired 1.126x |
+| **P4 Jakub cooperative matmul** | 🟩 Three exact arithmetic oracles; clean 32/32 accesses; reviewed exact-one drop breaks the skewed oracle; paired 1.139x; detector gap tracked by `bd-2sjm.1` | 🟩 Three exact arithmetic oracles; clean 32/32 accesses + 8/8 barriers; reviewed drop emits a diagnostic and breaks the skewed oracle; paired 2.579x | 🟩 Three exact arithmetic oracles; clean 32/32 accesses + 8/8 applicable barrier members; stride-1/offset-0 fault qualification emits a diagnostic and breaks the skewed oracle; paired 1.174x | 🟩 Three exact arithmetic oracles; clean 32/32 accesses + 4/4 barriers; reviewed drop emits a diagnostic and breaks the skewed oracle; paired 1.145x |
 
 CLIP BF16 is intentionally omitted from the current acceptance matrix.  Its
 uninstrumented execution is not presently practical in the software GPU
@@ -67,28 +67,38 @@ until baseline execution becomes suitable for end-to-end validation.
 
 ### Target-native Jakub matmul
 
-hip-moi commits `6a25f44` and `f06db81` add and strengthen the missing
-`hip_moi_reference_gfx1250_jakub_matmul` executable. Its two parameterized
+hip-moi commits `6a25f44`, `f06db81`, and `0fcd57d` add and strengthen the
+`hip_moi_reference_gfx1250_jakub_matmul` executable. Its three parameterized
 cases use the gfx1250 wave32 16x16x32 FP16 WMMA layout, a cooperative cross-wave
 LDS producer/consumer handoff, and a real two-buffer K=128 ping-pong schedule.
 The logical-coordinate oracle independently checks arithmetic, contraction
 length, and accumulator placement; as documented in the source, it is invariant
 to a bijective shared A/B K-slot permutation. The mixed-architecture build gate
-pins this binary to gfx1250 rather than relabeling the RDNA4 executable.
+pins this binary to gfx1250 rather than relabeling the RDNA4 executable. The
+separate producer-skew case applies bounded volatile private-memory traffic
+before every B-fragment handoff, so the scheduling opportunity survives both
+unoptimized and optimized compilation. Safe barriers absorb the skew, while
+removing a handoff makes the exact oracle fail. This coupling is a workload
+schedule property: the kernel does not inspect sanitizer mode or runtime
+configuration. Ordinary K32/K128 cases remain separate for timing.
 
-`gfx1250-jakub-native-reviewed-final2-clean-20260801` is exact and
-static/dynamic-complete for all four profiles.
-`gfx1250-jakub-native-reviewed-final2-inventory-20260801` retains the current
-`fnv1a64:157798994827a43c` barrier inventory and records the source commit in
-the reviewed spec. The first barrier drop is schedule-masked by the workload
-oracle; Record/Replay and Inline Shadow diagnose it, while SuperCollider and
-Sampled retain qualified misses tracked by `bd-1w9.86`. These are not accepted
-no-ops: the gate requires one requested, planned, applied, and installed
-mutation plus healthy pre/post simulator probes. The exact committed spec hash
-is retained by `gfx1250-jakub-native-reviewed-final2-fault-20260801`, whose
-top-level summary also carries the launcher and site provenance.
-`gfx1250-jakub-native-reviewed-final-overhead-20260801` uses an 821.5 ms paired
-baseline.
+`gfx1250-jakub-skew-final-clean-20260801` is exact and
+static/dynamic-complete for all four profiles across all three cases.
+`gfx1250-jakub-skew-volatile16k-inventory-20260801` retains the current
+`fnv1a64:71c39178e2c3786a` barrier inventory and records hip-moi commit
+`0fcd57def36188500a19abaf3b6bca3a6e773034` in the reviewed spec.
+`gfx1250-jakub-skew-final-accepted-fault-20260801` accepts the same exact-one
+drop in all four profiles: every exact oracle fails, Record/Replay, Sampled,
+and Inline Shadow also diagnose the conflict, and SuperCollider retains the
+qualified detector miss tracked by `bd-2sjm.1`. Each row records one requested,
+planned, applied, and installed mutation plus healthy pre/post simulator
+probes; the slowest complete row took 21.10 seconds. The optional
+`ConSanGfx1250HipMoiSim.JakubProducerSkewBarrierDrop` CTest locks this execution
+contract to the supported simulator launcher.
+
+`gfx1250-jakub-skew-final-overhead-20260801` excludes the producer-skew case,
+uses an 800 ms paired baseline, and retains the per-profile slowdowns shown in
+the matrix. This keeps the schedule discriminator from diluting timing ratios.
 
 This row is the target-native cooperative LDS/WMMA qualification role, not an
 inherited instruction-site denominator. gfx1250 evidence comes only from the
