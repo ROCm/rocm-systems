@@ -2620,18 +2620,42 @@ class ConSanValidationTest(unittest.TestCase):
         )
 
     def test_coverage_output_result_references_workload_provenance(self) -> None:
-        workload = replace(
-            validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
-            coverage_output_contract=RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT,
-        )
-        log = complete_coverage_log(moi_auto_replay(7, 1, 0))
         with temporary_root() as root:
+            original_bytes = b"retained original code object"
+            original = root / "original.hsaco"
+            original.write_bytes(original_bytes)
+            fingerprint = validation._fnv1a64_file(original)
+            contract = replace(
+                RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT,
+                code_object_fingerprint=fingerprint,
+            )
+            workload = replace(
+                validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+                coverage_output_contract=contract,
+            )
+            log = complete_coverage_log(moi_auto_replay(7, 1, 0)).replace(
+                RETIRED_TOPK_CODE_OBJECT_FINGERPRINT, fingerprint
+            )
             artifact_root = root / "artifacts"
             provenance = validation._workload_provenance_path(artifact_root, workload)
             provenance.parent.mkdir(parents=True)
-            provenance.write_text("{}\n", encoding="utf-8")
             hook = root / "hook.so"
             hook.write_bytes(b"hook")
+            hook_sha = validation.sha256_file(hook)
+
+            def run_process(command, environment, log_path, timeout):
+                del command, timeout
+                log_path.write_text(log, encoding="utf-8")
+                dump = Path(environment["RJ_CONSAN_DUMP_DIR"])
+                (dump / "rj-dbi-000001-reader-7-original.hsaco").write_bytes(
+                    original_bytes
+                )
+                (dump / "rj-dbi-000001-reader-7-patched.hsaco").write_bytes(
+                    b"retained patched code object"
+                )
+                return 0, 0.1, log
+
+            source = {"root": str(root), "head": "a" * 40, "dirty": False}
             with (
                 mock.patch.object(validation, "_hook_path", return_value=hook),
                 mock.patch.object(
@@ -2640,10 +2664,20 @@ class ConSanValidationTest(unittest.TestCase):
                 mock.patch.object(
                     validation,
                     "_run_process",
-                    return_value=(0, 0.1, log),
+                    side_effect=run_process,
                 ),
-                mock.patch.object(validation, "_source_identities", return_value=[]),
+                mock.patch.object(
+                    validation,
+                    "_input_files",
+                    return_value={},
+                ),
+                mock.patch.object(
+                    validation, "_source_identities", return_value=[source]
+                ),
             ):
+                validation._write_provenance(
+                    root, "gfx1201", workload, provenance.parent
+                )
                 result = validation._run_profile(
                     root,
                     "gfx1201",
@@ -2663,10 +2697,61 @@ class ConSanValidationTest(unittest.TestCase):
                     / "result.json"
                 ).read_text(encoding="utf-8")
             )
+            result_path = (
+                artifact_root
+                / workload.id
+                / "coverage-output"
+                / "record-replay"
+                / "result.json"
+            )
+            initial_verification = validation.verify_coverage_output_result(result_path)
+            relocated_root = root / "relocated"
+            relocated_root.mkdir()
+            relocated_workload = relocated_root / workload.id
+            (artifact_root / workload.id).rename(relocated_workload)
+            relocated_result = (
+                relocated_workload / "coverage-output" / "record-replay" / "result.json"
+            )
+            relocated_verification = validation.verify_coverage_output_result(
+                relocated_result
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                relocated_cli_status = validation.main(
+                    ["verify-coverage-output", "--result", str(relocated_result)]
+                )
+            relocated_log = relocated_result.with_name("run-0.log")
+            relocated_log.write_text(log + "\ntampered\n", encoding="utf-8")
+            tampered_verification = validation.verify_coverage_output_result(
+                relocated_result
+            )
+            relocated_log.write_text(log, encoding="utf-8")
+            next(
+                relocated_result.parent.glob("code-objects-0/*-patched.hsaco")
+            ).unlink()
+            missing_dump_verification = validation.verify_coverage_output_result(
+                relocated_result
+            )
 
         self.assertEqual(result["phase"], "coverage-output")
-        self.assertEqual(result["provenance"], str(provenance))
-        self.assertTrue(result["accepted"])
+        self.assertEqual(result["provenance"], "../../provenance.json")
+        self.assertTrue(result["accepted"], result["artifact_verification"])
+        self.assertTrue(
+            result["artifact_verification"]["accepted"],
+            result["artifact_verification"],
+        )
+        self.assertEqual(
+            result["files"]["hook"],
+            {
+                "path": str(hook),
+                "size": 4,
+                "sha256": hook_sha,
+            },
+        )
+        self.assertEqual(
+            result["retained_artifacts"]["code_objects"]["directories"],
+            ["code-objects-0"],
+        )
         self.assertEqual(
             result["coverage"]["diagnostics"]["replay_count"],
             0,
@@ -2675,6 +2760,179 @@ class ConSanValidationTest(unittest.TestCase):
             persisted["coverage"]["diagnostics"],
             json.loads(json.dumps(result["coverage"]["diagnostics"])),
         )
+        self.assertTrue(initial_verification["accepted"], initial_verification)
+        self.assertTrue(relocated_verification["accepted"], relocated_verification)
+        self.assertEqual(relocated_cli_status, 0, output.getvalue())
+        self.assertFalse(tampered_verification["accepted"])
+        self.assertIn(
+            "retained artifact inventory does not match storage",
+            "\n".join(tampered_verification["reasons"]),
+        )
+        self.assertFalse(missing_dump_verification["accepted"])
+        self.assertIn(
+            "lacks a fingerprint-matched original/patched pair",
+            "\n".join(missing_dump_verification["reasons"]),
+        )
+
+    def test_coverage_output_disassembly_retains_kernel_and_mnemonic(self) -> None:
+        self.assertEqual(
+            validation._parse_text_virtual_address(
+                "  [ 8] .text PROGBITS 00000000005dbd00 5dad00 1b3700 00 AX 0 0 256\n"
+            ),
+            0x5DBD00,
+        )
+        symbols = validation._parse_kernel_symbols(
+            "kernel_a T fe900 100\nkernel_a.kd R 100 40\n"
+        )
+        instructions = validation._parse_disassembly_instructions(
+            "\tds_write_b32 v0, v1 // 0000000FE96C: D81A0000 00000100\n"
+            "  fe974: d8 1a 00 00 ds_write_b32 v0, v1\n"
+        )
+
+        self.assertEqual(symbols, ((0xFE900, 0x100, "kernel_a"),))
+        self.assertEqual(
+            instructions,
+            {0xFE96C: "ds_write_b32", 0xFE974: "ds_write_b32"},
+        )
+        tool_outputs = {
+            "llvm-readelf": (
+                "  [ 8] .text PROGBITS 00000000005dbd00 5dad00 1b3700 "
+                "00 AX 0 0 256\n"
+            ),
+            "llvm-nm": (
+                "wrong_alias T 6da600 0\n"
+                "wrong_alias.kd R 100 40\n"
+                "kernel_a T 6da600 100\n"
+                "kernel_a.kd R 140 40\n"
+            ),
+            "llvm-objdump": (
+                "\tds_write_b32 v0, v1 // 0000006DA66C: D81A0000 00000100\n"
+            ),
+        }
+        with mock.patch.object(
+            validation,
+            "_run_llvm_tool",
+            side_effect=lambda name, *args: tool_outputs[name],
+        ):
+            semantic = validation._disassembly_semantic_sites(
+                Path("object.hsaco"), {0xFE96C}
+            )
+        self.assertEqual(
+            semantic[0xFE96C],
+            {"kernel_symbol": "kernel_a", "mnemonic": "ds_write_b32"},
+        )
+
+    def test_coverage_output_semantic_sites_join_diagnostics_to_dump(self) -> None:
+        with temporary_root() as root:
+            row = root / "artifacts" / "workload" / "coverage-output" / "record-replay"
+            dump = row / "code-objects-0"
+            dump.mkdir(parents=True)
+            original = dump / "rj-dbi-000001-reader-7-original.hsaco"
+            patched = dump / "rj-dbi-000001-reader-7-patched.hsaco"
+            original.write_bytes(b"original semantic object")
+            patched.write_bytes(b"patched semantic object")
+            fingerprint = validation._fnv1a64_file(original)
+            contract = replace(
+                RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT,
+                code_object_fingerprint=fingerprint,
+            )
+            log = complete_coverage_log(
+                moi_auto_replay(
+                    7,
+                    1,
+                    1,
+                    provenance_repaired=1,
+                    code_object_fingerprint=fingerprint,
+                ),
+                moi_auto_replay_diagnostic(
+                    7, 1, 1, 0, code_object_fingerprint=fingerprint
+                ),
+            ).replace(RETIRED_TOPK_CODE_OBJECT_FINGERPRINT, fingerprint)
+            coverage = validation._coverage_summary(
+                log,
+                profile="record-replay",
+                coverage_output_contract=contract,
+            )
+            _, entries = validation._coverage_dump_inventory(row, [dump])
+            semantic_mapping = {
+                0xFE96C: {"kernel_symbol": "kernel_a", "mnemonic": "ds_write_b32"},
+                0xFE974: {"kernel_symbol": "kernel_a", "mnemonic": "ds_write_b32"},
+            }
+            with mock.patch.object(
+                validation,
+                "_disassembly_semantic_sites",
+                return_value=semantic_mapping,
+            ):
+                sites = validation._coverage_output_semantic_sites(
+                    row, [coverage], entries
+                )
+
+        self.assertEqual(
+            [
+                (site["instruction"], site["kernel_symbol"], site["mnemonic"])
+                for site in sites
+            ],
+            [
+                ("0xfe96c", "kernel_a", "ds_write_b32"),
+                ("0xfe974", "kernel_a", "ds_write_b32"),
+            ],
+        )
+        self.assertTrue(
+            all(site["code_object_fingerprint"] == fingerprint for site in sites)
+        )
+
+    def test_coverage_output_collection_marks_missing_dumps_rejected(self) -> None:
+        workload = replace(
+            validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+            coverage_output_contract=RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT,
+        )
+        log = complete_coverage_log(moi_auto_replay(7, 1, 0))
+        with temporary_root() as root:
+            artifact_root = root / "artifacts"
+            provenance = validation._workload_provenance_path(artifact_root, workload)
+            provenance.parent.mkdir(parents=True)
+            provenance.write_text("{}\n", encoding="utf-8")
+            hook = root / "hook.so"
+            hook.write_bytes(b"hook")
+
+            def run_process(command, environment, log_path, timeout):
+                del command, environment, timeout
+                log_path.write_text(log, encoding="utf-8")
+                return 0, 0.1, log
+
+            with (
+                mock.patch.object(validation, "_hook_path", return_value=hook),
+                mock.patch.object(
+                    validation, "_workload_command", return_value=["/bin/true"]
+                ),
+                mock.patch.object(validation, "_run_process", side_effect=run_process),
+                mock.patch.object(validation, "_source_identities", return_value=[]),
+            ):
+                result = validation._run_profile(
+                    root,
+                    "gfx1201",
+                    workload,
+                    "record-replay",
+                    "clean",
+                    artifact_root,
+                    120,
+                )
+            result_path = (
+                artifact_root
+                / workload.id
+                / "coverage-output"
+                / "record-replay"
+                / "result.json"
+            )
+
+            self.assertTrue(result_path.is_file())
+            self.assertTrue(result["coverage_acceptance"])
+            self.assertFalse(result["accepted"])
+            self.assertFalse(result["artifact_verification"]["accepted"])
+            self.assertIn(
+                "lacks a fingerprint-matched original/patched pair",
+                "\n".join(result["artifact_verification"]["reasons"]),
+            )
 
     def test_workload_provenance_is_shared_only_when_inputs_match(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"]

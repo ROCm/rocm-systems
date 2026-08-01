@@ -450,6 +450,39 @@ under the requested phase. Reusing that workload root is accepted only when
 the hook, workload inputs, source identities, and manifest match byte for byte;
 drift fails instead of silently relabeling existing results.
 
+Coverage-output rows have an additional retained-artifact gate. Collection
+automatically writes each process log and its original/transformed code-object
+dumps below the row, records their sizes and SHA-256 hashes, and references the
+shared workload provenance with a relative path. Before `accepted` can be true,
+the gate reparses every command log, reproduces the coverage and diagnostic
+decision, checks the hook identity and source revisions against workload
+provenance, and verifies that the contracted diagnostic reader has a
+fingerprint-matched original/transformed dump pair. Missing files, redirected
+storage outside the workload artifact tree, stale hashes, or a non-relocatable
+provenance reference reject the row. The pre-artifact runtime decision remains
+available as `coverage_acceptance`; the final `accepted` value also requires
+`artifact_verification.accepted`.
+
+For every diagnostic instruction, collection disassembles the retained
+original object and stores the exported kernel symbol and mnemonic beside the
+raw offset and code-object fingerprint. That semantic identity lets a reviewer
+compare a regenerated object with the previously qualified structure while the
+exact fingerprint gate remains in force. The harness prefers the LLVM tools in
+`/home/jakub/llvm/main/build/bin`; set `CONSAN_VALIDATION_LLVM_BIN` to another
+directory containing `llvm-nm`, `llvm-objdump`, and `llvm-readelf` when needed.
+
+Recheck a retained or relocated row without configuring a validation target or
+workspace:
+
+```sh
+python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
+  verify-coverage-output \
+  --result "$ARTIFACT_ROOT/<workload>/coverage-output/<profile>/result.json"
+```
+
+The command exits zero only when the retained decision is self-contained and
+replayable. It does not rerun the GPU workload.
+
 ## Correct-workload overhead
 
 Overhead is measured without fault injection:
