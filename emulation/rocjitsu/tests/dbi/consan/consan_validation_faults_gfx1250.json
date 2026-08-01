@@ -245,25 +245,28 @@
           "family": "barrier-drop",
           "environment": {
             "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:5a15eb7d119ed588|function=_ZL20__work_group_barrierj|kind=barrier|pc=0x000000000000af90|mnemonic=s_barrier_wait|occurrence=1",
-            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:5a15eb7d119ed588|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000af8c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:5a15eb7d119ed588|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000af90|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:1789aed140b5cec0|function=_ZL20__work_group_barrierj|kind=barrier|pc=0x0000000000008490|mnemonic=s_barrier_wait|occurrence=1",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:1789aed140b5cec0|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000848c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:1789aed140b5cec0|function=_ZL20__work_group_barrierj|event=barrier|pc=0x0000000000008490|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
           },
           "profiles": {
             "supercollider": {
               "detector": "not_detected",
-              "oracle": "fail"
+              "oracle": "pass"
             },
             "record-replay": {
-              "detector": "not_detected",
-              "oracle": "fail"
+              "detector": "detected",
+              "oracle": "pass",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
+              }
             },
             "sampled": {
               "detector": "not_detected",
-              "oracle": "fail"
+              "oracle": "pass"
             },
             "inline-shadow": {
               "detector": "detected",
-              "oracle": "fail",
+              "oracle": "pass",
               "environment": {
                 "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
               }

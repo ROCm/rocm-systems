@@ -4294,6 +4294,9 @@ def _inventory(args: argparse.Namespace) -> int:
     command = _workload_command(
         workspace, target, workload, "fault", root / "unused.json"
     )
+    launcher = _launcher_from_json(args.launcher_json)
+    if launcher:
+        command = [*launcher, *command]
     family_runs = []
     aggregate_records = {"sites": set(), "sequences": set(), "destinations": set()}
     for family in _fault_families(target, workload):
@@ -5077,6 +5080,7 @@ def _fault(args: argparse.Namespace) -> int:
     spec_path = args.spec.resolve()
     fault = _load_fault(spec_path, target, workload, args.fault)
     profiles = PROFILE_IDS if args.profile == "all" else (args.profile,)
+    launcher = _launcher_from_json(args.launcher_json)
     hook = _hook_path(workspace)
     fault_root = args.artifact_root.resolve() / workload.id / "faults" / fault["id"]
     fault_root.mkdir(parents=True, exist_ok=False)
@@ -5091,6 +5095,10 @@ def _fault(args: argparse.Namespace) -> int:
     health_command = args.health_command_json or [
         shutil.which("rocminfo") or "rocminfo"
     ]
+    if launcher and args.smoke_command_json is None:
+        smoke = [*launcher, *smoke]
+    if launcher and args.health_command_json is None:
+        health_command = [*launcher, *health_command]
     runner = Path(__file__).with_name("consan_fault_runner.py")
     summaries = []
     profile_summaries = []
@@ -5154,6 +5162,8 @@ def _fault(args: argparse.Namespace) -> int:
             )
             if workload.kind == "sharktank":
                 command.append("--allow-oracle-failure")
+            if launcher:
+                command = [*launcher, *command]
             identities = sorted(
                 value
                 for key, value in environment.items()
@@ -5401,6 +5411,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     inventory.add_argument("--workload", choices=tuple(WORKLOAD_BY_ID), required=True)
     inventory.add_argument("--artifact-root", type=Path, required=True)
     inventory.add_argument("--timeout", type=int, default=TIMEOUT_SECONDS)
+    inventory.add_argument(
+        "--launcher-json",
+        help="JSON argv prefix used to launch the workload process",
+    )
 
     fault = subparsers.add_parser(
         "fault", help="run a reviewed exact fault spec with health containment"
@@ -5423,6 +5437,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="deadline in seconds for each retained discovery and smoke probe",
     )
     fault.add_argument("--allow-destructive", action="store_true")
+    fault.add_argument(
+        "--launcher-json",
+        help=(
+            "JSON argv prefix used for the workload and default health/smoke "
+            "commands"
+        ),
+    )
     fault.add_argument(
         "--health-command-json",
         type=_command_json,
