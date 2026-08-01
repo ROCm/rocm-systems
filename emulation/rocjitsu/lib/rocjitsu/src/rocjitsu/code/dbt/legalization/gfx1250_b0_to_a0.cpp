@@ -6,10 +6,14 @@
 
 #include "rocjitsu/code/dbt/legalization/gfx1250_b0_to_a0.h"
 
+#include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include "util/log.h"
@@ -17,6 +21,8 @@
 #include <array>
 #include <cstring>
 #include <string_view>
+#include <unordered_map>
+#include <vector>
 
 namespace rocjitsu {
 namespace {
@@ -164,6 +170,58 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
          mnemonic == "s_monitor_sleep";
 }
 
+[[nodiscard]] bool is_wmma_completion_wait(const Instruction &inst) {
+  if (inst.size() != static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr ||
+      inst.mnemonic() != "s_wait_alu")
+    return false;
+
+  // S_WAIT_ALU SIMM16[15:12] is VA_VDST. Zero waits for all outstanding
+  // destination writes, regardless of any additional counters the source
+  // instruction also drains.
+  constexpr uint32_t kVaVdstMask = 0xf000u;
+  return (inst.raw_encoding()[0] & kVaVdstMask) == 0;
+}
+
+[[nodiscard]] bool has_wmma_completion_wait_ahead(
+    const Instruction &inst,
+    const std::unordered_map<uint64_t, const Instruction *> &source_instruction_by_offset,
+    const Gfx1250VgprMsbAnalysis &vgpr_msb) {
+  RegisterSet pending_defs = InstDefUse(inst, &vgpr_msb, UnknownVgprDefPolicy::ExpandAll).defs;
+  uint64_t next_offset = inst.src_loc() + inst.size();
+  while (true) {
+    const auto next_it = source_instruction_by_offset.find(next_offset);
+    if (next_it == source_instruction_by_offset.end())
+      return false;
+
+    const Instruction &next = *next_it->second;
+    constexpr uint64_t kControlTransferOrTerminator =
+        BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR;
+    if ((next.flags() & kControlTransferOrTerminator) != 0)
+      return false;
+    if (is_wmma_completion_wait(next))
+      return true;
+
+    // Bound the scan to affected WMMA and the exact scalar instructions that
+    // generated split forms may place before their trailing completion wait.
+    // The def/use check below independently verifies VGPR transparency for
+    // both generated and hand-written source streams.
+    const std::string_view mnemonic = next.mnemonic();
+    const bool canonical_split_scaffolding =
+        mnemonic == "s_wait_xcnt" || mnemonic == "s_set_vgpr_msb";
+    if (!canonical_split_scaffolding && !gfx1250_b0_to_a0_requires_wmma_completion_wait(next))
+      return false;
+
+    const InstDefUse access(next, &vgpr_msb, UnknownVgprDefPolicy::ExpandAll);
+    if (access.uses.intersects(pending_defs))
+      return false;
+    pending_defs |= access.defs;
+
+    if (next.size() <= 0)
+      return false;
+    next_offset += static_cast<uint64_t>(next.size());
+  }
+}
+
 } // namespace
 
 bool gfx1250_b0_to_a0_requires_wmma_completion_wait(const Instruction &inst) {
@@ -174,6 +232,27 @@ bool gfx1250_b0_to_a0_requires_wmma_completion_wait(const Instruction &inst) {
   return mnemonic.find("_fp8") != std::string_view::npos ||
          mnemonic.find("_bf8") != std::string_view::npos ||
          mnemonic.find("_f8f6f4") != std::string_view::npos || mnemonic.ends_with("_f4");
+}
+
+void gfx1250_b0_to_a0_append_wmma_completion_wait_if_needed(
+    const Instruction &inst,
+    const std::unordered_map<uint64_t, const Instruction *> &source_instruction_by_offset,
+    const Gfx1250VgprMsbAnalysis &vgpr_msb, std::vector<uint32_t> &words) {
+  if (!gfx1250_b0_to_a0_requires_wmma_completion_wait(inst) ||
+      has_wmma_completion_wait_ahead(inst, source_instruction_by_offset, vgpr_msb)) {
+    return;
+  }
+
+  // TODO: Replace this conservative producer-side drain with block-local
+  // S_WAIT_ALU analysis over the final translated instruction stream. It should
+  // track VA_VDST/VM_VSRC dependencies and wait only before a dependent use.
+  // B0 code may schedule scaled WMMA consumers under SCHED_MODE 2 using B0
+  // completion timing. A0 has a lower FP8/FP4 WMMA issue rate, and mode 2 makes
+  // software responsible for VA_VDST dependencies. Wait for pending VALU
+  // destinations without draining unrelated ALU dependency counters.
+  // The no-wait default is 0xff9f; clearing only VA_VDST[15:12] gives 0x0f9f.
+  constexpr uint16_t kWaitVaVdstZero = 0x0f9f;
+  words.push_back(gfx1250::build_sopp(gfx1250::kSWaitAluSopp, {.simm16 = kWaitVaVdstZero})[0]);
 }
 
 const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &inst) {
