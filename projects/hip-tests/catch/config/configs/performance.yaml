@@ -261,3 +261,4 @@ performance:
   Performance_Graph_AnyOrderOverlap_Fork: *level_2
   Performance_Graph_AnyOrderOverlap_DetectorSelfTest: *level_2
   Performance_Graph_AnyOrderOverlap_Perf: *level_2
+  Performance_Graph_DisabledBoundarySynchronization: *level_2

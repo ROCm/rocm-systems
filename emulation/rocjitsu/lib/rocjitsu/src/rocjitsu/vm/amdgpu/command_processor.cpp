@@ -180,6 +180,73 @@ bool sgpr_count_is_descriptor_encoded(rj_code_arch_t arch, uint32_t sgpr_gran) {
   return isa_properties(arch).descriptor_sgpr_count_encoded;
 }
 
+bool compute_pgm_rsrc1_mode_preserves_dx10_ieee(rj_code_arch_t arch) {
+  /*
+   * New ISA families should classify descriptor-to-MODE field initialization
+   * for the architecture's MODE layout.
+   */
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return true;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_RV32I:
+  case ROCJITSU_CODE_ARCH_RV64I:
+  case ROCJITSU_CODE_ARCH_NUM_ARCHS:
+    return false;
+  }
+  // Handle out-of-range values without a default, so -Wswitch catches new architectures.
+  return false;
+}
+
+bool compute_pgm_rsrc1_mode_has_debug_field(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return true;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_RV32I:
+  case ROCJITSU_CODE_ARCH_RV64I:
+  case ROCJITSU_CODE_ARCH_NUM_ARCHS:
+    return false;
+  }
+  // Handle out-of-range values without a default, so -Wswitch catches new architectures.
+  return false;
+}
+
+uint32_t initial_mode_from_compute_pgm_rsrc1(uint32_t rsrc1, rj_code_arch_t arch) {
+  using namespace rocr::llvm::amdhsa;
+
+  uint32_t mode = 0;
+  mode |= AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_32) << 0;
+  mode |= AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_16_64) << 2;
+  mode |= AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_32) << 4;
+  mode |= AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_16_64) << 6;
+  if (compute_pgm_rsrc1_mode_preserves_dx10_ieee(arch)) {
+    mode |= AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP) << 8;
+    mode |= AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE) << 9;
+  }
+  if (compute_pgm_rsrc1_mode_has_debug_field(arch))
+    mode |= AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_DEBUG_MODE) << 11;
+  if (AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FP16_OVFL))
+    mode |= Wavefront::FP16_OVFL_BIT;
+  return mode;
+}
+
 } // namespace
 
 void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
@@ -408,10 +475,9 @@ void CommandProcessor::startup() {
   // thread). on_cu_idle() dispatches inline and calls ComputeUnitCore::schedule_work()
   // on those CUs, which mutates their non-atomic executing_/tick_event_ and pushes to
   // the partition event queue without synchronization — safe only same-partition. The
-  // recursive-bisection partitioner (topology.partition(), run in the engine's
-  // create() before startup) could in principle split a CP from a CU under
-  // num_threads > 1; assert here (after partitioning, before the run loop) so any such
-  // split fails loudly rather than silently racing.
+  // generic balanced partitioner could in principle split a CP from a CU under
+  // num_threads > 1; assert here (after partitioning, before the run loop) so any
+  // such split fails loudly rather than silently racing.
   for ([[maybe_unused]] const auto *cu : cus_)
     assert(cu->partition_id() == partition_id() &&
            "CommandProcessor and its compute units must share one partition");
@@ -955,6 +1021,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_lds(placement.lds);
       wf->set_dispatch_id(entry.dispatch_id);
       wf->set_process_id(entry.process_id);
+      wf->set_mode_raw(entry.initial_mode_raw);
       wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, cu->wf_size()));
       wf->set_cluster_info(entry.cluster_rank_for_flat_wg_id(global_wg_id), entry.cluster_size());
       try {
@@ -1245,6 +1312,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.num_user_sgprs = user_sgprs;
   dp.kernel_code_properties = kd.kernel_code_properties;
   dp.kernarg_preload = kd.kernarg_preload;
+  dp.initial_mode_raw = initial_mode_from_compute_pgm_rsrc1(kd.compute_pgm_rsrc1, arch);
   dp.private_segment_fixed_size = std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
   dp.group_segment_fixed_size = std::max(kd.group_segment_fixed_size, pkt.group_segment_size);
   dp.wgp_mode = isa_properties(arch).supports_wgp_mode &&
@@ -1968,7 +2036,9 @@ constexpr uint32_t GCR_GFX1250_CONTROL_DW = 3;
 constexpr uint32_t GCR_GFX1250_GL2_DISCARD_BIT = 1u << 13;
 constexpr uint32_t GCR_GFX1250_GL2_INV_BIT = 1u << 14;
 constexpr uint32_t GCR_GFX1250_GL2_WB_BIT = 1u << 15;
-constexpr uint32_t COPY_LINEAR_WAITSIGNAL_GFX11_PLUS_SIZE = 19;
+constexpr uint32_t COPY_LINEAR_WAIT_DWORDS = 7;
+constexpr uint32_t COPY_LINEAR_BODY_DWORDS = 6;
+constexpr uint32_t COPY_LINEAR_SIGNAL_DWORDS = 5;
 constexpr uint32_t FENCE_64B_GFX11_PLUS_SIZE = 5;
 constexpr uint32_t POLL_MEM_64B_GFX11_PLUS_SIZE = 8;
 constexpr uint32_t COPY_LINEAR_BROADCAST_FLAG = 1u << 27;
@@ -2001,16 +2071,11 @@ bool sdma_compare_u64(uint32_t func, uint64_t value, uint64_t reference) {
 } // namespace
 
 void CommandProcessor::flush_gpu_caches() {
-  // Write back dirty scalar L1 (K$) lines into L2 first, then flush L2 to
-  // backing, so a dirty K$ line overlapping an SDMA destination is published
-  // before the direct write (which happens after this helper returns) rather
-  // than being written out over it by a later K$ flush. Each line is written
-  // back under its own owning vmid. Vector L1 (V$) is write-through, so it only
-  // needs invalidation. Ordering: K$ -> L2 -> backing, then invalidate V$.
-  for (auto *cu : cus_) {
-    cu->l1_scalar().writeback_all();
+  // Both L1 caches are write-through, so discard their clean snapshots around
+  // direct backing writes. Flush dirty L2 data before the direct write so a
+  // later L2 flush cannot overwrite it.
+  for (auto *cu : cus_)
     cu->l1_scalar().invalidate_all();
-  }
   for (auto *l2 : l2_caches_)
     l2->flush_all();
   for (auto *cu : cus_)
@@ -2088,15 +2153,18 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
     case sdma::OP_COPY: {
       if (uses_gfx11_plus_sdma_packets() && sub_op == sdma::SUBOP_COPY_LINEAR &&
           (header & ((1u << 30) | (1u << 31)))) {
-        if (rpos + sdma::COPY_LINEAR_WAITSIGNAL_GFX11_PLUS_SIZE > wpos) {
+        const bool has_wait = (header & (1u << 30)) != 0;
+        const bool has_signal = (header & (1u << 31)) != 0;
+        // WAIT and SIGNAL blocks are absent, not padded, when their header bit
+        // is clear. Account for those blocks before decoding the shifted body.
+        const uint32_t copy_base = 1 + (has_wait ? sdma::COPY_LINEAR_WAIT_DWORDS : 0);
+        const uint32_t signal_base = copy_base + sdma::COPY_LINEAR_BODY_DWORDS;
+        const uint32_t packet_dwords =
+            signal_base + (has_signal ? sdma::COPY_LINEAR_SIGNAL_DWORDS : 0);
+        if (rpos + packet_dwords > wpos) {
           rpos = wpos;
           continue;
         }
-
-        constexpr uint32_t COPY_BASE = 8;
-        constexpr uint32_t SIGNAL_BASE = 14;
-        bool has_wait = (header & (1u << 30)) != 0;
-        bool has_signal = (header & (1u << 31)) != 0;
 
         if (has_wait) {
           uint32_t wait_func = dw(1) & 0x7;
@@ -2122,11 +2190,11 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         uint64_t signal_data = 0;
         bool signal_decrement = false;
         if (has_signal) {
-          uint32_t signal_op = dw(SIGNAL_BASE) & 0x7F;
-          signal_addr = (static_cast<uint64_t>(dw(SIGNAL_BASE + 1) & ~0x7u)) |
-                        (static_cast<uint64_t>(dw(SIGNAL_BASE + 2)) << 32);
-          signal_data = static_cast<uint64_t>(dw(SIGNAL_BASE + 3)) |
-                        (static_cast<uint64_t>(dw(SIGNAL_BASE + 4)) << 32);
+          uint32_t signal_op = dw(signal_base) & 0x7F;
+          signal_addr = (static_cast<uint64_t>(dw(signal_base + 1) & ~0x7u)) |
+                        (static_cast<uint64_t>(dw(signal_base + 2)) << 32);
+          signal_data = static_cast<uint64_t>(dw(signal_base + 3)) |
+                        (static_cast<uint64_t>(dw(signal_base + 4)) << 32);
 
           if (signal_addr > 0x1000 && signal_op == 0x70) {
             signal_ptr = static_cast<int64_t *>(resolve(signal_addr));
@@ -2137,11 +2205,11 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           }
         }
 
-        uint32_t count = (dw(COPY_BASE) & 0x3FFFFFFF) + 1;
-        uint64_t src_va = static_cast<uint64_t>(dw(COPY_BASE + 2)) |
-                          (static_cast<uint64_t>(dw(COPY_BASE + 3)) << 32);
-        uint64_t dst_va = static_cast<uint64_t>(dw(COPY_BASE + 4)) |
-                          (static_cast<uint64_t>(dw(COPY_BASE + 5)) << 32);
+        uint32_t count = (dw(copy_base) & 0x3FFFFFFF) + 1;
+        uint64_t src_va = static_cast<uint64_t>(dw(copy_base + 2)) |
+                          (static_cast<uint64_t>(dw(copy_base + 3)) << 32);
+        uint64_t dst_va = static_cast<uint64_t>(dw(copy_base + 4)) |
+                          (static_cast<uint64_t>(dw(copy_base + 5)) << 32);
         auto *src_ptr = resolve(src_va);
         auto *dst_ptr = resolve(dst_va);
         if (!src_ptr || !dst_ptr) {
@@ -2152,8 +2220,8 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         // caches. Real SDMA does not snoop GL2; coherence is re-established by
         // the consuming kernel's acquire fence at dispatch. We model that with a
         // coarse writeback+invalidate that runs BEFORE the direct write: the
-        // writeback publishes any dirty L2 lines (e.g. from K$ writeback) so
-        // they are not lost, and — critically — a dirty line overlapping the
+        // writeback publishes any dirty L2 lines so they are not lost, and —
+        // critically — a dirty line overlapping the
         // destination is written back first, so the subsequent SDMA write
         // supersedes it instead of being clobbered by a later flush. After the
         // flush the caches are empty, so the destination re-reads fresh backing.
@@ -2165,7 +2233,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
               .fetch_sub(static_cast<int64_t>(signal_data), std::memory_order_release);
         }
 
-        pkt_dwords = sdma::COPY_LINEAR_WAITSIGNAL_GFX11_PLUS_SIZE;
+        pkt_dwords = packet_dwords;
         break;
       }
 

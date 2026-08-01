@@ -661,6 +661,87 @@ __device__ int IPCContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
   return ROCSHMEM_SUCCESS;
 }
 
+template <typename T, ROCSHMEM_OP Op>
+__device__ int IPCContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
+                                               const T *source, int nreduce) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+
+  int PE_size   = team_obj->tinfo_wrt_world->size;
+  int PE_start  = team_obj->tinfo_wrt_world->pe_start;
+  int stride    = team_obj->tinfo_wrt_world->stride;
+  int team_rank = (my_pe - PE_start) / stride;
+
+  long  *pSync = team_obj->reduce_pSync;
+  T     *pWrk  = reinterpret_cast<T *>(team_obj->pWrk);
+
+  int wave_tid  = get_flat_block_id() % WF_SIZE;
+
+  int pWrk_elems = (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
+  int chunk_size = max(1, pWrk_elems / PE_size);
+  int n_chunks   = (nreduce + chunk_size - 1) / chunk_size;
+  int finish = PE_start + stride * PE_size;
+  
+  for (int c = 0; c < n_chunks; c++) {
+    int offset = c * chunk_size;
+    int count  = min(chunk_size, nreduce - offset);
+    int64_t flag_val = static_cast<int64_t>(c) + 1;
+    // Seed dest[offset..offset+count) from my own contribution.
+    for (int j = wave_tid; j < count; j += WF_SIZE) {
+      dest[offset + j] = source[team_rank * nreduce + offset + j];
+    }
+	  __builtin_amdgcn_wave_barrier();
+
+    // Send my contribution to each remote PE's pWrk slot, then signal.
+    for (int i = PE_start; i < finish; i += stride) {
+      if (i != my_pe) {
+        int remote_rank = (i - PE_start) / stride;
+        internal_putmem_wave(&pWrk[team_rank * chunk_size],
+                              reinterpret_cast<const void *>(
+                                  source + remote_rank * nreduce + offset),
+                              count * sizeof(T), i);
+        if (is_thread_zero_in_wave()) {
+          fence(i);
+          internal_putmem(&pSync[team_rank], &flag_val, sizeof(*pSync), i);
+        }
+      }
+    }
+    threadfence_system();
+    __builtin_amdgcn_wave_barrier();
+
+    // Wait for each remote PE's signal, then accumulate into dest.
+    for (int i = PE_start; i < finish; i += stride) {
+      if (i != my_pe) {
+        int remote_rank = (i - PE_start) / stride;
+        if (is_thread_zero_in_wave()) {
+          wait_until(&pSync[remote_rank], ROCSHMEM_CMP_EQ, flag_val);
+        }
+	      __builtin_amdgcn_wave_barrier();
+        T *src_chunk = &pWrk[remote_rank * chunk_size];
+        T *dst_chunk = dest + offset;
+        for (int j = wave_tid; j < count; j += WF_SIZE) {
+          OpWrap<Op>::Calc(src_chunk, dst_chunk, j);
+        }
+        threadfence_system();
+      }
+    }
+    
+    // Sync with wave 0 of other PEs
+    sync_wave(team);
+    __builtin_amdgcn_wave_barrier();
+
+  }
+  // Reset pSync before reuse.
+  for (int j = wave_tid; j < PE_size; j += WF_SIZE) {
+    pSync[j] = ROCSHMEM_SYNC_VALUE;
+  }
+
+  sync_wave(team);
+  __builtin_amdgcn_wave_barrier();
+  barrier_wave(team);
+
+  return ROCSHMEM_SUCCESS;
+}
+
 template <typename T>
 __device__ void IPCContext::internal_put_broadcast_wave(T *dst, const T *src, int nelems, int pe_root, int pe_start,
     int stride, int pe_size) {  // NOLINT(runtime/int)
@@ -680,7 +761,7 @@ __device__ void IPCContext::internal_get_broadcast_wave(
 
 template <typename T>
 __device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
-                              T *dest, const T *source, int nelement, int PE_root) {
+                              T *dest, const T *source, int nelems, int PE_root) {
   if (dest == nullptr || 
     source == nullptr || 
     team == ROCSHMEM_TEAM_INVALID)
@@ -695,7 +776,7 @@ __device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
 
   // Passed pe_root is relative to team, convert to world root
   int pe_root_world = team_obj->get_pe_in_world(PE_root);
-  internal_broadcast_wave<T>(dest, source, nelement, pe_root_world, 
+  internal_broadcast_wave<T>(dest, source, nelems, pe_root_world,
                               pe_start, stride, pe_size, p_sync);
 
   return ROCSHMEM_SUCCESS;

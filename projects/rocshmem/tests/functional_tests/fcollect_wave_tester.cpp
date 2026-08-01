@@ -33,8 +33,8 @@ __device__ int wave_fcollect([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unused
 #define FCOLLECT_WAVE_DEF_GEN(T, TNAME)                                          \
   template <>                                                                    \
   __device__ int wave_fcollect<T>(rocshmem_ctx_t ctx, rocshmem_team_t team,      \
-                                  T *dest, const T *source, int nelem) {         \
-    return rocshmem_ctx_##TNAME##_fcollect_wave(ctx, team, dest, source, nelem); \
+                                  T *dest, const T *source, int nelems) {        \
+    return rocshmem_ctx_##TNAME##_fcollect_wave(ctx, team, dest, source, nelems);\
   }
 
 FCOLLECT_WAVE_DEF_GEN(float, float)

@@ -192,6 +192,9 @@ public:
   [[nodiscard]] TranslatedCodeObject translate(const AmdGpuCodeObject &obj);
 
 private:
+  /// @brief Whether this translator is running the gfx1250 B0-to-A0 profile.
+  [[nodiscard]] bool is_gfx1250_b0_to_a0() const;
+
   /// @brief Return the generated or revision-specific legalization for an instruction.
   [[nodiscard]] const InstructionLegalization *lookup_legalization(const Instruction &inst) const;
 
@@ -209,7 +212,7 @@ private:
   /// @returns true if the instruction was translated or copied safely.
   [[nodiscard]] bool handle_encoding(const Instruction &inst, uint64_t offset,
                                      std::vector<uint8_t> &text, uint16_t dst_opcode,
-                                     std::span<const uint8_t> orig_text, bool collect_trace_words,
+                                     std::span<const uint8_t> orig_text, bool collect_target_words,
                                      bool &copied_original, bool &changed,
                                      std::vector<uint32_t> &target_words);
 

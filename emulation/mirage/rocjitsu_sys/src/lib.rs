@@ -40,6 +40,8 @@ pub const ROCJITSU_STATUS_OUT_OF_RESOURCES: RjStatus = 3;
 pub const ROCJITSU_STATUS_INVALID_CODE_OBJECT: RjStatus = 4;
 /// A required file could not be opened or read.
 pub const ROCJITSU_STATUS_INVALID_FILE: RjStatus = 5;
+/// The requested operation is not supported by this configuration.
+pub const ROCJITSU_STATUS_UNSUPPORTED: RjStatus = 6;
 
 /// Platform-specific handle type (`rj_handle_t`); an fd on Linux.
 pub type RjHandle = c_int;
@@ -222,6 +224,7 @@ impl RjVmGpuInfo {
 type FnVmCreate = unsafe extern "C" fn(*const c_char, RjVmMode, *mut *mut RjVm) -> RjStatus;
 type FnVmCreateFromString =
     unsafe extern "C" fn(*const c_char, RjVmMode, *mut *mut RjVm) -> RjStatus;
+type FnVmLoadPlugins = unsafe extern "C" fn(*mut RjVm, *const c_char, *const c_char) -> RjStatus;
 type FnVmRun = unsafe extern "C" fn(*mut RjVm, *mut u64) -> RjStatus;
 type FnVmRequestExit = unsafe extern "C" fn(*mut RjVm, *const c_char);
 type FnVmDestroy = unsafe extern "C" fn(*mut RjVm);
@@ -252,6 +255,10 @@ pub struct Lib {
     // so it is kept in `_lib` and dropped last.
     vm_create: FnVmCreate,
     vm_create_from_string: FnVmCreateFromString,
+    // Optional: only present in rocjitsu libraries that ship the runtime
+    // plugin loader. When absent, plugin selection in the config is a no-op
+    // for a C-API host (the daemon), matching an older library.
+    vm_load_plugins: Option<FnVmLoadPlugins>,
     vm_run: FnVmRun,
     vm_request_exit: FnVmRequestExit,
     vm_destroy: FnVmDestroy,
@@ -296,6 +303,11 @@ impl Lib {
             let vm_create = *lib.get::<FnVmCreate>(b"rj_vm_create\0")?;
             let vm_create_from_string =
                 *lib.get::<FnVmCreateFromString>(b"rj_vm_create_from_string\0")?;
+            // Optional symbol: tolerate older libraries that predate the loader.
+            let vm_load_plugins = lib
+                .get::<FnVmLoadPlugins>(b"rj_vm_load_plugins\0")
+                .map(|s| *s)
+                .ok();
             let vm_run = *lib.get::<FnVmRun>(b"rj_vm_run\0")?;
             let vm_request_exit = *lib.get::<FnVmRequestExit>(b"rj_vm_request_exit\0")?;
             let vm_destroy = *lib.get::<FnVmDestroy>(b"rj_vm_destroy\0")?;
@@ -317,6 +329,7 @@ impl Lib {
             Ok(Self {
                 vm_create,
                 vm_create_from_string,
+                vm_load_plugins,
                 vm_run,
                 vm_request_exit,
                 vm_destroy,
@@ -362,6 +375,30 @@ impl Lib {
         let mut vm: *mut RjVm = std::ptr::null_mut();
         let status = unsafe { (self.vm_create_from_string)(json.as_ptr(), mode, &mut vm) };
         (status, vm)
+    }
+
+    /// Load and attach the execution plugins declared in `config_json`
+    /// (its `plugins` / `sinks` / `profiled` sections) to `vm`.
+    ///
+    /// `plugin_dir`, when non-empty, is a trusted directory the plugin
+    /// shared objects are loaded from by explicit path — required in
+    /// daemon mode, where the process is not re-`exec`'d and so cannot
+    /// rely on a launcher-populated `LD_LIBRARY_PATH`.
+    ///
+    /// Returns `None` when the loaded library predates the
+    /// `rj_vm_load_plugins` symbol (an older rocjitsu without the runtime
+    /// plugin loader); otherwise the C API status.
+    ///
+    /// # Safety
+    /// `vm` must be a live handle from [`Lib::vm_create`].
+    pub unsafe fn vm_load_plugins(
+        &self,
+        vm: *mut RjVm,
+        config_json: &CStr,
+        plugin_dir: &CStr,
+    ) -> Option<RjStatus> {
+        let load = self.vm_load_plugins?;
+        Some(unsafe { load(vm, config_json.as_ptr(), plugin_dir.as_ptr()) })
     }
 
     /// Run the simulation engine until [`Lib::vm_request_exit`] is
@@ -581,6 +618,31 @@ mod tests {
         assert_eq!(RjDaemonStatus::Stopped as i32, 0);
         assert_eq!(RjDaemonStatus::Running as i32, 2);
         assert_eq!(RjDaemonStatus::Error as i32, 4);
+    }
+
+    #[test]
+    fn status_codes_match_c_api() {
+        const C_STATUS_HEADER: &str = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../rocjitsu/lib/rocjitsu/include/rocjitsu/base/rj_status.h"
+        ));
+        let c_statuses: Vec<String> = C_STATUS_HEADER
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("ROCJITSU_STATUS_"))
+            .map(|line| line.trim_end_matches(',').to_owned())
+            .collect();
+        let rust_statuses = vec![
+            format!("ROCJITSU_STATUS_SUCCESS = {ROCJITSU_STATUS_SUCCESS}"),
+            format!("ROCJITSU_STATUS_ERROR = {ROCJITSU_STATUS_ERROR}"),
+            format!("ROCJITSU_STATUS_INVALID_ARGUMENT = {ROCJITSU_STATUS_INVALID_ARGUMENT}"),
+            format!("ROCJITSU_STATUS_OUT_OF_RESOURCES = {ROCJITSU_STATUS_OUT_OF_RESOURCES}"),
+            format!("ROCJITSU_STATUS_INVALID_CODE_OBJECT = {ROCJITSU_STATUS_INVALID_CODE_OBJECT}"),
+            format!("ROCJITSU_STATUS_INVALID_FILE = {ROCJITSU_STATUS_INVALID_FILE}"),
+            format!("ROCJITSU_STATUS_UNSUPPORTED = {ROCJITSU_STATUS_UNSUPPORTED}"),
+        ];
+
+        assert_eq!(c_statuses, rust_statuses);
     }
 
     #[test]

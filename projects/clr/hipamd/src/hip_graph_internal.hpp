@@ -758,8 +758,9 @@ class Graph {
 
   //! Schedules one node on a virtual stream.
   //! It will also process the nodes in edges, using DFS
-  void ScheduleOneNode(Node node,     //!< Node for scheduling on a virtual stream
-                       int stream_id  //!< Current active virtual stream to use for scheduling
+  hipError_t ScheduleOneNode(
+      Node node,     //!< Node for scheduling on a virtual stream
+      int stream_id  //!< Current active virtual stream to use for scheduling
   );
 
   //! Schedules all nodes in the graph into different streams
@@ -779,15 +780,16 @@ class Graph {
   hipError_t ScheduleNodesIntoBatches();
 
   //! Find execution paths hierarchically, keeping child graphs separate
-  GraphExecutionPaths FindExecutionPathsHierarchical();
+  hipError_t FindExecutionPathsHierarchical(GraphExecutionPaths& graph_paths);
 
   //! Find all paths from a node using an explicit DFS over a node stack, with
   //! hierarchical handling of child graphs (only child graphs recurse)
-  void FindPathsDFS(Node node, std::vector<Node>& current_path,
-                    std::unordered_set<unsigned int>& visited, GraphExecutionPaths& graph_paths);
+  hipError_t FindPathsDFS(Node node, std::vector<Node>& current_path,
+                          std::unordered_set<unsigned int>& visited,
+                          GraphExecutionPaths& graph_paths);
 
   //! Create segments from hierarchical execution paths
-  void CreateSegmentsFromPaths(const GraphExecutionPaths& exec_paths);
+  hipError_t CreateSegmentsFromPaths(const GraphExecutionPaths& exec_paths);
 
   //! Resolve dependencies between segments
   void ResolveSegmentDependencies();
@@ -1162,7 +1164,7 @@ class GraphExecSegmented : public GraphExecBase {
 
   //! Find the number of streams required per device for packet engine mode
   //! This method analyzes segments to determine per-device stream requirements
-  void FindStreamsReqPerDevForSegments();
+  hipError_t FindStreamsReqPerDevForSegments();
   //! Round-robin stream assignment: spreads parallel segments evenly per dependency level
   void RoundRobinStreamAssignment();
   //! DFS stream assignment: preserves chain continuity across segment DAG branches
@@ -1230,6 +1232,12 @@ class GraphExecSegmented : public GraphExecBase {
     std::vector<NodeRange> nodeRanges;
     std::unordered_map<GraphNode*, size_t> nodeToRangeIndex;  // O(1) lookup
     int disabledNodeCount = 0;  // Count of currently disabled nodes
+    // Standalone barrier reserved (at BuildSyncPlan) for the last batch of a
+    // segment whose completion signal is embedded on its last kernel packet.
+    // Only spliced into the *filtered* dispatch buffer by rebuildFilteredLists
+    // when every node packet in this batch is disabled, so the segment can still
+    // emit its completion signal instead of losing it. nullptr when unused.
+    uint8_t* fallbackBarrier = nullptr;
     PacketBatch() {}
     // O(1) enable/disable operations - just update state
     void setEnabled(GraphNode* node, bool enabled);
@@ -1417,6 +1425,7 @@ class GraphKernelNode : public GraphNode {
   int globalWorkSizeY_remainder_;
   int globalWorkSizeZ_remainder_;
   dim3 clusterDim_;                    //!< Cluster dimensions for cluster launch
+  uint32_t launchFlags_;               //!< Ext launch flags (e.g. hipExtAnyOrderLaunch)
   hipFunction_t resolvedFunc_ = nullptr;  //!< Cached resolved function to avoid redundant lookups
 
  protected:
@@ -1429,6 +1438,7 @@ class GraphKernelNode : public GraphNode {
     globalWorkSizeY_remainder_ = rhs.globalWorkSizeY_remainder_;
     globalWorkSizeZ_remainder_ = rhs.globalWorkSizeZ_remainder_;
     clusterDim_ = rhs.clusterDim_;
+    launchFlags_ = rhs.launchFlags_;
     hipError_t status = copyParams(&rhs.kernelParams_);
     if (status != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to allocate memory to copy params");
@@ -1650,7 +1660,8 @@ class GraphKernelNode : public GraphNode {
                   int globalWorkSizeX_remainder = 0,
                   int globalWorkSizeY_remainder = 0,
                   int globalWorkSizeZ_remainder = 0,
-                  dim3 clusterDim = {1, 1, 1})
+                  dim3 clusterDim = {1, 1, 1},
+                  uint32_t launchFlags = 0)
       : GraphNode(hipGraphNodeTypeKernel, "bold", "octagon", "KERNEL") {
     kernelEvents_ = {0};
     if (pEvents != nullptr) {
@@ -1667,6 +1678,7 @@ class GraphKernelNode : public GraphNode {
     globalWorkSizeY_remainder_ = globalWorkSizeY_remainder;
     globalWorkSizeZ_remainder_ = globalWorkSizeZ_remainder;
     clusterDim_ = clusterDim;
+    launchFlags_ = launchFlags;
   }
 
   ~GraphKernelNode() { freeParams(); }
@@ -1729,17 +1741,8 @@ class GraphKernelNode : public GraphNode {
     }
     commands_.reserve(1);
     amd::Command* command;
-    uint32_t flags = 0;
-    if (DEBUG_HIP_FORCE_ASYNC_QUEUE) {
-      // If there is one dependency, but many edges, then execute this node in any order
-      if (((dependencies_.size() == 1) && (dependencies_[0]->GetEdges().size() > 1) &&
-           (DEBUG_HIP_FORCE_GRAPH_QUEUES == 1))) {
-        // Makes sure the first node in the edges will have a barrier always
-        if (dependencies_[0]->GetEdges()[0] != this) {
-          flags = hipExtAnyOrderLaunch;
-        }
-      }
-    }
+    // Honor ext launch flags captured at graph-build time (e.g. hipExtAnyOrderLaunch).
+    uint32_t flags = launchFlags_;
 
     const amd::Device* device = g_devices[dev_id_]->devices()[0];
     amd::HIPLaunchParams launch_params(kernelParams_.gridDim.x, kernelParams_.gridDim.y,
@@ -2166,6 +2169,19 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
             dev_id_ = dstMemory->GetDeviceById()->index();
           }
         }
+        break;
+      case hipWriteBuffer:
+        // H2D: src is plain host memory (srcMemory == nullptr), dst is the only
+        // device-side memory. dev_id_ otherwise defaults to the device that was
+        // current when the node was recorded, which can differ from the device
+        // that actually owns dst (e.g. hipSetDevice() called between the
+        // hipMalloc and the node's creation) -- override it to dst's real device.
+        dev_id_ = dstMemory->GetDeviceById()->index();
+        break;
+      case hipReadBuffer:
+        // D2H: dst is plain host memory (dstMemory == nullptr), src is the only
+        // device-side memory. Same rationale as hipWriteBuffer above, mirrored.
+        dev_id_ = srcMemory->GetDeviceById()->index();
         break;
       default:
         break;
@@ -3572,24 +3588,39 @@ class hipGraphExternalSemWaitNode : public GraphNode {
 class hipGraphBatchMemOpNode : public GraphNode {
   hipBatchMemOpNodeParams batchMemOpNodeParam_;
 
+  void copyParams(const hipBatchMemOpNodeParams* src) {
+    delete[] batchMemOpNodeParam_.paramArray;
+    batchMemOpNodeParam_ = *src;
+    if (src->paramArray && src->count > 0) {
+      // Deep-copy paramArray — caller's array may be freed before graph replay.
+      batchMemOpNodeParam_.paramArray = new hipStreamBatchMemOpParams[src->count];
+      std::memcpy(batchMemOpNodeParam_.paramArray, src->paramArray,
+                  src->count * sizeof(hipStreamBatchMemOpParams));
+    }
+  }
+
  protected:
   // Copy constructor is needed for cloning the node, but it should not be used for any other
   // purpose. To prevent accidental misuse, the copy-assignment operator is deleted.
   hipGraphBatchMemOpNode(const hipGraphBatchMemOpNode& rhs) : GraphNode(rhs) {
-    batchMemOpNodeParam_ = rhs.batchMemOpNodeParam_;
+    batchMemOpNodeParam_.paramArray = nullptr;
+    copyParams(&rhs.batchMemOpNodeParam_);
   }
 
  public:
   hipGraphBatchMemOpNode(const hipBatchMemOpNodeParams* pNodeParams)
       : GraphNode(hipGraphNodeTypeBatchMemOp, "solid", "rectangle", "BATCH_MEM_OP_NODE") {
-    batchMemOpNodeParam_ = *pNodeParams;
+    batchMemOpNodeParam_.paramArray = nullptr;
+    copyParams(pNodeParams);
   }
-  ~hipGraphBatchMemOpNode() {}
+  ~hipGraphBatchMemOpNode() { delete[] batchMemOpNodeParam_.paramArray; }
 
   // Delete copy-assignment operator to prevent accidental copies causing unexpected behaviors.
   hipGraphBatchMemOpNode& operator=(const hipGraphBatchMemOpNode&) = delete;
 
   GraphNode* clone() const override { return new hipGraphBatchMemOpNode(*this); }
+
+  virtual bool GraphCaptureEnabled() override { return true; }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
@@ -3610,7 +3641,7 @@ class hipGraphBatchMemOpNode : public GraphNode {
   }
 
   hipError_t SetParams(const hipBatchMemOpNodeParams* pNodeParams) {
-    std::memcpy(&batchMemOpNodeParam_, pNodeParams, sizeof(hipBatchMemOpNodeParams));
+    copyParams(pNodeParams);
     return hipSuccess;
   }
 };

@@ -841,6 +841,8 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   if (!target_private_size)
     append_descriptor_error(result, "private segment size plus lowering addend overflows 32 bits");
   result.target_private_size = target_private_size.value_or(0);
+  result.uses_dynamic_stack =
+      AMDHSA_BITS_GET(src.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_USES_DYNAMIC_STACK) != 0;
   const auto requested_lds_size_checked =
       util::checked_add(src.group_segment_fixed_size, options.group_segment_fixed_size_addend);
   if (!requested_lds_size_checked)
@@ -954,6 +956,7 @@ void KdTranslation::configure_skipped_stub() {
   kernarg_wrapper_original_pointer_offset = 0;
   lds_overflow_kernarg_pointer_offset = 0;
   target_private_size = 0;
+  uses_dynamic_stack = false;
   target_user_sgpr_count = 0;
   source_user_sgpr_count = 0;
   user_sgpr_repair_start = 0;
