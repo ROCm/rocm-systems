@@ -478,8 +478,7 @@ bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count, SpillMana
     }
   });
   if (!non_acc.empty()) {
-    report(error_out,
-           ("AccVGPR spill planning received non-AccVGPR registers:" + non_acc).c_str());
+    report(error_out, ("AccVGPR spill planning received non-AccVGPR registers:" + non_acc).c_str());
     return false;
   }
   if (spill_set.none())

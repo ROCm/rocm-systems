@@ -1697,9 +1697,8 @@ TEST(InstrumentorSpill, PlanAccSpillsRejectsNonAcc) {
   SpillManager spills(0, 4096);
   std::vector<SpillSlot> out;
   std::string err;
-  ASSERT_FALSE(
-      plan_acc_spills(make_vgpr_set({2}), /*acc_count=*/8, spills, ROCJITSU_CODE_ARCH_CDNA4, out,
-                      &err));
+  ASSERT_FALSE(plan_acc_spills(make_vgpr_set({2}), /*acc_count=*/8, spills,
+                               ROCJITSU_CODE_ARCH_CDNA4, out, &err));
   EXPECT_TRUE(out.empty());
   EXPECT_NE(err.find("v2"), std::string::npos) << "error was: " << err;
 }
@@ -1710,8 +1709,8 @@ TEST(InstrumentorSpill, PlanAccSpillsRejectsIndexPastAllocatedCount) {
   SpillManager spills(0, 4096);
   std::vector<SpillSlot> out;
   std::string err;
-  ASSERT_FALSE(plan_acc_spills(make_acc_set({8}), /*acc_count=*/8, spills,
-                               ROCJITSU_CODE_ARCH_CDNA4, out, &err));
+  ASSERT_FALSE(plan_acc_spills(make_acc_set({8}), /*acc_count=*/8, spills, ROCJITSU_CODE_ARCH_CDNA4,
+                               out, &err));
   EXPECT_TRUE(out.empty());
   EXPECT_NE(err.find("acc8"), std::string::npos) << "error was: " << err;
 }
@@ -1721,8 +1720,8 @@ TEST(InstrumentorSpill, PlanAccSpillsRejectsUnsupportedArch) {
   SpillManager spills(0, 4096);
   std::vector<SpillSlot> out;
   std::string err;
-  ASSERT_FALSE(plan_acc_spills(make_acc_set({1}), /*acc_count=*/8, spills,
-                               ROCJITSU_CODE_ARCH_CDNA2, out, &err));
+  ASSERT_FALSE(plan_acc_spills(make_acc_set({1}), /*acc_count=*/8, spills, ROCJITSU_CODE_ARCH_CDNA2,
+                               out, &err));
   EXPECT_TRUE(out.empty());
 }
 
@@ -2555,10 +2554,10 @@ TEST_F(Cdna4ProbeSpill, SpillsLiveClobberedVgprSgprAndAccVgpr) {
   // 16 VGPRs with ACCUM_OFFSET=1 puts the accumulator window at v8-v15, so v2 and
   // the v5/v6/v7 dests are genuine ordinary VGPRs and acc0 sits in a nonempty
   // window (the SGPR bridge is then bounded to the ordinary prefix v0-v7).
-  const Caved caved = patch_spill(
-      {kMovV5V2, kMovV6S8, kAccReadV7A0Lo, kAccReadV7A0Hi, endpgm()},
-      {kMovV2Zero, kMovS8Zero, kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc()}, 64,
-      /*granulated_vgpr_count=*/1, /*accum_offset=*/1);
+  const Caved caved =
+      patch_spill({kMovV5V2, kMovV6S8, kAccReadV7A0Lo, kAccReadV7A0Hi, endpgm()},
+                  {kMovV2Zero, kMovS8Zero, kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc()}, 64,
+                  /*granulated_vgpr_count=*/1, /*accum_offset=*/1);
   const std::vector<uint32_t> &cave = caved.cave;
 
   // VGPR v2 -> slot 64, straight to scratch.
