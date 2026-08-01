@@ -10604,6 +10604,99 @@ TEST(BinaryTranslatorE2E, Gfx1250MaterializesDsAddtidAddressForA0) {
   EXPECT_EQ(((*v_bfe)->raw_encoding()[1] >> 18) & 0x1ffu, static_cast<uint16_t>(kInline + 20));
 }
 
+// A getpc-plus-literal names its target by distance from the getpc, so relocating the body that
+// contains it silently retargets it. A callee packed up against its caller moves whenever the
+// source left padding between them, and its instructions are copied verbatim -- so nothing else in
+// the pipeline notices that the pair now reaches a different address. The literal must therefore be
+// recomputed from the getpc's final placement.
+TEST(BinaryTranslatorE2E, Gfx1250RepointsPcRelativeDataAddressAfterRelocation) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  constexpr uint32_t kGfx1250GetPcS0 = 0xBE804700u;    // s_get_pc_i64 s[0:1]
+  constexpr uint32_t kGfx1250AddNcU64S0 = 0xA980FE00u; // s_add_nc_u64 s[0:1], s[0:1], lit64
+  constexpr uint32_t kGfx1250SetPcS30 = 0xBE80481Eu;   // s_set_pc_i64 s[30:31]
+  // s_call_i64 s[30:31], simm16 jumps to (this instruction + 4) + simm16 * 4. The callee starts at
+  // word 8, so simm16 is 7; words 2..7 are the padding that disappears when it is packed against
+  // the caller, which is what moves the getpc.
+  constexpr uint32_t kGfx1250CallToWord8 = 0xBA1E0007u;
+  constexpr size_t kCalleeWord = 8;
+
+  std::vector<uint32_t> words = {
+      kGfx1250CallToWord8, kGfx1250SEndpgm, kGfx1250SNop,        kGfx1250SNop,
+      kGfx1250SNop,        kGfx1250SNop,    kGfx1250SNop,        kGfx1250SNop,
+      kGfx1250GetPcS0,     kGfx1250AddNcU64S0, 0u /*lit lo*/,    0u /*lit hi*/,
+      kGfx1250SetPcS30,
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+
+  // Locate .text and a real non-executable allocated target, then point the literal at it.
+  const auto sections = [](std::span<const uint8_t> img) {
+    rocjitsu::Elf64_Ehdr ehdr{};
+    std::memcpy(&ehdr, img.data(), sizeof(ehdr));
+    std::vector<rocjitsu::Elf64_Shdr> shdrs(ehdr.e_shnum);
+    std::memcpy(shdrs.data(), img.data() + ehdr.e_shoff, ehdr.e_shnum * sizeof(rocjitsu::Elf64_Shdr));
+    return shdrs;
+  };
+  auto shdrs = sections(image);
+  const auto text = std::ranges::find_if(
+      shdrs, [](const rocjitsu::Elf64_Shdr &s) { return (s.sh_flags & rocjitsu::SHF_EXECINSTR) != 0; });
+  const auto data = std::ranges::find_if(shdrs, [](const rocjitsu::Elf64_Shdr &s) {
+    return (s.sh_flags & rocjitsu::SHF_ALLOC) != 0 && (s.sh_flags & rocjitsu::SHF_EXECINSTR) == 0 && s.sh_size != 0;
+  });
+  ASSERT_NE(text, shdrs.end());
+  ASSERT_NE(data, shdrs.end());
+
+  const uint64_t source_getpc_result =
+      text->sh_addr + kCalleeWord * sizeof(uint32_t) + sizeof(uint32_t);
+  const uint64_t target_vaddr = data->sh_addr;
+  const uint64_t source_literal = target_vaddr - source_getpc_result;
+  std::memcpy(image.data() + text->sh_offset + (kCalleeWord + 2) * sizeof(uint32_t),
+              &source_literal, sizeof(source_literal));
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  // Find the relocated getpc by its encoding; the callee moved, so its offset is not known up front.
+  auto out_shdrs = sections(result.elf_bytes);
+  const auto out_text = std::ranges::find_if(
+      out_shdrs, [](const rocjitsu::Elf64_Shdr &s) { return (s.sh_flags & rocjitsu::SHF_EXECINSTR) != 0; });
+  const auto out_data = std::ranges::find_if(out_shdrs, [](const rocjitsu::Elf64_Shdr &s) {
+    return (s.sh_flags & rocjitsu::SHF_ALLOC) != 0 && (s.sh_flags & rocjitsu::SHF_EXECINSTR) == 0 && s.sh_size != 0;
+  });
+  ASSERT_NE(out_text, out_shdrs.end());
+  ASSERT_NE(out_data, out_shdrs.end());
+
+  std::optional<size_t> getpc_word;
+  for (size_t i = 0; i + 3 < out_text->sh_size / sizeof(uint32_t); ++i) {
+    uint32_t word = 0;
+    std::memcpy(&word, result.elf_bytes.data() + out_text->sh_offset + i * sizeof(uint32_t),
+                sizeof(word));
+    if (word == kGfx1250GetPcS0) {
+      getpc_word = i;
+      break;
+    }
+  }
+  ASSERT_TRUE(getpc_word.has_value()) << "the callee body must survive into translated text";
+  ASSERT_NE(*getpc_word, kCalleeWord) << "the callee must have moved, or this proves nothing";
+
+  uint64_t relocated_literal = 0;
+  std::memcpy(&relocated_literal,
+              result.elf_bytes.data() + out_text->sh_offset + (*getpc_word + 2) * sizeof(uint32_t),
+              sizeof(relocated_literal));
+  const uint64_t relocated_getpc_result =
+      out_text->sh_addr + *getpc_word * sizeof(uint32_t) + sizeof(uint32_t);
+  EXPECT_EQ(relocated_getpc_result + relocated_literal, out_data->sh_addr)
+      << "the relocated body must still reach the same data address";
+  EXPECT_NE(relocated_literal, source_literal) << "the body moved, so the literal had to change";
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnExcludedBarrierSignalIsfirst) {
   // Inline constants encode -1 at 193, so the excluded id is 195.
   constexpr uint8_t kExcludedBarrierIdInline = 195;

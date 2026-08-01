@@ -1301,6 +1301,36 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   const auto relocation_table_calls = attach_relocation_table_call_edges(
       block_index, relocation_function_tables, relocation_table_dispatches);
 
+  // Address materializations that must survive relocation. See the use site for why a non-.text
+  // target has to be rewritten and a .text one must not be.
+  const auto pc_relative_address_builders =
+      discover_pc_relative_address_builders(blocks, text_vaddr);
+  // Read the section headers straight from the image rather than through all_sections(), which
+  // drops SHT_NOBITS. A zero-initialized device global lives in .bss, so that omission would hide
+  // the most ordinary target there is. This must also agree with replace_text(): it resolves a data
+  // relocation by the same "allocated, not executable, contains the address" test, and reporting a
+  // builder it cannot resolve would turn a stale literal into a refused code object.
+  const auto addresses_loadable_data = [image = patcher.image_bytes()](uint64_t vaddr) {
+    if (image.size() < sizeof(Elf64_Ehdr))
+      return false;
+    Elf64_Ehdr ehdr{};
+    std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+    if (ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
+        ehdr.e_shoff > image.size() - sizeof(Elf64_Shdr) ||
+        static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr) > image.size() - ehdr.e_shoff) {
+      return false;
+    }
+    for (uint16_t i = 0; i < ehdr.e_shnum; ++i) {
+      Elf64_Shdr shdr{};
+      std::memcpy(&shdr, image.data() + ehdr.e_shoff + i * sizeof(Elf64_Shdr), sizeof(shdr));
+      if ((shdr.sh_flags & SHF_ALLOC) == 0 || (shdr.sh_flags & SHF_EXECINSTR) != 0)
+        continue;
+      if (vaddr >= shdr.sh_addr && vaddr - shdr.sh_addr < shdr.sh_size)
+        return true;
+    }
+    return false;
+  };
+
   // Callees reached through a relocation-table dispatch are explicit analysis
   // roots whose live-in SGPRs are caller-supplied, not architected: a dispatched
   // callee can be entered with an original .text pointer in a scalar argument.
@@ -2784,6 +2814,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       text_relocations.push_back(
           {.source_offset = source_offset, .target_offset = target_offset + target_delta});
     }
+    std::unordered_set<uint64_t> patched_address_add_offsets;
     for (const RelocationTableDispatch &dispatch : relocation_table_dispatches) {
       if (!target_offset_by_source_offset.contains(dispatch.source_call_offset))
         continue;
@@ -2801,6 +2832,35 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           {.target_getpc_offset = getpc->second + target_delta,
            .target_literal_offset = add->second + target_delta + sizeof(uint32_t),
            .source_target_vaddr = dispatch.source_table_address_vaddr});
+      patched_address_add_offsets.insert(dispatch.source_address_add_offset);
+    }
+
+    // Every other getpc-plus-literal that names data needs the same treatment. The literal is the
+    // distance from the getpc to its target, so relocating the body silently retargets it: a
+    // device-library routine that reads its control block this way reaches into whatever now sits
+    // at the old distance. The instructions are copied verbatim, so nothing else in the pipeline
+    // notices. Recompute the literal from the getpc's final placement instead.
+    //
+    // Only non-executable targets are taken. A `.text` target is a code address, which the
+    // recovered-builder fixups already rewrite through the block placement map, and routing it
+    // here as well would write the same literal twice from two different models.
+    for (const PcRelativeAddressBuilder &builder : pc_relative_address_builders) {
+      if (patched_address_add_offsets.contains(builder.source_address_add_offset))
+        continue;
+      if (!addresses_loadable_data(builder.target_vaddr))
+        continue;
+      const auto getpc = target_offset_by_source_offset.find(builder.source_getpc_offset);
+      const auto add = target_offset_by_source_offset.find(builder.source_address_add_offset);
+      // A builder outside this scope's emitted blocks belongs to another scope's copy and is
+      // rewritten when that scope emits it.
+      if (getpc == target_offset_by_source_offset.end() ||
+          add == target_offset_by_source_offset.end()) {
+        continue;
+      }
+      data_relocations.push_back(
+          {.target_getpc_offset = getpc->second + target_delta,
+           .target_literal_offset = add->second + target_delta + sizeof(uint32_t),
+           .source_target_vaddr = builder.target_vaddr});
     }
 
     if (kernel_context.required_vgpr_count > kernel_context.num_vgprs)

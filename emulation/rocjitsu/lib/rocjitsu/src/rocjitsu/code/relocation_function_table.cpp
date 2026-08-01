@@ -107,13 +107,23 @@ table_at_address(std::span<const RelocationFunctionTable> tables, uint64_t vaddr
 
 void transfer_instruction(PairState &state, const Instruction &inst,
                           std::span<const RelocationFunctionTable> tables, uint64_t text_vaddr,
-                          std::vector<RelocationTableDispatch> *dispatches) {
+                          std::vector<RelocationTableDispatch> *dispatches,
+                          std::vector<PcRelativeAddressBuilder> *address_builders = nullptr) {
   const std::string_view mnemonic = inst.mnemonic();
   // Only getpc can create a tracked fact from an empty state. Large linked
   // objects contain millions of unrelated instructions, so avoid decoding
   // operand register classes or constructing a full def/use set for them.
   if (state.empty() && mnemonic != "s_get_pc_i64" && mnemonic != "s_getpc_b64")
     return;
+  // Report the completed address before the table check below can reclassify the pair, so a
+  // builder is described the same way whether or not its target happens to be a known table.
+  const auto report_address_builder = [&](const PairValue &value) {
+    if (address_builders == nullptr || value.source_address_add_offset == 0)
+      return;
+    address_builders->push_back({.source_getpc_offset = value.source_getpc_offset,
+                                 .source_address_add_offset = value.source_address_add_offset,
+                                 .target_vaddr = value.value});
+  };
   const auto dst_pair = sgpr_pair(inst.dst_operand(0));
   const auto src0_pair = sgpr_pair(inst.src_operand(0));
 
@@ -174,6 +184,7 @@ void transfer_instruction(PairState &state, const Instruction &inst,
         // Address.
         result->value += *addend;
         result->source_address_add_offset = inst.src_loc();
+        report_address_builder(*result);
         // RCCL materializes ncclDevFuncTable_{1,2,4} directly with getpc plus
         // a literal and then performs an indexed s_load_b64 from that base.
         if (const auto table = table_at_address(tables, result->value)) {
@@ -238,6 +249,13 @@ meet_predecessors(const BasicBlock &block,
   }
   return nullptr;
 }
+
+/// @brief Shared getpc/add fixed point. Both public entry points need the same lattice; only what
+/// they collect from the final pass differs, so the worklist itself is written once.
+void run_pair_dataflow(std::span<const std::unique_ptr<BasicBlock>> blocks,
+                       std::span<const RelocationFunctionTable> tables, uint64_t text_vaddr,
+                       std::vector<RelocationTableDispatch> *dispatches,
+                       std::vector<PcRelativeAddressBuilder> *address_builders);
 
 } // namespace
 
@@ -370,7 +388,44 @@ discover_relocation_table_dispatches(std::span<const std::unique_ptr<BasicBlock>
                                      uint64_t text_vaddr) {
   if (blocks.empty() || tables.empty())
     return {};
+  std::vector<RelocationTableDispatch> dispatches;
+  run_pair_dataflow(blocks, tables, text_vaddr, &dispatches, nullptr);
+  std::ranges::sort(dispatches, [](const auto &lhs, const auto &rhs) {
+    if (lhs.source_call_offset != rhs.source_call_offset)
+      return lhs.source_call_offset < rhs.source_call_offset;
+    return lhs.table_index < rhs.table_index;
+  });
+  dispatches.erase(std::ranges::unique(dispatches, {},
+                                       [](const RelocationTableDispatch &item) {
+                                         return std::pair{item.source_call_offset,
+                                                          item.table_index};
+                                       })
+                       .begin(),
+                   dispatches.end());
+  return dispatches;
+}
 
+std::vector<PcRelativeAddressBuilder>
+discover_pc_relative_address_builders(std::span<const std::unique_ptr<BasicBlock>> blocks,
+                                      uint64_t text_vaddr) {
+  if (blocks.empty())
+    return {};
+  std::vector<PcRelativeAddressBuilder> builders;
+  run_pair_dataflow(blocks, {}, text_vaddr, nullptr, &builders);
+  std::ranges::sort(builders, {}, &PcRelativeAddressBuilder::source_address_add_offset);
+  builders.erase(std::ranges::unique(builders, {},
+                                     &PcRelativeAddressBuilder::source_address_add_offset)
+                     .begin(),
+                 builders.end());
+  return builders;
+}
+
+namespace {
+
+void run_pair_dataflow(std::span<const std::unique_ptr<BasicBlock>> blocks,
+                       std::span<const RelocationFunctionTable> tables, uint64_t text_vaddr,
+                       std::vector<RelocationTableDispatch> *dispatches,
+                       std::vector<PcRelativeAddressBuilder> *address_builders) {
   std::unordered_map<const BasicBlock *, size_t> positions;
   positions.reserve(blocks.size());
   for (size_t i = 0; i < blocks.size(); ++i) {
@@ -428,28 +483,15 @@ discover_relocation_table_dispatches(std::span<const std::unique_ptr<BasicBlock>
     }
   }
 
-  std::vector<RelocationTableDispatch> dispatches;
   for (size_t i = 0; i < blocks.size(); ++i) {
     if (blocks[i] == nullptr || !initialized[i])
       continue;
     PairState state = in[i];
-    for (const Instruction &inst : blocks[i]->instructions()) {
-      transfer_instruction(state, inst, tables, text_vaddr, &dispatches);
-    }
+    for (const Instruction &inst : blocks[i]->instructions())
+      transfer_instruction(state, inst, tables, text_vaddr, dispatches, address_builders);
   }
-  std::ranges::sort(dispatches, [](const auto &lhs, const auto &rhs) {
-    if (lhs.source_call_offset != rhs.source_call_offset)
-      return lhs.source_call_offset < rhs.source_call_offset;
-    return lhs.table_index < rhs.table_index;
-  });
-  dispatches.erase(std::ranges::unique(dispatches, {},
-                                       [](const RelocationTableDispatch &item) {
-                                         return std::pair{item.source_call_offset,
-                                                          item.table_index};
-                                       })
-                       .begin(),
-                   dispatches.end());
-  return dispatches;
 }
+
+} // namespace
 
 } // namespace rocjitsu
