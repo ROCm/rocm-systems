@@ -29,8 +29,10 @@ import consan_cdna_hip_moi_registry as cdna_hip_moi_registry
 from consan_coverage_gate import CoverageParseError, parse_coverage_evidence
 from consan_tensile_support import resolve_tensile_validation_paths
 from consan_validation_support import (
+    FAULT_RESERVATION_QUALIFIED,
     SITE_KINDS,
     atomic_write_json,
+    fault_reservation_qualification,
     git_identity,
     sha256_file,
 )
@@ -4306,6 +4308,11 @@ def _fault_acceptance(result: dict, policy: dict) -> tuple[bool, list[str]]:
             "installation_evidence_complete="
             f"{mutation.get('installation_evidence_complete')}"
         )
+    reservation_status, reservation_reasons = fault_reservation_qualification(
+        mutation.get("reservation")
+    )
+    if reservation_status != FAULT_RESERVATION_QUALIFIED:
+        reasons.extend(reservation_reasons)
     if mutation.get("discarded_applied", 0):
         reasons.append(f"discarded_applied={mutation['discarded_applied']}")
     expected_detector = policy.get("detector")

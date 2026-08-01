@@ -483,6 +483,9 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                 accounting_schema_version: int = 2,
                 installation_evidence_complete: bool = True,
                 discarded_applied: int = 0,
+                reservation_contention_timeout: int = 0,
+                reservation_reentrant_contention: int = 0,
+                include_reservation: bool = True,
             ) -> None:
                 row_dir = root / f"{pair_id}-{role}"
                 row_dir.mkdir()
@@ -515,10 +518,35 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                             installation_evidence_complete
                         ),
                         "discarded_applied": discarded_applied,
+                        "reservation": {
+                            "schema_version": 1,
+                            "evidence_complete": True,
+                            "attempts": (
+                                int(applied > 0)
+                                + reservation_contention_timeout
+                                + reservation_reentrant_contention
+                            ),
+                            "outcomes": {
+                                "reserved": int(applied > 0),
+                                "mutation_already_installed": 0,
+                                "contention_timeout": (reservation_contention_timeout),
+                                "reentrant_contention": (
+                                    reservation_reentrant_contention
+                                ),
+                            },
+                            "not_requested_records": int(
+                                applied == 0
+                                and reservation_contention_timeout == 0
+                                and reservation_reentrant_contention == 0
+                            ),
+                            "unattributed_attempts": 0,
+                        },
                     },
                     "sanitizer": {"outcome": sanitizer},
                     "coverage": {"overflowed": overflowed},
                 }
+                if not include_reservation:
+                    manifest["mutation"].pop("reservation")
                 (row_dir / "result.json").write_text(
                     json.dumps(manifest), encoding="utf-8"
                 )
@@ -536,6 +564,8 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                 "legacy-accounting": "fault_not_applied",
                 "incomplete-install": "fault_not_applied",
                 "discarded-install": "fault_not_applied",
+                "reservation-contended": "reservation_contended",
+                "reservation-invalid": "reservation_evidence_invalid",
             }
             for pair_id in cases:
                 write_row(
@@ -568,13 +598,21 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                 if pair_id == "not-applied":
                     fault_options.update(applied=0, applicability="planned_not_applied")
                 if pair_id == "unsupported":
-                    fault_options.update(applied=0, applicability="not_applicable")
+                    fault_options.update(
+                        applied=0,
+                        applicability="not_applicable",
+                        include_reservation=False,
+                    )
                 if pair_id == "legacy-accounting":
                     fault_options.update(accounting_schema_version=1)
                 if pair_id == "incomplete-install":
                     fault_options.update(installation_evidence_complete=False)
                 if pair_id == "discarded-install":
                     fault_options.update(discarded_applied=1)
+                if pair_id == "reservation-contended":
+                    fault_options.update(reservation_contention_timeout=1)
+                if pair_id == "reservation-invalid":
+                    fault_options.update(include_reservation=False)
                 write_row(pair_id, "fault", **fault_options)
 
             legacy_dir = root / "legacy"
@@ -836,7 +874,9 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                     "dump = pathlib.Path(os.environ['RJ_CONSAN_DUMP_DIR'])",
                     "(dump / 'rj-dbi-000001-reader-7-original.hsaco').write_bytes(b'o' * 10)",
                     "(dump / 'rj-dbi-000001-reader-7-patched.hsaco').write_bytes(b'p' * 26)",
-                    "print('[rocjitsu-dbi-hooks] ConSan fault summary process=123 reader=7 requested=1 planned=1 applied=1 require_exactly_one=true')",
+                    "print('[rocjitsu-dbi-hooks] ConSan fault summary process=123 reader=7 requested=1 planned=1 applied=1 process_prior_applied=0 reservation=reserved require_exactly_one=true')",
+                    "print('[rocjitsu-dbi-hooks] ConSan fault install process=123 reader=7 applied=1 installed=true')",
+                    "print('[rocjitsu-dbi-hooks] ConSan fault reservation summary process=123 attempts=1 reserved=1 mutation_already_installed=0 contention_timeout=0 reentrant_contention=0 mutation_installed=true active=false complete=true')",
                     "print('[rocjitsu-dbi-hooks] ConSan fault site reader=7 identity=site kind=atomic')",
                     "print('[rocjitsu-dbi-hooks] ConSan proof patch reader=7 kind=inline-atomic-address-rewrite anchor=0x10')",
                     "print('[rocjitsu-dbi-hooks] ConSan proof patch reader=7 kind=trampoline-moi-atomic-record anchor=0x20 spilled_vgprs=2 private_bytes=96 workgroup_shadow_bytes=128 group_bytes=512')",
@@ -899,8 +939,51 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                         "raw_applied": 1,
                         "applied": 1,
                         "discarded_applied": 0,
+                        "reservation_outcomes": ["reserved"],
                     }
                 ],
+            )
+            self.assertEqual(
+                result["mutation"]["reservation"],
+                {
+                    "schema_version": 1,
+                    "evidence_complete": True,
+                    "attempts": 1,
+                    "outcomes": {
+                        "reserved": 1,
+                        "mutation_already_installed": 0,
+                        "contention_timeout": 0,
+                        "reentrant_contention": 0,
+                    },
+                    "not_requested_records": 0,
+                    "unattributed_attempts": 0,
+                    "observed_exceeds_summary": False,
+                    "processes": [
+                        {
+                            "process": "123",
+                            "attempts": 1,
+                            "outcomes": {
+                                "reserved": 1,
+                                "mutation_already_installed": 0,
+                                "contention_timeout": 0,
+                                "reentrant_contention": 0,
+                            },
+                            "mutation_installed": True,
+                            "active": False,
+                            "complete": True,
+                            "summary_records": 1,
+                            "observed_outcomes": {
+                                "reserved": 1,
+                                "mutation_already_installed": 0,
+                                "contention_timeout": 0,
+                                "reentrant_contention": 0,
+                            },
+                            "observed_exceeds_summary": False,
+                            "not_requested_records": 0,
+                            "unattributed_attempts": 0,
+                        }
+                    ],
+                },
             )
             self.assertEqual(
                 result["mutation"]["processes"],
@@ -920,6 +1003,7 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                                 "raw_applied": 1,
                                 "applied": 1,
                                 "discarded_applied": 0,
+                                "reservation_outcomes": ["reserved"],
                             }
                         ],
                     }
@@ -1559,6 +1643,140 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                 "summary_count": 1,
             },
         )
+
+    def test_reservation_summary_distinguishes_contention_from_no_plan(self):
+        contended = runner._parse_consan_log(
+            "\n".join(
+                (
+                    "[rocjitsu-dbi-hooks] ConSan fault summary process=456 reader=1 "
+                    "requested=1 planned=1 applied=1 reservation=reserved",
+                    "[rocjitsu-dbi-hooks] ConSan fault install process=456 reader=1 "
+                    "applied=1 installed=true",
+                    "[rocjitsu-dbi-hooks] ConSan fault summary process=456 reader=2 "
+                    "requested=0 planned=0 applied=0 "
+                    "reservation=mutation-already-installed",
+                    "[rocjitsu-dbi-hooks] ConSan fault summary process=456 reader=3 "
+                    "requested=0 planned=0 applied=0 reservation=contention-timeout",
+                    "[rocjitsu-dbi-hooks] ConSan fault summary process=456 reader=4 "
+                    "requested=0 planned=0 applied=0 reservation=reentrant-contention",
+                    "[rocjitsu-dbi-hooks] ConSan fault summary process=456 reader=5 "
+                    "requested=0 planned=0 applied=0 reservation=not-requested",
+                    "[rocjitsu-dbi-hooks] ConSan fault reservation summary process=456 "
+                    "attempts=4 reserved=1 mutation_already_installed=1 "
+                    "contention_timeout=1 reentrant_contention=1 "
+                    "mutation_installed=true active=false complete=true",
+                )
+            )
+        )["mutation"]["reservation"]
+        self.assertTrue(contended["evidence_complete"])
+        self.assertEqual(contended["attempts"], 4)
+        self.assertEqual(
+            contended["outcomes"],
+            {
+                "reserved": 1,
+                "mutation_already_installed": 1,
+                "contention_timeout": 1,
+                "reentrant_contention": 1,
+            },
+        )
+        self.assertEqual(contended["not_requested_records"], 1)
+        self.assertEqual(contended["unattributed_attempts"], 0)
+
+        not_planned = runner._parse_consan_log(
+            "\n".join(
+                (
+                    "[rocjitsu-dbi-hooks] ConSan fault summary process=789 reader=1 "
+                    "requested=1 planned=0 applied=0 reservation=not-requested",
+                    "[rocjitsu-dbi-hooks] ConSan fault reservation summary process=789 "
+                    "attempts=0 reserved=0 mutation_already_installed=0 "
+                    "contention_timeout=0 reentrant_contention=0 "
+                    "mutation_installed=false active=false complete=true",
+                )
+            )
+        )["mutation"]["reservation"]
+        self.assertTrue(not_planned["evidence_complete"])
+        self.assertEqual(not_planned["attempts"], 0)
+        self.assertEqual(not_planned["not_requested_records"], 1)
+        self.assertFalse(any(not_planned["outcomes"].values()))
+
+    def test_reservation_summary_rejects_inconsistent_producer_counts(self):
+        reservation = runner._parse_consan_log(
+            "\n".join(
+                (
+                    "[rocjitsu-dbi-hooks] ConSan fault summary process=456 reader=1 "
+                    "requested=1 planned=1 applied=1 reservation=reserved",
+                    "[rocjitsu-dbi-hooks] ConSan fault install process=456 reader=1 "
+                    "applied=1 installed=true",
+                    "[rocjitsu-dbi-hooks] ConSan fault reservation summary process=456 "
+                    "attempts=2 reserved=1 mutation_already_installed=0 "
+                    "contention_timeout=0 reentrant_contention=0 "
+                    "mutation_installed=true active=false complete=true",
+                )
+            )
+        )["mutation"]["reservation"]
+        self.assertFalse(reservation["evidence_complete"])
+        self.assertEqual(reservation["processes"], [])
+
+    def test_reservation_summary_aggregates_repeated_tool_lifetimes(self):
+        reservation = runner._parse_consan_log(
+            "\n".join(
+                (
+                    "[rocjitsu-dbi-hooks] ConSan fault summary process=456 reader=1 "
+                    "requested=1 planned=1 applied=1 reservation=reserved",
+                    "[rocjitsu-dbi-hooks] ConSan fault install process=456 reader=1 "
+                    "applied=1 installed=true",
+                    "[rocjitsu-dbi-hooks] ConSan fault reservation summary process=456 "
+                    "attempts=1 reserved=1 mutation_already_installed=0 "
+                    "contention_timeout=0 reentrant_contention=0 "
+                    "mutation_installed=true active=false complete=true",
+                    "[rocjitsu-dbi-hooks] ConSan fault reservation summary process=456 "
+                    "attempts=0 reserved=0 mutation_already_installed=0 "
+                    "contention_timeout=0 reentrant_contention=0 "
+                    "mutation_installed=false active=false complete=true",
+                )
+            )
+        )["mutation"]["reservation"]
+        self.assertTrue(reservation["evidence_complete"])
+        self.assertEqual(reservation["attempts"], 1)
+        self.assertEqual(reservation["processes"][0]["summary_records"], 2)
+        self.assertTrue(reservation["processes"][0]["mutation_installed"])
+
+    def test_reservation_summary_retains_malformed_reader_evidence_in_shape(self):
+        reservation = runner._parse_consan_log(
+            "\n".join(
+                (
+                    "[rocjitsu-dbi-hooks] ConSan fault summary process=456 reader=1 "
+                    "requested=0 planned=0 applied=0 reservation=reserved",
+                    "[rocjitsu-dbi-hooks] ConSan fault summary process=456 reader=2 "
+                    "requested=0 planned=0 applied=0 reservation=reserved",
+                    "[rocjitsu-dbi-hooks] ConSan fault reservation summary process=456 "
+                    "attempts=1 reserved=1 mutation_already_installed=0 "
+                    "contention_timeout=0 reentrant_contention=0 "
+                    "mutation_installed=false active=false complete=true",
+                )
+            )
+        )["mutation"]["reservation"]
+        self.assertFalse(reservation["evidence_complete"])
+        self.assertTrue(reservation["observed_exceeds_summary"])
+        self.assertEqual(reservation["unattributed_attempts"], 0)
+        self.assertEqual(reservation["processes"][0]["unattributed_attempts"], 0)
+
+    def test_reservation_install_identity_must_have_reserved(self):
+        reservation = runner._parse_consan_log(
+            "\n".join(
+                (
+                    "[rocjitsu-dbi-hooks] ConSan fault summary process=456 reader=1 "
+                    "requested=1 planned=1 applied=0 reservation=reserved",
+                    "[rocjitsu-dbi-hooks] ConSan fault install process=456 reader=2 "
+                    "applied=1 installed=true",
+                    "[rocjitsu-dbi-hooks] ConSan fault reservation summary process=456 "
+                    "attempts=1 reserved=1 mutation_already_installed=0 "
+                    "contention_timeout=0 reentrant_contention=0 "
+                    "mutation_installed=true active=false complete=true",
+                )
+            )
+        )["mutation"]["reservation"]
+        self.assertFalse(reservation["evidence_complete"])
 
     def test_all_discarded_fault_mutations_are_not_counted_as_applied(self):
         parsed = runner._parse_consan_log(

@@ -383,6 +383,32 @@ the fault and reports
 `RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS` to a positive millisecond deadline
 when a large transform or loader needs a longer bounded wait.
 
+At process teardown, an exactly-one run emits `ConSan fault reservation
+summary` with process-wide counts for `reserved`,
+`mutation_already_installed`, `contention_timeout`, and
+`reentrant_contention`. The fault runner retains these under
+`mutation.reservation`, together with per-reader `not-requested` records. A
+zero-attempt summary therefore means that no reader planned the selected
+mutation; it is not interchangeable with a timeout or same-thread reentry.
+`mutation-already-installed` is an expected bounded outcome when a later load
+matches a mutation already installed elsewhere in the process. Timeout and
+reentry counts reject campaign qualification even if another reader installed
+one mutation successfully. Inspect `mutation.reservation.processes` to find
+the affected process and increase the timeout only when the recorded transform
+or loader window legitimately needs it. The required per-reader summary,
+installation record, and process summary are emitted independently of
+`RJ_CONSAN_LOG`. If a process initializes and shuts down the HSA tool more than
+once, the parser aggregates its complete lifetime summaries under the same
+process record and retains `summary_records`.
+
+Reservation qualification requires a clean hook teardown. A process that
+terminates through `_Exit`, abort, or another path that bypasses `OnUnload`
+cannot attest complete process accounting; its retained reservation evidence
+is invalid and the run must be repeated. Pair summaries report this as
+`reservation_evidence_invalid`, separately from `fault_not_applied` and
+`reservation_contended`. A workload/profile with no applicable mutation site
+remains `unsupported` even when historical reservation evidence is absent.
+
 Fault injection is intentionally disruptive. Apply one mutation at a time,
 use an external timeout, and check device health before and after the run.
 Program corruption and a ConSan diagnostic are separate outcomes; a timeout,

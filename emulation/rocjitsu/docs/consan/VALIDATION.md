@@ -609,6 +609,19 @@ Promotion requires all of the following to match the reviewed spec:
   proving that each applied mutation reached the loaded replacement. Historical
   schema-v1 logs do not contain this evidence and must be rerun rather than
   re-parsed for current fault qualification;
+- reservation schema v1 requires one complete process-teardown summary for
+  every process represented by reader or installation evidence. It checks the
+  producer's `attempts` total against typed `reserved`,
+  `mutation_already_installed`, `contention_timeout`, and
+  `reentrant_contention` counts and retains any reservation attempt that exited
+  before an ordinary reader summary. A qualifying applied row needs at least
+  one reserved attempt, no unattributed attempts, and zero timeout or reentry
+  outcomes. `not_requested_records` separately identifies readers that never
+  planned the selected mutation. Required teardown evidence is independent of
+  `RJ_CONSAN_LOG`; repeated HSA tool lifetimes in one process are aggregated.
+  Runs that bypass `OnUnload` cannot qualify and are reported as
+  `reservation_evidence_invalid`, while a workload/profile with no matching
+  mutation site remains `unsupported`;
 - automatic report capacity is planned from a pristine dry-run semantic
   inventory. A live fault mutation and its final instrumentation composition
   run only after the report buffer has been allocated, so sizing cannot consume
@@ -619,8 +632,9 @@ Promotion requires all of the following to match the reviewed spec:
   default; `RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS` sets a larger positive
   bound for campaigns whose individual code-object load can take longer.
   Timeout or same-thread reentry is emitted as a warning with a typed
-  reservation outcome and loads without mutation, so the trial fails exact-one
-  accounting instead of deadlocking. A transform claiming more than one
+  reservation outcome and loads without mutation, so reservation schema v1
+  rejects the trial even if another concurrent reader installed the one
+  requested mutation. A transform claiming more than one
   applied mutation is rejected before its replacement can be installed;
 - schema-v2 mutation reader records carry both `process` and `reader`
   identities. The nested per-process view removes the repeated process field,

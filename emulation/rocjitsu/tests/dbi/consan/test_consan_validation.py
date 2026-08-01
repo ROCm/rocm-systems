@@ -87,6 +87,31 @@ def complete_coverage_log(*extra_lines: str) -> str:
     )
 
 
+def fault_reservation_evidence(
+    *,
+    reserved: int = 1,
+    mutation_already_installed: int = 0,
+    contention_timeout: int = 0,
+    reentrant_contention: int = 0,
+    evidence_complete: bool = True,
+    unattributed_attempts: int = 0,
+) -> dict[str, object]:
+    outcomes = {
+        "reserved": reserved,
+        "mutation_already_installed": mutation_already_installed,
+        "contention_timeout": contention_timeout,
+        "reentrant_contention": reentrant_contention,
+    }
+    return {
+        "schema_version": 1,
+        "evidence_complete": evidence_complete,
+        "attempts": sum(outcomes.values()),
+        "outcomes": outcomes,
+        "not_requested_records": 0,
+        "unattributed_attempts": unattributed_attempts,
+    }
+
+
 def moi_auto_replay(
     reader: int,
     generation: int,
@@ -3971,6 +3996,7 @@ class ConSanValidationTest(unittest.TestCase):
                     "planned": 1,
                     "applied": 1,
                     "installation_evidence_complete": True,
+                    "reservation": fault_reservation_evidence(),
                 },
                 "sanitizer": {"outcome": "not_detected"},
                 "oracle": {"outcome": "pass"},
@@ -3996,6 +4022,7 @@ class ConSanValidationTest(unittest.TestCase):
                     "applied": 1,
                     "installation_evidence_complete": True,
                     "discarded_applied": 1,
+                    "reservation": fault_reservation_evidence(),
                 },
                 "sanitizer": {"outcome": "detected"},
                 "oracle": {"outcome": "fail"},
@@ -4020,6 +4047,7 @@ class ConSanValidationTest(unittest.TestCase):
                     "planned": 1,
                     "applied": 1,
                     "installation_evidence_complete": False,
+                    "reservation": fault_reservation_evidence(),
                 },
                 "sanitizer": {"outcome": "not_detected"},
                 "oracle": {"outcome": "pass"},
@@ -4042,6 +4070,7 @@ class ConSanValidationTest(unittest.TestCase):
                     "requested": 1,
                     "planned": 1,
                     "applied": 1,
+                    "reservation": fault_reservation_evidence(),
                 },
                 "sanitizer": {"outcome": "not_detected"},
                 "oracle": {"outcome": "pass"},
@@ -4061,6 +4090,55 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertFalse(
             any("installation_evidence_complete" in reason for reason in reasons)
+        )
+
+    def test_fault_acceptance_rejects_contention_but_allows_prior_install(self) -> None:
+        def result(reservation: dict[str, object]) -> dict[str, object]:
+            return {
+                "mutation": {
+                    "accounting_schema_version": 2,
+                    "requested": 1,
+                    "planned": 1,
+                    "applied": 1,
+                    "installation_evidence_complete": True,
+                    "reservation": reservation,
+                },
+                "sanitizer": {"outcome": "not_detected"},
+                "oracle": {"outcome": "pass"},
+                "execution": {
+                    "outcome": "passed",
+                    "timed_out": False,
+                    "health_before": {"healthy": True},
+                    "health_after": {"healthy": True},
+                },
+            }
+
+        accepted, reasons = validation._fault_acceptance(
+            result(
+                fault_reservation_evidence(reserved=1, mutation_already_installed=2)
+            ),
+            {"detector": "not_detected", "oracle": "pass"},
+        )
+        self.assertTrue(accepted, reasons)
+
+        for outcome in ("contention_timeout", "reentrant_contention"):
+            with self.subTest(outcome=outcome):
+                accepted, reasons = validation._fault_acceptance(
+                    result(fault_reservation_evidence(**{outcome: 1})),
+                    {"detector": "not_detected", "oracle": "pass"},
+                )
+                self.assertFalse(accepted)
+                self.assertIn(f"reservation_{outcome}=1", reasons)
+
+        malformed = fault_reservation_evidence()
+        malformed["outcomes"]["reserved"] = "1"
+        accepted, reasons = validation._fault_acceptance(
+            result(malformed),
+            {"detector": "not_detected", "oracle": "pass"},
+        )
+        self.assertFalse(accepted)
+        self.assertTrue(
+            any("reservation evidence shape is invalid" in reason for reason in reasons)
         )
 
     def test_fault_does_not_execute_a_spec_not_applicable_profile(self) -> None:

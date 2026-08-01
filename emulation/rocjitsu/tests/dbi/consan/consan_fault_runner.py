@@ -25,8 +25,15 @@ from consan_coverage_gate import (
 )
 from consan_run_provenance import load_contract, validate_current_contract
 from consan_validation_support import (
+    FAULT_RESERVATION_CONTENDED,
+    FAULT_RESERVATION_EVIDENCE_INVALID,
+    FAULT_RESERVATION_NOT_APPLIED,
+    FAULT_RESERVATION_OUTCOMES,
+    FAULT_RESERVATION_QUALIFIED,
+    FAULT_RESERVATION_SCHEMA_VERSION,
     RESULT_SCHEMA_VERSION,
     atomic_write_json,
+    fault_reservation_qualification,
     git_identity,
     sha256_file,
 )
@@ -34,6 +41,7 @@ from consan_validation_support import (
 MAX_GPU_JOBS = 4
 MAX_RESOURCE_PLAN_ALTERNATIVES = 4096
 MAX_RESOURCE_PLAN_ALTERNATIVE_ERRORS = 16
+UINT64_MAX = (1 << 64) - 1
 QUARANTINE_FILE = ".gpu-quarantine.json"
 GLOBAL_DESTRUCTIVE_LOCK_ENV = "CONSAN_DESTRUCTIVE_GPU_LOCK"
 DEFAULT_GLOBAL_DESTRUCTIVE_LOCK = "/tmp/rocjitsu-consan-destructive-gpu.lock"
@@ -55,6 +63,14 @@ _MUTATION_PATCH_KINDS = {
     "inline-atomic-scope-rewrite",
     "inline-lds-address-rewrite",
 }
+
+_FAULT_RESERVATION_LOG_OUTCOMES = {
+    "reserved": "reserved",
+    "mutation-already-installed": "mutation_already_installed",
+    "contention-timeout": "contention_timeout",
+    "reentrant-contention": "reentrant_contention",
+}
+_FAULT_RESERVATION_NOT_REQUESTED = "not-requested"
 
 _RESOURCE_PLAN_ALTERNATIVE_KINDS = {
     "guest_operand_overlap_spill",
@@ -283,6 +299,7 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
         static_coverage_records = []
         coverage_site_parse_error = str(error)
     fault_summaries: list[dict[str, str]] = []
+    fault_reservation_summaries: list[dict[str, str]] = []
     fault_install_summaries: list[dict[str, str]] = []
     fault_load_selections: list[dict[str, str]] = []
     fault_load_summaries: list[dict[str, str]] = []
@@ -462,6 +479,8 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
         fields = _key_values(record)
         if record.startswith("fault summary "):
             fault_summaries.append(fields)
+        elif record.startswith("fault reservation summary "):
+            fault_reservation_summaries.append(fields)
         elif record.startswith("fault install "):
             fault_install_summaries.append(fields)
         elif record.startswith("fault load selection "):
@@ -1043,11 +1062,13 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
                 "raw_applied": 0,
                 "applied": 0,
                 "discarded_applied": 0,
+                "reservation_outcomes": [],
             },
         )
         record["requested"] = max(record["requested"], _integer(fields, "requested"))
         record["planned"] += _integer(fields, "planned")
         record["raw_applied"] += _integer(fields, "applied")
+        record["reservation_outcomes"].append(fields.get("reservation", UNSPECIFIED))
 
     install_by_identity: dict[tuple[str, str], list[dict[str, str]]] = {}
     valid_install_evidence = True
@@ -1086,6 +1107,7 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             "raw_applied": discarded,
             "applied": 0,
             "discarded_applied": 0,
+            "reservation_outcomes": [],
         }
 
     raw_by_identity = {
@@ -1123,6 +1145,147 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
     mutation_readers = sorted(
         mutation_reader_map.values(),
         key=lambda record: (record["process"], record["reader"]),
+    )
+    observed_reservations_by_process: dict[str, dict[str, int]] = {}
+    not_requested_by_process: dict[str, int] = {}
+    reservation_reader_evidence_valid = True
+    for fields in fault_summaries:
+        process = fields.get("process")
+        reader = fields.get("reader")
+        outcome = fields.get("reservation")
+        if (
+            not process
+            or not reader
+            or outcome
+            not in {
+                *_FAULT_RESERVATION_LOG_OUTCOMES,
+                _FAULT_RESERVATION_NOT_REQUESTED,
+            }
+        ):
+            reservation_reader_evidence_valid = False
+            continue
+        if outcome == _FAULT_RESERVATION_NOT_REQUESTED:
+            not_requested_by_process[process] = (
+                not_requested_by_process.get(process, 0) + 1
+            )
+            continue
+        counts = observed_reservations_by_process.setdefault(
+            process, {name: 0 for name in FAULT_RESERVATION_OUTCOMES}
+        )
+        counts[_FAULT_RESERVATION_LOG_OUTCOMES[outcome]] += 1
+
+    reservation_process_map: dict[str, dict[str, object]] = {}
+    reservation_summary_evidence_valid = bool(fault_reservation_summaries)
+    for fields in fault_reservation_summaries:
+        process = fields.get("process")
+        counts = {
+            name: _required_integer(fields, name) for name in FAULT_RESERVATION_OUTCOMES
+        }
+        attempts = _required_integer(fields, "attempts")
+        mutation_installed = fields.get("mutation_installed")
+        active = fields.get("active")
+        complete = fields.get("complete")
+        if (
+            not process
+            or attempts is None
+            or attempts < 0
+            or attempts > UINT64_MAX
+            or any(
+                count is None or count < 0 or count > UINT64_MAX
+                for count in counts.values()
+            )
+            or attempts != min(sum(int(count) for count in counts.values()), UINT64_MAX)
+            or mutation_installed not in {"true", "false"}
+            or active not in {"true", "false"}
+            or complete not in {"true", "false"}
+            or active != "false"
+            or complete != "true"
+        ):
+            reservation_summary_evidence_valid = False
+            continue
+        summary = reservation_process_map.setdefault(
+            process,
+            {
+                "process": process,
+                "attempts": 0,
+                "outcomes": {name: 0 for name in FAULT_RESERVATION_OUTCOMES},
+                "mutation_installed": False,
+                "active": False,
+                "complete": True,
+                "summary_records": 0,
+            },
+        )
+        for name in FAULT_RESERVATION_OUTCOMES:
+            summary["outcomes"][name] += int(counts[name])
+        summary["attempts"] = sum(summary["outcomes"].values())
+        summary["mutation_installed"] |= mutation_installed == "true"
+        summary["active"] |= active == "true"
+        summary["complete"] &= complete == "true"
+        summary["summary_records"] += 1
+
+    installed_processes = {
+        process
+        for (process, _reader), installs in install_by_identity.items()
+        if any(fields["installed"] == "true" for fields in installs)
+    }
+    reserved_identities = {
+        (fields.get("process"), fields.get("reader"))
+        for fields in fault_summaries
+        if fields.get("reservation") == "reserved"
+    }
+    installed_identities = {
+        identity
+        for identity, installs in install_by_identity.items()
+        if any(fields["installed"] == "true" for fields in installs)
+    }
+    if not installed_identities <= reserved_identities:
+        reservation_reader_evidence_valid = False
+    reservation_process_evidence = []
+    for process, summary in reservation_process_map.items():
+        observed = observed_reservations_by_process.get(
+            process, {name: 0 for name in FAULT_RESERVATION_OUTCOMES}
+        )
+        observed_exceeds_summary = any(
+            observed[name] > summary["outcomes"][name]
+            for name in FAULT_RESERVATION_OUTCOMES
+        )
+        if observed_exceeds_summary:
+            reservation_summary_evidence_valid = False
+        if summary["mutation_installed"] != (process in installed_processes):
+            reservation_summary_evidence_valid = False
+        reservation_process_evidence.append(
+            {
+                **summary,
+                "observed_outcomes": observed,
+                "observed_exceeds_summary": observed_exceeds_summary,
+                "not_requested_records": not_requested_by_process.get(process, 0),
+                "unattributed_attempts": sum(
+                    max(int(summary["outcomes"][name]) - observed[name], 0)
+                    for name in FAULT_RESERVATION_OUTCOMES
+                ),
+            }
+        )
+    reservation_process_evidence.sort(key=lambda record: record["process"])
+    referenced_reservation_processes = {
+        *observed_reservations_by_process,
+        *not_requested_by_process,
+        *installed_processes,
+    }
+    reservation_evidence_complete = (
+        reservation_reader_evidence_valid
+        and reservation_summary_evidence_valid
+        and referenced_reservation_processes <= reservation_process_map.keys()
+    )
+    reservation_outcome_counts = {
+        name: sum(
+            int(record["outcomes"][name]) for record in reservation_process_evidence
+        )
+        for name in FAULT_RESERVATION_OUTCOMES
+    }
+    reservation_attempts = sum(reservation_outcome_counts.values())
+    reservation_not_requested_records = sum(not_requested_by_process.values())
+    reservation_unattributed_attempts = sum(
+        int(record["unattributed_attempts"]) for record in reservation_process_evidence
     )
     classified_alternative_count = sum(
         resource_plan_alternative_counts[outcome]
@@ -1332,6 +1495,19 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             "readers": mutation_readers,
             "process_evidence_complete": process_evidence_complete,
             "processes": fault_process_evidence,
+            "reservation": {
+                "schema_version": FAULT_RESERVATION_SCHEMA_VERSION,
+                "evidence_complete": reservation_evidence_complete,
+                "attempts": reservation_attempts,
+                "outcomes": reservation_outcome_counts,
+                "not_requested_records": reservation_not_requested_records,
+                "unattributed_attempts": reservation_unattributed_attempts,
+                "observed_exceeds_summary": any(
+                    record["observed_exceeds_summary"]
+                    for record in reservation_process_evidence
+                ),
+                "processes": reservation_process_evidence,
+            },
             "load_selection": load_selection,
         },
         "sanitizer": {
@@ -1993,13 +2169,58 @@ def _pair_classification(
         "installation_evidence_complete"
     )
     evidence["mutation_discarded_applied"] = mutation.get("discarded_applied", 0)
+    reservation = mutation.get("reservation", {})
+    reservation_outcomes = (
+        reservation.get("outcomes", {}) if isinstance(reservation, dict) else {}
+    )
+    evidence["mutation_reservation_schema_version"] = (
+        reservation.get("schema_version") if isinstance(reservation, dict) else None
+    )
+    evidence["mutation_reservation_evidence_complete"] = (
+        reservation.get("evidence_complete") if isinstance(reservation, dict) else None
+    )
+    evidence["mutation_reservation_attempts"] = (
+        reservation.get("attempts") if isinstance(reservation, dict) else None
+    )
+    for outcome in FAULT_RESERVATION_OUTCOMES:
+        evidence[f"reservation_{outcome}"] = (
+            reservation_outcomes.get(outcome)
+            if isinstance(reservation_outcomes, dict)
+            else None
+        )
+    evidence["reservation_not_requested_records"] = (
+        reservation.get("not_requested_records")
+        if isinstance(reservation, dict)
+        else None
+    )
+    evidence["reservation_unattributed_attempts"] = (
+        reservation.get("unattributed_attempts")
+        if isinstance(reservation, dict)
+        else None
+    )
     if mutation.get("applicability") == "not_applicable":
         return "unsupported", evidence
     if (
         mutation.get("accounting_schema_version") != 2
         or mutation.get("installation_evidence_complete") is not True
         or mutation.get("discarded_applied", 0) != 0
-        or mutation.get("requested") != 1
+    ):
+        return "fault_not_applied", evidence
+    reservation_status, reservation_reasons = fault_reservation_qualification(
+        reservation
+    )
+    evidence["mutation_reservation_qualification"] = reservation_status
+    evidence["mutation_reservation_rejection_reasons"] = reservation_reasons
+    if reservation_status == FAULT_RESERVATION_EVIDENCE_INVALID:
+        return "reservation_evidence_invalid", evidence
+    if reservation_status == FAULT_RESERVATION_CONTENDED:
+        return "reservation_contended", evidence
+    if reservation_status == FAULT_RESERVATION_NOT_APPLIED:
+        return "fault_not_applied", evidence
+    if reservation_status != FAULT_RESERVATION_QUALIFIED:
+        return "indeterminate_execution", evidence
+    if (
+        mutation.get("requested") != 1
         or mutation.get("planned") != 1
         or mutation.get("applied") != 1
         or mutation.get("applicability") != "applied"
@@ -2116,6 +2337,13 @@ def _summarize(args: argparse.Namespace) -> int:
             "mutation_requested",
             "mutation_applied",
             "mutation_applicability",
+            "mutation_reservation_attempts",
+            "reservation_reserved",
+            "reservation_mutation_already_installed",
+            "reservation_contention_timeout",
+            "reservation_reentrant_contention",
+            "reservation_not_requested_records",
+            "reservation_unattributed_attempts",
             "sanitizer_outcome",
         ]
         with args.csv_out.open("w", encoding="utf-8", newline="") as output:

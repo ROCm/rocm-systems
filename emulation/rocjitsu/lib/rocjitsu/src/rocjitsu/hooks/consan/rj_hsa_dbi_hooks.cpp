@@ -688,12 +688,49 @@ std::mutex &log_mutex() {
   return mutex;
 }
 
+enum class ProcessFaultReservationOutcome : uint8_t {
+  Reserved,
+  MutationAlreadyInstalled,
+  ContentionTimeout,
+  ReentrantContention,
+};
+
+struct ProcessFaultReservationSummary {
+  uint64_t reserved = 0;
+  uint64_t mutation_already_installed = 0;
+  uint64_t contention_timeout = 0;
+  uint64_t reentrant_contention = 0;
+  bool mutation_installed = false;
+  bool reservation_active = false;
+
+  [[nodiscard]] uint64_t attempts() const {
+    uint64_t total = 0;
+    for (const uint64_t count :
+         {reserved, mutation_already_installed, contention_timeout, reentrant_contention}) {
+      if (count > std::numeric_limits<uint64_t>::max() - total)
+        return std::numeric_limits<uint64_t>::max();
+      total += count;
+    }
+    return total;
+  }
+
+  [[nodiscard]] bool complete() const { return !reservation_active; }
+};
+
 struct ProcessFaultApplicationState {
   std::mutex mutex;
   std::condition_variable changed;
   bool reservation_active = false;
   bool mutation_installed = false;
   std::thread::id reservation_owner;
+  ProcessFaultReservationSummary summary;
+  bool exactly_one_requested = false;
+  bool summary_taken = false;
+};
+
+struct ProcessFaultApplicationSnapshot {
+  ProcessFaultReservationSummary reservation;
+  bool exactly_one_requested = false;
 };
 
 ProcessFaultApplicationState &process_fault_application_state() {
@@ -712,16 +749,58 @@ void reset_process_fault_application_state() {
     state.reservation_active = false;
     state.mutation_installed = false;
     state.reservation_owner = {};
+    state.summary = {};
+    state.exactly_one_requested = false;
+    state.summary_taken = false;
   }
   state.changed.notify_all();
 }
 
-enum class ProcessFaultReservationOutcome : uint8_t {
-  Reserved,
-  MutationAlreadyInstalled,
-  ContentionTimeout,
-  ReentrantContention,
-};
+[[nodiscard]] std::optional<ProcessFaultApplicationSnapshot>
+take_process_fault_application_snapshot() {
+  ProcessFaultApplicationState &state = process_fault_application_state();
+  std::lock_guard lock(state.mutex);
+  if (state.summary_taken)
+    return std::nullopt;
+  state.summary_taken = true;
+  ProcessFaultApplicationSnapshot result;
+  result.reservation = state.summary;
+  result.reservation.mutation_installed = state.mutation_installed;
+  result.reservation.reservation_active = state.reservation_active;
+  result.exactly_one_requested = state.exactly_one_requested;
+  return result;
+}
+
+void observe_process_fault_requirement(bool require_exactly_one) {
+  if (!require_exactly_one)
+    return;
+  ProcessFaultApplicationState &state = process_fault_application_state();
+  std::lock_guard lock(state.mutex);
+  state.exactly_one_requested = true;
+}
+
+// Requires state.mutex to be held by the caller.
+void record_process_fault_reservation_outcome(ProcessFaultApplicationState &state,
+                                              ProcessFaultReservationOutcome outcome) {
+  const auto increment = [](uint64_t &count) {
+    if (count != std::numeric_limits<uint64_t>::max())
+      ++count;
+  };
+  switch (outcome) {
+  case ProcessFaultReservationOutcome::Reserved:
+    increment(state.summary.reserved);
+    return;
+  case ProcessFaultReservationOutcome::MutationAlreadyInstalled:
+    increment(state.summary.mutation_already_installed);
+    return;
+  case ProcessFaultReservationOutcome::ContentionTimeout:
+    increment(state.summary.contention_timeout);
+    return;
+  case ProcessFaultReservationOutcome::ReentrantContention:
+    increment(state.summary.reentrant_contention);
+    return;
+  }
+}
 
 [[nodiscard]] constexpr std::string_view
 process_fault_reservation_outcome_name(ProcessFaultReservationOutcome outcome) {
@@ -753,22 +832,34 @@ public:
     std::unique_lock lock(state.mutex);
     *prior_applications = state.mutation_installed ? 1u : 0u;
     if (state.reservation_active && state.reservation_owner == std::this_thread::get_id()) {
-      return ProcessFaultReservationOutcome::ReentrantContention;
+      constexpr ProcessFaultReservationOutcome outcome =
+          ProcessFaultReservationOutcome::ReentrantContention;
+      record_process_fault_reservation_outcome(state, outcome);
+      return outcome;
     }
     // This hook must not create an unbounded process-wide blocking edge inside
     // an interposed loader call. On timeout the contender loads unmodified and
     // the fault harness attributes any resulting zero-application trial.
     if (!state.changed.wait_for(lock, wait, [&] { return !state.reservation_active; })) {
       *prior_applications = state.mutation_installed ? 1u : 0u;
-      return ProcessFaultReservationOutcome::ContentionTimeout;
+      constexpr ProcessFaultReservationOutcome outcome =
+          ProcessFaultReservationOutcome::ContentionTimeout;
+      record_process_fault_reservation_outcome(state, outcome);
+      return outcome;
     }
     *prior_applications = state.mutation_installed ? 1u : 0u;
-    if (state.mutation_installed)
-      return ProcessFaultReservationOutcome::MutationAlreadyInstalled;
+    if (state.mutation_installed) {
+      constexpr ProcessFaultReservationOutcome outcome =
+          ProcessFaultReservationOutcome::MutationAlreadyInstalled;
+      record_process_fault_reservation_outcome(state, outcome);
+      return outcome;
+    }
     state.reservation_active = true;
     state.reservation_owner = std::this_thread::get_id();
     reserved_ = true;
-    return ProcessFaultReservationOutcome::Reserved;
+    constexpr ProcessFaultReservationOutcome outcome = ProcessFaultReservationOutcome::Reserved;
+    record_process_fault_reservation_outcome(state, outcome);
+    return outcome;
   }
 
   void commit_applied_mutation() {
@@ -825,6 +916,50 @@ void log_message(int required_level, const char *format, ...) {
   std::fprintf(stderr, "\n");
 }
 
+void emit_evidence_message(const char *format, ...) {
+  std::lock_guard lock(log_mutex());
+  std::fprintf(stderr, "[rocjitsu-dbi-hooks] ");
+
+  va_list args;
+  va_start(args, format);
+  std::vfprintf(stderr, format, args);
+  va_end(args);
+
+  std::fprintf(stderr, "\n");
+  std::fflush(stderr);
+}
+
+void emit_fault_summary_message(bool required_evidence, const char *format, ...) {
+  if (!required_evidence && g_log_level.load(std::memory_order_relaxed) < kLogInfo)
+    return;
+  std::lock_guard lock(log_mutex());
+  std::fprintf(stderr, "[rocjitsu-dbi-hooks] ");
+
+  va_list args;
+  va_start(args, format);
+  std::vfprintf(stderr, format, args);
+  va_end(args);
+
+  std::fprintf(stderr, "\n");
+  if (required_evidence)
+    std::fflush(stderr);
+}
+
+void emit_process_fault_reservation_summary(const ProcessFaultReservationSummary &summary) {
+  emit_evidence_message(
+      "ConSan fault reservation summary process=%llu attempts=%llu reserved=%llu "
+      "mutation_already_installed=%llu contention_timeout=%llu reentrant_contention=%llu "
+      "mutation_installed=%s active=%s complete=%s",
+      static_cast<unsigned long long>(::getpid()),
+      static_cast<unsigned long long>(summary.attempts()),
+      static_cast<unsigned long long>(summary.reserved),
+      static_cast<unsigned long long>(summary.mutation_already_installed),
+      static_cast<unsigned long long>(summary.contention_timeout),
+      static_cast<unsigned long long>(summary.reentrant_contention),
+      summary.mutation_installed ? "true" : "false", summary.reservation_active ? "true" : "false",
+      summary.complete() ? "true" : "false");
+}
+
 class FaultInstallationEvidence {
 public:
   explicit FaultInstallationEvidence(uint64_t reader) : reader_(reader) {}
@@ -839,9 +974,10 @@ public:
     emitted_ = true;
     if (applied_ == 0)
       return;
-    log_message(kLogInfo, "ConSan fault install process=%llu reader=%llu applied=%zu installed=%s",
-                static_cast<unsigned long long>(::getpid()),
-                static_cast<unsigned long long>(reader_), applied_, installed_ ? "true" : "false");
+    emit_evidence_message("ConSan fault install process=%llu reader=%llu applied=%zu installed=%s",
+                          static_cast<unsigned long long>(::getpid()),
+                          static_cast<unsigned long long>(reader_), applied_,
+                          installed_ ? "true" : "false");
     std::fflush(stderr);
   }
 
@@ -1981,10 +2117,17 @@ public:
     const bool moi_forbid_overflow = moi_forbid_overflow_;
     const rocjitsu::ConSanMoiEngine moi_engine =
         config_ ? config_->moi_engine : rocjitsu::ConSanMoiEngine::RecordReplay;
+    const bool fault_require_exactly_one = config_ && config_->fault_require_exactly_one;
+    const std::optional<ProcessFaultApplicationSnapshot> fault_application_snapshot =
+        take_process_fault_application_snapshot();
     const std::optional<rocjitsu::ConSanFaultLoadSelector> fault_load_selector =
         fault_load_selector_;
     CodeObjectReaderRegistry::instance().clear();
     KernelPrivateDispatchRegistry::instance().clear();
+    if (fault_application_snapshot &&
+        (fault_require_exactly_one || fault_application_snapshot->exactly_one_requested)) {
+      emit_process_fault_reservation_summary(fault_application_snapshot->reservation);
+    }
     if (fault_load_selector) {
       log_message(kLogInfo,
                   "ConSan fault load summary requested_occurrence=%llu observed=%llu "
@@ -2928,6 +3071,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   }
   if (!refresh_report_config_from_env(&*config))
     return HSA_STATUS_ERROR;
+  observe_process_fault_requirement(config->fault_require_exactly_one);
 
   TransformLoadState transform_state;
   auto &replacement_storage = transform_state.replacement_storage;
@@ -3867,30 +4011,31 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   barrier_scope_name(plan.original_barrier_scope),
                   barrier_scope_name(plan.target_barrier_scope));
     }
-    log_message(kLogInfo,
-                "ConSan fault summary process=%llu reader=%llu requested=%zu planned=%zu "
-                "applied=%zu process_prior_applied=%zu "
-                "reservation=%.*s "
-                "require_exactly_one=%s destructive_incomplete_barrier_drop=%s "
-                "completing_conditional_barrier_move=%s "
-                "destructive_divergent_barrier_move=%s",
-                static_cast<unsigned long long>(::getpid()),
-                static_cast<unsigned long long>(code_object_reader.handle),
-                patch_result.requested_fault_mutations, patch_result.planned_fault_mutations,
-                patch_result.applied_fault_mutations, process_prior_fault_applications,
-                static_cast<int>(
-                    (process_fault_reservation_attempted
-                         ? process_fault_reservation_outcome_name(process_fault_reservation_outcome)
-                         : std::string_view{"not-requested"})
-                        .size()),
-                (process_fault_reservation_attempted
-                     ? process_fault_reservation_outcome_name(process_fault_reservation_outcome)
-                     : std::string_view{"not-requested"})
-                    .data(),
-                config->fault_require_exactly_one ? "true" : "false",
-                config->fault_allow_destructive_incomplete_barrier_drop ? "true" : "false",
-                config->fault_allow_completing_conditional_barrier_move ? "true" : "false",
-                config->fault_allow_destructive_divergent_barrier_move ? "true" : "false");
+    emit_fault_summary_message(
+        config->fault_require_exactly_one,
+        "ConSan fault summary process=%llu reader=%llu requested=%zu planned=%zu "
+        "applied=%zu process_prior_applied=%zu "
+        "reservation=%.*s "
+        "require_exactly_one=%s destructive_incomplete_barrier_drop=%s "
+        "completing_conditional_barrier_move=%s "
+        "destructive_divergent_barrier_move=%s",
+        static_cast<unsigned long long>(::getpid()),
+        static_cast<unsigned long long>(code_object_reader.handle),
+        patch_result.requested_fault_mutations, patch_result.planned_fault_mutations,
+        patch_result.applied_fault_mutations, process_prior_fault_applications,
+        static_cast<int>(
+            (process_fault_reservation_attempted
+                 ? process_fault_reservation_outcome_name(process_fault_reservation_outcome)
+                 : std::string_view{"not-requested"})
+                .size()),
+        (process_fault_reservation_attempted
+             ? process_fault_reservation_outcome_name(process_fault_reservation_outcome)
+             : std::string_view{"not-requested"})
+            .data(),
+        config->fault_require_exactly_one ? "true" : "false",
+        config->fault_allow_destructive_incomplete_barrier_drop ? "true" : "false",
+        config->fault_allow_completing_conditional_barrier_move ? "true" : "false",
+        config->fault_allow_destructive_divergent_barrier_move ? "true" : "false");
     if (config->fault_require_exactly_one && !config->fault_dry_run &&
         patch_result.applied_fault_mutations > 1u) {
       return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,

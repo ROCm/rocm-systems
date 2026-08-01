@@ -1438,6 +1438,10 @@ public:
       installed_ = false;
     }
   }
+  void invoke_unload_again_for_test() {
+    if (on_unload_ != nullptr)
+      on_unload_();
+  }
   [[nodiscard]] bool reload(FakeApiTable &api) {
     if (on_load_ == nullptr || set_override_ == nullptr || needs_unload_)
       return false;
@@ -4039,7 +4043,7 @@ TEST(HsaHooksUnitTest, ConSanFaultReservationIsRetainedAfterReplacementLoads) {
   ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
   ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
   ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
-
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "0");
   g_transform_override_result = b96_require_patch_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
   g_transform_override_models_fault_application = true;
 
@@ -4048,6 +4052,7 @@ TEST(HsaHooksUnitTest, ConSanFaultReservationIsRetainedAfterReplacementLoads) {
   ASSERT_TRUE(hook.installed()) << hook.error();
 
   constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  testing::internal::CaptureStderr();
   for (size_t load = 0; load < 2; ++load) {
     SCOPED_TRACE(load);
     hsa_code_object_reader_t reader{};
@@ -4061,6 +4066,22 @@ TEST(HsaHooksUnitTest, ConSanFaultReservationIsRetainedAfterReplacementLoads) {
 
   EXPECT_EQ(g_transform_override_fault_drop_barriers, (std::vector<bool>{true, true, true, false}));
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+  hook.unload();
+  hook.invoke_unload_again_for_test();
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log.find("reservation=reserved"), std::string::npos) << log;
+  EXPECT_NE(log.find("reservation=mutation-already-installed"), std::string::npos) << log;
+  EXPECT_NE(log.find("ConSan fault install process="), std::string::npos) << log;
+  EXPECT_NE(log.find("ConSan fault reservation summary process="), std::string::npos) << log;
+  EXPECT_EQ(log.find("ConSan fault reservation summary process=",
+                     log.find("ConSan fault reservation summary process=") + 1),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("attempts=2 reserved=1 mutation_already_installed=1 "
+                     "contention_timeout=0 reentrant_contention=0 mutation_installed=true "
+                     "active=false complete=true"),
+            std::string::npos)
+      << log;
 }
 
 TEST(HsaHooksUnitTest, ConSanFaultReservationRetriesAfterConcurrentRejectedOwner) {
@@ -4244,13 +4265,19 @@ TEST(HsaHooksUnitTest, ConSanFaultReservationTimesOutWhileOwnerIsInLoader) {
   }
   g_loader_block_cv.notify_all();
   EXPECT_EQ(first_load.get(), HSA_STATUS_SUCCESS);
-  const std::string log = testing::internal::GetCapturedStderr();
-
-  EXPECT_NE(log.find("outcome=contention-timeout"), std::string::npos) << log;
   EXPECT_NE(std::ranges::find(g_transform_override_fault_drop_barriers, false),
             g_transform_override_fault_drop_barriers.end());
   EXPECT_EQ(std::ranges::count(g_transform_override_fault_drop_barriers, false), 1);
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+  hook.unload();
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_NE(log.find("outcome=contention-timeout"), std::string::npos) << log;
+  EXPECT_NE(log.find("attempts=2 reserved=1 mutation_already_installed=0 "
+                     "contention_timeout=1 reentrant_contention=0 mutation_installed=true "
+                     "active=false complete=true"),
+            std::string::npos)
+      << log;
 }
 
 TEST(HsaHooksUnitTest, ConSanFaultReservationRejectsSameThreadReentry) {
@@ -4287,15 +4314,21 @@ TEST(HsaHooksUnitTest, ConSanFaultReservationRejectsSameThreadReentry) {
   EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
                                                               first_reader, nullptr, nullptr),
             HSA_STATUS_SUCCESS);
-  const std::string log = testing::internal::GetCapturedStderr();
-
   ASSERT_TRUE(g_reentrant_fault_load_status.has_value());
   EXPECT_EQ(*g_reentrant_fault_load_status, HSA_STATUS_SUCCESS);
-  EXPECT_NE(log.find("outcome=reentrant-contention"), std::string::npos) << log;
   EXPECT_NE(std::ranges::find(g_transform_override_fault_drop_barriers, false),
             g_transform_override_fault_drop_barriers.end());
   EXPECT_EQ(std::ranges::count(g_transform_override_fault_drop_barriers, false), 1);
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+  hook.unload();
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_NE(log.find("outcome=reentrant-contention"), std::string::npos) << log;
+  EXPECT_NE(log.find("attempts=2 reserved=1 mutation_already_installed=0 "
+                     "contention_timeout=0 reentrant_contention=1 mutation_installed=true "
+                     "active=false complete=true"),
+            std::string::npos)
+      << log;
 }
 
 TEST(HsaHooksUnitTest, ConSanExactOneRejectsMultipleAppliedMutationsBeforeInstallation) {
