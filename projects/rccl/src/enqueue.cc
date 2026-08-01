@@ -35,6 +35,7 @@
 #include <cassert>
 #include <cfloat> // FLT_MAX
 #include "latency_profiler/CollTraceFunc.h"
+#include "kernel_timing.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -2081,6 +2082,31 @@ ncclResult_t ncclLaunchKernelBefore_NoUncapturedCuda(struct ncclComm* comm, stru
 NCCL_PARAM(MemSyncDomain, "MEM_SYNC_DOMAIN", cudaLaunchMemSyncDomainRemote);
 #endif
 
+/* Launches the plan with a completion event attached to the dispatch packet, so
+ * the kernel's own start/end timestamps become available without the two extra
+ * marker packets a hipEventRecord pair would insert. Sets *timed false when
+ * timing is off or unavailable, leaving the launch to the caller.
+ *
+ * Note hipExtModuleLaunchKernel takes global work sizes, not a grid dimension in
+ * blocks; passing grid dimensions would silently launch one block per axis. */
+static ncclResult_t ncclLaunchKernelTimed(struct ncclComm* comm, struct ncclKernelPlan* plan, CUfunction fn, dim3 grid,
+                                          dim3 block, int smem, cudaStream_t stream, void** extra, bool* timed) {
+  *timed = false;
+  uint64_t slot = 0;
+  cudaEvent_t stopEvent = ncclKernelTimingBeginLaunch(comm, plan, grid.x, block.x, &slot);
+  if (stopEvent == nullptr) return ncclSuccess;
+
+  hipError_t err = hipExtModuleLaunchKernel(fn, grid.x * block.x, grid.y * block.y, grid.z * block.z, block.x, block.y,
+                                            block.z, smem, stream, nullptr, extra, nullptr, stopEvent, 0);
+  if (err != hipSuccess) {
+    WARN("Cuda failure %d '%s'", err, hipGetErrorString(err));
+    return ncclUnhandledCudaError;
+  }
+  ncclKernelTimingCommitLaunch(comm, slot);
+  *timed = true;
+  return ncclSuccess;
+}
+
 ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   ncclResult_t ret = ncclSuccess;
   struct ncclKernelPlanner* planner = &comm->planner;
@@ -2112,10 +2138,15 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   CUDACHECKGOTO(cudaGetFuncBySymbol(&fn, sym), ret, do_return);
 
   if (planner->numStreams == 1 && !plan->persistent) {
+    bool timed = false;
     latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
-    CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr,
-                               extra),
-                ret, do_return);
+    NCCLCHECKGOTO(ncclLaunchKernelTimed(comm, plan, fn, grid, block, smem, launchStream, extra, &timed), ret,
+                  do_return);
+    if (!timed) {
+      CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr,
+                                 extra),
+                  ret, do_return);
+    }
     // doneEvent is recorded lazily by ncclLaunchPrepare on a detected stream change; no
     // per-launch hipEventRecord is needed here. lastStream/lastStreamValid bookkeeping is
     // still required so the next call's ncclLaunchPrepare can detect that change.
@@ -2207,8 +2238,16 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 #endif
   // Standard kernel launch
   latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
-  CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra),
-              ret, do_return);
+  {
+    bool timed = false;
+    NCCLCHECKGOTO(ncclLaunchKernelTimed(comm, plan, fn, grid, block, smem, launchStream, extra, &timed), ret,
+                  do_return);
+    if (!timed) {
+      CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr,
+                                 extra),
+                  ret, do_return);
+    }
+  }
   latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
   // Mirror fast-path bookkeeping so the next ncclLaunchPrepare can detect stream-change.
   // doneEvent is recorded lazily by ncclLaunchPrepare in the stream-change branch.

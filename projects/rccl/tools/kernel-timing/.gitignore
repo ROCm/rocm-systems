@@ -6,3 +6,5 @@ timestamp_discovery
 timestamp_validation
 launch_cost
 hsa_signal_crosscheck
+drain_smoke
+rp/

@@ -75,6 +75,7 @@
 
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
+#include "kernel_timing.h"
 #include "dda_all_reduce.h"
 #include "ipc_init.h"
 #include "fabric_init.h"
@@ -2681,6 +2682,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
+  NCCLCHECKGOTO(ncclKernelTimingCommInit(comm), res, fail);
 
   if (!job->parent && !job->isGrow) {
     if (ncclDdaUseFabricPath(comm)) {
@@ -3506,6 +3508,7 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
   CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
 
   NCCLCHECKGOTO(latency_profiler::collTraceDestroy(comm), ret, fail);
+  NCCLCHECKGOTO(ncclKernelTimingCommFree(comm), ret, fail);
   TRACE(NCCL_DESTROY, "Destroying comm %p rank %d abortFlag %d asyncResult %d", comm, comm->rank, *comm->abortFlag,
         comm->asyncResult);
 

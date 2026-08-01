@@ -850,6 +850,7 @@ struct ncclComm {
   // can correctly detect a stream change in either case.
   bool lastStreamValid;
   latency_profiler::CollTrace* ctrace;
+  struct ncclKernelTimingCtx* kernelTiming;
 
 #ifdef ENABLE_WARP_SPEED
   int warpSpeedChannelMultiplier;

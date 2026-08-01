@@ -204,6 +204,7 @@ set(SRC_FILES
   include/tuner.h
   include/utils.h
   include/kernel_config.h
+  include/kernel_timing.h
   include/mlx5/mlx5dvcore.h
   include/mlx5/mlx5dvsymbols.h
   include/mlx5/mlx5dvwrap.h
@@ -343,6 +344,7 @@ set(SRC_FILES
 # misc/nvmlwrap.cc
   misc/nvmlwrap_stub.cc
   misc/kernel_config.cc
+  misc/kernel_timing.cc
   misc/param.cc
   misc/rocmwrap.cc
   misc/roctx.cc
