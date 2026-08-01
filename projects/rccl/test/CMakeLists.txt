@@ -255,6 +255,7 @@ if(BUILD_TESTS)
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
       DdaCollCommonTests.cpp
+      DdaFabricEpochTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/GinDeviceTests.cpp
@@ -358,7 +359,6 @@ if(BUILD_TESTS)
       DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
-      DdaFabricEpochTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
