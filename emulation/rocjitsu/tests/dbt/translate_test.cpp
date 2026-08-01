@@ -453,7 +453,8 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
     const std::vector<uint32_t> &text_words,
     std::optional<size_t> text_function_words = std::nullopt, size_t text_function_offset_words = 0,
     std::optional<size_t> function_pointer_table_target_words = std::nullopt,
-    bool name_function_pointer_table_with_symbol = true) {
+    bool name_function_pointer_table_with_symbol = true,
+    uint8_t kernel_descriptor_symbol_binding = kElfSymbolBindGlobal) {
   if (text_function_words && text_function_offset_words + *text_function_words > text_words.size())
     throw std::invalid_argument("text function extent exceeds .text fixture");
   if (function_pointer_table_target_words &&
@@ -548,7 +549,7 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
 
   std::vector<Elf64_Sym> syms(sym_count);
   syms[1].st_name = kd_symbol_name;
-  syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
+  syms[1].st_info = elf_symbol_info(kernel_descriptor_symbol_binding, kElfSymbolTypeObject);
   syms[1].st_shndx = 2;
   syms[1].st_value = rodata_vaddr;
   syms[1].st_size = kKernelDescriptorSize;
@@ -10835,6 +10836,47 @@ TEST(BinaryTranslatorE2E, Gfx1250RefusesDeviceFunctionBodyReachedByNoScope) {
   EXPECT_EQ(result.elf_bytes, image);
   EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
                                              "device function body reached no kernel scope"));
+}
+
+// The loader dispatches a kernel descriptor at any binding, and clang emits a weak one for a weak
+// kernel and for some implicit template instantiations. Requiring STB_GLOBAL therefore left such a
+// kernel untranslated -- and because translated text replaces .text wholesale, its entry offset was
+// reoccupied by another kernel's relocated body, so launching it ran unrelated code with no fault.
+TEST(BinaryTranslatorE2E, Gfx1250TranslatesAKernelWhoseDescriptorSymbolIsWeak) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr auto conversion =
+      gfx1250::build_vop3(gfx1250::kVCvtF32Fp8Vop3, {.vdst = 30, .clamp = 1, .src0 = 256 + 22});
+  const std::vector<uint32_t> words = {conversion[0], conversion[1], kGfx1250SEndpgm};
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      words, /*text_function_words=*/std::nullopt, /*text_function_offset_words=*/0,
+      /*function_pointer_table_target_words=*/std::nullopt,
+      /*name_function_pointer_table_with_symbol=*/true,
+      /*kernel_descriptor_symbol_binding=*/rocjitsu::kElfSymbolBindWeak);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  rocjitsu::KernelDescriptorTranslator parser(ROCJITSU_CODE_ARCH_GFX1250,
+                                              ROCJITSU_CODE_ARCH_GFX1250);
+  const auto infos = parser.translate_image(
+      result.elf_bytes, translated.text_sections()[0]->sectionOffset(),
+      translated.text_sections()[0]->size(), rocjitsu::KernelDescriptorTranslationOptions{});
+  EXPECT_EQ(infos.size(), 1u) << "a weak descriptor must still be seen as a kernel root";
+  for (const auto &diagnostic : result.diagnostics) {
+    EXPECT_NE(diagnostic.kind, rocjitsu::DiagnosticKind::NothingToTranslate)
+        << "the body must translate as a kernel, not report as an unreferenced function";
+  }
 }
 
 // The same shape with the pointer array's own symbol stripped. Table discovery needs a qualifying

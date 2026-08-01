@@ -188,10 +188,12 @@ kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t s
   if (sym.st_size != sizeof(KD))
     return std::nullopt;
 
-  // AMDHSA kernel descriptors are global object symbols. Size alone is not a
-  // durable signal because unrelated data objects can also be 64 bytes.
-  if (elf_symbol_type(sym.st_info) != kElfSymbolTypeObject ||
-      elf_symbol_bind(sym.st_info) != kElfSymbolBindGlobal)
+  // Object symbols only: size alone is not a durable signal, because unrelated data objects can
+  // also be 64 bytes. Binding is deliberately unconstrained. The loader dispatches a descriptor at
+  // any binding, so requiring STB_GLOBAL leaves a weak kernel untranslated while it is still
+  // launched -- and because translated text replaces .text wholesale, that kernel's entry is
+  // reoccupied by relocated code and the launch runs something else with no fault.
+  if (elf_symbol_type(sym.st_info) != kElfSymbolTypeObject)
     return std::nullopt;
 
   // AMDHSA descriptors are named "<kernel>.kd". An unnamed 64-byte global

@@ -753,10 +753,11 @@ void shift_relocation_offsets_in_moved_sections(std::vector<uint8_t> &image, con
   if (symbol.st_size != sizeof(KD))
     return false;
 
-  // AMDHSA kernel descriptors are global object symbols. This keeps other
-  // sizeof(KD) data objects from being treated as descriptors by accident.
-  if (elf_symbol_type(symbol.st_info) != kElfSymbolTypeObject ||
-      elf_symbol_bind(symbol.st_info) != kElfSymbolBindGlobal)
+  // Object symbols only, which keeps other sizeof(KD) data objects from being treated as
+  // descriptors by accident. Binding is deliberately unconstrained, matching the loader and the
+  // descriptor reader: a weak descriptor left un-rewritten here would keep an entry offset into
+  // text that no longer holds that kernel.
+  if (elf_symbol_type(symbol.st_info) != kElfSymbolTypeObject)
     return false;
 
   // AMDHSA descriptors are named "<kernel>.kd". An unnamed 64-byte global
