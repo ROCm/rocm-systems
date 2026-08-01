@@ -648,8 +648,7 @@ relocate_relative_text_addends(std::vector<uint8_t> &image, const Elf64_Ehdr &eh
 /// Addends into `.text` are deliberately untouched: those name code, which does not simply shift,
 /// and relocate_relative_text_addends() rewrites them through the block placement map instead. The
 /// two are disjoint because a `.text` addend is below @p old_text_end_vaddr by construction.
-void shift_relative_addends_into_moved_sections(std::vector<uint8_t> &image,
-                                                const Elf64_Ehdr &ehdr,
+void shift_relative_addends_into_moved_sections(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
                                                 std::span<const Elf64_Shdr> shdrs,
                                                 uint64_t old_text_end_vaddr, uint64_t delta) {
   if (delta == 0)
@@ -1134,8 +1133,12 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
   // literal is their difference. `s_get_pc_i64` leaves the address of the following instruction, so
   // the distance to make up is measured from one word past the getpc.
   for (const PcRelativeTextRelocation &relocation : code_relocations) {
-    if (relocation.target_getpc_offset > new_text.size() - sizeof(uint32_t) ||
-        relocation.target_literal_offset > new_text.size() - sizeof(uint64_t) ||
+    // Subtract from the size only after proving the offset is inside it: a text shorter than the
+    // field being written would otherwise wrap the subtraction and admit an out-of-bounds write.
+    if (relocation.target_getpc_offset > new_text.size() ||
+        sizeof(uint32_t) > new_text.size() - relocation.target_getpc_offset ||
+        relocation.target_literal_offset > new_text.size() ||
+        sizeof(uint64_t) > new_text.size() - relocation.target_literal_offset ||
         relocation.target_text_offset > new_text.size()) {
       return false;
     }

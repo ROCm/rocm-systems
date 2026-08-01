@@ -100,8 +100,8 @@ table_for_got_slot(std::span<const RelocationFunctionTable> tables, uint64_t vad
 /// @details Matched by containment rather than by an exact base, because the address code holds is
 /// not always the object's first byte. The Itanium ABI's vptr points sixteen bytes into the vtable,
 /// past the offset-to-top and typeinfo words, so a dispatch materializing a vptr names the table
-/// from the middle. The callee set is the whole table either way -- the slot index is not tracked --
-/// so widening the match cannot admit a callee that an exact match would have excluded.
+/// from the middle. The callee set is the whole table either way -- the slot index is not tracked
+/// -- so widening the match cannot admit a callee that an exact match would have excluded.
 [[nodiscard]] std::optional<size_t>
 table_at_address(std::span<const RelocationFunctionTable> tables, uint64_t vaddr) {
   for (size_t table_index = 0; table_index < tables.size(); ++table_index) {
@@ -429,10 +429,10 @@ discover_pc_relative_address_builders(std::span<const std::unique_ptr<BasicBlock
   std::vector<PcRelativeAddressBuilder> builders;
   run_pair_dataflow(blocks, {}, text_vaddr, nullptr, &builders);
   std::ranges::sort(builders, {}, &PcRelativeAddressBuilder::source_address_add_offset);
-  builders.erase(std::ranges::unique(builders, {},
-                                     &PcRelativeAddressBuilder::source_address_add_offset)
-                     .begin(),
-                 builders.end());
+  builders.erase(
+      std::ranges::unique(builders, {}, &PcRelativeAddressBuilder::source_address_add_offset)
+          .begin(),
+      builders.end());
   return builders;
 }
 

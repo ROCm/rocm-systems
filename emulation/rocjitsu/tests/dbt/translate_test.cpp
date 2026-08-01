@@ -10666,12 +10666,13 @@ TEST(BinaryTranslatorE2E, Gfx1250MaterializesDsAddtidAddressForA0) {
 // recomputed from the getpc's final placement.
 // Read back the single `R_AMDGPU_RELATIVE64` addend and resolve it to `.text` words, so a test can
 // assert where a function pointer ends up pointing rather than only that translation succeeded.
-[[nodiscard]] std::vector<uint32_t>
-text_words_at_relative64_addend(std::span<const uint8_t> image, size_t count) {
+[[nodiscard]] std::vector<uint32_t> text_words_at_relative64_addend(std::span<const uint8_t> image,
+                                                                    size_t count) {
   rocjitsu::Elf64_Ehdr ehdr{};
   std::memcpy(&ehdr, image.data(), sizeof(ehdr));
   std::vector<rocjitsu::Elf64_Shdr> shdrs(ehdr.e_shnum);
-  std::memcpy(shdrs.data(), image.data() + ehdr.e_shoff, ehdr.e_shnum * sizeof(rocjitsu::Elf64_Shdr));
+  std::memcpy(shdrs.data(), image.data() + ehdr.e_shoff,
+              ehdr.e_shnum * sizeof(rocjitsu::Elf64_Shdr));
 
   std::optional<uint64_t> addend;
   for (const rocjitsu::Elf64_Shdr &section : shdrs) {
@@ -10679,7 +10680,8 @@ text_words_at_relative64_addend(std::span<const uint8_t> image, size_t count) {
       continue;
     for (size_t i = 0; i < section.sh_size / sizeof(rocjitsu::Elf64_Rela); ++i) {
       rocjitsu::Elf64_Rela rela{};
-      std::memcpy(&rela, image.data() + section.sh_offset + i * sizeof(rocjitsu::Elf64_Rela), sizeof(rela));
+      std::memcpy(&rela, image.data() + section.sh_offset + i * sizeof(rocjitsu::Elf64_Rela),
+                  sizeof(rela));
       if ((rela.r_info & 0xffffffffu) == rocjitsu::R_AMDGPU_RELATIVE64)
         addend = static_cast<uint64_t>(rela.r_addend);
     }
@@ -10781,10 +10783,9 @@ TEST(BinaryTranslatorE2E, Gfx1250RepointsPcRelativeDataAddressAfterRelocation) {
   constexpr size_t kCalleeWord = 8;
 
   std::vector<uint32_t> words = {
-      kGfx1250CallToWord8, kGfx1250SEndpgm, kGfx1250SNop,        kGfx1250SNop,
-      kGfx1250SNop,        kGfx1250SNop,    kGfx1250SNop,        kGfx1250SNop,
-      kGfx1250GetPcS0,     kGfx1250AddNcU64S0, 0u /*lit lo*/,    0u /*lit hi*/,
-      kGfx1250SetPcS30,
+      kGfx1250CallToWord8, kGfx1250SEndpgm, kGfx1250SNop,     kGfx1250SNop,    kGfx1250SNop,
+      kGfx1250SNop,        kGfx1250SNop,    kGfx1250SNop,     kGfx1250GetPcS0, kGfx1250AddNcU64S0,
+      0u /*lit lo*/,       0u /*lit hi*/,   kGfx1250SetPcS30,
   };
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
 
@@ -10793,14 +10794,17 @@ TEST(BinaryTranslatorE2E, Gfx1250RepointsPcRelativeDataAddressAfterRelocation) {
     rocjitsu::Elf64_Ehdr ehdr{};
     std::memcpy(&ehdr, img.data(), sizeof(ehdr));
     std::vector<rocjitsu::Elf64_Shdr> shdrs(ehdr.e_shnum);
-    std::memcpy(shdrs.data(), img.data() + ehdr.e_shoff, ehdr.e_shnum * sizeof(rocjitsu::Elf64_Shdr));
+    std::memcpy(shdrs.data(), img.data() + ehdr.e_shoff,
+                ehdr.e_shnum * sizeof(rocjitsu::Elf64_Shdr));
     return shdrs;
   };
   auto shdrs = sections(image);
-  const auto text = std::ranges::find_if(
-      shdrs, [](const rocjitsu::Elf64_Shdr &s) { return (s.sh_flags & rocjitsu::SHF_EXECINSTR) != 0; });
+  const auto text = std::ranges::find_if(shdrs, [](const rocjitsu::Elf64_Shdr &s) {
+    return (s.sh_flags & rocjitsu::SHF_EXECINSTR) != 0;
+  });
   const auto data = std::ranges::find_if(shdrs, [](const rocjitsu::Elf64_Shdr &s) {
-    return (s.sh_flags & rocjitsu::SHF_ALLOC) != 0 && (s.sh_flags & rocjitsu::SHF_EXECINSTR) == 0 && s.sh_size != 0;
+    return (s.sh_flags & rocjitsu::SHF_ALLOC) != 0 && (s.sh_flags & rocjitsu::SHF_EXECINSTR) == 0 &&
+           s.sh_size != 0;
   });
   ASSERT_NE(text, shdrs.end());
   ASSERT_NE(data, shdrs.end());
@@ -10822,12 +10826,15 @@ TEST(BinaryTranslatorE2E, Gfx1250RepointsPcRelativeDataAddressAfterRelocation) {
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
                                                           : result.diagnostics.front().message);
 
-  // Find the relocated getpc by its encoding; the callee moved, so its offset is not known up front.
+  // Find the relocated getpc by its encoding; the callee moved, so its offset is not known up
+  // front.
   auto out_shdrs = sections(result.elf_bytes);
-  const auto out_text = std::ranges::find_if(
-      out_shdrs, [](const rocjitsu::Elf64_Shdr &s) { return (s.sh_flags & rocjitsu::SHF_EXECINSTR) != 0; });
+  const auto out_text = std::ranges::find_if(out_shdrs, [](const rocjitsu::Elf64_Shdr &s) {
+    return (s.sh_flags & rocjitsu::SHF_EXECINSTR) != 0;
+  });
   const auto out_data = std::ranges::find_if(out_shdrs, [](const rocjitsu::Elf64_Shdr &s) {
-    return (s.sh_flags & rocjitsu::SHF_ALLOC) != 0 && (s.sh_flags & rocjitsu::SHF_EXECINSTR) == 0 && s.sh_size != 0;
+    return (s.sh_flags & rocjitsu::SHF_ALLOC) != 0 && (s.sh_flags & rocjitsu::SHF_EXECINSTR) == 0 &&
+           s.sh_size != 0;
   });
   ASSERT_NE(out_text, out_shdrs.end());
   ASSERT_NE(out_data, out_shdrs.end());

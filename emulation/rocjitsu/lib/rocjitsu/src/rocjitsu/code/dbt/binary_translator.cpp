@@ -841,8 +841,8 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
       if (term != nullptr && term->size() == sizeof(uint32_t)) {
         const std::string_view mnemonic = term->mnemonic();
         if (mnemonic == "s_setpc_b64" || mnemonic == "s_set_pc_i64")
-          candidates.emplace_back(block, static_cast<uint16_t>(
-                                             text_word_at(text, term->src_loc()) & 0xffu));
+          candidates.emplace_back(
+              block, static_cast<uint16_t>(text_word_at(text, term->src_loc()) & 0xffu));
       }
       for (BasicBlock *succ : block->successors())
         stack.push_back(succ);
@@ -1473,10 +1473,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // pointer handed over by a separately translated object -- and about those the claim is silent.
   // Requiring a producer keeps the permission from resting on a vacuous truth.
   const bool object_produces_code_addresses =
-      std::ranges::any_of(relocation_function_tables,
-                          [](const RelocationFunctionTable &table) {
-                            return !table.entries.empty();
-                          }) ||
+      std::ranges::any_of(
+          relocation_function_tables,
+          [](const RelocationFunctionTable &table) { return !table.entries.empty(); }) ||
       std::ranges::any_of(pc_relative_address_builders,
                           [&](const PcRelativeAddressBuilder &builder) {
                             return builder.target_vaddr >= text_vaddr &&
@@ -1638,8 +1637,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     std::ranges::sort(adopted_roots);
     adopted_roots.erase(std::ranges::unique(adopted_roots).begin(), adopted_roots.end());
     if (!adopted_roots.empty()) {
-      scopes = kernel_translation_scopes(blocks, block_index, descriptor_translations,
-                                         adopted_roots);
+      scopes =
+          kernel_translation_scopes(blocks, block_index, descriptor_translations, adopted_roots);
     }
   }
   const std::unordered_set<uint64_t> adopted_return_offsets =
@@ -1831,6 +1830,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     uint64_t source_target_text_offset = 0;
   };
   std::vector<PendingCodeRelocation> pending_code_relocations;
+  std::vector<PcRelativeTextRelocation> code_relocations;
 
   auto fail_or_skip_kernel =
       [&](const KernelTranslationScope &scope, KernelFailure failure, size_t output_begin,
@@ -3093,15 +3093,13 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     // patch_recovered_builder_fixups NOPs and regenerates a builder's whole source range, so a
     // literal it owns must not also be written here -- the later write would land in a range the
     // other model has already rebuilt.
+    // Only the fixups actually queued for patching own a literal. A consumer's candidate fixups are
+    // not the same set: one whose target could not be resolved, or whose consumer was handled by a
+    // direct-window conversion instead, never reaches patch_recovered_builder_fixups. Excluding
+    // those here would leave their builders written by nobody.
     std::unordered_set<uint64_t> recovered_builder_getpc_offsets;
     for (const IndirectCallFixup &fixup : layout.recovered_builder_fixups)
       recovered_builder_getpc_offsets.insert(fixup.source_getpc_offset);
-    for (const auto &[source_call_offset, consumer] : recovered_indirect_by_call) {
-      (void)source_call_offset;
-      recovered_builder_getpc_offsets.insert(consumer.window_fixup.source_getpc_offset);
-      for (const IndirectCallFixup &fixup : consumer.fixups)
-        recovered_builder_getpc_offsets.insert(fixup.source_getpc_offset);
-    }
 
     std::unordered_set<uint64_t> patched_address_add_offsets;
     for (const RelocationTableDispatch &dispatch : relocation_table_dispatches) {
@@ -3159,10 +3157,27 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         continue;
       if (recovered_builder_getpc_offsets.contains(builder.source_getpc_offset))
         continue;
+      const uint64_t source_target = builder.target_vaddr - text_vaddr;
+      // Prefer this scope's own copy of the target. A body reached by several kernels is cloned
+      // once per scope so each scope's branches resolve through its own placement map, and
+      // patch_recovered_builder_fixups already points a recovered builder at its scope's clone.
+      // Following the same convention keeps a computed address consistent with the code that
+      // computed it, and avoids inventing a conflict between clones that are only distinguishable
+      // by which scope emitted them.
+      if (const auto local = target_offset_by_source_offset.find(source_target);
+          local != target_offset_by_source_offset.end()) {
+        code_relocations.push_back(
+            {.target_getpc_offset = getpc->second + target_delta,
+             .target_literal_offset = add->second + target_delta + sizeof(uint32_t),
+             .target_text_offset = local->second + target_delta});
+        continue;
+      }
+      // Otherwise the target belongs to another scope -- an adopted body, say -- and can only be
+      // resolved once every placement is known.
       pending_code_relocations.push_back(
           {.target_getpc_offset = getpc->second + target_delta,
            .target_literal_offset = add->second + target_delta + sizeof(uint32_t),
-           .source_target_text_offset = builder.target_vaddr - text_vaddr});
+           .source_target_text_offset = source_target});
     }
 
     if (kernel_context.required_vgpr_count > kernel_context.num_vgprs)
@@ -3306,7 +3321,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // landed. A source offset emitted more than once has no single answer -- a runtime-dereferenced
   // code address cannot choose between clones -- so that fails closed rather than picking one,
   // matching how relocate_relative_text_addends treats a conflicting relocation addend.
-  std::vector<PcRelativeTextRelocation> code_relocations;
   if (!pending_code_relocations.empty()) {
     std::unordered_map<uint64_t, uint64_t> placement;
     std::unordered_set<uint64_t> conflicting;
@@ -3320,8 +3334,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       const auto placed = placement.find(pending.source_target_text_offset);
       if (placed == placement.end() || conflicting.contains(pending.source_target_text_offset)) {
         append_error(result.diagnostics, DiagnosticKind::Legalization,
-                     "PC-relative code address has no single relocated target; leaving code "
-                     "object unchanged",
+                     conflicting.contains(pending.source_target_text_offset)
+                         ? "PC-relative code address names a body emitted at more than one "
+                           "placement; leaving code object unchanged"
+                         : "PC-relative code address names a body this translation did not emit; "
+                           "leaving code object unchanged",
                      pending.source_target_text_offset);
         return leave_unchanged();
       }
