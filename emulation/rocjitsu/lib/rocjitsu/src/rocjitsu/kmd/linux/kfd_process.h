@@ -187,6 +187,8 @@ public:
     /// Number of host-allocation-backed bytes starting at host_ptr on this page.
     /// This simulator-side extent is independent of the hardware PTE encoding.
     size_t host_backed_bytes = kPageSize;
+    /// GPU-page offset that corresponds to host_ptr.
+    size_t gpu_page_offset = 0;
   };
 
   /// @brief Per-process GPU page table (GPU VA page number → PTE).
@@ -201,9 +203,16 @@ public:
                  amdgpu::Mtype mtype = amdgpu::Mtype::RW) {
     std::unique_lock lock(page_table_mutex_);
     auto *base = static_cast<uint8_t *>(host_ptr);
-    for (size_t off = 0; off < size; off += kPageSize) {
-      const size_t host_backed_bytes = std::min<size_t>(kPageSize, size - off);
-      page_table_[(gpu_va + off) >> kPageShift] = {base + off, mtype, host_backed_bytes};
+    uint64_t mapped_va = gpu_va;
+    size_t host_offset = 0;
+    while (host_offset < size) {
+      const size_t gpu_page_offset = mapped_va & (kPageSize - 1);
+      const size_t host_backed_bytes =
+          std::min<size_t>(kPageSize - gpu_page_offset, size - host_offset);
+      page_table_[mapped_va >> kPageShift] = {base + host_offset, mtype, host_backed_bytes,
+                                              gpu_page_offset};
+      mapped_va += host_backed_bytes;
+      host_offset += host_backed_bytes;
     }
     // Keep publication in the page-table critical section. Cached readers
     // validate this generation while holding the shared side of the same lock;
@@ -214,8 +223,15 @@ public:
   /// @brief Unmap pages from this process's GPU page table.
   void unmap_pages(uint64_t gpu_va, size_t size) {
     std::unique_lock lock(page_table_mutex_);
-    for (size_t off = 0; off < size; off += kPageSize)
-      page_table_.erase((gpu_va + off) >> kPageShift);
+    uint64_t mapped_va = gpu_va;
+    size_t unmapped_bytes = 0;
+    while (unmapped_bytes < size) {
+      page_table_.erase(mapped_va >> kPageShift);
+      const size_t chunk =
+          std::min<size_t>(kPageSize - (mapped_va & (kPageSize - 1)), size - unmapped_bytes);
+      mapped_va += chunk;
+      unmapped_bytes += chunk;
+    }
     // See map_pages(): the mutation and generation publication are one
     // page-table critical section by design.
     publish_page_table_mutation_locked();
@@ -230,13 +246,19 @@ public:
     auto *old_base = static_cast<uint8_t *>(old_host_ptr);
     auto *new_base = static_cast<uint8_t *>(new_host_ptr);
     bool changed = false;
-    for (size_t off = 0; off < size; off += kPageSize) {
-      auto it = page_table_.find((gpu_va + off) >> kPageShift);
-      if (it != page_table_.end() && it->second.host_ptr == old_base + off &&
-          it->second.host_ptr != new_base + off) {
-        it->second.host_ptr = new_base + off;
+    uint64_t mapped_va = gpu_va;
+    size_t host_offset = 0;
+    while (host_offset < size) {
+      auto it = page_table_.find(mapped_va >> kPageShift);
+      if (it != page_table_.end() && it->second.host_ptr == old_base + host_offset &&
+          it->second.host_ptr != new_base + host_offset) {
+        it->second.host_ptr = new_base + host_offset;
         changed = true;
       }
+      const size_t chunk =
+          std::min<size_t>(kPageSize - (mapped_va & (kPageSize - 1)), size - host_offset);
+      mapped_va += chunk;
+      host_offset += chunk;
     }
     if (changed)
       publish_page_table_mutation_locked();
@@ -246,12 +268,18 @@ public:
   void set_page_mtype(uint64_t gpu_va, size_t size, amdgpu::Mtype mtype) {
     std::unique_lock lock(page_table_mutex_);
     bool changed = false;
-    for (size_t off = 0; off < size; off += kPageSize) {
-      auto it = page_table_.find((gpu_va + off) >> kPageShift);
+    uint64_t mapped_va = gpu_va;
+    size_t updated_bytes = 0;
+    while (updated_bytes < size) {
+      auto it = page_table_.find(mapped_va >> kPageShift);
       if (it != page_table_.end() && it->second.mtype != mtype) {
         it->second.mtype = mtype;
         changed = true;
       }
+      const size_t chunk =
+          std::min<size_t>(kPageSize - (mapped_va & (kPageSize - 1)), size - updated_bytes);
+      mapped_va += chunk;
+      updated_bytes += chunk;
     }
     if (changed)
       publish_page_table_mutation_locked();

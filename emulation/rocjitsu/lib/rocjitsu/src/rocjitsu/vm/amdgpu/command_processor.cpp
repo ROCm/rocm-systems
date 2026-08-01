@@ -1404,10 +1404,8 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   if (host_accessible && memory_) {
     auto [host_range_base, host_range_size] =
         memory_->find_host_range(pkt.kernel_object, queue.process_id);
-    auto *kernel_object_page = memory_->resolve_host_ptr(pkt.kernel_object, queue.process_id);
-    if (host_range_base != 0 && kernel_object_page) {
-      auto *kernel_object_host_ptr =
-          kernel_object_page + (pkt.kernel_object & GpuMemory::PAGE_MASK);
+    auto *kernel_object_host_ptr = memory_->resolve_host_ptr(pkt.kernel_object, queue.process_id);
+    if (host_range_base != 0 && kernel_object_host_ptr) {
       auto *host_range_begin = reinterpret_cast<const uint8_t *>(host_range_base);
       auto *elf_base = find_elf_base(kernel_object_host_ptr, host_range_begin);
       if (elf_base) {
@@ -1457,12 +1455,12 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
                       dp.kernarg_addr, dp.num_user_sgprs);
     if (memory_) {
       auto *ko_ptr = memory_->translate_debug(pkt.kernel_object, queue.process_id);
-      auto *pc_ptr = memory_->translate_debug(entry_pc, queue.process_id);
+      auto *pc_ptr = memory_->translate_debug(entry_pc, queue.process_id, sizeof(uint32_t));
       os << std::format(" ko_mapped={} pc_mapped={} mem={:#x}", ko_ptr != nullptr,
                         pc_ptr != nullptr, reinterpret_cast<uintptr_t>(memory_));
       if (pc_ptr) {
         uint32_t first_word;
-        std::memcpy(&first_word, pc_ptr + (entry_pc & 0xFFF), 4);
+        std::memcpy(&first_word, pc_ptr, sizeof(first_word));
         os << std::format(" first_inst={:#010x}", first_word);
       }
     }
@@ -1979,13 +1977,10 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
 /// so we use GpuMemory::resolve_host_ptr() to find the correct address. In local
 /// mode, the GPU VA IS the host VA (identity mapping), so we cast directly.
 /// @returns Host pointer, or nullptr if the VA is not mapped.
-static void *resolve_sdma_ptr(GpuMemory *memory, uint64_t va, uint32_t vmid) {
+static void *resolve_sdma_ptr(GpuMemory *memory, uint64_t va, uint32_t vmid, size_t size) {
   if (!memory)
     return nullptr;
-  auto *page_base = memory->resolve_host_ptr(va, vmid);
-  if (!page_base)
-    return nullptr;
-  return page_base + (va & 0xFFF);
+  return memory->resolve_host_ptr(va, vmid, size);
 }
 
 // SDMA opcodes.
@@ -2104,14 +2099,14 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
   // Helper: resolve a GPU VA from an SDMA packet to a host pointer.
   // In daemon mode, the VA belongs to the client process; we go through the
   // VMID page table. In local mode, the VA IS the host address.
-  auto resolve = [&](uint64_t va) -> void * {
-    return resolve_sdma_ptr(memory_, va, queue.process_id);
+  auto resolve = [&](uint64_t va, size_t size = 1) -> void * {
+    return resolve_sdma_ptr(memory_, va, queue.process_id, size);
   };
   auto write_read_ptr = [&] {
     uint64_t rptr_val = rpos * sizeof(uint32_t);
     assert((queue.read_ptr_va & (alignof(uint64_t) - 1)) == 0 &&
            "SDMA queue read pointer must be 64-bit aligned");
-    auto *read_ptr = static_cast<uint64_t *>(resolve(queue.read_ptr_va));
+    auto *read_ptr = static_cast<uint64_t *>(resolve(queue.read_ptr_va, sizeof(uint64_t)));
     // The queue read pointer is ABI-aligned, so use an atomic store when the VA
     // translates to one naturally aligned host pointer inside a single page. The
     // byte-wise fallback preserves functional behavior for sparse-memory paths
@@ -2173,7 +2168,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           uint64_t wait_ref = static_cast<uint64_t>(dw(4)) | (static_cast<uint64_t>(dw(5)) << 32);
           uint64_t wait_mask = static_cast<uint64_t>(dw(6)) | (static_cast<uint64_t>(dw(7)) << 32);
           if (wait_addr > 0x1000) {
-            auto *wait_ptr = static_cast<uint64_t *>(resolve(wait_addr));
+            auto *wait_ptr = static_cast<uint64_t *>(resolve(wait_addr, sizeof(uint64_t)));
             if (!wait_ptr) {
               return stop_and_retry_current_packet();
             }
@@ -2197,7 +2192,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
                         (static_cast<uint64_t>(dw(signal_base + 4)) << 32);
 
           if (signal_addr > 0x1000 && signal_op == 0x70) {
-            signal_ptr = static_cast<int64_t *>(resolve(signal_addr));
+            signal_ptr = static_cast<int64_t *>(resolve(signal_addr, sizeof(int64_t)));
             if (!signal_ptr) {
               return stop_and_retry_current_packet();
             }
@@ -2210,8 +2205,8 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
                           (static_cast<uint64_t>(dw(copy_base + 3)) << 32);
         uint64_t dst_va = static_cast<uint64_t>(dw(copy_base + 4)) |
                           (static_cast<uint64_t>(dw(copy_base + 5)) << 32);
-        auto *src_ptr = resolve(src_va);
-        auto *dst_ptr = resolve(dst_va);
+        auto *src_ptr = resolve(src_va, count);
+        auto *dst_ptr = resolve(dst_va, count);
         if (!src_ptr || !dst_ptr) {
           return stop_and_retry_current_packet();
         }
@@ -2246,8 +2241,8 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       uint64_t dst_va = static_cast<uint64_t>(dw(5)) | (static_cast<uint64_t>(dw(6)) << 32);
       util::Logger::vm("SDMA COPY: src=", std::hex, src_va, " dst=", dst_va, std::dec,
                        " count=", count, " (", count / 1024, " KB)");
-      auto *src_ptr = resolve(src_va);
-      auto *dst_ptr = resolve(dst_va);
+      auto *src_ptr = resolve(src_va, count);
+      auto *dst_ptr = resolve(dst_va, count);
       if (!src_ptr || !dst_ptr) {
         return stop_and_retry_current_packet();
       }
@@ -2258,7 +2253,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
                                    : (header & (1u << 28)) != 0;
       if (is_broadcast_copy) {
         uint64_t dst2_va = static_cast<uint64_t>(dw(7)) | (static_cast<uint64_t>(dw(8)) << 32);
-        auto *dst2_ptr = resolve(dst2_va);
+        auto *dst2_ptr = resolve(dst2_va, count);
         if (!dst2_ptr) {
           return stop_and_retry_current_packet();
         }
@@ -2286,7 +2281,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         uint64_t addr_va =
             static_cast<uint64_t>(dw(1) & ~0x7u) | (static_cast<uint64_t>(dw(2)) << 32);
         uint64_t data = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
-        auto *ptr = static_cast<uint64_t *>(resolve(addr_va));
+        auto *ptr = static_cast<uint64_t *>(resolve(addr_va, sizeof(uint64_t)));
         if (ptr) {
           // Flush before the store so a destination-overlapping dirty line is
           // published first and the fence write supersedes it.
@@ -2299,7 +2294,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
 
       uint64_t addr_va = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
       uint32_t data = dw(3);
-      auto *ptr = static_cast<uint32_t *>(resolve(addr_va));
+      auto *ptr = static_cast<uint32_t *>(resolve(addr_va, sizeof(uint32_t)));
       if (ptr) {
         flush_gpu_caches();
         std::atomic_ref<uint32_t>(*ptr).store(data, std::memory_order_release);
@@ -2326,7 +2321,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         uint64_t ref = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
         uint64_t mask = static_cast<uint64_t>(dw(5)) | (static_cast<uint64_t>(dw(6)) << 32);
         if (addr > 0x1000) {
-          auto *ptr = static_cast<uint64_t *>(resolve(addr));
+          auto *ptr = static_cast<uint64_t *>(resolve(addr, sizeof(uint64_t)));
           if (!ptr) {
             return stop_and_retry_current_packet();
           }
@@ -2348,7 +2343,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       if (!mem_poll) {
         // Register poll / HDP flush — no-op in functional sim.
       } else if (addr_va > 0x1000) {
-        auto *ptr = static_cast<uint32_t *>(resolve(addr_va));
+        auto *ptr = static_cast<uint32_t *>(resolve(addr_va, sizeof(uint32_t)));
         if (!ptr) {
           return stop_and_retry_current_packet();
         }
@@ -2387,7 +2382,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       uint32_t atomic_op = (header >> 25) & 0x7F;
       // SDMA_ATOMIC_ADD64 = 47
       if (atomic_op == 47 && addr_va > 0x1000) {
-        auto *ptr = static_cast<int64_t *>(resolve(addr_va));
+        auto *ptr = static_cast<int64_t *>(resolve(addr_va, sizeof(int64_t)));
         if (ptr) {
           // Flush before the RMW: the fetch_add reads the backing value, so a
           // dirty overlapping L2 line must be written back first or the atomic
@@ -2399,12 +2394,12 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           if (static_cast<int64_t>(src_data) < 0 && interrupt_cb_) {
             // Signal layout: addr is at offset 8 (value field) from sig base.
             uint64_t sig_base = addr_va - 8;
-            auto *mb = static_cast<uint64_t *>(resolve(sig_base + 16));
-            auto *eid = static_cast<uint32_t *>(resolve(sig_base + 24));
+            auto *mb = static_cast<uint64_t *>(resolve(sig_base + 16, sizeof(uint64_t)));
+            auto *eid = static_cast<uint32_t *>(resolve(sig_base + 24, sizeof(uint32_t)));
             uint64_t mailbox_ptr = mb ? *mb : 0;
             uint32_t event_id = eid ? *eid : 0;
             if (mailbox_ptr != 0) {
-              auto *mb_dst = static_cast<uint64_t *>(resolve(mailbox_ptr));
+              auto *mb_dst = static_cast<uint64_t *>(resolve(mailbox_ptr, sizeof(uint64_t)));
               if (mb_dst) {
                 flush_gpu_caches();
                 std::atomic_ref<uint64_t>(*mb_dst).store(uint64_t(event_id),
@@ -2423,7 +2418,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       uint32_t data = dw(3);
       uint32_t count = (dw(4) & 0x3FFFFFF) + 1;
       uint32_t fillsize = (header >> 30) & 0x3;
-      auto *dst = static_cast<uint8_t *>(resolve(addr_va));
+      auto *dst = static_cast<uint8_t *>(resolve(addr_va, count));
       if (dst) {
         // Flush before the fill so a destination-overlapping dirty line is
         // published first and the fill supersedes it.
@@ -2444,7 +2439,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         auto now = std::chrono::steady_clock::now().time_since_epoch();
         uint64_t ts = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
-        auto *ptr = static_cast<uint64_t *>(resolve(addr_va));
+        auto *ptr = static_cast<uint64_t *>(resolve(addr_va, sizeof(uint64_t)));
         if (ptr) {
           // Flush before the direct store so a dirty cached line overlapping the
           // timestamp address is published first and the timestamp supersedes it
