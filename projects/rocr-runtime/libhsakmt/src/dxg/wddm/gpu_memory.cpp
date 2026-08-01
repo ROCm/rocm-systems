@@ -131,9 +131,11 @@ ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
   if (code != ErrorCode::Success)
     return code;
 
-  // Pin kSystem backing pages via D3DKMTLock2 so KMD cannot evict/trim them.
-  // Excludes imported/exporter sysmem-fd paths which manage their own lifetime.
-  if (IsSystem() && !IsSysMemFd() && !IsSysMemExporter()) {
+  // Pin explicitly locked kSystem backing pages via D3DKMTLock2 so KMD cannot
+  // evict/trim them. The locked bit is set from NoSubstitute/AllocatePinned;
+  // ordinary fine-grain/kernarg allocations are pageable and D3DKMTLock2 can
+  // reject them with STATUS_INVALID_PARAMETER.
+  if (IsSystem() && desc_.flags.is_locked && !IsSysMemFd() && !IsSysMemExporter()) {
     auto lock_code = LockSystemMemory();
     if (lock_code != ErrorCode::Success) {
       code = lock_code;
