@@ -829,8 +829,13 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors(
   return image;
 }
 
-std::vector<uint8_t>
-make_minimal_amdgpu_elf_with_relocation_after_text(bool place_reloc_in_text = false) {
+// reloc_type and reloc_addend default to a bare record, which is what the
+// r_offset tests want. Naming R_AMDGPU_RELATIVE64 with an addend inside the
+// section that follows .text instead exercises the addend shift: the stored
+// value is load_bias + r_addend, so a .text that grows past its load alignment
+// moves the section and the addend has to move with it.
+std::vector<uint8_t> make_minimal_amdgpu_elf_with_relocation_after_text(
+    bool place_reloc_in_text = false, uint32_t reloc_type = 0, int64_t reloc_addend = 0) {
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
   constexpr uint64_t text_size = 8;
@@ -903,6 +908,8 @@ make_minimal_amdgpu_elf_with_relocation_after_text(bool place_reloc_in_text = fa
   // moved section). place_reloc_in_text points it inside .text, which DBT cannot
   // remap after relocating instructions and must reject.
   rela.r_offset = place_reloc_in_text ? text_vaddr : data_vaddr;
+  rela.r_info = (uint64_t{0} << 32) | reloc_type;
+  rela.r_addend = reloc_addend;
   std::memcpy(image.data() + rela_offset, &rela, sizeof(rela));
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
 
@@ -2114,6 +2121,45 @@ TEST(CodeObjectPatcher, ReplaceTextUpdatesRelocationOffsetsIntoMovedSections) {
   std::memcpy(&rela, rela_dyn->data(), sizeof(rela));
   EXPECT_EQ(rela.r_offset, data->vaddr())
       << "ET_DYN relocation r_offset is the relocated storage address";
+}
+
+// The r_offset test above moves the relocation's storage. This one moves what the
+// relocation names: an R_AMDGPU_RELATIVE64 addend pointing into .data resolves to
+// load_bias + r_addend, so growing .text past its load alignment relocates .data
+// and the addend has to follow it or the pointer lands short of the moved section.
+TEST(CodeObjectPatcher, ReplaceTextShiftsRelativeAddendsIntoMovedSections) {
+  constexpr uint64_t load_align = 0x1000;
+  constexpr uint64_t kTextVaddr = 0x1100;
+  constexpr uint64_t kTextSize = 8;
+  constexpr uint64_t kOriginalDataVaddr = kTextVaddr + kTextSize + load_align;
+
+  auto image = make_minimal_amdgpu_elf_with_relocation_after_text(
+      /*place_reloc_in_text=*/false, rocjitsu::R_AMDGPU_RELATIVE64,
+      static_cast<int64_t>(kOriginalDataVaddr));
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+  ASSERT_FALSE(co.text_sections().empty());
+
+  CodeObjectPatcher patcher(co);
+  const std::vector<uint32_t> text_words(load_align / sizeof(uint32_t) + 3, 0xDEADBEEFu);
+  const auto *text_bytes = reinterpret_cast<const uint8_t *>(text_words.data());
+  ASSERT_TRUE(patcher.replace_text({text_bytes, text_words.size() * sizeof(uint32_t)}));
+
+  auto patched_bytes = patcher.emit();
+  AmdGpuCodeObject patched(patched_bytes.data(), patched_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+
+  const auto *data = find_section(patched, ".data");
+  const auto *rela_dyn = find_section(patched, ".rela.dyn");
+  ASSERT_NE(data, nullptr);
+  ASSERT_NE(rela_dyn, nullptr);
+  ASSERT_EQ(rela_dyn->size(), sizeof(Elf64_Rela));
+  ASSERT_GT(data->vaddr(), kOriginalDataVaddr) << "test only proves anything if .data moved";
+
+  Elf64_Rela rela{};
+  std::memcpy(&rela, rela_dyn->data(), sizeof(rela));
+  EXPECT_EQ(static_cast<uint64_t>(rela.r_addend), data->vaddr())
+      << "RELATIVE64 addend naming a section above .text must move with that section";
 }
 
 TEST(CodeObjectPatcher, DetectsRelocationsWithinText) {
