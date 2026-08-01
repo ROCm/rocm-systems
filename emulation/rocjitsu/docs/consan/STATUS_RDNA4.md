@@ -64,7 +64,6 @@ ConSan model false positive.
 | **P2 PyTorch/Inductor compiled softmax** | 🟩 Exact oracle; clean 4/4; exact third barrier drop is a precommitted qualified miss; overhead 0.960x | 🟩 Exact oracle; clean 4/4 + 3/3; exact drop emits an attributed replay diagnostic; overhead 1.065x | 🟩 Exact oracle; clean 4/4 + 6/6 barrier members; exact drop emits a causal diagnostic; overhead 1.204x | 🟩 Exact oracle; clean 4/4 + 3/3; exact drop emits attributed diagnostics; overhead 0.937x |
 | **P2 PyTorch split online softmax** | 🟩 Exact CPU-derived BF16 oracle; clean 8/8 across two stages; exact drop is a precommitted qualified miss; overhead 0.977x | 🟩 Exact oracle; clean 8/8 + 6/6; exact drop is a qualified replay miss; overhead 0.982x | 🟩 Exact oracle; clean 8/8 + 12/12 barrier members; exact drop emits a causal diagnostic; overhead 1.257x | 🟩 Exact oracle; clean 8/8 + 6/6; independently confirmed exact drop emits diagnostics; overhead 4.012x |
 | **P2 PyTorch Qwen-vocabulary top-k** | 🟨 Current exact clean and paired rows are complete at 58,992/58,992 accesses; clean execution takes 98.587 seconds and cold first-operation slowdown is 448.435x; current reviewed-fault refresh pending | 🟨 Current exact clean and paired rows are complete at 418,292/418,292 accesses plus 100,916/100,916 barriers with zero diagnostics; clean execution takes 108.626 seconds and cold first-operation slowdown is 433.798x; current reviewed-fault refresh pending | 🟨 Current exact clean and paired rows are complete at 418,292/418,292 accesses plus 100,916/100,916 barrier members; clean execution takes 96.725 seconds and cold first-operation slowdown is 416.660x; current reviewed-fault refresh pending | 🟨 Current exact clean and paired rows are complete at 418,292/418,292 accesses plus 50,458/50,458 barriers with zero incomplete state; clean execution takes 146.873 seconds and cold first-operation slowdown is 461.646x; current reviewed-fault refresh pending |
-| **P2 PyTorch causal SDPA** | 🟩 Independent CPU oracle; clean 158/158; exact barrier drop emits an attributed diagnostic and breaks the oracle; overhead 1.946x | 🟨 Independent CPU oracle; clean-complete 158/158 accesses + 22/22 barriers + 2/2 atomics + 2/2 fences; overhead 7.894x; reviewed drops cause unattributed traps | 🟥 The attention kernel lacks safe transient scalar probe/router state; only the separate 27/27-access fill object patches | 🟥 The attention kernel lacks a common dead scalar pair for its indirect router; 131 accesses + 22 barriers + 2 atomics remain unpatched |
 | **P2 llama.cpp quantized matvec** | 🟩 Independent CPU oracle; clean-complete 462/462 accesses; reviewed exact drop is a qualified miss; overhead 19.225x | 🟩 Independent CPU oracle; clean-complete 462/462 accesses + 44/44 barriers + 63/63 atomics + 72/72 fences; reviewed drop breaks the oracle; overhead 14.493x | 🟩 Independent CPU oracle; clean-complete 462/462 accesses + 88/88 barrier members; reviewed drop breaks the oracle; overhead 17.548x | 🟧 Exact oracle and zero diagnostics; 81/462 accesses + 44/44 barriers, but 49,152 unsupported dynamic events reject strict execution |
 | **P2 Sharktank TP2 family** | 🟩 Exact oracle; clean 2,976/2,976; exact drop is a precommitted qualified miss; overhead 1.28x | 🟨 Exact oracle; five clean-complete trials at 2,976/2,976 + 228/228 with no diagnostics; exact drop detected in 3/5 contained trials; overhead 1.806x prefill / 1.319x combined / 1.270x decode | 🟩 Exact oracle; clean 2,976/2,976 + 420/420; exact drop is a precommitted qualified miss; overhead 1.24x | 🟩 Exact oracle; clean 2,976/2,976 + 228/228; exact drop detected 16/16; overhead 2.17x |
 | **P3 CLIP BF16** | 🟩 Exact oracle; clean 85/85; exact drop and move are precommitted qualified misses; overhead 0.98x | 🟩 Exact oracle; clean 85/85 + 36/36; exact drop and move are qualified misses; overhead 1.380x | 🟩 Exact oracle; clean 85/85 + 72/72; exact drop and move are qualified misses; overhead 0.97x | 🟩 Exact oracle; clean 85/85 + 36/36; exact move emits a diagnostic and drop is a qualified miss; overhead 1.51x |
@@ -140,19 +139,19 @@ below.
   has not been refreshed for this larger nightly object, so all four cells stay
   yellow rather than inheriting green from older denominators.
 
-### PyTorch causal SDPA
+### Retired PyTorch causal SDPA
 
-- **Record/Replay:** `rdna4-sdpa-rr-safe-entry-return-20260722` is clean and
-  complete.  Two reviewed exact drops break the oracle through hardware traps
-  but emit no replay diagnostic; traps are not detections.  A bounded late-pair
-  trial (`rdna4-sdpa-rr-late18-discovery-20260722b`) also times out at 30
-  seconds.  The next useful step is either report attribution before abnormal
-  termination or a reviewed effective mutation that terminates normally.
-- **Sampled and Inline Shadow:** all 155 attention-object resource plans have
-  spillable VGPR windows, but the kernel has no common dead scalar pair for the
-  indirect router.  The missing capability is fully spill-backed indirect
-  SGPR entry/return state, not ordinary VGPR spilling.  Artifact:
-  `rdna4-sdpa-{sampled-literal,inline-scalar-fallback}-committed-20260722`.
+The July 21 TheRock nightly reproduces the default fused-backend failure on
+physical gfx1201 before ConSan is loaded: the maximum error is
+`2.407407522201538`. Explicit fused backend selections are also incorrect for
+this case, and forcing the math backend is not an acceptable sanitizer gate.
+A correct compiled decomposition was rejected as a replacement because its
+generated kernels expose no sanitizer-visible barrier sites.
+
+The invalid PyTorch row is no longer executable qualification evidence. The
+target-native `d128-block`, `d128-pressure`, and `wmma-attention` rows replace
+it for exact-oracle attention LDS/barrier coverage. The older SDPA artifacts
+remain historical diagnostics only and do not establish current acceptance.
 
 ### Sharktank TP2 family
 

@@ -1188,13 +1188,13 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_manifest_is_the_complete_north_star_matrix(self) -> None:
         manifest = validation._manifest("gfx1201")
-        self.assertEqual(len(manifest["workloads"]), 20)
+        self.assertEqual(len(manifest["workloads"]), 19)
         self.assertEqual(
             [profile["id"] for profile in manifest["profiles"]],
             list(validation.PROFILE_IDS),
         )
         self.assertEqual(
-            len({workload["id"] for workload in manifest["workloads"]}), 20
+            len({workload["id"] for workload in manifest["workloads"]}), 19
         )
         workloads = {workload["id"]: workload for workload in manifest["workloads"]}
         self.assertEqual(
@@ -1222,8 +1222,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertIsNone(
             workloads["pytorch-rdna4-llm-topk"]["coverage_output_contract"]
         )
-        self.assertEqual(workloads["pytorch-rdna4-sdpa"]["run_timeout_seconds"], 30)
-        self.assertEqual(workloads["pytorch-rdna4-sdpa"]["targets"], ("gfx1201",))
+        self.assertNotIn("pytorch-rdna4-sdpa", workloads)
         self.assertEqual(
             workloads["pytorch-torch-histc"]["targets"],
             ("gfx950", "gfx1250", "gfx1201"),
@@ -1425,7 +1424,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertIn("pytorch-rdna4-split-softmax", text)
         self.assertIn("pytorch-rdna4-llm-topk", text)
         self.assertIn("pytorch-torch-mode", text)
-        self.assertIn("pytorch-rdna4-sdpa", text)
+        self.assertNotIn("pytorch-rdna4-sdpa", text)
         self.assertIn("pytorch-torch-histc", text)
         self.assertIn("llama-rdna4-mul-mat-vec-q", text)
         self.assertIn("llama-rdna4-rms-norm", text)
@@ -3496,22 +3495,14 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
         self.assertEqual(command[command.index("--workload") + 1], "rdna4-llm-topk")
 
-    def test_pytorch_rdna4_sdpa_uses_native_client(self) -> None:
-        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-sdpa"]
-        with mock.patch.dict(
-            os.environ,
-            {validation.PYTORCH_PYTHON_ENV: "/workspace/venv/bin/python"},
-        ):
-            command = validation._workload_command(
-                Path("/workspace"),
-                "gfx1201",
-                workload,
-                "clean",
-                Path("/unused"),
-            )
-        self.assertEqual(command[0], "/workspace/venv/bin/python")
-        self.assertEqual(command[command.index("--repetitions") + 1], "1")
-        self.assertEqual(command[command.index("--workload") + 1], "rdna4-sdpa")
+    def test_invalid_pytorch_rdna4_sdpa_row_uses_native_replacements(self) -> None:
+        self.assertNotIn("pytorch-rdna4-sdpa", validation.WORKLOAD_BY_ID)
+        for workload_id in ("d128-block", "d128-pressure", "wmma-attention"):
+            with self.subTest(workload=workload_id):
+                workload = validation.WORKLOAD_BY_ID[workload_id]
+                self.assertEqual(workload.kind, "gtest")
+                self.assertTrue(workload.tracks_barriers)
+                self.assertIn("barrier-drop", workload.fault_families)
 
     def test_llama_rdna4_command_uses_gpu_cpu_oracle_wrapper(self) -> None:
         workload = validation.WORKLOAD_BY_ID["llama-rdna4-rms-norm"]

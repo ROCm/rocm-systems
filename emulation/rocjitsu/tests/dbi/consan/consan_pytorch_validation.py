@@ -116,9 +116,7 @@ def _cluster_barrier_kernel(
     offsets = ttgl.arange(0, output_elements, layout=blocked_layout)
     program = ttgl.program_id(axis=0)
     values = program * output_elements + offsets
-    shared = ttgl.allocate_shared_memory(
-        ttgl.int32, [output_elements], shared_layout
-    )
+    shared = ttgl.allocate_shared_memory(ttgl.int32, [output_elements], shared_layout)
     shared.store(values)
     ttgl.amd.gfx1250.cluster.arrive()
     ttgl.amd.gfx1250.cluster.wait()
@@ -139,7 +137,9 @@ def _run_cluster_load_sync(repetitions: int) -> dict[str, object]:
         order=[1, 0],
         cga_layout=[[0, 1]],
     )
-    host_input = torch.arange(rows * columns, dtype=torch.float32).reshape(rows, columns)
+    host_input = torch.arange(rows * columns, dtype=torch.float32).reshape(
+        rows, columns
+    )
     input_tensor = host_input.to(device="cuda")
     grid = (rows // block_rows * (columns // block_columns), 1)
     # Clustered launch geometry changes physical CTA grouping without
@@ -316,8 +316,10 @@ def _topk_input(rows: int, columns: int, dtype: torch.dtype) -> torch.Tensor:
         # integer range to BF16 would introduce ties and make the index oracle
         # ambiguous.
         ordered = (
-            torch.arange(columns, dtype=torch.int32) + 0x3C00
-        ).to(torch.int16).view(torch.bfloat16)
+            (torch.arange(columns, dtype=torch.int32) + 0x3C00)
+            .to(torch.int16)
+            .view(torch.bfloat16)
+        )
     else:
         ordered = torch.arange(columns, dtype=dtype)
     row = ordered[permutation]
@@ -397,46 +399,6 @@ def _run_rdna4_llm_topk(repetitions: int) -> dict[str, object]:
     }
 
 
-def _run_rdna4_sdpa(repetitions: int) -> dict[str, object]:
-    """Runs ordinary causal PyTorch attention with an independent CPU oracle."""
-    shape = (1, 8, 64, 64)
-    base = torch.arange(torch.tensor(shape).prod().item(), dtype=torch.float32).reshape(
-        shape
-    )
-    query = ((base % 113) - 56) / 31
-    key = ((base * 3 % 127) - 63) / 29
-    value = ((base * 5 % 131) - 65) / 27
-    expected = torch.nn.functional.scaled_dot_product_attention(
-        query, key, value, is_causal=True
-    )
-    device_query = query.to(device="cuda")
-    device_key = key.to(device="cuda")
-    device_value = value.to(device="cuda")
-    elapsed_ms = []
-    actual = None
-    for _ in range(repetitions):
-        start = time.monotonic()
-        actual = torch.nn.functional.scaled_dot_product_attention(
-            device_query, device_key, device_value, is_causal=True
-        )
-        torch.cuda.synchronize()
-        elapsed_ms.append((time.monotonic() - start) * 1000.0)
-    assert actual is not None
-    host_actual = actual.cpu()
-    if not torch.allclose(host_actual, expected, rtol=2.0e-4, atol=2.0e-4):
-        maximum_error = torch.max(torch.abs(host_actual - expected)).item()
-        raise RuntimeError(f"scaled-dot-product-attention oracle failed: {maximum_error}")
-    return {
-        "median_ms": statistics.median(elapsed_ms),
-        "repetitions": repetitions,
-        "oracle": "cpu-scaled-dot-product-attention-allclose",
-        "oracle_passed": True,
-        "shape": list(shape),
-        "dtype": str(query.dtype),
-        "is_causal": True,
-    }
-
-
 def _run_sort(repetitions: int) -> dict[str, object]:
     rows = 4
     columns = 256
@@ -471,9 +433,7 @@ def _run_sort(repetitions: int) -> dict[str, object]:
     }
 
 
-def _run_scatter_reduce_case(
-    repetitions: int, dtype: torch.dtype
-) -> dict[str, object]:
+def _run_scatter_reduce_case(repetitions: int, dtype: torch.dtype) -> dict[str, object]:
     bins = 64
     elements = 1024
     host_indices = torch.arange(elements, dtype=torch.int64) % bins
@@ -633,9 +593,7 @@ def _run_rdna4_split_softmax(repetitions: int) -> dict[str, object]:
     # Derive the reference independently in FP32, then round it once to the
     # operation's BF16 result type. This retains an exact output oracle without
     # loading PyTorch's unrelated precompiled RNG object during setup.
-    expected = torch.softmax(host_input.to(torch.float32), dim=-1).to(
-        torch.bfloat16
-    )
+    expected = torch.softmax(host_input.to(torch.float32), dim=-1).to(torch.bfloat16)
     input_tensor = host_input.to(device="cuda")
     compiled_softmax = torch.compile(
         lambda value: torch.softmax(value, dim=-1), fullgraph=True
@@ -686,7 +644,6 @@ def _parse_args() -> argparse.Namespace:
             "rdna4-compiled-softmax",
             "rdna4-split-softmax",
             "rdna4-llm-topk",
-            "rdna4-sdpa",
         ),
         required=True,
     )
@@ -734,30 +691,22 @@ def main() -> int:
             }
         elif args.workload == "vector-norm":
             result = {
-                "vector-norm": _run_norm_softmax(
-                    args.repetitions, run_softmax=False
-                )
+                "vector-norm": _run_norm_softmax(args.repetitions, run_softmax=False)
             }
         elif args.workload == "softmax":
             result = {"softmax": _run_norm_softmax(args.repetitions, run_norm=False)}
         elif args.workload == "rdna4-compiled-softmax":
             result = {
-                "rdna4-compiled-softmax": _run_rdna4_compiled_softmax(
-                    args.repetitions
-                )
+                "rdna4-compiled-softmax": _run_rdna4_compiled_softmax(args.repetitions)
             }
         elif args.workload == "rdna4-split-softmax":
-            result = {
-                "rdna4-split-softmax": _run_rdna4_split_softmax(args.repetitions)
-            }
+            result = {"rdna4-split-softmax": _run_rdna4_split_softmax(args.repetitions)}
         elif args.workload == "rdna4-llm-topk":
             result = _run_rdna4_llm_topk(args.repetitions)
         else:
-            result = {"rdna4-sdpa": _run_rdna4_sdpa(args.repetitions)}
+            raise AssertionError(f"unhandled PyTorch workload: {args.workload}")
     except Exception as exc:
-        _write_oracle_result(
-            "fail", {"workload": args.workload, "reason": str(exc)}
-        )
+        _write_oracle_result("fail", {"workload": args.workload, "reason": str(exc)})
         raise
     _write_oracle_result("pass", {"workload": args.workload, "result": result})
     print(json.dumps(result, sort_keys=True), flush=True)
