@@ -856,12 +856,17 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     auto lane_holds_saved_sgpr = [&](BasicBlock *start, const Instruction *from, uint16_t vgpr,
                                      uint16_t lane, uint16_t sgpr) {
       std::vector<std::pair<BasicBlock *, const Instruction *>> work{{start, from}};
-      std::unordered_set<BasicBlock *> seen;
+      // Keyed by the whole work item, not the block. Processing one is deterministic, so meeting
+      // the same pair twice adds nothing and is skipped; the same block reached with a different
+      // scan start is a different query and still has to run.
+      std::set<std::pair<const BasicBlock *, const Instruction *>> seen;
       while (!work.empty()) {
         const auto [block, before] = work.back();
         work.pop_back();
         if (block == nullptr || !body.contains(block))
           return false;
+        if (!seen.insert({block, before}).second)
+          continue;
         std::vector<const Instruction *> ordered;
         ordered.reserve(block->num_instructions());
         for (const Instruction &inst : block->instructions())
@@ -916,7 +921,11 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         // the caller's value comes from, here the save has to be inside the body.
         if (block == entry)
           return false;
-        if (block->predecessors().empty() || !seen.insert(block).second)
+        // Reconverging control flow -- a diamond, or a loop back edge -- reaches a block that is
+        // already queued or done. That is ordinary, not a reason to give up on the whole query; the
+        // dedup above absorbs it. Only a block with no predecessor inside the body is a path this
+        // analysis cannot see, and that still fails closed.
+        if (block->predecessors().empty())
           return false;
         for (BasicBlock *pred : block->predecessors())
           work.emplace_back(pred, nullptr);
@@ -962,12 +971,17 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     // Backward reaching-definition search for one half, starting just above `from`.
     auto caller_value_reaches = [&](BasicBlock *start, const Instruction *from, uint16_t sgpr) {
       std::vector<std::pair<BasicBlock *, const Instruction *>> work{{start, from}};
-      std::unordered_set<BasicBlock *> seen;
+      // Keyed by the whole work item, not the block. Processing one is deterministic, so meeting
+      // the same pair twice adds nothing and is skipped; the same block reached with a different
+      // scan start is a different query and still has to run.
+      std::set<std::pair<const BasicBlock *, const Instruction *>> seen;
       while (!work.empty()) {
         const auto [block, before] = work.back();
         work.pop_back();
         if (block == nullptr || !body.contains(block))
           return false;
+        if (!seen.insert({block, before}).second)
+          continue;
         // The instruction list is forward-only, so materialize it to scan upwards from `before`.
         std::vector<const Instruction *> ordered;
         ordered.reserve(block->num_instructions());
@@ -999,7 +1013,11 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         // this analysis cannot see, so it fails closed above.
         if (block == entry)
           continue;
-        if (block->predecessors().empty() || !seen.insert(block).second)
+        // Reconverging control flow -- a diamond, or a loop back edge -- reaches a block that is
+        // already queued or done. That is ordinary, not a reason to give up on the whole query; the
+        // dedup above absorbs it. Only a block with no predecessor inside the body is a path this
+        // analysis cannot see, and that still fails closed.
+        if (block->predecessors().empty())
           return false;
         for (BasicBlock *pred : block->predecessors())
           work.emplace_back(pred, nullptr);
