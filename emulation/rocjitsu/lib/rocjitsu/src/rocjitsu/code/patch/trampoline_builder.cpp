@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cstring>
 #include <iterator>
@@ -276,9 +277,25 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   return build(emit_plan, error_out);
 }
 
+class SoppRelayPlanningWorkContext {
+public:
+  SoppRelayPlanningWorkContext(size_t input_count, const SoppBranchRelayPlanningWorkLimits &limits,
+                               SoppBranchRelayPlanningWorkTelemetry *telemetry)
+      : meter_(limits.total.for_inputs(input_count),
+               telemetry == nullptr ? nullptr : &telemetry->work_count,
+               telemetry == nullptr ? nullptr : &telemetry->exhaustion_count) {}
+
+  [[nodiscard]] bool consume(size_t amount = 1u) { return meter_.consume(amount); }
+  [[nodiscard]] bool exhausted() const { return meter_.exhausted(); }
+
+private:
+  MeteredPlanningWork meter_;
+};
+
 static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
     std::span<const uint64_t> source_offsets, std::span<const uint64_t> relay_offsets,
-    std::span<const uint64_t> island_offsets, uint64_t maximum_hop_bytes, std::string *error_out) {
+    std::span<const uint64_t> island_offsets, uint64_t maximum_hop_bytes,
+    SoppRelayPlanningWorkContext &work, std::string *error_out) {
   enum class CoordinateKind : uint8_t {
     Source,
     Relay,
@@ -303,12 +320,25 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
   std::vector<Coordinate> coordinates;
   coordinates.reserve(source_offsets.size() + relay_offsets.size() + island_offsets.size());
   const auto append_coordinates = [&](std::span<const uint64_t> offsets, CoordinateKind kind) {
-    for (size_t i = 0; i < offsets.size(); ++i)
+    for (size_t i = 0; i < offsets.size(); ++i) {
+      if (!work.consume())
+        return false;
       coordinates.push_back({offsets[i], kind, i});
+    }
+    return true;
   };
-  append_coordinates(source_offsets, CoordinateKind::Source);
-  append_coordinates(relay_offsets, CoordinateKind::Relay);
-  append_coordinates(island_offsets, CoordinateKind::Island);
+  if (!append_coordinates(source_offsets, CoordinateKind::Source) ||
+      !append_coordinates(relay_offsets, CoordinateKind::Relay) ||
+      !append_coordinates(island_offsets, CoordinateKind::Island)) {
+    report(error_out, "SOPP relay planner exhausted its work allowance while reading inputs");
+    return std::nullopt;
+  }
+  const size_t coordinate_sort_work = saturated_multiply(
+      coordinates.size(), std::max<size_t>(std::bit_width(coordinates.size()), 1u));
+  if (!work.consume(coordinate_sort_work)) {
+    report(error_out, "SOPP relay planner exhausted its work allowance while ordering inputs");
+    return std::nullopt;
+  }
   std::ranges::sort(coordinates, [](const Coordinate &lhs, const Coordinate &rhs) {
     if (lhs.offset != rhs.offset)
       return lhs.offset < rhs.offset;
@@ -317,6 +347,10 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
     return lhs.input_index < rhs.input_index;
   });
   for (size_t i = 0; i < coordinates.size(); ++i) {
+    if (!work.consume()) {
+      report(error_out, "SOPP relay planner exhausted its work allowance while validating inputs");
+      return std::nullopt;
+    }
     if (coordinates[i].offset % sizeof(uint32_t) != 0) {
       report(error_out, "SOPP relay planner: coordinates must be dword aligned");
       return std::nullopt;
@@ -346,8 +380,9 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
   // with precise min-cut diagnostics. Large generated code objects need this
   // O(N log N) path: even an interval-compressed exact-flow graph can require
   // many expensive blocking-flow phases for tens of thousands of sites.
-  constexpr size_t kGreedyRelayPlannerThreshold = 4096u;
-  if (coordinates.size() > kGreedyRelayPlannerThreshold) {
+  const auto plan_greedily = [&]() -> std::optional<SoppBranchRelayPlan> {
+    const size_t heap_levels = std::max<size_t>(std::bit_width(coordinates.size()), 1u);
+    const auto charge_heap_operation = [&]() { return work.consume(heap_levels); };
     struct GreedyRouteState {
       std::vector<uint64_t> relay_offsets;
       std::optional<uint64_t> island_offset;
@@ -357,21 +392,41 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
     std::vector<GreedyRouteState> route_states(source_offsets.size());
     std::vector<std::pair<uint64_t, uint64_t>> cut_hops;
     for (const Coordinate &coordinate : coordinates) {
+      if (!work.consume()) {
+        report(error_out, "SOPP relay planner exhausted its work allowance in greedy routing");
+        return std::nullopt;
+      }
       if (coordinate.kind == CoordinateKind::Source) {
+        if (!charge_heap_operation()) {
+          report(error_out, "SOPP relay planner exhausted its work allowance in greedy routing");
+          return std::nullopt;
+        }
         active.emplace(coordinate.offset, coordinate.input_index);
         continue;
       }
       while (!active.empty() && coordinate.offset - active.top().first > maximum_hop_bytes) {
+        if (!charge_heap_operation()) {
+          report(error_out, "SOPP relay planner exhausted its work allowance in greedy routing");
+          return std::nullopt;
+        }
         cut_hops.emplace_back(active.top().first, coordinate.offset);
         active.pop();
       }
       if (active.empty())
         continue;
+      if (!charge_heap_operation()) {
+        report(error_out, "SOPP relay planner exhausted its work allowance in greedy routing");
+        return std::nullopt;
+      }
       const auto [endpoint, source_index] = active.top();
       (void)endpoint;
       active.pop();
       if (coordinate.kind == CoordinateKind::Relay) {
         route_states[source_index].relay_offsets.push_back(coordinate.offset);
+        if (!charge_heap_operation()) {
+          report(error_out, "SOPP relay planner exhausted its work allowance in greedy routing");
+          return std::nullopt;
+        }
         active.emplace(coordinate.offset, source_index);
       } else {
         route_states[source_index].island_offset = coordinate.offset;
@@ -382,6 +437,10 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
     plan.min_cut_hops = std::move(cut_hops);
     plan.routes.reserve(std::min(source_offsets.size(), island_offsets.size()));
     for (size_t source_index = 0; source_index < route_states.size(); ++source_index) {
+      if (!work.consume()) {
+        report(error_out, "SOPP relay planner exhausted its work allowance in greedy routing");
+        return std::nullopt;
+      }
       GreedyRouteState &state = route_states[source_index];
       if (!state.island_offset) {
         plan.rejected_source_indices.push_back(source_index);
@@ -392,7 +451,11 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
                              .relay_offsets = std::move(state.relay_offsets)});
     }
     return plan;
-  }
+  };
+
+  constexpr size_t kGreedyRelayPlannerThreshold = 4096u;
+  if (coordinates.size() > kGreedyRelayPlannerThreshold)
+    return plan_greedily();
 
   struct Edge {
     size_t to = 0;
@@ -409,13 +472,32 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
   const size_t relay_out_base = relay_in_base + relay_offsets.size();
   const size_t island_base = relay_out_base + relay_offsets.size();
   const size_t super_sink = island_base + island_offsets.size();
+  if (!work.consume(super_sink + 1u)) {
+    report(error_out, "SOPP relay planner exhausted its work allowance building exact graph");
+    return std::nullopt;
+  }
   std::vector<std::vector<Edge>> graph(super_sink + 1);
   const auto add_edge = [&](size_t from, size_t to, uint32_t capacity = 1u) {
+    if (!work.consume(2u))
+      return false;
     const size_t forward_index = graph[from].size();
     const size_t reverse_index = graph[to].size();
     graph[from].push_back({to, reverse_index, capacity, capacity, true});
     graph[to].push_back({from, forward_index, 0, 0, false});
+    return true;
   };
+
+  const auto order_work = [](size_t count) {
+    return saturated_add(count,
+                         saturated_multiply(count, std::max<size_t>(std::bit_width(count), 1u)));
+  };
+  size_t exact_order_work = order_work(source_offsets.size());
+  accumulate_saturated(exact_order_work, order_work(relay_offsets.size()));
+  accumulate_saturated(exact_order_work, order_work(island_offsets.size()));
+  if (!work.consume(exact_order_work)) {
+    report(error_out, "SOPP relay planner exhausted its work allowance ordering exact inputs");
+    return std::nullopt;
+  }
 
   std::vector<size_t> source_order(source_offsets.size());
   std::iota(source_order.begin(), source_order.end(), 0);
@@ -439,12 +521,24 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
     return lhs < rhs;
   });
 
-  for (size_t source : source_order)
-    add_edge(super_source, source_base + source);
-  for (size_t relay : relay_order)
-    add_edge(relay_in_base + relay, relay_out_base + relay);
-  for (size_t island : island_order)
-    add_edge(island_base + island, super_sink);
+  for (size_t source : source_order) {
+    if (!add_edge(super_source, source_base + source)) {
+      report(error_out, "SOPP relay planner exhausted its work allowance building exact graph");
+      return std::nullopt;
+    }
+  }
+  for (size_t relay : relay_order) {
+    if (!add_edge(relay_in_base + relay, relay_out_base + relay)) {
+      report(error_out, "SOPP relay planner exhausted its work allowance building exact graph");
+      return std::nullopt;
+    }
+  }
+  for (size_t island : island_order) {
+    if (!add_edge(island_base + island, super_sink)) {
+      report(error_out, "SOPP relay planner exhausted its work allowance building exact graph");
+      return std::nullopt;
+    }
+  }
 
   struct HopTarget {
     uint64_t offset = 0;
@@ -452,10 +546,24 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
   };
   std::vector<HopTarget> hop_targets;
   hop_targets.reserve(relay_offsets.size() + island_offsets.size());
-  for (size_t relay : relay_order)
+  for (size_t relay : relay_order) {
+    if (!work.consume()) {
+      report(error_out, "SOPP relay planner exhausted its work allowance building exact graph");
+      return std::nullopt;
+    }
     hop_targets.push_back({relay_offsets[relay], relay_in_base + relay});
-  for (size_t island : island_order)
+  }
+  for (size_t island : island_order) {
+    if (!work.consume()) {
+      report(error_out, "SOPP relay planner exhausted its work allowance building exact graph");
+      return std::nullopt;
+    }
     hop_targets.push_back({island_offsets[island], island_base + island});
+  }
+  if (!work.consume(order_work(hop_targets.size()))) {
+    report(error_out, "SOPP relay planner exhausted its work allowance ordering exact targets");
+    return std::nullopt;
+  }
   std::ranges::sort(hop_targets, [](const HopTarget &lhs, const HopTarget &rhs) {
     return std::tie(lhs.offset, lhs.node) < std::tie(rhs.offset, rhs.node);
   });
@@ -472,45 +580,62 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
     size_t right = std::numeric_limits<size_t>::max();
   };
   std::vector<TargetTreeNode> target_tree;
-  const auto build_target_tree = [&](auto &&self, size_t begin, size_t end) -> size_t {
+  const auto build_target_tree = [&](auto &&self, size_t begin,
+                                     size_t end) -> std::optional<size_t> {
+    if (!work.consume())
+      return std::nullopt;
     const size_t tree_index = target_tree.size();
     const size_t graph_node = graph.size();
     graph.emplace_back();
     target_tree.push_back({.graph_node = graph_node, .begin = begin, .end = end});
     if (end - begin == 1u) {
-      add_edge(graph_node, hop_targets[begin].node, static_cast<uint32_t>(source_offsets.size()));
+      if (!add_edge(graph_node, hop_targets[begin].node,
+                    static_cast<uint32_t>(source_offsets.size())))
+        return std::nullopt;
       return tree_index;
     }
     const size_t middle = begin + (end - begin) / 2u;
-    const size_t left = self(self, begin, middle);
-    const size_t right = self(self, middle, end);
-    target_tree[tree_index].left = left;
-    target_tree[tree_index].right = right;
-    add_edge(graph_node, target_tree[left].graph_node,
-             static_cast<uint32_t>(source_offsets.size()));
-    add_edge(graph_node, target_tree[right].graph_node,
-             static_cast<uint32_t>(source_offsets.size()));
+    const auto left = self(self, begin, middle);
+    const auto right = self(self, middle, end);
+    if (!left || !right)
+      return std::nullopt;
+    target_tree[tree_index].left = *left;
+    target_tree[tree_index].right = *right;
+    if (!add_edge(graph_node, target_tree[*left].graph_node,
+                  static_cast<uint32_t>(source_offsets.size())) ||
+        !add_edge(graph_node, target_tree[*right].graph_node,
+                  static_cast<uint32_t>(source_offsets.size())))
+      return std::nullopt;
     return tree_index;
   };
   const std::optional<size_t> target_tree_root =
-      hop_targets.empty()
-          ? std::nullopt
-          : std::optional<size_t>(build_target_tree(build_target_tree, 0, hop_targets.size()));
+      hop_targets.empty() ? std::nullopt
+                          : build_target_tree(build_target_tree, 0, hop_targets.size());
+  if (!hop_targets.empty() && !target_tree_root) {
+    report(error_out, "SOPP relay planner exhausted its work allowance building exact graph");
+    return std::nullopt;
+  }
   const auto add_target_interval = [&](auto &&self, size_t origin_node, size_t query_begin,
-                                       size_t query_end, size_t tree_index) -> void {
+                                       size_t query_end, size_t tree_index) -> bool {
+    if (!work.consume())
+      return false;
     const TargetTreeNode &tree_node = target_tree[tree_index];
     if (query_end <= tree_node.begin || tree_node.end <= query_begin)
-      return;
+      return true;
     if (query_begin <= tree_node.begin && tree_node.end <= query_end) {
-      add_edge(origin_node, tree_node.graph_node, static_cast<uint32_t>(source_offsets.size()));
-      return;
+      return add_edge(origin_node, tree_node.graph_node,
+                      static_cast<uint32_t>(source_offsets.size()));
     }
-    self(self, origin_node, query_begin, query_end, tree_node.left);
-    self(self, origin_node, query_begin, query_end, tree_node.right);
+    return self(self, origin_node, query_begin, query_end, tree_node.left) &&
+           self(self, origin_node, query_begin, query_end, tree_node.right);
   };
   const auto connect_origin = [&](size_t origin_node, uint64_t offset) {
     if (!target_tree_root)
-      return;
+      return true;
+    const size_t lookup_work =
+        saturated_multiply(2u, std::max<size_t>(std::bit_width(hop_targets.size()), 1u));
+    if (!work.consume(lookup_work))
+      return false;
     const uint64_t maximum_target =
         offset > std::numeric_limits<uint64_t>::max() - maximum_hop_bytes
             ? std::numeric_limits<uint64_t>::max()
@@ -522,29 +647,57 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
         std::ranges::upper_bound(hop_targets, maximum_target, {}, &HopTarget::offset) -
         hop_targets.begin());
     if (begin != end)
-      add_target_interval(add_target_interval, origin_node, begin, end, *target_tree_root);
+      return add_target_interval(add_target_interval, origin_node, begin, end, *target_tree_root);
+    return true;
   };
-  for (size_t source : source_order)
-    connect_origin(source_base + source, source_offsets[source]);
-  for (size_t relay : relay_order)
-    connect_origin(relay_out_base + relay, relay_offsets[relay]);
+  for (size_t source : source_order) {
+    if (!connect_origin(source_base + source, source_offsets[source])) {
+      report(error_out, "SOPP relay planner exhausted its work allowance building exact graph");
+      return std::nullopt;
+    }
+  }
+  for (size_t relay : relay_order) {
+    if (!connect_origin(relay_out_base + relay, relay_offsets[relay])) {
+      report(error_out, "SOPP relay planner exhausted its work allowance building exact graph");
+      return std::nullopt;
+    }
+  }
 
   // Dinic blocking flow preserves the exact maximum-cardinality result while
   // augmenting many routes per residual traversal.
+  bool exact_work_exhausted = false;
   for (;;) {
+    if (!work.consume(graph.size())) {
+      report(error_out, "SOPP relay planner exhausted its work allowance in exact routing");
+      return std::nullopt;
+    }
     std::vector<int32_t> level(graph.size(), -1);
     std::queue<size_t> queue;
     level[super_source] = 0;
     queue.push(super_source);
     while (!queue.empty()) {
+      if (!work.consume()) {
+        exact_work_exhausted = true;
+        break;
+      }
       const size_t from = queue.front();
       queue.pop();
       for (const Edge &edge : graph[from]) {
+        if (!work.consume()) {
+          exact_work_exhausted = true;
+          break;
+        }
         if (edge.capacity == 0 || level[edge.to] != -1)
           continue;
         level[edge.to] = level[from] + 1;
         queue.push(edge.to);
       }
+      if (exact_work_exhausted)
+        break;
+    }
+    if (exact_work_exhausted) {
+      report(error_out, "SOPP relay planner exhausted its work allowance in exact routing");
+      return std::nullopt;
     }
     if (level[super_sink] == -1)
       break;
@@ -553,6 +706,10 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
       if (from == super_sink)
         return limit;
       for (size_t &edge_index = next_edge[from]; edge_index < graph[from].size(); ++edge_index) {
+        if (!work.consume()) {
+          exact_work_exhausted = true;
+          return 0u;
+        }
         Edge &edge = graph[from][edge_index];
         if (edge.capacity == 0 || level[edge.to] != level[from] + 1)
           continue;
@@ -567,9 +724,17 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
     };
     while (push_flow(push_flow, super_source, static_cast<uint32_t>(source_offsets.size())) != 0u) {
     }
+    if (exact_work_exhausted) {
+      report(error_out, "SOPP relay planner exhausted its work allowance in exact routing");
+      return std::nullopt;
+    }
   }
   const auto take_used_original_edge_to = [&](size_t from) -> std::optional<size_t> {
     for (Edge &edge : graph[from]) {
+      if (!work.consume()) {
+        exact_work_exhausted = true;
+        return std::nullopt;
+      }
       if (!edge.original || edge.initial_capacity == edge.capacity)
         continue;
       ++edge.capacity;
@@ -585,14 +750,26 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
   };
   SoppBranchRelayPlan plan;
   {
+    if (!work.consume(graph.size())) {
+      report(error_out, "SOPP relay planner exhausted its work allowance finding exact cut");
+      return std::nullopt;
+    }
     std::vector<bool> reachable(graph.size(), false);
     std::queue<size_t> queue;
     reachable[super_source] = true;
     queue.push(super_source);
     while (!queue.empty()) {
+      if (!work.consume()) {
+        report(error_out, "SOPP relay planner exhausted its work allowance finding exact cut");
+        return std::nullopt;
+      }
       const size_t from = queue.front();
       queue.pop();
       for (const Edge &edge : graph[from]) {
+        if (!work.consume()) {
+          report(error_out, "SOPP relay planner exhausted its work allowance finding exact cut");
+          return std::nullopt;
+        }
         if (edge.capacity == 0 || reachable[edge.to])
           continue;
         reachable[edge.to] = true;
@@ -611,14 +788,30 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
       return std::nullopt;
     };
     for (size_t relay = 0; relay < relay_offsets.size(); ++relay) {
+      if (!work.consume()) {
+        report(error_out, "SOPP relay planner exhausted its work allowance finding exact cut");
+        return std::nullopt;
+      }
       if (reachable[relay_in_base + relay] && !reachable[relay_out_base + relay])
         plan.min_cut_relay_offsets.push_back(relay_offsets[relay]);
     }
+    if (!work.consume(order_work(plan.min_cut_relay_offsets.size()))) {
+      report(error_out, "SOPP relay planner exhausted its work allowance ordering exact cut");
+      return std::nullopt;
+    }
     std::ranges::sort(plan.min_cut_relay_offsets);
     for (size_t from = 0; from < graph.size(); ++from) {
+      if (!work.consume()) {
+        report(error_out, "SOPP relay planner exhausted its work allowance finding exact cut");
+        return std::nullopt;
+      }
       if (!reachable[from])
         continue;
       for (const Edge &edge : graph[from]) {
+        if (!work.consume()) {
+          report(error_out, "SOPP relay planner exhausted its work allowance finding exact cut");
+          return std::nullopt;
+        }
         if (!edge.original || edge.capacity != 0 || reachable[edge.to])
           continue;
         const auto from_offset = node_offset(from);
@@ -626,6 +819,10 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
         if (from_offset && to_offset && *from_offset != *to_offset)
           plan.min_cut_hops.emplace_back(*from_offset, *to_offset);
       }
+    }
+    if (!work.consume(order_work(plan.min_cut_hops.size()))) {
+      report(error_out, "SOPP relay planner exhausted its work allowance ordering exact cut");
+      return std::nullopt;
     }
     std::ranges::sort(plan.min_cut_hops);
     plan.min_cut_hops.erase(std::ranges::unique(plan.min_cut_hops).begin(),
@@ -636,8 +833,16 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
   // planner's documented deterministic tie-breaking, then restore input order
   // in the returned vectors.
   for (size_t source_index : source_order) {
+    if (!work.consume()) {
+      report(error_out, "SOPP relay planner exhausted its work allowance reconstructing routes");
+      return std::nullopt;
+    }
     bool admitted = false;
     for (const Edge &edge : graph[super_source]) {
+      if (!work.consume()) {
+        report(error_out, "SOPP relay planner exhausted its work allowance reconstructing routes");
+        return std::nullopt;
+      }
       if (edge.to != source_base + source_index || edge.capacity != 0)
         continue;
       SoppBranchRelayRoute route;
@@ -646,6 +851,11 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
       for (;;) {
         const auto next = take_used_original_edge_to(node);
         if (!next) {
+          if (exact_work_exhausted) {
+            report(error_out,
+                   "SOPP relay planner exhausted its work allowance reconstructing routes");
+            return std::nullopt;
+          }
           report(error_out, "SOPP relay planner: internal flow decomposition failure");
           return std::nullopt;
         }
@@ -654,6 +864,11 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
           const size_t relay = node - relay_in_base;
           route.relay_offsets.push_back(relay_offsets[relay]);
           const auto relay_out = take_used_original_edge_to(node);
+          if (exact_work_exhausted) {
+            report(error_out,
+                   "SOPP relay planner exhausted its work allowance reconstructing routes");
+            return std::nullopt;
+          }
           if (!relay_out || *relay_out != relay_out_base + relay) {
             report(error_out, "SOPP relay planner: relay capacity flow is inconsistent");
             return std::nullopt;
@@ -677,6 +892,11 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
     if (!admitted)
       plan.rejected_source_indices.push_back(source_index);
   }
+  if (!work.consume(saturated_add(order_work(plan.routes.size()),
+                                  order_work(plan.rejected_source_indices.size())))) {
+    report(error_out, "SOPP relay planner exhausted its work allowance ordering exact result");
+    return std::nullopt;
+  }
   std::ranges::sort(plan.routes, {}, &SoppBranchRelayRoute::source_index);
   std::ranges::sort(plan.rejected_source_indices);
   return plan;
@@ -685,15 +905,29 @@ static std::optional<SoppBranchRelayPlan> plan_monotonic_sopp_branch_relays(
 std::optional<SoppBranchRelayPlan>
 plan_forward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
                                 std::span<const uint64_t> relay_offsets,
-                                std::span<const uint64_t> island_offsets, std::string *error_out) {
+                                std::span<const uint64_t> island_offsets, std::string *error_out,
+                                SoppBranchRelayPlanningWorkTelemetry *work_telemetry,
+                                const SoppBranchRelayPlanningWorkLimits &work_limits) {
+  const size_t input_count = saturated_add(
+      saturated_add(source_offsets.size(), relay_offsets.size()), island_offsets.size());
+  SoppRelayPlanningWorkContext work(input_count, work_limits, work_telemetry);
   return plan_monotonic_sopp_branch_relays(source_offsets, relay_offsets, island_offsets,
-                                           kSoppBranchMaximumForwardReachBytes, error_out);
+                                           kSoppBranchMaximumForwardReachBytes, work, error_out);
 }
 
 std::optional<SoppBranchRelayPlan>
 plan_backward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
                                  std::span<const uint64_t> relay_offsets,
-                                 std::span<const uint64_t> island_offsets, std::string *error_out) {
+                                 std::span<const uint64_t> island_offsets, std::string *error_out,
+                                 SoppBranchRelayPlanningWorkTelemetry *work_telemetry,
+                                 const SoppBranchRelayPlanningWorkLimits &work_limits) {
+  const size_t input_count = saturated_add(
+      saturated_add(source_offsets.size(), relay_offsets.size()), island_offsets.size());
+  SoppRelayPlanningWorkContext work(input_count, work_limits, work_telemetry);
+  if (!work.consume(saturated_multiply(3u, input_count))) {
+    report(error_out, "SOPP backward relay planner exhausted its work allowance while mirroring");
+    return std::nullopt;
+  }
   uint64_t mirror = 0;
   const auto include_offsets = [&](std::span<const uint64_t> offsets) {
     if (!offsets.empty())
@@ -712,10 +946,26 @@ plan_backward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
   const std::vector<uint64_t> mirrored_sources = mirror_offsets(source_offsets);
   const std::vector<uint64_t> mirrored_relays = mirror_offsets(relay_offsets);
   const std::vector<uint64_t> mirrored_islands = mirror_offsets(island_offsets);
-  auto plan = plan_monotonic_sopp_branch_relays(mirrored_sources, mirrored_relays, mirrored_islands,
-                                                kSoppBranchMaximumBackwardReachBytes, error_out);
+  auto plan =
+      plan_monotonic_sopp_branch_relays(mirrored_sources, mirrored_relays, mirrored_islands,
+                                        kSoppBranchMaximumBackwardReachBytes, work, error_out);
   if (!plan)
     return std::nullopt;
+  size_t output_work =
+      saturated_add(plan->routes.size(),
+                    saturated_add(plan->min_cut_relay_offsets.size(), plan->min_cut_hops.size()));
+  for (const SoppBranchRelayRoute &route : plan->routes) {
+    accumulate_saturated(output_work, saturated_multiply(route.relay_offsets.size(), 3u));
+  }
+  const size_t cut_count =
+      saturated_add(plan->min_cut_relay_offsets.size(), plan->min_cut_hops.size());
+  accumulate_saturated(
+      output_work, saturated_multiply(cut_count, std::max<size_t>(std::bit_width(cut_count), 1u)));
+  if (!work.consume(output_work)) {
+    report(error_out,
+           "SOPP backward relay planner exhausted its work allowance while restoring coordinates");
+    return std::nullopt;
+  }
   for (SoppBranchRelayRoute &route : plan->routes) {
     route.island_offset = mirror - route.island_offset;
     for (uint64_t &relay_offset : route.relay_offsets)

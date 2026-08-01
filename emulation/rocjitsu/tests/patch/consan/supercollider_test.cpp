@@ -242,6 +242,8 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
   EXPECT_EQ(inventory.planned_appended_bytes,
             inventory.used_appended_bytes + inventory.unused_appended_bytes);
   EXPECT_EQ(inventory.used_appended_bytes, reservoir->trampoline_size);
+  EXPECT_GT(result.planning_work_telemetry.direct_reservoir_work_count, 0u);
+  EXPECT_EQ(result.planning_work_telemetry.direct_reservoir_exhaustion_count, 0u);
 
   ConSanResult malformed = result;
   const auto malformed_reservoir =
@@ -7110,6 +7112,8 @@ TEST(ConSan, Gfx1250LdsConvergenceMinimizesPromotedRelayReservoirOwners) {
   // materialized-only replay converge in three bounded planner calls.
   EXPECT_EQ(result.lds_branch_only_routing_telemetry.plan_call_count, 3u);
   EXPECT_EQ(result.lds_relay_reservoir_telemetry.used_reservoir_count, 1u);
+  EXPECT_GT(result.planning_work_telemetry.lds_convergence_work_count, 0u);
+  EXPECT_EQ(result.planning_work_telemetry.lds_convergence_exhaustion_count, 0u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
                                &ConSanPatchInfo::kind),
             1u);
@@ -7308,6 +7312,12 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
   EXPECT_EQ(inventory.planned_appended_bytes,
             inventory.used_appended_bytes + inventory.unused_appended_bytes);
   EXPECT_EQ(inventory.used_appended_bytes, reservoir->trampoline_size);
+  EXPECT_GT(result.planning_work_telemetry.sopp_relay_work_count, 0u);
+  EXPECT_EQ(result.planning_work_telemetry.sopp_relay_exhaustion_count, 0u);
+  EXPECT_GT(result.planning_work_telemetry.lds_relay_layout_work_count, 0u);
+  EXPECT_EQ(result.planning_work_telemetry.lds_relay_layout_exhaustion_count, 0u);
+  EXPECT_EQ(result.planning_work_telemetry.lds_convergence_work_count, 0u);
+  EXPECT_EQ(result.planning_work_telemetry.lds_convergence_exhaustion_count, 0u);
 
   const ConSanResult repeated = try_patch_consan(bytes, options);
   ASSERT_TRUE(consan_patch_succeeded(repeated));
@@ -7317,7 +7327,20 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
             1u);
   EXPECT_EQ(repeated.lds_branch_only_routing_telemetry, result.lds_branch_only_routing_telemetry);
   EXPECT_EQ(repeated.lds_relay_reservoir_telemetry, result.lds_relay_reservoir_telemetry);
+  EXPECT_EQ(repeated.planning_work_telemetry, result.planning_work_telemetry);
   EXPECT_EQ(repeated.elf_bytes, result.elf_bytes);
+
+  ConSanOptions exhausted_options = options;
+  exhausted_options.lds_relay_layout_planning_work_limit = {1u, 0u};
+  const ConSanResult exhausted = try_patch_consan(bytes, exhausted_options);
+  EXPECT_FALSE(consan_patch_succeeded(exhausted));
+  EXPECT_FALSE(exhausted.modified);
+  EXPECT_TRUE(exhausted.patches.empty());
+  EXPECT_EQ(exhausted.planning_work_telemetry.lds_relay_layout_work_count, 1u);
+  EXPECT_EQ(exhausted.planning_work_telemetry.lds_relay_layout_exhaustion_count, 1u);
+  EXPECT_TRUE(std::ranges::any_of(exhausted.errors, [](const std::string &error) {
+    return error.find("LDS relay-layout replay exhausted its work allowance") != std::string::npos;
+  })) << testing::PrintToString(exhausted.errors);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());

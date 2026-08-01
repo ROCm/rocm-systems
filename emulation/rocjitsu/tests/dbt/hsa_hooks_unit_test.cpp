@@ -1815,6 +1815,16 @@ TEST(HsaHooksUnitTest, ConSanLogsCompleteBranchRoutingTelemetrySchema) {
       .used_appended_bytes = 3072u,
       .unused_appended_bytes = 1024u,
   };
+  g_transform_override_result.planning_work_telemetry = {
+      .sopp_relay_work_count = 281u,
+      .sopp_relay_exhaustion_count = 283u,
+      .direct_reservoir_work_count = 293u,
+      .direct_reservoir_exhaustion_count = 307u,
+      .lds_relay_layout_work_count = 309u,
+      .lds_relay_layout_exhaustion_count = 310u,
+      .lds_convergence_work_count = 311u,
+      .lds_convergence_exhaustion_count = 313u,
+  };
 
   FakeApiTable api;
   InstalledDbiHook hook(api);
@@ -1831,7 +1841,8 @@ TEST(HsaHooksUnitTest, ConSanLogsCompleteBranchRoutingTelemetrySchema) {
   const std::string log = testing::internal::GetCapturedStderr();
 
   EXPECT_EQ(load_status, HSA_STATUS_SUCCESS);
-  EXPECT_NE(log.find("entry_route_failed=2 return_route_failed=3 relay_contention_failed=5 "
+  EXPECT_NE(log.find("pair_attempts=47 plan_calls=43 "
+                     "entry_route_failed=2 return_route_failed=3 relay_contention_failed=5 "
                      "work_budget_failed=7 work_budget_exhaustions=11 "
                      "relay_qualification_exhaustions=31 routing_work_exhaustions=32 "
                      "routing_invariant_failures=10 "
@@ -1841,7 +1852,7 @@ TEST(HsaHooksUnitTest, ConSanLogsCompleteBranchRoutingTelemetrySchema) {
                      "route_optimization_excess_relay_claims=34 "
                      "reservation_failed=13 "
                      "exact_pair_fallback_attempts=41 greedy_pair_fallback_attempts=37 "
-                     "pair_attempts=47 plan_calls=43 search_work=17 scan_work=19 "
+                     "search_work=17 scan_work=19 "
                      "route_optimization_search_work=23 route_optimization_scan_work=29 "
                      "relay_qualification_work=2 fallback_setup_work=3 "
                      "feasibility_scan_work=14 "
@@ -1923,6 +1934,13 @@ TEST(HsaHooksUnitTest, ConSanLogsCompleteBranchRoutingTelemetrySchema) {
                      "reservoir_planned_appended_bytes=4096 "
                      "reservoir_used_appended_bytes=3072 "
                      "reservoir_unused_appended_bytes=1024"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("ConSan planning work reader="), std::string::npos) << log;
+  EXPECT_NE(log.find("sopp_relay_work=281 sopp_relay_exhaustions=283 "
+                     "direct_reservoir_work=293 direct_reservoir_exhaustions=307 "
+                     "lds_relay_layout_work=309 lds_relay_layout_exhaustions=310 "
+                     "lds_convergence_work=311 lds_convergence_exhaustions=313"),
             std::string::npos)
       << log;
 }

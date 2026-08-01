@@ -496,7 +496,8 @@ TEST(DbiPatchPlacementPlanner, ReservesStableAppendedPrefixBeforeIndirectBodies)
 TEST(SoppBranchRelayPlanner, AssignsInterchangeableIslandsAtMaximumCardinality) {
   const std::vector<uint64_t> sources = {16, 0, 32};
   const std::vector<uint64_t> islands = {96, 80};
-  const auto plan = plan_forward_sopp_branch_relays(sources, {}, islands);
+  SoppBranchRelayPlanningWorkTelemetry work;
+  const auto plan = plan_forward_sopp_branch_relays(sources, {}, islands, nullptr, &work);
 
   ASSERT_TRUE(plan);
   ASSERT_EQ(plan->routes.size(), 2u);
@@ -506,6 +507,8 @@ TEST(SoppBranchRelayPlanner, AssignsInterchangeableIslandsAtMaximumCardinality) 
   EXPECT_EQ(plan->routes[1].source_index, 1u);
   EXPECT_EQ(plan->routes[1].island_offset, 80u);
   EXPECT_EQ(plan->rejected_source_indices, std::vector<size_t>({2}));
+  EXPECT_GT(work.work_count, 0u);
+  EXPECT_EQ(work.exhaustion_count, 0u);
 }
 
 TEST(SoppBranchRelayPlanner, ReachesLongTextThroughCapacityOneRelayWords) {
@@ -571,6 +574,31 @@ TEST(SoppBranchRelayPlanner, UsesDistinctRelaysToAdmitAllFeasibleSources) {
   EXPECT_TRUE(plan->rejected_source_indices.empty());
 }
 
+TEST(SoppBranchRelayPlanner, DefaultLimitsRetainExactMinCutAtSixtyCoordinates) {
+  constexpr size_t kSourceCount = 29u;
+  constexpr size_t kIslandCount = 30u;
+  constexpr uint64_t kMaximumForwardHop = 4u + 32767u * 4u;
+  std::vector<uint64_t> sources;
+  std::vector<uint64_t> islands;
+  sources.reserve(kSourceCount);
+  islands.reserve(kIslandCount);
+  for (size_t index = 0u; index < kSourceCount; ++index)
+    sources.push_back(index * sizeof(uint32_t));
+  for (size_t index = 0u; index < kIslandCount; ++index)
+    islands.push_back(2u * kMaximumForwardHop + index * sizeof(uint32_t));
+  const std::vector<uint64_t> relays = {kMaximumForwardHop};
+  SoppBranchRelayPlanningWorkTelemetry work;
+
+  const auto plan = plan_forward_sopp_branch_relays(sources, relays, islands, nullptr, &work);
+
+  ASSERT_TRUE(plan);
+  EXPECT_EQ(plan->routes.size(), 1u);
+  EXPECT_EQ(plan->rejected_source_indices.size(), kSourceCount - 1u);
+  EXPECT_EQ(plan->min_cut_relay_offsets, relays);
+  EXPECT_GT(work.work_count, 0u);
+  EXPECT_EQ(work.exhaustion_count, 0u);
+}
+
 TEST(SoppBranchRelayPlanner, ScalesAcrossLargeGeneratedCoordinateSets) {
   constexpr size_t kRouteCount = 1400u;
   constexpr uint64_t kMaximumForwardHop = 4u + 32767u * 4u;
@@ -629,6 +657,51 @@ TEST(SoppBranchRelayPlanner, RejectsUnalignedOrAliasedCoordinates) {
   EXPECT_EQ(error,
             "SOPP relay planner: coordinates must be globally unique; offset=16 first=source[0] "
             "second=relay[0]");
+}
+
+TEST(SoppBranchRelayPlanner, ReportsForwardAndBackwardWorkExhaustion) {
+  SoppBranchRelayPlanningWorkLimits limits;
+  limits.total = {1u, 0u};
+  SoppBranchRelayPlanningWorkTelemetry forward_work;
+  std::string forward_error;
+  EXPECT_FALSE(plan_forward_sopp_branch_relays(std::vector<uint64_t>{0u, 4u}, {},
+                                               std::vector<uint64_t>{16u}, &forward_error,
+                                               &forward_work, limits));
+  EXPECT_NE(forward_error.find("work allowance"), std::string::npos);
+  EXPECT_EQ(forward_work.work_count, 1u);
+  EXPECT_EQ(forward_work.exhaustion_count, 1u);
+
+  SoppBranchRelayPlanningWorkTelemetry backward_work;
+  std::string backward_error;
+  EXPECT_FALSE(plan_backward_sopp_branch_relays(std::vector<uint64_t>{16u}, {},
+                                                std::vector<uint64_t>{0u}, &backward_error,
+                                                &backward_work, limits));
+  EXPECT_NE(backward_error.find("work allowance"), std::string::npos);
+  EXPECT_EQ(backward_work.work_count, 0u);
+  EXPECT_EQ(backward_work.exhaustion_count, 1u);
+}
+
+TEST(PlanningWork, ScalesAndSaturatesWithoutWrapping) {
+  constexpr PlanningWorkLimit scaled{3u, 4u};
+  static_assert(scaled.for_inputs(5u) == 23u);
+  EXPECT_EQ((PlanningWorkLimit{1u, std::numeric_limits<size_t>::max()}.for_inputs(2u)),
+            std::numeric_limits<size_t>::max());
+
+  BoundedPlanningWorkMeter meter(3u);
+  EXPECT_TRUE(meter.consume(2u));
+  EXPECT_EQ(meter.consumed(), 2u);
+  EXPECT_FALSE(meter.consume(2u));
+  EXPECT_TRUE(meter.exhausted());
+  EXPECT_EQ(meter.remaining(), 0u);
+
+  size_t work_count = 0u;
+  size_t exhaustion_count = 0u;
+  MeteredPlanningWork metered(3u, &work_count, &exhaustion_count);
+  EXPECT_TRUE(metered.consume(2u));
+  EXPECT_FALSE(metered.consume(2u));
+  EXPECT_FALSE(metered.consume());
+  EXPECT_EQ(work_count, 2u);
+  EXPECT_EQ(exhaustion_count, 1u);
 }
 
 // NOTE: the inline-nop guardrail used to live in TrampolineBuilder and was

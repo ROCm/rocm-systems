@@ -158,6 +158,105 @@ struct ConSanBranchOnlyRoutingTelemetry {
   bool operator==(const ConSanBranchOnlyRoutingTelemetry &) const = default;
 };
 
+struct ConSanBranchOnlyRoutingTelemetryField {
+  std::string_view log_name;
+  size_t ConSanBranchOnlyRoutingTelemetry::*member = nullptr;
+};
+
+inline constexpr std::array kConSanBranchOnlyRoutingTelemetryFields = {
+    ConSanBranchOnlyRoutingTelemetryField{"pair_attempts",
+                                          &ConSanBranchOnlyRoutingTelemetry::pair_attempt_count},
+    ConSanBranchOnlyRoutingTelemetryField{"plan_calls",
+                                          &ConSanBranchOnlyRoutingTelemetry::plan_call_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "entry_route_failed", &ConSanBranchOnlyRoutingTelemetry::entry_route_failure_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "return_route_failed", &ConSanBranchOnlyRoutingTelemetry::return_route_failure_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "relay_contention_failed",
+        &ConSanBranchOnlyRoutingTelemetry::relay_contention_failure_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "work_budget_failed", &ConSanBranchOnlyRoutingTelemetry::work_budget_failure_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "work_budget_exhaustions", &ConSanBranchOnlyRoutingTelemetry::work_budget_exhaustion_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "relay_qualification_exhaustions",
+        &ConSanBranchOnlyRoutingTelemetry::relay_qualification_exhaustion_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "routing_work_exhaustions",
+        &ConSanBranchOnlyRoutingTelemetry::routing_work_exhaustion_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "routing_invariant_failures",
+        &ConSanBranchOnlyRoutingTelemetry::routing_invariant_failure_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "route_optimization_exhaustions",
+        &ConSanBranchOnlyRoutingTelemetry::route_optimization_exhaustion_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "route_optimization_invariant_failures",
+        &ConSanBranchOnlyRoutingTelemetry::route_optimization_invariant_failure_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "pristine_relay_occupancy_rejections",
+        &ConSanBranchOnlyRoutingTelemetry::pristine_relay_occupancy_rejection_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "route_optimization_excess_relay_claims",
+        &ConSanBranchOnlyRoutingTelemetry::route_optimization_excess_relay_claim_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "reservation_failed", &ConSanBranchOnlyRoutingTelemetry::reservation_failure_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "exact_pair_fallback_attempts",
+        &ConSanBranchOnlyRoutingTelemetry::exact_pair_fallback_attempt_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "greedy_pair_fallback_attempts",
+        &ConSanBranchOnlyRoutingTelemetry::greedy_pair_fallback_attempt_count},
+    ConSanBranchOnlyRoutingTelemetryField{"search_work",
+                                          &ConSanBranchOnlyRoutingTelemetry::search_work_count},
+    ConSanBranchOnlyRoutingTelemetryField{"scan_work",
+                                          &ConSanBranchOnlyRoutingTelemetry::scan_work_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "route_optimization_search_work",
+        &ConSanBranchOnlyRoutingTelemetry::route_optimization_search_work_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "route_optimization_scan_work",
+        &ConSanBranchOnlyRoutingTelemetry::route_optimization_scan_work_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "relay_qualification_work",
+        &ConSanBranchOnlyRoutingTelemetry::relay_qualification_work_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "fallback_setup_work", &ConSanBranchOnlyRoutingTelemetry::fallback_setup_work_count},
+    ConSanBranchOnlyRoutingTelemetryField{
+        "feasibility_scan_work", &ConSanBranchOnlyRoutingTelemetry::feasibility_scan_work_count},
+};
+
+static_assert(kConSanBranchOnlyRoutingTelemetryFields.size() == 24u);
+static_assert(sizeof(ConSanBranchOnlyRoutingTelemetry) ==
+                  kConSanBranchOnlyRoutingTelemetryFields.size() * sizeof(size_t),
+              "add every routing counter to the typed telemetry field table");
+static_assert([] {
+  for (size_t lhs = 0u; lhs < kConSanBranchOnlyRoutingTelemetryFields.size(); ++lhs) {
+    for (size_t rhs = lhs + 1u; rhs < kConSanBranchOnlyRoutingTelemetryFields.size(); ++rhs) {
+      if (kConSanBranchOnlyRoutingTelemetryFields[lhs].member ==
+              kConSanBranchOnlyRoutingTelemetryFields[rhs].member ||
+          kConSanBranchOnlyRoutingTelemetryFields[lhs].log_name ==
+              kConSanBranchOnlyRoutingTelemetryFields[rhs].log_name)
+        return false;
+    }
+  }
+  return true;
+}(), "routing telemetry field table must name every counter exactly once");
+
+[[nodiscard]] inline std::string
+format_consan_branch_only_routing_telemetry(const ConSanBranchOnlyRoutingTelemetry &telemetry) {
+  std::string result;
+  for (const auto &[name, member] : kConSanBranchOnlyRoutingTelemetryFields) {
+    if (!result.empty())
+      result.push_back(' ');
+    result.append(name);
+    result.push_back('=');
+    result.append(std::to_string(telemetry.*member));
+  }
+  return result;
+}
+
 /// Instruction reservoirs retained for shared relay routing, including both
 /// branch-only and legacy indirect relay consumers. Appended byte counts
 /// include each complete reserved appended body. Unused reservations remain
@@ -226,6 +325,30 @@ branch_only_reservoir_telemetry_is_empty(const ConSanBranchOnlyReservoirTelemetr
   return telemetry == ConSanBranchOnlyReservoirTelemetry{};
 }
 
+/// Work consumed outside the fixed-pair branch router. Counts are measured
+/// units charged by the shared bounded-planning meter; exhaustion counts are
+/// call- or convergence-scope events, not elapsed-time samples.
+struct ConSanPlanningWorkTelemetry {
+  size_t sopp_relay_work_count = 0;
+  size_t sopp_relay_exhaustion_count = 0;
+  size_t direct_reservoir_work_count = 0;
+  size_t direct_reservoir_exhaustion_count = 0;
+  size_t lds_relay_layout_work_count = 0;
+  size_t lds_relay_layout_exhaustion_count = 0;
+  size_t lds_convergence_work_count = 0;
+  size_t lds_convergence_exhaustion_count = 0;
+
+  bool operator==(const ConSanPlanningWorkTelemetry &) const = default;
+};
+
+static_assert(sizeof(ConSanPlanningWorkTelemetry) == 8u * sizeof(size_t),
+              "update the planning-work telemetry schema tests");
+
+[[nodiscard]] inline bool
+consan_planning_work_telemetry_is_empty(const ConSanPlanningWorkTelemetry &telemetry) {
+  return telemetry == ConSanPlanningWorkTelemetry{};
+}
+
 /// Machine-readable outcome of SuperCollider group-FLAT candidate selection.
 /// This remains available for successful partial transforms without forcing
 /// callers to parse a long warning string.
@@ -290,6 +413,7 @@ struct ConSanResult {
   /// transform retains no output image, so this remains zero; any attempted-
   /// plan inventory must use separate telemetry.
   ConSanBranchOnlyReservoirTelemetry lds_relay_reservoir_telemetry;
+  ConSanPlanningWorkTelemetry planning_work_telemetry;
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
   ConSanFlavor flavor = ConSanFlavor::None;
   ConSanMoiEngine moi_engine = ConSanMoiEngine::RecordReplay;
@@ -423,9 +547,8 @@ find_consan_sync_sequence_for_event(const ConSanResult &result, std::string_view
 consan_register_allocation_source_name(ConSanRegisterAllocationSource source);
 [[nodiscard]] const char *consan_register_plan_reason_name(ConSanRegisterPlanReason reason);
 [[nodiscard]] ConSanResourcePlanAlternativeOutcome
-consan_resource_plan_alternative_outcome(
-    const ConSanCandidateResourcePlan &plan,
-    const ConSanResourcePlanAlternative &alternative);
+consan_resource_plan_alternative_outcome(const ConSanCandidateResourcePlan &plan,
+                                         const ConSanResourcePlanAlternative &alternative);
 [[nodiscard]] const char *
 consan_resource_plan_alternative_kind_name(ConSanResourcePlanAlternativeKind kind);
 [[nodiscard]] const char *

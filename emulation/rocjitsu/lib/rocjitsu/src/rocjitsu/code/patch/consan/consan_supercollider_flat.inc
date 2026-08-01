@@ -485,10 +485,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     const uint32_t comparison_scratch_vgprs = flat_check_trap_comparison_scratch_vgprs(site);
     const uint32_t probe_scratch_vgprs = *required_vgprs + comparison_scratch_vgprs;
     const uint32_t report_alignment_padding =
-        options.report_buffer_address &&
-                consan_arch_requires_even_vgpr_tuples(arch)
-            ? 1u
-            : 0u;
+        options.report_buffer_address && consan_arch_requires_even_vgpr_tuples(arch) ? 1u : 0u;
     const uint32_t instrumentation_scratch_vgprs =
         probe_scratch_vgprs + report_alignment_padding + report_action_scratch_vgprs(options);
     const uint64_t comparison_setup_words = flat_check_trap_comparison_setup_words(site);
@@ -540,8 +537,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
             uses_dynamic_stack ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
                                : static_cast<uint16_t>(spill_vcc_save_pair_to_vgprs ? 2u : 0u);
         scratch_vgprs = instrumentation_scratch_vgprs + scalar_reservoir_count;
-        scratch =
-            choose_flat_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs, arch);
+        scratch = choose_flat_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs, arch);
         if (scratch && uses_dynamic_stack) {
           dynamic_stack_spill = build_dynamic_stack_borrowed_sgpr_spill_sequence(
               *scratch, scratch_vgprs, *vcc_save,
@@ -960,7 +956,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     if (!branch_router.plan_direct_reservoirs(
             block_ptrs, pristine_text, protected_ranges, arch, route_midpoint,
             2u * (max_patches - selected_candidates.size()), placement_planner,
-            direct_branch_reservoirs, &relay_error)) {
+            direct_branch_reservoirs, &relay_error, &result.planning_work_telemetry,
+            {.discovery = options.direct_reservoir_planning_work_limit})) {
       result.errors.emplace_back("ConSan flat check/trap proof " + relay_error);
       return false;
     }
@@ -1393,8 +1390,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     const uint16_t comparison_scratch_vgprs = flat_check_trap_comparison_scratch_vgprs(site);
     uint16_t report_scratch_vgpr =
         static_cast<uint16_t>(candidate.scratch_vgpr + *required_vgprs + comparison_scratch_vgprs);
-    if (options.report_buffer_address &&
-        consan_arch_requires_even_vgpr_tuples(arch) &&
+    if (options.report_buffer_address && consan_arch_requires_even_vgpr_tuples(arch) &&
         report_scratch_vgpr % 2u != 0)
       ++report_scratch_vgpr;
     auto mismatch_action = build_mismatch_action_words(

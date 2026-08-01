@@ -594,6 +594,17 @@ struct ConSanOptions {
   uint64_t moi_report_dispatch_id = 0;
   uint32_t delay_nops = 0;
   ConSanPatchedImageGrowthLimit patched_image_growth_limit;
+  /// Programmatic planning limits remain input-scaled and preserve the same
+  /// fail-closed semantics as their default production values. They are
+  /// exposed together so operators and qualification tests can reproduce an
+  /// observed exhaustion without a test-only path.
+  PlanningWorkLimit sopp_relay_planning_work_limit = kDefaultSoppRelayPlanningWorkLimit;
+  PlanningWorkLimit direct_reservoir_planning_work_limit =
+      kDefaultDirectReservoirPlanningWorkLimit;
+  PlanningWorkLimit lds_relay_layout_planning_work_limit =
+      kDefaultLdsRelayLayoutPlanningWorkLimit;
+  PlanningWorkLimit lds_convergence_planning_work_limit =
+      kDefaultLdsConvergencePlanningWorkLimit;
   /// Internal immutable baseline set by the public transform entry point and
   /// retained by every staged composition pass.
   std::optional<size_t> patched_image_growth_input_bytes;

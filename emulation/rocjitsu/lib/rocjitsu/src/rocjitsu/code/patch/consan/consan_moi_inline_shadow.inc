@@ -499,9 +499,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         reservoir_blocks.push_back(block.get());
     }
     std::string relay_error;
-    if (!branch_router.plan_direct_reservoirs(
-            reservoir_blocks, original_text, protected_ranges, arch, route_midpoint,
-            2u * candidates.size(), placement_planner, direct_branch_reservoirs, &relay_error)) {
+    if (!branch_router.plan_direct_reservoirs(reservoir_blocks, original_text, protected_ranges,
+                                              arch, route_midpoint, 2u * candidates.size(),
+                                              placement_planner, direct_branch_reservoirs,
+                                              &relay_error, &result.planning_work_telemetry,
+                                              {.discovery =
+                                                   options.direct_reservoir_planning_work_limit})) {
       result.errors.emplace_back("ConSan MOI inline-shadow probe " + relay_error);
       return;
     }

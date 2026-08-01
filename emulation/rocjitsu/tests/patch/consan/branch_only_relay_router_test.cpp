@@ -1791,87 +1791,28 @@ TEST(ConSanBranchOnlyRelayRouter, RecordsBatchedPlanAndFailureTelemetryWithShare
 }
 
 TEST(ConSanBranchOnlyRelayRouter, ComputesTelemetryDeltaAcrossEveryCounter) {
-  const ConSanBranchOnlyRoutingTelemetry before{
-      .pair_attempt_count = 1u,
-      .plan_call_count = 2u,
-      .entry_route_failure_count = 3u,
-      .return_route_failure_count = 4u,
-      .relay_contention_failure_count = 5u,
-      .work_budget_failure_count = 6u,
-      .work_budget_exhaustion_count = 7u,
-      .relay_qualification_exhaustion_count = 8u,
-      .routing_work_exhaustion_count = 9u,
-      .routing_invariant_failure_count = 10u,
-      .route_optimization_exhaustion_count = 11u,
-      .route_optimization_invariant_failure_count = 12u,
-      .pristine_relay_occupancy_rejection_count = 13u,
-      .route_optimization_excess_relay_claim_count = 14u,
-      .reservation_failure_count = 16u,
-      .exact_pair_fallback_attempt_count = 17u,
-      .greedy_pair_fallback_attempt_count = 18u,
-      .search_work_count = 19u,
-      .scan_work_count = 20u,
-      .route_optimization_search_work_count = 21u,
-      .route_optimization_scan_work_count = 22u,
-      .relay_qualification_work_count = 23u,
-      .fallback_setup_work_count = 24u,
-      .feasibility_scan_work_count = 25u,
-  };
-  const ConSanBranchOnlyRoutingTelemetry after{
-      .pair_attempt_count = 32u,
-      .plan_call_count = 34u,
-      .entry_route_failure_count = 36u,
-      .return_route_failure_count = 38u,
-      .relay_contention_failure_count = 40u,
-      .work_budget_failure_count = 42u,
-      .work_budget_exhaustion_count = 44u,
-      .relay_qualification_exhaustion_count = 46u,
-      .routing_work_exhaustion_count = 48u,
-      .routing_invariant_failure_count = 50u,
-      .route_optimization_exhaustion_count = 52u,
-      .route_optimization_invariant_failure_count = 54u,
-      .pristine_relay_occupancy_rejection_count = 56u,
-      .route_optimization_excess_relay_claim_count = 58u,
-      .reservation_failure_count = 62u,
-      .exact_pair_fallback_attempt_count = 64u,
-      .greedy_pair_fallback_attempt_count = 66u,
-      .search_work_count = 68u,
-      .scan_work_count = 70u,
-      .route_optimization_search_work_count = 72u,
-      .route_optimization_scan_work_count = 74u,
-      .relay_qualification_work_count = 76u,
-      .fallback_setup_work_count = 78u,
-      .feasibility_scan_work_count = 80u,
-  };
+  ConSanBranchOnlyRoutingTelemetry before;
+  ConSanBranchOnlyRoutingTelemetry after;
+  for (size_t index = 0u; index < kConSanBranchOnlyRoutingTelemetryFields.size(); ++index) {
+    const auto member = kConSanBranchOnlyRoutingTelemetryFields[index].member;
+    before.*member = index + 1u;
+    after.*member = 101u + 2u * index;
+  }
 
   const ConSanBranchOnlyRoutingTelemetry delta = branch_only_relay_telemetry_delta(after, before);
 
-  EXPECT_EQ(delta.pair_attempt_count, 31u);
-  EXPECT_EQ(delta.plan_call_count, 32u);
-  EXPECT_EQ(delta.entry_route_failure_count, 33u);
-  EXPECT_EQ(delta.return_route_failure_count, 34u);
-  EXPECT_EQ(delta.relay_contention_failure_count, 35u);
-  EXPECT_EQ(delta.work_budget_failure_count, 36u);
-  EXPECT_EQ(delta.work_budget_exhaustion_count, 37u);
-  EXPECT_EQ(delta.relay_qualification_exhaustion_count, 38u);
-  EXPECT_EQ(delta.routing_work_exhaustion_count, 39u);
-  EXPECT_EQ(delta.routing_invariant_failure_count, 40u);
-  EXPECT_EQ(delta.route_optimization_exhaustion_count, 41u);
-  EXPECT_EQ(delta.route_optimization_invariant_failure_count, 42u);
-  EXPECT_EQ(delta.pristine_relay_occupancy_rejection_count, 43u);
-  EXPECT_EQ(delta.route_optimization_excess_relay_claim_count, 44u);
-  EXPECT_EQ(delta.reservation_failure_count, 46u);
-  EXPECT_EQ(delta.exact_pair_fallback_attempt_count, 47u);
-  EXPECT_EQ(delta.greedy_pair_fallback_attempt_count, 48u);
-  EXPECT_EQ(delta.search_work_count, 49u);
-  EXPECT_EQ(delta.scan_work_count, 50u);
-  EXPECT_EQ(delta.route_optimization_search_work_count, 51u);
-  EXPECT_EQ(delta.route_optimization_scan_work_count, 52u);
-  EXPECT_EQ(delta.relay_qualification_work_count, 53u);
-  EXPECT_EQ(delta.fallback_setup_work_count, 54u);
-  EXPECT_EQ(delta.feasibility_scan_work_count, 55u);
+  for (size_t index = 0u; index < kConSanBranchOnlyRoutingTelemetryFields.size(); ++index) {
+    const auto member = kConSanBranchOnlyRoutingTelemetryFields[index].member;
+    EXPECT_EQ(delta.*member, 100u + index);
+  }
   EXPECT_FALSE(branch_only_relay_telemetry_is_empty(delta));
   EXPECT_TRUE(branch_only_relay_telemetry_is_empty({}));
+
+  const std::string formatted = format_consan_branch_only_routing_telemetry(delta);
+  for (const auto &[name, member] : kConSanBranchOnlyRoutingTelemetryFields) {
+    EXPECT_NE(formatted.find(std::string(name) + "=" + std::to_string(delta.*member)),
+              std::string::npos);
+  }
 }
 
 #ifdef NDEBUG
@@ -3065,6 +3006,82 @@ TEST(ConSanBranchOnlyRelayRouter, DirectReservoirPlanningShortCircuitsAndAdoptsA
     EXPECT_TRUE(reservoirs.reservoirs.empty());
     EXPECT_EQ(router.available_count(), 1u);
   }
+}
+
+TEST(ConSanBranchOnlyRelayRouter, DirectReservoirDiscoveryReportsBoundedWorkExhaustion) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  std::vector<uint32_t> words(16u, kRelayTestDonor);
+  words.push_back(kRelayTestEnd);
+  RelayTestCodeObject object(std::move(words));
+  RelayTestDecoder decoder;
+  auto blocks = BasicBlock::build(object, decoder, kArch);
+  const std::vector<BasicBlock *> block_ptrs = relay_block_ptrs(blocks);
+  DbiPatchPlacementPlanner planner(kArch, relay_test_text(object).size());
+  BranchOnlyRelayRouter router;
+  BranchOnlyDirectRelayReservoirSet reservoirs;
+  ConSanPlanningWorkTelemetry telemetry;
+  BranchOnlyDirectReservoirWorkLimits limits;
+  limits.discovery = {1u, 0u};
+  std::string error;
+
+  EXPECT_FALSE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch,
+                                             relay_test_text(object).size() / 2u, 1u, planner,
+                                             reservoirs, &error, &telemetry, limits));
+  EXPECT_NE(error.find("work allowance"), std::string::npos);
+  EXPECT_EQ(telemetry.direct_reservoir_work_count, 1u);
+  EXPECT_EQ(telemetry.direct_reservoir_exhaustion_count, 1u);
+  EXPECT_TRUE(reservoirs.reservoirs.empty());
+  EXPECT_EQ(router.available_count(), 0u);
+  EXPECT_TRUE(planner.occupied_ranges().empty());
+}
+
+TEST(ConSanBranchOnlyRelayRouter,
+     DirectReservoirExhaustionAfterAdoptionRollsBackWithDefaultHeadroom) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  std::vector<uint32_t> words(100u, kRelayTestDonor);
+  words.push_back(kRelayTestEnd);
+  RelayTestCodeObject object(std::move(words));
+  RelayTestDecoder decoder;
+  auto blocks = BasicBlock::build(object, decoder, kArch);
+  const std::vector<BasicBlock *> block_ptrs = relay_block_ptrs(blocks);
+
+  DbiPatchPlacementPlanner first_planner(kArch, relay_test_text(object).size());
+  BranchOnlyRelayRouter first_router;
+  BranchOnlyDirectRelayReservoirSet first_reservoirs;
+  ConSanPlanningWorkTelemetry first_telemetry;
+  std::string first_error;
+  ASSERT_TRUE(first_router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch,
+                                                  0u, 1u, first_planner, first_reservoirs,
+                                                  &first_error, &first_telemetry))
+      << first_error;
+  ASSERT_EQ(first_reservoirs.reservoirs.size(), 1u);
+  ASSERT_GT(first_telemetry.direct_reservoir_work_count, 0u);
+  const size_t text_words =
+      (relay_test_text(object).size() + sizeof(uint32_t) - 1u) / sizeof(uint32_t);
+  const size_t raw_inputs = text_words + block_ptrs.size();
+  const size_t complexity_units = raw_inputs * std::bit_width(raw_inputs);
+  EXPECT_LT(first_telemetry.direct_reservoir_work_count,
+            kDefaultDirectReservoirPlanningWorkLimit.for_inputs(complexity_units));
+
+  DbiPatchPlacementPlanner planner(kArch, relay_test_text(object).size());
+  BranchOnlyRelayRouter router;
+  BranchOnlyDirectRelayReservoirSet reservoirs;
+  ConSanPlanningWorkTelemetry telemetry;
+  BranchOnlyDirectReservoirWorkLimits limits;
+  limits.discovery = {first_telemetry.direct_reservoir_work_count, 0u};
+  std::string error;
+
+  EXPECT_FALSE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch, 0u,
+                                             std::numeric_limits<size_t>::max(), planner,
+                                             reservoirs, &error, &telemetry, limits));
+
+  EXPECT_NE(error.find("work allowance"), std::string::npos);
+  EXPECT_EQ(telemetry.direct_reservoir_work_count, first_telemetry.direct_reservoir_work_count);
+  EXPECT_EQ(telemetry.direct_reservoir_exhaustion_count, 1u);
+  EXPECT_TRUE(reservoirs.reservoirs.empty());
+  EXPECT_TRUE(reservoirs.reservoir_by_relay.empty());
+  EXPECT_EQ(router.available_count(), 0u);
+  EXPECT_TRUE(planner.occupied_ranges().empty());
 }
 
 TEST(ConSanBranchOnlyRelayRouter, PreplannedDirectReservoirIsZeroCostRoutingCapacity) {

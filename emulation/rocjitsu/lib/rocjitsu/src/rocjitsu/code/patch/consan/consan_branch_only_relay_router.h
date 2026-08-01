@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/planning_work.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 
 #include <compare>
@@ -132,14 +133,9 @@ enum class BranchOnlyRelayPlanStrategy : uint8_t {
   GreedyPairFallback,
 };
 
-struct BranchOnlyRelayScaledWorkLimit {
-  size_t base = 0u;
-  size_t per_input = 0u;
-};
-
 struct BranchOnlyRelayOptimizationWorkLimits {
-  BranchOnlyRelayScaledWorkLimit search;
-  BranchOnlyRelayScaledWorkLimit scan;
+  PlanningWorkLimit search;
+  PlanningWorkLimit scan;
 };
 
 struct BranchOnlyRelayQualificationWorkLimits {
@@ -157,11 +153,11 @@ struct BranchOnlyRelayQualificationWorkLimits {
 
 struct BranchOnlyRelayBatchWorkLimits {
   /// Search states and feasible alternatives allowed for a complete batch.
-  BranchOnlyRelayScaledWorkLimit feasibility_search{100'000u, 4'096u};
+  PlanningWorkLimit feasibility_search{100'000u, 4'096u};
   /// Polynomial relay inspections allowed for a complete batch. Per-input
   /// headroom keeps a larger request/relay inventory from shrinking the
   /// useful exact-search window solely because its summaries cost more.
-  BranchOnlyRelayScaledWorkLimit feasibility_scan{2'000'000u, 256u};
+  PlanningWorkLimit feasibility_scan{2'000'000u, 256u};
   /// A separate bounded pass may improve the first exact route
   /// lexicographically. Search headroom scales with demands and scan headroom
   /// with demand-relay pairs.
@@ -183,7 +179,7 @@ struct BranchOnlyRelayPairWorkLimits {
   /// Fixed per-pair allowance. Keeping this unscaled preserves a total bound
   /// linear in the number of pairs.
   size_t feasibility_search = 8'192u;
-  BranchOnlyRelayScaledWorkLimit feasibility_scan{100'000u, 64u};
+  PlanningWorkLimit feasibility_scan{100'000u, 64u};
   BranchOnlyRelayOptimizationWorkLimits optimization{{2'048u, 512u}, {25'000u, 16u}};
   /// Fixed allowance for one greedy routing or independent-classification
   /// phase. Each pair can consume at most one allowance for each phase.
@@ -265,20 +261,12 @@ struct BranchOnlyRelayPlanOutcome : BranchOnlyRelayPlanFlags {
   size_t route_optimization_excess_relay_claim_count = 0u;
 
   [[nodiscard]] size_t scan_work_consumed() const {
-    const auto saturated_add = [](size_t lhs, size_t rhs) {
-      return rhs > std::numeric_limits<size_t>::max() - lhs ? std::numeric_limits<size_t>::max()
-                                                            : lhs + rhs;
-    };
     return saturated_add(
         saturated_add(relay_qualification_work_consumed, fallback_setup_work_consumed),
         feasibility_scan_work_consumed);
   }
 
   [[nodiscard]] size_t total_work_consumed() const {
-    const auto saturated_add = [](size_t lhs, size_t rhs) {
-      return rhs > std::numeric_limits<size_t>::max() - lhs ? std::numeric_limits<size_t>::max()
-                                                            : lhs + rhs;
-    };
     return saturated_add(saturated_add(search_work_consumed, scan_work_consumed()),
                          saturated_add(route_optimization_search_work_consumed,
                                        route_optimization_scan_work_consumed));
@@ -337,6 +325,17 @@ struct BranchOnlyDirectRelayReservoirSet {
   [[nodiscard]] bool mark_claims_used(std::span<const BranchOnlyRelayClaim> claims,
                                       std::string *error_out = nullptr);
   [[nodiscard]] ConSanBranchOnlyReservoirTelemetry telemetry() const;
+};
+
+struct BranchOnlyDirectReservoirWorkLimits {
+  /// The input is a conservative complexity unit derived from pristine text
+  /// words and protected ranges. It includes logarithmic headroom for the two
+  /// ordered inventories built by discovery. Exhaustion fails the complete
+  /// discovery call and rolls back every adopted reservoir: a partial
+  /// candidate inventory is not a sound substitute for a whole-input result.
+  /// The margin also guards future algorithmic growth; programmatic callers
+  /// may override it through ConSanOptions.
+  PlanningWorkLimit discovery = kDefaultDirectReservoirPlanningWorkLimit;
 };
 
 /// Owns capacity-one branch relay hosts from discovery through emission.
@@ -442,7 +441,8 @@ public:
       std::span<const std::pair<uint64_t, uint64_t>> protected_ranges, rj_code_arch_t arch,
       uint64_t route_midpoint, size_t target_relay_count,
       DbiPatchPlacementPlanner &placement_planner, BranchOnlyDirectRelayReservoirSet &reservoirs,
-      std::string *error_out = nullptr);
+      std::string *error_out = nullptr, ConSanPlanningWorkTelemetry *work_telemetry = nullptr,
+      const BranchOnlyDirectReservoirWorkLimits &work_limits = {});
 
   [[nodiscard]] static bool
   emit_and_record(std::span<uint8_t> text, const BranchOnlyRelayRoute &route, uint64_t entry_target,

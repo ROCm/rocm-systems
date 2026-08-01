@@ -2088,9 +2088,26 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     };
     const std::unordered_set<const ConSanLdsSite *> required_relay_routed_sites =
         relay_routed_sites;
+    const size_t relay_layout_inputs = saturated_add(
+        required_relay_routed_sites.size(), relay_reservoir_candidates.size());
+    MeteredPlanningWork relay_layout_work(
+        options.lds_relay_layout_planning_work_limit.for_inputs(relay_layout_inputs),
+        &result.planning_work_telemetry.lds_relay_layout_work_count,
+        &result.planning_work_telemetry.lds_relay_layout_exhaustion_count);
+    bool relay_layout_exhausted = false;
+    const auto charge_relay_layout = [&]() {
+      const bool available = relay_layout_work.consume();
+      relay_layout_exhausted |= !available;
+      return available;
+    };
     const auto evaluate_relay_layout =
         [&](const DbiPatchPlacementPlanner &prefix_planner, size_t relay_bank_word_count,
             std::string *error_out) -> std::optional<RelayLayoutAttempt> {
+      if (!charge_relay_layout()) {
+        if (error_out != nullptr)
+          *error_out = "LDS relay-layout replay exhausted its work allowance";
+        return std::nullopt;
+      }
       std::unordered_set<const ConSanLdsSite *> routed_sites = required_relay_routed_sites;
       DbiPatchPlacementPlanner direct_layout = prefix_planner;
       std::unordered_map<const ConSanLdsSite *, std::vector<uint64_t>> body_relay_slots;
@@ -2194,8 +2211,15 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                    kScRelayTailRestoreWords * sizeof(uint32_t);
         reservoir.placement = *placement;
       }
-      auto plan =
-          plan_forward_sopp_branch_relays(source_offsets, relay_offsets, island_offsets, error_out);
+      SoppBranchRelayPlanningWorkTelemetry relay_work;
+      auto plan = plan_forward_sopp_branch_relays(source_offsets, relay_offsets, island_offsets,
+                                                  error_out, &relay_work,
+                                                  {.total =
+                                                       options.sopp_relay_planning_work_limit});
+      accumulate_saturated(result.planning_work_telemetry.sopp_relay_work_count,
+                               relay_work.work_count);
+      accumulate_saturated(result.planning_work_telemetry.sopp_relay_exhaustion_count,
+                               relay_work.exhaustion_count);
       if (!plan)
         return std::nullopt;
       return RelayLayoutAttempt{std::move(routed_sites), std::move(body_relay_slots),
@@ -2320,6 +2344,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         auto trial = evaluate_relay_layout(*trial_prefix, 0u, &trial_error);
         ScRelayReservoir trial_reservoir = selected_relay_reservoirs.back();
         selected_relay_reservoirs.pop_back();
+        if (relay_layout_exhausted) {
+          result.errors.emplace_back("ConSan LDS check/trap relay planning failed: " +
+                                     trial_error);
+          return;
+        }
         if (!trial || trial->relay_plan.rejected_source_indices.size() >= old_rejected) {
           if (exact_reservoir_trials >= kMaxExactReservoirTrialsPerIteration)
             break;
@@ -2368,6 +2397,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           last_exact_reservoir_trial_count = exact_reservoir_trials;
           auto trial =
               trial_prefix ? evaluate_relay_layout(*trial_prefix, 0u, &trial_error) : std::nullopt;
+          if (relay_layout_exhausted) {
+            result.errors.emplace_back("ConSan LDS check/trap relay planning failed: " +
+                                       trial_error);
+            return;
+          }
           if (trial && trial->relay_plan.rejected_source_indices.size() < old_rejected) {
             relay_prefix_planner = std::move(*trial_prefix);
             relay_attempt = std::move(trial);
@@ -2386,6 +2420,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           last_exact_reservoir_trial_count = exact_reservoir_trials;
           auto trial =
               trial_prefix ? evaluate_relay_layout(*trial_prefix, 0u, &trial_error) : std::nullopt;
+          if (relay_layout_exhausted) {
+            result.errors.emplace_back("ConSan LDS check/trap relay planning failed: " +
+                                       trial_error);
+            return;
+          }
           if (trial && trial->relay_plan.rejected_source_indices.size() < old_rejected) {
             relay_prefix_planner = std::move(*trial_prefix);
             relay_attempt = std::move(trial);
@@ -2446,6 +2485,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
             pruned_prefix
                 ? evaluate_relay_layout(*pruned_prefix, relay_bank_word_count, &prune_error)
                 : std::nullopt;
+        if (relay_layout_exhausted) {
+          selected_wide_composite_relay_donors = std::move(original_wide);
+          selected_relay_reservoirs = std::move(original_reservoirs);
+          result.errors.emplace_back("ConSan LDS check/trap relay planning failed: " +
+                                     prune_error);
+          return;
+        }
         if (pruned_attempt && pruned_attempt->relay_plan.rejected_source_indices.empty()) {
           relay_prefix_planner = std::move(*pruned_prefix);
           relay_attempt = std::move(pruned_attempt);
@@ -2761,12 +2807,16 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     // The defensive attempt cap admits the initial pass, one promotion per
     // finite candidate, and one final materialized-only replay; correct
     // progress never reaches it.
-    const size_t convergence_attempt_limit =
-        branch_reservoir_candidates.size() <= std::numeric_limits<size_t>::max() - 2u
-            ? branch_reservoir_candidates.size() + 2u
-            : std::numeric_limits<size_t>::max();
+    MeteredPlanningWork convergence_work(
+        options.lds_convergence_planning_work_limit.for_inputs(
+            branch_reservoir_candidates.size()),
+        &result.planning_work_telemetry.lds_convergence_work_count,
+        &result.planning_work_telemetry.lds_convergence_exhaustion_count);
+    const auto charge_convergence = [&]() {
+      return convergence_work.consume();
+    };
     bool convergence_terminated = false;
-    for (size_t iteration = 0u; iteration < convergence_attempt_limit; ++iteration) {
+    for (size_t iteration = 0u; charge_convergence(); ++iteration) {
       const bool initial_iteration = iteration == 0u;
       std::vector<LdsCheckTrapCandidate> tentative_candidates;
       DbiPatchPlacementPlanner tentative_planner = branch_prefix_planner;
@@ -2955,9 +3005,16 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         break;
       }
     }
+    if (!convergence_terminated && !convergence_work.exhausted()) {
+      result.errors.emplace_back(
+          "ConSan LDS check/trap branch-only reservoir replay lost its termination state");
+      return;
+    }
+    // Preserve the legacy LDS-specific signal as a mirror of the shared
+    // planning meter; the structured exhaustion counter is authoritative.
     result.lds_relay_reservoir_telemetry.lds_replay_limit_reached_count =
-        convergence_terminated ? 0u : 1u;
-    assert(convergence_terminated &&
+        convergence_work.exhausted() ? 1u : 0u;
+    assert(!convergence_work.exhausted() && convergence_terminated &&
            "branch-only reservoir replay must converge before its defensive limit");
     std::optional<ScSelectedSpillState> accepted_spills;
     if (routes_complete &&
@@ -3086,10 +3143,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     const ConSanLdsSite &site = *candidate.site;
     const auto gfx1250_two_address = gfx1250_two_address_expansion_plan(original_bytes, site, arch);
     std::optional<uint32_t> guest_instruction_word_offset;
-    auto words = build_lds_check_trap_words(
-        original_bytes, site, arch, options, *delay_words, candidate.scratch_vgpr,
-        candidate.vcc_save_sgpr, candidate.gfx1250_vgpr_msb_mode.value_or(0u),
-        guest_instruction_word_offset, result.errors);
+    auto words = build_lds_check_trap_words(original_bytes, site, arch, options, *delay_words,
+                                            candidate.scratch_vgpr, candidate.vcc_save_sgpr,
+                                            candidate.gfx1250_vgpr_msb_mode.value_or(0u),
+                                            guest_instruction_word_offset, result.errors);
     if (!words)
       return;
     const auto spill = selected_spills.sequences.find(&site);
@@ -3144,8 +3201,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                 "ConSan LDS check/trap proof lost its preserved-address guest offset");
             return;
           }
-          guest_instruction_word_offset = static_cast<uint32_t>(
-              wrapped.size() + 3u + *guest_instruction_word_offset - 1u);
+          guest_instruction_word_offset =
+              static_cast<uint32_t>(wrapped.size() + 3u + *guest_instruction_word_offset - 1u);
         }
         wrapped.push_back(*select_low);
         wrapped.push_back(words->front());
@@ -3423,8 +3480,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                 planned.trailing_relay_offsets.size() * sizeof(uint32_t));
       if (planned.guest_instruction_word_offset) {
         planned.info.relocated_guest_instruction_offset =
-            trampoline_text_offset +
-            *planned.guest_instruction_word_offset * sizeof(uint32_t);
+            trampoline_text_offset + *planned.guest_instruction_word_offset * sizeof(uint32_t);
       }
     } else {
       const uint64_t patch_bytes = static_cast<uint64_t>(planned.words.size() * sizeof(uint32_t));
@@ -3531,8 +3587,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                  branch_only_claimed_relay_slots.contains(offset);
         });
   }
-  ConSanBranchOnlyReservoirTelemetry lds_reservoir_telemetry =
-      result.lds_relay_reservoir_telemetry;
+  ConSanBranchOnlyReservoirTelemetry lds_reservoir_telemetry = result.lds_relay_reservoir_telemetry;
   for (const ScRelayReservoir &reservoir : selected_relay_reservoirs) {
     // Derive the footprint from the same structural inputs as planning and
     // emission. The final overhead word is the return-control word; keeping it
