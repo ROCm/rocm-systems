@@ -88,22 +88,29 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                 (
                     "[rocjitsu-dbi-hooks] ConSan MOI auto report reader=1 "
                     "record_replay_pressure_available=true "
+                    "record_replay_pressure_unavailable_reason=none "
                     "record_replay_bank_saturated=false "
                     "record_replay_access_table_occupied=0 "
                     "record_replay_access_table_capacity=16 "
                     "record_replay_observed_sites=0 "
                     "record_replay_max_site_owner_address_groups=0 "
+                    "record_replay_address_group_headroom=16 "
+                    "record_replay_logical_access_ranges=4 "
                     "record_replay_max_site_token=0 record_replay_invalid_site_tokens=0",
                     "[rocjitsu-dbi-hooks] ConSan MOI auto report reader=2 "
                     "record_replay_pressure_available=true "
+                    "record_replay_pressure_unavailable_reason=none "
                     "record_replay_bank_saturated=true "
                     "record_replay_access_table_occupied=15 "
                     "record_replay_access_table_capacity=16 "
                     "record_replay_observed_sites=3 "
                     "record_replay_max_site_owner_address_groups=9 "
+                    "record_replay_address_group_headroom=16 "
+                    "record_replay_logical_access_ranges=4 "
                     "record_replay_max_site_token=4 record_replay_invalid_site_tokens=1",
                     "[rocjitsu-dbi-hooks] ConSan MOI auto report reader=3 "
-                    "record_replay_pressure_available=false",
+                    "record_replay_pressure_available=false "
+                    "record_replay_pressure_unavailable_reason=no_dispatch_directory",
                     "[rocjitsu-dbi-hooks] ConSan MOI auto report reader=4",
                 )
             )
@@ -112,15 +119,56 @@ class ConSanFaultRunnerTest(unittest.TestCase):
         self.assertEqual(pressure["available_reports"], 2)
         self.assertEqual(pressure["unavailable_reports"], 1)
         self.assertEqual(pressure["missing_reports"], 1)
+        self.assertEqual(pressure["record_count"], 4)
+        self.assertFalse(pressure["records_truncated"])
+        self.assertEqual(
+            pressure["unavailable_reason_counts"], {"no_dispatch_directory": 1}
+        )
         self.assertEqual(pressure["saturated_reports"], 1)
-        self.assertEqual(pressure["access_table_occupied"], 15)
-        self.assertEqual(pressure["access_table_capacity"], 32)
+        self.assertEqual(pressure["access_table_occupied_total"], 15)
+        self.assertEqual(pressure["access_table_capacity_total"], 32)
         self.assertEqual(pressure["max_site_owner_address_groups"], 9)
-        self.assertEqual(pressure["invalid_site_tokens"], 1)
+        self.assertEqual(pressure["max_site_token"], 4)
+        self.assertEqual(pressure["max_address_group_headroom"], 16)
+        self.assertEqual(pressure["invalid_site_token_total"], 1)
         self.assertEqual(pressure["records"][0]["status"], "available")
         self.assertEqual(pressure["records"][0]["access_table_occupied"], 0)
         self.assertEqual(pressure["records"][2]["status"], "unavailable")
+        self.assertEqual(
+            pressure["records"][2]["unavailable_reason"], "no_dispatch_directory"
+        )
         self.assertEqual(pressure["records"][3]["status"], "missing")
+
+    def test_record_replay_pressure_bounds_retained_records_not_aggregates(
+        self,
+    ) -> None:
+        report_count = runner.MAX_RECORD_REPLAY_PRESSURE_RECORDS + 1
+        parsed = runner._parse_consan_log(
+            "\n".join(
+                "[rocjitsu-dbi-hooks] ConSan MOI auto report "
+                f"reader={index} record_replay_pressure_available=true "
+                "record_replay_pressure_unavailable_reason=none "
+                "record_replay_bank_saturated=false "
+                "record_replay_access_table_occupied=1 "
+                "record_replay_access_table_capacity=2 "
+                "record_replay_observed_sites=1 "
+                "record_replay_max_site_owner_address_groups=1 "
+                "record_replay_address_group_headroom=8 "
+                "record_replay_logical_access_ranges=1 "
+                "record_replay_max_site_token=0 "
+                "record_replay_invalid_site_tokens=0"
+                for index in range(report_count)
+            )
+        )
+        pressure = parsed["metrics"]["record_replay_pressure"]
+        self.assertEqual(pressure["record_count"], report_count)
+        self.assertEqual(
+            len(pressure["records"]), runner.MAX_RECORD_REPLAY_PRESSURE_RECORDS
+        )
+        self.assertTrue(pressure["records_truncated"])
+        self.assertEqual(pressure["available_reports"], report_count)
+        self.assertEqual(pressure["access_table_occupied_total"], report_count)
+        self.assertEqual(pressure["access_table_capacity_total"], report_count * 2)
 
     def test_supercollider_marker_is_value_instability_diagnosis(self) -> None:
         parsed = runner._parse_consan_log(
@@ -935,7 +983,7 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                     "print('[rocjitsu-dbi-hooks] ConSan MOI auto report buffer skipped reader=6: no MOI report sites')",
                     "print('[rocjitsu-dbi-hooks] ConSan MOI auto report plan reader=7 outcome=complete reason=none required_bytes=4096 cap_bytes=16777216 per_buffer_ceiling=16777216 process_ceiling=268435456 access_ranges=5 barriers=2 atomics=4 fences=1 diagnostics=4 sampled_banks=3 sampled_watchpoints=3 inline_lds_bytes=128 inline_releases=64 inline_snapshots=64 inline_tokens=64')",
                     "print('[rocjitsu-dbi-hooks] ConSan MOI auto report buffer reader=7 bytes=4096 required_bytes=4096 cap_bytes=16777216 process_current_bytes=4096 process_peak_bytes=4096 process_ceiling_bytes=268435456 allocation_outcome=allocated access_record_capacity=5 barrier_record_capacity=2 atomic_record_capacity=4 fence_record_capacity=1 exact_shadow_entry_capacity=32 diagnostic_capacity=4 inline_atomic_release_capacity=64 inline_acquired_epoch_token_capacity=64 inline_causal_snapshot_capacity=64 sampled_watchpoint_capacity=3 sampled_causal_window_capacity=6 sampled_sync_metadata_capacity=6 sampled_pending_acquire_capacity=6')",
-                    "print('[rocjitsu-dbi-hooks] ConSan MOI auto report reader=7 visible_records=5 dropped_records=1 record_replay_bank_saturated=false record_replay_pressure_available=true record_replay_access_table_occupied=5 record_replay_access_table_capacity=16 record_replay_observed_sites=2 record_replay_max_site_owner_address_groups=4 record_replay_max_site_token=1 record_replay_invalid_site_tokens=0 visible_barriers=2 dropped_barriers=0 visible_atomics=4 dropped_atomics=0 visible_diagnostics=1 dropped_diagnostics=2 visible_exact_shadow=7 exact_incomplete_snapshots=5 exact_changed_snapshots=6 exact_malformed_snapshots=7 inline_undercoverage=8 inline_overflow=9 inline_unsupported=10 inline_malformed=11 visible_inline_atomic_releases=3 visible_inline_acquired_tokens=0 release_incomplete_snapshots=0 release_changed_snapshots=0 release_overflow_snapshots=0 release_source_incomplete_snapshots=0 release_malformed_snapshots=0 token_incomplete_snapshots=0 token_changed_snapshots=0 token_malformed_snapshots=0 visible_sampled=3 sampled_conflicts=1 sampled_immediate_conflicts=2 sampled_claimed_windows=3 sampled_dropped_windows=1 sampled_stale_snapshots=1 sampled_incomplete_snapshots=2 sampled_changed_snapshots=3 sampled_malformed_snapshots=4')",
+                    "print('[rocjitsu-dbi-hooks] ConSan MOI auto report reader=7 visible_records=5 dropped_records=1 record_replay_bank_saturated=false record_replay_pressure_available=true record_replay_pressure_unavailable_reason=none record_replay_access_table_occupied=5 record_replay_access_table_capacity=16 record_replay_observed_sites=2 record_replay_max_site_owner_address_groups=4 record_replay_address_group_headroom=8 record_replay_logical_access_ranges=3 record_replay_max_site_token=1 record_replay_invalid_site_tokens=0 visible_barriers=2 dropped_barriers=0 visible_atomics=4 dropped_atomics=0 visible_diagnostics=1 dropped_diagnostics=2 visible_exact_shadow=7 exact_incomplete_snapshots=5 exact_changed_snapshots=6 exact_malformed_snapshots=7 inline_undercoverage=8 inline_overflow=9 inline_unsupported=10 inline_malformed=11 visible_inline_atomic_releases=3 visible_inline_acquired_tokens=0 release_incomplete_snapshots=0 release_changed_snapshots=0 release_overflow_snapshots=0 release_source_incomplete_snapshots=0 release_malformed_snapshots=0 token_incomplete_snapshots=0 token_changed_snapshots=0 token_malformed_snapshots=0 visible_sampled=3 sampled_conflicts=1 sampled_immediate_conflicts=2 sampled_claimed_windows=3 sampled_dropped_windows=1 sampled_stale_snapshots=1 sampled_incomplete_snapshots=2 sampled_changed_snapshots=3 sampled_malformed_snapshots=4')",
                     "print('[rocjitsu-dbi-hooks] ConSan MOI auto inline-atomic-release reader=7 index=0 version=2 owner=1 epoch_plus_one=2 workgroup=3 address=0x4000 dispatch=0x5000 snapshot_count=1 snapshot_flags=0 snapshot0_owner=4 snapshot0_epoch_plus_one=5')",
                     "print('[rocjitsu-dbi-hooks] ConSan MOI auto inline-atomic-release reader=7 index=1 version=4 owner=2 epoch_plus_one=3 workgroup=3 address=0x4010 dispatch=0x5000 snapshot_count=0 snapshot_flags=0')",
                     "print('[rocjitsu-dbi-hooks] ConSan MOI auto inline-atomic-release reader=7 index=2 version=6 owner=3 epoch_plus_one=4 workgroup=3 address=0x4020 dispatch=0x5000 snapshot_count=0 snapshot_flags=0')",
@@ -1115,11 +1163,14 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                     {
                         "reader": "7",
                         "status": "available",
+                        "unavailable_reason": "none",
                         "saturated": False,
                         "access_table_occupied": 5,
                         "access_table_capacity": 16,
                         "observed_sites": 2,
                         "max_site_owner_address_groups": 4,
+                        "address_group_headroom": 8,
+                        "logical_access_ranges": 3,
                         "max_site_token": 1,
                         "invalid_site_tokens": 0,
                     }
@@ -1226,14 +1277,19 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                 result["metrics"]["record_replay_pressure"],
                 {
                     "records": reader["record_replay_pressure"],
+                    "record_count": 1,
+                    "records_truncated": False,
                     "available_reports": 1,
                     "unavailable_reports": 0,
                     "missing_reports": 0,
+                    "unavailable_reason_counts": {},
                     "saturated_reports": 0,
-                    "access_table_occupied": 5,
-                    "access_table_capacity": 16,
+                    "access_table_occupied_total": 5,
+                    "access_table_capacity_total": 16,
                     "max_site_owner_address_groups": 4,
-                    "invalid_site_tokens": 0,
+                    "max_site_token": 1,
+                    "max_address_group_headroom": 8,
+                    "invalid_site_token_total": 0,
                 },
             )
             self.assertEqual(result["metrics"]["spill_slot_bytes"], 24)

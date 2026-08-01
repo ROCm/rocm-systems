@@ -373,16 +373,6 @@ public:
       total.dropped_diagnostic_record_count += entry_summary.dropped_diagnostic_record_count;
       total.record_replay_bank_saturation_count +=
           entry_summary.record_replay_bank_saturation_count;
-      total.record_replay_pressure_available_count +=
-          entry_summary.record_replay_pressure_available_count;
-      total.record_replay_access_table_occupied_count +=
-          entry_summary.record_replay_access_table_occupied_count;
-      total.record_replay_access_table_capacity +=
-          entry_summary.record_replay_access_table_capacity;
-      total.record_replay_observed_site_count += entry_summary.record_replay_observed_site_count;
-      total.record_replay_max_site_owner_address_group_count =
-          std::max(total.record_replay_max_site_owner_address_group_count,
-                   entry_summary.record_replay_max_site_owner_address_group_count);
       total.record_replay_invalid_site_token_count +=
           entry_summary.record_replay_invalid_site_token_count;
       total.replay_conflict_count += entry_summary.replay_conflict_count;
@@ -1118,16 +1108,11 @@ private:
           return record.access_kind !=
                  static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Empty);
         }));
-    const uint32_t pressure_scratch_count =
-        expected_engine == ConSanMoiEngine::RecordReplay &&
-                header->record_replay_dispatch_token_capacity != 0
-            ? visible_records
-            : 0u;
-    std::vector<uint32_t> pressure_record_indices(pressure_scratch_count);
     const RecordReplayPressureTelemetry record_replay_pressure = record_replay_pressure_telemetry(
         *header, expected_engine,
         std::span<const rocjitsu::ConSanMoiAccessRecord>(records, visible_records),
-        entry.layout.record_replay_logical_access_range_count, pressure_record_indices);
+        expected_layout.record_replay_logical_access_range_count,
+        expected_layout.record_replay_address_group_headroom);
     summary.visible_access_record_count = committed_records;
     summary.visible_barrier_record_count = visible_barriers;
     summary.visible_atomic_record_count = visible_atomics;
@@ -1147,13 +1132,6 @@ private:
     summary.dropped_diagnostic_record_count = dropped_diagnostics;
     summary.record_replay_bank_saturation_count =
         record_replay_bank_saturation_count(*header, expected_engine);
-    summary.record_replay_pressure_available_count = record_replay_pressure.available ? 1u : 0u;
-    summary.record_replay_access_table_occupied_count =
-        record_replay_pressure.occupied_access_record_count;
-    summary.record_replay_access_table_capacity = record_replay_pressure.access_record_capacity;
-    summary.record_replay_observed_site_count = record_replay_pressure.observed_site_count;
-    summary.record_replay_max_site_owner_address_group_count =
-        record_replay_pressure.maximum_site_owner_address_group_count;
     summary.record_replay_invalid_site_token_count =
         record_replay_pressure.invalid_site_token_count;
     summary.sampled_conflict_count = sampled_conflicts;
@@ -1199,8 +1177,10 @@ private:
         "capacity=%u dispatch_tokens=%u/%u record_replay_flags=0x%x "
         "record_replay_bank_saturated=%s "
         "record_replay_pressure_available=%s "
+        "record_replay_pressure_unavailable_reason=%.*s "
         "record_replay_access_table_occupied=%llu record_replay_access_table_capacity=%llu "
         "record_replay_observed_sites=%llu record_replay_max_site_owner_address_groups=%llu "
+        "record_replay_address_group_headroom=%u record_replay_logical_access_ranges=%u "
         "record_replay_max_site_token=%u record_replay_invalid_site_tokens=%llu "
         "barrier_records=%u visible_barriers=%u dropped_barriers=%u barrier_capacity=%u "
         "atomic_records=%u visible_atomics=%u dropped_atomics=%u atomic_capacity=%u "
@@ -1241,11 +1221,18 @@ private:
         expected_engine == ConSanMoiEngine::RecordReplay ? header->flags : 0u,
         summary.record_replay_bank_saturation_count != 0 ? "true" : "false",
         record_replay_pressure.available ? "true" : "false",
+        static_cast<int>(record_replay_pressure_unavailable_reason_name(
+                             record_replay_pressure.unavailable_reason)
+                             .size()),
+        record_replay_pressure_unavailable_reason_name(record_replay_pressure.unavailable_reason)
+            .data(),
         static_cast<unsigned long long>(record_replay_pressure.occupied_access_record_count),
         static_cast<unsigned long long>(record_replay_pressure.access_record_capacity),
         static_cast<unsigned long long>(record_replay_pressure.observed_site_count),
         static_cast<unsigned long long>(
             record_replay_pressure.maximum_site_owner_address_group_count),
+        record_replay_pressure.address_group_headroom,
+        record_replay_pressure.logical_access_range_count,
         record_replay_pressure.maximum_site_token,
         static_cast<unsigned long long>(record_replay_pressure.invalid_site_token_count),
         barrier_record_count, visible_barriers, dropped_barriers, header->barrier_record_capacity,

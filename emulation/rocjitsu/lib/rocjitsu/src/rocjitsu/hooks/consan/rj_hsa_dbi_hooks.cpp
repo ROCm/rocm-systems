@@ -2214,6 +2214,7 @@ public:
         moi_report_summary.dropped_fence_record_count +
         moi_report_summary.dropped_diagnostic_record_count +
         moi_report_summary.record_replay_bank_saturation_count +
+        moi_report_summary.record_replay_invalid_site_token_count +
         moi_report_summary.sampled_dropped_window_count +
         moi_report_summary.sampled_unusable_snapshot_count() +
         moi_report_summary.exact_unusable_snapshot_count() +
@@ -2240,6 +2241,7 @@ public:
         "incomplete_code_objects=%llu access=%llu/%llu barrier=%llu/%llu "
         "atomic=%llu/%llu fence=%llu/%llu visible_evidence=%llu dynamic_incomplete=%llu "
         "record_replay_bank_saturation=%llu "
+        "record_replay_invalid_site_tokens=%llu "
         "replay_unsupported_access=%llu replay_unsupported_atomics=%llu "
         "replay_unsupported_fences=%llu replay_metadata_full=%llu\n",
         static_coverage_summary.applicable_code_objects != 0 ? "true" : "false",
@@ -2258,6 +2260,7 @@ public:
         static_cast<unsigned long long>(visible_evidence_count),
         static_cast<unsigned long long>(dynamic_incomplete_count),
         static_cast<unsigned long long>(moi_report_summary.record_replay_bank_saturation_count),
+        static_cast<unsigned long long>(moi_report_summary.record_replay_invalid_site_token_count),
         static_cast<unsigned long long>(moi_report_summary.replay_unsupported_access_count),
         static_cast<unsigned long long>(moi_report_summary.replay_unsupported_atomic_count),
         static_cast<unsigned long long>(moi_report_summary.replay_unsupported_fence_count),
@@ -2294,6 +2297,17 @@ public:
           "saturation: "
           "%llu auto report buffer(s) exhausted a bounded capture probe\n",
           static_cast<unsigned long long>(moi_report_summary.record_replay_bank_saturation_count));
+      std::fflush(stderr);
+      if (moi_forbid_overflow)
+        std::_Exit(90);
+    }
+    if (moi_report_summary.record_replay_invalid_site_token_count != 0) {
+      std::fprintf(stderr,
+                   "[rocjitsu-dbi-hooks] ConSan MOI Record/Replay malformed access evidence: "
+                   "invalid_site_tokens=%llu across %llu auto report buffer(s)\n",
+                   static_cast<unsigned long long>(
+                       moi_report_summary.record_replay_invalid_site_token_count),
+                   static_cast<unsigned long long>(moi_report_summary.buffer_count));
       std::fflush(stderr);
       if (moi_forbid_overflow)
         std::_Exit(90);

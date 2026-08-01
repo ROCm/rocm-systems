@@ -484,6 +484,7 @@ std::vector<std::optional<rocjitsu::ConSanMoiReportLayoutOverride>>
     g_transform_override_report_layouts;
 bool g_seed_auto_replay_report_on_load = false;
 bool g_seed_auto_replay_report_succeeded = false;
+bool g_seed_auto_replay_invalid_site_token = false;
 bool g_seed_auto_sampled_report_on_load = false;
 bool g_seed_auto_sampled_report_succeeded = false;
 std::vector<std::vector<uint8_t>> g_fake_allocations;
@@ -1007,6 +1008,10 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
         .epoch = 3,
         .event_index = 2,
     };
+    if (g_seed_auto_replay_invalid_site_token) {
+      records[0].site_token = layout.record_replay_logical_access_range_count;
+      records[1].site_token = layout.record_replay_logical_access_range_count;
+    }
     g_seed_auto_replay_report_succeeded = true;
   }
   if (g_seed_auto_sampled_report_on_load) {
@@ -1540,6 +1545,7 @@ void reset_code_object_observations() {
   g_transform_override_results.clear();
   g_seed_auto_replay_report_on_load = false;
   g_seed_auto_replay_report_succeeded = false;
+  g_seed_auto_replay_invalid_site_token = false;
   g_seed_auto_sampled_report_on_load = false;
   g_seed_auto_sampled_report_succeeded = false;
   g_transform_override_result = {};
@@ -3159,17 +3165,20 @@ TEST(HsaHooksUnitTest, RecordReplayPressureDistinguishesLowHighAndSaturatedFanou
   header.access_record_capacity = 8;
   header.record_replay_dispatch_token_capacity = 4;
   std::array<rocjitsu::ConSanMoiAccessRecord, 7> records{};
-  std::array<uint32_t, 7> record_indices{};
 
   const auto low = rocjitsu::consan_hook::record_replay_pressure_telemetry(
       header, rocjitsu::ConSanMoiEngine::RecordReplay, records,
-      /*logical_access_range_count=*/2, record_indices);
+      /*logical_access_range_count=*/2, /*address_group_headroom=*/64);
   EXPECT_TRUE(low.available);
   EXPECT_FALSE(low.saturated);
+  EXPECT_EQ(low.unavailable_reason,
+            rocjitsu::consan_hook::RecordReplayPressureTelemetry::UnavailableReason::None);
   EXPECT_EQ(low.occupied_access_record_count, 0u);
   EXPECT_EQ(low.access_record_capacity, 8u);
   EXPECT_EQ(low.observed_site_count, 0u);
   EXPECT_EQ(low.maximum_site_owner_address_group_count, 0u);
+  EXPECT_EQ(low.address_group_headroom, 64u);
+  EXPECT_EQ(low.logical_access_range_count, 2u);
 
   for (size_t index = 0; index < 3; ++index) {
     records[index].access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write);
@@ -3187,7 +3196,7 @@ TEST(HsaHooksUnitTest, RecordReplayPressureDistinguishesLowHighAndSaturatedFanou
 
   const auto high = rocjitsu::consan_hook::record_replay_pressure_telemetry(
       header, rocjitsu::ConSanMoiEngine::RecordReplay, records,
-      /*logical_access_range_count=*/2, record_indices);
+      /*logical_access_range_count=*/2, /*address_group_headroom=*/64);
   EXPECT_TRUE(high.available);
   EXPECT_FALSE(high.saturated);
   EXPECT_EQ(high.occupied_access_record_count, 7u);
@@ -3199,7 +3208,7 @@ TEST(HsaHooksUnitTest, RecordReplayPressureDistinguishesLowHighAndSaturatedFanou
   header.flags |= rocjitsu::kConSanMoiReportFlagRecordReplayBankSaturated;
   const auto saturated = rocjitsu::consan_hook::record_replay_pressure_telemetry(
       header, rocjitsu::ConSanMoiEngine::RecordReplay, records,
-      /*logical_access_range_count=*/2, record_indices);
+      /*logical_access_range_count=*/2, /*address_group_headroom=*/64);
   EXPECT_TRUE(saturated.available);
   EXPECT_TRUE(saturated.saturated);
   EXPECT_EQ(saturated.occupied_access_record_count, high.occupied_access_record_count);
@@ -3208,11 +3217,78 @@ TEST(HsaHooksUnitTest, RecordReplayPressureDistinguishesLowHighAndSaturatedFanou
 
   const auto unavailable = rocjitsu::consan_hook::record_replay_pressure_telemetry(
       header, rocjitsu::ConSanMoiEngine::InlineShadow, records,
-      /*logical_access_range_count=*/2, record_indices);
+      /*logical_access_range_count=*/2, /*address_group_headroom=*/64);
   EXPECT_FALSE(unavailable.available);
   EXPECT_FALSE(unavailable.saturated);
+  EXPECT_EQ(
+      unavailable.unavailable_reason,
+      rocjitsu::consan_hook::RecordReplayPressureTelemetry::UnavailableReason::NotRecordReplay);
   EXPECT_EQ(unavailable.occupied_access_record_count, 0u);
   EXPECT_EQ(unavailable.access_record_capacity, 0u);
+
+  header.record_replay_dispatch_token_capacity = 0;
+  const auto no_dispatch_directory = rocjitsu::consan_hook::record_replay_pressure_telemetry(
+      header, rocjitsu::ConSanMoiEngine::RecordReplay, records,
+      /*logical_access_range_count=*/2, /*address_group_headroom=*/64);
+  EXPECT_EQ(
+      no_dispatch_directory.unavailable_reason,
+      rocjitsu::consan_hook::RecordReplayPressureTelemetry::UnavailableReason::NoDispatchDirectory);
+  header.record_replay_dispatch_token_capacity = 4;
+  header.access_record_capacity = 0;
+  const auto no_access_table = rocjitsu::consan_hook::record_replay_pressure_telemetry(
+      header, rocjitsu::ConSanMoiEngine::RecordReplay, records,
+      /*logical_access_range_count=*/2, /*address_group_headroom=*/64);
+  EXPECT_EQ(no_access_table.unavailable_reason,
+            rocjitsu::consan_hook::RecordReplayPressureTelemetry::UnavailableReason::NoAccessTable);
+  header.access_record_capacity = 8;
+  const auto no_logical_ranges = rocjitsu::consan_hook::record_replay_pressure_telemetry(
+      header, rocjitsu::ConSanMoiEngine::RecordReplay, records,
+      /*logical_access_range_count=*/0, /*address_group_headroom=*/64);
+  EXPECT_EQ(no_logical_ranges.unavailable_reason,
+            rocjitsu::consan_hook::RecordReplayPressureTelemetry::UnavailableReason::
+                NoLogicalAccessRanges);
+}
+
+TEST(HsaHooksUnitTest, RecordReplayPressureKeysFanoutByFullDynamicIdentity) {
+  rocjitsu::ConSanMoiReportHeader header;
+  header.access_record_capacity = 16;
+  header.record_replay_dispatch_token_capacity = 4;
+  std::array<rocjitsu::ConSanMoiAccessRecord, 8> records{};
+  for (auto &record : records) {
+    record.access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write);
+    record.site_token = 1;
+    record.generation = 10;
+    record.workgroup_x = 1;
+    record.workgroup_y = 2;
+    record.workgroup_z = 3;
+    record.wave_id = 4;
+  }
+  // Keep the two records for the first owner interleaved with the other
+  // identities so this also pins the host-side sort before fanout counting.
+  records[0].lds_byte_offset = 0;
+  records[1].generation = 11;
+  records[1].lds_byte_offset = 8;
+  records[2].workgroup_x = 9;
+  records[2].lds_byte_offset = 8;
+  records[3].lds_byte_offset = 4;
+  records[4].workgroup_y = 9;
+  records[4].lds_byte_offset = 8;
+  records[5].workgroup_z = 9;
+  records[5].lds_byte_offset = 8;
+  records[6].wave_id = 5;
+  records[6].lds_byte_offset = 8;
+  records[7] = records[3];
+
+  const auto telemetry = rocjitsu::consan_hook::record_replay_pressure_telemetry(
+      header, rocjitsu::ConSanMoiEngine::RecordReplay, records,
+      /*logical_access_range_count=*/3, /*address_group_headroom=*/8);
+  EXPECT_TRUE(telemetry.available);
+  EXPECT_EQ(telemetry.occupied_access_record_count, 8u);
+  EXPECT_EQ(telemetry.observed_site_count, 1u);
+  EXPECT_EQ(telemetry.maximum_site_owner_address_group_count, 2u);
+  EXPECT_EQ(telemetry.maximum_site_token, 1u);
+  EXPECT_EQ(telemetry.address_group_headroom, 8u);
+  EXPECT_EQ(telemetry.logical_access_range_count, 3u);
 }
 
 TEST(HsaHooksUnitTest, ConSanLegacySelectionRemainsActive) {
@@ -5538,6 +5614,49 @@ TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageContractFields) {
         "first_kind=2", "second_kind=2"}) {
     EXPECT_NE(log.find(field, detail), std::string::npos) << field << "\n" << log;
   }
+}
+
+TEST(HsaHooksUnitTest, AutoReplayInvalidSiteTokensMakeDynamicEvidenceIncomplete) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_replay_transform_result();
+  g_seed_auto_replay_report_on_load = true;
+  g_seed_auto_replay_invalid_site_token = true;
+
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    EXPECT_TRUE(hook.installed()) << hook.error();
+    if (hook.installed()) {
+      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+      hsa_code_object_reader_t reader{};
+      EXPECT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                      original.size(), &reader),
+                HSA_STATUS_SUCCESS);
+      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                  reader, nullptr, nullptr),
+                HSA_STATUS_SUCCESS);
+    }
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_TRUE(g_seed_auto_replay_report_succeeded) << log;
+  EXPECT_NE(log.find("record_replay_invalid_site_tokens=2"), std::string::npos) << log;
+  EXPECT_NE(log.find("dynamic_complete=false"), std::string::npos) << log;
+  EXPECT_NE(log.find("dynamic_incomplete=2"), std::string::npos) << log;
+  EXPECT_NE(log.find("Record/Replay malformed access evidence: invalid_site_tokens=2"),
+            std::string::npos)
+      << log;
 }
 
 TEST(HsaHooksUnitTest, AutoReportMetadataMatchesReaderAndGeneration) {

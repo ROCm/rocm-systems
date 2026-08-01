@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <vector>
 
 namespace rocjitsu::consan_hook {
 
@@ -750,11 +751,6 @@ struct AutoMoiReportSummary {
   uint64_t dropped_fence_record_count = 0;
   uint64_t dropped_diagnostic_record_count = 0;
   uint64_t record_replay_bank_saturation_count = 0;
-  uint64_t record_replay_pressure_available_count = 0;
-  uint64_t record_replay_access_table_occupied_count = 0;
-  uint64_t record_replay_access_table_capacity = 0;
-  uint64_t record_replay_observed_site_count = 0;
-  uint64_t record_replay_max_site_owner_address_group_count = 0;
   uint64_t record_replay_invalid_site_token_count = 0;
   uint64_t replay_conflict_count = 0;
   uint64_t replay_diagnostic_count = 0;
@@ -811,34 +807,78 @@ record_replay_bank_saturation_count(const ConSanMoiReportHeader &header, ConSanM
 struct RecordReplayPressureTelemetry {
   bool available = false;
   bool saturated = false;
+  enum class UnavailableReason : uint8_t {
+    None,
+    NotRecordReplay,
+    NoDispatchDirectory,
+    NoAccessTable,
+    NoLogicalAccessRanges,
+  } unavailable_reason = UnavailableReason::None;
   uint64_t occupied_access_record_count = 0;
   uint64_t access_record_capacity = 0;
   uint64_t observed_site_count = 0;
   uint64_t maximum_site_owner_address_group_count = 0;
+  uint32_t address_group_headroom = 0;
+  uint32_t logical_access_range_count = 0;
+  // Meaningful only when maximum_site_owner_address_group_count is nonzero.
   uint32_t maximum_site_token = 0;
   uint64_t invalid_site_token_count = 0;
 };
 
+[[nodiscard]] constexpr std::string_view record_replay_pressure_unavailable_reason_name(
+    RecordReplayPressureTelemetry::UnavailableReason reason) {
+  using Reason = RecordReplayPressureTelemetry::UnavailableReason;
+  switch (reason) {
+  case Reason::None:
+    return "none";
+  case Reason::NotRecordReplay:
+    return "not_record_replay";
+  case Reason::NoDispatchDirectory:
+    return "no_dispatch_directory";
+  case Reason::NoAccessTable:
+    return "no_access_table";
+  case Reason::NoLogicalAccessRanges:
+    return "no_logical_access_ranges";
+  }
+  return "unknown";
+}
+
 /// Summarizes the bounded automatic Record/Replay access table. Dynamic
 /// address-group fanout is counted for each static-site, dispatch, workgroup,
 /// and wave identity, so launch size does not masquerade as divergence. A
-/// false available bit distinguishes engines and direct layouts that do not
-/// provide this telemetry from a valid automatic table with zero occupancy.
+/// false available bit distinguishes a named non-automatic layout reason from
+/// a valid automatic table with zero occupancy.
 [[nodiscard]] inline RecordReplayPressureTelemetry
 record_replay_pressure_telemetry(const ConSanMoiReportHeader &header, ConSanMoiEngine engine,
                                  std::span<const ConSanMoiAccessRecord> records,
                                  uint32_t logical_access_range_count,
-                                 std::span<uint32_t> committed_record_indices) {
+                                 uint32_t address_group_headroom) {
   RecordReplayPressureTelemetry result;
   result.saturated = record_replay_bank_saturation_count(header, engine) != 0;
-  if (engine != ConSanMoiEngine::RecordReplay ||
-      header.record_replay_dispatch_token_capacity == 0 || header.access_record_capacity == 0 ||
-      logical_access_range_count == 0 || committed_record_indices.size() < records.size()) {
+  if (engine != ConSanMoiEngine::RecordReplay) {
+    result.unavailable_reason = RecordReplayPressureTelemetry::UnavailableReason::NotRecordReplay;
+    return result;
+  }
+  if (header.record_replay_dispatch_token_capacity == 0) {
+    result.unavailable_reason =
+        RecordReplayPressureTelemetry::UnavailableReason::NoDispatchDirectory;
+    return result;
+  }
+  if (header.access_record_capacity == 0) {
+    result.unavailable_reason = RecordReplayPressureTelemetry::UnavailableReason::NoAccessTable;
+    return result;
+  }
+  if (logical_access_range_count == 0) {
+    result.unavailable_reason =
+        RecordReplayPressureTelemetry::UnavailableReason::NoLogicalAccessRanges;
     return result;
   }
 
   result.available = true;
   result.access_record_capacity = header.access_record_capacity;
+  result.address_group_headroom = address_group_headroom;
+  result.logical_access_range_count = logical_access_range_count;
+  std::vector<uint32_t> committed_record_indices(records.size());
   size_t committed_record_count = 0;
   for (size_t index = 0; index < records.size(); ++index) {
     const ConSanMoiAccessRecord &record = records[index];

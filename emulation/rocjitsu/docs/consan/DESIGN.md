@@ -737,8 +737,9 @@ Runtime self-checks:
   that requires host replay to emit a conflict.
 - `RJ_CONSAN_MOI_FORBID_OVERFLOW=1`: fail at teardown if an auto buffer dropped
   access, barrier, atomic, or diagnostic records, or if a Record/Replay
-  dispatch/owner bank saturated. Overflow and saturation are always printed to
-  stderr even without this guard.
+  dispatch/owner bank saturated or published an invalid static-site token.
+  Overflow, saturation, and malformed evidence are always printed to stderr
+  even without this guard.
 
 ### Record/Replay engine
 
@@ -751,6 +752,21 @@ Current implementation:
   ordinary settings.
 - Emits `ConSanMoiAccessRecord` entries.
 - Supports bounded report-wide dispatch and access-identity tables by default.
+- Reports automatic-table pressure per buffer. Occupancy is paired with table
+  capacity, and the hottest static site's realized dynamic LDS address-group
+  fanout is paired with its planned address-group headroom. Fanout is keyed by
+  static site, dispatch, all three workgroup coordinates, and wave, so larger
+  launch dimensions do not masquerade as address divergence. The hottest site
+  token is meaningful only when its fanout is nonzero.
+- Names why pressure is unavailable (`not_record_replay`,
+  `no_dispatch_directory`, `no_access_table`, or
+  `no_logical_access_ranges`), which keeps an unsupported layout distinct from
+  a valid automatic table with zero occupancy and from an older log that lacks
+  the fields. The fault-runner JSON retains bounded per-buffer detail and exact
+  aggregate totals. It deliberately applies no workload-specific warning
+  threshold: consumers compare occupancy/capacity and fanout/headroom under
+  their own qualification contract, while the typed saturation verdict remains
+  the universal failure boundary.
 - Supports dynamic per-lane append with
   `RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1`.
 - Records dynamic event indexes.

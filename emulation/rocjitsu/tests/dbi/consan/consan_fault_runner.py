@@ -41,6 +41,7 @@ from consan_validation_support import (
 MAX_GPU_JOBS = 4
 MAX_RESOURCE_PLAN_ALTERNATIVES = 4096
 MAX_RESOURCE_PLAN_ALTERNATIVE_ERRORS = 16
+MAX_RECORD_REPLAY_PRESSURE_RECORDS = 4096
 UINT64_MAX = (1 << 64) - 1
 QUARANTINE_FILE = ".gpu-quarantine.json"
 GLOBAL_DESTRUCTIVE_LOCK_ENV = "CONSAN_DESTRUCTIVE_GPU_LOCK"
@@ -419,6 +420,20 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
     inline_diagnostics = 0
     replay_diagnostics = 0
     record_replay_pressure_records: list[dict[str, object]] = []
+    record_replay_pressure_record_count = 0
+    record_replay_pressure_status_counts = {
+        "available": 0,
+        "unavailable": 0,
+        "missing": 0,
+    }
+    record_replay_pressure_unavailable_reason_counts: dict[str, int] = {}
+    record_replay_saturated_report_count = 0
+    record_replay_access_table_occupied_total = 0
+    record_replay_access_table_capacity_total = 0
+    record_replay_max_site_owner_address_groups = 0
+    record_replay_max_site_token = 0
+    record_replay_max_address_group_headroom = 0
+    record_replay_invalid_site_token_total = 0
     sampled_conflicts = 0
     sampled_immediate_conflicts = 0
     sampled_claimed_windows = 0
@@ -787,12 +802,17 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             )
             inline_diagnostics += _integer(fields, "visible_diagnostics")
             pressure_available = fields.get("record_replay_pressure_available")
+            pressure_status = (
+                "missing"
+                if pressure_available is None
+                else "available" if pressure_available == "true" else "unavailable"
+            )
             pressure = {
                 "reader": fields.get("reader", ""),
-                "status": (
-                    "missing"
-                    if pressure_available is None
-                    else "available" if pressure_available == "true" else "unavailable"
+                "status": pressure_status,
+                "unavailable_reason": fields.get(
+                    "record_replay_pressure_unavailable_reason",
+                    "missing" if pressure_available is None else "unspecified",
                 ),
                 "saturated": fields.get("record_replay_bank_saturated") == "true",
                 "access_table_occupied": _integer(
@@ -805,12 +825,49 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
                 "max_site_owner_address_groups": _integer(
                     fields, "record_replay_max_site_owner_address_groups"
                 ),
+                "address_group_headroom": _integer(
+                    fields, "record_replay_address_group_headroom"
+                ),
+                "logical_access_ranges": _integer(
+                    fields, "record_replay_logical_access_ranges"
+                ),
                 "max_site_token": _integer(fields, "record_replay_max_site_token"),
                 "invalid_site_tokens": _integer(
                     fields, "record_replay_invalid_site_tokens"
                 ),
             }
-            record_replay_pressure_records.append(pressure)
+            record_replay_pressure_record_count += 1
+            record_replay_pressure_status_counts[pressure_status] += 1
+            if pressure_status == "unavailable":
+                unavailable_reason = str(pressure["unavailable_reason"])
+                record_replay_pressure_unavailable_reason_counts[unavailable_reason] = (
+                    record_replay_pressure_unavailable_reason_counts.get(
+                        unavailable_reason, 0
+                    )
+                    + 1
+                )
+            record_replay_saturated_report_count += int(bool(pressure["saturated"]))
+            record_replay_access_table_occupied_total += int(
+                pressure["access_table_occupied"]
+            )
+            record_replay_access_table_capacity_total += int(
+                pressure["access_table_capacity"]
+            )
+            pressure_fanout = int(pressure["max_site_owner_address_groups"])
+            if pressure_fanout > record_replay_max_site_owner_address_groups:
+                record_replay_max_site_owner_address_groups = pressure_fanout
+                record_replay_max_site_token = int(pressure["max_site_token"])
+                record_replay_max_address_group_headroom = int(
+                    pressure["address_group_headroom"]
+                )
+            record_replay_invalid_site_token_total += int(
+                pressure["invalid_site_tokens"]
+            )
+            retain_pressure = (
+                len(record_replay_pressure_records) < MAX_RECORD_REPLAY_PRESSURE_RECORDS
+            )
+            if retain_pressure:
+                record_replay_pressure_records.append(pressure)
             sampled_conflicts += _integer(fields, "sampled_conflicts")
             sampled_immediate_conflicts += _integer(
                 fields, "sampled_immediate_conflicts"
@@ -885,7 +942,8 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             per_reader = reader_record(fields)
             if per_reader is not None:
                 per_reader["inline_summary_records"] += 1
-                per_reader["record_replay_pressure"].append(pressure)
+                if retain_pressure:
+                    per_reader["record_replay_pressure"].append(dict(pressure))
                 per_reader["inline_summary_complete"] &= all(
                     _required_integer(fields, field) is not None
                     for field in required_inline_summary_fields
@@ -1641,41 +1699,34 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             "inline_causal_snapshot_capacity_entries": inline_causal_snapshot_capacity_entries,
             "record_replay_pressure": {
                 "records": record_replay_pressure_records,
-                "available_reports": sum(
-                    record["status"] == "available"
-                    for record in record_replay_pressure_records
+                "record_count": record_replay_pressure_record_count,
+                "records_truncated": (
+                    record_replay_pressure_record_count
+                    > len(record_replay_pressure_records)
                 ),
-                "unavailable_reports": sum(
-                    record["status"] == "unavailable"
-                    for record in record_replay_pressure_records
+                "available_reports": record_replay_pressure_status_counts["available"],
+                "unavailable_reports": record_replay_pressure_status_counts[
+                    "unavailable"
+                ],
+                "missing_reports": record_replay_pressure_status_counts["missing"],
+                "unavailable_reason_counts": (
+                    record_replay_pressure_unavailable_reason_counts
                 ),
-                "missing_reports": sum(
-                    record["status"] == "missing"
-                    for record in record_replay_pressure_records
+                "saturated_reports": record_replay_saturated_report_count,
+                "access_table_occupied_total": (
+                    record_replay_access_table_occupied_total
                 ),
-                "saturated_reports": sum(
-                    bool(record["saturated"])
-                    for record in record_replay_pressure_records
+                "access_table_capacity_total": (
+                    record_replay_access_table_capacity_total
                 ),
-                "access_table_occupied": sum(
-                    int(record["access_table_occupied"])
-                    for record in record_replay_pressure_records
+                "max_site_owner_address_groups": (
+                    record_replay_max_site_owner_address_groups
                 ),
-                "access_table_capacity": sum(
-                    int(record["access_table_capacity"])
-                    for record in record_replay_pressure_records
+                "max_site_token": record_replay_max_site_token,
+                "max_address_group_headroom": (
+                    record_replay_max_address_group_headroom
                 ),
-                "max_site_owner_address_groups": max(
-                    (
-                        int(record["max_site_owner_address_groups"])
-                        for record in record_replay_pressure_records
-                    ),
-                    default=0,
-                ),
-                "invalid_site_tokens": sum(
-                    int(record["invalid_site_tokens"])
-                    for record in record_replay_pressure_records
-                ),
+                "invalid_site_token_total": record_replay_invalid_site_token_total,
             },
             "spill_patch_count": spill_patch_count,
             "spill_slot_bytes": spill_slot_bytes,
