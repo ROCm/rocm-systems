@@ -1,0 +1,8 @@
+clock_domains
+ext_launch_gating
+marker_vs_attached
+rocprof_crosscheck
+timestamp_discovery
+timestamp_validation
+launch_cost
+hsa_signal_crosscheck
