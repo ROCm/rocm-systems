@@ -198,10 +198,11 @@ public:
     auto pte = entry.page_table->find(addr >> PAGE_SHIFT);
     if (pte != entry.page_table->end()) {
       const size_t page_offset = addr & PAGE_MASK;
-      const bool allocation_backed =
-          pte->second.host_ptr != nullptr && page_offset < pte->second.valid_bytes &&
-          size <= pte->second.valid_bytes - page_offset &&
-          addressable_prefix(pte->second.host_ptr + page_offset, size) == size;
+      const size_t valid_bytes =
+          std::min(pte->second.valid_bytes,
+                   addressable_prefix(pte->second.host_ptr, pte->second.valid_bytes));
+      const bool allocation_backed = pte->second.host_ptr != nullptr && page_offset < valid_bytes &&
+                                     size <= valid_bytes - page_offset;
       if (allocation_backed) {
         atomic_rmw_mapped(addr, pte->second.host_ptr, fn);
       } else if (pte->second.host_ptr == nullptr) {
@@ -435,9 +436,11 @@ private:
 
   static size_t addressable_prefix(const uint8_t *ptr, size_t len) {
 #if defined(RJ_GPU_MEMORY_WITH_ASAN)
-    if (auto *poisoned = static_cast<const uint8_t *>(
-            __asan_region_is_poisoned(const_cast<uint8_t *>(ptr), len)))
-      return static_cast<size_t>(poisoned - ptr);
+    if (ptr) {
+      if (auto *poisoned = static_cast<const uint8_t *>(
+              __asan_region_is_poisoned(const_cast<uint8_t *>(ptr), len)))
+        return static_cast<size_t>(poisoned - ptr);
+    }
 #endif
     return len;
   }
@@ -461,6 +464,8 @@ private:
     KfdProcess::PageTable *page_table = nullptr;
     std::shared_mutex *mutex = nullptr;
     const uint64_t *generation_ptr = nullptr;
+    size_t addressable_bytes = 0;
+    bool addressable_bytes_cached = false;
   };
 
   /// @brief Walk a VMID page table with a generation-keyed thread-local cache.
@@ -503,6 +508,7 @@ private:
       cache.page_key = page_key;
       cache.generation = generation;
       cache.found = it != cache.page_table->end();
+      cache.addressable_bytes_cached = false;
       if (cache.found)
         cache.pte = it->second;
     }
@@ -524,7 +530,17 @@ private:
       if (pte) {
         if (pte->host_ptr == nullptr)
           return false;
-        fn(pte->host_ptr, pte->valid_bytes);
+        size_t valid_bytes = pte->valid_bytes;
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+        // HIP registers the allocation redzone after the KFD map call returns,
+        // so discover the usable tail lazily and cache it off the hot path.
+        if (!cache.addressable_bytes_cached) {
+          cache.addressable_bytes = addressable_prefix(pte->host_ptr, valid_bytes);
+          cache.addressable_bytes_cached = true;
+        }
+        valid_bytes = std::min(valid_bytes, cache.addressable_bytes);
+#endif
+        fn(pte->host_ptr, valid_bytes);
         return true;
       }
       if (passthrough_ && addr < kUserSpaceLimit) {
@@ -545,10 +561,8 @@ private:
       const size_t page_offset = addr & PAGE_MASK;
       size_t mapped_bytes =
           page_offset < valid_bytes ? std::min(len, valid_bytes - page_offset) : 0;
-      if (mapped_bytes > 0) {
-        mapped_bytes = addressable_prefix(page + page_offset, mapped_bytes);
+      if (mapped_bytes > 0)
         std::memcpy(dst, page + page_offset, mapped_bytes);
-      }
       std::memset(static_cast<uint8_t *>(dst) + mapped_bytes, 0, len - mapped_bytes);
     });
   }
@@ -560,10 +574,8 @@ private:
       const size_t page_offset = addr & PAGE_MASK;
       size_t mapped_bytes =
           page_offset < valid_bytes ? std::min(len, valid_bytes - page_offset) : 0;
-      if (mapped_bytes > 0) {
-        mapped_bytes = addressable_prefix(page + page_offset, mapped_bytes);
+      if (mapped_bytes > 0)
         std::memcpy(page + page_offset, src, mapped_bytes);
-      }
     });
   }
 

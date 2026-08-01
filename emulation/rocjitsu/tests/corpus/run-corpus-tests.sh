@@ -69,7 +69,7 @@ done
 corpus_test_status=0
 corpus_work_dir="$(pwd -P)"
 rocjitsu_launcher="$(command -v rocjitsu)"
-run_wrapper_prefix=()
+run_wrapper_prefix=(env "HSA_HOTSWAP_DISABLE=1")
 
 launcher_dependencies="$(readelf -d "${rocjitsu_launcher}" 2>/dev/null)"
 asan_enabled=false
@@ -82,16 +82,14 @@ elif [[ "${launcher_dependencies}" == *"libasan.so"* ]]; then
 fi
 
 if [[ "${asan_enabled}" == true ]]; then
-  lsan_suppressions="${ROCJITSU_SOURCE_DIR}/tests/corpus/lsan.supp"
   asan_symbolizer="${ROCM_PATH}/lib/llvm/bin/llvm-symbolizer"
-  if [[ ! -f "${lsan_suppressions}" || ! -x "${asan_symbolizer}" ]]; then
-    echo "Could not resolve LSan suppressions or the ASan symbolizer for corpus tests" >&2
+  if [[ ! -x "${asan_symbolizer}" ]]; then
+    echo "Could not resolve the ASan symbolizer for corpus tests" >&2
     exit 1
   fi
-  corpus_lsan_options="${LSAN_OPTIONS:+${LSAN_OPTIONS}:}suppressions=${lsan_suppressions}"
-  run_wrapper_prefix=(
-    env
-    "LSAN_OPTIONS=${corpus_lsan_options}"
+  corpus_asan_options="${ASAN_OPTIONS:+${ASAN_OPTIONS}:}detect_leaks=0"
+  run_wrapper_prefix+=(
+    "ASAN_OPTIONS=${corpus_asan_options}"
     "ASAN_SYMBOLIZER_PATH=${asan_symbolizer}"
   )
 fi

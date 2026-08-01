@@ -210,6 +210,9 @@ jobs:
           ASAN_UBSAN_EXCLUDED_TESTS=(
             "HsaTest\.InitSucceeded"
             "HsaTest\.GpuAgentFound"
+            # The hardware-backed tools-hook test cannot initialize ROCR when
+            # the launcher and hook are both instrumented with ASan.
+            "HsaHooksTest\.TranslateGfx950Mfma16x16ThroughToolsLib"
             "Cdna4ToCdna3SimulatedDispatchTest\..*"
             "Cdna4ToCdna3DbtGuestTest\..*"
             "HipMemcpyTest\.RoundTripFloat"
