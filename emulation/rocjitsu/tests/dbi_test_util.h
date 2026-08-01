@@ -283,8 +283,8 @@ make_gfx950_unterminated_kd_name_elf(const std::vector<uint32_t> &text_words,
 
 // gfx950 target ELF whose e_shoff + e_shnum*sizeof(Elf64_Shdr) overflows, for
 // exercising the scanner's overflow-safe section-header-table bounds check.
-inline std::vector<uint8_t>
-make_gfx950_wrapping_shoff_elf(const std::vector<uint32_t> &text_words, uint32_t private_bytes) {
+inline std::vector<uint8_t> make_gfx950_wrapping_shoff_elf(const std::vector<uint32_t> &text_words,
+                                                           uint32_t private_bytes) {
   return make_amdgpu_kernel_elf(text_words, private_bytes, /*granulated_sgpr_count=*/3,
                                 EF_AMDGPU_MACH_AMDGCN_GFX950, /*unterminated_kd_name=*/false,
                                 /*wrap_section_header_table=*/true);
@@ -293,8 +293,8 @@ make_gfx950_wrapping_shoff_elf(const std::vector<uint32_t> &text_words, uint32_t
 // gfx950 target ELF whose .symtab sh_offset + sh_size overflows, for exercising the
 // scanner's overflow-safe section-range bounds check (the .text section stays intact
 // so discovery still resolves the text base before rejecting the bad symtab).
-inline std::vector<uint8_t>
-make_gfx950_wrapping_symtab_elf(const std::vector<uint32_t> &text_words, uint32_t private_bytes) {
+inline std::vector<uint8_t> make_gfx950_wrapping_symtab_elf(const std::vector<uint32_t> &text_words,
+                                                            uint32_t private_bytes) {
   return make_amdgpu_kernel_elf(text_words, private_bytes, /*granulated_sgpr_count=*/3,
                                 EF_AMDGPU_MACH_AMDGCN_GFX950, /*unterminated_kd_name=*/false,
                                 /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/true);
