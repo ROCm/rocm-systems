@@ -95,6 +95,10 @@ if ! rocjitsu_launcher="$(command -v rocjitsu)"; then
   echo "Could not resolve rocjitsu on PATH for corpus tests" >&2
   exit 1
 fi
+if ! command -v setpriv >/dev/null || ! command -v timeout >/dev/null; then
+  echo "Could not resolve setpriv and timeout for corpus process cleanup" >&2
+  exit 1
+fi
 
 if [[ "${sanitizer_mode}" != none ]]; then
   asan_symbolizer="${ROCM_PATH}/lib/llvm/bin/llvm-symbolizer"
@@ -124,24 +128,22 @@ if [[ "${sanitizer_mode}" == clang-asan ]]; then
   launcher_preload_args=(--preload "${hip_runtime}")
 fi
 
-for target in "${targets[@]}"; do
-  read -r name rocjitsu_config skip_tests_config <<< "${target}"
-  echo "::group::(${name}) pytest"
-
-  rocjitsu_config_path="${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}"
-  skip_tests_config_path="${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}"
-  artifact_dir="${corpus_work_dir}/.pytest-artifacts/${name}"
-  cache_dir="${corpus_work_dir}/.pytest-cache/${name}"
-  run_wrapper=(
+run_pytest() {
+  local timeout_seconds="$1"
+  shift
+  local run_wrapper=(
     "${run_wrapper_prefix[@]}"
+    setpriv --pdeathsig TERM
+    timeout --signal=TERM --kill-after=5s "${timeout_seconds}s"
     "${rocjitsu_launcher}"
     --config "${rocjitsu_config_path}"
     "${launcher_preload_args[@]}"
     --
   )
+  local run_wrapper_command
   printf -v run_wrapper_command '%q ' "${run_wrapper[@]}"
 
-  pytest_cmd=(
+  local pytest_cmd=(
     pytest tests/test_corpus.py
     --target "${name}"
     --suite iree,kernels,cts
@@ -155,8 +157,18 @@ for target in "${targets[@]}"; do
     -n "${worker_count}"
     -o "timeout_func_only=true"
   )
+  "${pytest_cmd[@]}" --timeout "${timeout_seconds}" "$@"
+}
 
-  if "${pytest_cmd[@]}" --timeout "${soft_timeout_seconds}"; then
+for target in "${targets[@]}"; do
+  read -r name rocjitsu_config skip_tests_config <<< "${target}"
+  echo "::group::(${name}) pytest"
+
+  rocjitsu_config_path="${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}"
+  skip_tests_config_path="${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}"
+  artifact_dir="${corpus_work_dir}/.pytest-artifacts/${name}"
+  cache_dir="${corpus_work_dir}/.pytest-cache/${name}"
+  if run_pytest "${soft_timeout_seconds}"; then
     echo "::endgroup::"
     echo "All (${name}) tests passed."
     continue
@@ -175,7 +187,7 @@ for target in "${targets[@]}"; do
 
   # Retry success does not turn CI green.
   echo "::group::(${name}) pytest rerun failed tests"
-  if "${pytest_cmd[@]}" --last-failed --last-failed-no-failures=none --timeout "${hard_timeout_seconds}"; then
+  if run_pytest "${hard_timeout_seconds}" --last-failed --last-failed-no-failures=none; then
     echo "::endgroup::"
     echo "::warning::Retried (${name}) tests passed."
     continue
