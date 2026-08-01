@@ -92,6 +92,30 @@ Against `all_reduce_perf -b 1M -e 64M -f 8 -g 4 -n 50 -w 10`, with
   path to get this: querying an event per launch makes the runtime flush the
   queue and cost ~190 us per dispatch.
 
+### Latency-bound sizes (8-128 B)
+
+An all-reduce this small is ~20 us of pure latency, so the cost of attaching the
+event is at its most visible: **+3.4 us, about 17%**, steady-state across 8, 32
+and 128 B. Two things make that number easy to get wrong. The first timed loop
+in a process is slower with timing on than later ones (+7 us vs +3.4), so a
+single-size run measures one-time cost as if it were per-dispatch. And a caller
+that never drains fills the in-flight queue, after which timing costs far more
+than it saves.
+
+Sampling does not help. Timing 1 dispatch in 2, 4, 16 or 64 gives no consistent
+reduction and 1-in-4 measured *worse* than timing everything, which suggests the
+cost is not per-timed-dispatch so much as the queue carrying a mix of dispatches
+with and without completion signals. A `KERNEL_TIMING_SAMPLE` knob was written
+and then dropped for this reason.
+
+This is also where the drain API is worth the most. Against rocprof on the same
+workload it reports 17.6 us median where rocprof reports 23.9 us, i.e. rocprof
+inflates these collectives by **27%** -- at this scale a rank spends most of its
+kernel waiting for peers, so anything that delays a launch lengthens the kernel
+it is trying to measure. The per-rank medians the drain API records for one
+32 B run were 11.2, 14.9, 18.6 and 22.7 us: real skew that a single aggregate
+number hides.
+
 ## `evtstamp.h`
 
 Recovers the absolute dispatch start/end from a stop event. No runtime ABI is
@@ -119,3 +143,4 @@ at `+16` of the same object.
 | `hsa_signal_crosscheck` | finds the ROCr signal, compares against `hsa_amd_profiling_get_dispatch_time`, measures conversion drift |
 | `check_trace.py` | sanity-checks a trace written by rccl-tests: counts, gaps, overlaps, malformed windows |
 | `compare_rocprof.py` | duration distributions from the drain API vs a rocprofv3 kernel trace |
+| `tiny_compare.py` | the same, for latency-bound sizes where there is nothing to bin |

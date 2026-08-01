@@ -517,6 +517,10 @@ cudaEvent_t ncclKernelTimingBeginLaunch(struct ncclComm* comm, struct ncclKernel
   if (rcclParamKernelTimingHarvestOnLaunch()) harvest(ctx, comm->cudaDev);
   if (ctx->disabled) return nullptr;
 
+  /* Every dispatch is counted whether or not it ends up timed, so a record's
+   * seq says which dispatch it was and a gap says one went unmeasured. */
+  uint64_t seq = ctx->seq++;
+
   uint64_t inflight = ctx->inflightEvent.size();
   if (ctx->inflightHead - ctx->inflightTail == inflight) {
     /* Every slot is held, which means the queue is not being drained. Harvest
@@ -545,7 +549,7 @@ cudaEvent_t ncclKernelTimingBeginLaunch(struct ncclComm* comm, struct ncclKernel
   }
   ncclKernelTimingRecord& rec = ctx->inflightRec[slot];
   memset(&rec, 0, sizeof(rec));
-  rec.seq = ctx->seq++;
+  rec.seq = seq;
   rec.commHash = comm->commHash;
   rec.rank = comm->rank;
   rec.nChannels = nChannels;
