@@ -1670,11 +1670,17 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         ++emitting_scopes[block];
     }
 
-    const auto adopt = [&](uint64_t text_offset) {
+    const auto note_address_taken = [&](uint64_t text_offset) -> const BasicBlock * {
       const BasicBlock *entry = block_for_offset(block_index, text_offset);
+      if (entry != nullptr)
+        address_taken_offsets.insert(text_offset);
+      return entry;
+    };
+
+    const auto adopt = [&](uint64_t text_offset) {
+      const BasicBlock *entry = note_address_taken(text_offset);
       if (entry == nullptr)
         return;
-      address_taken_offsets.insert(text_offset);
       // Only a body no scope reaches needs adopting. One that several scopes clone is left where it
       // is: lowering it through an unrelated scope would deny it the context its real caller
       // supplies -- DS2 mode inference and liveness are scope-relative -- so the ambiguity between
@@ -1689,14 +1695,19 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         adopt(slot.target_text_offset);
     }
     // A getpc that computes a code address makes that body address-taken just as surely as a
-    // relocation slot does -- the value can be stored, passed, or returned, and the body must exist
-    // at a known place for the literal to be rewritten to. Unlike a relocation target this one is
-    // named only by instructions, so nothing else in the pipeline would keep it alive: a body
-    // reached by no call is dropped, and its address then has no placement to resolve against.
+    // relocation slot does, so its target has to be accounted for before the rewrite is permitted.
+    // It is deliberately not adopted, though. A relocation slot is a fixed property of the input:
+    // the same eleven slots are discovered whether or not the object has already been translated.
+    // A getpc builder is not -- translation folds the ones it can prove into direct calls, so a
+    // second pass over translated text discovers a different, smaller set. Adopting from that set
+    // would make the scope partition, and therefore the entire `.text` layout, depend on how much
+    // of the previous layout the analysis happened to recover, which is not a fixed point. A
+    // builder target that no scope reaches instead leaves the code address unaccounted for and the
+    // object is refused, which is the conservative outcome rather than a silent stale address.
     for (const PcRelativeAddressBuilder &builder : pc_relative_address_builders) {
       if (builder.target_vaddr < text_vaddr || builder.target_vaddr - text_vaddr >= text.size())
         continue;
-      adopt(builder.target_vaddr - text_vaddr);
+      note_address_taken(builder.target_vaddr - text_vaddr);
     }
     std::ranges::sort(adopted_roots);
     adopted_roots.erase(std::ranges::unique(adopted_roots).begin(), adopted_roots.end());
