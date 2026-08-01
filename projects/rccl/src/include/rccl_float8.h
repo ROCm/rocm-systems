@@ -82,19 +82,23 @@ inline __device__ half2_t rccl_clamp2_f16(half2_t v, half2_t bound) {
 // its sums can leave f16: 57344+57344 is 114688 and f16 stops at 65504. That
 // overflow produces the same Inf an Inf operand does, and the two have to end up
 // in different places, so the sum alone cannot decide it. The operands can. No
-// finite e5m2 value exceeds max_finite, so raising the bound to
-// max(|x|, |y|, max_finite) leaves it at max_finite for finite operands and
-// lifts it to Inf exactly when one operand is Inf, which is when the clamp has
-// to stop clamping. A NaN operand makes the bound NaN, which the clamp then
-// propagates -- the wanted answer, since the sum is NaN too.
+// finite e5m2 value exceeds max_finite, so widening the clamp's limits to
+// max(x, y, max_finite) above and min(x, y, -max_finite) below leaves them at
+// +/-max_finite for finite operands and opens the relevant side to infinity
+// exactly when an operand is the infinity that has to survive. A NaN operand
+// makes both limits NaN, which the clamp then propagates -- the wanted answer,
+// since the sum is NaN too.
+//
+// Taking the limits from the operands rather than their magnitudes is what keeps
+// this to four instructions: each limit is one v_pk_maximum3_f16 or
+// v_pk_minimum3_f16, and no absolute value has to be materialized first.
 inline __device__ half2_t rccl_add_clamp2_bf8_f16(half2_t a, half2_t b) {
   const half2_t maxFinite = {(half_t)RCCL_BF8_MAX_FINITE, (half_t)RCCL_BF8_MAX_FINITE};
-  half2_t bound = __builtin_elementwise_maximum(
-      __builtin_elementwise_maximum(__builtin_elementwise_abs(a), __builtin_elementwise_abs(b)),
-      maxFinite);
+  half2_t hi = __builtin_elementwise_maximum(__builtin_elementwise_maximum(a, b), maxFinite);
+  half2_t lo = __builtin_elementwise_minimum(__builtin_elementwise_minimum(a, b), -maxFinite);
   half2_t v;
   asm volatile("v_pk_add_f16 %0, %1, %2" : "=v"(v) : "v"(a), "v"(b));
-  return rccl_clamp2_f16(v, bound);
+  return __builtin_elementwise_minimum(__builtin_elementwise_maximum(v, lo), hi);
 }
 #endif
 
