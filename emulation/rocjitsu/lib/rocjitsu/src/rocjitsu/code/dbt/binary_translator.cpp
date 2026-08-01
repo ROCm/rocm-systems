@@ -3,7 +3,7 @@
 
 #include "rocjitsu/code/dbt/binary_translator.h"
 
-#include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -29,8 +29,6 @@
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/code/relocation_function_table.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -92,16 +90,6 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   if (!raw)
     return {};
   return {raw, raw + inst.size() / sizeof(uint32_t)};
-}
-
-void append_gfx1250_wmma_completion_wait(std::vector<uint32_t> &words) {
-  // TODO: Replace this unconditional drain with block-local S_WAIT_ALU
-  // analysis over the final translated instruction stream. It should track
-  // VA_VDST/VM_VSRC register dependencies, account for pre-existing waits,
-  // and emit a wait only immediately before a dependent instruction.
-  constexpr uint16_t kWaitVaVdstZero = 0x0f9f;
-  words.push_back(
-      gfx1250::build_sopp(gfx1250::kSWaitAluSopp, {.simm16 = kWaitVaVdstZero})[0]);
 }
 
 [[nodiscard]] uint32_t text_word_at(std::span<const uint8_t> text, uint64_t offset) {
@@ -1430,19 +1418,20 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
   };
 
-  auto copy_original_instruction = [&](const Instruction &inst, uint64_t offset,
-                                       std::vector<uint8_t> &kernel_text,
-                                       std::vector<PendingTrace> &pending_traces) {
-    const uint32_t inst_size = inst.size();
-    const uint64_t target_offset = kernel_text.size();
-    const auto *words = reinterpret_cast<const uint32_t *>(text.data() + offset);
-    std::vector<uint32_t> copied_words(words, words + inst_size / sizeof(uint32_t));
-    append_words(kernel_text, copied_words);
-    // Continued-failure mode is diagnostic-only. Emit an explicit copy event so
-    // diff reports make it clear which failed source instruction was preserved.
-    queue_trace(pending_traces, inst, offset, nullptr, true, false, false, target_offset,
-                std::move(copied_words));
-  };
+  auto copy_original_instruction =
+      [&](const Instruction &inst, uint64_t offset, std::vector<uint8_t> &kernel_text,
+          std::vector<PendingTrace> &pending_traces, std::span<const uint32_t> suffix_words = {}) {
+        const uint32_t inst_size = inst.size();
+        const uint64_t target_offset = kernel_text.size();
+        const auto *words = reinterpret_cast<const uint32_t *>(text.data() + offset);
+        std::vector<uint32_t> copied_words(words, words + inst_size / sizeof(uint32_t));
+        copied_words.insert(copied_words.end(), suffix_words.begin(), suffix_words.end());
+        append_words(kernel_text, copied_words);
+        // Continued-failure mode is diagnostic-only. Emit an explicit copy event so
+        // diff reports make it clear which failed source instruction was preserved.
+        queue_trace(pending_traces, inst, offset, nullptr, true, false, !suffix_words.empty(),
+                    target_offset, std::move(copied_words));
+      };
 
   auto continue_after_instruction_error = [&](const Instruction &inst, uint64_t offset,
                                               std::vector<uint8_t> &kernel_text,
@@ -1732,6 +1721,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
     const bool can_use_long_direct_branches =
         next_long_branch_sgpr_pair(kernel_context, host_arch_).has_value();
+    const bool is_gfx1250_b0_to_a0_profile = is_gfx1250_b0_to_a0();
+    std::unordered_map<uint64_t, const Instruction *> source_instruction_by_offset;
+    std::unordered_map<uint64_t, const BasicBlock *> source_block_by_end_offset;
+    for (BasicBlock *block : scope.blocks) {
+      for (const Instruction &inst : block->instructions())
+        source_instruction_by_offset.emplace(inst.src_loc(), &inst);
+      source_block_by_end_offset.emplace(block->end_offset(), block);
+    }
+
     LivenessAnalysisOptions liveness_options;
     liveness_options.max_free_vgpr =
         static_cast<uint16_t>(isa_properties(host_arch_).max_addressable_vgprs_per_wf);
@@ -1769,18 +1767,29 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           live_before_instructions.data(), live_before_instructions.size());
     }
     LivenessAnalysis liveness = LivenessAnalysis::unavailable();
+    std::vector<ScopedCfgEdge> scope_analysis_edges;
     if (scope_requires_liveness) {
-      const auto liveness_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
-      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), liveness_options, liveness_edges);
+      scope_analysis_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
+      liveness =
+          LivenessAnalysis(KernelBlockScope(scope.blocks), liveness_options, scope_analysis_edges);
     }
 
-    std::unordered_map<uint64_t, const Instruction *> source_instruction_by_offset;
-    std::unordered_map<uint64_t, const BasicBlock *> source_block_by_end_offset;
-    for (BasicBlock *block : scope.blocks) {
-      for (const Instruction &inst : block->instructions())
-        source_instruction_by_offset.emplace(inst.src_loc(), &inst);
-      source_block_by_end_offset.emplace(block->end_offset(), block);
-    }
+    std::unique_ptr<Gfx1250VgprMsbAnalysis> wmma_completion_wait_vgpr_msb;
+    auto needs_profile_wmma_completion_wait = [&](const Instruction &inst) {
+      return is_gfx1250_b0_to_a0_profile && gfx1250_b0_to_a0_requires_wmma_completion_wait(inst);
+    };
+    auto append_profile_wmma_completion_wait_if_needed = [&](const Instruction &inst,
+                                                             std::vector<uint32_t> &words) {
+      if (wmma_completion_wait_vgpr_msb == nullptr) {
+        if (!scope_requires_liveness) {
+          scope_analysis_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
+        }
+        wmma_completion_wait_vgpr_msb = std::make_unique<Gfx1250VgprMsbAnalysis>(
+            KernelBlockScope(scope.blocks), scope.entry, scope_analysis_edges, text);
+      }
+      gfx1250_b0_to_a0_append_wmma_completion_wait_if_needed(inst, source_instruction_by_offset,
+                                                             *wmma_completion_wait_vgpr_msb, words);
+    };
 
     // Raw marker bytes are only candidates. Preserve a pool for this kernel
     // when either its marker and skip are adjacent decoded instructions in this
@@ -2394,10 +2403,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
           if (expansion.status == ExpandStatus::Success) {
             std::vector<uint32_t> target_words = std::move(expansion.words);
-            if (is_gfx1250_b0_to_a0() &&
-                gfx1250_b0_to_a0_requires_wmma_completion_wait(inst)) {
-              append_gfx1250_wmma_completion_wait(target_words);
-            }
+            if (needs_profile_wmma_completion_wait(inst))
+              append_profile_wmma_completion_wait_if_needed(inst, target_words);
             append_words(kernel_text, target_words);
             queue_trace(pending_traces, inst, offset, leg, false, true, true, target_offset,
                         std::move(target_words));
@@ -2499,14 +2506,13 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // indirect transfers have already taken their relocation paths above;
         // explicit profile expansions have already continued or failed closed.
         if (guest_arch_ == host_arch_ && leg == nullptr) {
-          if (is_gfx1250_b0_to_a0() &&
-              gfx1250_b0_to_a0_requires_wmma_completion_wait(inst)) {
-            std::vector<uint32_t> target_words = raw_words_for_inst(inst);
-            append_gfx1250_wmma_completion_wait(target_words);
-            append_words(kernel_text, target_words);
-            queue_trace(pending_traces, inst, offset, leg, false, false, true, target_offset,
-                        std::move(target_words));
-            continue;
+          if (needs_profile_wmma_completion_wait(inst)) {
+            std::vector<uint32_t> suffix_words;
+            append_profile_wmma_completion_wait_if_needed(inst, suffix_words);
+            if (!suffix_words.empty()) {
+              copy_original_instruction(inst, offset, kernel_text, pending_traces, suffix_words);
+              continue;
+            }
           }
           copy_original_instruction(inst, offset, kernel_text, pending_traces);
           continue;
