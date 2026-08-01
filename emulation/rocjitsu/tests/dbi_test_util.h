@@ -96,13 +96,17 @@ inline uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
 // `text_words`, entry at .text offset 0. The `.kd` symbol is a global STT_OBJECT
 // of descriptor size so scan_kernel_descriptors() (and replace_text) can find and
 // keep it coherent. `e_flags` selects the target ISA (e.g. GFX950 / GFX1200).
-// When `unterminated_kd_name` is set, the .strtab section size is trimmed to drop
-// the `.kd` name's terminating NUL, so the name runs to the table end unterminated
-// (exercises the scanner's boundary rejection).
+// The trailing bools inject malformed headers to exercise the scanner's rejection
+// paths (each keeps the rest of the image well-formed): `unterminated_kd_name` trims
+// the .strtab size so the `.kd` name runs off the table end with no NUL;
+// `wrap_section_header_table` sets e_shoff so e_shoff + e_shnum*sizeof(Shdr) overflows;
+// `wrap_symtab_range` sets the .symtab sh_offset so sh_offset + sh_size overflows.
 inline std::vector<uint8_t> make_amdgpu_kernel_elf(const std::vector<uint32_t> &text_words,
                                                    uint32_t private_bytes,
                                                    uint32_t granulated_sgpr_count, uint32_t e_flags,
-                                                   bool unterminated_kd_name = false) {
+                                                   bool unterminated_kd_name = false,
+                                                   bool wrap_section_header_table = false,
+                                                   bool wrap_symtab_range = false) {
   namespace kd = rocr::llvm::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
@@ -150,6 +154,8 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(const std::vector<uint32_t> &
   ehdr.e_shentsize = sizeof(Elf64_Shdr);
   ehdr.e_shnum = section_count;
   ehdr.e_shstrndx = 5;
+  if (wrap_section_header_table)
+    ehdr.e_shoff = UINT64_MAX - 8; // e_shoff + e_shnum * sizeof(Elf64_Shdr) overflows
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
   std::array<Elf64_Phdr, phdr_count> phdrs{};
@@ -234,6 +240,9 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(const std::vector<uint32_t> &
   shdrs[5].sh_size = shstrtab.size();
   shdrs[5].sh_addralign = 1;
 
+  if (wrap_symtab_range)
+    shdrs[3].sh_offset = UINT64_MAX - 4; // sh_offset + sh_size overflows
+
   std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
   return image;
 }
@@ -270,6 +279,25 @@ make_gfx950_unterminated_kd_name_elf(const std::vector<uint32_t> &text_words,
                                      uint32_t private_bytes) {
   return make_amdgpu_kernel_elf(text_words, private_bytes, /*granulated_sgpr_count=*/3,
                                 EF_AMDGPU_MACH_AMDGCN_GFX950, /*unterminated_kd_name=*/true);
+}
+
+// gfx950 target ELF whose e_shoff + e_shnum*sizeof(Elf64_Shdr) overflows, for
+// exercising the scanner's overflow-safe section-header-table bounds check.
+inline std::vector<uint8_t>
+make_gfx950_wrapping_shoff_elf(const std::vector<uint32_t> &text_words, uint32_t private_bytes) {
+  return make_amdgpu_kernel_elf(text_words, private_bytes, /*granulated_sgpr_count=*/3,
+                                EF_AMDGPU_MACH_AMDGCN_GFX950, /*unterminated_kd_name=*/false,
+                                /*wrap_section_header_table=*/true);
+}
+
+// gfx950 target ELF whose .symtab sh_offset + sh_size overflows, for exercising the
+// scanner's overflow-safe section-range bounds check (the .text section stays intact
+// so discovery still resolves the text base before rejecting the bad symtab).
+inline std::vector<uint8_t>
+make_gfx950_wrapping_symtab_elf(const std::vector<uint32_t> &text_words, uint32_t private_bytes) {
+  return make_amdgpu_kernel_elf(text_words, private_bytes, /*granulated_sgpr_count=*/3,
+                                EF_AMDGPU_MACH_AMDGCN_GFX950, /*unterminated_kd_name=*/false,
+                                /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/true);
 }
 
 // Like make_gfx950_kernel_elf but exports *two* `.kd` descriptors (both entering

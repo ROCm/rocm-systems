@@ -19,6 +19,13 @@ using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
 
 static_assert(sizeof(KD) == 64, "AMDHSA kernel descriptor size changed");
 
+// True if [offset, offset + length) fits within [0, size) without overflow (the
+// image is an arbitrary span, so offset + length may wrap). Use before forming any
+// pointer into the image.
+[[nodiscard]] bool range_in_bounds(uint64_t offset, uint64_t length, uint64_t size) {
+  return offset <= size && length <= size - offset;
+}
+
 [[nodiscard]] std::optional<std::string>
 kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t strtab_size) {
   if (sym.st_size != sizeof(KD))
@@ -70,7 +77,8 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
     return out;
 
   const auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image.data());
-  if (ehdr->e_shoff + static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr) > image.size())
+  if (!range_in_bounds(ehdr->e_shoff, static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr),
+                       image.size()))
     return out;
 
   const auto *shdr = reinterpret_cast<const Elf64_Shdr *>(image.data() + ehdr->e_shoff);
@@ -88,7 +96,8 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
   for (int i = 0; i < ehdr->e_shnum; ++i) {
     if (shdr[i].sh_type != SHT_SYMTAB && shdr[i].sh_type != SHT_DYNSYM)
       continue;
-    if (shdr[i].sh_offset + shdr[i].sh_size > image.size() || shdr[i].sh_entsize == 0)
+    if (!range_in_bounds(shdr[i].sh_offset, shdr[i].sh_size, image.size()) ||
+        shdr[i].sh_entsize == 0)
       continue;
     if (shdr[i].sh_entsize != sizeof(Elf64_Sym))
       continue;
@@ -97,7 +106,7 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
     size_t strtab_size = 0;
     if (shdr[i].sh_link < ehdr->e_shnum) {
       const auto &strtab_shdr = shdr[shdr[i].sh_link];
-      if (strtab_shdr.sh_offset + strtab_shdr.sh_size <= image.size()) {
+      if (range_in_bounds(strtab_shdr.sh_offset, strtab_shdr.sh_size, image.size())) {
         strtab = reinterpret_cast<const char *>(image.data() + strtab_shdr.sh_offset);
         strtab_size = strtab_shdr.sh_size;
       }
@@ -110,13 +119,21 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
       if (!kernel_name)
         continue;
 
+      // Map the descriptor symbol to the file bytes it points at, validating every
+      // step so a crafted symbol cannot form an out-of-bounds pointer: its section
+      // index must exist; its value must sit at or above that section's vaddr (so the
+      // vaddr->file delta does not underflow); the delta must land the file offset
+      // within the image (no wrap); and the full 64-byte descriptor must fit from
+      // there. Any failure skips this symbol rather than reading past the image.
       const uint16_t sec_idx = symtab[j].st_shndx;
       if (sec_idx >= ehdr->e_shnum || symtab[j].st_value < shdr[sec_idx].sh_addr)
         continue;
 
-      const uint64_t file_off =
-          shdr[sec_idx].sh_offset + (symtab[j].st_value - shdr[sec_idx].sh_addr);
-      if (file_off + sizeof(KD) > image.size())
+      const uint64_t delta = symtab[j].st_value - shdr[sec_idx].sh_addr;
+      if (!range_in_bounds(shdr[sec_idx].sh_offset, delta, image.size()))
+        continue;
+      const uint64_t file_off = shdr[sec_idx].sh_offset + delta;
+      if (!range_in_bounds(file_off, sizeof(KD), image.size()))
         continue;
       if (!seen_descriptor_offsets.insert(file_off).second)
         continue;
