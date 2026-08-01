@@ -81,10 +81,13 @@ jobs:
             enable_tsan: 0
             enable_expensive_checks: 0
             sanitizer_runtime: STATIC
+            run_simulator_corpus: true
+            corpus_soft_timeout: 15
+            corpus_hard_timeout: 30
           - name: asan-ubsan
             allow_failure: true
-            # Keep the first corpus gate on the fastest lane. Focused second-pass
-            # paths remain covered by the sanitizer test suite.
+            # Sanitized simulator cases need extra headroom for large FPSan
+            # modules. A failed-test rerun preserves extra diagnostics.
             verify_dbt_idempotence: 0
             dbt_timeout: 180
             dbt_memory_limit_mib: 4096
@@ -96,6 +99,9 @@ jobs:
             enable_tsan: 0
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
+            run_simulator_corpus: true
+            corpus_soft_timeout: 240
+            corpus_hard_timeout: 480
           - name: tsan
             allow_failure: false
             verify_dbt_idempotence: 0
@@ -110,6 +116,9 @@ jobs:
             enable_tsan: 1
             enable_expensive_checks: 0
             sanitizer_runtime: SHARED
+            run_simulator_corpus: false
+            corpus_soft_timeout: 0
+            corpus_hard_timeout: 0
           - name: asan-ubsan-gcc
             allow_failure: true
             verify_dbt_idempotence: 0
@@ -127,6 +136,9 @@ jobs:
             sanitizer_runtime: SHARED
             c_compiler: gcc
             cxx_compiler: g++
+            run_simulator_corpus: true
+            corpus_soft_timeout: 240
+            corpus_hard_timeout: 480
 
     steps:
       - name: Install base dependencies
@@ -152,7 +164,7 @@ jobs:
             shared/machine-readable-isa/isa
 
       - name: Checkout rocjitsu corpus
-        if: matrix.name == 'release'
+        if: matrix.run_simulator_corpus
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
@@ -195,9 +207,12 @@ jobs:
           ROCMINFO=RocminfoTest
           RCCL_DAEMON=RcclDaemonTest
           EXCLUDED_TESTS="${ROCMINFO}|${RCCL_DAEMON}"
-          ASAN_UBSAN_EXCLUDED_TESTS=(
+          SANITIZER_EXCLUDED_TESTS=(
             "HsaTest\.InitSucceeded"
             "HsaTest\.GpuAgentFound"
+            # The hardware-backed tools-hook test cannot initialize ROCR when
+            # the launcher and hook use a sanitizer-instrumented process image.
+            "HsaHooksTest\.TranslateGfx950Mfma16x16ThroughToolsLib"
             "Cdna4ToCdna3SimulatedDispatchTest\..*"
             "Cdna4ToCdna3DbtGuestTest\..*"
             "HipMemcpyTest\.RoundTripFloat"
@@ -217,7 +232,7 @@ jobs:
             "RaceTest\..*"
           )
           TSAN_EXCLUDED_TESTS=(
-            "${ASAN_UBSAN_EXCLUDED_TESTS[@]}"
+            "${SANITIZER_EXCLUDED_TESTS[@]}"
             # This test has a five-second wall-clock assertion that becomes
             # load-sensitive at the TSan job's CI-level parallelism.
             "DaemonApi\.FullListenerQueueDoesNotBlockOrRemoveSocket"
@@ -226,7 +241,7 @@ jobs:
           TEST_REGEX="${{ matrix.test_regex }}"
           CMAKE_CONFIG_FLAGS=()
           if [[ "${{ matrix.enable_asan }}" == "1" && "${{ matrix.enable_ubsan }}" == "1" ]]; then
-            EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${ASAN_UBSAN_EXCLUDED_TESTS[*]}")"
+            EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${SANITIZER_EXCLUDED_TESTS[*]}")"
             CMAKE_CONFIG_FLAGS+=(
               -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -g"
               -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O2 -g"
@@ -258,9 +273,12 @@ jobs:
             -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }} \
             -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }}
 
-          # Set a conservative number of workers to avoid OOM and excessive system load.
-          WORKERS="$(( ($(nproc) + 1) / 2 ))"
-          cmake --build "${ROCJITSU_BUILD_DIR}" -j "${WORKERS}"
+          cmake --build "${ROCJITSU_BUILD_DIR}"
+
+          TEST_WORKERS="$(nproc)"
+          if (( TEST_WORKERS > 8 )); then
+            TEST_WORKERS=8
+          fi
 
           CTEST_SELECTION=()
           if [[ -n "${TEST_REGEX}" ]]; then
@@ -270,7 +288,7 @@ jobs:
             "${CTEST_SELECTION[@]}" \
             -E "${EXCLUDED_TESTS}" \
             --output-on-failure \
-            -j "${WORKERS}"
+            -j "${TEST_WORKERS}"
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
@@ -299,14 +317,15 @@ jobs:
             --output-on-failure
 
       - name: Install corpus test dependencies
-        if: matrix.name == 'release'
+        if: matrix.run_simulator_corpus
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         run: |
           uv pip install --system -r requirements.txt
           uv pip install --system --prerelease allow \
             --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
             "rocm-sdk-device-gfx942==${ROCM_SDK_VERSION}" \
-            "rocm-sdk-device-gfx950==${ROCM_SDK_VERSION}"
+            "rocm-sdk-device-gfx950==${ROCM_SDK_VERSION}" \
+            "rocm-sdk-device-gfx1250==${ROCM_SDK_VERSION}"
           rocm-sdk init
 
       - name: Run amdisa tests
@@ -317,7 +336,8 @@ jobs:
           python -m pytest lib/python/amdisa/tests
 
       - name: Run corpus tests
-        if: matrix.name == 'release'
+        if: matrix.run_simulator_corpus
+        timeout-minutes: 60
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         env:
@@ -332,13 +352,13 @@ jobs:
           corpus_test_status=0
 
           WORKERS="$(nproc)"
-          if (( WORKERS > 16 )); then
-            WORKERS=16
+          if (( WORKERS > 8 )); then
+            WORKERS=8
           fi
           corpus_test_flags=(
             --workers "${WORKERS}" \
-            --soft-timeout 15 \
-            --hard-timeout 30 \
+            --soft-timeout ${{ matrix.corpus_soft_timeout }} \
+            --hard-timeout ${{ matrix.corpus_hard_timeout }} \
             --rerun-failed \
           )
           bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-corpus-tests.sh" "${corpus_test_flags[@]}" || corpus_test_status=$?

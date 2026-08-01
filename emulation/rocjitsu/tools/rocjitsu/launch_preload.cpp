@@ -113,6 +113,14 @@ void LaunchEnvironment::set(const std::string &name, const std::string &value) {
   envp_dirty_ = true;
 }
 
+void LaunchEnvironment::erase(const std::string &name) {
+  auto it = find_env_entry(entries_, name);
+  if (it == entries_.end())
+    return;
+  entries_.erase(it);
+  envp_dirty_ = true;
+}
+
 void LaunchEnvironment::prepend_path(const std::string &name, const std::string &value) {
   if (const char *old_value = get(name); old_value && *old_value) {
     set(name, value + ":" + old_value);
@@ -150,6 +158,15 @@ std::string find_loaded_tsan_runtime() {
 }
 
 void prepend_launch_preloads(LaunchEnvironment &environment, const std::string &interposer_path) {
+  // Add caller-requested child libraries before enforcing sanitizer/interposer
+  // ordering. Consume this launcher-only setting so nested launchers do not add
+  // the same library again.
+  std::string extra_preload;
+  if (const char *requested_preload = environment.get("RJ_LAUNCH_PRELOAD"))
+    extra_preload = requested_preload;
+  environment.erase("RJ_LAUNCH_PRELOAD");
+  if (!extra_preload.empty())
+    environment.prepend_path("LD_PRELOAD", extra_preload);
   environment.prepend_path("LD_PRELOAD", interposer_path);
   if (std::string asan_runtime = find_loaded_asan_runtime(); !asan_runtime.empty())
     environment.prepend_path("LD_PRELOAD", asan_runtime);
