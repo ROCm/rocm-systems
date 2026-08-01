@@ -25,6 +25,8 @@ from utils.analysis_orm import (
 
 PC_SAMPLING_VIEW_COLUMNS = [
     "workload_id",
+    "pid",
+    "code_object_id",
     "kernel_uuid",
     "kernel_name",
     "offset",
@@ -140,7 +142,8 @@ def fetch_pc_sampling_rows(session: Session) -> list[dict[str, object]]:
     rows = session.execute(
         text(
             f"SELECT {selected_columns} FROM compute_pc_sampling_view "
-            "ORDER BY workload_id, kernel_uuid, offset, instruction, source"
+            "ORDER BY workload_id, pid, code_object_id, kernel_uuid, offset, "
+            "instruction, source"
         )
     ).mappings()
     decoded_rows = []
@@ -264,10 +267,9 @@ def test_equal_identities_under_distinct_parent_chains_get_distinct_uuids(
 ):
     """Allow equal child identities under distinct ownership chains."""
     workload = Workload(name="w", sub_name="s")
-    first_kernel = Kernel(kernel_name="k", workload=workload)
-    second_kernel = Kernel(kernel_name="k", workload=workload)
-    first_dispatch = Dispatch(dispatch_id=0, kernel=first_kernel)
-    second_dispatch = Dispatch(dispatch_id=0, kernel=second_kernel)
+    kernel = Kernel(kernel_name="k", workload=workload)
+    first_dispatch = Dispatch(dispatch_id=0, kernel=kernel)
+    second_dispatch = Dispatch(dispatch_id=1, kernel=kernel)
     first_code_object = CodeObjectStore(
         code_object_id=5,
         pid=42,
@@ -285,14 +287,14 @@ def test_equal_identities_under_distinct_parent_chains_get_distinct_uuids(
         comment="/s/a.cpp:1",
         instruction="v_mov",
         code_object_store=first_code_object,
-        kernel=first_kernel,
+        kernel=kernel,
     )
     second_instruction = InstructionLine(
         code_object_offset=0x10,
         comment="/s/a.cpp:1",
         instruction="v_mov",
         code_object_store=second_code_object,
-        kernel=second_kernel,
+        kernel=kernel,
     )
     db_session.add_all([
         first_dispatch,
@@ -302,13 +304,12 @@ def test_equal_identities_under_distinct_parent_chains_get_distinct_uuids(
     ])
     db_session.commit()
 
-    assert first_kernel.kernel_uuid != second_kernel.kernel_uuid
     assert first_dispatch.dispatch_uuid != second_dispatch.dispatch_uuid
     assert first_code_object.code_object_uuid != second_code_object.code_object_uuid
     assert (first_code_object.pid, second_code_object.pid) == (42, 99)
     assert first_instruction.instruction_uuid != second_instruction.instruction_uuid
-    assert first_instruction.kernel is first_dispatch.kernel
-    assert second_instruction.kernel is second_dispatch.kernel
+    # Same kernel and offset; the process-scoped code object is what separates them.
+    assert first_instruction.kernel is second_instruction.kernel
     assert first_instruction.code_object_store is first_code_object
     assert second_instruction.code_object_store is second_code_object
 
@@ -373,6 +374,8 @@ def test_pc_sampling_view_flattens_normalized_tables(db_session):
     assert fetch_pc_sampling_rows(db_session) == [
         {
             "workload_id": workload.workload_id,
+            "pid": 42,
+            "code_object_id": 5,
             "kernel_uuid": kernel.kernel_uuid,
             "kernel_name": "vecCopy",
             "offset": 0x10,
@@ -386,8 +389,8 @@ def test_pc_sampling_view_flattens_normalized_tables(db_session):
     ]
 
 
-def test_pc_sampling_view_aggregates_matching_states_within_kernel_uuid(db_session):
-    """Matching states for one kernel UUID aggregate counts and stall reasons."""
+def test_pc_sampling_view_separates_states_by_code_object(db_session):
+    """States under one kernel stay separate per code object."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     add_pc_sampling_state(
@@ -416,15 +419,16 @@ def test_pc_sampling_view_aggregates_matching_states_within_kernel_uuid(db_sessi
 
     rows = fetch_pc_sampling_rows(db_session)
 
-    assert len(rows) == 1
-    assert rows[0]["count"] == 17
-    assert rows[0]["count_issue"] == 5
-    assert rows[0]["count_stall"] == 12
-    assert rows[0]["stall_reason"] == {
-        "BARRIER": 1,
-        "MEMORY": 4,
-        "WAITCNT": 7,
-    }
+    # The same offset in two code objects can be different code, so the rows are
+    # never summed together.
+    assert [row["code_object_id"] for row in rows] == [5, 6]
+    assert [row["count"] for row in rows] == [8, 9]
+    assert [row["count_issue"] for row in rows] == [2, 3]
+    assert [row["count_stall"] for row in rows] == [6, 6]
+    assert [row["stall_reason"] for row in rows] == [
+        {"MEMORY": 4, "WAITCNT": 2},
+        {"BARRIER": 1, "WAITCNT": 5},
+    ]
 
 
 @pytest.mark.parametrize(
@@ -480,15 +484,14 @@ def test_pc_sampling_view_keeps_display_identity_fields_separate(
     }
 
 
-def test_pc_sampling_view_keeps_same_name_kernel_uuids_separate(db_session):
-    """Matching states for same-name kernel UUIDs remain separate view rows."""
+def test_pc_sampling_view_keeps_processes_separate_under_one_kernel(db_session):
+    """Identical states in two processes remain separate view rows."""
     workload = Workload(name="w", sub_name="s")
-    first_kernel = Kernel(kernel_name="vecCopy", workload=workload)
-    second_kernel = Kernel(kernel_name="vecCopy", workload=workload)
+    kernel = Kernel(kernel_name="vecCopy", workload=workload)
     add_pc_sampling_state(
         db_session,
         workload=workload,
-        kernel=first_kernel,
+        kernel=kernel,
         pid=42,
         total_count=3,
         issue_count=3,
@@ -497,7 +500,7 @@ def test_pc_sampling_view_keeps_same_name_kernel_uuids_separate(db_session):
     add_pc_sampling_state(
         db_session,
         workload=workload,
-        kernel=second_kernel,
+        kernel=kernel,
         pid=99,
         total_count=5,
         issue_count=5,
@@ -508,10 +511,9 @@ def test_pc_sampling_view_keeps_same_name_kernel_uuids_separate(db_session):
 
     rows = fetch_pc_sampling_rows(db_session)
 
-    assert {(row["kernel_uuid"], row["count"]) for row in rows} == {
-        (first_kernel.kernel_uuid, 3),
-        (second_kernel.kernel_uuid, 5),
-    }
+    # One kernel row, one view row per process.
+    assert {row["kernel_uuid"] for row in rows} == {kernel.kernel_uuid}
+    assert {(row["pid"], row["count"]) for row in rows} == {(42, 3), (99, 5)}
 
 
 def test_pc_sampling_view_keeps_different_workloads_separate(db_session):
@@ -549,8 +551,8 @@ def test_pc_sampling_view_keeps_different_workloads_separate(db_session):
     }
 
 
-def test_pc_sampling_view_aggregates_host_trap_states_with_null_counts(db_session):
-    """Host-trap totals aggregate while issue, stall, and reason fields remain null."""
+def test_pc_sampling_view_keeps_host_trap_states_with_null_counts(db_session):
+    """Host-trap rows stay per code object with null issue, stall, and reason."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     add_pc_sampling_state(
@@ -577,18 +579,18 @@ def test_pc_sampling_view_aggregates_host_trap_states_with_null_counts(db_sessio
 
     rows = fetch_pc_sampling_rows(db_session)
 
-    assert len(rows) == 1
-    assert rows[0]["count"] == 8
-    assert rows[0]["count_issue"] is None
-    assert rows[0]["count_stall"] is None
-    assert rows[0]["stall_reason"] is None
+    assert [row["code_object_id"] for row in rows] == [5, 6]
+    assert [row["count"] for row in rows] == [3, 5]
+    assert all(row["count_issue"] is None for row in rows)
+    assert all(row["count_stall"] is None for row in rows)
+    assert all(row["stall_reason"] is None for row in rows)
 
 
 @pytest.mark.parametrize("nullable_field", ["offset", "instruction", "source"])
 def test_pc_sampling_view_attaches_reasons_with_nullable_identity(
     db_session, nullable_field
 ):
-    """Null identity fields still group matching states and retain stall reasons."""
+    """Null identity fields keep their rows and their own stall reasons."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     identity = {
@@ -625,7 +627,7 @@ def test_pc_sampling_view_attaches_reasons_with_nullable_identity(
 
     rows = fetch_pc_sampling_rows(db_session)
 
-    assert len(rows) == 1
-    assert rows[0][nullable_field] is None
-    assert rows[0]["count"] == 8
-    assert rows[0]["stall_reason"] == {"WAITCNT": 6}
+    assert [row["code_object_id"] for row in rows] == [5, 6]
+    assert all(row[nullable_field] is None for row in rows)
+    assert [row["count"] for row in rows] == [3, 5]
+    assert [row["stall_reason"] for row in rows] == [{"WAITCNT": 2}, {"WAITCNT": 4}]

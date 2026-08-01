@@ -70,7 +70,7 @@ from utils.utils_counter_defs import (
     get_build_in_vars,
 )
 
-KernelKey = tuple[Optional[int], str]
+KernelKey = str
 CodeObjectKey = tuple[int, int]
 
 
@@ -157,7 +157,7 @@ class db_analysis(OmniAnalyze_Base):
             for dispatch in self._dispatch_data_per_workload.get(
                 workload_path, pd.DataFrame()
             ).itertuples():
-                kernel_key: KernelKey = (dispatch.pid, dispatch.kernel_name)
+                kernel_key: KernelKey = dispatch.kernel_name
                 # Add kernel object and map it, if not already added
                 if kernel_key not in kernel_objs:
                     kernel_objs[kernel_key] = orm.Kernel(
@@ -182,7 +182,7 @@ class db_analysis(OmniAnalyze_Base):
                 workload_path, pd.DataFrame()
             ).itertuples():
                 kernel_name = getattr(roofline_data, "kernel_name", None)
-                kernel_key: KernelKey = (None, kernel_name)
+                kernel_key: KernelKey = kernel_name
                 if kernel_key not in kernel_objs:
                     console_warning(
                         f"Kernel {kernel_name} from roofline data "
@@ -214,13 +214,6 @@ class db_analysis(OmniAnalyze_Base):
                         lds_cache_data=workload_roofline.get("lds_cache_data"),
                         workload=workload_obj,
                     )
-                )
-
-            if self.pc_sampling_collected() and not self.pc_sampling_only():
-                self._add_pid_scoped_pc_sampling_kernels(
-                    workload_path,
-                    workload_obj,
-                    kernel_objs,
                 )
 
             # Add pc sampling data, then the full code-object ISA
@@ -273,7 +266,7 @@ class db_analysis(OmniAnalyze_Base):
         for value in self._kernel_values_data_per_workload.get(
             workload_path, pd.DataFrame()
         ).itertuples():
-            kernel_key: KernelKey = (None, value.kernel_name)
+            kernel_key: KernelKey = value.kernel_name
             # Check if kernel exists
             if kernel_key not in kernel_objs:
                 console_warning(
@@ -435,7 +428,6 @@ class db_analysis(OmniAnalyze_Base):
                 for line in code_object.instruction_lines:
                     self._add_instruction_line(
                         line,
-                        pid,
                         code_object_store,
                         kernel_objs,
                     )
@@ -445,12 +437,11 @@ class db_analysis(OmniAnalyze_Base):
     @staticmethod
     def _add_instruction_line(
         line: InstructionLineRecord,
-        pid: int,
         code_object_store: orm.CodeObjectStore,
         kernel_objs: dict[KernelKey, orm.Kernel],
     ) -> None:
         """Insert one instruction line, its sample state, and child counts."""
-        kernel = kernel_objs.get((pid, line.kernel_name))
+        kernel = kernel_objs.get(line.kernel_name)
         if kernel is None:
             # Drop lines whose kernel was filtered out or never mapped.
             return
@@ -1005,7 +996,6 @@ class db_analysis(OmniAnalyze_Base):
                 dispatch_data_per_workload[workload_path] = pd.DataFrame([
                     {
                         "dispatch_id": row.Dispatch_ID,
-                        "pid": getattr(row, "PID", None),
                         "kernel_name": row.Kernel_Name,
                         "gpu_id": row.GPU_ID,
                         "start_timestamp": row.Start_Timestamp,
@@ -1018,37 +1008,6 @@ class db_analysis(OmniAnalyze_Base):
             console_debug("Calculated dispatch data")
 
         return dispatch_data_per_workload
-
-    def _add_pid_scoped_pc_sampling_kernels(
-        self,
-        workload_path: str,
-        workload_obj: orm.Workload,
-        kernel_objs: dict[KernelKey, orm.Kernel],
-    ) -> None:
-        """Register process-scoped kernels for dispatched sampling symbols."""
-        tool_data_records = self._pc_sampling_tool_data_per_workload.get(
-            workload_path, []
-        )
-        for tool_data in tool_data_records:
-            pid: int = tool_data["metadata"]["pid"]
-            dispatched_kernel_ids = {
-                dispatch_record["dispatch_info"]["kernel_id"]
-                for dispatch_record in tool_data["buffer_records"]["kernel_dispatch"]
-            }
-            for symbol in tool_data.get("kernel_symbols", []):
-                if symbol["kernel_id"] not in dispatched_kernel_ids:
-                    continue
-                kernel_name = symbol["formatted_kernel_name"]
-                if (None, kernel_name) not in kernel_objs:
-                    continue
-                kernel_key: KernelKey = (pid, kernel_name)
-                if kernel_key in kernel_objs:
-                    continue
-                kernel_objs[kernel_key] = orm.Kernel(
-                    kernel_name=kernel_name,
-                    workload=workload_obj,
-                )
-                Database.get_session().add(kernel_objs[kernel_key])
 
     @staticmethod
     def _pc_sampling_tool_data_by_pid(
@@ -1072,8 +1031,12 @@ class db_analysis(OmniAnalyze_Base):
         tool_data: dict[str, Any],
         kernel_objs: dict[KernelKey, orm.Kernel],
     ) -> dict[tuple[Any, str], orm.Kernel]:
-        """Map process-local ELF symbols to their dispatched kernel objects."""
-        pid: int = tool_data["metadata"]["pid"]
+        """Map process-local ELF symbols to their dispatched kernel objects.
+
+        The key stays process-local because ``code_object_id`` is, but the
+        kernel it resolves to is shared: a kernel is identified by name across
+        the whole workload.
+        """
         dispatched_kernel_ids = {
             dispatch_record["dispatch_info"]["kernel_id"]
             for dispatch_record in tool_data["buffer_records"]["kernel_dispatch"]
@@ -1085,10 +1048,7 @@ class db_analysis(OmniAnalyze_Base):
             ): kernel
             for symbol in tool_data.get("kernel_symbols", [])
             if symbol["kernel_id"] in dispatched_kernel_ids
-            if (
-                (kernel := kernel_objs.get((pid, symbol["formatted_kernel_name"])))
-                is not None
-            )
+            if (kernel := kernel_objs.get(symbol["formatted_kernel_name"])) is not None
         }
 
     @staticmethod

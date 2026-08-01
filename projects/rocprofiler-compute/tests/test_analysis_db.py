@@ -1000,13 +1000,13 @@ def test_add_pc_sampling_data_no_tool_data_is_noop(db_session):
 
 
 def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
-    """Instruction lines use the PID-scoped kernels and transient store registry."""
+    """Instruction lines use the workload kernels and transient store registry."""
     workload_path = "/fake/workload"
     workload = orm.Workload(name="w", sub_name="s")
     db_session.add(workload)
     kernel_objs = {
-        (42, "vecCopy"): orm.Kernel(kernel_name="vecCopy", workload=workload),
-        (42, "vecAdd"): orm.Kernel(kernel_name="vecAdd", workload=workload),
+        "vecCopy": orm.Kernel(kernel_name="vecCopy", workload=workload),
+        "vecAdd": orm.Kernel(kernel_name="vecAdd", workload=workload),
     }
     for kernel in kernel_objs.values():
         db_session.add(kernel)
@@ -1049,11 +1049,10 @@ def test_add_pc_sampling_data_separates_shared_code_object_ids_across_pids(
     workload = orm.Workload(name="w", sub_name="s")
     db_session.add(workload)
     kernel_objs = {
-        (process_id, kernel_name): orm.Kernel(
+        kernel_name: orm.Kernel(
             kernel_name=kernel_name,
             workload=workload,
         )
-        for process_id in (42, 99)
         for kernel_name in ("vecCopy", "vecAdd")
     }
     for kernel in kernel_objs.values():
@@ -1079,14 +1078,11 @@ def test_add_pc_sampling_data_separates_shared_code_object_ids_across_pids(
     assert first_store is not second_store
     assert first_store.code_object_uuid != second_store.code_object_uuid
     assert (first_store.pid, second_store.pid) == (42, 99)
-    assert {line.kernel for line in first_store.instruction_lines} == {
-        kernel_objs[(42, "vecCopy")],
-        kernel_objs[(42, "vecAdd")],
-    }
-    assert {line.kernel for line in second_store.instruction_lines} == {
-        kernel_objs[(99, "vecCopy")],
-        kernel_objs[(99, "vecAdd")],
-    }
+    # Both stores attribute to the same workload kernels; the stores stay
+    # distinct because code_object_id is process-local.
+    expected_kernels = {kernel_objs["vecCopy"], kernel_objs["vecAdd"]}
+    assert {line.kernel for line in first_store.instruction_lines} == expected_kernels
+    assert {line.kernel for line in second_store.instruction_lines} == expected_kernels
     total_vec_copy_samples = sum(
         line.pc_sample_state.total_count
         for line in db_session.query(orm.InstructionLine).all()
@@ -1148,36 +1144,16 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
         (42, 5),
         (99, 5),
     ]
-    process_id_by_kernel_uuid = {
-        line.kernel_uuid: store.pid
-        for store in code_object_stores
-        for line in store.instruction_lines
-    }
+    # A kernel is identified by name across the workload, so both processes
+    # share one kernel row. Renumbering keeps their dispatch ids distinct.
     assert [
-        (
-            process_id_by_kernel_uuid[dispatch.kernel_uuid],
-            dispatch.dispatch_id,
-            dispatch.kernel.kernel_name,
-        )
-        for dispatch in dispatches
+        (dispatch.dispatch_id, dispatch.kernel.kernel_name) for dispatch in dispatches
     ] == [
-        (42, 0, "vecCopy"),
-        (42, 1, "vecCopy"),
-        (99, 0, "vecCopy"),
+        (0, "vecCopy"),
+        (1, "vecCopy"),
+        (2, "vecCopy"),
     ]
-    kernel_uuids_by_process_id = {
-        process_id: {
-            kernel_uuid
-            for kernel_uuid, owner_process_id in process_id_by_kernel_uuid.items()
-            if owner_process_id == process_id
-        }
-        for process_id in (42, 99)
-    }
-    assert {
-        process_id: len(kernel_uuids)
-        for process_id, kernel_uuids in kernel_uuids_by_process_id.items()
-    } == {42: 1, 99: 1}
-    assert kernel_uuids_by_process_id[42].isdisjoint(kernel_uuids_by_process_id[99])
+    assert len({dispatch.kernel_uuid for dispatch in dispatches}) == 1
     assert len({dispatch.dispatch_uuid for dispatch in dispatches}) == 3
 
     assert len({store.code_object_uuid for store in code_object_stores}) == 2
@@ -1201,20 +1177,19 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     } == {42: 1, 99: 2}
     assert sum(line.pc_sample_state.total_count for line in instruction_lines) == 3
 
-    for process_id, instruction_line in instruction_by_process_id.items():
-        assert instruction_line.kernel_uuid in kernel_uuids_by_process_id[process_id]
+    # Each process's line resolves to the one shared kernel, which is reachable
+    # from the kernel view because it owns dispatches.
+    shared_kernel_uuid = dispatches[0].kernel_uuid
+    for instruction_line in instruction_by_process_id.values():
+        assert instruction_line.kernel_uuid == shared_kernel_uuid
         assert instruction_line.kernel.dispatches
-        assert all(
-            dispatch.kernel_uuid == instruction_line.kernel_uuid
-            for dispatch in instruction_line.kernel.dispatches
-        )
         assert instruction_line.code_object_store.code_object_id == 5
 
 
-def test_run_analysis_materialized_views_keep_pid_scoped_pc_sampling_origins(
+def test_run_analysis_materialized_views_keep_pc_sampling_origins(
     db_session,
 ):
-    """Preserve process-scoped ownership through materialized database views."""
+    """Preserve process-scoped code objects through materialized views."""
     workload_path = "/fake/workload"
     analyzer = make_pc_sampling_only_database_analyzer(
         workload_path,
@@ -1233,25 +1208,15 @@ def test_run_analysis_materialized_views_keep_pid_scoped_pc_sampling_origins(
         (42, 5),
         (99, 5),
     ]
-    process_id_by_kernel_uuid = {
-        line.kernel_uuid: store.pid
-        for store in code_object_stores
-        for line in store.instruction_lines
-    }
-    dispatches = db_session.query(orm.Dispatch).order_by(orm.Dispatch.kernel_uuid).all()
+    dispatches = db_session.query(orm.Dispatch).order_by(orm.Dispatch.dispatch_id).all()
     assert [
-        (
-            process_id_by_kernel_uuid[dispatch.kernel_uuid],
-            dispatch.dispatch_id,
-            dispatch.kernel.kernel_name,
-        )
-        for dispatch in dispatches
+        (dispatch.dispatch_id, dispatch.kernel.kernel_name) for dispatch in dispatches
     ] == [
-        (42, 0, "vecCopy"),
-        (99, 0, "vecCopy"),
+        (0, "vecCopy"),
+        (1, "vecCopy"),
     ]
     assert len({dispatch.dispatch_uuid for dispatch in dispatches}) == 2
-    assert len({dispatch.kernel_uuid for dispatch in dispatches}) == 2
+    assert len({dispatch.kernel_uuid for dispatch in dispatches}) == 1
 
     assert len(code_object_stores) == 2
     assert {store.code_object_id for store in code_object_stores} == {5}
@@ -1275,13 +1240,9 @@ def test_run_analysis_materialized_views_keep_pid_scoped_pc_sampling_origins(
     } == {42: 1, 99: 2}
     assert sum(line.pc_sample_state.total_count for line in instruction_lines) == 3
 
-    for process_id, instruction_line in instruction_by_process_id.items():
-        dispatch = next(
-            dispatch
-            for dispatch in dispatches
-            if process_id_by_kernel_uuid[dispatch.kernel_uuid] == process_id
-        )
-        assert instruction_line.kernel_uuid == dispatch.kernel_uuid
+    shared_kernel_uuid = dispatches[0].kernel_uuid
+    for instruction_line in instruction_by_process_id.values():
+        assert instruction_line.kernel_uuid == shared_kernel_uuid
         assert (
             instruction_line.code_object_uuid
             == instruction_line.code_object_store.code_object_uuid
@@ -1355,8 +1316,8 @@ def test_run_analysis_materialized_views_keep_pid_scoped_pc_sampling_origins(
         db_session
         .execute(
             text(
-                "SELECT kernel_uuid, kernel_name, count "
-                "FROM compute_pc_sampling_view ORDER BY kernel_uuid"
+                "SELECT pid, kernel_uuid, kernel_name, count "
+                "FROM compute_pc_sampling_view ORDER BY pid"
             )
         )
         .mappings()
@@ -1366,9 +1327,12 @@ def test_run_analysis_materialized_views_keep_pid_scoped_pc_sampling_origins(
         "vecCopy",
         "vecCopy",
     ]
-    pc_sampling_mapping = {row["kernel_uuid"]: row["count"] for row in pc_sampling_rows}
+    # Both rows name the same kernel; pid is what keeps them apart.
+    assert len({row["kernel_uuid"] for row in pc_sampling_rows}) == 1
+    pc_sampling_mapping = {row["pid"]: row["count"] for row in pc_sampling_rows}
     expected_pc_sampling_mapping = {
-        line.kernel_uuid: line.pc_sample_state.total_count for line in instruction_lines
+        line.code_object_store.pid: line.pc_sample_state.total_count
+        for line in instruction_lines
     }
     assert pc_sampling_mapping == expected_pc_sampling_mapping
     assert sum(pc_sampling_mapping.values()) == 3
@@ -1384,18 +1348,20 @@ def test_run_analysis_materialized_views_keep_pid_scoped_pc_sampling_origins(
         .mappings()
         .all()
     )
-    assert [row["kernel_name"] for row in kernel_rows] == [
-        "vecCopy",
-        "vecCopy",
-    ]
-    kernel_mapping = {row["kernel_uuid"]: row["dispatch_count"] for row in kernel_rows}
-    assert kernel_mapping == dict.fromkeys(expected_pc_sampling_mapping, 1)
+    # The kernel view inner-joins dispatches, so the shared kernel appears once
+    # and carries both processes' dispatches.
+    assert [row["kernel_name"] for row in kernel_rows] == ["vecCopy"]
+    assert kernel_rows[0]["dispatch_count"] == 2
+    # Every sampling row resolves to a kernel the kernel view exposes.
+    assert {row["kernel_uuid"] for row in pc_sampling_rows} == {
+        row["kernel_uuid"] for row in kernel_rows
+    }
 
 
-def test_run_analysis_exports_existing_csv_surface_for_pid_scoped_pc_sampling(
+def test_run_analysis_exports_process_scoped_pc_sampling_csv(
     tmp_path,
 ):
-    """Keep process-scoped rows distinct without changing the CSV schema."""
+    """Export one PC sampling CSV row per process, resolvable in kernel.csv."""
     try:
         orm.Database.init(":memory:")
         database_session = orm.Database.get_session()
@@ -1411,12 +1377,9 @@ def test_run_analysis_exports_existing_csv_surface_for_pid_scoped_pc_sampling(
         run_analysis_with_materialized_views(analyzer)
 
         expected_pc_sampling_mapping = {
-            kernel_uuid: count
-            for kernel_uuid, count in database_session.execute(
-                text(
-                    "SELECT kernel_uuid, count "
-                    "FROM compute_pc_sampling_view ORDER BY kernel_uuid"
-                )
+            pid: count
+            for pid, count in database_session.execute(
+                text("SELECT pid, count FROM compute_pc_sampling_view ORDER BY pid")
             )
         }
         expected_kernel_mapping = {
@@ -1443,29 +1406,27 @@ def test_run_analysis_exports_existing_csv_surface_for_pid_scoped_pc_sampling(
 
         pc_sampling_frame = pd.read_csv(csv_directory / "pc_sampling.csv")
         kernel_frame = pd.read_csv(csv_directory / "kernel.csv")
-        assert "pid" not in pc_sampling_frame.columns
+        assert "pid" in pc_sampling_frame.columns
+        assert "code_object_id" in pc_sampling_frame.columns
         assert "pid" not in kernel_frame.columns
         assert list(pc_sampling_frame["kernel_name"]) == ["vecCopy", "vecCopy"]
-        assert list(kernel_frame["kernel_name"]) == ["vecCopy", "vecCopy"]
+        assert list(kernel_frame["kernel_name"]) == ["vecCopy"]
 
         pc_sampling_csv_mapping = {
-            row.kernel_uuid: row.count
-            for row in pc_sampling_frame.itertuples(index=False)
+            row.pid: row.count for row in pc_sampling_frame.itertuples(index=False)
         }
-        assert len(pc_sampling_csv_mapping) == 2
-        assert set(pc_sampling_csv_mapping) == set(expected_pc_sampling_mapping)
-        assert set(pc_sampling_csv_mapping.values()) == {1, 2}
-        assert sum(pc_sampling_csv_mapping.values()) == 3
+        assert pc_sampling_csv_mapping == {42: 1, 99: 2}
         assert pc_sampling_csv_mapping == expected_pc_sampling_mapping
 
         kernel_csv_mapping = {
             row.kernel_uuid: row.dispatch_count
             for row in kernel_frame.itertuples(index=False)
         }
-        assert len(kernel_csv_mapping) == 2
-        assert set(kernel_csv_mapping) == set(expected_pc_sampling_mapping)
-        assert set(kernel_csv_mapping.values()) == {1}
         assert kernel_csv_mapping == expected_kernel_mapping
+        assert set(kernel_csv_mapping.values()) == {2}
+
+        # T1 regression guard: every sampling row must resolve in kernel.csv.
+        assert set(pc_sampling_frame["kernel_uuid"]) <= set(kernel_frame["kernel_uuid"])
     finally:
         current_session = orm.Database._session
         if current_session is not None:
@@ -1481,7 +1442,7 @@ def test_run_analysis_keeps_mixed_counter_and_pc_sampling_ownership(
     db_session,
     tmp_path,
 ):
-    """Keep counter and process-scoped PC sampling ownership separate."""
+    """Attribute every process's sampling lines to the dispatched kernel."""
     workload_path = str(tmp_path)
     first_tool_data = make_colliding_pc_sampling_tool_data(42, 1)
     second_tool_data = make_colliding_pc_sampling_tool_data(99, 2)
@@ -1555,9 +1516,11 @@ def test_run_analysis_keeps_mixed_counter_and_pc_sampling_ownership(
     assert roofline_data.kernel_uuid == aggregate_kernel.kernel_uuid
     assert roofline_data.total_flops == 64.0
 
+    # One kernel row per name, so the sampling lines attribute to the same
+    # kernel the counter dispatch created and stay reachable from kernel.csv.
     kernels = db_session.query(orm.Kernel).all()
-    assert len(kernels) == 3
-    assert {kernel.kernel_name for kernel in kernels} == {"vecCopy"}
+    assert len(kernels) == 1
+    assert kernels == [aggregate_kernel]
 
     stores = (
         db_session
@@ -1602,31 +1565,21 @@ def test_run_analysis_keeps_mixed_counter_and_pc_sampling_ownership(
         sampled_instruction_uuid_chain,
         isa_instruction_uuid_chain,
     ) = zip(*chain_by_process_id.values())
-    assert len(set(kernel_uuid_chain)) == 2
+    # Process identity lives on the code object, not the kernel.
+    assert set(kernel_uuid_chain) == {aggregate_kernel.kernel_uuid}
     assert len(set(code_object_uuid_chain)) == 2
     assert len(set(sampled_instruction_uuid_chain)) == 2
     assert len(set(isa_instruction_uuid_chain)) == 2
 
-    pid_kernel_uuids = set(kernel_uuid_chain)
-    assert aggregate_kernel.kernel_uuid not in pid_kernel_uuids
-    assert {kernel.kernel_uuid for kernel in kernels} == {
-        aggregate_kernel.kernel_uuid,
-        *pid_kernel_uuids,
-    }
-    assert aggregate_kernel.instruction_lines == []
-
-    pid_kernels = [
-        kernel for kernel in kernels if kernel.kernel_uuid in pid_kernel_uuids
-    ]
-    for kernel in pid_kernels:
-        assert kernel.dispatches == []
-        assert kernel.metric_values == []
-        assert kernel.roofline_data_points == []
+    assert len(aggregate_kernel.instruction_lines) == 4
+    assert aggregate_kernel.dispatches
+    assert aggregate_kernel.metric_values
+    assert aggregate_kernel.roofline_data_points
 
     sample_states = db_session.query(orm.PCSampleState).all()
     assert len(sample_states) == 2
     assert all(
-        state.instruction_line.kernel_uuid in pid_kernel_uuids
+        state.instruction_line.kernel_uuid == aggregate_kernel.kernel_uuid
         for state in sample_states
     )
     assert db_session.query(orm.PCSampleStallReason).count() == 2
@@ -1651,15 +1604,17 @@ def test_run_analysis_does_not_register_filtered_pc_sampling_symbols(
     dispatch = db_session.query(orm.Dispatch).one()
 
     kernels = db_session.query(orm.Kernel).all()
-    assert len(kernels) == 2
+    assert len(kernels) == 1
     assert {kernel.kernel_name for kernel in kernels} == {"vecCopy"}
 
     instruction_lines = db_session.query(orm.InstructionLine).all()
     assert [line.code_object_offset for line in instruction_lines] == [0x10]
 
+    # vecAdd was filtered out of the dispatches, so only vecCopy's line survives
+    # and it attributes to the dispatched kernel.
     sampled_line = instruction_lines[0]
     assert sampled_line.code_object_store.pid == 42
-    assert sampled_line.kernel_uuid != dispatch.kernel_uuid
+    assert sampled_line.kernel_uuid == dispatch.kernel_uuid
     assert sampled_line.pc_sample_state.total_count == 1
     assert db_session.query(orm.PCSampleState).count() == 1
     assert db_session.query(orm.PCSampleStallReason).count() == 1
@@ -1750,8 +1705,8 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
         workload = orm.Workload(name="w", sub_name="s")
         db_session.add(workload)
         kernel_objs = {
-            (42, "vecCopy"): orm.Kernel(kernel_name="vecCopy", workload=workload),
-            (42, "vecAdd"): orm.Kernel(kernel_name="vecAdd", workload=workload),
+            "vecCopy": orm.Kernel(kernel_name="vecCopy", workload=workload),
+            "vecAdd": orm.Kernel(kernel_name="vecAdd", workload=workload),
         }
         for kernel in kernel_objs.values():
             db_session.add(kernel)
@@ -1848,11 +1803,7 @@ def test_add_code_object_isa_scopes_unsampled_code_objects_by_process(db_session
         workload = orm.Workload(name="w", sub_name="s")
         db_session.add(workload)
         kernel_objs = {
-            (process_id, "helper"): orm.Kernel(
-                kernel_name="helper",
-                workload=workload,
-            )
-            for process_id in (42, 99)
+            "helper": orm.Kernel(kernel_name="helper", workload=workload),
         }
         db_session.add_all(kernel_objs.values())
 
@@ -1885,8 +1836,8 @@ def test_add_code_object_isa_scopes_unsampled_code_objects_by_process(db_session
         assert first_line.code_object_offset == second_line.code_object_offset == 0x8
         assert first_line.instruction == second_line.instruction == "s_endpgm"
         assert first_line.instruction_uuid != second_line.instruction_uuid
-        assert first_line.kernel is kernel_objs[(42, "helper")]
-        assert second_line.kernel is kernel_objs[(99, "helper")]
+        assert first_line.kernel is kernel_objs["helper"]
+        assert second_line.kernel is kernel_objs["helper"]
     finally:
         common.clean_output_dir(True, workload_path)
 
@@ -1923,7 +1874,7 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
         db_session.add(workload)
         helper = orm.Kernel(kernel_name="helper", workload=workload)
         db_session.add(helper)
-        kernel_objs = {(42, "helper"): helper}
+        kernel_objs = {"helper": helper}
 
         analyzer = db_analysis(MagicMock(), {})
         analyzer._pc_sampling_tool_data_per_workload = {workload_path: [tool_data]}
@@ -1997,11 +1948,10 @@ def test_add_code_object_isa_scopes_duplicate_offsets_by_process(db_session):
         workload = orm.Workload(name="w", sub_name="s")
         db_session.add(workload)
         kernel_objs = {
-            (process_id, kernel_name): orm.Kernel(
+            kernel_name: orm.Kernel(
                 kernel_name=kernel_name,
                 workload=workload,
             )
-            for process_id in (42, 99)
             for kernel_name in ("vecCopy", "vecAdd")
         }
         for kernel in kernel_objs.values():
@@ -2041,8 +1991,8 @@ def test_add_code_object_isa_scopes_duplicate_offsets_by_process(db_session):
         assert first_line.instruction == second_line.instruction == "s_shared"
         assert first_line.instruction_uuid != second_line.instruction_uuid
         assert first_line.code_object_uuid != second_line.code_object_uuid
-        assert first_line.kernel is kernel_objs[(42, "vecCopy")]
-        assert second_line.kernel is kernel_objs[(99, "vecCopy")]
+        assert first_line.kernel is kernel_objs["vecCopy"]
+        assert second_line.kernel is kernel_objs["vecCopy"]
     finally:
         common.clean_output_dir(True, workload_path)
 
@@ -2100,8 +2050,8 @@ def test_add_code_object_isa_requires_process_local_dispatch(db_session):
         workload = orm.Workload(name="w", sub_name="s")
         db_session.add(workload)
         kernel_objs = {
-            (99, "vecCopy"): orm.Kernel(kernel_name="vecCopy", workload=workload),
-            (99, "vecAdd"): orm.Kernel(kernel_name="vecAdd", workload=workload),
+            "vecCopy": orm.Kernel(kernel_name="vecCopy", workload=workload),
+            "vecAdd": orm.Kernel(kernel_name="vecAdd", workload=workload),
         }
         db_session.add_all(kernel_objs.values())
 
@@ -2138,10 +2088,8 @@ def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
     workload = orm.Workload(name="w", sub_name="s")
     db_session.add(workload)
     # Only vecCopy survives filtering; vecAdd's line must be dropped.
-    kernel_objs = {
-        (42, "vecCopy"): orm.Kernel(kernel_name="vecCopy", workload=workload)
-    }
-    db_session.add(kernel_objs[(42, "vecCopy")])
+    kernel_objs = {"vecCopy": orm.Kernel(kernel_name="vecCopy", workload=workload)}
+    db_session.add(kernel_objs["vecCopy"])
 
     analyzer = db_analysis(MagicMock(), {})
     analyzer._pc_sampling_tool_data_per_workload = {
@@ -2153,7 +2101,7 @@ def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
     lines = db_session.query(orm.InstructionLine).all()
     assert [line.code_object_offset for line in lines] == [0x10]
     retained_line = lines[0]
-    assert retained_line.kernel is kernel_objs[(42, "vecCopy")]
+    assert retained_line.kernel is kernel_objs["vecCopy"]
 
     retained_sample_state = db_session.query(orm.PCSampleState).one()
     assert retained_line.pc_sample_state is retained_sample_state

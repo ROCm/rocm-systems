@@ -220,20 +220,6 @@ def build_agent_to_gpu_map_from_json(
     return {agent["id"]["handle"]: index for index, agent in enumerate(gpu_agents)}
 
 
-def discover_pc_sampling_result_files(
-    workload_path: Path,
-) -> tuple[Path, ...]:
-    """Discover direct-child ``<pid>_ps_file_results.json`` files."""
-    if not workload_path.is_dir():
-        direct_child_files: tuple[Path, ...] = ()
-    else:
-        direct_child_files = tuple(
-            child_path for child_path in workload_path.iterdir() if child_path.is_file()
-        )
-
-    return _find_pid_prefixed_pc_sampling_result_files(direct_child_files)
-
-
 @demarcate
 def load_pc_sampling_results(workload_path: str) -> list[dict[str, Any]]:
     """Load valid PC sampling tool records for a workload.
@@ -245,7 +231,7 @@ def load_pc_sampling_results(workload_path: str) -> list[dict[str, Any]]:
     with every PC sampling consumer instead of re-reading the files.
     """
     tool_records = []
-    for result_file in discover_pc_sampling_result_files(Path(workload_path)):
+    for result_file in _find_pid_prefixed_pc_sampling_result_files(Path(workload_path)):
         tool_record = _parse_pc_sampling_result_file(result_file)
         if tool_record is None:
             continue
@@ -261,13 +247,14 @@ def process_pc_sampling_kernel_traces(
     if not tool_data_records:
         return process_pc_sampling_kernel_trace(None)
 
-    return pd.concat(
+    combined_trace = pd.concat(
         [
             process_pc_sampling_kernel_trace(tool_data)
             for tool_data in tool_data_records
         ],
         ignore_index=True,
     )
+    return _renumber_dispatch_ids_across_processes(combined_trace)
 
 
 def process_pc_sampling_kernel_trace(
@@ -422,14 +409,43 @@ def is_single_panel_config(
         )
 
 
+def _renumber_dispatch_ids_across_processes(
+    combined_trace: pd.DataFrame,
+) -> pd.DataFrame:
+    """Replace process-local dispatch ids with ids unique across processes.
+
+    ``dispatch_info.dispatch_id`` restarts in every process, so a multi-process
+    workload repeats the same id once per process. Counter profiling already
+    folds ``PID`` into ``Dispatch_ID`` before analyze sees it, via the
+    ``GroupIdAssigner`` in ``utils_profile``, which is why it can then drop the
+    ``PID`` column outright. Doing the same here keeps one meaning of a dispatch
+    id across both analyze paths, and keeps ``--dispatch`` unambiguous.
+
+    Records arrive in numeric PID order and carry one row per dispatch, so
+    positional numbering is deterministic and matches the counter path's
+    zero-based, first-seen ids.
+    """
+    if combined_trace.empty:
+        return combined_trace
+
+    renumbered_trace = combined_trace.copy()
+    renumbered_trace["Dispatch_Id"] = range(len(renumbered_trace))
+    return renumbered_trace
+
+
 def _find_pid_prefixed_pc_sampling_result_files(
-    direct_child_files: tuple[Path, ...],
+    workload_path: Path,
 ) -> tuple[Path, ...]:
-    """Return PID-prefixed result files in numeric PID order."""
+    """Return the workload's ``<pid>_ps_file_results.json`` in numeric PID order."""
+    if not workload_path.is_dir():
+        return ()
+
     results_filename_suffix = "_ps_file_results.json"
     pid_result_candidates: list[Path] = []
 
-    for candidate_path in direct_child_files:
+    for candidate_path in workload_path.iterdir():
+        if not candidate_path.is_file():
+            continue
         if not candidate_path.name.endswith(results_filename_suffix):
             continue
 
@@ -439,12 +455,12 @@ def _find_pid_prefixed_pc_sampling_result_files(
 
         pid_result_candidates.append(candidate_path)
 
+    # The PID prefix alone orders the files: it is unique among siblings.
     return tuple(
         sorted(
             pid_result_candidates,
-            key=lambda candidate_path: (
-                int(candidate_path.name[: -len(results_filename_suffix)]),
-                candidate_path.name,
+            key=lambda candidate_path: int(
+                candidate_path.name[: -len(results_filename_suffix)]
             ),
         )
     )
@@ -453,7 +469,12 @@ def _find_pid_prefixed_pc_sampling_result_files(
 def _validate_pc_sampling_process_ids(
     tool_data_records: list[dict[str, Any]],
 ) -> None:
-    """Require a concrete, unique process ID for every tool record."""
+    """Require a concrete, unique process ID for every tool record.
+
+    This is the precondition that lets every downstream consumer index
+    ``tool_data["metadata"]["pid"]`` without a guard. ``console_error`` exits by
+    default, so a record that reaches those consumers is known to have a pid.
+    """
     if not tool_data_records:
         return
 

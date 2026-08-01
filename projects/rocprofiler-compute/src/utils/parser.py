@@ -392,21 +392,23 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
 def load_pc_sampling_data(
     workload: schema.Workload,
     sorting_type: str,
-    tool_data_records: list[dict[str, Any]],
+    tool_data_records: Optional[list[dict[str, Any]]] = None,
     num_rows: Optional[int] = None,
 ) -> pd.DataFrame:
     """Return the detailed per-instruction table for a single kernel or all.
 
-    Detects the method, builds one unformatted frame per tool record, merges
-    equivalent rows across records, then formats the table for all kernels
-    (no ``-k``) or a single kernel (one ``-k``). The output schema is identical
-    either way. Callers pass the already-parsed *tool_data_records*.
+    Detects the method, builds one frame per tool record, then formats the
+    concatenation for all kernels (no ``-k``) or a single kernel (one ``-k``).
+    The output schema is identical either way. Rows are process-scoped: the
+    same offset in two processes can be different code, so frames are never
+    merged across records. Callers pass the already-parsed *tool_data_records*.
     """
     if not tool_data_records:
         return pd.DataFrame()
 
-    # Zero-sample processes still produce valid result records when another
-    # enabled domain, such as kernel tracing, contains data. Infer the shared
+    # One invocation configures one sampling method, so every record is assumed
+    # to share it. Zero-sample processes still produce valid result records when
+    # another enabled domain, such as kernel tracing, contains data, so infer the
     # method from every process that captured at least one PC sample.
     detected_pc_sampling_methods = {
         method
@@ -427,39 +429,43 @@ def load_pc_sampling_data(
         console_warning("PC sampling: can not detect pc sampling method.")
         return pd.DataFrame()
 
-    # No kernel filter: return every kernel's rows.
-    if not workload.filter_kernel_ids:
-        return _load_pc_sampling_data_from_records(
-            pc_sampling_method,
-            tool_data_records,
-            sorting_type,
-            num_rows=num_rows,
-        )
+    # No kernel filter means every kernel's rows.
+    kernel_name = None
+    if workload.filter_kernel_ids:
+        if len(workload.filter_kernel_ids) > 1:
+            console_error(
+                "PC sampling supports single kernel only! Please specify -k with "
+                "single kernel.",
+                exit=False,
+            )
+            return pd.DataFrame()
 
-    if len(workload.filter_kernel_ids) > 1:
-        console_error(
-            "PC sampling supports single kernel only! Please specify -k with "
-            "single kernel.",
-            exit=False,
+        kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
+        kernel_index = workload.filter_kernel_ids[0]
+        if kernel_index >= len(kernel_top_df):
+            console_warning(
+                f"Kernel index {kernel_index} is out of bounds. "
+                f"kernel_top table has only {len(kernel_top_df)} rows."
+            )
+            return pd.DataFrame()
+
+        kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
+
+    process_frames = []
+    for tool_data in tool_data_records:
+        frame = _build_pc_sampling_partial_frame(
+            pc_sampling_method, tool_data, kernel_name
         )
+        if not frame.empty:
+            process_frames.append(frame)
+
+    if not process_frames:
         return pd.DataFrame()
 
-    # Exactly one kernel filter.
-    kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
-    kernel_index = workload.filter_kernel_ids[0]
-    if kernel_index >= len(kernel_top_df):
-        console_warning(
-            f"Kernel index {kernel_index} is out of bounds. "
-            f"kernel_top table has only {len(kernel_top_df)} rows."
-        )
-        return pd.DataFrame()
-
-    kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
-    return _load_pc_sampling_data_from_records(
+    return _format_pc_sampling_display_frame(
+        pd.concat(process_frames, ignore_index=True),
         pc_sampling_method,
-        tool_data_records,
         sorting_type,
-        kernel_name,
         num_rows=num_rows,
     )
 
@@ -504,6 +510,8 @@ def _build_pc_sampling_partial_frame(
     df = df.rename(
         columns={"code_object_offset": "offset", "kernel_name": "Kernel_Name"}
     )
+    # Row identity is process-scoped, so every row carries its own process.
+    df["pid"] = tool_data["metadata"]["pid"]
 
     if kernel_name is not None:
         df = df[df["Kernel_Name"] == kernel_name]
@@ -520,158 +528,49 @@ def _format_pc_sampling_display_frame(
     sorting_type: str,
     num_rows: Optional[int] = None,
 ) -> pd.DataFrame:
-    """Return aggregated sampling rows in their requested display layout."""
+    """Return the sampling rows in their requested display layout."""
     # Project stall_reason as a descending list[(reason, count)].
     df["stall_reason"] = df["stall_reason"].apply(_stall_reason_dict_to_list)
     df["source_line"] = df["source_line"].apply(_trim_source_line)
 
     # Sort on the numeric offset (lexicographic hex order is wrong), then
-    # format offset as hex for display.
+    # format offset as hex for display. Leading with pid keeps each process's
+    # rows contiguous.
     if sorting_type == "offset":
-        df_sorted = df.sort_values(by=["Kernel_Name", "offset"])
-    else:
+        df_sorted = df.sort_values(
+            by=["pid", "code_object_id", "Kernel_Name", "offset"]
+        )
+    elif sorting_type == "count":
         df_sorted = df.sort_values(by=["count"], ascending=False)
+    else:
+        console_error(
+            'Error: pc sampling sorting_type must be either "offset" or "count".'
+        )
+        return pd.DataFrame()
 
     # num_rows of 0 or None (or a negative passed programmatically) shows all.
     if num_rows and num_rows > 0:
         df_sorted = df_sorted.head(num_rows)
 
-    df_sorted["offset"] = df_sorted["_display_offset"]
+    df_sorted["offset"] = df_sorted["offset"].apply(hex)
 
     # Stochastic adds issue/stall detail on top of the host_trap columns.
-    shared_columns = ["source_line", "instruction", "code_object_id", "offset", "count"]
+    shared_columns = [
+        "pid",
+        "source_line",
+        "instruction",
+        "code_object_id",
+        "offset",
+        "count",
+    ]
     stochastic_only_columns = ["count_issued", "count_stalled", "stall_reason"]
     columns_to_return = shared_columns + (
         stochastic_only_columns if method == "stochastic" else []
     )
     columns_to_return.append("Kernel_Name")
-    return df_sorted[columns_to_return]
-
-
-def _load_pc_sampling_data_from_records(
-    method: str,
-    tool_data_records: list[dict[str, Any]],
-    sorting_type: str,
-    kernel_name: Optional[str] = None,
-    num_rows: Optional[int] = None,
-) -> pd.DataFrame:
-    """Return one display frame derived from every process's sampling records."""
-    process_frames = []
-    for tool_data in tool_data_records:
-        frame = _build_pc_sampling_partial_frame(method, tool_data, kernel_name)
-        if frame.empty:
-            continue
-        process_frames.append(frame)
-
-    if not process_frames:
-        return pd.DataFrame()
-
-    df = _combine_pc_sampling_partial_frames(
-        process_frames,
-        method,
-        sorting_type,
-    )
-    return _format_pc_sampling_display_frame(
-        df,
-        method,
-        sorting_type,
-        num_rows=num_rows,
-    )
-
-
-def _combine_pc_sampling_partial_frames(
-    process_frames: list[pd.DataFrame],
-    method: str,
-    sorting_type: str,
-) -> pd.DataFrame:
-    """Aggregate equivalent sampling display rows across process frames."""
-    ordered_frames = []
-    for record_order, frame in enumerate(process_frames):
-        if sorting_type == "count":
-            frame = frame.sort_values(by=["count"], ascending=False)
-        ordered_frames.append(
-            frame.assign(
-                _record_order=record_order,
-                _row_order=range(len(frame)),
-            )
-        )
-
-    df = pd.concat(ordered_frames, ignore_index=True)
-    df["_display_source_line"] = df["source_line"].apply(_trim_source_line)
-    df = _order_pc_sampling_reduction_candidates(df, sorting_type)
-
-    aggregations: dict[str, Any] = {
-        "source_line": ("source_line", "first"),
-        "code_object_id": ("code_object_id", "first"),
-        "count": ("count", "sum"),
-    }
-    if method == "stochastic":
-        aggregations.update({
-            "count_issued": ("count_issued", "sum"),
-            "count_stalled": ("count_stalled", "sum"),
-            "stall_reason": ("stall_reason", _merge_stall_reason_dict_rows),
-        })
-    else:
-        aggregations["stall_reason"] = ("stall_reason", "first")
-
-    row_identity = [
-        "Kernel_Name",
-        "offset",
-        "instruction",
-        "_display_source_line",
-    ]
-    aggregated_df = df.groupby(
-        row_identity,
-        as_index=False,
-        dropna=False,
-        sort=False,
-    ).agg(**aggregations)
-    aggregated_df["_display_offset"] = aggregated_df["offset"].apply(hex)
-
-    display_identity = [
-        "Kernel_Name",
-        "_display_offset",
-        "instruction",
-        "_display_source_line",
-    ]
-    return aggregated_df.sort_values(by=display_identity).reset_index(drop=True)
-
-
-def _order_pc_sampling_reduction_candidates(
-    df: pd.DataFrame,
-    sorting_type: str,
-) -> pd.DataFrame:
-    if sorting_type == "count":
-        return df
-    return df.sort_values(
-        by=["_record_order", "code_object_id", "offset", "_row_order"]
-    )
-
-
-def _merge_stall_reason_dict_rows(
-    stall_reason_rows: pd.Series,
-) -> dict[str, int]:
-    return dict(_merge_stall_reason_rows(stall_reason_rows))
-
-
-def _merge_stall_reason_rows(
-    stall_reason_rows: pd.Series,
-) -> list[tuple[str, int]]:
-    """Sum stall-reason counts across nullable row representations."""
-    merged_reasons: dict[str, int] = {}
-    for stall_reasons in stall_reason_rows:
-        if not stall_reasons:
-            continue
-        reason_counts = (
-            stall_reasons.items() if isinstance(stall_reasons, dict) else stall_reasons
-        )
-        for reason, count in reason_counts:
-            merged_reasons[reason] = merged_reasons.get(reason, 0) + count
-    return sorted(
-        merged_reasons.items(),
-        key=lambda item: item[1],
-        reverse=True,
-    )
+    # Renumber after sorting so the displayed index reads 0..n-1 rather than the
+    # pre-sort positions the row happened to land on.
+    return df_sorted[columns_to_return].reset_index(drop=True)
 
 
 def _stall_reason_dict_to_list(
@@ -760,7 +659,7 @@ def load_non_mertrics_table(
             tmp[df_id] = load_pc_sampling_data(
                 workload,
                 args.pc_sampling_sorting_type,
-                pc_sampling_tool_data or [],
+                pc_sampling_tool_data,
                 num_rows=args.pc_sampling_rows,
             )
 

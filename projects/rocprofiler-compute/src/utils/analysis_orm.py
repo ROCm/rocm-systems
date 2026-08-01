@@ -28,7 +28,6 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    and_,
     create_engine,
     func,
     select,
@@ -39,8 +38,6 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.sql import Select
-from sqlalchemy.sql.elements import ColumnElement
-from sqlalchemy.sql.selectable import CTE
 
 from utils.logger import console_debug, console_error, console_warning
 
@@ -142,6 +139,8 @@ class Dispatch(Base):
 
 class Kernel(Base):
     __tablename__ = f"{PREFIX}kernel"
+    # One kernel row per name per workload.
+    __table_args__ = (UniqueConstraint("workload_id", "kernel_name"),)
 
     kernel_uuid = Column(Integer, primary_key=True)
     workload_id = Column(
@@ -390,13 +389,6 @@ class Database:
     _db_name: Optional[str] = None
     _view_sql_cache: Optional[dict[str, str]] = None
     _type_cache: Optional[dict[tuple[type[Base], str], Base]] = None
-    _PC_SAMPLING_IDENTITY_COLUMN_NAMES = (
-        "workload_id",
-        "kernel_uuid",
-        "offset",
-        "instruction",
-        "source",
-    )
 
     @classmethod
     def init(cls, db_name: str) -> str:
@@ -519,141 +511,6 @@ class Database:
         return value
 
     @staticmethod
-    def _pc_sampling_identity_columns(
-        pc_sampling_cte: CTE,
-    ) -> tuple[ColumnElement[Any], ...]:
-        return tuple(
-            pc_sampling_cte.c[column_name]
-            for column_name in Database._PC_SAMPLING_IDENTITY_COLUMN_NAMES
-        )
-
-    @staticmethod
-    def _build_pc_sampling_base_cte() -> CTE:
-        """Build the raw sampling CTE keyed by instruction ownership."""
-        return (
-            select(
-                CodeObjectStore.workload_id.label("workload_id"),
-                InstructionLine.kernel_uuid.label("kernel_uuid"),
-                InstructionLine.code_object_offset.label("offset"),
-                InstructionLine.instruction.label("instruction"),
-                InstructionLine.comment.label("source"),
-                PCSampleState.pc_sample_state_uuid.label("pc_sample_state_uuid"),
-                PCSampleState.total_count.label("total_count"),
-                PCSampleState.issue_count.label("issue_count"),
-                PCSampleState.stall_count.label("stall_count"),
-            )
-            .select_from(PCSampleState)
-            .join(
-                InstructionLine,
-                PCSampleState.instruction_uuid == InstructionLine.instruction_uuid,
-            )
-            .join(
-                CodeObjectStore,
-                InstructionLine.code_object_uuid == CodeObjectStore.code_object_uuid,
-            )
-        ).cte("pc_sample_base")
-
-    @staticmethod
-    def _build_pc_sampling_totals_cte(pc_sample_base: CTE) -> CTE:
-        """Aggregate sample totals by the complete display identity."""
-        pc_sample_identity = Database._pc_sampling_identity_columns(pc_sample_base)
-        return (
-            select(
-                *pc_sample_identity,
-                func.sum(pc_sample_base.c.total_count).label("count"),
-                func.sum(pc_sample_base.c.issue_count).label("count_issue"),
-                func.sum(pc_sample_base.c.stall_count).label("count_stall"),
-            )
-            .group_by(*pc_sample_identity)
-            .cte("pc_sample_totals")
-        )
-
-    @staticmethod
-    def _build_pc_sampling_stall_reason_json_cte(pc_sample_base: CTE) -> CTE:
-        """Aggregate stall-reason counts into JSON per display identity."""
-        pc_sample_identity = Database._pc_sampling_identity_columns(pc_sample_base)
-        pc_sample_stall_reason_totals = (
-            select(
-                *pc_sample_identity,
-                PCSampleStallReasonLookup.text.label("reason"),
-                func.sum(PCSampleStallReason.count).label("reason_count"),
-            )
-            .select_from(pc_sample_base)
-            .join(
-                PCSampleStallReason,
-                pc_sample_base.c.pc_sample_state_uuid
-                == PCSampleStallReason.pc_sample_state_uuid,
-            )
-            .join(
-                PCSampleStallReasonLookup,
-                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
-                == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
-            )
-            .group_by(*pc_sample_identity, PCSampleStallReasonLookup.text)
-            .cte("pc_sample_stall_reason_totals")
-        )
-
-        pc_sample_stall_reason_identity = Database._pc_sampling_identity_columns(
-            pc_sample_stall_reason_totals
-        )
-        return (
-            select(
-                *pc_sample_stall_reason_identity,
-                func.json_group_object(
-                    pc_sample_stall_reason_totals.c.reason,
-                    pc_sample_stall_reason_totals.c.reason_count,
-                ).label("stall_reason"),
-            )
-            .group_by(*pc_sample_stall_reason_identity)
-            .cte("pc_sample_stall_reason_json")
-        )
-
-    @staticmethod
-    def _build_pc_sampling_identity_match(
-        pc_sample_totals: CTE,
-        pc_sample_stall_reason_json: CTE,
-    ) -> ColumnElement[bool]:
-        """Match totals to stall reasons using null-safe display identity."""
-        return and_(
-            *(
-                pc_sample_totals.c[column_name].is_not_distinct_from(
-                    pc_sample_stall_reason_json.c[column_name]
-                )
-                for column_name in Database._PC_SAMPLING_IDENTITY_COLUMN_NAMES
-            )
-        )
-
-    @staticmethod
-    def _build_pc_sampling_view_select() -> Select[Any]:
-        """Build the aggregated PC sampling analysis view."""
-        pc_sample_base = Database._build_pc_sampling_base_cte()
-        pc_sample_totals = Database._build_pc_sampling_totals_cte(pc_sample_base)
-        pc_sample_stall_reason_json = Database._build_pc_sampling_stall_reason_json_cte(
-            pc_sample_base
-        )
-        pc_sample_identity_match = Database._build_pc_sampling_identity_match(
-            pc_sample_totals,
-            pc_sample_stall_reason_json,
-        )
-        return (
-            select(
-                pc_sample_totals.c.workload_id,
-                pc_sample_totals.c.kernel_uuid,
-                Kernel.kernel_name,
-                pc_sample_totals.c.offset,
-                pc_sample_totals.c.instruction,
-                pc_sample_totals.c.source,
-                pc_sample_totals.c.count,
-                pc_sample_totals.c.count_issue,
-                pc_sample_totals.c.count_stall,
-                pc_sample_stall_reason_json.c.stall_reason,
-            )
-            .select_from(pc_sample_totals)
-            .join(Kernel, pc_sample_totals.c.kernel_uuid == Kernel.kernel_uuid)
-            .outerjoin(pc_sample_stall_reason_json, pc_sample_identity_match)
-        )
-
-    @staticmethod
     def _compile_view_sql() -> dict[str, str]:
         """Build and compile the analysis views to SQLite SQL strings."""
         median_sort_subquery = (
@@ -687,6 +544,22 @@ class Database:
                 ])
             )
             .group_by(median_sort_subquery.c.kernel_uuid)
+        ).subquery()
+
+        stall_reason_json_subquery = (
+            select(
+                PCSampleStallReason.pc_sample_state_uuid,
+                func.json_group_object(
+                    PCSampleStallReasonLookup.text, PCSampleStallReason.count
+                ).label("stall_reason"),
+            )
+            .select_from(PCSampleStallReason)
+            .join(
+                PCSampleStallReasonLookup,
+                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
+                == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
+            )
+            .group_by(PCSampleStallReason.pc_sample_state_uuid)
         ).subquery()
 
         definitions: dict[str, Select[Any]] = {
@@ -766,7 +639,39 @@ class Database:
                 WorkloadMetricValue,
                 MetricDefinition.metric_uuid == WorkloadMetricValue.metric_uuid,
             ),
-            "pc_sampling": Database._build_pc_sampling_view_select(),
+            # One row per sampled instruction line. Identity is
+            # (pid, code_object_id, kernel, offset): the same offset in two
+            # processes can be different code, so the rows stay separate.
+            "pc_sampling": select(
+                CodeObjectStore.workload_id.label("workload_id"),
+                CodeObjectStore.pid.label("pid"),
+                CodeObjectStore.code_object_id.label("code_object_id"),
+                Kernel.kernel_uuid.label("kernel_uuid"),
+                Kernel.kernel_name,
+                InstructionLine.code_object_offset.label("offset"),
+                InstructionLine.instruction,
+                InstructionLine.comment.label("source"),
+                PCSampleState.total_count.label("count"),
+                PCSampleState.issue_count.label("count_issue"),
+                PCSampleState.stall_count.label("count_stall"),
+                stall_reason_json_subquery.c.stall_reason,
+            )
+            .select_from(PCSampleState)
+            .join(
+                InstructionLine,
+                PCSampleState.instruction_uuid == InstructionLine.instruction_uuid,
+            )
+            .join(
+                CodeObjectStore,
+                InstructionLine.code_object_uuid == CodeObjectStore.code_object_uuid,
+            )
+            .join(Kernel, InstructionLine.kernel_uuid == Kernel.kernel_uuid)
+            # host_trap samples have no stall reasons, so the subquery is empty.
+            .outerjoin(
+                stall_reason_json_subquery,
+                PCSampleState.pc_sample_state_uuid
+                == stall_reason_json_subquery.c.pc_sample_state_uuid,
+            ),
         }
 
         dialect = sqlite.dialect()

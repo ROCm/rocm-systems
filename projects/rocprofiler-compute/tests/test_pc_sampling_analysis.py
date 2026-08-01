@@ -26,11 +26,11 @@ from utils.file_io import (
     build_agent_to_gpu_map_from_json,
     load_pc_sampling_results,
     process_pc_sampling_kernel_trace,
+    process_pc_sampling_kernel_traces,
 )
 from utils.parser import (
     PMC_DISPATCH_INFO_TABLE_ID,
     PMC_KERNEL_TOP_TABLE_ID,
-    _merge_stall_reason_rows,
     load_non_mertrics_table,
     load_pc_sampling_data,
     load_table_data,
@@ -43,6 +43,7 @@ PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI300X_A1"
 PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
 INST_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_"
 HOST_TRAP_DISPLAY_COLUMNS = [
+    "pid",
     "source_line",
     "instruction",
     "code_object_id",
@@ -51,6 +52,7 @@ HOST_TRAP_DISPLAY_COLUMNS = [
     "Kernel_Name",
 ]
 STOCHASTIC_DISPLAY_COLUMNS = [
+    "pid",
     "source_line",
     "instruction",
     "code_object_id",
@@ -869,10 +871,10 @@ def test_load_pc_sampling_data_no_tool_data() -> None:
 
 
 @pytest.mark.parametrize("method", ["host_trap", "stochastic"])
-def test_load_pc_sampling_data_aggregates_rows_within_single_record(
+def test_load_pc_sampling_data_separates_code_objects_within_one_record(
     method: str,
 ) -> None:
-    """A single result record uses the same display aggregation as many records."""
+    """Two code objects under one kernel name stay separate display rows."""
     if method == "host_trap":
         samples = [
             make_host_trap_record(5, 0x10, 0, dispatch_id=0),
@@ -925,21 +927,24 @@ def test_load_pc_sampling_data_aggregates_rows_within_single_record(
         [tool_data],
     )
 
-    assert len(df) == 1
+    # The same offset in two code objects can be different code, so the counts
+    # are never summed together.
+    assert len(df) == 2
     expected_columns = (
         HOST_TRAP_DISPLAY_COLUMNS
         if method == "host_trap"
         else STOCHASTIC_DISPLAY_COLUMNS
     )
     assert list(df.columns) == expected_columns
-    assert df.iloc[0]["code_object_id"] == 5
-    assert df.iloc[0]["count"] == 4
+    assert list(df["code_object_id"]) == [5, 7]
+    assert list(df["count"]) == [2, 2]
+    assert set(df["Kernel_Name"]) == {"sharedKernel"}
     if method == "stochastic":
-        assert df.iloc[0]["count_issued"] == 1
-        assert df.iloc[0]["count_stalled"] == 3
-        assert df.iloc[0]["stall_reason"] == [
-            ("WAITCNT", 2),
-            ("ALU_DEPENDENCY", 1),
+        assert list(df["count_issued"]) == [1, 0]
+        assert list(df["count_stalled"]) == [1, 2]
+        assert list(df["stall_reason"]) == [
+            [("WAITCNT", 1)],
+            [("ALU_DEPENDENCY", 1), ("WAITCNT", 1)],
         ]
 
 
@@ -1096,8 +1101,8 @@ def test_load_pc_sampling_data_rejects_conflicting_methods() -> None:
 @pytest.mark.parametrize(
     "populated, expected_column_count",
     [
-        ("host_trap", 6),  # host_trap-only is detected
-        ("both", 9),  # stochastic wins when both arrays are populated
+        ("host_trap", 7),  # host_trap-only is detected
+        ("both", 10),  # stochastic wins when both arrays are populated
     ],
 )
 def test_load_pc_sampling_data_method_detection(
@@ -1195,7 +1200,7 @@ def test_load_pc_sampling_data_preserves_display_identity_boundaries() -> None:
 
 
 def test_load_pc_sampling_data_retains_missing_instruction_metadata() -> None:
-    """Aggregate matching rows even when their instruction metadata is missing."""
+    """Keep per-process rows even when their instruction metadata is missing."""
     tool_data_records = [
         make_display_row_tool_data(
             "host_trap",
@@ -1221,13 +1226,14 @@ def test_load_pc_sampling_data_retains_missing_instruction_metadata() -> None:
         tool_data_records,
     )
 
-    assert len(df) == 1
-    assert df.iloc[0]["count"] == 2
-    assert pd.isna(df.iloc[0]["instruction"])
+    assert len(df) == 2
+    assert list(df["pid"]) == [101, 202]
+    assert list(df["count"]) == [1, 1]
+    assert df["instruction"].isna().all()
 
 
-def test_load_pc_sampling_data_stitches_multi_process_rows() -> None:
-    """Rows from separate result records are summed by shared kernel and offset."""
+def test_load_pc_sampling_data_keeps_multi_process_rows_separate() -> None:
+    """Rows from separate result records stay separate, keyed by process."""
     first_tool_data = make_tool_data(
         stochastic=[
             make_record(
@@ -1293,20 +1299,23 @@ def test_load_pc_sampling_data_stitches_multi_process_rows() -> None:
     )
 
     assert set(df["Kernel_Name"]) == {"sharedKernel", "distinctKernel"}
-    shared_row = df[df["Kernel_Name"] == "sharedKernel"].iloc[0]
-    assert shared_row["offset"] == "0x10"
-    assert shared_row["code_object_id"] == 5
-    assert shared_row["count"] == 5
-    assert shared_row["count_issued"] == 1
-    assert shared_row["count_stalled"] == 4
-    assert shared_row["stall_reason"] == [
-        ("WAITCNT", 3),
-        ("ALU_DEPENDENCY", 1),
+    shared_rows = df[df["Kernel_Name"] == "sharedKernel"]
+    # Both processes sampled offset 0x10 under the same kernel name, in code
+    # objects that only happen to be numbered differently. The rows stay apart.
+    assert list(shared_rows["pid"]) == [202, 101]
+    assert list(shared_rows["offset"]) == ["0x10", "0x10"]
+    assert list(shared_rows["code_object_id"]) == [7, 5]
+    assert list(shared_rows["count"]) == [3, 2]
+    assert list(shared_rows["count_issued"]) == [1, 0]
+    assert list(shared_rows["count_stalled"]) == [2, 2]
+    assert list(shared_rows["stall_reason"]) == [
+        [("ALU_DEPENDENCY", 1), ("WAITCNT", 1)],
+        [("WAITCNT", 2)],
     ]
 
 
-def test_load_pc_sampling_data_applies_top_n_after_global_aggregation() -> None:
-    """Apply the row limit after combining counts from all process records."""
+def test_load_pc_sampling_data_applies_top_n_across_process_rows() -> None:
+    """Apply the row limit to the combined per-process rows."""
     first_tool_data = make_tool_data(
         host_trap=[
             *[make_host_trap_record(5, 0x10, 0, dispatch_id=0) for _ in range(3)],
@@ -1343,24 +1352,12 @@ def test_load_pc_sampling_data_applies_top_n_after_global_aggregation() -> None:
         num_rows=1,
     )
 
+    # Per-process rows are ranked as they are; nothing is summed first, so the
+    # single largest row wins rather than a cross-process total.
     assert len(df) == 1
-    assert df.iloc[0]["Kernel_Name"] == "sharedKernel"
-    assert df.iloc[0]["count"] == 6
-
-
-def test_merge_stall_reason_rows_sums_counts_and_skips_empty_rows() -> None:
-    """Sum duplicate stall reasons while ignoring empty and missing rows."""
-    stall_reason_rows = pd.Series([
-        [("WAITCNT", 2), ("ALU_DEPENDENCY", 1)],
-        [],
-        None,
-        [("WAITCNT", 3)],
-    ])
-
-    assert _merge_stall_reason_rows(stall_reason_rows) == [
-        ("WAITCNT", 5),
-        ("ALU_DEPENDENCY", 1),
-    ]
+    assert df.iloc[0]["Kernel_Name"] == "firstLeader"
+    assert df.iloc[0]["pid"] == 101
+    assert df.iloc[0]["count"] == 5
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1678,6 +1675,27 @@ def test_load_pc_sampling_tool_data_gate(tmp_path: Path) -> None:
     assert instance.load_pc_sampling_tool_data(str(tmp_path)) == []
 
 
+def test_pc_sampling_kernel_traces_renumber_colliding_dispatch_ids() -> None:
+    """Give every process's dispatch an id unique across the workload."""
+    combined_trace = process_pc_sampling_kernel_traces(
+        make_multiprocess_dispatch_tool_data()
+    )
+
+    # Both records carry a process-local dispatch 0.
+    assert combined_trace["Dispatch_Id"].tolist() == [0, 1, 2]
+    assert combined_trace["PID"].tolist() == [101, 101, 202]
+    assert combined_trace["Dispatch_Id"].is_unique
+
+
+def test_pc_sampling_kernel_traces_preserve_single_process_ids() -> None:
+    """Leave a lone process's dispatch ordering untouched."""
+    single_record = make_multiprocess_dispatch_tool_data()[:1]
+
+    combined_trace = process_pc_sampling_kernel_traces(single_record)
+
+    assert combined_trace["Dispatch_Id"].tolist() == [0, 1]
+
+
 def test_pc_sampling_multiprocess_dispatch_statistics_include_every_row(
     tmp_path: Path,
 ) -> None:
@@ -1693,21 +1711,21 @@ def test_pc_sampling_multiprocess_dispatch_statistics_include_every_row(
         make_multiprocess_dispatch_tool_data(),
     )
 
-    assert workload.raw_pmc["Dispatch_ID"].tolist() == [0, 1, 0]
+    assert workload.raw_pmc["Dispatch_ID"].tolist() == [0, 1, 2]
     assert workload.raw_pmc["PID"].tolist() == [101, 101, 202]
     kernel_top = workload.dfs[PMC_KERNEL_TOP_TABLE_ID].iloc[0]
     assert kernel_top["Count"] == 3
     assert kernel_top["Sum(ns)"] == 60
     dispatch_info = workload.dfs[PMC_DISPATCH_INFO_TABLE_ID]
-    assert dispatch_info["Dispatch_ID"].tolist() == [0, 1, 0]
+    assert dispatch_info["Dispatch_ID"].tolist() == [0, 1, 2]
     assert dispatch_info["PID"].tolist() == [101, 101, 202]
 
 
-def test_pc_sampling_dispatch_filter_matches_every_process(
+def test_pc_sampling_dispatch_filter_selects_one_process(
     tmp_path: Path,
 ) -> None:
-    """Match the filtered dispatch ID independently in every process."""
-    workload = schema.Workload(filter_dispatch_ids=["0"])
+    """Resolve a filtered dispatch ID to exactly one process's dispatch."""
+    workload = schema.Workload(filter_dispatch_ids=["2"])
     args = argparse.Namespace(time_unit="ns", kernel_verbose=5)
     instance = make_db_analysis(str(tmp_path))
 
@@ -1718,12 +1736,14 @@ def test_pc_sampling_dispatch_filter_matches_every_process(
         make_multiprocess_dispatch_tool_data(),
     )
 
+    # Dispatch 2 is the second process's only dispatch; before renumbering it
+    # shared id 0 with the first process and both were selected.
     kernel_top = workload.dfs[PMC_KERNEL_TOP_TABLE_ID].iloc[0]
-    assert kernel_top["Count"] == 2
-    assert kernel_top["Sum(ns)"] == 40
+    assert kernel_top["Count"] == 1
+    assert kernel_top["Sum(ns)"] == 30
     dispatch_info = workload.dfs[PMC_DISPATCH_INFO_TABLE_ID]
-    assert dispatch_info["Dispatch_ID"].tolist() == [0, 0]
-    assert dispatch_info["PID"].tolist() == [101, 202]
+    assert dispatch_info["Dispatch_ID"].tolist() == [2]
+    assert dispatch_info["PID"].tolist() == [202]
 
 
 def test_load_table_data_forwards_pc_sampling_tool_data() -> None:
@@ -1992,7 +2012,7 @@ def test_calc_dispatch_data_stitches_pc_sampling_tool_records(
 
     df = result[str(tmp_path)]
     assert df["kernel_name"].tolist() == ["vecCopy", "vecCopy", "vecCopy"]
-    assert df["dispatch_id"].tolist() == [0, 1, 0]
+    assert df["dispatch_id"].tolist() == [0, 1, 2]
     assert df["pid"].tolist() == [101, 101, 202]
 
 
@@ -2197,8 +2217,10 @@ def test_pc_sampling_analyze_csv_output(
         csv_kernel = pd.read_csv(csv_dir / "kernel.csv")
         assert len(csv_pc_sampling) == 14
         assert csv_pc_sampling["count"].sum() == 390
-        assert "pid" not in csv_pc_sampling.columns
+        assert set(csv_pc_sampling["pid"]) == {1429079}
         assert csv_kernel.iloc[0]["dispatch_count"] == 3
+        # Every sampling row must resolve to a kernel the kernel view exposes.
+        assert set(csv_pc_sampling["kernel_uuid"]) <= set(csv_kernel["kernel_uuid"])
     finally:
         common.clean_output_dir(True, str(workload_dir))
 
