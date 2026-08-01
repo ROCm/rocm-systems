@@ -2130,6 +2130,20 @@ protected:
     EXPECT_TRUE(std::equal(drain.begin(), drain.end(), it - drain.size()));
   }
 
+  // A second in-flight-load drain sits immediately before the first spill fill
+  // (`first_fill_load`, the first epilogue scratch load), so a probe's own still-in-
+  // flight load cannot retire onto a just-restored register -- on RDNA4 the per-fill
+  // s_wait_loadcnt misses a scalar s_load (KMCNT). Fills exist only after the call,
+  // so this also places the drain after s_swappc_b64.
+  void expect_drain_before_fill(const std::vector<uint32_t> &cave,
+                                const std::vector<uint32_t> &first_fill_load) {
+    const auto drain = build_wait_all_loads_complete(a_.arch);
+    auto it = std::search(cave.begin(), cave.end(), first_fill_load.begin(), first_fill_load.end());
+    ASSERT_NE(it, cave.end());
+    ASSERT_GE(it - cave.begin(), static_cast<std::ptrdiff_t>(drain.size()));
+    EXPECT_TRUE(std::equal(drain.begin(), drain.end(), it - drain.size()));
+  }
+
   // Assert v`vgpr`'s spill words are in `cave`: a scratch store (prologue) and load
   // (epilogue) at slot `off`. Checks the words appear, not their order or the
   // descriptor size -- callers assert the load wait, drain, and scratch growth.
@@ -2169,6 +2183,7 @@ protected:
     expect_vgpr_spill_present(cave, /*vgpr=*/2, /*off=*/64);
     EXPECT_NE(std::find(cave.begin(), cave.end(), build_wait_loads_complete(a_.arch)), cave.end());
     expect_drain_before_store(cave, build_scratch_store_dword(/*vgpr=*/2, /*off=*/64, a_.arch));
+    expect_drain_before_fill(cave, build_scratch_load_dword(/*vgpr=*/2, /*off=*/64, a_.arch));
     EXPECT_EQ(caved.scratch, 68u);
   }
 
@@ -2181,6 +2196,7 @@ protected:
     EXPECT_NE(std::find(cave.begin(), cave.end(), build_wait_loads_complete(a_.arch)), cave.end());
     const auto writelane = build_v_writelane_b32(/*bridge=*/0, /*sgpr=*/8, /*lane=*/0, a_.arch);
     expect_drain_before_store(cave, {writelane.begin(), writelane.end()});
+    expect_drain_before_fill(cave, build_scratch_load_dword(/*bridge=*/0, /*off=*/64, a_.arch));
     EXPECT_EQ(caved.scratch, 68u);
   }
 

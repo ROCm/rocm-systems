@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -79,6 +80,35 @@ TEST(KernelDescriptorScan, UnterminatedDescriptorNameIsRejected) {
   const auto image =
       make_gfx950_unterminated_kd_name_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
   EXPECT_TRUE(scan_via_text_section(image).empty());
+}
+
+// .text (offset, size) from a pristine build, valid for a same-layout hostile
+// variant whose own headers cannot be trusted to resolve them.
+std::pair<uint64_t, uint64_t> clean_text_coords(const std::vector<uint32_t> &code) {
+  const auto image = make_gfx950_kernel_elf(code, /*private_bytes=*/64);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_TRUE(obj.is_valid());
+  EXPECT_FALSE(obj.text_sections().empty());
+  const Section *text = obj.text_sections().front();
+  return {text->sectionOffset(), text->size()};
+}
+
+// A section-header table whose declared extent overflows is rejected before any
+// section pointer is formed: no descriptors and no out-of-bounds read.
+TEST(KernelDescriptorScan, WrappingSectionHeaderTableIsRejected) {
+  const std::vector<uint32_t> code = {kMovV3V2, 0xbf810000u};
+  const auto [text_off, text_sz] = clean_text_coords(code);
+  const auto image = make_gfx950_wrapping_shoff_elf(code, /*private_bytes=*/64);
+  EXPECT_TRUE(scan_kernel_descriptors({image.data(), image.size()}, text_off, text_sz).empty());
+}
+
+// A symbol-table section whose declared extent overflows is skipped, not read past;
+// the intact .text still lets discovery resolve the text base first.
+TEST(KernelDescriptorScan, WrappingSymtabRangeIsRejected) {
+  const std::vector<uint32_t> code = {kMovV3V2, 0xbf810000u};
+  const auto [text_off, text_sz] = clean_text_coords(code);
+  const auto image = make_gfx950_wrapping_symtab_elf(code, /*private_bytes=*/64);
+  EXPECT_TRUE(scan_kernel_descriptors({image.data(), image.size()}, text_off, text_sz).empty());
 }
 
 // When no section matches the requested (text_offset, text_size), the walk cannot

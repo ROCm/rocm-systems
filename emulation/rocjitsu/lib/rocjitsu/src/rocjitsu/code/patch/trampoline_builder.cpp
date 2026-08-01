@@ -128,6 +128,16 @@ struct SpillBracket {
     bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
   }
 
+  // Drain the probe's in-flight loads before any fill: a probe body may issue an
+  // unwaited load into a register we are about to restore, and on RDNA4 the fills'
+  // s_wait_loadcnt misses a scalar s_load (KMCNT), so that load could retire after
+  // the readlane and clobber the restored value. Emitted after the call, before the
+  // first fill; mirrors the prologue drain.
+  if (has_vgpr || has_sgpr) {
+    const auto drain = build_wait_all_loads_complete(arch);
+    bracket.epilogue.insert(bracket.epilogue.end(), drain.begin(), drain.end());
+  }
+
   // Epilogue: restore SGPRs first (load/wait/readlane each, since the single bridge
   // is reused), then the VGPRs, so a reused bridge's reload lands last (see above).
   for (const SpillSlot &slot : sgpr_spills) {
