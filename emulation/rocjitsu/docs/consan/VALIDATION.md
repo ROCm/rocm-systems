@@ -318,8 +318,8 @@ continues to reject the cumulative reference file.
 
 The current gfx1201 manifest covers Qwen3-0.6B prefill; native
 PyTorch/Inductor compact and split online-softmax clients, collision-heavy
-scatter-reduce, large-object mode selection, Qwen-vocabulary top-k, causal
-SDPA, and histogram;
+scatter-reduce, large-object mode selection, Qwen-vocabulary top-k, and
+histogram;
 native llama.cpp quantized matvec and RMSNorm; Sharktank TP1 prefill and
 decode/combined, TP2, and CLIP BF16; and the hip-moi D128, WMMA, Stream-K,
 tree-atomic-OR, and Jakub workloads. The profile IDs are `supercollider`,

@@ -40,7 +40,7 @@ oracle, and coverage evidence are valid.
 
 ## Current matrix
 
-All 20 workloads × 4 engines are assessed.  Coverage counts use each engine's
+All 19 workloads × 4 engines are assessed.  Coverage counts use each engine's
 own admitted-site model; in particular, Sampled reports split-barrier members
 where other engines report logical barriers.
 
@@ -82,9 +82,11 @@ Only current blockers and the most useful retained evidence are recorded here.
 Do not raise a timeout or change a fault expectation merely to promote a cell.
 The source-matched Record/Replay campaigns for this checkpoint are
 `rdna4-rr-final-clean-20260722`, `rdna4-rr-final-faults-20260722`, and
-`rdna4-rr-final-overhead-20260722`.  Those historical 19-workload campaigns
-have all 19 clean and all 57 paired-overhead rows passing; the reviewed-fault
-campaign accepts 17/19 rows.  `rdna4-rr-final-faults-20260722` predates
+`rdna4-rr-final-overhead-20260722`.  Those historical 19-workload campaigns use
+a different set: they predate `torch.mode` and include the now-retired SDPA
+row. They have all 19 clean and all 57 paired-overhead rows passing; the
+reviewed-fault campaign accepts 17/19 rows.
+`rdna4-rr-final-faults-20260722` predates
 accounting schema v2 and its installation-evidence records, so it remains
 historical evidence but requires a rerun for current qualification rather than
 re-parsing.  The subsequently added `torch.mode` row is qualified separately
@@ -141,6 +143,8 @@ below.
 
 ### Retired PyTorch causal SDPA
 
+Tracking: `bd-1w9.26`.
+
 The July 21 TheRock nightly reproduces the default fused-backend failure on
 physical gfx1201 before ConSan is loaded: the maximum error is
 `2.407407522201538`. Explicit fused backend selections are also incorrect for
@@ -150,8 +154,11 @@ generated kernels expose no sanitizer-visible barrier sites.
 
 The invalid PyTorch row is no longer executable qualification evidence. The
 target-native `d128-block`, `d128-pressure`, and `wmma-attention` rows replace
-it for exact-oracle attention LDS/barrier coverage. The older SDPA artifacts
-remain historical diagnostics only and do not establish current acceptance.
+its exact-oracle attention LDS/barrier mechanism coverage, but gfx1201 now has
+no real-framework causal-attention row. The older SDPA artifacts remain
+historical diagnostics only and do not establish current acceptance. If a
+future nightly restores a correct default fused backend, reinstate the row from
+commit `1003eba026` and requalify it before treating it as current evidence.
 
 ### Sharktank TP2 family
 

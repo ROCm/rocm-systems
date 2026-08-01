@@ -207,6 +207,14 @@ class Workload:
     tensile_streamk_mode: int | None = None
 
 
+@dataclass(frozen=True)
+class RetiredWorkloadCoverage:
+    id: str
+    tracking_issue: str
+    coverage_successors: tuple[str, ...]
+    remaining_gap: str
+
+
 PROFILES = {
     "supercollider": Profile(
         id="supercollider",
@@ -948,6 +956,16 @@ WORKLOADS = (
 
 
 WORKLOAD_BY_ID = {workload.id: workload for workload in WORKLOADS}
+RETIRED_WORKLOAD_COVERAGE = {
+    "gfx1201": (
+        RetiredWorkloadCoverage(
+            id="pytorch-rdna4-sdpa",
+            tracking_issue="bd-1w9.26",
+            coverage_successors=("d128-block", "d128-pressure", "wmma-attention"),
+            remaining_gap="real-framework causal attention",
+        ),
+    ),
+}
 
 
 def _validate_coverage_output_contract(workload: Workload) -> None:
@@ -1030,6 +1048,23 @@ def _validate_workload_manifest() -> None:
             raise RuntimeError(
                 f"{workload.id} must declare the shared Stream-K fault families"
             )
+    for target, retired_rows in RETIRED_WORKLOAD_COVERAGE.items():
+        for retired in retired_rows:
+            if retired.id in WORKLOAD_BY_ID:
+                raise RuntimeError(f"retired workload remains registered: {retired.id}")
+            if not retired.tracking_issue.startswith("bd-"):
+                raise RuntimeError(
+                    f"retired workload needs a tracking bead: {retired.id}"
+                )
+            for successor_id in retired.coverage_successors:
+                successor = WORKLOAD_BY_ID.get(successor_id)
+                if successor is None or (
+                    successor.targets is not None and target not in successor.targets
+                ):
+                    raise RuntimeError(
+                        f"{target} retired workload has unavailable coverage successor: "
+                        f"{retired.id} -> {successor_id}"
+                    )
 
 
 _validate_workload_manifest()
@@ -1744,6 +1779,9 @@ def _manifest(target: str) -> dict:
         "profiles": [asdict(PROFILES[profile]) for profile in PROFILE_IDS],
         "workloads": [
             manifest_workload(workload) for workload in _workloads_for_target(target)
+        ],
+        "retired_workloads": [
+            asdict(workload) for workload in RETIRED_WORKLOAD_COVERAGE.get(target, ())
         ],
         "ordinary_forbidden_environment": list(ORDINARY_FORBIDDEN_ENVIRONMENT),
         "timeout_seconds": TIMEOUT_SECONDS,

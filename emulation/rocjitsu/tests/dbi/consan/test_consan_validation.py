@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import asdict, dataclass, replace
 import io
@@ -1231,6 +1232,71 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["llama-rdna4-mul-mat-vec-q"]["targets"], ("gfx1201",)
         )
         self.assertEqual(workloads["llama-rdna4-rms-norm"]["targets"], ("gfx1201",))
+
+    def test_gfx1201_retired_sdpa_declares_executable_coverage_successors(
+        self,
+    ) -> None:
+        manifest = validation._manifest("gfx1201")
+        self.assertEqual(
+            manifest["retired_workloads"],
+            [
+                {
+                    "id": "pytorch-rdna4-sdpa",
+                    "tracking_issue": "bd-1w9.26",
+                    "coverage_successors": (
+                        "d128-block",
+                        "d128-pressure",
+                        "wmma-attention",
+                    ),
+                    "remaining_gap": "real-framework causal attention",
+                }
+            ],
+        )
+        workloads = {workload["id"]: workload for workload in manifest["workloads"]}
+        for workload_id in manifest["retired_workloads"][0]["coverage_successors"]:
+            with self.subTest(workload=workload_id):
+                workload = workloads[workload_id]
+                self.assertEqual(workload["kind"], "gtest")
+                self.assertTrue(workload["tracks_barriers"])
+                self.assertIn("barrier-drop", workload["fault_families"])
+                self.assertIsNotNone(workload["overhead_filter"])
+
+    def test_gfx1201_status_workload_count_matches_manifest(self) -> None:
+        status_path = (
+            Path(validation.__file__).resolve().parents[3]
+            / "docs/consan/STATUS_RDNA4.md"
+        )
+        status = status_path.read_text()
+        count = re.search(r"All (\d+) workloads × 4 engines are assessed", status)
+        self.assertIsNotNone(count)
+        self.assertEqual(
+            int(count.group(1)), len(validation._manifest("gfx1201")["workloads"])
+        )
+
+    def test_pytorch_manifest_workloads_have_client_runners(self) -> None:
+        client_path = Path(validation.__file__).with_name(
+            "consan_pytorch_validation.py"
+        )
+        tree = ast.parse(client_path.read_text(), filename=str(client_path))
+        runner_assignment = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "WORKLOAD_RUNNERS"
+        )
+        self.assertIsInstance(runner_assignment.value, ast.Dict)
+        client_workloads = {
+            ast.literal_eval(key)
+            for key in runner_assignment.value.keys
+            if key is not None
+        }
+        manifest_workloads = {
+            workload.id.removeprefix("pytorch-")
+            for workload in validation.WORKLOADS
+            if workload.kind == "pytorch"
+        }
+        self.assertLessEqual(manifest_workloads, client_workloads)
 
     def test_coverage_output_contract_rejects_unknown_profile(self) -> None:
         workload = replace(
@@ -3494,15 +3560,6 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(command[0], "/workspace/venv/bin/python")
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
         self.assertEqual(command[command.index("--workload") + 1], "rdna4-llm-topk")
-
-    def test_invalid_pytorch_rdna4_sdpa_row_uses_native_replacements(self) -> None:
-        self.assertNotIn("pytorch-rdna4-sdpa", validation.WORKLOAD_BY_ID)
-        for workload_id in ("d128-block", "d128-pressure", "wmma-attention"):
-            with self.subTest(workload=workload_id):
-                workload = validation.WORKLOAD_BY_ID[workload_id]
-                self.assertEqual(workload.kind, "gtest")
-                self.assertTrue(workload.tracks_barriers)
-                self.assertIn("barrier-drop", workload.fault_families)
 
     def test_llama_rdna4_command_uses_gpu_cpu_oracle_wrapper(self) -> None:
         workload = validation.WORKLOAD_BY_ID["llama-rdna4-rms-norm"]

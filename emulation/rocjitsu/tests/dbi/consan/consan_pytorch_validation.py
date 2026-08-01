@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import ctypes
 import json
 import os
@@ -626,25 +627,61 @@ def _run_rdna4_split_softmax(repetitions: int) -> dict[str, object]:
     }
 
 
+def _run_descriptor_add_workload(repetitions: int) -> dict[str, object]:
+    triton.set_allocator(_descriptor_allocator)
+    return {
+        "one-cta": _run_descriptor_add(1, repetitions),
+        "two-cta-cluster": _run_descriptor_add(2, repetitions),
+    }
+
+
+def _run_norm_softmax_workload(repetitions: int) -> dict[str, object]:
+    component = os.environ.get("CONSAN_PYTORCH_REDUCTION_COMPONENT", "both")
+    if component not in ("both", "norm", "softmax"):
+        raise RuntimeError(
+            "CONSAN_PYTORCH_REDUCTION_COMPONENT must be both, norm, or softmax"
+        )
+    return {
+        "norm-and-softmax": _run_norm_softmax(
+            repetitions,
+            run_norm=component != "softmax",
+            run_softmax=component != "norm",
+        )
+    }
+
+
+WORKLOAD_RUNNERS: dict[str, Callable[[int], dict[str, object]]] = {
+    "tdm-descriptor-add": _run_descriptor_add_workload,
+    "cluster-load-sync": lambda repetitions: {
+        "cluster-load-and-sync": _run_cluster_load_sync(repetitions)
+    },
+    "torch-mode": lambda repetitions: {"large-row": _run_mode(repetitions)},
+    "torch-topk": _run_topk,
+    "torch-sort": lambda repetitions: {"segmented-rows": _run_sort(repetitions)},
+    "scatter-reduce": _run_scatter_reduce,
+    "torch-histc": lambda repetitions: {"shared-bin-count": _run_histc(repetitions)},
+    "norm-softmax": _run_norm_softmax_workload,
+    "vector-norm": lambda repetitions: {
+        "vector-norm": _run_norm_softmax(repetitions, run_softmax=False)
+    },
+    "softmax": lambda repetitions: {
+        "softmax": _run_norm_softmax(repetitions, run_norm=False)
+    },
+    "rdna4-compiled-softmax": lambda repetitions: {
+        "rdna4-compiled-softmax": _run_rdna4_compiled_softmax(repetitions)
+    },
+    "rdna4-split-softmax": lambda repetitions: {
+        "rdna4-split-softmax": _run_rdna4_split_softmax(repetitions)
+    },
+    "rdna4-llm-topk": _run_rdna4_llm_topk,
+}
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--workload",
-        choices=(
-            "tdm-descriptor-add",
-            "cluster-load-sync",
-            "torch-mode",
-            "torch-topk",
-            "torch-sort",
-            "scatter-reduce",
-            "torch-histc",
-            "norm-softmax",
-            "vector-norm",
-            "softmax",
-            "rdna4-compiled-softmax",
-            "rdna4-split-softmax",
-            "rdna4-llm-topk",
-        ),
+        choices=tuple(WORKLOAD_RUNNERS),
         required=True,
     )
     parser.add_argument("--repetitions", type=int, default=1)
@@ -657,54 +694,9 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = _parse_args()
+    runner = WORKLOAD_RUNNERS[args.workload]
     try:
-        if args.workload == "tdm-descriptor-add":
-            triton.set_allocator(_descriptor_allocator)
-            result = {
-                "one-cta": _run_descriptor_add(1, args.repetitions),
-                "two-cta-cluster": _run_descriptor_add(2, args.repetitions),
-            }
-        elif args.workload == "cluster-load-sync":
-            result = {"cluster-load-and-sync": _run_cluster_load_sync(args.repetitions)}
-        elif args.workload == "torch-mode":
-            result = {"large-row": _run_mode(args.repetitions)}
-        elif args.workload == "torch-topk":
-            result = _run_topk(args.repetitions)
-        elif args.workload == "torch-sort":
-            result = {"segmented-rows": _run_sort(args.repetitions)}
-        elif args.workload == "scatter-reduce":
-            result = _run_scatter_reduce(args.repetitions)
-        elif args.workload == "torch-histc":
-            result = {"shared-bin-count": _run_histc(args.repetitions)}
-        elif args.workload == "norm-softmax":
-            component = os.environ.get("CONSAN_PYTORCH_REDUCTION_COMPONENT", "both")
-            if component not in ("both", "norm", "softmax"):
-                raise RuntimeError(
-                    "CONSAN_PYTORCH_REDUCTION_COMPONENT must be both, norm, or softmax"
-                )
-            result = {
-                "norm-and-softmax": _run_norm_softmax(
-                    args.repetitions,
-                    run_norm=component != "softmax",
-                    run_softmax=component != "norm",
-                )
-            }
-        elif args.workload == "vector-norm":
-            result = {
-                "vector-norm": _run_norm_softmax(args.repetitions, run_softmax=False)
-            }
-        elif args.workload == "softmax":
-            result = {"softmax": _run_norm_softmax(args.repetitions, run_norm=False)}
-        elif args.workload == "rdna4-compiled-softmax":
-            result = {
-                "rdna4-compiled-softmax": _run_rdna4_compiled_softmax(args.repetitions)
-            }
-        elif args.workload == "rdna4-split-softmax":
-            result = {"rdna4-split-softmax": _run_rdna4_split_softmax(args.repetitions)}
-        elif args.workload == "rdna4-llm-topk":
-            result = _run_rdna4_llm_topk(args.repetitions)
-        else:
-            raise AssertionError(f"unhandled PyTorch workload: {args.workload}")
+        result = runner(args.repetitions)
     except Exception as exc:
         _write_oracle_result("fail", {"workload": args.workload, "reason": str(exc)})
         raise
