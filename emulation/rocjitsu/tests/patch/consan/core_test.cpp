@@ -422,6 +422,11 @@ TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
 
   for (const UnsupportedTarget &unsupported : unsupported_targets) {
     SCOPED_TRACE(unsupported.machine);
+    EXPECT_EQ(consan_arch_for_target(unsupported.target), ROCJITSU_CODE_ARCH_INVALID);
+    EXPECT_EQ(consan_capability_disposition(unsupported.target,
+                                            ConSanCapabilityEngine::SuperCollider,
+                                            ConSanCapabilityForm::NativeLdsAccess),
+              ConSanCapabilityDisposition::OutOfContract);
     std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
     mutate_elf_header(bytes,
                       [unsupported](Elf64_Ehdr &header) { header.e_flags = unsupported.machine; });

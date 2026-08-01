@@ -766,9 +766,10 @@ sampled_atomic_disposition_reason(std::string_view reason) {
 }
 
 [[nodiscard]] ConSanSiteDispositionReason
-first_light_atomic_disposition_reason(const ConSanAtomicSite &site, bool allow_gfx1250_lds) {
+first_light_atomic_disposition_reason(const ConSanAtomicSite &site,
+                                      bool allow_ordered_lds_atomic) {
   if (!site.mnemonic.starts_with("flat_atomic") && !site.mnemonic.starts_with("global_atomic") &&
-      !(allow_gfx1250_lds && site.mnemonic.starts_with("ds_")))
+      !(allow_ordered_lds_atomic && site.mnemonic.starts_with("ds_")))
     return ConSanSiteDispositionReason::NonFlatAtomicAddress;
   if (!site.addr_vgpr || !site.data_vgpr)
     return ConSanSiteDispositionReason::MissingAtomicOperands;
@@ -794,7 +795,8 @@ void append_moi_atomic_site_dispositions(const Container &container, const ConSa
        container.name.find(options.test_kernel_name_filter) == std::string::npos))
     return;
   const bool in_kernel = std::is_same_v<Container, ConSanKernelInfo>;
-  const bool allow_gfx1250_lds = semantic_result.arch == ROCJITSU_CODE_ARCH_GFX1250;
+  const bool allow_ordered_lds_atomic = consan_arch_supports_capability_form(
+      semantic_result.arch, ConSanCapabilityForm::OrderedLdsAtomic);
   if (in_kernel && is_rocclr_runtime_kernel_name(container.name))
     return;
   for (const ConSanAtomicSite &site : container.atomic_sites) {
@@ -816,8 +818,9 @@ void append_moi_atomic_site_dispositions(const Container &container, const ConSa
       reason = inline_atomic_disposition_reason(
           classify_consan_moi_inline_atomic_support(site, *event_kind));
     } else {
-      const ConSanAtomicSite normalized = normalize_atomic_record_site(site, allow_gfx1250_lds);
-      reason = first_light_atomic_disposition_reason(normalized, allow_gfx1250_lds);
+      const ConSanAtomicSite normalized =
+          normalize_atomic_record_site(site, allow_ordered_lds_atomic);
+      reason = first_light_atomic_disposition_reason(normalized, allow_ordered_lds_atomic);
       if (reason == ConSanSiteDispositionReason::None &&
           options.moi_engine == ConSanMoiEngine::Sampled) {
         std::string sampled_reason;
@@ -858,7 +861,13 @@ void append_moi_barrier_site_dispositions(const Container &container, const ConS
         continue;
     }
     ConSanSiteDispositionReason reason = ConSanSiteDispositionReason::None;
-    if (options.moi_engine == ConSanMoiEngine::Sampled) {
+    const bool unavailable_cluster_form =
+        site.scope == ConSanBarrierSite::Scope::Cluster &&
+        !consan_arch_supports_capability_form(result.arch,
+                                              ConSanCapabilityForm::ClusterBarrier);
+    if (unavailable_cluster_form) {
+      reason = ConSanSiteDispositionReason::UnsupportedScope;
+    } else if (options.moi_engine == ConSanMoiEngine::Sampled) {
       const ConSanSyncEvent *event = sync_index.event(ConSanSyncEventKind::Barrier, container.name,
                                                       in_kernel, site.text_offset);
       const ConSanSyncSequence *sequence = event == nullptr || event->size != site.size
@@ -872,7 +881,8 @@ void append_moi_barrier_site_dispositions(const Container &container, const ConS
       reason = ConSanSiteDispositionReason::InvalidBarrierEncoding;
     }
     append_moi_site_disposition(ConSanResourceSiteKind::Barrier, container.name, in_kernel,
-                                site.text_offset, site.mnemonic, reason, result);
+                                site.text_offset, site.mnemonic, reason, result,
+                                unavailable_cluster_form);
   }
 }
 

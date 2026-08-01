@@ -1604,7 +1604,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   };
   std::vector<Candidate> candidates;
   const MoiSyncInventoryIndex sync_index(result);
-  const bool allow_gfx1250_lds = result.arch == ROCJITSU_CODE_ARCH_GFX1250;
+  const bool allow_ordered_lds_atomic = consan_arch_supports_capability_form(
+      result.arch, ConSanCapabilityForm::OrderedLdsAtomic);
   const auto append = [&](std::string_view name, bool in_kernel, std::optional<uint64_t> descriptor,
                           const std::vector<ConSanAtomicSite> &sites) {
     for (const ConSanAtomicSite &site : sites) {
@@ -1614,8 +1615,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                                      ": compare-exchange-dynamic-outcome-unavailable");
         continue;
       }
-      const ConSanAtomicSite normalized = normalize_atomic_record_site(site, allow_gfx1250_lds);
-      if (!is_first_light_atomic_record_candidate(normalized, allow_gfx1250_lds))
+      const ConSanAtomicSite normalized =
+          normalize_atomic_record_site(site, allow_ordered_lds_atomic);
+      if (!is_first_light_atomic_record_candidate(normalized, allow_ordered_lds_atomic))
         continue;
       const auto event_kind = atomic_event_kind_for_site(sync_index, name, in_kernel, normalized);
       if (!event_kind)

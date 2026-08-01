@@ -5,6 +5,37 @@ This document is the normative supported-form contract for ConSan on
 and synchronization semantics, not identical ISA mnemonic sets. The
 target-specific status ledgers record workload qualification separately.
 
+The following compact projection is generated from the typed contract in
+`consan_capability_contract.h`. The host-side
+`ConSan.CapabilityManifestMatchesDocumentation` gate rejects drift in target,
+engine, or semantic-form availability without parsing the surrounding prose or
+copying target-native mnemonic lists. "Associated only" means the form is not
+standalone evidence for that engine; it contributes ordering metadata only to
+an admitted atomic sequence. Forms without a parenthesized qualifier are
+supported under the engine semantics described below. "Unsupported" records
+an engine-specific lowering gap for a form admitted by the target family.
+
+<!-- BEGIN GENERATED CONSAN CAPABILITY CONTRACT -->
+| Target | Engine | Access | Barrier | Atomic | Fence |
+| --- | --- | --- | --- | --- | --- |
+| `gfx942` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only) | addressed ordinary (mutation only) |
+| `gfx942` | Record/Replay | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary |
+| `gfx942` | Sampled | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
+| `gfx942` | Inline Shadow | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL (unsupported)<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
+| `gfx950` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only) | addressed ordinary (mutation only) |
+| `gfx950` | Record/Replay | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary |
+| `gfx950` | Sampled | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
+| `gfx950` | Inline Shadow | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL (unsupported)<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
+| `gfx1201` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only) | addressed ordinary (mutation only) |
+| `gfx1201` | Record/Replay | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary |
+| `gfx1201` | Sampled | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary (associated only) |
+| `gfx1201` | Inline Shadow | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary (associated only) |
+| `gfx1250` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only)<br>cluster (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only)<br>ordered LDS (mutation only) | addressed ordinary (mutation only) |
+| `gfx1250` | Record/Replay | native LDS<br>group FLAT | workgroup<br>cluster | ordered FLAT<br>ordered VGLOBAL<br>ordered LDS<br>relaxed LDS RMW (access only) | addressed ordinary |
+| `gfx1250` | Sampled | native LDS<br>group FLAT | workgroup<br>cluster | ordered FLAT<br>ordered VGLOBAL<br>ordered LDS<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
+| `gfx1250` | Inline Shadow | native LDS<br>group FLAT | workgroup<br>cluster | ordered FLAT<br>ordered VGLOBAL<br>ordered LDS<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
+<!-- END GENERATED CONSAN CAPABILITY CONTRACT -->
+
 A form marked **supported** is decoded into the shared semantic inventory and
 has a lowering path for the named engine. Register pressure, report capacity,
 placement, or bounded runtime-state exhaustion can still make a particular
@@ -40,7 +71,7 @@ therefore intentional and are not target-parity gaps.
 | Full workgroup barrier | Singleton `s_barrier` | Singleton `s_barrier` | Qualified signal/wait sequence | Qualified signal/wait sequence |
 | Cluster-scope barrier | No target form claimed | No target form claimed | No target form claimed | Qualified cluster signal/wait sequence |
 | 32-bit ordered FLAT atomic | Cache-associated device/system release, acquire, and acquire-release | Cache-associated device/system release, acquire, and acquire-release | Device/system release, acquire, and acquire-release | Device/system release, acquire, and acquire-release |
-| Ordered global/buffer atomic address forms | FLAT address semantics only | FLAT address semantics only | VGLOBAL and buffer-resource materialization | VGLOBAL and buffer-resource materialization |
+| Ordered VGLOBAL atomic address forms | VGLOBAL vector-only and scalar-base materialization | VGLOBAL vector-only and scalar-base materialization | VGLOBAL vector-only and scalar-base materialization | VGLOBAL vector-only and scalar-base materialization |
 | Ordered LDS atomic | Relaxed LDS RMW is access-only | Relaxed LDS RMW is access-only | No ordered LDS form claimed | Ordered LDS token form plus relaxed access-only forms |
 | Addressed ordinary-memory fence | Cache-associated release/acquire sequence | Cache-associated release/acquire sequence | Global/buffer communication sequence | Global/buffer communication sequence |
 

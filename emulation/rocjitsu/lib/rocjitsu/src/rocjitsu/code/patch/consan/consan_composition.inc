@@ -448,7 +448,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       // image.
       fault_result = std::move(pristine_mutation_plan);
       AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
-      const rj_code_arch_t arch = arch_for_target(code_object.target_id());
+      const rj_code_arch_t arch = consan_arch_for_target(code_object.target_id());
       apply_fault_mutation_to_inventory(code_object, arch, fault_options, fault_result);
       fault_result = finalize_consan_result(std::move(fault_result), code_object_bytes);
     }
@@ -669,7 +669,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   result.kernel_metadata_trustworthy = code_object->kernel_metadata_is_trustworthy();
   result.malformed_kernel_metadata_note_count = code_object->malformed_kernel_metadata_note_count();
   result.target = code_object->target_id();
-  result.arch = arch_for_target(code_object->target_id());
+  result.arch = consan_arch_for_target(code_object->target_id());
   result.errors = validate_consan_input_layout(*code_object);
   if (!result.errors.empty())
     return result;

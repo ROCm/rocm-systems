@@ -16,6 +16,7 @@
 #include <string_view>
 #include <vector>
 
+#include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 #include "rocjitsu/code/patch/consan/consan_flat_access.h"
 #include "rocjitsu/code/rj_code.h"
 
@@ -28,6 +29,29 @@
 #include "rocjitsu/code/patch/consan/consan_fault_sync_types.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_result.h.inc"
+
+/// Bridge runtime option identities to the flattened public capability
+/// matrix. Invalid or disabled option combinations are outside that contract.
+[[nodiscard]] constexpr std::optional<ConSanCapabilityEngine>
+consan_capability_engine(ConSanFlavor flavor, ConSanMoiEngine moi_engine) {
+  switch (flavor) {
+  case ConSanFlavor::SuperCollider:
+    return ConSanCapabilityEngine::SuperCollider;
+  case ConSanFlavor::Moi:
+    switch (moi_engine) {
+    case ConSanMoiEngine::RecordReplay:
+      return ConSanCapabilityEngine::RecordReplay;
+    case ConSanMoiEngine::Sampled:
+      return ConSanCapabilityEngine::Sampled;
+    case ConSanMoiEngine::InlineShadow:
+      return ConSanCapabilityEngine::InlineShadow;
+    }
+    return std::nullopt;
+  case ConSanFlavor::None:
+    return std::nullopt;
+  }
+  return std::nullopt;
+}
 
 /// Return the active VGPR-bank role mask at an instruction in a gfx1250
 /// container. The scan is bounded by the owning container entry.

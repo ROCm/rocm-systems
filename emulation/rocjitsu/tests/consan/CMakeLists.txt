@@ -15,6 +15,36 @@ set(RJ_CONSAN_GFX950_HIP_MOI_BUILD_DIR
     "Exact hip-moi-build-gfx950-tests directory for simulator CTest coverage"
 )
 
+add_executable(
+    consan_capability_manifest
+    "${CMAKE_CURRENT_LIST_DIR}/tools/consan_capability_manifest.cpp"
+)
+target_include_directories(
+    consan_capability_manifest
+    PRIVATE "${CMAKE_SOURCE_DIR}/lib/rocjitsu/src"
+)
+rj_configure_target(consan_capability_manifest TEST)
+add_custom_target(
+    consan_capability_manifest_update
+    COMMAND
+        ${CMAKE_COMMAND}
+        "-DMANIFEST_EXECUTABLE=$<TARGET_FILE:consan_capability_manifest>"
+        "-DCAPABILITIES_DOCUMENT=${CMAKE_SOURCE_DIR}/docs/consan/CAPABILITIES.md"
+        -DUPDATE=ON -P
+        "${CMAKE_CURRENT_LIST_DIR}/check_capability_manifest.cmake"
+    DEPENDS consan_capability_manifest
+    COMMENT "Updating the generated ConSan capability contract"
+)
+rj_add_test(
+    NAME ConSan.CapabilityManifestMatchesDocumentation
+    COMMAND
+        ${CMAKE_COMMAND}
+        "-DMANIFEST_EXECUTABLE=$<TARGET_FILE:consan_capability_manifest>"
+        "-DCAPABILITIES_DOCUMENT=${CMAKE_SOURCE_DIR}/docs/consan/CAPABILITIES.md"
+        -P "${CMAKE_CURRENT_LIST_DIR}/check_capability_manifest.cmake"
+    LABELS consan
+)
+
 function(rj_add_consan_unit_sources target)
     target_sources(
         ${target}

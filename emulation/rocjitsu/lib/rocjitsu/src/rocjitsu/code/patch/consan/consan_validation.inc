@@ -87,7 +87,7 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
   const std::span<const uint8_t> active_bytes =
       result.elf_bytes.empty() ? original_bytes : std::span<const uint8_t>(result.elf_bytes);
   AmdGpuCodeObject active(active_bytes.data(), active_bytes.size());
-  const rj_code_arch_t arch = arch_for_target(active.target_id());
+  const rj_code_arch_t arch = consan_arch_for_target(active.target_id());
   if (arch == ROCJITSU_CODE_ARCH_INVALID)
     return;
   CodeObjectPatcher patcher(active);
@@ -356,7 +356,7 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
     }
   }
 
-  const uint32_t padding_nop = build_s_nop(0, arch_for_target(replacement.target_id()));
+  const uint32_t padding_nop = build_s_nop(0, consan_arch_for_target(replacement.target_id()));
   size_t offset = original_bytes.size();
   while (offset < replacement_bytes.size()) {
     if (accounted[offset]) {
@@ -465,7 +465,7 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
   std::vector<std::string> errors;
   if (replacement.text_sections().size() != 1)
     return errors;
-  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
+  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (!decoder) {
     errors.emplace_back("ConSan final validation could not create a replacement decoder");
@@ -501,7 +501,7 @@ validate_sc_indirect_island_semantics(const AmdGpuCodeObject &replacement,
   const auto replacement_text = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
       replacement.text_sections().front()->size());
-  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
+  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   for (const ConSanPatchInfo &island : result.patches) {
     if (island.kind != ConSanPatchKind::TrampolineScIndirectBranchIsland)
       continue;
@@ -580,7 +580,7 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
   const auto text = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
       replacement.text_sections().front()->size());
-  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
+  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   const auto read_word = [](std::span<const uint8_t> bytes,
                             uint64_t offset) -> std::optional<uint32_t> {
     if (offset > bytes.size() || sizeof(uint32_t) > bytes.size() - offset)
@@ -756,7 +756,7 @@ validate_sc_dense_call_semantics(const AmdGpuCodeObject &original,
   const auto replacement_text = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
       replacement.text_sections().front()->size());
-  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
+  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   const uint32_t nop = build_s_nop(0, arch);
   const auto matches = [&](uint64_t offset, std::span<const uint32_t> words) {
     const uint64_t size = words.size() * sizeof(uint32_t);
@@ -969,7 +969,7 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
   const auto replacement_text = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
       replacement.text_sections().front()->size());
-  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
+  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (!decoder) {
     errors.emplace_back("ConSan relay donor proof could not create a pristine decoder");
@@ -1201,7 +1201,7 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
   const auto replacement_text = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
       replacement.text_sections().front()->size());
-  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
+  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (!decoder) {
     errors.emplace_back("ConSan relay reservoir proof could not create a pristine decoder");
@@ -1589,7 +1589,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
   const auto replacement_text = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
       replacement.text_sections().front()->size());
-  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
+  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (!decoder) {
     errors.emplace_back("ConSan mutation proof could not create a replacement decoder");
@@ -2549,7 +2549,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
   const auto replacement_text = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
       replacement.text_sections().front()->size());
-  const rj_code_arch_t arch = arch_for_target(original.target_id());
+  const rj_code_arch_t arch = consan_arch_for_target(original.target_id());
   const uint32_t nop = build_s_nop(0, arch);
   std::unordered_set<std::string> proven_edges;
   const SyncEventIdentityIndex pristine_events = build_sync_event_identity_index(pristine);
@@ -2785,7 +2785,7 @@ validate_entry_scalar_backup_semantics(const AmdGpuCodeObject &original,
   const auto *replacement_section = replacement.text_sections().front();
   const std::span<const uint8_t> replacement_text(
       reinterpret_cast<const uint8_t *>(replacement_section->data()), replacement_section->size());
-  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
+  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
 
   for (const ConSanPatchInfo &patch : result.patches) {
     const bool has_vgpr = patch.entry_scalar_backup_vgpr.has_value();
@@ -2897,7 +2897,7 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
   const auto *replacement_section = replacement.text_sections().front();
   const std::span<const uint8_t> replacement_text(
       reinterpret_cast<const uint8_t *>(replacement_section->data()), replacement_section->size());
-  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
+  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   const auto validate_entry = [&](const ConSanPatchInfo &patch, uint64_t entry_offset,
                                   std::string_view kernel_name) {
     const bool captures_sgpr = patch.dispatch_id_capture_sgpr.has_value();
@@ -3075,7 +3075,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
         return is_exact_patch(patch) && patch.workgroup_shadow_size == 0u;
       });
-  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
+  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   if (replacement.text_sections().size() != 1 ||
       (has_global_exact_patch && !result.resolved_moi_dispatch_id_sgpr &&
        !result.resolved_moi_dispatch_id_vgpr && !is_rdna4_family_arch(arch))) {
@@ -3351,7 +3351,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     return errors;
   }
 
-  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
+  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (!decoder) {
     errors.emplace_back(
@@ -3866,7 +3866,7 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
 
   const bool text_relocated =
       original.text_sections().front()->size() != replacement.text_sections().front()->size();
-  const rj_code_arch_t arch = arch_for_target(replacement.target_id());
+  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   for (const AmdGpuKernelInfo &original_kernel : original.kernels()) {
     const auto replacement_it =
         std::ranges::find_if(replacement.kernels(), [&](const AmdGpuKernelInfo &kernel) {

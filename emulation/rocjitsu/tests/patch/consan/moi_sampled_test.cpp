@@ -1456,6 +1456,13 @@ TEST(ConSanMoi, CdnaSampledVglobalMaterializesVectorAndScalarAddressesInScratchT
   }};
   for (const SampledTarget &target : kSampledCdnaTargets) {
     SCOPED_TRACE(target.label);
+    const rj_code_target_id_t target_id = target.arch == ROCJITSU_CODE_ARCH_CDNA3
+                                              ? ROCJITSU_CODE_TARGET_GFX942
+                                              : ROCJITSU_CODE_TARGET_GFX950;
+    EXPECT_EQ(consan_arch_for_target(target_id), target.arch);
+    EXPECT_EQ(consan_capability_disposition(target_id, ConSanCapabilityEngine::Sampled,
+                                            ConSanCapabilityForm::OrderedVglobalAtomic),
+              ConSanCapabilityDisposition::Supported);
     const auto access = target.arch == ROCJITSU_CODE_ARCH_CDNA3
                             ? build_cdna3_ds_store_b32(
                                   /*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, target.arch)

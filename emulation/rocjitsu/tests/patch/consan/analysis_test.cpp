@@ -1234,12 +1234,21 @@ TEST(ConSan, RetainsTypedIdentityForEverySupportedTarget) {
 
   for (const TargetCase &target_case : cases) {
     SCOPED_TRACE(rj_code_target_name(target_case.target));
+    EXPECT_EQ(consan_arch_for_target(target_case.target), target_case.arch);
     const ConSanResult result = try_patch_consan(target_case.bytes, options);
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     EXPECT_TRUE(result.parsed_code_object);
     EXPECT_EQ(result.target, target_case.target);
     EXPECT_EQ(result.arch, target_case.arch);
   }
+  EXPECT_EQ(consan_capability_engine(ConSanFlavor::SuperCollider, ConSanMoiEngine::RecordReplay),
+            ConSanCapabilityEngine::SuperCollider);
+  EXPECT_EQ(consan_capability_engine(ConSanFlavor::Moi, ConSanMoiEngine::RecordReplay),
+            ConSanCapabilityEngine::RecordReplay);
+  EXPECT_EQ(consan_capability_engine(ConSanFlavor::Moi, ConSanMoiEngine::Sampled),
+            ConSanCapabilityEngine::Sampled);
+  EXPECT_EQ(consan_capability_engine(ConSanFlavor::Moi, ConSanMoiEngine::InlineShadow),
+            ConSanCapabilityEngine::InlineShadow);
 }
 
 TEST(ConSan, CountsCdna4LdsAccessesFromNativeInstructionShapes) {

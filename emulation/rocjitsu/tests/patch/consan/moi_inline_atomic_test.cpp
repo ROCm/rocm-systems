@@ -1526,6 +1526,14 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
   changed.raw_saddr = 4;
   EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
             ConSanMoiInlineAtomicSupport::Supported);
+  changed.size = 2u * sizeof(uint32_t);
+  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release),
+            ConSanMoiInlineAtomicSupport::UnsupportedEncoding);
+  EXPECT_EQ(consan_capability_disposition(ROCJITSU_CODE_TARGET_GFX950,
+                                          ConSanCapabilityEngine::InlineShadow,
+                                          ConSanCapabilityForm::OrderedVglobalAtomic),
+            ConSanCapabilityDisposition::Unsupported);
+  changed.size = 3u * sizeof(uint32_t);
   changed.mnemonic = "global_atomic_cmpswap_b32";
   changed.dst_vgpr = 6;
   changed.returns_old_value = true;

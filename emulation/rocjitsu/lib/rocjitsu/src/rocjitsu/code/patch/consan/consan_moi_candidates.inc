@@ -289,6 +289,8 @@ two_address_native_lds_offset_scale(std::string_view mnemonic);
 [[nodiscard]] bool is_moi_native_lds_candidate(const ConSanLdsSite &site, rj_code_arch_t arch) {
   const bool supported_atomic =
       site.kind == ConSanLdsAccessKind::Atomic &&
+      consan_arch_supports_capability_form(arch,
+                                           ConSanCapabilityForm::RelaxedLdsAtomicAccess) &&
       ((arch == ROCJITSU_CODE_ARCH_GFX1250 &&
         equals_any(site.mnemonic, {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64",
                                    "ds_cmpstore_rtn_b32"})) ||
@@ -539,8 +541,8 @@ void append_moi_access_site_dispositions(std::span<const uint8_t> bytes, const C
 
   for (const ConSanLdsSite &site : container.lds_sites) {
     if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write &&
-        !((arch == ROCJITSU_CODE_ARCH_GFX1250 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-           arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+        !(consan_arch_supports_capability_form(
+              arch, ConSanCapabilityForm::RelaxedLdsAtomicAccess) &&
           site.kind == ConSanLdsAccessKind::Atomic))
       continue;
     append_moi_access_site_disposition(

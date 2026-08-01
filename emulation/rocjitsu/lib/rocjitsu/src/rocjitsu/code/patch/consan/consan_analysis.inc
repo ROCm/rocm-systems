@@ -229,21 +229,6 @@ apply_descriptor_vgpr_growths_to_patcher(CodeObjectPatcher &patcher,
   return true;
 }
 
-[[nodiscard]] rj_code_arch_t arch_for_target(rj_code_target_id_t target) {
-  switch (target) {
-  case ROCJITSU_CODE_TARGET_GFX942:
-    return ROCJITSU_CODE_ARCH_CDNA3;
-  case ROCJITSU_CODE_TARGET_GFX950:
-    return ROCJITSU_CODE_ARCH_CDNA4;
-  case ROCJITSU_CODE_TARGET_GFX1201:
-    return ROCJITSU_CODE_ARCH_RDNA4;
-  case ROCJITSU_CODE_TARGET_GFX1250:
-    return ROCJITSU_CODE_ARCH_GFX1250;
-  default:
-    return ROCJITSU_CODE_ARCH_INVALID;
-  }
-}
-
 [[nodiscard]] bool starts_with_any(std::string_view value,
                                    std::initializer_list<std::string_view> prefixes) {
   for (std::string_view prefix : prefixes) {

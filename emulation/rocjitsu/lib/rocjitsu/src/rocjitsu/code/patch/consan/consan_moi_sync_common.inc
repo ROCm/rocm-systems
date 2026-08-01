@@ -301,10 +301,11 @@ void append_fence_record_candidates(const ConSanResult &result,
 }
 
 [[nodiscard]] bool is_first_light_atomic_record_candidate(const ConSanAtomicSite &site,
-                                                          bool allow_gfx1250_lds = false) {
-  const bool is_gfx1250_lds = allow_gfx1250_lds && site.mnemonic.starts_with("ds_");
+                                                          bool allow_ordered_lds_atomic = false) {
+  const bool is_ordered_lds_atomic =
+      allow_ordered_lds_atomic && site.mnemonic.starts_with("ds_");
   if (!site.mnemonic.starts_with("flat_atomic") && !site.mnemonic.starts_with("global_atomic") &&
-      !is_gfx1250_lds)
+      !is_ordered_lds_atomic)
     return false;
   if (!site.addr_vgpr || !site.data_vgpr || *site.addr_vgpr >= 255)
     return false;
@@ -320,12 +321,13 @@ void append_fence_record_candidates(const ConSanResult &result,
 }
 
 [[nodiscard]] ConSanAtomicSite normalize_atomic_record_site(const ConSanAtomicSite &site,
-                                                            bool allow_gfx1250_lds) {
+                                                            bool allow_ordered_lds_atomic) {
   ConSanAtomicSite normalized = site;
   // LDS visibility is inherently workgroup-scoped. Its instruction encoding
   // has no explicit scope field, so supply the semantic scope only after the
   // surrounding sequence has qualified this site as an ordering event.
-  if (allow_gfx1250_lds && normalized.mnemonic.starts_with("ds_") && !normalized.raw_scope)
+  if (allow_ordered_lds_atomic && normalized.mnemonic.starts_with("ds_") &&
+      !normalized.raw_scope)
     normalized.raw_scope = 1u;
   return normalized;
 }
@@ -363,11 +365,14 @@ void append_atomic_record_candidates(const ConSanKernelInfo &kernel, const ConSa
                                      std::vector<AtomicRecordCandidate> &candidates) {
   if (is_rocclr_runtime_kernel_name(kernel.name))
     return;
-  const bool allow_gfx1250_lds = result.arch == ROCJITSU_CODE_ARCH_GFX1250;
+  const bool allow_ordered_lds_atomic = consan_arch_supports_capability_form(
+      result.arch, ConSanCapabilityForm::OrderedLdsAtomic);
   for (const ConSanAtomicSite &site : kernel.atomic_sites) {
     const auto event_kind = atomic_event_kind_for_site(sync_index, kernel.name, true, site);
-    const ConSanAtomicSite normalized = normalize_atomic_record_site(site, allow_gfx1250_lds);
-    if (is_first_light_atomic_record_candidate(normalized, allow_gfx1250_lds) && event_kind) {
+    const ConSanAtomicSite normalized =
+        normalize_atomic_record_site(site, allow_ordered_lds_atomic);
+    if (is_first_light_atomic_record_candidate(normalized, allow_ordered_lds_atomic) &&
+        event_kind) {
       std::optional<uint64_t> descriptor_file_offset = kernel.descriptor_file_offset;
       const ConSanSyncEvent *event =
           sync_index.event(ConSanSyncEventKind::Atomic, kernel.name, true, site.text_offset);
@@ -383,11 +388,13 @@ void append_atomic_record_candidates(const ConSanKernelInfo &kernel, const ConSa
 void append_atomic_record_candidates(const ConSanFunctionInfo &function, const ConSanResult &result,
                                      const MoiSyncInventoryIndex &sync_index,
                                      std::vector<AtomicRecordCandidate> &candidates) {
-  const bool allow_gfx1250_lds = result.arch == ROCJITSU_CODE_ARCH_GFX1250;
+  const bool allow_ordered_lds_atomic = consan_arch_supports_capability_form(
+      result.arch, ConSanCapabilityForm::OrderedLdsAtomic);
   for (const ConSanAtomicSite &site : function.atomic_sites) {
     const auto event_kind = atomic_event_kind_for_site(sync_index, function.name, false, site);
-    const ConSanAtomicSite normalized = normalize_atomic_record_site(site, allow_gfx1250_lds);
-    if (is_first_light_atomic_record_candidate(normalized, allow_gfx1250_lds) && event_kind)
+    const ConSanAtomicSite normalized =
+        normalize_atomic_record_site(site, allow_ordered_lds_atomic);
+    if (is_first_light_atomic_record_candidate(normalized, allow_ordered_lds_atomic) && event_kind)
       candidates.push_back({"function:" + function.name, normalized, std::nullopt, *event_kind});
   }
 }
