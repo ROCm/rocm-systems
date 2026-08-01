@@ -832,7 +832,6 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     std::vector<BasicBlock *> stack{entry};
     std::unordered_set<BasicBlock *> body;
     std::vector<std::pair<BasicBlock *, uint16_t>> candidates;
-    std::map<std::pair<uint16_t, uint16_t>, std::set<uint16_t>> saved_lane_sources;
     while (!stack.empty()) {
       BasicBlock *block = stack.back();
       stack.pop_back();
@@ -845,32 +844,91 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
           candidates.emplace_back(
               block, static_cast<uint16_t>(text_word_at(text, term->src_loc()) & 0xffu));
       }
-      // A lane only holds the caller's value because this body put it there. Record each
-      // v_writelane_b32 as (vgpr, lane) <- sgpr so a later read can be checked against it; without
-      // that pairing any lane read into the pair would look like a restore.
-      for (const Instruction &inst : block->instructions()) {
-        if (inst.mnemonic() != "v_writelane_b32")
-          continue;
-        const Operand *vdst = inst.dst_operand(0);
-        const Operand *ssrc = inst.src_operand(0);
-        const Operand *lane = inst.src_operand(1);
-        if (vdst == nullptr || ssrc == nullptr || lane == nullptr)
-          continue;
-        if (vdst->encoding_value() < 0 || ssrc->encoding_value() < 0 || lane->encoding_value() < 0)
-          continue;
-        saved_lane_sources[{static_cast<uint16_t>(vdst->encoding_value()),
-                            static_cast<uint16_t>(lane->encoding_value())}]
-            .insert(static_cast<uint16_t>(ssrc->encoding_value()));
-      }
       for (BasicBlock *succ : block->successors())
         stack.push_back(succ);
     }
+
+    // Whether (vgpr, lane) still holds what `v_writelane_b32` put there from `sgpr`, asked at one
+    // program point rather than of the body as a whole. A body-wide set of saves cannot answer
+    // this: a save that appears after the read, or on a path that does not join it, or one a later
+    // write to the same VGPR has already destroyed, would all still be in the set and would let an
+    // arbitrary lane read pass as a return-address restore.
+    auto lane_holds_saved_sgpr = [&](BasicBlock *start, const Instruction *from, uint16_t vgpr,
+                                     uint16_t lane, uint16_t sgpr) {
+      std::vector<std::pair<BasicBlock *, const Instruction *>> work{{start, from}};
+      std::unordered_set<BasicBlock *> seen;
+      while (!work.empty()) {
+        const auto [block, before] = work.back();
+        work.pop_back();
+        if (block == nullptr || !body.contains(block))
+          return false;
+        std::vector<const Instruction *> ordered;
+        ordered.reserve(block->num_instructions());
+        for (const Instruction &inst : block->instructions())
+          ordered.push_back(&inst);
+        size_t cursor = ordered.size();
+        if (before != nullptr) {
+          const auto found = std::ranges::find(ordered, before);
+          if (found == ordered.end())
+            return false;
+          cursor = static_cast<size_t>(found - ordered.begin());
+        }
+
+        bool resolved = false;
+        while (cursor > 0) {
+          --cursor;
+          const Instruction &inst = *ordered[cursor];
+          const Operand *vdst = inst.dst_operand(0);
+          const bool writes_lane = inst.mnemonic() == "v_writelane_b32" && vdst != nullptr &&
+                                   vdst->encoding_value() >= 0;
+          if (writes_lane && static_cast<uint16_t>(vdst->encoding_value()) == vgpr) {
+            const Operand *ssrc = inst.src_operand(0);
+            const Operand *written_lane = inst.src_operand(1);
+            if (ssrc == nullptr || written_lane == nullptr || ssrc->encoding_value() < 0 ||
+                written_lane->encoding_value() < 0)
+              return false;
+            // A write to a different lane of the same VGPR leaves this lane alone.
+            if (static_cast<uint16_t>(written_lane->encoding_value()) != lane)
+              continue;
+            if (static_cast<uint16_t>(ssrc->encoding_value()) != sgpr)
+              return false;
+            resolved = true;
+            break;
+          }
+          // Any other definition of the VGPR rewrites every lane, including this one.
+          bool clobbers = false;
+          for (int i = 0; i < inst.num_dst_operands(); ++i) {
+            const Operand *dst = inst.dst_operand(i);
+            if (dst == nullptr || dst->encoding_value() < 0)
+              continue;
+            const auto base = static_cast<uint16_t>(dst->encoding_value());
+            const int halves = dst->size_bits() > 32 ? dst->size_bits() / 32 : 1;
+            if (vgpr >= base && vgpr < base + halves)
+              clobbers = true;
+          }
+          if (clobbers)
+            return false;
+        }
+        if (resolved)
+          continue;
+        // Reaching the entry without meeting the save means the lane was never given the caller's
+        // value on this path, which is the opposite of the SGPR search: there the entry is where
+        // the caller's value comes from, here the save has to be inside the body.
+        if (block == entry)
+          return false;
+        if (block->predecessors().empty() || !seen.insert(block).second)
+          return false;
+        for (BasicBlock *pred : block->predecessors())
+          work.emplace_back(pred, nullptr);
+      }
+      return true;
+    };
 
     // Classify one instruction's effect on the tracked half: a lane restore reinstates the
     // caller's value, any other definition replaces it with something this analysis cannot vouch
     // for, and everything else leaves the search running.
     enum class Effect { kNone, kRestores, kRedefines };
-    auto effect_on = [&saved_lane_sources](const Instruction &inst, uint16_t sgpr) {
+    auto effect_on = [&](const Instruction &inst, uint16_t sgpr, BasicBlock *block) {
       bool defines = false;
       for (int i = 0; i < inst.num_dst_operands(); ++i) {
         const Operand *dst = inst.dst_operand(i);
@@ -894,9 +952,9 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
           lane->encoding_value() < 0) {
         return Effect::kRedefines;
       }
-      const auto saved = saved_lane_sources.find({static_cast<uint16_t>(vsrc->encoding_value()),
-                                                  static_cast<uint16_t>(lane->encoding_value())});
-      if (saved == saved_lane_sources.end() || !saved->second.contains(sgpr))
+      // Ask at this instruction, not of the body: the save has to reach this read on every path.
+      if (!lane_holds_saved_sgpr(block, &inst, static_cast<uint16_t>(vsrc->encoding_value()),
+                                 static_cast<uint16_t>(lane->encoding_value()), sgpr))
         return Effect::kRedefines;
       return Effect::kRestores;
     };
@@ -926,7 +984,7 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         bool resolved = false;
         while (cursor > 0) {
           --cursor;
-          const Effect effect = effect_on(*ordered[cursor], sgpr);
+          const Effect effect = effect_on(*ordered[cursor], sgpr, block);
           if (effect == Effect::kNone)
             continue;
           if (effect == Effect::kRedefines)
