@@ -479,7 +479,12 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
           "};\n\n")
       unroll_fns = [fn for fn in primary_funcs if fn.unroll == unroll]
       for i, fn in enumerate(unroll_fns):
-        sym = paste("_", "ncclDevFunc", *fn)
+        # Must match the symbol emitted for the forward declarations / table /
+        # DEFINE_ncclDevFunc above: fn_sym() omits the reg suffix when reg=="0",
+        # so calling by name here must use it too (plain *fn would append the
+        # "_0" reg field and reference an undeclared symbol, breaking the
+        # pure-RDC / --no-device-linker build).
+        sym = "ncclDevFunc_" + fn_sym(fn)
         guard = get_arch_guard(fn)
         spec = f"template<> struct Caller{unroll}<{i}, {i+1}> {{ static __forceinline__ __device__ void call{unroll}(unsigned short) noexcept"
         if guard:

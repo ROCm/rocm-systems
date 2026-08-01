@@ -18,6 +18,7 @@ generated text rather than compiling it.
 """
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -28,8 +29,11 @@ GENERATE_PY = os.path.join(HERE, "generate.py")
 
 # A small, fast slice of collectives. "AllReduce RING SIMPLE Sum f32" expands to
 # both an unguarded primary and an arch-guarded variant, which exercises the
-# guarded-out (trap) leaf below.
-ONLY_FUNCS = "AllReduce RING SIMPLE Sum f32|SendRecv"
+# guarded-out (trap) leaf below. The AllReduce LL128 entries are reg-variant
+# (see ll128_reg_variant_colls), so they carry a "_1"/"_2" reg suffix while every
+# other kernel omits the reg field -- the pure-RDC dispatcher must call each by
+# its exact declared name (regression: #ll128-reg-split).
+ONLY_FUNCS = "AllReduce RING SIMPLE Sum f32|AllReduce RING LL128 Sum f32|SendRecv"
 
 
 def _generate(tmpdir, ifc="OFF"):
@@ -81,6 +85,30 @@ class DeviceTableGenerationTest(unittest.TestCase):
         # One explicit leaf specialization per index, dispatched by name.
         self.assertIn("struct Caller1<0, 1>", self.header)
         self.assertRegex(self.header, r"Caller1<0, \d+>::call1")
+
+    def test_pure_rdc_dispatch_calls_only_declared_symbols(self):
+        # Every ncclDevFunc_* called by name in a pure-RDC Caller leaf must be
+        # one of the forward-declared symbols. The reg-variant split makes the
+        # symbol name conditional (reg suffix only when reg != 0), so a leaf that
+        # reconstructs the name from all fields (appending a stray "_0") would
+        # reference an undeclared symbol and fail the -fgpu-rdc / --no-device-linker
+        # link. This asserts the two symbol sets agree.
+        declared = set(re.findall(r"__device__ void (ncclDevFunc_\w+)\(\);", self.header))
+        self.assertTrue(declared, "no forward declarations found")
+        called = set(
+            re.findall(r"noexcept \{ (ncclDevFunc_\w+)\(\); \}", self.header)
+        )
+        self.assertTrue(called, "no pure-RDC dispatch leaves found")
+        undeclared = called - declared
+        self.assertEqual(
+            set(),
+            undeclared,
+            "pure-RDC dispatch calls symbols that were never declared: %s" % sorted(undeclared),
+        )
+        # Sanity: the reg-variant AllReduce LL128 kernels keep their reg suffix,
+        # and no kernel ever gets a bogus "_0" reg suffix.
+        self.assertTrue(any(s.endswith(("_1", "_2")) for s in called))
+        self.assertFalse(any(re.search(r"_LL128_.*_0$", s) for s in called))
 
     def test_guarded_out_leaf_traps_not_noop(self):
         # Arch-guarded-out slots must fail fast (matching the old nullptr table
