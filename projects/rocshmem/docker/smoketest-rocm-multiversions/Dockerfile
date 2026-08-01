@@ -1,7 +1,7 @@
 # =============================================================================
 # Multi-ROCm-version rocSHMEM smoketest
 #
-# Installs multiple ROCm versions side-by-side (6.3, 6.4, 7.0, 7.2 + 7.13 TheRock),
+# Installs multiple ROCm versions side-by-side (6.3, 6.4, 7.0, 7.2 + 7.13/7.14 TheRock),
 # builds rocshmem against a default subset, runs ping-pong smoketest + Python wheel.
 #
 # Build from local checkout:
@@ -32,7 +32,8 @@
 FROM ubuntu:24.04
 
 ARG ROCM_LEGACY_VERSIONS="6.3.3 6.4.3 7.0.2 7.2.4"
-ARG ROCM_THEROCK_VERSION=7.13
+ARG ROCM_THEROCK_VERSIONS="7.13 7.14"
+ARG ROCM_THEROCK_GPU_TARGETS="gfx942 gfx950 gfx1250"
 
 ###############################################################################
 # System dependencies
@@ -50,7 +51,7 @@ RUN apt-get update \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 ###############################################################################
-# ROCm 6.3 + 7.2 (traditional repo.radeon.com)
+# ROCm legacy versions (traditional repo.radeon.com)
 ###############################################################################
 RUN mkdir -p /etc/apt/keyrings \
  && wget -qO- https://repo.radeon.com/rocm/rocm.gpg.key \
@@ -70,7 +71,7 @@ RUN mkdir -p /etc/apt/keyrings \
  && { update-alternatives --query rocm >/dev/null 2>&1 && update-alternatives --remove-all rocm; }
 
 ###############################################################################
-# ROCm 7.13 (TheRock repo.amd.com)
+# ROCm TheRock versions (repo.amd.com)
 ###############################################################################
 RUN wget -qO- https://repo.amd.com/rocm/packages/gpg/rocm.gpg \
     | gpg --dearmor > /etc/apt/keyrings/amdrocm.gpg \
@@ -78,15 +79,15 @@ RUN wget -qO- https://repo.amd.com/rocm/packages/gpg/rocm.gpg \
       https://repo.amd.com/rocm/packages-multi-arch/ubuntu2404 stable main" \
       > /etc/apt/sources.list.d/amdrocm.list \
  && apt-get update \
- && apt-get install -y \
-      "amdrocm-core-dev${ROCM_THEROCK_VERSION}" \
-      "amdrocm-core${ROCM_THEROCK_VERSION}-gfx942" \
-      "amdrocm-core${ROCM_THEROCK_VERSION}-gfx950" \
-      "amdrocm-developer-tools${ROCM_THEROCK_VERSION}" \
-      "amdrocm-runtime-dev${ROCM_THEROCK_VERSION}" \
-      "amdrocm-runtime${ROCM_THEROCK_VERSION}" \
-      "amdrocm-llvm${ROCM_THEROCK_VERSION}" \
-      "amdrocm-sysdeps${ROCM_THEROCK_VERSION}" \
+ && for ver in ${ROCM_THEROCK_VERSIONS}; do \
+      pkgs="amdrocm-developer-tools${ver} amdrocm-runtime-dev${ver} amdrocm-runtime${ver} amdrocm-llvm${ver} amdrocm-sysdeps${ver}"; \
+      for gpu in ${ROCM_THEROCK_GPU_TARGETS}; do \
+        for pkg in "amdrocm-core${ver}-${gpu}" "amdrocm-core-dev${ver}-${gpu}"; do \
+          apt-cache show "${pkg}" >/dev/null 2>&1 && pkgs="${pkgs} ${pkg}"; \
+        done; \
+      done; \
+      apt-get install -y ${pkgs}; \
+    done \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 ###############################################################################
@@ -161,10 +162,6 @@ RUN if [ -n "${BUILD_THEROCK}" ]; then \
 # ROCM_NIGHTLY_ARCH:    GPU arch slice, e.g. gfx950, gfx94X (default: gfx94X)
 # ROCM_NIGHTLY_VERSION: version+date string, e.g. 10.1.0a20260731
 #                       Set to "latest" to auto-resolve the most recent build.
-#
-# Examples:
-#   --build-arg ROCM_NIGHTLY_VERSION=10.1.0a20260731
-#   --build-arg ROCM_NIGHTLY_VERSION=latest --build-arg ROCM_NIGHTLY_ARCH=gfx950
 ###############################################################################
 ARG ROCM_NIGHTLY_VERSION=
 ARG ROCM_NIGHTLY_ARCH=gfx94X
