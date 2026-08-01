@@ -323,13 +323,33 @@ TEST(BinaryTranslatorE2E, BuildsCfgForRealMultiKernelIndirectBranches) {
   }
 
   std::ranges::sort(direct_scall_offsets);
-  // These are the three RJ_STATIC_SCALL_ISLAND sites in the checked-in
-  // fixture. Each target jumps to the join instead of returning, so its
-  // syntactic s_branch continuation is dead.
-  const std::vector<uint64_t> expected_direct_scall_offsets{0xbacu, 0xbdcu, 0xc10u};
   EXPECT_GE(recovered_swappc_blocks, 6u);
   EXPECT_GE(recovered_setpc_blocks, 3u);
-  EXPECT_EQ(direct_scall_offsets, expected_direct_scall_offsets);
+
+  // The three RJ_STATIC_SCALL_ISLAND sites, which the fixture places in one
+  // kernel. Each target jumps to the join instead of returning, so its
+  // syntactic s_branch continuation is dead; that is asserted per site above.
+  //
+  // Located by the kernel containing them rather than by literal .text offsets.
+  // The fixture is compiled, so anything ahead of this kernel changing size
+  // shifts every literal address by the same amount and the test then reports a
+  // toolchain difference as a translation defect.
+  ASSERT_EQ(direct_scall_offsets.size(), 3u);
+  const auto *scall_kernel =
+      kernel_translation_by_name(source_kernels, *co, "multikernel_indirect_branch_scall");
+  ASSERT_NE(scall_kernel, nullptr);
+  const uint64_t scall_entry = scall_kernel->entry_text_offset;
+  uint64_t scall_end = text->size();
+  for (const auto &kernel : source_kernels) {
+    if (kernel.entry_text_offset > scall_entry)
+      scall_end = std::min(scall_end, kernel.entry_text_offset);
+  }
+  ASSERT_LT(scall_entry, scall_end);
+  for (const uint64_t offset : direct_scall_offsets) {
+    EXPECT_GE(offset, scall_entry);
+    EXPECT_LT(offset, scall_end)
+        << "a direct s_call outside the island kernel means the fixture no longer isolates them";
+  }
 }
 
 TEST(BinaryTranslatorE2E, CountsRealMultiKernelIndirectBranchCfgBlocksPerKernel) {
