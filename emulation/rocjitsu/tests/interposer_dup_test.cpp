@@ -17,8 +17,8 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "drm/amdgpu_drm.h"
-#include "drm/drm.h"
+#include "linux/uapi/drm/amdgpu_drm.h"
+#include "linux/uapi/drm/drm.h"
 #include "linux/uapi/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
@@ -336,6 +336,71 @@ int gem_close(int drm_fd, uint32_t handle) {
 }
 
 } // namespace
+
+TEST(InterposerSyncobjTest, VmTimelineWaitObservesSynchronousMapAndUnmap) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  ASSERT_NE(create.handle, 0u);
+
+  constexpr size_t kBoSize = 0x1000;
+  constexpr uint64_t kVa = 0x1000000000ULL;
+  int dmabuf = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf, 0);
+  uint32_t gem_handle = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf, &gem_handle));
+
+  uint32_t handles[] = {create.handle};
+  uint64_t points[] = {1};
+  drm_syncobj_timeline_wait wait{};
+  wait.handles = reinterpret_cast<uintptr_t>(handles);
+  wait.points = reinterpret_cast<uintptr_t>(points);
+  wait.count_handles = 1;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  EXPECT_EQ(errno, ETIME);
+
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  drm_amdgpu_gem_va map{};
+  map.handle = gem_handle;
+  map.operation = AMDGPU_VA_OP_MAP;
+  map.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  map.va_address = kVa;
+  map.map_size = kBoSize;
+  map.vm_timeline_point = 1;
+  map.vm_timeline_syncobj_out = create.handle;
+  ASSERT_EQ(ioctl(drm, gem_va, &map), 0);
+
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), 0);
+
+  drm_amdgpu_gem_va unmap{};
+  unmap.handle = gem_handle;
+  unmap.operation = AMDGPU_VA_OP_UNMAP;
+  unmap.va_address = kVa;
+  unmap.map_size = kBoSize;
+  unmap.vm_timeline_point = 2;
+  unmap.vm_timeline_syncobj_out = create.handle;
+  ASSERT_EQ(ioctl(drm, gem_va, &unmap), 0);
+  points[0] = unmap.vm_timeline_point;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), 0);
+
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  EXPECT_EQ(errno, ENOENT);
+
+  EXPECT_EQ(gem_close(drm, gem_handle), 0);
+  EXPECT_EQ(close(dmabuf), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
 
 // A dmabuf export fd number that is closed and then recycled by a second export
 // must resolve to a DISTINCT, stable GEM handle — never one derived from the fd

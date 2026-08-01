@@ -326,6 +326,7 @@ public:
       if (gem.owns_dmabuf_fd && gem.dmabuf_fd >= 0)
         real().close(gem.dmabuf_fd);
     gem_entries_.clear();
+    syncobj_entries_.clear();
     // Also drop the transient EXPORT_DMABUF fd->flags handoffs: they key on the
     // parent's dmabuf fd numbers, so a child that reuses one of those fd numbers
     // before a fresh EXPORT could otherwise fold a stale parent MTYPE hint into its
@@ -839,6 +840,65 @@ public:
     return drm_fds_.erase(fd) != 0;
   }
 
+  int create_syncobj(uint32_t flags, uint32_t *handle) {
+    if (!handle || (flags & ~DRM_SYNCOBJ_CREATE_SIGNALED) != 0)
+      return -EINVAL;
+    std::lock_guard lock(fd_mutex_);
+    uint32_t candidate = next_syncobj_handle_++;
+    while (candidate == 0 || syncobj_entries_.count(candidate) != 0)
+      candidate = next_syncobj_handle_++;
+    SyncobjEntry &entry = syncobj_entries_[candidate];
+    entry.signaled = (flags & DRM_SYNCOBJ_CREATE_SIGNALED) != 0;
+    entry.point = entry.signaled ? ~uint64_t{0} : 0;
+    *handle = candidate;
+    return 0;
+  }
+
+  int destroy_syncobj(uint32_t handle) {
+    std::lock_guard lock(fd_mutex_);
+    if (syncobj_entries_.erase(handle) == 0)
+      return -ENOENT;
+    return 0;
+  }
+
+  bool has_syncobj(uint32_t handle) {
+    std::lock_guard lock(fd_mutex_);
+    return syncobj_entries_.count(handle) != 0;
+  }
+
+  int signal_syncobj(uint32_t handle, uint64_t point) {
+    std::lock_guard lock(fd_mutex_);
+    auto it = syncobj_entries_.find(handle);
+    if (it == syncobj_entries_.end())
+      return -ENOENT;
+    it->second.signaled = true;
+    it->second.point = std::max(it->second.point, point);
+    return 0;
+  }
+
+  int wait_syncobj_timeline(drm_syncobj_timeline_wait *wait) {
+    if (!wait || wait->count_handles == 0 || wait->handles == 0 || wait->points == 0)
+      return -EINVAL;
+    auto *handles = reinterpret_cast<const uint32_t *>(static_cast<uintptr_t>(wait->handles));
+    auto *points = reinterpret_cast<const uint64_t *>(static_cast<uintptr_t>(wait->points));
+    std::lock_guard lock(fd_mutex_);
+    const bool wait_all = (wait->flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL) != 0;
+    bool any_signaled = false;
+    for (uint32_t i = 0; i < wait->count_handles; ++i) {
+      auto it = syncobj_entries_.find(handles[i]);
+      if (it == syncobj_entries_.end())
+        return -ENOENT;
+      const bool signaled = it->second.signaled && it->second.point >= points[i];
+      if (wait_all && !signaled)
+        return -ETIME;
+      if (!wait_all && signaled && !any_signaled) {
+        wait->first_signaled = i;
+        any_signaled = true;
+      }
+    }
+    return (wait_all || any_signaled) ? 0 : -ETIME;
+  }
+
   bool create_local_vm(const std::string &config_path) {
     rj_vm_t *created_vm = nullptr;
     if (rj_vm_create(config_path.c_str(), RJ_VM_MODE_LOCAL, &created_vm) !=
@@ -1315,6 +1375,15 @@ private:
   /// recorded only if a reference was actually acquired, so track/untrack stay
   /// balanced and can never over-release or resurrect the wrong connection.
   std::unordered_map<int, DupBackend> kfd_dup_fds_;
+  struct SyncobjEntry {
+    uint64_t point = 0;
+    bool signaled = false;
+  };
+  /// @brief Process-local DRM timeline objects used to sequence synchronous VM updates.
+  /// @details GEM_VA updates complete before ioctl returns, so the associated point is
+  /// signaled immediately and a subsequent timeline wait never needs a host wait.
+  std::unordered_map<uint32_t, SyncobjEntry> syncobj_entries_;
+  uint32_t next_syncobj_handle_ = 1;
   /// @brief Imported GEM buffer objects, keyed by a stable, minted GEM handle.
   /// @details The handle (never fd-derived) owns the mapping lifetime; entries live
   /// from PRIME_FD_TO_HANDLE until DRM_IOCTL_GEM_CLOSE, or until the owning DRM file
@@ -1700,6 +1769,9 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
   constexpr unsigned kDrmIoctlNrAmdgpuInfo = DRM_COMMAND_BASE + DRM_AMDGPU_INFO;
   constexpr unsigned kDrmIoctlNrGemVa = DRM_COMMAND_BASE + DRM_AMDGPU_GEM_VA;
   constexpr unsigned kDrmIoctlNrPrimeFdToHandle = _IOC_NR(DRM_IOCTL_PRIME_FD_TO_HANDLE);
+  constexpr unsigned kDrmIoctlNrSyncobjCreate = _IOC_NR(DRM_IOCTL_SYNCOBJ_CREATE);
+  constexpr unsigned kDrmIoctlNrSyncobjDestroy = _IOC_NR(DRM_IOCTL_SYNCOBJ_DESTROY);
+  constexpr unsigned kDrmIoctlNrSyncobjTimelineWait = _IOC_NR(DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT);
 
   if (InterposerContext::ctx.is_drm(fd)) {
     unsigned nr = _IOC_NR(request);
@@ -1757,6 +1829,18 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       // export fd right after access setup; the handle — not the fd — owns the BO.
       prime->handle = InterposerContext::ctx.prime_import(prime->fd, fd, sz);
       return 0;
+    }
+    if (type == kDrmIoctlType && nr == kDrmIoctlNrSyncobjCreate && arg) {
+      auto *create = static_cast<drm_syncobj_create *>(arg);
+      return kfd_ioctl_ret(InterposerContext::ctx.create_syncobj(create->flags, &create->handle));
+    }
+    if (type == kDrmIoctlType && nr == kDrmIoctlNrSyncobjDestroy && arg) {
+      auto *destroy = static_cast<drm_syncobj_destroy *>(arg);
+      return kfd_ioctl_ret(InterposerContext::ctx.destroy_syncobj(destroy->handle));
+    }
+    if (type == kDrmIoctlType && nr == kDrmIoctlNrSyncobjTimelineWait && arg) {
+      return kfd_ioctl_ret(InterposerContext::ctx.wait_syncobj_timeline(
+          static_cast<drm_syncobj_timeline_wait *>(arg)));
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrAmdgpuInfo && arg) {
       // Service the AMDGPU_INFO queries that real libdrm_amdgpu issues during
@@ -1868,6 +1952,11 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       // VAs. We map by GEM handle, lazily mmap the backing pages, and
       // install/remove them in the GPU page table.
       auto *va = static_cast<drm_amdgpu_gem_va *>(arg);
+      if (va->vm_timeline_syncobj_out != 0 &&
+          !InterposerContext::ctx.has_syncobj(va->vm_timeline_syncobj_out)) {
+        errno = ENOENT;
+        return -1;
+      }
       // GEM_VA page-table installation only applies to the local simulated driver;
       // there is no such path for a remote (daemon) or DBT-guest backend. Report
       // failure rather than a phantom success so userspace does not record a mapping
@@ -1907,12 +1996,16 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         errno = EINVAL;
         return -1;
       }
+      if (va->vm_timeline_syncobj_out != 0)
+        return kfd_ioctl_ret(InterposerContext::ctx.signal_syncobj(va->vm_timeline_syncobj_out,
+                                                                   va->vm_timeline_point));
       return 0;
     }
-    // Only DRM command ioctls (nr >= DRM_COMMAND_BASE) carry an AMDGPU-relative
-    // command number; core DRM ioctls (nr < DRM_COMMAND_BASE) would underflow and
-    // log a nonsense "AMDGPU cmd", so report the raw nr for those.
-    if (nr >= DRM_COMMAND_BASE) {
+    // The AMDGPU command range starts at DRM_COMMAND_BASE, while generic DRM
+    // requests occupy ranges on both sides of it (timeline syncobj requests, for
+    // example, start at 0xbf). Only label requests in the range defined by this
+    // vendored AMDGPU UAPI as driver-relative commands.
+    if (nr >= DRM_COMMAND_BASE && nr <= DRM_COMMAND_BASE + DRM_AMDGPU_USERQ_WAIT) {
       util::Logger::warn("DRM ioctl rejected: nr=0x", std::hex, nr, " (AMDGPU cmd 0x",
                          nr - DRM_COMMAND_BASE, std::dec, ") fd=", fd);
     } else {

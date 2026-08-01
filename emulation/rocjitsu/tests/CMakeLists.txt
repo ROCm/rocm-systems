@@ -1180,7 +1180,9 @@ add_executable(interposer_dup_test interposer_dup_test.cpp)
 rj_configure_target(interposer_dup_test TEST)
 target_include_directories(
     interposer_dup_test
-    PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers
 )
 target_link_libraries(interposer_dup_test PRIVATE GTest::gtest_main)
 add_dependencies(interposer_dup_test rocjitsu_bin rocjitsu_shared)
@@ -1251,6 +1253,26 @@ foreach(
             "--gtest_filter=InterposerGemTest.${_interposer_gem_test}"
     )
 endforeach()
+
+rj_add_test(
+    NAME InterposerSyncobjTest.VmTimelineWaitObservesSynchronousMapAndUnmap
+    COMMAND
+        ${RJ_CLI}
+        --config
+        ${RJ_CDNA4_KMD_CONFIG}
+        --
+        $<TARGET_FILE:interposer_dup_test>
+        --gtest_filter=InterposerSyncobjTest.VmTimelineWaitObservesSynchronousMapAndUnmap
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
+        "--"
+        "bin/interposer_dup_test"
+        "--gtest_filter=InterposerSyncobjTest.VmTimelineWaitObservesSynchronousMapAndUnmap"
+)
 
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
 # Spawns rocminfo via the rocjitsu CLI and validates output.
