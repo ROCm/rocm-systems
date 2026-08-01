@@ -1021,7 +1021,7 @@ std::vector<uint8_t> make_rdna4_code_object_with_local_function(
   AMDHSA_BITS_SET(kernel_descriptor.compute_pgm_rsrc1,
                   kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, vgpr_granulated);
   AMDHSA_BITS_SET(kernel_descriptor.kernel_code_properties,
-                  kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, wave32 ? 1u : 0u);
+                  kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, static_cast<uint32_t>(wave32));
   std::memcpy(image.data() + rodata_offset, &kernel_descriptor, sizeof(kernel_descriptor));
   if (function_is_kernel) {
     KD function_descriptor = kernel_descriptor;
@@ -1397,7 +1397,7 @@ std::vector<uint8_t> make_two_kernel_shared_helper_code_object(
       AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 2u);
     }
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
-                    private_bytes != 0 ? 1u : 0u);
+                    static_cast<uint32_t>(private_bytes != 0u));
     const uint32_t wave32_value = wave32 ? 1u : 0u;
     AMDHSA_BITS_SET(descriptor.kernel_code_properties,
                     kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, wave32_value);
@@ -1689,7 +1689,7 @@ std::vector<uint8_t> make_rdna4_three_kernel_overlapping_shared_helpers_code_obj
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                     kRdna4Wave64AllVgprsGranulated);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
-                    private_bytes[owner] != 0u ? 1u : 0u);
+                    static_cast<uint32_t>(private_bytes[owner] != 0u));
     std::memcpy(image.data() + rodata_offset + owner * kDescriptorSize, &descriptor,
                 sizeof(descriptor));
   }

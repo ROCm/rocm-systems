@@ -7115,6 +7115,84 @@ TEST(ConSan, Gfx1250LdsConvergenceMinimizesPromotedRelayReservoirOwners) {
             1u);
 }
 
+TEST(ConSan, Rdna4LdsDegradedPartialRoutePromotesOptimisticRelayReservoirs) {
+  constexpr size_t kTextWords = 33'010u;
+  constexpr size_t kFirstReservoirWord = 16'500u;
+  constexpr size_t kSecondReservoirWord = 15'500u;
+  constexpr size_t kReservoirWords = 12u;
+  constexpr std::array<uint32_t, 2> load = {
+      0xD8D80000u,
+      0x01000002u, // ds_load_b32 v1, v2
+  };
+  const auto make_kernel = [&](size_t reservoir_word) {
+    std::vector<uint32_t> words(kTextWords, build_s_mov_b32(100u, 100u, ROCJITSU_CODE_ARCH_RDNA4));
+    words[0] = load[0];
+    words[1] = load[1];
+    for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
+      words[2u + sgpr] = build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_RDNA4);
+    }
+    for (size_t word = 0u; word < kReservoirWords; ++word) {
+      words[reservoir_word + word] =
+          build_s_mov_b32(100u, static_cast<uint16_t>(word), ROCJITSU_CODE_ARCH_RDNA4);
+    }
+    words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+    return words;
+  };
+  const std::vector<uint32_t> first_kernel_words = make_kernel(kFirstReservoirWord);
+  const std::vector<uint32_t> second_kernel_words = make_kernel(kSecondReservoirWord);
+
+  // Each wave32 kernel contributes one full-pressure LDS site and one
+  // three-slot reservoir. The first pair needs both reservoirs; the second
+  // pair contends for the second reservoir after the first pair is retained.
+  std::vector<uint8_t> bytes = make_rdna4_code_object_with_local_function(
+      first_kernel_words, second_kernel_words, {}, kRdna4Wave64AllVgprsGranulated,
+      /*function_is_kernel=*/true, /*wave32=*/true);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 3;
+  options.max_patches = 2;
+  // Model filler already owned by an earlier composition phase so only the
+  // two intended reservoir runs can donate relay capacity. The guest scalar
+  // uses remain present for ordinary liveness analysis.
+  const auto reserve_kernel_filler = [&](uint64_t kernel_offset, size_t reservoir_word) {
+    options.preapplied_reserved_ranges.push_back(
+        {.text_offset = kernel_offset + 2u * sizeof(uint32_t),
+         .size = static_cast<uint32_t>((reservoir_word - 2u) * sizeof(uint32_t))});
+    options.preapplied_reserved_ranges.push_back(
+        {.text_offset = kernel_offset + (reservoir_word + kReservoirWords) * sizeof(uint32_t),
+         .size = static_cast<uint32_t>((kTextWords - reservoir_word - kReservoirWords - 1u) *
+                                       sizeof(uint32_t))});
+  };
+  reserve_kernel_filler(0u, kFirstReservoirWord);
+  reserve_kernel_filler(kTextWords * sizeof(uint32_t), kSecondReservoirWord);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_FALSE(result.modified) << testing::PrintToString(result.warnings);
+  // Discovery without optimistic owners rejects both pairs. The next call
+  // sees the complete optimistic inventory through exact-pair fallback,
+  // retains the first pair, and rejects the second for contention. That
+  // degraded partial plan is not a capacity verdict, so its owners are
+  // materialized and replayed once before the route is rejected.
+  EXPECT_EQ(result.lds_branch_only_routing_telemetry.plan_call_count, 3u);
+  EXPECT_EQ(result.lds_branch_only_routing_telemetry.pair_attempt_count, 6u)
+      << testing::PrintToString(result.warnings);
+  EXPECT_EQ(result.lds_branch_only_routing_telemetry.entry_route_failure_count, 2u);
+  EXPECT_EQ(result.lds_branch_only_routing_telemetry.relay_contention_failure_count, 2u);
+  EXPECT_EQ(result.lds_branch_only_routing_telemetry.work_budget_failure_count, 0u);
+  EXPECT_EQ(result.lds_branch_only_routing_telemetry.work_budget_exhaustion_count, 0u);
+  EXPECT_EQ(result.lds_branch_only_routing_telemetry.exact_pair_fallback_attempt_count, 6u);
+  EXPECT_EQ(result.lds_branch_only_routing_telemetry.greedy_pair_fallback_attempt_count, 0u);
+  EXPECT_TRUE(branch_only_reservoir_telemetry_is_empty(result.lds_relay_reservoir_telemetry));
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("branch-only continuation could not route all spill-backed sites") !=
+               std::string::npos &&
+           warning.find("1 relay-contended pair") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModeRoutesThroughRelocatedAnchorSecondWord) {
   constexpr uint64_t kMaximumForwardHop = 4u + 32767u * sizeof(uint32_t);
   constexpr uint64_t kSecondAnchorOffset = kMaximumForwardHop - sizeof(uint32_t);

@@ -2754,12 +2754,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
 
     // Route optimistically through every non-overlapping proven reservoir,
     // then materialize exactly the reservoirs used by that route and replay.
-    // Relocating a reservoir moves the appended bodies, so the replay may
-    // expose one more frontier. Every noninitial replay either commits, stops,
-    // or permanently classifies at least one previously optimistic candidate
-    // as selected or unavailable. The defensive attempt cap admits the
-    // initial pass, one promotion per finite candidate, and one final
-    // materialized-only replay; correct progress never reaches it.
+    // Replay proves the route against the owners that could actually reserve
+    // appended storage; failed reservations make their capacity unavailable.
+    // Every noninitial replay either commits, stops, or permanently classifies
+    // at least one previously optimistic candidate as selected or unavailable.
+    // The defensive attempt cap admits the initial pass, one promotion per
+    // finite candidate, and one final materialized-only replay; correct
+    // progress never reaches it.
     const size_t convergence_attempt_limit =
         branch_reservoir_candidates.size() <= std::numeric_limits<size_t>::max() - 2u
             ? branch_reservoir_candidates.size() + 2u
@@ -2923,10 +2924,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
 
       // Promote every optimistic owner referenced by the current complete or
       // partial plan together. Owner minimization reduces the promoted set for
-      // complete plans; bounded partial plans may still expose capacity needed
-      // by the next attempt. Replanning remains necessary because
-      // materializing the set advances appended placement and can expose a new
-      // reach frontier.
+      // complete plans. A bounded or fallback partial plan is not a capacity
+      // verdict: paying for an earlier pair's owners can change later choices
+      // and recover a complete route. Replay also excludes any candidate whose
+      // appended reservation could not be materialized.
       std::vector<const ScRelayReservoirCandidate *> newly_used(used_optimistic_reservoirs.begin(),
                                                                 used_optimistic_reservoirs.end());
       std::ranges::sort(newly_used, {}, &ScRelayReservoirCandidate::anchor_offset);
