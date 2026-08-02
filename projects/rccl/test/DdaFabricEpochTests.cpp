@@ -9,11 +9,13 @@
 // LL and LL128). The counter is sized by ddaLLEpochCount() and restamped every
 // launch; each block derives its LL flag from its cell (bank = flag & 1) and the
 // collectives rely on every cell advancing in lock-step so peer-swapped block
-// pairs derive the same flag+bank. Source of truth:
-//   src/include/algorithms/all_gather/all_gather_dda_fabric_ll.h  (flag+write-back)
-//   src/include/algorithms/alltoall/alltoall_dda_fabric_ll.h      (same 2-D shape)
+// pairs derive the same flag+bank. Source of truth for the modelled kernels:
+//   src/include/algorithms/all_gather/all_gather_dda_fabric_ll.h       (2-D flag+write-back)
+//   src/include/algorithms/alltoall/alltoall_dda_fabric_ll.h           (same 2-D shape)
+//   src/include/algorithms/all_reduce/all_reduce_dda_ll.h              (1-D; note: the AR-LL
+//       kernel lives here, there is NO all_reduce_dda_fabric_ll.h)
 //   src/include/algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll.h (1-D)
-//   src/include/dda_init_detail.h                                 (ddaLLEpochCount)
+//   src/include/dda_init_detail.h                                      (ddaLLEpochCount)
 //
 // Faithfulness notes for the host replay below:
 //  * A launch is modelled as read-all-then-write-all. That is a valid
@@ -23,12 +25,18 @@
 //  * Cross-launch lock-step (bank alternation) holds only because DDA launches on
 //    a comm are stream-serialized, so launch N fully restamps before launch N+1.
 //
-// The tests import the real dda_init_detail.h constants/functions so they track
-// the source, and include a negative control that fails if the full-length
-// restamp (all_gather_dda_fabric_ll.h: `for (e=flatBlockId; e<epochLen; e+=total)`)
-// is weakened to own-cell-only. No GPU is needed.
+// Scope note: these tests validate the HOST MODEL of the epoch arithmetic (using
+// the real dda_init_detail.h constants) and the producer/consumer scratch
+// contract. The negative controls fail if the *model* loses a property, proving
+// the positive assertions are not vacuous; they do NOT read the device kernels,
+// so they cannot detect a device-side regression (e.g. the write-back loop in
+// all_gather_dda_fabric_ll.h being changed from `e < epochLen` to `e < total`).
+// This file is in rccl-UnitTestsFixtures (Release+Debug): it uses only
+// inline/constexpr helpers and the DDA_FABRIC_BUFFER_SIZE macro, no librccl
+// symbols, so the producer-coverage assertion runs in Release CI too.
 
-#include "dda_init_detail.h" // ddaLLEpochCount, kDdaFabricLLArMaxBlocks, kDdaLLAgMaxBlocksPerPeer, DDA_FABRIC_MAXBLOCKS
+#include "common/DdaFabricFootprints.hpp" // shared footprint mirrors (dependency-free)
+#include "dda_init_detail.h" // ddaLLEpochCount, kDdaFabricLLArMaxBlocks, kDdaLLAgMaxBlocksPerPeer, DDA_FABRIC_MAXBLOCKS, DDA_FABRIC_BUFFER_SIZE
 #include "fabric_gpu_barrier.h" // meta::comms::kDdaMaxNranks
 
 #include "gtest/gtest.h"
@@ -71,6 +79,9 @@ unsigned bankOf(uint32_t flag) {
 // [0, writeBackLen) with block b owning cells b, b+total, b+2*total, ... exactly
 // as the kernels do: `for (e = flatBlockId; e < epochLen; e += total) epoch[e]=flag`.
 // writeBackLen == kFullWriteBack models the production full-length restamp.
+// The ASSERT_ bounds guards are preconditions (call sites are constructed to
+// satisfy them); wrap calls in ASSERT_NO_FATAL_FAILURE so a guard trip stops the
+// caller instead of cascading against an unmodified array.
 void applyLaunch(std::vector<uint32_t>& epoch, int total, int writeBackLen = kFullWriteBack) {
     const int cells    = static_cast<int>(epoch.size());
     const int epochLen = (writeBackLen == kFullWriteBack) ? cells : writeBackLen;
@@ -93,16 +104,20 @@ void applyAllGather(std::vector<uint32_t>& epoch, int nRanks, int bpp, int write
     applyLaunch(epoch, nRanks * bpp, writeBackLen);
 }
 
+// AllToAll shares AllGather's 2-D grid shape; alias for readability at call sites.
 void applyAllToAll(std::vector<uint32_t>& epoch, int nRanks, int bpp) {
     applyLaunch(epoch, nRanks * bpp);
 }
 
-// AllReduce / ReduceScatter: 1-D grid of `blocks` (<= kDdaFabricLLArMaxBlocks or
-// clamped to ddaLLEpochLen at the launch site).
+// AllReduce: 1-D grid capped at kDdaFabricLLArMaxBlocks (the AR-only cap,
+// dda_all_reduce_fabric_ll.cu).
 void applyAllReduce(std::vector<uint32_t>& epoch, int blocks) {
     applyLaunch(epoch, blocks);
 }
 
+// ReduceScatter: 1-D grid. Its launcher uses nBlocksMax = comm->ddaFabricMaxBlocks
+// (up to DDA_FABRIC_MAXBLOCKS = 256), then clamps to ddaLLEpochLen -- NOT the
+// AR-only kDdaFabricLLArMaxBlocks. `blocks` need not divide the cell count.
 void applyReduceScatter(std::vector<uint32_t>& epoch, int blocks) {
     applyLaunch(epoch, blocks);
 }
@@ -154,16 +169,18 @@ constexpr int kLargeBpp = kDdaLLAgMaxBlocksPerPeer; // widest per-peer fan-out
 // range (up to kDdaMaxNranks) and every RCCL_DDA_FABRIC_MAXBLOCKS value [1,256].
 // Uses nRanks past the nRanks*8 vs 256 crossover (>32) so both arms of the max
 // are exercised.
-TEST(DdaFabricEpochStatic, EpochCount_CoversWidestCollective) {
+TEST(DdaFabricEpochStaticTest, EpochCount_CoversWidestCollective) {
     for (int arMaxBlocks : {1, kDdaFabricLLArMaxBlocks, DDA_FABRIC_MAXBLOCKS}) {
         for (int nRanks : {2, 8, 32, 33, meta::comms::kDdaMaxNranks}) {
             const long cells = static_cast<long>(ddaLLEpochCount(nRanks, arMaxBlocks));
-            EXPECT_EQ(cells, std::max(nRanks * kDdaLLAgMaxBlocksPerPeer, arMaxBlocks))
+            ASSERT_EQ(cells, std::max(nRanks * kDdaLLAgMaxBlocksPerPeer, arMaxBlocks))
                 << "nRanks=" << nRanks << " arMaxBlocks=" << arMaxBlocks;
             // Must index the widest AllGather/AllToAll grid (nRanks*8) and the
             // actual AR grid, which is capped at min(arMaxBlocks, kDdaFabricLLArMaxBlocks).
-            EXPECT_GE(cells, static_cast<long>(nRanks) * kDdaLLAgMaxBlocksPerPeer);
-            EXPECT_GE(cells, std::min(arMaxBlocks, kDdaFabricLLArMaxBlocks));
+            ASSERT_GE(cells, static_cast<long>(nRanks) * kDdaLLAgMaxBlocksPerPeer)
+                << "nRanks=" << nRanks << " arMaxBlocks=" << arMaxBlocks;
+            ASSERT_GE(cells, std::min(arMaxBlocks, kDdaFabricLLArMaxBlocks))
+                << "nRanks=" << nRanks << " arMaxBlocks=" << arMaxBlocks;
         }
     }
 }
@@ -171,19 +188,34 @@ TEST(DdaFabricEpochStatic, EpochCount_CoversWidestCollective) {
 // The AllGather launcher has no runtime clamp; it relies on ddaLLAgBlocksPerPeer
 // capping per-peer blocks at kDdaLLAgMaxBlocksPerPeer. That cap must keep the
 // grid within the epoch array for every rank count and MAXBLOCKS setting.
-TEST(DdaFabricEpochStatic, AllGatherGridAlwaysFitsEpochArray) {
+TEST(DdaFabricEpochStaticTest, AllGatherGridAlwaysFitsEpochArray) {
     for (int arMaxBlocks : {1, kDdaFabricLLArMaxBlocks, DDA_FABRIC_MAXBLOCKS}) {
         for (int nRanks = 2; nRanks <= meta::comms::kDdaMaxNranks; ++nRanks) {
             const long widestGrid = static_cast<long>(nRanks) * kDdaLLAgMaxBlocksPerPeer;
-            EXPECT_LE(widestGrid, static_cast<long>(ddaLLEpochCount(nRanks, arMaxBlocks)))
+            ASSERT_LE(widestGrid, static_cast<long>(ddaLLEpochCount(nRanks, arMaxBlocks)))
                 << "nRanks=" << nRanks << " arMaxBlocks=" << arMaxBlocks;
         }
     }
 }
 
+// Producer side of the scratch contract: the shipped fabric scratch buffer must
+// cover every fixed-footprint tier at the maximum rank count. This is the
+// consumer-side gate's counterpart (the eligibility predicates, exercised in
+// DdaFabricScratchTests.cpp) and runs in Release CI. If DDA_FABRIC_BUFFER_SIZE is
+// lowered (or a tier's fixed footprint raised) below this, LL/LL128 fall back at
+// runtime with no error -- this assertion catches that.
+TEST(DdaFabricEpochStaticTest, ScratchBufferCoversFixedTiersAtMaxRanks) {
+    const int n = meta::comms::kDdaMaxNranks;
+    EXPECT_GE(DDA_FABRIC_BUFFER_SIZE, ddaLLFixedFootprint(n)) << "scratch < LL footprint at " << n << " ranks";
+    EXPECT_GE(DDA_FABRIC_BUFFER_SIZE, ddaLL128FixedFootprint(n))
+        << "scratch < LL128 AG/A2A/RS footprint at " << n << " ranks";
+    // (AR-LL128 is message-dependent and intentionally NOT covered to its 1 GiB
+    //  cap at high rank counts; see DdaFabricScratchTests EffectiveCapShrinksWithRanks.)
+}
+
 // Flag derivation must skip the 0 sentinel and preserve bank parity, including
 // at the uint32 wraparound the kernel comment guards against.
-TEST(DdaFabricEpochStatic, DeriveFlag_SkipsZeroKeepsBankParity) {
+TEST(DdaFabricEpochStaticTest, DeriveFlag_SkipsZeroKeepsBankParity) {
     for (uint32_t x : {0u, 1u, 2u, 3u, 100u, UINT32_MAX - 1u, UINT32_MAX}) {
         EXPECT_NE(deriveFlag(x), 0u) << "x=" << x;
         EXPECT_EQ(bankOf(deriveFlag(x)), (x + 1u) & 1u) << "x=" << x; // parity survives wrap
@@ -194,65 +226,81 @@ TEST(DdaFabricEpochStatic, DeriveFlag_SkipsZeroKeepsBankParity) {
 // Rank-parameterized behavior
 // ===========================================================================
 
-class DdaFabricEpoch : public ::testing::TestWithParam<int> {
+class DdaFabricEpochTest : public ::testing::TestWithParam<int> {
 };
 
 // Name the instances 2Ranks / 4Ranks / 8Ranks / 72Ranks instead of /0../3.
-INSTANTIATE_TEST_SUITE_P(Ranks, DdaFabricEpoch, ::testing::Values(2, 4, 8, meta::comms::kDdaMaxNranks),
+INSTANTIATE_TEST_SUITE_P(Ranks, DdaFabricEpochTest, ::testing::Values(2, 4, 8, meta::comms::kDdaMaxNranks),
                          [](const ::testing::TestParamInfo<int>& info) {
                              return std::to_string(info.param) + "Ranks";
                          });
 
 // A small AllGather then a large one: array stays uniform, the wider AllGather's
 // peer-swap pairing is consistent, and consecutive launches alternate banks.
-TEST_P(DdaFabricEpoch, AllGatherSmallThenLarge_StaysConsistent) {
+TEST_P(DdaFabricEpochTest, AllGatherSmallThenLarge_StaysConsistent) {
     const int nRanks = GetParam();
     std::vector<uint32_t> epoch(epochCells(nRanks), 0u);
 
     const uint32_t f1 = deriveFlag(epoch[0]);
-    applyAllGather(epoch, nRanks, kSmallBpp);
+    ASSERT_NO_FATAL_FAILURE(applyAllGather(epoch, nRanks, kSmallBpp));
     ASSERT_TRUE(allCellsUniform(epoch));
     ASSERT_EQ(agPairingMismatches(epoch, nRanks, kLargeBpp), 0);
 
     const uint32_t f2 = deriveFlag(epoch[0]);
     ASSERT_NE(bankOf(f2), bankOf(f1)) << "consecutive launches must alternate banks";
-    applyAllGather(epoch, nRanks, kLargeBpp);
+    ASSERT_NO_FATAL_FAILURE(applyAllGather(epoch, nRanks, kLargeBpp));
     ASSERT_TRUE(allCellsUniform(epoch));
     ASSERT_EQ(agPairingMismatches(epoch, nRanks, kLargeBpp), 0);
 }
 
-TEST_P(DdaFabricEpoch, AllReduceThenAllGather_StaysConsistent) {
+// AR then AG: after an AllReduce, the shared array is still pairing-consistent for
+// a following AllGather (no AllGather is applied here -- the check is the pairing
+// a subsequent AG would derive).
+TEST_P(DdaFabricEpochTest, AllReduceThenAllGatherPairingHolds) {
     const int nRanks = GetParam();
     std::vector<uint32_t> epoch(epochCells(nRanks), 0u);
-    applyAllReduce(epoch, kDdaFabricLLArMaxBlocks); // widest AR grid
+    ASSERT_NO_FATAL_FAILURE(applyAllReduce(epoch, kDdaFabricLLArMaxBlocks)); // widest AR grid
     ASSERT_TRUE(allCellsUniform(epoch));
     ASSERT_EQ(agPairingMismatches(epoch, nRanks, kLargeBpp), 0);
 }
 
-TEST_P(DdaFabricEpoch, ReduceScatterThenAllGather_StaysConsistent) {
+// RS then AG. ReduceScatter's real cap is DDA_FABRIC_MAXBLOCKS (clamped to the
+// cell count), not the AR-only cap; also exercise a block count that does not
+// divide the cell count (the write-back stride must still tile every cell).
+TEST_P(DdaFabricEpochTest, ReduceScatterThenAllGatherPairingHolds) {
     const int nRanks = GetParam();
-    std::vector<uint32_t> epoch(epochCells(nRanks), 0u);
-    applyReduceScatter(epoch, std::min<int>(kDdaFabricLLArMaxBlocks, static_cast<int>(epoch.size())));
+    const int cells  = static_cast<int>(epochCells(nRanks));
+
+    std::vector<uint32_t> epoch(cells, 0u);
+    ASSERT_NO_FATAL_FAILURE(applyReduceScatter(epoch, std::min(DDA_FABRIC_MAXBLOCKS, cells))); // widest real RS grid
     ASSERT_TRUE(allCellsUniform(epoch));
+    ASSERT_EQ(agPairingMismatches(epoch, nRanks, kLargeBpp), 0);
+
+    const int nonDividing = 100; // 100 divides neither 256 nor 576; <= 256 cap and <= cells
+    ASSERT_LE(nonDividing, cells);
+    ASSERT_NO_FATAL_FAILURE(applyReduceScatter(epoch, nonDividing));
+    ASSERT_TRUE(allCellsUniform(epoch)) << "non-dividing block count must still restamp every cell";
     ASSERT_EQ(agPairingMismatches(epoch, nRanks, kLargeBpp), 0);
 }
 
-TEST_P(DdaFabricEpoch, AllToAllThenAllGather_StaysConsistent) {
+TEST_P(DdaFabricEpochTest, AllToAllThenAllGatherPairingHolds) {
     const int nRanks = GetParam();
     std::vector<uint32_t> epoch(epochCells(nRanks), 0u);
-    applyAllToAll(epoch, nRanks, kLargeBpp); // A2A is peer-swapped like AG
+    ASSERT_NO_FATAL_FAILURE(applyAllToAll(epoch, nRanks, kLargeBpp)); // A2A is peer-swapped like AG
     ASSERT_TRUE(allCellsUniform(epoch));
     ASSERT_EQ(agPairingMismatches(epoch, nRanks, kLargeBpp), 0);
 }
 
 // Interleaved mixed-size launches keep the array uniform and every AllGather /
 // AllToAll pairing consistent each step. ASSERT_ stops at the first divergence.
-TEST_P(DdaFabricEpoch, RepeatedMixedSizes_StaysConsistent) {
+TEST_P(DdaFabricEpochTest, RepeatedMixedSizes_StaysConsistent) {
     const int nRanks = GetParam();
-    const int agBpp[] = {1, 2, 4, kLargeBpp, 3};
+    const int agBpp[] = {kSmallBpp, 2, 4, kLargeBpp, 3};
     const int arBlk[] = {1, 4, kDdaFabricLLArMaxBlocks, 7};
     std::vector<uint32_t> epoch(epochCells(nRanks), 0u);
 
+    // Seed for the first bank-alternation check: bank 0 vs the first launch's
+    // flag deriveFlag(0)=1 (bank 1), so the first iteration's ASSERT_NE holds.
     uint32_t prevFlag = 0u;
     for (int iter = 0; iter < 4; ++iter) {
         for (int bpp : agBpp) {
@@ -260,37 +308,38 @@ TEST_P(DdaFabricEpoch, RepeatedMixedSizes_StaysConsistent) {
             const uint32_t f = deriveFlag(epoch[0]);
             ASSERT_NE(bankOf(f), bankOf(prevFlag)) << "banks must alternate, iter=" << iter << " bpp=" << bpp;
             prevFlag = f;
-            applyAllGather(epoch, nRanks, bpp);
+            ASSERT_NO_FATAL_FAILURE(applyAllGather(epoch, nRanks, bpp));
             ASSERT_TRUE(allCellsUniform(epoch)) << "after AG iter=" << iter << " bpp=" << bpp;
         }
         for (int blk : arBlk) {
             const uint32_t f = deriveFlag(epoch[0]);
             ASSERT_NE(bankOf(f), bankOf(prevFlag)) << "banks must alternate, iter=" << iter << " blk=" << blk;
             prevFlag = f;
-            applyAllReduce(epoch, blk);
+            ASSERT_NO_FATAL_FAILURE(applyAllReduce(epoch, blk));
             ASSERT_TRUE(allCellsUniform(epoch)) << "after AR iter=" << iter << " blk=" << blk;
         }
     }
 }
 
 // ===========================================================================
-// Negative controls -- these MUST fail if the harness (or the modelled kernel
-// behavior) loses the property; they prove the positive tests have teeth.
+// Negative controls -- these MUST fail if the modelled behavior loses the
+// property; they prove the positive tests are not vacuous. They validate the
+// HOST MODEL, not the device kernels.
 // ===========================================================================
 
-// If the full-length restamp is weakened to own-cell-only (the exact regression
-// `e < epochLen` -> `e < total` in all_gather_dda_fabric_ll.h:133), a small AG
+// If the full-length restamp is weakened to own-cell-only (modelling the
+// `e < epochLen` -> `e < total` regression in the write-back loop), a small AG
 // followed by a wide AG leaves stale high cells and the pairing breaks. The
 // full-length restamp on the same sequence stays consistent.
-TEST_P(DdaFabricEpoch, NegativeControl_ShortWriteBackBreaksPairing) {
+TEST_P(DdaFabricEpochTest, NegativeControl_ShortWriteBackBreaksPairing) {
     const int nRanks = GetParam();
 
     std::vector<uint32_t> full(epochCells(nRanks), 0u);
-    applyAllGather(full, nRanks, kSmallBpp, kFullWriteBack);
+    ASSERT_NO_FATAL_FAILURE(applyAllGather(full, nRanks, kSmallBpp, kFullWriteBack));
     ASSERT_EQ(agPairingMismatches(full, nRanks, kLargeBpp), 0) << "full restamp must stay consistent";
 
     std::vector<uint32_t> shortWb(epochCells(nRanks), 0u);
-    applyAllGather(shortWb, nRanks, kSmallBpp, /*writeBackLen=*/nRanks * kSmallBpp); // own-cell-only
+    ASSERT_NO_FATAL_FAILURE(applyAllGather(shortWb, nRanks, kSmallBpp, /*writeBackLen=*/nRanks * kSmallBpp));
     EXPECT_GT(agPairingMismatches(shortWb, nRanks, kLargeBpp), 0)
         << "own-cell-only restamp must break pairing -> proves the full-length restamp is load-bearing";
 }
@@ -299,12 +348,12 @@ TEST_P(DdaFabricEpoch, NegativeControl_ShortWriteBackBreaksPairing) {
 // BEFORE the write-back, so those residue classes are never restamped and the
 // array goes non-uniform. Launch sites use grid.x == nRanks; this pins that
 // assumption.
-TEST_P(DdaFabricEpoch, NegativeControl_PeerBeyondNRanksBreaksUniformity) {
+TEST_P(DdaFabricEpochTest, NegativeControl_PeerBeyondNRanksBreaksUniformity) {
     const int nRanks = GetParam();
     const int bpp    = 2;
 
     std::vector<uint32_t> ok(epochCells(nRanks), 0u);
-    applyAllGather(ok, nRanks, bpp);
+    ASSERT_NO_FATAL_FAILURE(applyAllGather(ok, nRanks, bpp));
     ASSERT_TRUE(allCellsUniform(ok)) << "grid.x == nRanks must stay uniform";
 
     // Model grid.x == nRanks+1: all blocks read, but peer==nRanks blocks return

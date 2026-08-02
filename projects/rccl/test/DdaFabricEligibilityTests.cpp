@@ -16,13 +16,8 @@
 namespace RcclUnitTesting
 {
 
-class DdaFabricEligibilityTest : public ::testing::Test
-{
-protected:
-    DdaFabricMockComm mockComm_;
-    void*             sendbuff_{reinterpret_cast<void*>(0x1000)};
-    void*             recvbuff_{reinterpret_cast<void*>(0x2000)};
-};
+// Fixture (mock comm + dummy buffers) is shared via DdaFabricTestHelpers.hpp.
+using DdaFabricEligibilityTest = DdaFabricFixture;
 
 // ---------------------------------------------------------------------------
 // AllGather
