@@ -41,6 +41,22 @@
     "parallel_jobs": 64
   },
   "test_configurations": {
+    "device_find_window": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixtures",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 120,
+      "description": "Device-side symmetric window lookup (ncclFindWindow). A kernel resolves the registered symmetric window for a local pointer from the device-side window registry (no host round-trip) and reads a peer's value through it. Single node, 2 GPUs with direct P2P; skips if symmetric memory is unsupported.",
+      "tests": [
+        {
+          "name": "DeviceApi_FindWindowRemoteRead",
+          "description": "In-kernel ncclFindWindow resolves the peer's symmetric window from a local user pointer and reads its value; validates the device-side window registry.",
+          "test_filter": "DeviceApi.FindWindowRemoteRead"
+        }
+      ]
+    },
     "default": {
       "env_variables": {
         "NCCL_LAUNCH_MODE": "GROUP"
@@ -1184,6 +1200,12 @@
       "name": "NET IB-CAST - GIN DmaBuf",
       "description": "GIN plugin tests with dma-buf support",
       "config": "net_ib_cast_gin_dmabuf",
+      "enabled": true
+    },
+    {
+      "name": "Device API - Find window (symmetric)",
+      "description": "AICOMRCCL-1173: in-kernel ncclFindWindow resolves a peer's symmetric window from a local pointer (device-side window registry, no host round-trip). Release fixtures, 2 GPUs with P2P, no NIC required.",
+      "config": "device_find_window",
       "enabled": true
     }
   ]
