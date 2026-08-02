@@ -42,6 +42,125 @@ def make_dual_issue_arch_config(metric_name: str, peak_col: str = "Peak"):
     return arch_config
 
 
+def make_pc_sampling_dispatch(dispatch_id, kernel_id):
+    """Build one PC-sampling kernel dispatch record."""
+    return {
+        "start_timestamp": 0,
+        "end_timestamp": 0,
+        "dispatch_info": {
+            "dispatch_id": dispatch_id,
+            "kernel_id": kernel_id,
+            "agent_id": {"handle": 1},
+        },
+    }
+
+
+def make_colliding_pc_sampling_tool_data(process_id: int, sample_count: int):
+    """Build process-local sampling data that reuses shared display identities."""
+    tool_data = make_pc_sampling_tool_data()
+    shared_sample = tool_data["buffer_records"]["pc_sample_stochastic"][0]
+    tool_data["metadata"]["pid"] = process_id
+    tool_data["buffer_records"]["pc_sample_stochastic"] = [
+        copy.deepcopy(shared_sample) for _ in range(sample_count)
+    ]
+    tool_data["buffer_records"]["kernel_dispatch"] = [make_pc_sampling_dispatch(0, 100)]
+    tool_data["strings"] = {
+        "pc_sample_instructions": ["v_mov"],
+        "pc_sample_comments": ["/s/shared.cpp:7"],
+    }
+    tool_data["kernel_symbols"] = [tool_data["kernel_symbols"][0]]
+    return tool_data
+
+
+def make_pc_sampling_only_database_analyzer(workload_path, tool_data_records):
+    """Build a database analyzer configured for sampling-only records."""
+    analyzer = db_analysis(
+        SimpleNamespace(output_name=None, output_format="database"),
+        {},
+    )
+    analyzer._runs = {
+        workload_path: schema.Workload(
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
+        )
+    }
+    analyzer._roofline_ceilings_per_workload = {}
+    analyzer._profiling_config = {"filter_blocks": ["pc_sampling"]}
+    analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data_records}
+    analyzer._dispatch_data_per_workload = {
+        workload_path: analyzer._build_pc_sampling_dispatch_data(tool_data_records)
+    }
+    analyzer._roofline_data_per_kernel = {}
+    analyzer._roofline_data_per_workload = {}
+    return analyzer
+
+
+def make_counter_backed_database_analyzer(
+    workload_path,
+    filter_blocks,
+    tool_data_records,
+):
+    """Build a counter-backed analyzer with optional sampling records."""
+    analyzer = db_analysis(
+        SimpleNamespace(output_name=None, output_format="database"),
+        {},
+    )
+    analyzer._runs = {
+        workload_path: schema.Workload(
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
+        )
+    }
+    analyzer._roofline_ceilings_per_workload = {}
+    analyzer._profiling_config = {"filter_blocks": filter_blocks}
+    analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data_records}
+    analyzer._dispatch_data_per_workload = {
+        workload_path: pd.DataFrame([
+            {
+                "dispatch_id": 7,
+                "kernel_name": "vecCopy",
+                "gpu_id": 0,
+                "start_timestamp": 10,
+                "end_timestamp": 20,
+            }
+        ])
+    }
+    analyzer._roofline_data_per_kernel = {workload_path: pd.DataFrame()}
+    analyzer._roofline_data_per_workload = {}
+    analyzer._metrics_info_data_per_workload = {}
+    analyzer._kernel_values_data_per_workload = {}
+    analyzer._workload_values_data_per_workload = {}
+    return analyzer
+
+
+def run_analysis_with_existing_database(analyzer):
+    """Run analysis while preserving the test's existing database session."""
+    with ExitStack() as patch_stack:
+        patch_stack.enter_context(patch.object(orm.Database, "init"))
+        patch_stack.enter_context(patch.object(orm.Database, "create_views"))
+        patch_stack.enter_context(patch.object(orm.Database, "write"))
+        patch_stack.enter_context(
+            patch(
+                "rocprof_compute_analyze.analysis_db.get_version",
+                return_value={"version": "test", "sha": "test"},
+            )
+        )
+        analyzer.run_analysis()
+
+
+def run_analysis_with_materialized_views(analyzer):
+    """Run analysis while materializing views in the existing test database."""
+    with ExitStack() as patch_stack:
+        patch_stack.enter_context(patch.object(orm.Database, "init"))
+        patch_stack.enter_context(patch.object(orm.Database, "write"))
+        patch_stack.enter_context(patch.object(analyzer, "run_analysis_metrics"))
+        patch_stack.enter_context(
+            patch(
+                "rocprof_compute_analyze.analysis_db.get_version",
+                return_value={"version": "test", "sha": "test"},
+            )
+        )
+        analyzer.run_analysis()
+
+
 # =============================================================================
 # db_analysis.evaluate() tests
 # =============================================================================
@@ -806,19 +925,6 @@ def test_validate_dual_issue_metrics_skips_non_metric_table_dfs():
 # =============================================================================
 
 
-def make_pc_sampling_dispatch(dispatch_id, kernel_id):
-    """Build one PC-sampling kernel dispatch record."""
-    return {
-        "start_timestamp": 0,
-        "end_timestamp": 0,
-        "dispatch_info": {
-            "dispatch_id": dispatch_id,
-            "kernel_id": kernel_id,
-            "agent_id": {"handle": 1},
-        },
-    }
-
-
 def make_pc_sampling_tool_data():
     """Two offsets under two kernels sharing one code object, with counts."""
     stall = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_WAITCNT"
@@ -875,113 +981,6 @@ def make_pc_sampling_tool_data():
         "code_objects": [{"code_object_id": 5, "load_base": 0x1000}],
         "agents": [],
     }
-
-
-def make_colliding_pc_sampling_tool_data(process_id: int, sample_count: int):
-    """Build process-local sampling data that reuses shared display identities."""
-    tool_data = make_pc_sampling_tool_data()
-    shared_sample = tool_data["buffer_records"]["pc_sample_stochastic"][0]
-    tool_data["metadata"]["pid"] = process_id
-    tool_data["buffer_records"]["pc_sample_stochastic"] = [
-        copy.deepcopy(shared_sample) for _ in range(sample_count)
-    ]
-    tool_data["buffer_records"]["kernel_dispatch"] = [make_pc_sampling_dispatch(0, 100)]
-    tool_data["strings"] = {
-        "pc_sample_instructions": ["v_mov"],
-        "pc_sample_comments": ["/s/shared.cpp:7"],
-    }
-    tool_data["kernel_symbols"] = [tool_data["kernel_symbols"][0]]
-    return tool_data
-
-
-def make_pc_sampling_only_database_analyzer(workload_path, tool_data_records):
-    """Build a database analyzer configured for sampling-only records."""
-    analyzer = db_analysis(
-        SimpleNamespace(output_name=None, output_format="database"),
-        {},
-    )
-    analyzer._runs = {
-        workload_path: schema.Workload(
-            sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
-        )
-    }
-    analyzer._roofline_ceilings_per_workload = {}
-    analyzer._profiling_config = {"filter_blocks": ["pc_sampling"]}
-    analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data_records}
-    analyzer._dispatch_data_per_workload = {
-        workload_path: analyzer._build_pc_sampling_dispatch_data(tool_data_records)
-    }
-    analyzer._roofline_data_per_kernel = {}
-    analyzer._roofline_data_per_workload = {}
-    return analyzer
-
-
-def make_counter_backed_database_analyzer(
-    workload_path,
-    filter_blocks,
-    tool_data_records,
-):
-    """Build a counter-backed analyzer with optional sampling records."""
-    analyzer = db_analysis(
-        SimpleNamespace(output_name=None, output_format="database"),
-        {},
-    )
-    analyzer._runs = {
-        workload_path: schema.Workload(
-            sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
-        )
-    }
-    analyzer._roofline_ceilings_per_workload = {}
-    analyzer._profiling_config = {"filter_blocks": filter_blocks}
-    analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data_records}
-    analyzer._dispatch_data_per_workload = {
-        workload_path: pd.DataFrame([
-            {
-                "dispatch_id": 7,
-                "pid": None,
-                "kernel_name": "vecCopy",
-                "gpu_id": 0,
-                "start_timestamp": 10,
-                "end_timestamp": 20,
-            }
-        ])
-    }
-    analyzer._roofline_data_per_kernel = {workload_path: pd.DataFrame()}
-    analyzer._roofline_data_per_workload = {}
-    analyzer._metrics_info_data_per_workload = {}
-    analyzer._kernel_values_data_per_workload = {}
-    analyzer._workload_values_data_per_workload = {}
-    return analyzer
-
-
-def run_analysis_with_existing_database(analyzer):
-    """Run analysis while preserving the test's existing database session."""
-    with ExitStack() as patch_stack:
-        patch_stack.enter_context(patch.object(orm.Database, "init"))
-        patch_stack.enter_context(patch.object(orm.Database, "create_views"))
-        patch_stack.enter_context(patch.object(orm.Database, "write"))
-        patch_stack.enter_context(
-            patch(
-                "rocprof_compute_analyze.analysis_db.get_version",
-                return_value={"version": "test", "sha": "test"},
-            )
-        )
-        analyzer.run_analysis()
-
-
-def run_analysis_with_materialized_views(analyzer):
-    """Run analysis while materializing views in the existing test database."""
-    with ExitStack() as patch_stack:
-        patch_stack.enter_context(patch.object(orm.Database, "init"))
-        patch_stack.enter_context(patch.object(orm.Database, "write"))
-        patch_stack.enter_context(patch.object(analyzer, "run_analysis_metrics"))
-        patch_stack.enter_context(
-            patch(
-                "rocprof_compute_analyze.analysis_db.get_version",
-                return_value={"version": "test", "sha": "test"},
-            )
-        )
-        analyzer.run_analysis()
 
 
 def test_add_pc_sampling_data_no_tool_data_is_noop(db_session):

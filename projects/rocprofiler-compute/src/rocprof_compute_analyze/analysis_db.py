@@ -496,14 +496,19 @@ class db_analysis(OmniAnalyze_Base):
         tool_data_records = self._pc_sampling_tool_data_per_workload.get(
             workload_path, []
         )
-        tool_data_by_pid = self._pc_sampling_tool_data_by_pid(tool_data_records)
+        tool_data_by_pid = {
+            tool_data["metadata"]["pid"]: tool_data for tool_data in tool_data_records
+        }
 
         for pid, disassemblies in load_code_object_disassemblies(workload_path).items():
             tool_data = tool_data_by_pid.get(pid)
             if tool_data is None:
                 continue
 
-            load_base_by_id = self._load_base_by_code_object_id(tool_data)
+            load_base_by_id = {
+                code_object["code_object_id"]: code_object.get("load_base")
+                for code_object in tool_data.get("code_objects", [])
+            }
             kernel_by_symbol = self._kernel_by_symbol(tool_data, kernel_objs)
             invoked_code_object_ids = {
                 code_object_id for code_object_id, _ in kernel_by_symbol
@@ -1010,23 +1015,6 @@ class db_analysis(OmniAnalyze_Base):
         return dispatch_data_per_workload
 
     @staticmethod
-    def _pc_sampling_tool_data_by_pid(
-        tool_data_records: list[dict[str, Any]],
-    ) -> dict[int, dict[str, Any]]:
-        return {
-            tool_data["metadata"]["pid"]: tool_data for tool_data in tool_data_records
-        }
-
-    @staticmethod
-    def _load_base_by_code_object_id(
-        tool_data: dict[str, Any],
-    ) -> dict[Any, Any]:
-        return {
-            code_object["code_object_id"]: code_object.get("load_base")
-            for code_object in tool_data.get("code_objects", [])
-        }
-
-    @staticmethod
     def _kernel_by_symbol(
         tool_data: dict[str, Any],
         kernel_objs: dict[KernelKey, orm.Kernel],
@@ -1058,7 +1046,6 @@ class db_analysis(OmniAnalyze_Base):
         """Convert combined sampling traces to the database dispatch schema."""
         columns = [
             "dispatch_id",
-            "pid",
             "kernel_name",
             "gpu_id",
             "start_timestamp",
@@ -1070,7 +1057,6 @@ class db_analysis(OmniAnalyze_Base):
 
         dispatch_df = pd.DataFrame({
             "dispatch_id": trace_df["Dispatch_Id"],
-            "pid": trace_df["PID"],
             "kernel_name": trace_df["Kernel_Name"],
             "gpu_id": trace_df["GPU_ID"],
             "start_timestamp": trace_df["Start_Timestamp"],

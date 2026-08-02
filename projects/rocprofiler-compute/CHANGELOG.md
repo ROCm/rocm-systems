@@ -18,8 +18,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Deprecated the `--join-type` profile mode option; it no longer has any effect and will be removed in a future release.
 
-* `--pc-sampling-rows` now caps the combined per-process rows of the PC sampling table.
-
 ### Removed
 
 * Removed the CSV profile output backend and the `--format-rocprof-output` profile mode option. Profiling now always uses the `rocpd` output format, which was already the default.

@@ -244,6 +244,32 @@ def make_display_row_tool_data(
     )
 
 
+def make_pc_sampling_workload(kernel_name: str = "vecCopy") -> schema.Workload:
+    """Build a workload that selects *kernel_name* from the kernel-top table."""
+    return schema.Workload(
+        filter_kernel_ids=[0],
+        dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": [kernel_name]})},
+    )
+
+
+def make_multiprocess_dispatch_tool_data() -> list[dict]:
+    """Build colliding process-local dispatch IDs for one shared kernel."""
+    first_tool_data = make_tool_data(
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[
+            make_dispatch(0, 100, start=10, end=20),
+            make_dispatch(1, 100, start=30, end=50),
+        ],
+        pid=101,
+    )
+    second_tool_data = make_tool_data(
+        kernel_symbols=[make_kernel_symbol(200, 7, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 200, start=60, end=90)],
+        pid=202,
+    )
+    return [first_tool_data, second_tool_data]
+
+
 # ═══════════════════════════════════════════════════════════════
 # is_only_pc_sampling
 # ═══════════════════════════════════════════════════════════════
@@ -610,14 +636,6 @@ def setup_pc_sampling_data(
     )
 
 
-def make_pc_sampling_workload(kernel_name: str = "vecCopy") -> schema.Workload:
-    """Build a workload that selects *kernel_name* from the kernel-top table."""
-    return schema.Workload(
-        filter_kernel_ids=[0],
-        dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": [kernel_name]})},
-    )
-
-
 @pytest.mark.parametrize(
     "method, sorting_type",
     [
@@ -974,9 +992,10 @@ def test_load_pc_sampling_data_no_filter_schema_parity(method: str) -> None:
         "offset",
         [tool_data],
     )
+    # Index 1 selects the second kernel-top row, not the first.
     single = load_pc_sampling_data(
         schema.Workload(
-            filter_kernel_ids=[0], dfs={PMC_KERNEL_TOP_TABLE_ID: kernel_top_df}
+            filter_kernel_ids=[1], dfs={PMC_KERNEL_TOP_TABLE_ID: kernel_top_df}
         ),
         "offset",
         [tool_data],
@@ -984,7 +1003,7 @@ def test_load_pc_sampling_data_no_filter_schema_parity(method: str) -> None:
     assert list(no_filter.columns) == list(single.columns)
     assert "Kernel_Name" in no_filter.columns
     assert set(no_filter["Kernel_Name"]) == {"vecCopy", "vecAdd"}
-    assert set(single["Kernel_Name"]) == {"vecCopy"}
+    assert set(single["Kernel_Name"]) == {"vecAdd"}
     assert len(no_filter) > len(single)
     by_kernel = dict(zip(no_filter["source_line"], no_filter["Kernel_Name"]))
     assert by_kernel[".../vcopy.cpp:42"] == "vecCopy"
@@ -1636,24 +1655,6 @@ def make_db_analysis(workload_path: str) -> db_analysis:
     return instance
 
 
-def make_multiprocess_dispatch_tool_data() -> list[dict]:
-    """Build colliding process-local dispatch IDs for one shared kernel."""
-    first_tool_data = make_tool_data(
-        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
-        kernel_dispatch=[
-            make_dispatch(0, 100, start=10, end=20),
-            make_dispatch(1, 100, start=30, end=50),
-        ],
-        pid=101,
-    )
-    second_tool_data = make_tool_data(
-        kernel_symbols=[make_kernel_symbol(200, 7, "vecCopy")],
-        kernel_dispatch=[make_dispatch(0, 200, start=60, end=90)],
-        pid=202,
-    )
-    return [first_tool_data, second_tool_data]
-
-
 def test_load_pc_sampling_tool_data_gate(tmp_path: Path) -> None:
     """Tool data loads whenever PC sampling was collected, else returns empty."""
     write_results_json(
@@ -1972,14 +1973,12 @@ def test_calc_dispatch_data_uses_provided_tool_data(tmp_path: Path) -> None:
     df = result[str(tmp_path)]
     assert list(df.columns) == [
         "dispatch_id",
-        "pid",
         "kernel_name",
         "gpu_id",
         "start_timestamp",
         "end_timestamp",
     ]
     assert df.iloc[0]["kernel_name"] == "vecCopy"
-    assert df.iloc[0]["pid"] == 42
     assert df.iloc[0]["gpu_id"] == 0
 
 
@@ -2013,7 +2012,6 @@ def test_calc_dispatch_data_stitches_pc_sampling_tool_records(
     df = result[str(tmp_path)]
     assert df["kernel_name"].tolist() == ["vecCopy", "vecCopy", "vecCopy"]
     assert df["dispatch_id"].tolist() == [0, 1, 2]
-    assert df["pid"].tolist() == [101, 101, 202]
 
 
 # ═══════════════════════════════════════════════════════════════

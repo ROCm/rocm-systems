@@ -416,14 +416,8 @@ def _renumber_dispatch_ids_across_processes(
 
     ``dispatch_info.dispatch_id`` restarts in every process, so a multi-process
     workload repeats the same id once per process. Counter profiling already
-    folds ``PID`` into ``Dispatch_ID`` before analyze sees it, via the
-    ``GroupIdAssigner`` in ``utils_profile``, which is why it can then drop the
-    ``PID`` column outright. Doing the same here keeps one meaning of a dispatch
-    id across both analyze paths, and keeps ``--dispatch`` unambiguous.
-
-    Records arrive in numeric PID order and carry one row per dispatch, so
-    positional numbering is deterministic and matches the counter path's
-    zero-based, first-seen ids.
+    folds ``PID`` into ``Dispatch_ID`` via ``utils_profile``'s
+    ``GroupIdAssigner``, so both analyze paths agree on what a dispatch id means.
     """
     if combined_trace.empty:
         return combined_trace
