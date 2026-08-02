@@ -19,8 +19,11 @@ The separation is structural rather than advisory:
 A proposal therefore cannot cite a tool that was never called, name a kernel
 that was never measured, or assign itself an identity or provenance.
 
-This module is inert until a session resolves to the ``exploratory`` tier;
-:func:`resolve_tier` returns ``strict`` for every current configuration.
+This module is inert until a session resolves to the ``exploratory`` tier,
+which :func:`resolve_tier` grants only when the deployment ceiling, a live
+session, and the agent's own capability all independently permit it. Any one
+of them withheld -- including the default configuration -- yields ``strict``,
+and a strict session never reaches proposal construction at all.
 """
 
 from __future__ import annotations
