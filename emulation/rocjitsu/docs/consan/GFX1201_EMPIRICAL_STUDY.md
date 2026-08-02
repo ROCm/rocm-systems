@@ -69,18 +69,64 @@ Initial candidates are deliberately broader than the final admitted set:
 
 | Source family | Candidate workload | Primary stress | Oracle | Fault route | Status |
 |---|---|---|---|---|---|
-| rdna4_matmul | Production FP16/FP8 WMMA matmul | High-rate LDS staging and barriers | Exact small-shape plus sampled 4096³ host reference | Manual racy variants and automatic final-ISA mutation | Harness admitted; engine cells under qualification |
-| hip-moi | D128/WMMA attention | LDS handoff, barriers, register pressure | Existing exact reference | Automatic barrier mutation; manual source control if needed | Candidate |
-| hip-moi | Stream-K or tree atomic reduction | Atomics, fences, LDS coordination | Existing exact reference | Automatic order/scope mutation | Candidate |
-| llama.cpp | Quantized matvec | Real quantized kernel with LDS, barriers, atomics, and fences | CPU result comparison | Automatic reviewed mutation | Candidate |
+| rdna4_matmul | Production FP16/FP8 WMMA matmul | High-rate LDS staging and barriers | Exact small-shape plus sampled 4096³ host reference | Manual racy variants and automatic final-ISA mutation | FP8 admitted for Sampled; other engine failures retained |
+| hip-moi | D128/WMMA attention | LDS handoff, barriers, register pressure | Existing exact reference | Automatic barrier mutation; manual source control if needed | D128 block admitted for all four engines |
+| hip-moi | Stream-K or tree atomic reduction | Atomics, fences, LDS coordination | Existing exact reference | Automatic order/scope mutation | Arrival counter admitted except Inline Shadow |
+| llama.cpp | Quantized matvec | Real quantized kernel with LDS, barriers, atomics, and fences | CPU result comparison | Automatic reviewed mutation | Admitted except Record/Replay |
 | llama.cpp | RMS normalization | Small production reduction | CPU result comparison | Automatic mutation after an effective site is identified | Candidate |
-| Triton/PyTorch | Compiled or split online softmax | Generated LDS/barrier code | CPU-derived tensor comparison | Automatic reviewed mutation | Candidate |
+| Triton/PyTorch | Compiled or split online softmax | Generated LDS/barrier code | CPU-derived tensor comparison | Automatic reviewed mutation | Compiled softmax admitted except Record/Replay |
 | AITER or CK | One production attention, GEMM, reduction, or collective kernel | Library-generated high-performance code | Library reference or CPU comparison | Inventory-driven automatic mutation | Candidate |
 
 An admitted workload must have a bounded production-relevant launch shape, an
 independent correctness oracle, a stable baseline command, source and binary
 identity, and at least one ConSan-visible supported site. Tiny shapes used only
 for compilation or smoke tests are not performance evidence.
+
+### Frozen corpus checkpoint
+
+Corpus admission was completed on 2026-08-02 in
+`artifacts/bd-2wsf-corpus-admission-833029ddd0-20260802`. The artifact is a
+clean-qualification and inventory checkpoint, not performance evidence. Every
+native baseline passed its independent oracle, and every selected workload had
+a complete exact-site inventory. No kernel filter, site cap, forced register,
+or coverage relaxation was used. The set satisfies the four-family requirement
+with rdna4_matmul, hip-moi, native llama.cpp, and generated Triton kernels.
+
+The source and runtime lock is:
+
+| Component | Identity |
+|---|---|
+| RocJITsu / validator | `833029ddd01960957d257b7b39602b2a3d701c74` |
+| ConSan hook | SHA-256 `b72109fb27a9f2edd49dac504e3469b536613dae2b34eb8b5be7961a180a6a6d` |
+| rdna4_matmul | `03431b8af28be2c3cad828bec77dfe8836d4a555`; production executable SHA-256 `56ee1d612f91b746c4a0f029b7aab5cfc969be01ccb22a064806d7019ec2b608` |
+| hip-moi | `0fcd57def36188500a19abaf3b6bca3a6e773034`; D128 executable SHA-256 `0751f77dfcb4d1529acdfd5c37b6f3691e19cfa7a28bbef90e81f4ada621da4e`; Stream-K executable SHA-256 `9378b6b8a6b953f336bc71cfb597c702c6aea0123c4e6c9fb01b901266d29960` |
+| rocjitsu-test-corpus / llama.cpp | `5f1e7f57a8d502294e94e5b960aec71964f1b79d`; runner SHA-256 `1fbab008c93c0ee54f48406753876d42b1b94a356ea27cd5f9c385c9a8556ba4`; `libggml-hip` SHA-256 `b7026216d5355efefc54be22c0ac23a96bb2008a2484b755f437d56dab94dabd` |
+| PyTorch / Triton | PyTorch `2.14.0a0+rocm7.15.0a20260721`, HIP `7.15.0`, Triton `3.8.0` |
+
+The admitted launch and oracle set is:
+
+| Workload | Frozen launch and oracle | Code-object fingerprint | Inventory |
+|---|---|---|---|
+| `rdna4-matmul-fp8-production` | Exact `256x128x128` plus two sampled host-reference tiles at `4096³` | `fnv1a64:2ea902aa8104f911` | 227 LDS-access sites and 48 barrier sites in 24 sequences |
+| `llama-rdna4-mul-mat-vec-q` | One token, embedding 1024, independent CPU binary output, absolute tolerance `0.02` | `fnv1a64:de2f8cc9883dcdb8` | 88 barrier sites in 44 sequences |
+| `d128-block` | One 64-thread workgroup, sequence 32, D128/V128, exact and sampled host-reference contexts | `fnv1a64:cebac378f1e018d9` | 8 barrier sites in 4 sequences |
+| `streamk-arrival` | One 64-thread workgroup, one `16x16` tile, two K16 partials, exact host-expected output | `fnv1a64:6a20802924b6e784` | 34 atomic sites with order and scope mutation identities |
+| `pytorch-rdna4-compiled-softmax` | Full-graph compiled FP32 softmax at `[128, 256]`, CPU `allclose` oracle | `fnv1a64:46555795a0b96f12` | 6 barrier sites in 3 sequences |
+
+Clean pair admission at that checkpoint is:
+
+| Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
+|---|---:|---:|---:|---:|
+| FP8 production matmul | rejected: 75/227 accesses | rejected: dynamic history incomplete | admitted: 227/227 accesses, 48/48 barriers | rejected: 215/227 accesses |
+| llama.cpp quantized matvec | admitted: 462/462 accesses | rejected: transform status 4112 | admitted: 462/462 accesses, 88/88 barriers | admitted: 462/462 accesses, 44/44 barriers |
+| hip-moi D128 attention block | admitted: 12/12 accesses | admitted: 12/12 accesses, 8/8 barriers | admitted: 12/12 accesses, 8/8 barriers | admitted: 12/12 accesses, 4/4 barriers |
+| hip-moi Stream-K arrival counter | admitted: 4/4 accesses | admitted: 4/4 accesses, 15/15 atomics, 8/8 barriers, 16/16 fences | admitted: 4/4 accesses, 15/15 atomics, 8/8 barriers | rejected: 0/4 accesses and 0/15 atomics |
+| PyTorch/Triton compiled softmax | admitted: 4/4 accesses | rejected: 512 clean access-conflict diagnostics | admitted: 4/4 accesses, 6/6 barriers | admitted: 4/4 accesses, 3/3 barriers |
+
+These rejections are part of the empirical result. Performance and detection
+collection must not hide them by substituting a smaller workload or a relaxed
+engine configuration. A pair may enter a later campaign only after a real
+implementation fix and a fresh clean-source checkpoint.
 
 The `rdna4_matmul` source-level instrumentation catalog is not the workload
 binary: loading that catalog would make RocJITsu transform hundreds of
@@ -91,6 +137,7 @@ target from a clean source checkpoint instead:
 VENV=/path/to/therock-venv PRODUCTION_ONLY=1 \
   /path/to/rdna4_matmul/build_and_test.sh --help
 export CONSAN_VALIDATION_RDNA4_MATMUL_DIR=/path/to/rdna4_matmul
+export CONSAN_VALIDATION_LLAMA_BUILD_DIR=/path/to/llama/build/cases/llama.cpp
 export CONSAN_VALIDATION_LLVM_READELF=/path/to/llvm-readelf
 ```
 
