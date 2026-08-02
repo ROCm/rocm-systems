@@ -281,6 +281,12 @@ complete matching rows; an interrupted row is preserved with an
 `incomplete-N` suffix before it is retried. A changed source, binary, command,
 or campaign configuration requires a new artifact root.
 
+With `--profile all`, admission is evaluated independently for every engine.
+The campaign retains each rejection and times every admitted pair; a rejected
+pair is never allowed to suppress evidence for the other engines or enter the
+timing schedule. The campaign summary separates requested, timed, and rejected
+profiles.
+
 Campaigns are collected per workload today. Performance collection is tracked
 by `bd-2wsf.3`, fault collection by `bd-2wsf.4`, and the cross-workload reader
 that verifies shared provenance and renders the recommendation tables by
