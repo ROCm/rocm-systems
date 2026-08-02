@@ -221,7 +221,12 @@ def test_root_writes_bottleneck_narrative(fake_provider):
         provider="anthropic",
     )
     assert len(result.narrative) > 0
-    assert result.primary_bottleneck == "memory_transfer"
+
+    # The model claimed "memory_transfer"; there is no readable database here,
+    # so the rule verdict is data_insufficient and it wins. This assertion used
+    # to expect the model's claim, which made Root's classification depend on
+    # the model and let a confident answer override a refusal to answer.
+    assert result.primary_bottleneck == "data_insufficient"
 
 
 # -- Finding #24: Root lambda stubs for tasks.* never validated ---------------

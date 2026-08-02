@@ -100,18 +100,21 @@ _INTENT_TO_HANDOFF = {
 }
 
 
-def _airgap_primary_bottleneck(
+def _deterministic_primary_bottleneck(
     payload: schemas.RootInput,
     *,
     routed_to: str,
 ) -> tuple[str, list[str]]:
-    """Best-effort deterministic bottleneck for Root airgap mode.
+    """Best-effort deterministic bottleneck for Root, in either mode.
 
-    The Root airgap template does not invoke any Layer-1 agents, but the
-    batch ``perfxpert analyze`` path still expects Root to thread through the
+    The Root template does not invoke any Layer-1 agents, but the batch
+    ``perfxpert analyze`` path still expects Root to thread through the
     deterministic Analysis verdict when a profiling DB is present. Without
-    this, airgap JSON/webview drift to ``mixed`` even when Analysis already
+    this, JSON/webview drift to ``mixed`` even when Analysis already
     classifies the run as latency/compute/memory bound.
+
+    Used by both modes so Root's classification is a rule output rather than
+    a model claim — which is what keeps the two modes in agreement.
     """
     if routed_to not in {"analysis", "recommendation"} or not payload.database_path:
         return "mixed", []
@@ -134,6 +137,29 @@ def _airgap_primary_bottleneck(
         return "mixed", [f"airgap analysis fallback failed: {exc}"]
 
 
+def _routing_summary(intent: str, routed_to: str) -> list[dict]:
+    """Root's ``recommendations`` entry: a record of where the query went.
+
+    Root does not itself rank optimizations -- Recommendation does. What Root
+    can honestly report is its own routing decision, which is a rule output
+    and therefore identical in both modes.
+
+    The summary is built from the routing decision rather than sliced out of
+    the narrative. Embedding model prose here would put unlabelled model text
+    inside the vetted-lane field for any consumer that renders it, and would
+    make the two modes disagree. The narrative is carried in its own field
+    for callers that want it.
+    """
+    return [
+        {
+            "type": intent,
+            "target": routed_to,
+            "summary": f"Routed to {routed_to} specialist via intent {intent!r}.",
+            "source": "root.routing",
+        }
+    ]
+
+
 def run_root(
     payload: schemas.RootInput,
     *,
@@ -152,14 +178,18 @@ def run_root(
         airgap=airgap,
     )
 
+    # Classification and routing are rule outputs in both modes. Root is
+    # Layer 0 and holds no exploration capability, so nothing it publishes
+    # may depend on what the model asserted -- only how it is worded.
+    primary_bottleneck, extra_warnings = _deterministic_primary_bottleneck(
+        payload,
+        routed_to=routed_to,
+    )
+
     if raw.get("_mode") == "airgap":
-        primary_bottleneck, extra_warnings = _airgap_primary_bottleneck(
-            payload,
-            routed_to=routed_to,
-        )
         return schemas.RootOutput(
             narrative=raw.get("narrative", ""),
-            recommendations=[],
+            recommendations=_routing_summary(verdict.intent, routed_to),
             primary_bottleneck=primary_bottleneck,
             warnings=["airgap mode; deterministic template used", *extra_warnings],
             metadata={"routed_to": routed_to, "intent": verdict.intent},
@@ -167,27 +197,17 @@ def run_root(
 
     so = raw.get("structured_output") or {}
     narrative = so.get("narrative") or raw.get("text") or ""
-    recommendations = so.get("recommendations") or []
-    if not recommendations:
-        recommendations = [
-            {
-                "type": verdict.intent,
-                "target": routed_to,
-                "summary": (
-                    narrative.split("\n", 1)[0][:240]
-                    if narrative
-                    else f"Routed to {routed_to} specialist via intent {verdict.intent!r}."
-                ),
-                "source": "root.fallback",
-            }
-        ]
 
     return schemas.RootOutput(
         narrative=narrative,
-        recommendations=recommendations,
-        primary_bottleneck=so.get("primary_bottleneck", "mixed"),
-        warnings=so.get("warnings", []),
-        metadata={**so.get("metadata", {}), "routed_to": routed_to, "intent": verdict.intent},
+        # Deliberately not ``so.get("recommendations")``. This field is the
+        # vetted lane, and Root is the entry point most callers use, so a
+        # model-written entry here would reach a user as advice with nothing
+        # marking it unproven. Ranked advice comes from Recommendation.
+        recommendations=_routing_summary(verdict.intent, routed_to),
+        primary_bottleneck=primary_bottleneck,
+        warnings=[*extra_warnings],
+        metadata={"routed_to": routed_to, "intent": verdict.intent},
     )
 
 

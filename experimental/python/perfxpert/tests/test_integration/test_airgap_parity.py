@@ -22,7 +22,7 @@ from perfxpert.agents.framework import FakeProviderResponse
 # its own confidence, invent findings, or reorder ranked advice.
 HOSTILE = {
     "routed_to": "correctness",
-    "primary_bottleneck": "compute_bound",
+    "primary_bottleneck": "compute",
     "confidence": 1.0,
     "time_breakdown": {"kernel_pct": 100.0},
     "hot_kernels": [{"name": "[INVENTED]", "pct": 0.99}],
@@ -39,6 +39,31 @@ HOSTILE = {
 }
 
 
+# Some field names are declared by more than one schema with different legal
+# values. `verdict` is "improved" for Diff but "pass"/"reject"/"regressed" for
+# Correctness, and a value that is illegal for the target schema gets the whole
+# response discarded — which would hide the very code path being tested.
+_PER_SCHEMA_OVERRIDES = {
+    "CorrectnessOutput": {"verdict": "reject"},
+}
+
+
+def hostile_for(output_schema):
+    """The hostile payload narrowed to the fields ``output_schema`` declares.
+
+    Output validation mirrors each agent's schema with ``extra="forbid"``, so
+    sending the combined dict would be rejected wholesale by every agent — and
+    a rejected response never reaches the code these tests exist to check.
+    Parity would then hold because the model was ignored for the wrong reason.
+    """
+    fields = getattr(output_schema, "model_fields", None)
+    if not fields:
+        return dict(HOSTILE)
+    payload = {key: value for key, value in HOSTILE.items() if key in fields}
+    payload.update(_PER_SCHEMA_OVERRIDES.get(getattr(output_schema, "__name__", ""), {}))
+    return payload
+
+
 @pytest.fixture
 def hostile_llm(monkeypatch):
     """Every LLM call returns output designed to break parity.
@@ -52,7 +77,7 @@ def hostile_llm(monkeypatch):
 
     def mock_invoke(agent, payload, provider):
         invoked.append(agent.name)
-        return FakeProviderResponse(structured_output=dict(HOSTILE))
+        return FakeProviderResponse(structured_output=hostile_for(agent.output_schema))
 
     monkeypatch.setattr("perfxpert.agents.framework._sdk_invoke", mock_invoke)
     return invoked
@@ -98,6 +123,30 @@ def test_root_routing_identical_under_hostile_model(
 
     assert airgap_out.metadata.get("routed_to") == expected_route
     assert live_out.metadata.get("routed_to") == expected_route
+
+
+@pytest.mark.parametrize("user_query", [
+    "why is this kernel slow?",
+    "suggest optimizations",
+    "did my patch help",
+])
+def test_root_published_fields_identical_under_hostile_model(user_query, hostile_llm):
+    """Asserting only the handoff target left Root's own output unchecked,
+    and Root is the entry point most callers use. Everything it publishes
+    except the narrative is a rule output and must agree across modes."""
+    payload = schemas.RootInput(user_query=user_query, database_path=None)
+    airgap_out, live_out = _both_modes("run_root", payload, hostile_llm)
+
+    _assert_fields_identical(
+        airgap_out, live_out, ("recommendations", "primary_bottleneck", "metadata")
+    )
+    names = [
+        entry.get("name")
+        for entry in live_out.recommendations
+        if isinstance(entry, dict)
+    ]
+    assert "invented_recommendation" not in names
+    assert live_out.primary_bottleneck != HOSTILE["primary_bottleneck"]
 
 
 def test_classification_identical_under_hostile_model(memory_bound_db, hostile_llm):
