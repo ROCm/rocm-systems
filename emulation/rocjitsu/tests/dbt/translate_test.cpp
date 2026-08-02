@@ -1811,6 +1811,9 @@ TEST(CodeObjectPatcher, ReplaceTextRejectsCodeRelocationTargetPastEndOfText) {
       << "a target one past the end of .text is not an instruction";
   EXPECT_FALSE(attempt(sizeof(text_words) - 2))
       << "a target without room for a whole instruction word is not an instruction";
+  EXPECT_FALSE(attempt(1)) << "an offset interior to the first instruction is not a destination";
+  EXPECT_FALSE(attempt(sizeof(uint32_t) + 2))
+      << "an offset interior to a later instruction is not a destination";
   EXPECT_TRUE(attempt(sizeof(text_words) - sizeof(uint32_t)))
       << "the last instruction in .text is a legitimate branch destination";
 }
