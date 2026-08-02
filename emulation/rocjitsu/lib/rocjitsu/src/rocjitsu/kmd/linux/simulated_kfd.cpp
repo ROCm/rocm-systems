@@ -1534,11 +1534,13 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     if (!daemon_mode_) {
       map_to_gpu(proc, args->ring_base_address, reinterpret_cast<void *>(args->ring_base_address),
                  args->ring_size, amdgpu::Mtype::UC);
-      uint64_t rptr_page = args->read_pointer_address & ~0xFFFULL;
-      uint64_t wptr_page = args->write_pointer_address & ~0xFFFULL;
-      map_to_gpu(proc, rptr_page, reinterpret_cast<void *>(rptr_page), 4096, amdgpu::Mtype::UC);
-      if (wptr_page != rptr_page)
-        map_to_gpu(proc, wptr_page, reinterpret_cast<void *>(wptr_page), 4096, amdgpu::Mtype::UC);
+      map_to_gpu(proc, args->read_pointer_address,
+                 reinterpret_cast<void *>(args->read_pointer_address), sizeof(uint64_t),
+                 amdgpu::Mtype::UC);
+      if (args->write_pointer_address != args->read_pointer_address)
+        map_to_gpu(proc, args->write_pointer_address,
+                   reinterpret_cast<void *>(args->write_pointer_address), sizeof(uint64_t),
+                   amdgpu::Mtype::UC);
     }
 
     uint32_t queue_id = proc.next_queue_id_++;
