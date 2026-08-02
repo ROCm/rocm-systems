@@ -112,10 +112,18 @@ def load_proposals(payload: Any) -> List[Dict[str, Any]]:
     def _collect(container: Any) -> None:
         if not isinstance(container, dict):
             return
-        for entry in container.get("exploratory_proposals") or []:
+        # The file is whatever the user saved, so the lane may be any shape.
+        # Iterating a non-list here raised out of the CLI on a malformed
+        # result rather than reporting that it holds no proposals.
+        lane = container.get("exploratory_proposals")
+        if not isinstance(lane, list):
+            return
+        for entry in lane:
             if not isinstance(entry, dict):
                 continue
             pid = entry.get("proposal_id")
+            if not isinstance(pid, str) or not pid:
+                continue
             if pid in seen:
                 continue
             seen.add(pid)

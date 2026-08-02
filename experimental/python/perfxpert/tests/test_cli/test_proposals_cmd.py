@@ -98,6 +98,36 @@ def test_same_proposal_carried_twice_is_listed_once():
     assert len(load_proposals(payload)) == 1
 
 
+@pytest.mark.parametrize(
+    "lane", [42, "not a list", {"proposal_id": "x"}, None, True],
+    ids=["int", "str", "dict", "null", "bool"],
+)
+def test_a_malformed_lane_reads_as_empty_rather_than_raising(lane):
+    """The result file is whatever the user saved, so it may be any shape.
+
+    A non-list lane used to raise out of the CLI, which reports a broken tool
+    for what is really a file with no proposals in it.
+    """
+    assert load_proposals({"exploratory_proposals": lane}) == []
+
+
+def test_a_proposal_with_no_usable_id_is_skipped():
+    """Every later step addresses a proposal by id, so one without a usable id
+    cannot be shown or promoted — and letting several share ``None`` made them
+    deduplicate into one."""
+    payload = {
+        "exploratory_proposals": [
+            {"title": "first"},
+            {"title": "second", "proposal_id": ""},
+            {"title": "third", "proposal_id": 7},
+            PROPOSAL,
+        ]
+    }
+    assert [p["proposal_id"] for p in load_proposals(payload)] == [
+        PROPOSAL["proposal_id"]
+    ]
+
+
 def test_result_without_proposals_is_not_an_error(tmp_path, capsys):
     path = tmp_path / "plain.json"
     path.write_text(json.dumps({"techniques": [], "confidence": 0.6}))

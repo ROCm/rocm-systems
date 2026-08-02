@@ -42,8 +42,15 @@ def agent_recommendation(
             phase-transition messages. ``None`` for zero overhead.
 
     Returns:
-        A dict with :class:`RecommendationOutput` keys:
-        ``{"recommendations", "specialist_used", "plateau_detected"}``.
+        A dict with :class:`RecommendationOutput` keys: ``{"recommendations",
+        "specialist_used", "plateau_detected", "exploratory_proposals"}``.
+
+        The last two lanes are not interchangeable. ``recommendations`` are
+        catalog-ranked and measured. ``exploratory_proposals`` are model-
+        generated, unproven, and carry their own evidence and confidence
+        ceiling, so they must be presented as untested suggestions and never
+        merged into ``recommendations``. It is empty in air-gap mode and under
+        the default strict tier.
     """
     from perfxpert.agents import runtime, schemas
 
@@ -64,6 +71,9 @@ def agent_recommendation(
         "recommendations": list(getattr(output, "recommendations", []) or []),
         "specialist_used": getattr(output, "specialist_used", "none"),
         "plateau_detected": getattr(output, "plateau_detected", False),
+        "exploratory_proposals": list(
+            getattr(output, "exploratory_proposals", []) or []
+        ),
     }
 
 
