@@ -51,8 +51,18 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # PERFXPERT_SKIP_BUNDLED_BUILD: setup.py otherwise builds the bundled
+      # perfxpert-code binary, which needs bun and the opencode submodule.
+      # Neither is present on a clean runner, and no test in this lane uses
+      # the binary.
+      #
+      # The litellm extra is not optional for coverage: it is what routes
+      # non-OpenAI models, so without it that path skips itself and CI would
+      # report green on a lane it never ran.
       - name: Install
-        run: python -m pip install --upgrade pip && pip install -e '.[dev]'
+        env:
+          PERFXPERT_SKIP_BUNDLED_BUILD: '1'
+        run: python -m pip install --upgrade pip && pip install -e '.[dev,litellm]'
 
       - name: Agent construction and runtime guardrails
         run: pytest tests/test_agents tests/test_runtime -q

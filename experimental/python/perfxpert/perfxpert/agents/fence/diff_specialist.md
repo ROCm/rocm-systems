@@ -30,16 +30,14 @@ than single-run roofline classification.
 - `kernel_deltas`: dict with `"regressions"` and `"improvements"` —
   two lists of per-kernel dicts with keys `name`, `baseline_ns`,
   `new_ns`, `delta_ns`, `delta_pct`, `regressed`, `was_hot`.
-- `verdict`: one of `improved` / `regressed` / `neutral`. Derive it
-  deterministically from the underlying tool output:
-  - any `primary_regressions` entry → `"regressed"`
-  - wall delta > +0.5% → `"regressed"`
-  - wall delta < -0.5% → `"improved"`
-  - otherwise → `"neutral"`
-- `narrative`: one or two short English sentences for the user.
-- `confidence`: 0..1; raise it when the baseline and new runs both
-  contain the same set of hot kernels (apples-to-apples); lower it
-  when kernels appeared or disappeared.
+- `narrative`: one or two short English sentences for the user. This is
+  the field you own.
+
+`wall_delta_pct`, `kernel_deltas`, `verdict`, and `confidence` are
+measurements. The runtime computes all four from the tool output and
+returns them unchanged, so anything you emit under them is discarded —
+do not spend tokens there. The rules below are given so your narrative
+agrees with the verdict the user is shown, not so you can set it.
 
 The MCP wrapper flattens `kernel_deltas` back to top-level
 `regressions` / `improvements` keys for callers (`perfxpert.api.
@@ -62,8 +60,8 @@ the regressed kernels and hand control back to Recommendation.
 
 ## Verdict rules
 
-Emit `verdict` deterministically from the raw tool output — LLM tone
-never overrides the threshold:
+The runtime applies these to the raw tool output. They are here so your
+narrative matches the verdict; tone never moves a threshold:
 
 - Any entry in `trace_diff.diff_runs → primary_regressions` →
   `verdict = "regressed"`.
@@ -73,9 +71,8 @@ never overrides the threshold:
   percent) → `verdict = "improved"`.
 - Otherwise → `verdict = "neutral"`.
 
-`confidence` follows from apples-to-apples kernel coverage: raise it
-(→ 0.9) when baseline and new share the same hot-kernel set; lower
-it (→ 0.55) when kernels appeared or disappeared between runs.
+`confidence` describes how well the two runs support that verdict, so
+the runtime sets it. It is not a judgement about your own certainty.
 
 ## Deterministic procedure
 
@@ -90,8 +87,8 @@ it (→ 0.55) when kernels appeared or disappeared between runs.
    the new run, call `roofline.classify` and tag the regression with
    its current bottleneck class (`compute` / `memory` / `latency` /
    `mixed`). Fold the tag into the narrative (one short clause).
-4. Produce the verdict from the rules above — do not let LLM tone
-   override the threshold.
+4. Read the verdict off the rules above so your narrative agrees with
+   it. The runtime has already computed it.
 5. Write a narrative of **at most two sentences**. Structure:
    headline + optionally one "why" clause citing the biggest
    regression. Example:

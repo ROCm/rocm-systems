@@ -514,11 +514,17 @@ def test_resolve_model_uses_private_specific_model_env(monkeypatch):
 
 
 def test_sdk_invoke_builds_litellm_route_for_anthropic(monkeypatch):
+    # Needs the real extra: the routing this asserts is what litellm provides,
+    # and without it the framework raises before reaching the assertions.
+    pytest.importorskip(
+        "litellm", reason="LiteLLM routing needs the perfxpert[litellm] extra"
+    )
     captured = {}
 
     class _FakeSdkAgent:
-        def __init__(self, *, name, instructions, tools, model):
+        def __init__(self, *, name, instructions, tools, model, model_settings=None):
             captured["model"] = model
+            captured["model_settings"] = model_settings
 
     class _FakeRunResult:
         def __init__(self):
@@ -556,8 +562,9 @@ def test_sdk_invoke_private_provider_uses_custom_openai_base_url(monkeypatch):
     captured = {}
 
     class _FakeSdkAgent:
-        def __init__(self, *, name, instructions, tools, model):
+        def __init__(self, *, name, instructions, tools, model, model_settings=None):
             captured["model"] = model
+            captured["model_settings"] = model_settings
 
     class _FakeRunResult:
         def __init__(self):
@@ -634,8 +641,9 @@ def test_sdk_invoke_private_provider_accepts_compat_endpoint_env(monkeypatch):
     captured = {}
 
     class _FakeSdkAgent:
-        def __init__(self, *, name, instructions, tools, model):
+        def __init__(self, *, name, instructions, tools, model, model_settings=None):
             captured["model"] = model
+            captured["model_settings"] = model_settings
 
     class _FakeRunResult:
         def __init__(self):
