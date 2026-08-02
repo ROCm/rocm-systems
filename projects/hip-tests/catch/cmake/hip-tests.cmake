@@ -146,22 +146,6 @@ function(hip_gen_exe_target)
         ADD_TAGS_AS_LABELS
         PROPERTIES ${_DISCOVER_PROPERTIES} DISABLED TRUE
       )
-      # CatchAddTests.cmake returns early (without writing _tests.cmake) when
-      # the test binary has no tests matching the filter. For most binaries
-      # there are no [disabled] tests, so the second catch_discover_tests call
-      # above leaves the generated _include.cmake referencing a _tests.cmake
-      # that never gets created. Pre-seed an empty stub for any such missing
-      # file so that ctest's include() does not error at startup.
-      file(GLOB _ALL_INC "${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}-*_include.cmake")
-      foreach(_inc ${_ALL_INC})
-        string(REPLACE "_include.cmake" "_tests.cmake" _tests "${_inc}")
-        if(NOT EXISTS "${_tests}")
-          file(WRITE "${_tests}" "# no tests discovered for this spec\n")
-        endif()
-      endforeach()
-      unset(_ALL_INC)
-      unset(_inc)
-      unset(_tests)
     endif()
     file(GLOB CTEST_INC_FILES "${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}-*_include.cmake")
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CTEST_INCLUDE_FILES ${CTEST_INC_FILES})
