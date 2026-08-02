@@ -35,9 +35,17 @@
 // inline/constexpr helpers and the DDA_FABRIC_BUFFER_SIZE macro, no librccl
 // symbols, so the producer-coverage assertion runs in Release CI too.
 
-#include "common/DdaFabricFootprints.hpp" // shared footprint mirrors (dependency-free)
+#include "common/DdaFabricFootprints.hpp" // shared footprint mirrors
 #include "dda_init_detail.h" // ddaLLEpochCount, kDdaFabricLLArMaxBlocks, kDdaLLAgMaxBlocksPerPeer, DDA_FABRIC_MAXBLOCKS, DDA_FABRIC_BUFFER_SIZE
 #include "fabric_gpu_barrier.h" // meta::comms::kDdaMaxNranks
+
+// Real launcher constants, to pin the DdaFabricFootprints.hpp mirrors at compile
+// time. This TU builds under hipcc in the Release fixtures target, so including
+// the (device-code-bearing) kernel headers is fine, and the static_asserts below
+// run in Release CI -- a production stride/cap change fails this build.
+#include "algorithms/CollCommon_ll128.h"                       // meta::comms::{LLLine128,kDdaLL128DataElems}
+#include "algorithms/all_reduce/all_reduce_dda_ll.h"           // meta::comms::{kDdaLLArMaxBytes,LLPacket16}
+#include "algorithms/all_gather/all_gather_dda_fabric_ll128.h" // meta::comms::kDdaLL128AgMaxPerRankBytes
 
 #include "gtest/gtest.h"
 
@@ -47,6 +55,15 @@
 #include <vector>
 
 namespace RcclUnitTesting {
+
+// Compile-time tie between the footprint mirrors and the real launcher constants
+// (the per-tier caps for RS/A2A are additionally pinned at runtime by the
+// exact-boundary tests in DdaFabricScratchTests.cpp, which call the real predicates).
+static_assert(kLLPacketBytes == sizeof(meta::comms::LLPacket16), "LLPacket16 size mirror drift");
+static_assert(kLL128LineBytes == sizeof(meta::comms::LLLine128), "LLLine128 size mirror drift");
+static_assert(kLL128DataElems == static_cast<size_t>(meta::comms::kDdaLL128DataElems), "LL128 data-elems mirror drift");
+static_assert(kLLTierMaxBytes == meta::comms::kDdaLLArMaxBytes, "LL tier cap mirror drift");
+static_assert(kLL128TierMaxBytes == meta::comms::kDdaLL128AgMaxPerRankBytes, "LL128 tier cap mirror drift");
 
 namespace {
 
@@ -86,6 +103,7 @@ void applyLaunch(std::vector<uint32_t>& epoch, int total, int writeBackLen = kFu
     const int cells    = static_cast<int>(epoch.size());
     const int epochLen = (writeBackLen == kFullWriteBack) ? cells : writeBackLen;
     ASSERT_GT(total, 0);
+    ASSERT_GT(epochLen, 0);     // a zero write-back would make allCellsUniform vacuous
     ASSERT_LE(total, cells);    // read index flatBlockId < total stays in bounds
     ASSERT_LE(epochLen, cells); // write index stays in bounds
     std::vector<uint32_t> flag(total);
@@ -175,19 +193,24 @@ TEST(DdaFabricEpochStaticTest, EpochCount_CoversWidestCollective) {
             const long cells = static_cast<long>(ddaLLEpochCount(nRanks, arMaxBlocks));
             ASSERT_EQ(cells, std::max(nRanks * kDdaLLAgMaxBlocksPerPeer, arMaxBlocks))
                 << "nRanks=" << nRanks << " arMaxBlocks=" << arMaxBlocks;
-            // Must index the widest AllGather/AllToAll grid (nRanks*8) and the
-            // actual AR grid, which is capped at min(arMaxBlocks, kDdaFabricLLArMaxBlocks).
+            // Must index the widest AllGather/AllToAll grid (nRanks*8), the AR-LL
+            // grid (capped at kDdaFabricLLArMaxBlocks), and the RS-LL / LL128 grids
+            // which launch up to comm->ddaFabricMaxBlocks (== arMaxBlocks here).
             ASSERT_GE(cells, static_cast<long>(nRanks) * kDdaLLAgMaxBlocksPerPeer)
                 << "nRanks=" << nRanks << " arMaxBlocks=" << arMaxBlocks;
             ASSERT_GE(cells, std::min(arMaxBlocks, kDdaFabricLLArMaxBlocks))
+                << "nRanks=" << nRanks << " arMaxBlocks=" << arMaxBlocks;
+            ASSERT_GE(cells, arMaxBlocks) // RS-LL / AR-LL128 / RS-LL128 launch up to ddaFabricMaxBlocks
                 << "nRanks=" << nRanks << " arMaxBlocks=" << arMaxBlocks;
         }
     }
 }
 
-// The AllGather launcher has no runtime clamp; it relies on ddaLLAgBlocksPerPeer
-// capping per-peer blocks at kDdaLLAgMaxBlocksPerPeer. That cap must keep the
-// grid within the epoch array for every rank count and MAXBLOCKS setting.
+// The AllGather-LL launcher has no runtime clamp; it relies on
+// ddaLLAgBlocksPerPeer capping per-peer blocks at kDdaLLAgMaxBlocksPerPeer. (The
+// LL128 AG/A2A launchers instead clamp blocksPerPeer against epochLen at runtime,
+// since RCCL_DDA_LL128_AG_MAXBPP can raise their cap.) That compile-time cap must
+// keep the AG-LL grid within the epoch array for every rank count and MAXBLOCKS.
 TEST(DdaFabricEpochStaticTest, AllGatherGridAlwaysFitsEpochArray) {
     for (int arMaxBlocks : {1, kDdaFabricLLArMaxBlocks, DDA_FABRIC_MAXBLOCKS}) {
         for (int nRanks = 2; nRanks <= meta::comms::kDdaMaxNranks; ++nRanks) {
@@ -256,7 +279,7 @@ TEST_P(DdaFabricEpochTest, AllGatherSmallThenLarge_StaysConsistent) {
 // AR then AG: after an AllReduce, the shared array is still pairing-consistent for
 // a following AllGather (no AllGather is applied here -- the check is the pairing
 // a subsequent AG would derive).
-TEST_P(DdaFabricEpochTest, AllReduceThenAllGatherPairingHolds) {
+TEST_P(DdaFabricEpochTest, AllReduce_LeavesArrayAllGatherPairable) {
     const int nRanks = GetParam();
     std::vector<uint32_t> epoch(epochCells(nRanks), 0u);
     ASSERT_NO_FATAL_FAILURE(applyAllReduce(epoch, kDdaFabricLLArMaxBlocks)); // widest AR grid
@@ -267,7 +290,7 @@ TEST_P(DdaFabricEpochTest, AllReduceThenAllGatherPairingHolds) {
 // RS then AG. ReduceScatter's real cap is DDA_FABRIC_MAXBLOCKS (clamped to the
 // cell count), not the AR-only cap; also exercise a block count that does not
 // divide the cell count (the write-back stride must still tile every cell).
-TEST_P(DdaFabricEpochTest, ReduceScatterThenAllGatherPairingHolds) {
+TEST_P(DdaFabricEpochTest, ReduceScatter_LeavesArrayAllGatherPairable) {
     const int nRanks = GetParam();
     const int cells  = static_cast<int>(epochCells(nRanks));
 
@@ -283,7 +306,7 @@ TEST_P(DdaFabricEpochTest, ReduceScatterThenAllGatherPairingHolds) {
     ASSERT_EQ(agPairingMismatches(epoch, nRanks, kLargeBpp), 0);
 }
 
-TEST_P(DdaFabricEpochTest, AllToAllThenAllGatherPairingHolds) {
+TEST_P(DdaFabricEpochTest, AllToAll_LeavesArrayAllGatherPairable) {
     const int nRanks = GetParam();
     std::vector<uint32_t> epoch(epochCells(nRanks), 0u);
     ASSERT_NO_FATAL_FAILURE(applyAllToAll(epoch, nRanks, kLargeBpp)); // A2A is peer-swapped like AG

@@ -9,7 +9,7 @@
 // every DDA fabric tier that is nominally enabled, and each tier's eligibility
 // predicate must fail closed (return false, i.e. fall back) when it is not.
 //
-// Whatever sizes the scratch buffer is the producer; these tests pin the
+// The code that sizes the scratch buffer is the producer; these tests pin the
 // consumer side, which lives in the eligibility predicates:
 //   ncclAllReduceDdaFabricLL/LL128Eligible, and the AllGather/AllToAll/
 //   ReduceScatter counterparts (declared in dda_*.h). The sibling
@@ -47,9 +47,10 @@ namespace RcclUnitTesting {
 namespace {
 
 // Footprint constants/helpers (kLLPacketBytes, kLL128LineBytes, ddaLLFixedFootprint,
-// ddaLL128FixedFootprint, ddaLL128ArFootprintForBytes) are shared via
-// DdaFabricTestHelpers.hpp so this file and DdaFabricEpochTests.cpp mirror the
-// launcher constants in one place.
+// ddaLL128FixedFootprint, ddaLL128ArFootprintForBytes) come from
+// common/DdaFabricFootprints.hpp, so this file and DdaFabricEpochTests.cpp mirror
+// the launcher constants in one place (pinned to the real constants by
+// static_assert in DdaFabricEpochTests.cpp).
 
 // 4 * float32 = 16 B clears every non-scratch gate: %16 (AG/A2A), %8 (AR/RS),
 // all MaxBytes caps, op == ncclSum. So the scratch clause alone decides.
@@ -250,7 +251,7 @@ TEST_F(DdaFabricScratchTest, AllGather_LL128_FootprintScalesWithRanks) {
 
 TEST_F(DdaFabricScratchTest, AllReduce_LL128_FootprintGrowsWithMessage) {
     const int    nRanks     = mockComm_.comm.nRanks;
-    const size_t smallBytes = (size_t)kValidElemCount * sizeof(float); // 16 B
+    const size_t smallBytes = static_cast<size_t>(kValidElemCount) * sizeof(float); // 16 B
     const size_t bigCount   = 65536 / sizeof(float);                   // 64 KiB message
     const size_t bigBytes   = bigCount * sizeof(float);
 
@@ -274,7 +275,7 @@ TEST_F(DdaFabricScratchTest, AllReduce_LL128_EffectiveCapShrinksWithRanks) {
     // A message at the advertised cap (kDdaLL128ArMaxBytes = 1 GiB) is eligible
     // against the real buffer at a low rank count but not at kDdaMaxNranks,
     // because AR-LL128 scratch scales with nRanks * message.
-    const size_t oneGiB = (size_t)1 << 30;
+    const size_t oneGiB = static_cast<size_t>(1) << 30;
     const size_t count  = oneGiB / sizeof(float);
     mockComm_.comm.ddaScratchBytes = DDA_FABRIC_BUFFER_SIZE;
 
