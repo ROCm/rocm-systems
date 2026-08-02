@@ -237,6 +237,12 @@ class Instruction(InstBase):
         name: Name of the instruction.
         opcode: Opcode of the instruction.
         operands: The instruction's operands.
+        available_encodings: All encoding names listed for this instruction in
+            the machine-readable ISA, including alternate DPP, SDWA, and
+            literal forms that are not emitted as independent instruction
+            classes. ``None`` means encoding provenance is unknown; modifier
+            generation rejects that state, so synthetic VOP instructions must
+            provide an explicit set.
     """
 
     def __init__(
@@ -246,11 +252,13 @@ class Instruction(InstBase):
         opcode: int,
         operands: list[Operand],
         is_implied_literal_enc: bool = False,
+        available_encodings: frozenset[str] | None = None,
     ) -> None:
         super().__init__(enc_name, is_implied_literal_enc)
         self.name = name
         self.opcode = opcode
         self.operands = operands
+        self.available_encodings = available_encodings
 
     @cached_property
     def fmt_name(self) -> str:

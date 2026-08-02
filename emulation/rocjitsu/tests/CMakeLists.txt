@@ -374,6 +374,7 @@ add_executable(
     l2_cache_test.cpp
     sparse_memory_test.cpp
     simdojo_sim_test.cpp
+    partitioning_test.cpp
     simulated_kfd_test.cpp
     decode_smoke_test.cpp
     buffer_operand_test.cpp
@@ -520,8 +521,29 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
-# ./rocjitsu_tests --gtest_filter='*Benchmark*').
-rj_add_gtest_tests(rocjitsu_tests TEST_FILTER -*Benchmark*)
+# ./rocjitsu_tests --gtest_filter='*Benchmark*'). The request-exit stress test
+# is registered separately so CTest can bound a deadlocked child process.
+rj_add_gtest_tests(
+    rocjitsu_tests
+    TEST_FILTER "-*Benchmark*:*RequestExitWakesAllPartitions*"
+)
+
+# RequestExitWakesAllPartitions may require several runs to show regression
+# (deadlock). Run 30 times with a 10 second timeout to boost chances of seeing
+# the failures. Usually fails within the first 5 times and 30 passing tests
+# takes about 2.5s in CI.
+rj_add_test(
+    NAME "TerminationTest.RequestExitWakesAllPartitions"
+    COMMAND
+        $<TARGET_FILE:rocjitsu_tests>
+        "--gtest_filter=TerminationTest.RequestExitWakesAllPartitions"
+        "--gtest_repeat=30"
+    TIMEOUT 10
+    INSTALL_COMMAND
+        "bin/rocjitsu_tests"
+        "--gtest_filter=TerminationTest.RequestExitWakesAllPartitions"
+        "--gtest_repeat=30"
+)
 
 # Exercise the Linux-only model ISA contract in a decoder-only final link.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -577,7 +599,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         NAME Gfx1250B0ToA0Library.SymbolBoundary
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
-            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_gfx1250_b0_to_a0> -P
+            -DMODEL_BINARY=$<TARGET_FILE:hsa_hotswap_rocjitsu> -P
             ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
     )
 
@@ -757,7 +779,10 @@ target_include_directories(
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
 )
-target_link_libraries(rj_dbt_translate_smoke_test PRIVATE GTest::gtest)
+target_link_libraries(
+    rj_dbt_translate_smoke_test
+    PRIVATE rocjitsu_translate_cli GTest::gtest
+)
 rj_configure_target(rj_dbt_translate_smoke_test TEST)
 add_dependencies(rj_dbt_translate_smoke_test rj_dbt_translate)
 if(RJ_INSTALL_TESTS)
@@ -1043,7 +1068,6 @@ target_include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-        ${CMAKE_SOURCE_DIR}/lib/util/include
         ${CMAKE_BINARY_DIR}/include
         ${GENERATED_DIR}
 )
@@ -1064,6 +1088,55 @@ target_link_libraries(
 )
 rj_configure_target(hsa_hooks_unit_test TEST)
 gtest_discover_tests(hsa_hooks_unit_test)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(
+        hsa_hotswap_rocjitsu_unit_test
+        dbt/hsa_hotswap_rocjitsu_unit_test.cpp
+    )
+    target_include_directories(
+        hsa_hotswap_rocjitsu_unit_test
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+    )
+    target_include_directories(
+        hsa_hotswap_rocjitsu_unit_test
+        SYSTEM
+        PRIVATE ${HSA_INCLUDE_DIR}
+    )
+    target_link_libraries(
+        hsa_hotswap_rocjitsu_unit_test
+        PRIVATE hsa_hotswap_rocjitsu_testable GTest::gtest_main
+    )
+    if(HAS_GFX1250_DBT_FIXTURE)
+        target_compile_definitions(
+            hsa_hotswap_rocjitsu_unit_test
+            PRIVATE
+                GFX1250_B0_TO_A0_FIXTURE="${KERNEL_OUTPUT_DIR}/relocation_function_table_dispatch_gfx1250.hsaco"
+        )
+        add_dependencies(
+            hsa_hotswap_rocjitsu_unit_test
+            probe_relocation_function_table_dispatch_gfx1250
+        )
+    endif()
+    rj_configure_target(hsa_hotswap_rocjitsu_unit_test TEST)
+    gtest_discover_tests(hsa_hotswap_rocjitsu_unit_test)
+endif()
+
+# A separate loadable module is the only way to observe the force-scalar gate's
+# per-module scope: the gate is an inline variable with hidden visibility, so
+# nothing linked into the test executable can see the boundary. The test dlopens
+# this and compares what it reports against its own copy.
+add_library(util_force_scalar_probe MODULE util_force_scalar_probe.cpp)
+target_link_libraries(util_force_scalar_probe PRIVATE util)
+rj_configure_target(util_force_scalar_probe TEST)
+add_dependencies(rocjitsu_tests util_force_scalar_probe)
+target_compile_definitions(
+    rocjitsu_tests
+    PRIVATE
+        RJ_FORCE_SCALAR_PROBE_MODULE="$<TARGET_FILE:util_force_scalar_probe>"
+)
 
 # --- Interposer loader initialization regression tests ---
 
@@ -1442,7 +1515,6 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${CMAKE_SOURCE_DIR}/lib/util/include
                 ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
@@ -1474,13 +1546,13 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${CMAKE_SOURCE_DIR}/lib/util/include
                 ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
             hsa_hooks_test
             PRIVATE
                 ${RJ_OBJECT_LIBS}
+                util
                 ${HSA_RUNTIME64}
                 GTest::gtest
                 GTest::gtest_main
@@ -1562,7 +1634,6 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${CMAKE_SOURCE_DIR}/lib/util/include
                 ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
@@ -1712,13 +1783,13 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${CMAKE_SOURCE_DIR}/lib/util/include
                 ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
             hsa_dbi_nop_asm_test
             PRIVATE
                 ${RJ_OBJECT_LIBS}
+                util
                 ${HSA_RUNTIME64}
                 GTest::gtest
                 GTest::gtest_main
@@ -1790,13 +1861,13 @@ if(HSA_RUNTIME64)
                 PRIVATE
                     ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                     ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                    ${CMAKE_SOURCE_DIR}/lib/util/include
                     ${RJ_HSA_INCLUDE_DIR}
             )
             target_link_libraries(
                 hsa_dbi_nop_probe_test
                 PRIVATE
                     ${RJ_OBJECT_LIBS}
+                    util
                     ${HSA_RUNTIME64}
                     GTest::gtest
                     GTest::gtest_main
@@ -2419,7 +2490,8 @@ if(RJ_ENABLE_HIP_TESTS AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
         COMMAND
             ${AMDCXX} -x hip --offload-arch=gfx950 --rocm-path=${ROCM_PATH}
             -std=c++20 ${RJ_HIP_SANITIZER_FLAGS}
-            -I${CMAKE_SOURCE_DIR}/lib/util/include -o ${CVT_NARROW_BIN}
+            "-I$<JOIN:$<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>,;-I>"
+            -o ${CVT_NARROW_BIN}
             ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
             ${RJ_HIP_SANITIZER_LINK_FLAGS}
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp

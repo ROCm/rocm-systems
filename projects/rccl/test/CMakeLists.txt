@@ -195,6 +195,9 @@ if(BUILD_TESTS)
     SendRecvTests.cpp
     StandaloneTests.cpp
     DdaIpcTests.cpp
+    NetPluginReloadTests.cpp
+    plugin/net_reload_plugin.cpp
+    CpuAffinityTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
     common/main.cpp
@@ -227,6 +230,17 @@ if(BUILD_TESTS)
 
   # Create rccl-UnitTests binary
   add_executable(rccl-UnitTests ${TEST_SOURCE_FILES})
+
+  # AICOMRCCL-1534: net_reload_plugin.cpp is compiled into rccl-UnitTests and loaded
+  # in-process via NCCL_NET_PLUGIN=STATIC_PLUGIN (dlopen(NULL)), so no external .so.
+  # Scope its headers to the file so the generic example headers don't shadow others.
+  set_source_files_properties(plugin/net_reload_plugin.cpp PROPERTIES
+    INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/net/example/nccl)
+
+  # dlsym(dlopen(NULL), ...) only finds symbols present in the dynamic symbol table;
+  # export just the one plugin symbol (narrow, unlike a broad -rdynamic).
+  target_link_options(rccl-UnitTests PRIVATE
+    "LINKER:--export-dynamic-symbol=ncclNetPlugin_v10")
 
   # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
   # (inline, static, constexpr, template functions) and can run in both Release and Debug.
@@ -414,6 +428,82 @@ if(BUILD_TESTS)
     endif()
   endif()
 
+  # rccl-UnitTestsAmdSmi: tests for the amdsmi_wrap layer.
+  #
+  # AmdSmiFabricTests.cpp covers the fabric predicates and struct layout pinned in
+  # amdsmi_wrap.h. Those are header-inline, so they need no librccl.so symbols and
+  # run in both Release and Debug.
+  #
+  # AmdSmiWrapTests.cpp drives the amd_smi_* API itself, so it needs symbols that
+  # src/CMakeLists.txt only exports under -fvisibility=default in Debug. Adding it
+  # in Release would fail to link, so it joins the target only where they exist.
+  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
+    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsAmdSmi)
+
+    # main_altrsmi.cpp is a plain InitGoogleTest/RUN_ALL_TESTS entry point, reused here.
+    set(TEST_AMDSMI_SOURCE_FILES
+      AmdSmiFabricTests.cpp
+      common/main_altrsmi.cpp
+    )
+
+    if(CMAKE_BUILD_TYPE MATCHES "Debug")
+      list(APPEND TEST_AMDSMI_SOURCE_FILES
+        AmdSmiWrapTests.cpp
+        common/ProcessIsolatedTestRunner.cpp
+      )
+
+      # Loaded only by isolated lifecycle tests, never by the normal test process.
+      add_library(rccl-AmdSmiLifecycleStub SHARED AmdSmiLifecycleStub.cpp)
+      set_target_properties(rccl-AmdSmiLifecycleStub PROPERTIES
+        OUTPUT_NAME "amd_smi"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/amdsmi_lifecycle_stub"
+      )
+
+      # Match the versioned name used by amdsmi_wrap when headers are present.
+      # Older ROCm configurations may not define SMI_INCLUDE_DIR, so also check
+      # ROCM_PATH; without either header amdsmi_wrap uses the unversioned name.
+      if(EXISTS "${SMI_INCLUDE_DIR}/amd_smi/amdsmi.h")
+        set(AMDSMI_TEST_HEADER "${SMI_INCLUDE_DIR}/amd_smi/amdsmi.h")
+      elseif(EXISTS "${ROCM_PATH}/include/amd_smi/amdsmi.h")
+        set(AMDSMI_TEST_HEADER "${ROCM_PATH}/include/amd_smi/amdsmi.h")
+      endif()
+      if(AMDSMI_TEST_HEADER)
+        file(STRINGS "${AMDSMI_TEST_HEADER}" AMDSMI_VERSION_MAJOR_LINE
+          REGEX "^#define AMDSMI_LIB_VERSION_MAJOR [0-9]+"
+          LIMIT_COUNT 1
+        )
+        string(REGEX REPLACE ".* ([0-9]+)$" "\\1"
+          AMDSMI_TEST_SOVERSION "${AMDSMI_VERSION_MAJOR_LINE}"
+        )
+        set_target_properties(rccl-AmdSmiLifecycleStub PROPERTIES
+          SOVERSION "${AMDSMI_TEST_SOVERSION}"
+        )
+      endif()
+    endif()
+
+    add_executable(rccl-UnitTestsAmdSmi ${TEST_AMDSMI_SOURCE_FILES})
+
+    if(CMAKE_BUILD_TYPE MATCHES "Debug")
+      add_dependencies(rccl-UnitTestsAmdSmi rccl-AmdSmiLifecycleStub)
+      target_compile_definitions(rccl-UnitTestsAmdSmi PRIVATE
+        AMDSMI_TEST_STUB_DIR="$<TARGET_FILE_DIR:rccl-AmdSmiLifecycleStub>"
+        AMDSMI_TEST_STUB_SONAME="$<TARGET_SONAME_FILE_NAME:rccl-AmdSmiLifecycleStub>"
+      )
+    endif()
+
+    # amdsmi_wrap.h needs both halves of this pairing: the include path so its
+    # __has_include finds amdsmi, and AMDSMI_FABRIC_DIRECT, which is PRIVATE to the
+    # rccl target and so does not reach test TUs. With the headers reachable but the
+    # define absent, the header's fabric compat block compiles on top of the real
+    # declarations and every fabric type collides.
+    if(DEFINED SMI_INCLUDE_DIR)
+      target_include_directories(rccl-UnitTestsAmdSmi PRIVATE ${SMI_INCLUDE_DIR})
+    endif()
+    if(AMDSMI_FABRIC_API)
+      target_compile_definitions(rccl-UnitTestsAmdSmi PRIVATE AMDSMI_FABRIC_DIRECT)
+    endif()
+  endif()
+
   # Create separate MPI test binary if MPI tests are enabled
   if(ENABLE_MPI_TESTS)
     set(MPI_TEST_SOURCE_FILES
@@ -574,6 +664,23 @@ if(BUILD_TESTS)
             )
         else()
             message(WARNING "Skipping test categories for rccl-UnitTestsFixtures: missing ${_rccl_test_categories_fixtures_yaml}")
+        endif()
+
+        # Registered outside the Debug-only block below: this target's fabric predicate
+        # and layout cases need no librccl symbols and so run in Release too. The
+        # AmdSmiWrap* patterns in the yaml match nothing in a Release binary, where
+        # that file is left out for lack of exported amd_smi_* symbols.
+        set(_rccl_test_categories_amdsmi_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_amdsmi.yaml")
+        if(EXISTS "${_rccl_test_categories_amdsmi_yaml}")
+            message(STATUS "Applying test categories for rccl-UnitTestsAmdSmi")
+            apply_test_category_labels(
+                rccl-UnitTestsAmdSmi
+                "${_rccl_test_categories_amdsmi_yaml}"
+                "${PROJECT_BINARY_DIR}"
+                "${INSTALL_TEST_FILE}"
+            )
+        else()
+            message(WARNING "Skipping test categories for rccl-UnitTestsAmdSmi: missing ${_rccl_test_categories_amdsmi_yaml}")
         endif()
     endif()
 
