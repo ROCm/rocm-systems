@@ -171,6 +171,18 @@ static bool hasFullDirectP2p(int gpuCount)
     return true;
 }
 
+// ncclFindWindow relies on device-side symmetric window resolution that is not
+// yet functional on gfx950 (tracked by ROCM-27777). Skip there so CI reports a
+// skip instead of a spurious failure until the platform enablement lands.
+static bool isFindWindowUnsupportedArch()
+{
+    hipDeviceProp_t props{};
+    if(hipGetDeviceProperties(&props, 0) != hipSuccess)
+        return false;
+
+    return std::string(props.gcnArchName).find("gfx950") != std::string::npos;
+}
+
 static void initializeCommunicators(DeviceApiResources& resources)
 {
     std::vector<ncclComm_t> comms(resources.ranks.size(), nullptr);
@@ -356,6 +368,9 @@ static void runFindWindowRemoteReadTest()
 
     if(!hasFullDirectP2p(kPositiveRanks))
         GTEST_SKIP() << "This test requires direct P2P access between the first 2 GPUs.";
+
+    if(isFindWindowUnsupportedArch())
+        GTEST_SKIP() << "ncclFindWindow is not yet functional on gfx950 (ROCM-27777).";
 
     DeviceApiResources resources(kPositiveRanks);
     initializeCommunicators(resources);
