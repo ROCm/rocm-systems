@@ -33,6 +33,7 @@ from perfxpert.agents import (
     root,
     schemas,
 )
+from perfxpert.agents.creativity import CreativityTier, resolve_tier
 from perfxpert.agents.framework import RunPolicy, active_policy
 from perfxpert.runtime import ensure_not_recursive
 
@@ -120,9 +121,23 @@ class AnalysisSession:
     providers: tuple[str, ...] = ()
     api_key: Optional[str] = None
     policy: Optional[RunPolicy] = None
+    creativity: CreativityTier = CreativityTier.STRICT
 
     def _provider_name(self) -> str:
         return self.provider or DEFAULT_PROVIDER
+
+    def tier_for(self, agent) -> CreativityTier:
+        """Effective creativity tier for one agent in this session.
+
+        The session ceiling, the air-gap flag and the agent's own capability
+        must all permit exploration; any one of them holds the result at
+        strict.
+        """
+        return resolve_tier(
+            self.creativity,
+            airgap=self.airgap,
+            capability=agent.capability,
+        )
 
     def _run_live(self, fn: Callable[[str], object]) -> object:
         from perfxpert.providers._exceptions import (
@@ -260,6 +275,21 @@ def _airgap_from_env() -> bool:
     return os.environ.get("PERFXPERT_AIRGAP", "0") == "1"
 
 
+def _configured_creativity() -> CreativityTier:
+    """Read the session ceiling from configuration.
+
+    Deliberately not a parameter of ``build_session``: the ceiling is a
+    deployment decision, and an argument would give a calling model a handle
+    to raise its own limit.
+    """
+    try:
+        from perfxpert.config import load_config
+
+        return CreativityTier(load_config().agent_creativity)
+    except Exception:  # pragma: no cover - unreadable config falls back safely
+        return CreativityTier.STRICT
+
+
 def _max_session_turns() -> int:
     """Session-wide LLM turn cap.
 
@@ -326,6 +356,7 @@ def build_session(
         airgap=is_airgap,
         api_key=None if is_airgap else api_key,
         policy=None if is_airgap else RunPolicy(max_session_turns=_max_session_turns()),
+        creativity=_configured_creativity(),
     )
 
 

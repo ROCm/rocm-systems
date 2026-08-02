@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 from perfxpert.agents import schemas
 from perfxpert.agents._predict_attach import attach_predictions_to_techniques
 from perfxpert.agents.compute_specialist import _rank_catalog_deterministic
-from perfxpert.agents.framework import Agent, ToolBinding, run_agent
+from perfxpert.agents.framework import AgentCapability, Agent, ToolBinding, run_agent
 from perfxpert.tools import arch, dependency_graph, interconnect, rccl_analysis
 
 
@@ -67,6 +67,7 @@ def build_latency_specialist() -> Agent:
         tools=tools,
         allowed_handoffs=[],
         token_budget=3072,
+        capability=AgentCapability.ADDITIVE_EXPLORATION,
     )
 
 

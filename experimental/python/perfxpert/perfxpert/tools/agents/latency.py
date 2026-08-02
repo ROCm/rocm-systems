@@ -44,7 +44,13 @@ def agent_latency_specialist(
 
     Returns:
         A dict with :class:`LatencySpecialistOutput` keys:
-        ``{"techniques", "confidence", "citations"}``.
+        ``{"techniques", "confidence", "citations",
+        "exploratory_proposals"}``.
+
+        ``exploratory_proposals`` is a separate lane of unverified ideas,
+        never ranked against the vetted ``techniques`` and always carrying
+        ``status: "exploratory"``. It is empty unless the deployment sets
+        ``agent_creativity: exploratory``.
     """
     from perfxpert.agents import runtime, schemas
 
@@ -65,6 +71,9 @@ def agent_latency_specialist(
         "techniques": list(getattr(output, "techniques", []) or []),
         "confidence": getattr(output, "confidence", 0.0),
         "citations": list(getattr(output, "citations", []) or []),
+        "exploratory_proposals": list(
+            getattr(output, "exploratory_proposals", []) or []
+        ),
     }
 
 

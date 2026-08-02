@@ -29,6 +29,7 @@ import logging
 import os
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Type
@@ -99,6 +100,20 @@ class HandoffPolicyViolation(RuntimeError):
 
 class SessionTurnBudgetExceeded(RuntimeError):
     """Raised when a session exhausts MAX_SESSION_LLM_TURNS."""
+
+
+# -- Capabilities ---------------------------------------------------------
+
+
+class AgentCapability(str, Enum):
+    """What an agent may do with a model-generated open-set channel.
+
+    Lives here rather than in ``creativity`` so ``Agent`` can validate it
+    without the framework depending on the creativity module.
+    """
+
+    CATALOG_ONLY = "catalog_only"
+    ADDITIVE_EXPLORATION = "additive_exploration"
 
 
 # -- Run policy -----------------------------------------------------------
@@ -195,6 +210,7 @@ class Agent:
     - layer in (0, 1, 2)
     - len(tools) <= 5
     - fence line count <= 400
+    - additive_exploration only on Layer 2
     """
 
     name: str
@@ -205,6 +221,9 @@ class Agent:
     tools: Tuple[ToolBinding, ...] = field(default_factory=tuple)
     allowed_handoffs: Tuple[str, ...] = field(default_factory=tuple)
     token_budget: int = 4096
+    # Default is the restrictive value: an agent gains an open-set channel
+    # only by asking for one.
+    capability: AgentCapability = AgentCapability.CATALOG_ONLY
     fence_text: str = field(init=False, default="")
     fence_line_count: int = field(init=False, default=0)
 
@@ -213,6 +232,7 @@ class Agent:
         allowed_handoffs = tuple(self.allowed_handoffs)
         object.__setattr__(self, "tools", tools)
         object.__setattr__(self, "allowed_handoffs", allowed_handoffs)
+        object.__setattr__(self, "capability", AgentCapability(self.capability))
 
         if self.layer not in (0, 1, 2):
             raise AgentConstructionError(
@@ -222,6 +242,13 @@ class Agent:
 
         if len(tools) > 5:
             raise AgentConstructionError(f"Agent {self.name}: {len(tools)} tools declared (cap is 5)")
+
+        if self.capability is AgentCapability.ADDITIVE_EXPLORATION and self.layer != 2:
+            raise AgentConstructionError(
+                f"Agent {self.name}: additive_exploration requires layer=2, got "
+                f"layer={self.layer} — Root and the decision-makers route and "
+                "classify, so an open-set channel there would steer the run"
+            )
 
         if self.fence_path is not None:
             text = _compose_fence_text(self.fence_path)

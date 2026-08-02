@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from perfxpert.agents import schemas
-from perfxpert.agents.framework import Agent, ToolBinding, run_agent
+from perfxpert.agents.framework import AgentCapability, Agent, ToolBinding, run_agent
 from perfxpert.tools import regression, roofline, trace_diff
 
 
@@ -46,6 +46,7 @@ def build_diff_specialist() -> Agent:
         tools=tools,
         allowed_handoffs=[],
         token_budget=3072,
+        capability=AgentCapability.ADDITIVE_EXPLORATION,
     )
 
 

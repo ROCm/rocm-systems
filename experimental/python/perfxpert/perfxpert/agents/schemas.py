@@ -26,6 +26,98 @@ class _FrozenModel(BaseModel):
 BottleneckType = Literal["compute", "memory_transfer", "latency", "api_overhead", "mixed", "data_insufficient"]
 
 
+# -- Exploratory proposals (RFC 0001) --------------------------------------
+#
+# Leaf models for the exploratory lane. These are nested payloads, not agent
+# Input/Output schemas, so the ≤5/≤10 field caps do not apply to them.
+#
+# The split matters: a model fills in ExploratoryProposalDraft, and the
+# runtime builds the ExploratoryProposal. Every field the runtime owns —
+# proposal_id, status, specialist, provenance — lives only on the final
+# model, so a model cannot assign a proposal its identity or its origin.
+
+
+class EvidenceItem(_FrozenModel):
+    """One reference supporting a proposal.
+
+    ``ref`` is checked against a manifest of what actually ran, so a model
+    cannot cite a tool it never called.
+    """
+
+    kind: Literal["tool", "kernel", "catalog"]
+    ref: str = Field(..., min_length=1, max_length=200)
+    observation: str = Field(..., min_length=1, max_length=500)
+
+
+class ExpectedEffect(_FrozenModel):
+    metric: str = Field(..., min_length=1, max_length=100)
+    direction: Literal["increase", "decrease", "unchanged"]
+
+
+class SuccessCriterion(_FrozenModel):
+    metric: str = Field(..., min_length=1, max_length=100)
+    op: Literal["<", "<=", ">", ">=", "=="]
+    baseline: Literal["measured", "target"] = "measured"
+
+
+class VerificationPlan(_FrozenModel):
+    """How a human would confirm or refute the proposal."""
+
+    metrics: List[str] = Field(default_factory=list, max_length=10)
+    success_criteria: List[SuccessCriterion] = Field(default_factory=list, max_length=10)
+    # A proposal is unproven by construction, so it cannot opt out of the
+    # gates that would catch it being wrong.
+    requires_full_gate_cascade: Literal[True] = True
+
+
+class ProposalProvenance(_FrozenModel):
+    """Runtime-stamped origin. Never model-supplied."""
+
+    provider: str = ""
+    model: str = ""
+    trace_fingerprint: str = ""
+    fence_sha256: str = ""
+    catalog_sha256: str = ""
+
+
+class ExploratoryProposalDraft(_FrozenModel):
+    """What a model may emit. Deliberately excludes runtime-owned fields."""
+
+    title: str = Field(..., min_length=1, max_length=120)
+    hypothesis: str = Field(..., min_length=1, max_length=1000)
+    mechanism: str = Field(..., min_length=1, max_length=1000)
+    target_kernel: Optional[str] = Field(default=None, max_length=500)
+    evidence: List[EvidenceItem] = Field(default_factory=list, max_length=10)
+    expected_effects: List[ExpectedEffect] = Field(default_factory=list, max_length=10)
+    verification: VerificationPlan = Field(default_factory=VerificationPlan)
+    assumptions: List[str] = Field(default_factory=list, max_length=10)
+    failure_modes: List[str] = Field(default_factory=list, max_length=10)
+    confidence: float = Field(default=0.3, ge=0.0, le=0.5)
+
+
+class ExploratoryProposal(_FrozenModel):
+    """A validated proposal. Constructed by the runtime, never by a model.
+
+    ``status`` is a constant so the lane can never be relabelled as vetted
+    advice while flowing through a dict-shaped boundary.
+    """
+
+    proposal_id: str = Field(..., min_length=1, max_length=64)
+    status: Literal["exploratory"] = "exploratory"
+    specialist: Literal["compute", "memory", "latency", "diff"]
+    title: str = Field(..., min_length=1, max_length=120)
+    target_kernel: Optional[str] = Field(default=None, max_length=500)
+    hypothesis: str = Field(..., min_length=1, max_length=1000)
+    mechanism: str = Field(..., min_length=1, max_length=1000)
+    evidence: List[EvidenceItem] = Field(default_factory=list, max_length=10)
+    expected_effects: List[ExpectedEffect] = Field(default_factory=list, max_length=10)
+    verification: VerificationPlan = Field(default_factory=VerificationPlan)
+    assumptions: List[str] = Field(default_factory=list, max_length=10)
+    failure_modes: List[str] = Field(default_factory=list, max_length=10)
+    confidence: float = Field(..., ge=0.0, le=0.5)
+    provenance: ProposalProvenance = Field(default_factory=ProposalProvenance)
+
+
 # -- Gate verdict (consumed by Correctness from runtime/gate_cascade.py) ----
 
 
@@ -114,6 +206,10 @@ class RecommendationOutput(_FrozenModel):
     recommendations: List[Dict[str, Any]]  # flat, ranked, deduplicated
     specialist_used: Literal["compute", "memory", "latency", "none"]
     plateau_detected: bool = False
+    # Carried separately from `recommendations` on purpose: proposals are
+    # unverified, so they are never ranked against vetted advice, never
+    # deduplicated against it, and never fed to impact prediction.
+    exploratory_proposals: List[ExploratoryProposal] = Field(default_factory=list)
 
 
 # -- Correctness (Layer 1) -------------------------------------------------
@@ -165,6 +261,7 @@ class ComputeSpecialistOutput(_FrozenModel):
     techniques: List[Dict[str, Any]]  # [{name, rationale, expected_impact, effort, risk}]
     confidence: float = Field(..., ge=0.0, le=1.0)
     citations: List[str] = Field(default_factory=list)
+    exploratory_proposals: List[ExploratoryProposal] = Field(default_factory=list)
 
 
 class MemorySpecialistInput(_FrozenModel):
@@ -178,6 +275,7 @@ class MemorySpecialistOutput(_FrozenModel):
     techniques: List[Dict[str, Any]]
     confidence: float = Field(..., ge=0.0, le=1.0)
     citations: List[str] = Field(default_factory=list)
+    exploratory_proposals: List[ExploratoryProposal] = Field(default_factory=list)
 
 
 class LatencySpecialistInput(_FrozenModel):
@@ -191,6 +289,7 @@ class LatencySpecialistOutput(_FrozenModel):
     techniques: List[Dict[str, Any]]
     confidence: float = Field(..., ge=0.0, le=1.0)
     citations: List[str] = Field(default_factory=list)
+    exploratory_proposals: List[ExploratoryProposal] = Field(default_factory=list)
 
 
 # -- Diff specialist (Layer 2) --------------------------------------------
@@ -213,11 +312,35 @@ class DiffSpecialistOutput(_FrozenModel):
     wall_delta_pct: float
     kernel_deltas: Dict[str, List[Dict[str, Any]]] = Field(
         default_factory=lambda: {"regressions": [], "improvements": []},
-        description="Per-kernel deltas, keyed by 'regressions' / 'improvements'.",
+        description=(
+            "Per-kernel deltas keyed by 'regressions' / 'improvements', plus an "
+            "'exploratory_proposals' key. Diff is at the 5-field output cap, so "
+            "the exploratory lane nests here rather than adding a sixth field."
+        ),
     )
     verdict: Literal["improved", "regressed", "neutral"]
     narrative: str
     confidence: float = Field(..., ge=0.0, le=1.0)
+
+    _KERNEL_DELTA_KEYS = frozenset({"regressions", "improvements", "exploratory_proposals"})
+
+    @model_validator(mode="after")
+    def _kernel_deltas_shape(self) -> "DiffSpecialistOutput":
+        """Constrain the nested dict so it cannot become an untyped grab bag.
+
+        Without this, nesting the lane inside a Dict[str, ...] would trade the
+        field cap for an unvalidated channel — exactly what the exploratory
+        lane is supposed to avoid.
+        """
+        unknown = set(self.kernel_deltas) - self._KERNEL_DELTA_KEYS
+        if unknown:
+            raise ValueError(
+                f"DiffSpecialistOutput.kernel_deltas has unknown key(s) {sorted(unknown)}; "
+                f"allowed: {sorted(self._KERNEL_DELTA_KEYS)}"
+            )
+        for item in self.kernel_deltas.get("exploratory_proposals", []):
+            ExploratoryProposal(**item)
+        return self
 
 
 # -- Communication (RCCL payload block) -----------------------------------

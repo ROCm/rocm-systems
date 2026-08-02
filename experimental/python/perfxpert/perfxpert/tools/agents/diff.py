@@ -59,12 +59,18 @@ def agent_diff_specialist(
               "verdict":       "improved" | "regressed" | "neutral",
               "narrative":     str,
               "confidence":    float  (0..1),
+              "exploratory_proposals": [],
             }
 
-        ``regressions`` and ``improvements`` are flattened from the
-        Pydantic output's ``kernel_deltas`` dict so callers interact
-        with the shape documented in the agent hierarchy reference
-        (not the internal 5-field-capped schema).
+        ``regressions``, ``improvements`` and ``exploratory_proposals``
+        are flattened from the Pydantic output's ``kernel_deltas`` dict
+        so callers interact with the shape documented in the agent
+        hierarchy reference (not the internal 5-field-capped schema).
+
+        ``exploratory_proposals`` is a separate lane of unverified ideas.
+        Entries are never ranked against the measured deltas and always
+        carry ``status: "exploratory"``. It is empty unless the
+        deployment sets ``agent_creativity: exploratory``.
     """
     from perfxpert.agents import runtime, schemas
 
@@ -89,11 +95,13 @@ def agent_diff_specialist(
     else:  # pragma: no cover — defensive
         raw = dict(output)
 
-    # Flatten ``kernel_deltas`` → top-level regressions / improvements
-    # so the public tool signature matches the agent-hierarchy docs.
+    # Flatten ``kernel_deltas`` → top-level regressions / improvements /
+    # exploratory_proposals so the public tool signature matches the
+    # agent-hierarchy docs.
     deltas = raw.pop("kernel_deltas", {}) or {}
     raw["regressions"] = list(deltas.get("regressions", []) or [])
     raw["improvements"] = list(deltas.get("improvements", []) or [])
+    raw["exploratory_proposals"] = list(deltas.get("exploratory_proposals", []) or [])
     return raw
 
 

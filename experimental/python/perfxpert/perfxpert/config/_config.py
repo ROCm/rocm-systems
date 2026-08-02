@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 ProviderName = Literal["anthropic", "openai", "ollama", "private", "opencode"]
 FenceProfile = Literal["minimal", "standard", "full"]
+AgentCreativity = Literal["strict", "exploratory"]
 
 
 class PerfXpertConfig(BaseModel):
@@ -33,6 +34,15 @@ class PerfXpertConfig(BaseModel):
     airgap: bool = Field(False, description="When true, skip all LLM calls (tools-only)")
     regression_threshold_pct: float = Field(3.0, ge=0.0, le=100.0)
     hot_kernel_coverage_pct: float = Field(80.0, ge=0.0, le=100.0)
+    agent_creativity: AgentCreativity = Field(
+        "strict",
+        description=(
+            "Ceiling on model-generated content. 'exploratory' lets Layer-2 "
+            "specialists attach separately-labelled proposals beside their "
+            "vetted advice; it never alters the vetted lane. Deployment-level "
+            "only: no MCP argument may raise it (RFC 0001)."
+        ),
+    )
 
 
 def _coerce(value: str, hint: Any) -> Any:
@@ -53,6 +63,7 @@ _ENV_MAP = {
     "PERFXPERT_AIRGAP": ("airgap", bool),
     "PERFXPERT_REGRESSION_THRESHOLD_PCT": ("regression_threshold_pct", float),
     "PERFXPERT_HOT_KERNEL_COVERAGE_PCT": ("hot_kernel_coverage_pct", float),
+    "PERFXPERT_AGENT_CREATIVITY": ("agent_creativity", str),
 }
 
 

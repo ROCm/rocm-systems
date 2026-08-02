@@ -16,7 +16,7 @@ from perfxpert.agents.compute_specialist import (
     _promote_named_technique,
     _rank_catalog_deterministic,
 )
-from perfxpert.agents.framework import Agent, ToolBinding, run_agent
+from perfxpert.agents.framework import AgentCapability, Agent, ToolBinding, run_agent
 from perfxpert.tools import arch, bottleneck, predict_impact, unified_memory
 
 
@@ -68,6 +68,7 @@ def build_memory_specialist() -> Agent:
         tools=tools,
         allowed_handoffs=[],
         token_budget=3072,
+        capability=AgentCapability.ADDITIVE_EXPLORATION,
     )
 
 

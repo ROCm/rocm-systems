@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from perfxpert.agents import schemas
 from perfxpert.agents._predict_attach import attach_predictions_to_techniques
-from perfxpert.agents.framework import Agent, ToolBinding, run_agent
+from perfxpert.agents.framework import AgentCapability, Agent, ToolBinding, run_agent
 from perfxpert.tools import arch, compiler, kernel_fusion, roofline
 
 
@@ -63,6 +63,7 @@ def build_compute_specialist() -> Agent:
         tools=tools,
         allowed_handoffs=[],    # Layer-2 returns to Recommendation
         token_budget=3072,
+        capability=AgentCapability.ADDITIVE_EXPLORATION,
     )
 
 
