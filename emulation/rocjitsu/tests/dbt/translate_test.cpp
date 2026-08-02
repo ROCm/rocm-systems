@@ -492,12 +492,17 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
   const uint64_t strtab_offset = rodata_offset + rodata_size;
   const uint64_t symtab_offset = align_up_for_test(strtab_offset + strtab.size(), 8);
   const size_t sym_count = (text_function_words ? 3 : 2) + (has_table ? 1 : 0);
-  const uint64_t table_offset = symtab_offset + sym_count * sizeof(Elf64_Sym);
+  // The table is SHF_ALLOC, so a real loader only maps it when a PT_LOAD covers it. Give the file
+  // offset the same residue mod load_align as table_vaddr so the extra segment below satisfies the
+  // p_offset == p_vaddr (mod p_align) congruence a loader requires.
+  const uint64_t table_offset =
+      align_up_for_test(symtab_offset + sym_count * sizeof(Elf64_Sym), load_align) +
+      (table_vaddr % load_align);
   const uint64_t rela_offset = has_table ? table_offset + table_size : table_offset;
   const uint64_t shstrtab_offset = rela_offset + (has_table ? sizeof(Elf64_Rela) : 0);
   const uint64_t shoff = align_up_for_test(shstrtab_offset + shstrtab.size(), 8);
   const uint16_t section_count = has_table ? 8 : 6;
-  constexpr uint16_t phdr_count = 2;
+  const uint16_t phdr_count = has_table ? 3 : 2;
 
   std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
 
@@ -519,7 +524,7 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
   ehdr.e_shstrndx = 5;
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
-  std::array<Elf64_Phdr, phdr_count> phdrs{};
+  std::vector<Elf64_Phdr> phdrs(phdr_count);
   phdrs[0].p_type = PT_LOAD;
   phdrs[0].p_flags = 0x5; // PF_R | PF_X
   phdrs[0].p_offset = text_offset;
@@ -537,6 +542,18 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
   phdrs[1].p_filesz = rodata_size;
   phdrs[1].p_memsz = rodata_size;
   phdrs[1].p_align = load_align;
+  if (has_table) {
+    // Map the table itself, so these cases exercise a slot a loader would place rather than only
+    // section-header discovery.
+    phdrs[2].p_type = PT_LOAD;
+    phdrs[2].p_flags = 0x4; // PF_R
+    phdrs[2].p_offset = table_offset;
+    phdrs[2].p_vaddr = table_vaddr;
+    phdrs[2].p_paddr = table_vaddr;
+    phdrs[2].p_filesz = table_size;
+    phdrs[2].p_memsz = table_size;
+    phdrs[2].p_align = load_align;
+  }
   std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
 
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
