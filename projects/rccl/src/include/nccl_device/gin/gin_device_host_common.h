@@ -17,8 +17,8 @@
 // Keep both names so AMD-side code that still uses the old name continues to compile.
 #define NCCL_GIN_MAX_CONNECTIONS NCCL_GIN_MAX_CONTEXTS
 
-typedef struct ncclGinGpuCtx *ncclGinGpuCtx_t;
-typedef void *ncclGinWindow_t;
+typedef struct ncclGinGpuCtx* ncclGinGpuCtx_t;
+typedef void* ncclGinWindow_t;
 
 typedef enum ncclGinSignalOp_t {
   ncclGinSignalInc = 0,

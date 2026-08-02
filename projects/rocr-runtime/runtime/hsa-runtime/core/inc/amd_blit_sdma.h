@@ -96,19 +96,10 @@ class BlitSdmaBase : public core::Blit {
       core::Signal& out_signal,
       bool profiling_enabled) = 0;
 
-  /// @brief Pack N linear copy packets back-to-back in a single SDMA ring
-  /// submission (linearB2BCopy path).  Each entry i copies srcs[i] -> dsts[i]
-  /// of sizes[i] bytes.  For the broadcast case (same src/size for all dsts),
-  /// the caller simply fills srcs and sizes with repeated values.
-  virtual hsa_status_t SubmitLinearCopyB2BCommand(
-      const std::vector<void*>& dsts, const std::vector<const void*>& srcs,
-      const std::vector<size_t>& sizes, std::vector<core::Signal*>& dep_signals,
-      core::Signal& out_signal) = 0;
-
   virtual bool BroadcastSupported() const = 0;
   virtual bool MulticastSupported() const = 0;
   virtual bool PlatformAtomicSupport() const = 0;
-  virtual bool IsGfx1250() const = 0;
+  virtual bool IsGfx125Plus() const = 0;
 
   /// @brief Maximum byte count a single linear copy packet can describe
   /// (the 30-bit count field, ~1 GiB).  Larger copies are split into multiple
@@ -118,64 +109,90 @@ class BlitSdmaBase : public core::Blit {
   /// larger than this limit.
   virtual size_t MaxSingleLinearCopySize() const = 0;
 
-  virtual hsa_status_t SubmitPrologue(const std::vector<core::Signal*>& dep_signals,
-                                      core::Signal& out_signal,
-                                      core::Signal& prologue_signal) = 0;
-
-  virtual hsa_status_t SubmitBody(const void* cmd, size_t cmd_size, uint64_t size,
-                                  core::Signal& prologue_signal,
-                                  core::Signal& body_signal) = 0;
-
-  /// @brief Submit epilogue that waits for bodies, then performs GCR writeback,
-  /// end timestamp, and sets out_signal to its final value.
-  /// When body_signals is non-empty, polls each body signal for 0 (non-atomic path).
-  /// When body_signals is empty, polls out_signal for body_complete_value (atomic path).
-  virtual hsa_status_t SubmitEpilogue(core::Signal& out_signal,
-                                      hsa_signal_value_t body_complete_value,
-                                      const std::vector<core::Signal*>& body_signals = {}) = 0;
-
-  virtual hsa_status_t SubmitLinearCopyBody(void* dst, const void* src, size_t size,
-                                            core::Signal& prologue_signal,
-                                            core::Signal& body_signal) = 0;
-
-  virtual hsa_status_t SubmitLinearSwapBody(void* addr_a, void* addr_b, size_t size,
-                                            core::Signal& prologue_signal,
-                                            core::Signal& body_signal) = 0;
-
-  /// @brief Emit a fused wait/copy/signal linear copy.  @p dep_signals[0] folds
-  /// into the packet WAIT and @p out_signal is decremented by the packet SIGNAL
-  /// on the final chunk (large copies are chunked internally).  When
-  /// @p fused_notify is true the GCR invalidate (prologue) and GCR writeback +
-  /// mailbox notify (epilogue) are emitted in the same ring reservation, so a
-  /// standalone single-engine copy needs only one reserve/release instead of
-  /// three; the fan-out path leaves it false and drives notify separately across
-  /// engines.
+  /// @brief Single-doorbell fused WaitSignal copy for gfx125+ single copies.
+  /// Emits GCR invalidate + dep polls + N fused WaitSignal+Copy packets +
+  /// GCR writeback + mailbox/trap — all in one ring reservation.
+  /// Each chunk carries wait+copy+signal dec inline; no prologue signal needed.
+  /// When profiling is enabled, start/end SDMA timestamp commands are emitted
+  /// around the copy packets (after dep polls and after copies respectively).
   virtual hsa_status_t SubmitLinearCopyBodyWaitSignal(
       void* dst, const void* src, size_t size,
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal,
       bool fused_notify = true) = 0;
 
-  virtual hsa_status_t SubmitLinearSwapBodyWaitSignal(
-      void* addr_a, void* addr_b, size_t size_a, size_t size_b,
+  /// @brief Unified prologue: dep polls, HDP flush, start timestamp, GCR
+  /// invalidate, and prologue_signal decrement — emitted conditionally based on
+  /// @p fused_bodies and the internal profiling_enabled() state.
+  ///   fused + !profiling: only GCR invalidate + prologue_signal dec (bodies WAIT
+  ///     on deps themselves).
+  ///   !fused or profiling: dep polls + HDP flush + [start timestamp] + GCR + dec.
+  virtual hsa_status_t SubmitPrologue(
       const std::vector<core::Signal*>& dep_signals,
-      core::Signal& out_signal) = 0;
+      core::Signal& out_signal,
+      core::Signal& prologue_signal,
+      bool fused_bodies) = 0;
 
-  // Linear copy body with optional source and/or destination address
-  // indirection, combined wait+signal.  The SDMA engine dereferences
-  // @p src (when @p indirect_src) and/or @p dst (when @p indirect_dst)
-  // to obtain the real copy pointers before performing the transfer.
-  // At least one of @p indirect_src or @p indirect_dst must be true.
-  // Only available on gfx1250.
-  virtual hsa_status_t SubmitLinearCopyBodyIndirectWaitSignal(
-      void* dst, const void* src, size_t size,
+  /// @brief Unified epilogue: drain bodies, GCR writeback, end timestamp (if
+  /// profiling), final out_signal write to 0, mailbox + trap interrupt.
+  /// When platform atomics are available (body_signals empty): polls out_signal
+  /// for 1 (bodies decremented it from N+1 to 1).
+  /// When platform atomics are absent (body_signals non-empty): polls each
+  /// body_signal for 0 (bodies fenced them), then fences out_signal to 0.
+  virtual hsa_status_t SubmitEpilogue(
+      core::Signal& out_signal,
+      const std::vector<core::Signal*>& body_signals = {}) = 0;
+
+  /// @brief Single-doorbell fused submission for the coordinator engine: packs
+  /// prologue (if needed) + body entries + epilogue into one ring reservation.
+  /// Saves 1-2 doorbells vs separate Submit{Prologue,Bodies,Epilogue} calls when
+  /// the coordinator engine also carries body entries.
+  /// @param prologue_signal  If non-null, prologue logic fires this signal after
+  ///   dep handling; other engines' bodies can poll on it.
+  /// @param body_deps  Dependencies for the body WaitSignal packets on this ring.
+  ///   When prologue is on the same ring, these are satisfied in-order (the wait
+  ///   resolves immediately), but are still encoded for packet correctness.
+  virtual hsa_status_t SubmitFusedCoordinator(
+      const std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal,
+      core::Signal* prologue_signal,
+      bool fused_bodies,
+      hsa_amd_memory_copy_op_type_t op,
+      const std::vector<void*>& dsts,
+      const std::vector<const void*>& srcs,
+      const std::vector<size_t>& sizes_a,
+      const std::vector<size_t>& sizes_b,
+      bool indirect_src, bool indirect_dst,
+      const std::vector<core::Signal*>& body_deps) = 0;
+
+  /// @brief Unified body submission: one ring reservation (one doorbell) for all
+  /// entries in an engine group.  Dispatches internally to copy / swap / indirect
+  /// packet builders based on @p op.  Every chunk waits on dep_signals[0] and
+  /// decrements out_signal via fused WaitSignal packets; dep_signals[1..] are
+  /// leading 64b polls.  Arms out_signal for chunk extras:
+  /// AddRelaxed(total_chunks - num_entries).
+  ///
+  /// Entries are gathered directly from the caller's master @p dst_list /
+  /// @p src_list / @p size_list arrays via @p indices, avoiding per-engine
+  /// temporary copies at the call site.
+  /// @param indices  Master-list indices of the entries this engine handles.
+  /// @param dep_signals  Dependency signals. On the fused (gfx125+) path this may
+  ///   be empty. On the classic (non-gfx125+) path it must be non-empty:
+  ///   dep_signals[0] is the prologue signal polled before the copies; returns
+  ///   HSA_STATUS_ERROR_INVALID_ARGUMENT if empty on the classic path.
+  /// @param body_signal  When non-null (!platform_atomic_support_ classic path),
+  ///   the body fences this signal to 0 on completion instead of atomic-
+  ///   decrementing out_signal.  Caller allocates one per engine group.
+  virtual hsa_status_t SubmitBodies(
+      hsa_amd_memory_copy_op_type_t op,
+      void* const* dst_list,
+      const void* const* src_list,
+      const size_t* size_list,
+      const std::vector<uint32_t>& indices,
       bool indirect_src, bool indirect_dst,
       const std::vector<core::Signal*>& dep_signals,
-      core::Signal& out_signal) = 0;
-
-  virtual hsa_status_t SubmitNotifyPrologue(
-      core::Signal* prologue_signal = nullptr) = 0;
-  virtual hsa_status_t SubmitNotifyEpilogue(core::Signal& out_signal) = 0;
+      core::Signal& out_signal,
+      core::Signal* body_signal = nullptr) = 0;
 
   virtual bool SwapSupported() const = 0;
   virtual bool IndirectCopySupported() const = 0;
@@ -258,11 +275,6 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
       core::Signal& out_signal,
       bool profiling_enabled) override;
 
-  hsa_status_t SubmitLinearCopyB2BCommand(
-      const std::vector<void*>& dsts, const std::vector<const void*>& srcs,
-      const std::vector<size_t>& sizes, std::vector<core::Signal*>& dep_signals,
-      core::Signal& out_signal) override;
-
   /// @brief Submit a linear fill command to the queue buffer
   ///
   /// @param ptr Memory address of the fill destination.
@@ -279,51 +291,50 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   bool BroadcastSupported() const override { return broadcast_supported_; }
   bool MulticastSupported() const override { return multicast_supported_; }
   bool PlatformAtomicSupport() const override { return platform_atomic_support_; }
-  bool IsGfx1250() const override { return is_gfx1250_; }
+  bool IsGfx125Plus() const override { return is_gfx125plus_; }
   size_t MaxSingleLinearCopySize() const override {
     return max_single_linear_copy_size_ ? max_single_linear_copy_size_ : kMaxSingleCopySize;
   }
-
-  hsa_status_t SubmitPrologue(const std::vector<core::Signal*>& dep_signals,
-                              core::Signal& out_signal,
-                              core::Signal& prologue_signal) override;
-
-  hsa_status_t SubmitBody(const void* cmd, size_t cmd_size, uint64_t size,
-                          core::Signal& prologue_signal,
-                          core::Signal& body_signal) override;
-
-  hsa_status_t SubmitEpilogue(core::Signal& out_signal,
-                              hsa_signal_value_t body_complete_value,
-                              const std::vector<core::Signal*>& body_signals = {}) override;
-
-  hsa_status_t SubmitLinearCopyBody(void* dst, const void* src, size_t size,
-                                    core::Signal& prologue_signal,
-                                    core::Signal& body_signal) override;
-
-  hsa_status_t SubmitLinearSwapBody(void* addr_a, void* addr_b, size_t size,
-                                    core::Signal& prologue_signal,
-                                    core::Signal& body_signal) override;
 
   hsa_status_t SubmitLinearCopyBodyWaitSignal(
       void* dst, const void* src, size_t size,
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal,
-      bool fused_notify) override;
+      bool fused_notify = true) override;
 
-  hsa_status_t SubmitLinearSwapBodyWaitSignal(
-      void* addr_a, void* addr_b, size_t size_a, size_t size_b,
+  hsa_status_t SubmitPrologue(
       const std::vector<core::Signal*>& dep_signals,
-      core::Signal& out_signal) override;
+      core::Signal& out_signal,
+      core::Signal& prologue_signal,
+      bool fused_bodies) override;
 
-  hsa_status_t SubmitLinearCopyBodyIndirectWaitSignal(
-      void* dst, const void* src, size_t size,
+  hsa_status_t SubmitEpilogue(
+      core::Signal& out_signal,
+      const std::vector<core::Signal*>& body_signals = {}) override;
+
+  hsa_status_t SubmitFusedCoordinator(
+      const std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal,
+      core::Signal* prologue_signal,
+      bool fused_bodies,
+      hsa_amd_memory_copy_op_type_t op,
+      const std::vector<void*>& dsts,
+      const std::vector<const void*>& srcs,
+      const std::vector<size_t>& sizes_a,
+      const std::vector<size_t>& sizes_b,
+      bool indirect_src, bool indirect_dst,
+      const std::vector<core::Signal*>& body_deps) override;
+
+  hsa_status_t SubmitBodies(
+      hsa_amd_memory_copy_op_type_t op,
+      void* const* dst_list,
+      const void* const* src_list,
+      const size_t* size_list,
+      const std::vector<uint32_t>& indices,
       bool indirect_src, bool indirect_dst,
       const std::vector<core::Signal*>& dep_signals,
-      core::Signal& out_signal) override;
-
-  hsa_status_t SubmitNotifyPrologue(
-      core::Signal* prologue_signal = nullptr) override;
-  hsa_status_t SubmitNotifyEpilogue(core::Signal& out_signal) override;
+      core::Signal& out_signal,
+      core::Signal* body_signal = nullptr) override;
 
   bool SwapSupported() const override { return swap_supported_; }
   bool IndirectCopySupported() const override { return indirect_copy_supported_; }
@@ -552,16 +563,16 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   /// True if SDMA supports broadcast linear copy (one src -> two dst).
   bool broadcast_supported_;
 
-  /// True if SDMA supports multicast linear copy (one src -> N dst), gfx1250+.
+  /// True if SDMA supports multicast linear copy (one src -> N dst), gfx125+.
   bool multicast_supported_;
 
-  /// True for gfx1250 (major=12 minor=5): multicast, wait/signal packets, 64b poll/fence.
-  bool is_gfx1250_;
+  /// True for gfx125+ (major=12 minor>=5): multicast, wait/signal packets, 64b poll/fence.
+  bool is_gfx125plus_;
 
   /// True if SDMA supports linear swap copy (gfx94X+).
   bool swap_supported_;
 
-  /// True if SDMA supports the linear wait/signal-indirect copy packet (gfx1250).
+  /// True if SDMA supports the linear wait/signal-indirect copy packet (gfx125+).
   bool indirect_copy_supported_;
 };
 

@@ -209,7 +209,7 @@ if(BUILD_STANDALONE AND GRPC_ROOT STREQUAL GRPC_ROOT_DEFAULT)
     )
 endif()
 
-find_package(amd_smi 26.0.0 NAMES amd_smi HINTS ${ROCM_DIR}/lib/cmake CONFIG REQUIRED)
+find_package(amd_smi 27.0.0 NAMES amd_smi HINTS ${ROCM_DIR}/lib/cmake CONFIG REQUIRED)
 
 if(NOT EXISTS "${AMD_SMI_INCLUDE_DIR}" OR NOT EXISTS "${AMD_SMI_LIB_DIR}")
     message(
@@ -374,6 +374,15 @@ endif()
 
 # Folders for both standalone and embedded
 add_subdirectory("rdc_libs")
+
+# Unit tests link librdc/librdc_bootstrap directly and need neither grpc nor the
+# daemon, so they build in both standalone and embedded configurations.
+if(BUILD_TESTS)
+    # enable_testing() must run in this top-level dir so ctest works from the
+    # build root, not just from tests/unit.
+    enable_testing()
+    add_subdirectory("tests/unit")
+endif()
 
 if(BUILD_EXAMPLES)
     add_subdirectory("example")

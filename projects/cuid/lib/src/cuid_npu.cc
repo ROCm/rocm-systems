@@ -298,28 +298,27 @@ CuidNpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
 
 amdcuid_status_t CuidNpu::get_primary_cuid(amdcuid_primary_id &id) const {
   bool temp = false;
-  if (geteuid() != 0) {
-    temp = true;
-  }
   amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
   uint64_t fingerprint = 0;
 
-  // Attempt to read the CUID from the file first
-  std::string cuid_file_path = CuidUtilities::priv_cuid_file();
-  CuidFile primary_file(cuid_file_path, false);
-  primary_file.load();
+  if (geteuid() == 0) {
+    // Attempt to read the CUID from the file first
+    std::string cuid_file_path = CuidUtilities::priv_cuid_file();
+    CuidFile primary_file(cuid_file_path, false);
+    primary_file.load();
 
-  CuidFileEntry entry;
-  status = primary_file.find_by_device_node(m_info.accel_node, entry);
-  if (status == AMDCUID_STATUS_SUCCESS) {
-    id.UUIDv8_representation = entry.primary_cuid;
-    CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-    return AMDCUID_STATUS_SUCCESS;
+    CuidFileEntry entry;
+    status = primary_file.find_by_device_node(m_info.accel_node, entry);
+    if (status == AMDCUID_STATUS_SUCCESS && entry.is_temporary == false) {
+      id.UUIDv8_representation = entry.primary_cuid;
+      CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
+      return AMDCUID_STATUS_SUCCESS;
+    }
+
+    // Primary CUID not found in file, so generate it
+    status = get_hardware_fingerprint(fingerprint);
   }
-
-  // Primary CUID not found in file, so generate it
-  status = get_hardware_fingerprint(fingerprint);
-  if (status != AMDCUID_STATUS_SUCCESS) {
+  if (geteuid() != 0 || status != AMDCUID_STATUS_SUCCESS) {
     std::string bdf;
     status = this->get_bdf(bdf);
     if (status != AMDCUID_STATUS_SUCCESS) {

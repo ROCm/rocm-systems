@@ -1461,8 +1461,17 @@ hsa_status_t hsa_amd_agent_memory_pool_get_info(
 }
 
 hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t* agents,
-                                        hsa_handle_t interop_handle, uint32_t flags, size_t* size,
-                                        void** ptr, size_t* metadata_size, const void** metadata) {
+                                       hsa_handle_t interop_handle, uint32_t flags, size_t* size,
+                                       void** ptr, size_t* metadata_size, const void** metadata) {
+  return AMD::hsa_amd_interop_map_buffer_with_size(num_agents, agents, interop_handle, flags,
+                                               size_t{0},  // size_hint = 0 for legacy API
+                                               size, ptr, metadata_size, metadata);
+}
+
+hsa_status_t hsa_amd_interop_map_buffer_with_size(uint32_t num_agents, hsa_agent_t* agents,
+                                                   hsa_handle_t interop_handle, uint32_t flags,
+                                                   size_t size_hint, size_t* size, void** ptr,
+                                                   size_t* metadata_size, const void** metadata) {
   static const int tinyArraySize = 8;
   TRY;
   IS_OPEN();
@@ -1489,8 +1498,8 @@ hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t* agents
   }
 
   auto ret = core::Runtime::runtime_singleton_->InteropMap(
-      num_agents, core_agents, interop_handle, static_cast<hsa_interop_map_flag_t>(flags), size,
-      ptr, metadata_size, metadata);
+      num_agents, core_agents, interop_handle, static_cast<hsa_interop_map_flag_t>(flags),
+      size_hint, size, ptr, metadata_size, metadata);
 
   return ret;
   CATCH;
@@ -1601,9 +1610,11 @@ hsa_status_t hsa_amd_queue_intercept_create(
   IS_OPEN();
   IS_BAD_PTR(queue);
 
-  // A wrapped queue for the intercept queue must have at least 3 slots so
-  // there is space for a packet, a new retry barrier packet, and an existing
-  // retry packet that is in the process of being processed.
+  // The intercept queue needs at least 3 wrapped-queue slots to guarantee forward
+  // progress when draining overflow: one for a data packet, one for a new retry barrier
+  // to drain the remainder, and one for a previously inserted retry barrier that has
+  // completed but whose slot has not yet been reclaimed (invalidated by StoreRelaxed).
+  // See PlanSubmit() in intercept_queue_logic.h for the slot accounting this enables.
   if (size < 3) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   hsa_queue_t* lower_queue;
@@ -1835,8 +1846,9 @@ hsa_status_t hsa_amd_portable_export_dmabuf_v2(const void* ptr, size_t size,
 }
 
 hsa_status_t hsa_amd_portable_close_dmabuf(int dmabuf) {
+  /* dmabuf is passed by value; caller's copy is not zeroed — ABI constraint */
   TRY;
-  return rocr::os::DmaBufClose(dmabuf);
+  return rocr::os::DmaBufClose(&dmabuf);
   CATCH;
 }
 
@@ -1918,6 +1930,9 @@ hsa_status_t hsa_amd_vmem_handle_create(hsa_amd_memory_pool_t memory_pool, size_
 
   MemoryRegion::AllocateFlags alloc_flag = core::MemoryRegion::AllocateMemoryOnly;
   if (type == MEMORY_TYPE_PINNED) alloc_flag |= core::MemoryRegion::AllocatePinned;
+
+  if (mem_region->owner()->device_type() == core::Agent::kAmdCpuDevice)
+    alloc_flag |= core::MemoryRegion::AllocateNonPaged;
 
   return core::Runtime::runtime_singleton_->VMemoryHandleCreate(mem_region, size, alloc_flag, flags,
                                                                 memory_handle);

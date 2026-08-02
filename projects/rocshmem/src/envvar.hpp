@@ -524,6 +524,15 @@ namespace envvar {
 
     extern const var<std::string> requested_nic;
     extern const var<std::string> hca_list;
+
+    /**
+     * @brief Maximum number of symmetric user buffers that can be registered
+     * with rocshmem_buffer_register_symmetric.
+     *
+     * Backend-agnostic; currently consumed by the IPC backend and intended to
+     * be honored by other backends as they gain symmetric-registration support.
+     */
+    extern const var<size_t> max_symm_regions;
   }  // inline namespace _base
 
   namespace bootstrap {

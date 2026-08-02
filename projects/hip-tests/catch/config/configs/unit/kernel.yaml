@@ -104,3 +104,12 @@ kernel:
     disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_Validate_User_Sgpr_Count:
     <<: *level_2
+  Unit_hipGridLaunch_MaxGridDim_DeviceProperties:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipGridLaunch_MaxGridDim_GetDeviceAttribute:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipLaunchParmFunctor_kernel_arg_prefetch:
+    <<: *level_2
+    tags: [launch]

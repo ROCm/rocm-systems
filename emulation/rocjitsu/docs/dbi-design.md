@@ -4,7 +4,7 @@
 
 The Dynamic Binary Instrumentation (DBI) system patches AMDGPU HSA code objects in-place, before they are loaded into device memory, to inject code at chosen anchor instructions. Patched code objects can be loaded by either the simulated KMD (`SimulatedDriver`) or — eventually — by real ROCR via the HSA tools layer (`HSA_TOOLS_LIB=librocjitsu_hooks.so`). DBI itself is target-agnostic at the layer boundary; per-ISA differences are confined to the instruction builder and decoder.
 
-This document describes the DBI subsystem as currently implemented. The first end-to-end slice — an *inline-nop* trampoline at a single anchor — is in tree. The broader instrumentation framework (probe-call bodies, multi-site instrumentation with per-site failure tolerance, predicate-based anchor selection, EXEC-policy management, `AfterInst` / `BlockEntry` / `BlockExit` kinds, layout/negotiation between the builder and the orchestrator) is still future work and is tracked in `dbt_dbi_plan.md`.
+This document describes the DBI subsystem as currently implemented. Two end-to-end trampoline shapes are in tree: the original *inline-nop* trampoline, and a *probe call* that invokes a copied no-op probe body (`rj_nop_probe`) via `s_swappc_b64` before the relocated original. Multiple instrumentation points per code object are supported. Still future work: per-site failure tolerance, predicate-based anchor selection, EXEC-policy management, `AfterInst` / `BlockEntry` / `BlockExit` kinds, layout/negotiation between the builder and the orchestrator, register **spilling** (non-empty spill sets currently fail closed), and **automatic SGPR-count growth** so the probe's link pair is always granted (see [Probe-call register requirement](#instrumentation-flow-probe-call)).
 
 ---
 
@@ -69,16 +69,18 @@ InstrumentedCodeObject      -- patched ELF + diagnostics
 - `patch_with_debug_summaries()` is a test/debug entry point returning `InstrumentedCodeObjectDebug` (extends `InstrumentedCodeObject` with per-site `InstrumentationPatch` summaries — schema unstable; production callers should prefer `patch()` and recover per-site info from a fresh disassembly).
 - Single-attempt: both entry points share one budget. After `patched_ = true`, subsequent calls return a fatal error. Recoverable errors require constructing a new Instrumentor.
 
-### Current scope (inline-nop milestone)
+### Current scope
 
-- Exactly one queued `InstrumentationPoint` per `patch()` call (multi-site is fatal).
+- Multiple queued `InstrumentationPoint`s per `patch()` call are supported; sites sharing the same `(probe_obj, probe_symbol)` reuse one copied probe body. All-or-nothing: any per-site failure fails the whole patch.
 - Single `.text` section (multi-text is fatal).
 - `BeforeInst` kind only (other kinds are fatal).
-- Reserved `InstrumentationPoint` fields (`filter_flags`, `probe_obj`, `probe_symbol`, `force_full_exec`) must be default; non-default is fatal. These rejections are the milestone guardrail and disappear as each field gains a real consumer.
+- `probe_obj` + `probe_symbol` are **consumed**: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.
+- `filter_flags` and `force_full_exec` are still reserved milestone guardrails — non-default values are fatal until each gains a real consumer.
+- Probe calls require the probe's link pair (`s[30:31]` for `rj_nop_probe`) and any chosen scratch to be within the kernel's SGPR allocation, and an empty spill set. Non-empty spill sets fail closed; auto-growing the SGPR count is not yet implemented (see [Probe-call register requirement](#instrumentation-flow-probe-call)).
 
 ### Key design constraint
 
-The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPatcher do not. Milestone-scoped restrictions live in three places at the orchestrator boundary: reserved-field rejections in `validate_anchor()`, plan-shape checks in `validate_inline_nop_plan()`, and multi-text/multi-point rejections at the top of `patch()`. The builder accepts any well-formed plan and the patcher accepts any well-formed mutation request.
+The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPatcher do not. Milestone-scoped restrictions live at the orchestrator boundary: reserved-field rejections in `validate_anchor()`, the `validate_inline_nop_plan()` shape check on the inline-nop path, the spill-policy gate on the probe-call path, and the multi-text rejection at the top of `patch()`. The builder accepts any well-formed plan and the patcher accepts any well-formed mutation request.
 
 ---
 
@@ -86,7 +88,7 @@ The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPat
 
 **Files:** `code/patch/trampoline_builder.h`, `code/patch/trampoline_builder.cpp`
 
-Generic byte emitter. Takes a `TrampolinePlan` and returns `TrampolineBytes{patched_anchor_bytes, trampoline_words}`. Knows nothing about `InstrumentationPoint`s, milestones, or probe bodies — ready to absorb richer plans (probe calls, clobber-bearing inline asm) without rewrites.
+Generic byte emitter. Takes a `TrampolinePlan` and returns `TrampolineBytes{patched_anchor_bytes, trampoline_words}`. Knows nothing about `InstrumentationPoint`s or milestones. It emits two body shapes: the inline-nop body, and the probe-call envelope (SCC save, `s_getpc_b64` + 64-bit add chain to materialize the copied probe body's address, `s_swappc_b64` to it, SCC restore) wrapped around the relocated original. `plan_probe_call()` selects the link/target SGPR pairs and SCC temp and reports `builder_clobbers`; `emit_probe_call()` lowers the chosen plan to bytes.
 
 ### What it handles
 
@@ -126,7 +128,7 @@ Rules enforced:
 
 ### `validate_anchor(anchor, anchor_offset, text_bytes, pt, arch, error_out)`
 
-Combines `is_relocatable_anchor()` with milestone-scoped policy checks against `pt`: `filter_flags` is zero, `kind` is `BeforeInst`, `probe_obj` is null, `probe_symbol` is empty, `force_full_exec` is false. On success returns a `ResolvedInstrumentationSite` with the captured anchor snapshot (offset, size, original bytes, mnemonic, kind).
+Combines `is_relocatable_anchor()` with milestone-scoped policy checks against `pt`: `filter_flags` is zero, `kind` is `BeforeInst`, `force_full_exec` is false. The `probe_obj`/`probe_symbol` pair is consumed (not rejected): consistency (both set or both empty) and symbol resolution happen during point resolution. On success returns a `ResolvedInstrumentationSite` with the captured anchor snapshot (offset, size, original bytes, mnemonic, kind, and the resolved probe index when this is a probe call).
 
 ### `validate_inline_nop_plan(plan, error_out)`
 
@@ -138,11 +140,12 @@ Defense-in-depth check that the orchestrator-produced `TrampolinePlan` matches t
 
 | Type | Stage | Carries |
 | --- | --- | --- |
-| `InstrumentationPoint` | request | `anchor_offset`, `kind`, reserved fields |
-| `ResolvedInstrumentationSite` | post-validation | `anchor_offset`, `original_size`, `original_bytes`, `mnemonic`, `kind` |
-| `TrampolinePlan` | builder input | `arch`, `anchor_offset`, `original_size`, `original_words`, `trampoline_offset`, `return_target`, `before_items`, `after_items`, `emit_original` |
+| `InstrumentationPoint` | request | `anchor_offset`, `kind`, `probe_obj`, `probe_symbol`, reserved fields |
+| `ResolvedInstrumentationSite` | post-validation | `anchor_offset`, `original_size`, `original_bytes`, `mnemonic`, `kind`, `probe_index` (set for probe calls) |
+| `ProbeCallable` | probe registry | resolved probe `symbol`, `arch`, calling convention, `body_words`, `output_text_offset` |
+| `TrampolinePlan` | builder input | `arch`, `anchor_offset`, `original_size`, `original_words`, `trampoline_offset`, `return_target`, `before_items`, `after_items`, `emit_original`; probe-call: `is_probe_call`, `probe_target_offset`, `link_pair_base`, `target_pair_base`, `scc_temp`, `preserve_scc`, `before_word_count`, `builder_clobbers` |
 | `TrampolineBytes` | builder output | `patched_anchor_bytes`, `trampoline_words` |
-| `InstrumentationPatch` | per-site summary (test/debug) | `anchor_offset`, `original_size`, `trampoline_offset`, `return_target`, `original_bytes`, `patched_anchor_bytes` |
+| `InstrumentationPatch` | per-site summary (test/debug) | `anchor_offset`, `original_size`, `trampoline_offset`, `return_target`, `original_bytes`, `patched_anchor_bytes`; probe-call: `is_probe_call`, `probe_symbol`, `probe_target_offset`, `link_pair_base`, `target_pair_base` |
 | `InstrumentedCodeObject` | `patch()` output | `elf_bytes`, `errors`, `warnings` |
 | `InstrumentedCodeObjectDebug` | `patch_with_debug_summaries()` output | `InstrumentedCodeObject` + `patches` |
 
@@ -163,7 +166,7 @@ ISA-parameterized helpers for encoding common instructions (`s_branch`, `s_nop`,
 ### Register Liveness Analysis [shared with DBT]
 
 **Files:** `analysis/liveness.h`, `analysis/liveness.cpp`, `analysis/def_use_chain.h`, `analysis/def_use_chain.cpp`
-**Used by:** DBT semantic translator (today); DBI probe-call passes (planned)
+**Used by:** DBT semantic translator; the DBI probe-call register planner (liveness at the anchor feeds dead-register selection for the link/target pairs and SCC temp, and the spill-set computation)
 
 Kernel-scoped backward register liveness over the CFG embedded in `BasicBlock`. Callers construct a `LivenessAnalysis` from one `KernelBlockScope` (the blocks reachable from one kernel descriptor entry). Successor/predecessor edges that leave the scope are ignored, so one decoded code object containing N kernels yields N independent analyses.
 
@@ -248,7 +251,7 @@ The trampolines live inside `.text`, immediately after the original kernel bytes
   ...
   [local cave, after the original bytes]
   @ trampoline_offset:
-    s_nop 0                     <-- inline-nop placeholder (becomes probe call later)
+    s_nop 0                     <-- inline-nop body (the probe-call variant is described below)
     <relocated original word(s)> <-- 4 or 8 bytes, same encoding as the anchor
     s_branch <return>           <-- back to anchor_offset + original_size
 ```
@@ -257,11 +260,49 @@ Branch offsets are computed in SOPP `simm16` units; the trampoline must lie with
 
 ---
 
+## Instrumentation Flow (probe-call)
+
+A probe-call point sets `probe_obj` + `probe_symbol`. Resolution copies the probe's self-contained body (`rj_nop_probe`: `s_waitcnt` then `s_setpc_b64 s[30:31]`) once into the cave; sites sharing a `(probe_obj, probe_symbol)` reuse that one copy. The cave is laid out as: original kernel bytes, then each distinct probe body, then the per-site trampolines. The forward `s_branch` at the anchor targets the trampoline (not the body); the trampoline *calls* the body via `s_swappc_b64`.
+
+The trampoline envelope wraps the relocated original:
+
+```
+.text:
+  [original kernel bytes]   @ anchor_offset: s_branch <trampoline>
+  ...
+  [copied probe body]       @ probe_target_offset:
+    s_waitcnt ...
+    s_setpc_b64 s[30:31]    <-- returns through the link pair
+  [trampoline]              @ trampoline_offset:
+    s_cselect_b32 <scc_temp>, 1, 0     <-- SCC save (preserve_scc)
+    s_getpc_b64  s[target_pair]
+    s_add_u32    s[target_lo], s[target_lo], (probe_target - pc)@lo
+    s_addc_u32   s[target_hi], s[target_hi], (probe_target - pc)@hi
+    s_swappc_b64 s[30:31], s[target_pair]   <-- call: PC=body, return->s[30:31]
+    s_cmp_lg_u32 <scc_temp>, 0          <-- SCC restore
+    <relocated original word(s)>
+    s_branch <return>                   <-- back to anchor_offset + original_size
+```
+
+The `s_getpc_b64` + 64-bit add chain is `.text`-relative, so the materialized target is load-base-independent; the `±simm16` branch range only constrains the forward/return `s_branch`es, not the call.
+
+### Register requirement
+
+The probe's calling convention fixes the **link pair** at `s[30:31]` (`AmdGpuFuncNoArgsReturnS30S31`): `s_swappc_b64` writes the return address there and the body's `s_setpc_b64 s[30:31]` reads it back. The planner additionally picks a dead, even-aligned **target pair** (holds the materialized address) and a dead **SCC temp** from the anchor's liveness. All of these must be *granted by the kernel's SGPR allocation*.
+
+The instrumentor does **not yet grow the kernel's SGPR count**, so the kernel must already allocate through `s31`. Until auto-growth lands, the hardware smoke test instruments a register-padded fixture kernel (`vector_add_probe.hip`, `.sgpr_count` ≥ 32). Resource policy also fails closed when the link pair is live at the anchor, when no dead target pair is available, or when the spill set is non-empty (`instrument_clobbers ∩ live_at_anchor`; spilling is deferred).
+
+---
+
 ## Testing
 
-- **Unit (`tests/patch/instrumentor_test.cpp`):** Validator coverage (each rejection path on synthetic anchors, including the bounds-overflow regression for `is_relocatable_anchor`), inline-nop plan guardrail, `make_trampoline_plan`, end-to-end `patch()` on a synthetic ELF (expected anchor splice + trampoline layout + reparse), and a decoded round-trip of every word in the emitted trampoline.
+- **Unit (`tests/patch/instrumentor_test.cpp`):** Validator coverage (each rejection path on synthetic anchors, including the bounds-overflow regression for `is_relocatable_anchor`), inline-nop plan guardrail, `make_trampoline_plan`, end-to-end `patch()` on a synthetic ELF (expected anchor splice + trampoline layout + reparse), a decoded round-trip of every word in the emitted trampoline, the probe-call path (probe body copied once and the trampoline call targets it), and the spill formula + no-spill policy.
 - **Unit (`tests/patch/trampoline_builder_test.cpp`):** Builder byte-layout contract, branch math, arch-honoring opcode selection, INT16 limit boundary cases.
 - **Unit (`tests/patch/instruction_builder_test.cpp`):** `compute_sopp_branch_simm16` boundary / alignment / overflow / negative-unaligned-delta.
-- **Static DBI smoke (`tests/dbi/hsa_dbi_smoke_test.cpp`, `HsaDbiSmokeStatic`):** Loads a real compiled gfx90a `vector_add` ELF, runs `Instrumentor::patch()`, asserts the patched ELF differs from the original, decodes the anchor as `s_branch`, and confirms `.text` grew to hold the appended trampoline cave. No GPU required.
-- **Hardware DBI smoke (`HsaDbiSmokeHardware`, gated on `HAS_CDNA2_GPU`):** Three tests on a real gfx90a GPU — patched ELF loads + validates via HSA; dispatched kernel produces bit-identical output to the original (the inline-nop placeholder is a no-op); a *sabotage* test overwrites the trampoline's `s_nop 0` with `s_endpgm 0` and asserts the kernel actually fails, proving the GPU genuinely executes the trampoline path rather than silently bypassing the splice. `hsa_init` / `hsa_shut_down` and gfx90a agent enumeration run once per suite via `SetUpTestSuite` / `TearDownTestSuite`.
-- Run with `build/tests/rocjitsu_tests` and `build/tests/hsa_dbi_smoke_test`.
+- **Unit (`tests/patch/probe_symbol_test.cpp`, `probe_callable_test.cpp`, `probe_clobber_test.cpp`):** Probe symbol resolution (missing / duplicate / undefined / non-executable / zero-size rejection), `ProbeCallable` construction, and the `rj_nop_probe` clobber summary (empty ordinary clobbers, no special state).
+- **Probe fixture (`tests/dbi/probe_fixture_test.cpp`, gated on `HAS_PROBE_FIXTURES`):** Resolves `rj_nop_probe` in the real amdclang++-compiled gfx90a device ELF, confirms the body returns via `s_setpc_b64 s[30:31]`, builds the callable, and checks the clobber summary. No GPU required.
+- **Static DBI smoke (`tests/dbi/hsa_dbi_nop_asm_test.cpp`, `HsaDbiNopAsmStatic`):** Loads a real compiled gfx90a `vector_add` ELF, runs `Instrumentor::patch()`, asserts the patched ELF differs from the original, decodes the anchor as `s_branch`, and confirms `.text` grew to hold the appended trampoline cave. No GPU required.
+- **Hardware DBI smoke (`HsaDbiNopAsmHardware`, gated on `HAS_CDNA2_GPU`):** Three tests on a real gfx90a GPU — patched ELF loads + validates via HSA; dispatched kernel produces bit-identical output to the original (the inline-nop placeholder is a no-op); a *sabotage* test overwrites the trampoline's `s_nop 0` with `s_endpgm 0` and asserts the kernel actually fails, proving the GPU genuinely executes the trampoline path rather than silently bypassing the splice. `hsa_init` / `hsa_shut_down` and gfx90a agent enumeration run once per suite via `SetUpTestSuite` / `TearDownTestSuite`.
+- **Static probe-call smoke (`tests/dbi/hsa_dbi_nop_probe_test.cpp`, `HsaDbiNopProbeStatic`, gated on `HAS_PROBE_FIXTURES`):** Instruments the register-padded `vector_add_probe` kernel with a probe call to `rj_nop_probe`, then asserts the patch shape — anchor decodes as `s_branch`, `.text` grew, the copied probe body matches the resolved body and ends in `s_setpc_b64`, and the trampoline contains the `s_swappc_b64` to it. No GPU required.
+- **Hardware probe-call smoke (`HsaDbiNopProbeHardware`, gated on `HAS_CDNA2_GPU`):** Load + validate; dispatch the probe-call-patched kernel and confirm bit-identical output to the original (the no-op probe is transparent); a *sabotage* test overwrites the copied probe body's first word with `s_endpgm` and asserts the wave terminates, proving the `s_swappc_b64` genuinely transfers control into the body. **Preconditions:** these dispatching cases require the [register-padded fixture kernel](#instrumentation-flow-probe-call) *and* the SMEM SBASE operand decode fix in the branch's base; without both the probe-call wave hangs the GPU.
+- Run with `build/tests/rocjitsu_tests`, `build/tests/hsa_dbi_nop_asm_test`, and `build/tests/hsa_dbi_nop_probe_test`.

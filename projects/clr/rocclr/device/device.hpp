@@ -22,6 +22,7 @@
 #include "devkernel.hpp"
 #include "amdocl/cl_profile_amd.h"
 #include "devsignal.hpp"
+#include "utils/nontemporal.hpp"
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
@@ -53,6 +54,8 @@ class FillMemoryCommand;
 class CopyMemoryCommand;
 class CopyMemoryP2PCommand;
 class BatchCopyMemoryCommand;
+class BatchWriteMemoryCommand;
+class BatchReadMemoryCommand;
 class MapMemoryCommand;
 class UnmapMemoryCommand;
 class MigrateMemObjectsCommand;
@@ -652,6 +655,9 @@ struct Info : public amd::EmbeddedObject {
   //! large bar support.
   bool largeBar_;
 
+  //! CPU supports MOVDIR64B (atomic 64-byte write with WC buffer close).
+  bool movdir64b_;
+
   uint32_t hmmSupported_;            //!< ROCr supports HMM interfaces
   uint32_t hmmCpuMemoryAccessible_;  //!< CPU memory is accessible by GPU without pinning/register
   uint32_t hmmDirectHostAccess_;     //!< HMM memory is accessible from the host without migration
@@ -698,10 +704,8 @@ class Settings {
     HostKernelArgs = 0,        //!< Kernel Arguments are put into host memory
     DeviceKernelArgs,          //!< Device memory kernel arguments with no memory
                                //!< ordering workaround (e.g. XGMI)
-    DeviceKernelArgsReadback,  //!< Device memory kernel arguments with kernel
+    DeviceKernelArgsReadback   //!< Device memory kernel arguments with kernel
                                //!< argument readback workaround
-    DeviceKernelArgsHDP        //!< Device memory kernel arguments with kernel
-                               //!< argument readback plus HDP flush workaround.
   };
 
   uint64_t extensions_;  //!< Supported OCL extensions
@@ -728,7 +732,8 @@ class Settings {
       uint sdma_swap_supported_ : 1;         //!< SDMA linear swap copy (gfx94x/gfx95x)
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
       uint sdma_indirect_supported_ : 1;     //!< SDMA linear indirect copy (gfx1250+)
-      uint reserved_ : 9;
+      uint aql_device_ring_buf_ : 1;          //!< Place the AQL queue ring buffer in device memory
+      uint reserved_ : 8;
     };
     uint value_;
   };
@@ -1309,6 +1314,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
   virtual void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) = 0;
   virtual void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) = 0;
+  virtual void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) = 0;
+  virtual void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) = 0;
   virtual void submitMapMemory(amd::MapMemoryCommand& cmd) = 0;
   virtual void submitUnmapMemory(amd::UnmapMemoryCommand& cmd) = 0;
   virtual void submitKernel(amd::NDRangeKernelCommand& command) = 0;
@@ -1371,11 +1378,10 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void HiddenHeapInit() = 0;
 
   //! Fast-path dispatch using a pre-built contiguous flat packet buffer.
-  virtual bool dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPacketData,
+  virtual bool dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>& flatPacketData,
                                           const std::vector<uint32_t>& validFullHeaders,
                                           amd::AccumulateCommand* vcmd = nullptr,
                                           bool attach_signal = false,
-                                          const std::vector<const std::string*>* kernelNames = nullptr,
                                           bool pre_patched = false,
                                           bool blocking = false,
                                           const std::vector<uint8_t>* flatMetadataData = nullptr) {
@@ -1750,8 +1756,17 @@ class Device : public RuntimeObject {
 
   //<! Enum describing the access permissions of Virtual memory
   enum class VmmAccess { kNone = 0x0, kReadOnly = 0x1, kReadWrite = 0x3 };
-  //<! Enum describing the location of Virtual memory
-  enum class VmmLocationType { kNone = 0x0, kDevice = 0x1, kHost = 0x2 };
+  //<! Enum describing the location of Virtual memory. Values mirror hipMemLocationType
+  //<! so hip_vm.cpp can static_cast between them.
+  enum class VmmLocationType {
+    kNone = 0x0,
+    kDevice = 0x1,
+    kHost = 0x2,
+    kHostNuma = 0x3,
+    kHostNumaCurrent = 0x4
+  };
+
+  enum class VmmExportStatus { kSuccess, kError, kResourceNotReady };
 
   typedef std::pair<LinkAttribute, int32_t /* value */> LinkAttrType;
 
@@ -2118,7 +2133,8 @@ class Device : public RuntimeObject {
    * @param count Number of access permissions
    */
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                            VmmLocationType = VmmLocationType::kDevice) = 0;
+                            VmmLocationType = VmmLocationType::kDevice,
+                            int numaNode = -1) = 0;
 
   /**
    * Get Access permisions for a virtual memory object.
@@ -2150,10 +2166,11 @@ class Device : public RuntimeObject {
    * @param flags any flags to be passed
    * @param shareableHandle exported handle, points to fdesc.
    */
-  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
-                                        void* shareableHandle, amd::Memory::HandleType handle_type) {
+  virtual VmmExportStatus ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
+                                                   void* shareableHandle,
+                                                   amd::Memory::HandleType handle_type) {
     ShouldNotCallThis();
-    return false;
+    return VmmExportStatus::kError;
   }
 
   /**
@@ -2215,6 +2232,10 @@ class Device : public RuntimeObject {
     return static_cast<uint32_t>(-1); //!< PAL doesn't support it
   }
 
+  //! Number of host NUMA nodes (CPU agents) usable for host-NUMA VMM allocations.
+  //! Returns 0 when host-NUMA is unsupported (e.g. PAL).
+  virtual uint32_t numHostNumaNodes() const { return 0; }
+
   virtual void ReleaseGlobalSignal(void* signal) const {}
   virtual void RetainGlobalSignal(void* signal) const {}
 
@@ -2243,6 +2264,12 @@ class Device : public RuntimeObject {
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
     int hw_event_index;
     int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
+    // Segment that owns this patch (set at BuildSyncPlan time). At launch the
+    // graph layer resolves it to the actual stream's vGPU index into queue_index.
+    int segment_id = -1;
+    // vGPU (queue) index resolved at launch from segment_id. Read by
+    // ApplyHwEventPatches to attribute the signal to its execution stream.
+    uint32_t queue_index = std::numeric_limits<uint32_t>::max();
   };
 
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
@@ -2407,6 +2434,13 @@ class Device : public RuntimeObject {
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
   virtual device::UriLocator* createUriLocator() const = 0;
+#endif
+#endif
+
+#if defined(__linux__) && defined(__clang__)
+#if __has_feature(address_sanitizer)
+  void reportDeviceMemoryLeaks();
+  static void reportAllDeviceMemoryLeaks();
 #endif
 #endif
 

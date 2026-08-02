@@ -16,12 +16,6 @@ option(BUILD_ICD "Enable building OpenCL ICD Loader" OFF)
 option(EMU_ENV "Enable building for emulation environment" OFF)
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 
-# Add flags to generate PDB files with full symbolic information
-if(MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /DEBUG:FULL")
-endif()
-
 # Address sanitizer options
 if(ENABLE_ADDRESS_SANITIZER)
   message(STATUS "Building ocltst tests with Address Sanitizer options")
