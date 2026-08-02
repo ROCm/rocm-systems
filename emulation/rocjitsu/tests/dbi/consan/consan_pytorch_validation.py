@@ -81,6 +81,19 @@ def _descriptor_allocator(size: int, alignment: int, stream: int | None):
     return torch.empty(size, device="cuda", dtype=torch.int8)
 
 
+def _timed_cuda_call(operation: Callable[[], object]) -> tuple[object, float, float]:
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    host_start = time.monotonic()
+    start_event.record()
+    result = operation()
+    end_event.record()
+    torch.cuda.synchronize()
+    host_ms = (time.monotonic() - host_start) * 1000.0
+    device_ms = float(start_event.elapsed_time(end_event))
+    return result, host_ms, device_ms
+
+
 @gluon.jit
 def _cluster_load_kernel(
     input_pointer,
@@ -164,6 +177,7 @@ def _run_cluster_load_sync(repetitions: int) -> dict[str, object]:
         cluster_programs * barrier_elements, dtype=torch.int32
     ).reshape(cluster_programs, barrier_elements)
     elapsed_ms = []
+    device_elapsed_ms = []
     output = None
     barrier_output = None
     for _ in range(repetitions):
@@ -174,28 +188,31 @@ def _run_cluster_load_sync(repetitions: int) -> dict[str, object]:
             dtype=torch.int32,
             device="cuda",
         )
-        start = time.monotonic()
-        _cluster_load_kernel[grid](
-            input_tensor,
-            output,
-            rows,
-            columns,
-            block_rows,
-            block_columns,
-            blocked_layout,
-            num_warps=2,
-            num_ctas=cluster_ctas,
+        _, host_ms, device_ms = _timed_cuda_call(
+            lambda: (
+                _cluster_load_kernel[grid](
+                    input_tensor,
+                    output,
+                    rows,
+                    columns,
+                    block_rows,
+                    block_columns,
+                    blocked_layout,
+                    num_warps=2,
+                    num_ctas=cluster_ctas,
+                ),
+                _cluster_barrier_kernel[(4,)](
+                    barrier_output,
+                    barrier_elements,
+                    barrier_blocked_layout,
+                    barrier_shared_layout,
+                    num_warps=8,
+                    num_ctas=cluster_ctas,
+                ),
+            )
         )
-        _cluster_barrier_kernel[(4,)](
-            barrier_output,
-            barrier_elements,
-            barrier_blocked_layout,
-            barrier_shared_layout,
-            num_warps=8,
-            num_ctas=cluster_ctas,
-        )
-        torch.cuda.synchronize()
-        elapsed_ms.append((time.monotonic() - start) * 1000.0)
+        elapsed_ms.append(host_ms)
+        device_elapsed_ms.append(device_ms)
     assert output is not None
     assert barrier_output is not None
     if not torch.equal(output.cpu(), host_input):
@@ -207,6 +224,9 @@ def _run_cluster_load_sync(repetitions: int) -> dict[str, object]:
         )
     return {
         "median_ms": statistics.median(elapsed_ms),
+        "samples_ms": elapsed_ms,
+        "device_median_ms": statistics.median(device_elapsed_ms),
+        "device_samples_ms": device_elapsed_ms,
         "repetitions": repetitions,
         "oracle": "exact-cluster-copy-and-barrier-sentinels",
         "oracle_passed": True,
@@ -230,23 +250,27 @@ def _run_descriptor_add(num_ctas: int, repetitions: int) -> dict[str, object]:
     ).reshape(rows, columns)
     expected = lhs.cpu() + rhs.cpu()
     elapsed_ms = []
+    device_elapsed_ms = []
     output = None
     for _ in range(repetitions):
         output = torch.full_like(lhs, float("nan"))
-        start = time.monotonic()
-        _descriptor_add_kernel[(rows // block_rows, columns // block_columns)](
-            lhs,
-            rhs,
-            output,
-            rows,
-            columns,
-            block_rows,
-            block_columns,
-            num_warps=4,
-            num_ctas=num_ctas,
+        _, host_ms, device_ms = _timed_cuda_call(
+            lambda: _descriptor_add_kernel[
+                (rows // block_rows, columns // block_columns)
+            ](
+                lhs,
+                rhs,
+                output,
+                rows,
+                columns,
+                block_rows,
+                block_columns,
+                num_warps=4,
+                num_ctas=num_ctas,
+            )
         )
-        torch.cuda.synchronize()
-        elapsed_ms.append((time.monotonic() - start) * 1000.0)
+        elapsed_ms.append(host_ms)
+        device_elapsed_ms.append(device_ms)
     assert output is not None
     actual = output.cpu()
     matches = torch.equal(actual, expected)
@@ -255,6 +279,9 @@ def _run_descriptor_add(num_ctas: int, repetitions: int) -> dict[str, object]:
         raise RuntimeError(f"descriptor-add oracle failed: max error {maximum_error}")
     return {
         "median_ms": statistics.median(elapsed_ms),
+        "samples_ms": elapsed_ms,
+        "device_median_ms": statistics.median(device_elapsed_ms),
+        "device_samples_ms": device_elapsed_ms,
         "repetitions": repetitions,
         "oracle": "exact",
         "oracle_passed": True,
@@ -275,13 +302,16 @@ def _run_mode(repetitions: int) -> dict[str, object]:
 
     input_tensor = host_input.to(device="cuda")
     elapsed_ms = []
+    device_elapsed_ms = []
     actual_values = None
     actual_indices = None
     for _ in range(repetitions):
-        start = time.monotonic()
-        actual_values, actual_indices = torch.mode(input_tensor, dim=1)
-        torch.cuda.synchronize()
-        elapsed_ms.append((time.monotonic() - start) * 1000.0)
+        result, host_ms, device_ms = _timed_cuda_call(
+            lambda: torch.mode(input_tensor, dim=1)
+        )
+        actual_values, actual_indices = result
+        elapsed_ms.append(host_ms)
+        device_elapsed_ms.append(device_ms)
     assert actual_values is not None
     assert actual_indices is not None
     host_values = actual_values.cpu()
@@ -302,6 +332,9 @@ def _run_mode(repetitions: int) -> dict[str, object]:
         )
     return {
         "median_ms": statistics.median(elapsed_ms),
+        "samples_ms": elapsed_ms,
+        "device_median_ms": statistics.median(device_elapsed_ms),
+        "device_samples_ms": device_elapsed_ms,
         "repetitions": repetitions,
         "oracle": "exact-value-and-valid-index",
         "oracle_passed": True,
@@ -341,15 +374,16 @@ def _run_topk_case(
     )
     input_tensor = host_input.to(device="cuda")
     elapsed_ms = []
+    device_elapsed_ms = []
     actual_values = None
     actual_indices = None
     for _ in range(repetitions):
-        start = time.monotonic()
-        actual_values, actual_indices = torch.topk(
-            input_tensor, k, dim=1, largest=True, sorted=True
+        result, host_ms, device_ms = _timed_cuda_call(
+            lambda: torch.topk(input_tensor, k, dim=1, largest=True, sorted=True)
         )
-        torch.cuda.synchronize()
-        elapsed_ms.append((time.monotonic() - start) * 1000.0)
+        actual_values, actual_indices = result
+        elapsed_ms.append(host_ms)
+        device_elapsed_ms.append(device_ms)
     assert actual_values is not None
     assert actual_indices is not None
     host_values = actual_values.cpu()
@@ -366,6 +400,9 @@ def _run_topk_case(
         )
     return {
         "median_ms": statistics.median(elapsed_ms),
+        "samples_ms": elapsed_ms,
+        "device_median_ms": statistics.median(device_elapsed_ms),
+        "device_samples_ms": device_elapsed_ms,
         "repetitions": repetitions,
         "oracle": "exact-sorted-values-and-indices",
         "oracle_passed": True,
@@ -411,13 +448,16 @@ def _run_sort(repetitions: int) -> dict[str, object]:
     expected_values, expected_indices = torch.sort(host_input, dim=1)
     input_tensor = host_input.to(device="cuda")
     elapsed_ms = []
+    device_elapsed_ms = []
     actual_values = None
     actual_indices = None
     for _ in range(repetitions):
-        start = time.monotonic()
-        actual_values, actual_indices = torch.sort(input_tensor, dim=1)
-        torch.cuda.synchronize()
-        elapsed_ms.append((time.monotonic() - start) * 1000.0)
+        result, host_ms, device_ms = _timed_cuda_call(
+            lambda: torch.sort(input_tensor, dim=1)
+        )
+        actual_values, actual_indices = result
+        elapsed_ms.append(host_ms)
+        device_elapsed_ms.append(device_ms)
     assert actual_values is not None
     assert actual_indices is not None
     if not torch.equal(actual_values.cpu(), expected_values):
@@ -426,6 +466,9 @@ def _run_sort(repetitions: int) -> dict[str, object]:
         raise RuntimeError("sort index oracle failed")
     return {
         "median_ms": statistics.median(elapsed_ms),
+        "samples_ms": elapsed_ms,
+        "device_median_ms": statistics.median(device_elapsed_ms),
+        "device_samples_ms": device_elapsed_ms,
         "repetitions": repetitions,
         "oracle": "exact-sorted-values-and-indices",
         "oracle_passed": True,
@@ -442,20 +485,25 @@ def _run_scatter_reduce_case(repetitions: int, dtype: torch.dtype) -> dict[str, 
     indices = host_indices.to(device="cuda")
     source = torch.ones(elements, dtype=dtype, device="cuda")
     elapsed_ms = []
+    device_elapsed_ms = []
     actual = None
     for _ in range(repetitions):
         output = torch.zeros(bins, dtype=dtype, device="cuda")
-        start = time.monotonic()
-        actual = output.scatter_reduce(
-            0, indices, source, reduce="sum", include_self=True
+        actual, host_ms, device_ms = _timed_cuda_call(
+            lambda: output.scatter_reduce(
+                0, indices, source, reduce="sum", include_self=True
+            )
         )
-        torch.cuda.synchronize()
-        elapsed_ms.append((time.monotonic() - start) * 1000.0)
+        elapsed_ms.append(host_ms)
+        device_elapsed_ms.append(device_ms)
     assert actual is not None
     if not torch.equal(actual.cpu(), expected):
         raise RuntimeError(f"scatter-reduce oracle failed for {dtype}")
     return {
         "median_ms": statistics.median(elapsed_ms),
+        "samples_ms": elapsed_ms,
+        "device_median_ms": statistics.median(device_elapsed_ms),
+        "device_samples_ms": device_elapsed_ms,
         "repetitions": repetitions,
         "oracle": "exact-collision-counts",
         "oracle_passed": True,
@@ -479,17 +527,22 @@ def _run_histc(repetitions: int) -> dict[str, object]:
     expected = torch.full((bins,), repeats, dtype=torch.float32)
     input_tensor = host_input.to(device="cuda")
     elapsed_ms = []
+    device_elapsed_ms = []
     actual = None
     for _ in range(repetitions):
-        start = time.monotonic()
-        actual = torch.histc(input_tensor, bins=bins, min=0, max=bins - 1)
-        torch.cuda.synchronize()
-        elapsed_ms.append((time.monotonic() - start) * 1000.0)
+        actual, host_ms, device_ms = _timed_cuda_call(
+            lambda: torch.histc(input_tensor, bins=bins, min=0, max=bins - 1)
+        )
+        elapsed_ms.append(host_ms)
+        device_elapsed_ms.append(device_ms)
     assert actual is not None
     if not torch.equal(actual.cpu(), expected):
         raise RuntimeError("histc oracle failed")
     return {
         "median_ms": statistics.median(elapsed_ms),
+        "samples_ms": elapsed_ms,
+        "device_median_ms": statistics.median(device_elapsed_ms),
+        "device_samples_ms": device_elapsed_ms,
         "repetitions": repetitions,
         "oracle": "exact-bin-counts",
         "oracle_passed": True,
@@ -510,16 +563,23 @@ def _run_norm_softmax(
     device_norm_input = norm_input.to(device="cuda")
     device_softmax_input = softmax_input.to(device="cuda")
     elapsed_ms = []
+    device_elapsed_ms = []
     actual_norm = None
     actual_softmax = None
     for _ in range(repetitions):
-        start = time.monotonic()
-        if run_norm:
-            actual_norm = torch.linalg.vector_norm(device_norm_input, dim=1)
-        if run_softmax:
-            actual_softmax = torch.softmax(device_softmax_input, dim=1)
-        torch.cuda.synchronize()
-        elapsed_ms.append((time.monotonic() - start) * 1000.0)
+        result, host_ms, device_ms = _timed_cuda_call(
+            lambda: (
+                (
+                    torch.linalg.vector_norm(device_norm_input, dim=1)
+                    if run_norm
+                    else None
+                ),
+                torch.softmax(device_softmax_input, dim=1) if run_softmax else None,
+            )
+        )
+        actual_norm, actual_softmax = result
+        elapsed_ms.append(host_ms)
+        device_elapsed_ms.append(device_ms)
     if run_norm and (
         actual_norm is None or not torch.equal(actual_norm.cpu(), expected_norm)
     ):
@@ -533,6 +593,9 @@ def _run_norm_softmax(
         raise RuntimeError("softmax oracle failed")
     return {
         "median_ms": statistics.median(elapsed_ms),
+        "samples_ms": elapsed_ms,
+        "device_median_ms": statistics.median(device_elapsed_ms),
+        "device_samples_ms": device_elapsed_ms,
         "repetitions": repetitions,
         "oracle": "exact-3-4-5-norm-and-cpu-softmax",
         "oracle_passed": True,
@@ -558,12 +621,14 @@ def _run_rdna4_compiled_softmax(repetitions: int) -> dict[str, object]:
         lambda value: torch.softmax(value, dim=1), fullgraph=True
     )
     elapsed_ms = []
+    device_elapsed_ms = []
     actual = None
     for _ in range(repetitions):
-        start = time.monotonic()
-        actual = compiled_softmax(input_tensor)
-        torch.cuda.synchronize()
-        elapsed_ms.append((time.monotonic() - start) * 1000.0)
+        actual, host_ms, device_ms = _timed_cuda_call(
+            lambda: compiled_softmax(input_tensor)
+        )
+        elapsed_ms.append(host_ms)
+        device_elapsed_ms.append(device_ms)
     assert actual is not None
     host_actual = actual.cpu()
     if not torch.allclose(host_actual, expected, rtol=1.0e-5, atol=1.0e-7):
@@ -573,6 +638,9 @@ def _run_rdna4_compiled_softmax(repetitions: int) -> dict[str, object]:
         )
     return {
         "median_ms": statistics.median(elapsed_ms),
+        "samples_ms": elapsed_ms,
+        "device_median_ms": statistics.median(device_elapsed_ms),
+        "device_samples_ms": device_elapsed_ms,
         "repetitions": repetitions,
         "oracle": "cpu-softmax-allclose",
         "oracle_passed": True,
@@ -600,12 +668,14 @@ def _run_rdna4_split_softmax(repetitions: int) -> dict[str, object]:
         lambda value: torch.softmax(value, dim=-1), fullgraph=True
     )
     elapsed_ms = []
+    device_elapsed_ms = []
     actual = None
     for _ in range(repetitions):
-        start = time.monotonic()
-        actual = compiled_softmax(input_tensor)
-        torch.cuda.synchronize()
-        elapsed_ms.append((time.monotonic() - start) * 1000.0)
+        actual, host_ms, device_ms = _timed_cuda_call(
+            lambda: compiled_softmax(input_tensor)
+        )
+        elapsed_ms.append(host_ms)
+        device_elapsed_ms.append(device_ms)
     assert actual is not None
     host_actual = actual.cpu()
     if not torch.equal(host_actual, expected):
@@ -617,6 +687,9 @@ def _run_rdna4_split_softmax(repetitions: int) -> dict[str, object]:
         )
     return {
         "median_ms": statistics.median(elapsed_ms),
+        "samples_ms": elapsed_ms,
+        "device_median_ms": statistics.median(device_elapsed_ms),
+        "device_samples_ms": device_elapsed_ms,
         "repetitions": repetitions,
         "oracle": "independent-fp32-cpu-softmax-rounded-exactly-to-bf16",
         "oracle_passed": True,

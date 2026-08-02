@@ -40,9 +40,11 @@ oracle, and coverage evidence are valid.
 
 ## Current matrix
 
-All 19 workloads × 4 engines are assessed.  Coverage counts use each engine's
-own admitted-site model; in particular, Sampled reports split-barrier members
-where other engines report logical barriers.
+19 of 21 workloads × 4 engines are assessed. The newly admitted production
+FP16 and FP8 matmul rows are intentionally gray until the empirical campaign
+tracked by `bd-2wsf` completes. Coverage counts use each engine's own
+admitted-site model; in particular, Sampled reports split-barrier members where
+other engines report logical barriers.
 
 This checkpoint also admits native `ds_load_b96` and `ds_store_b96` on both
 gfx1201 and gfx1250 across Record/Replay, Sampled, and Inline Shadow. gfx1100
@@ -56,6 +58,8 @@ race and a generic ConSan model false positive.
 
 | Priority workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
+| **P0 production FP16 RDNA4 matmul** | 🩶 Empirical admission pending (`bd-2wsf`) | 🩶 Empirical admission pending (`bd-2wsf`) | 🩶 Empirical admission pending (`bd-2wsf`) | 🩶 Empirical admission pending (`bd-2wsf`) |
+| **P0 production FP8 RDNA4 matmul** | 🩶 Empirical admission pending (`bd-2wsf`) | 🩶 Empirical admission pending (`bd-2wsf`) | 🩶 Empirical admission pending (`bd-2wsf`) | 🩶 Empirical admission pending (`bd-2wsf`) |
 | **P0 Qwen3-0.6B prefill** | 🟩 Exact oracle; clean 20/20; exact barrier drop emits an attributed diagnostic and breaks the oracle; overhead 1.044x | 🟩 Exact oracle; clean 20/20 + 14/14; exact drop is a precommitted qualified miss and breaks the oracle; overhead 1.004x | 🟩 Exact oracle; clean 20/20 + 26/26; deterministic 32-offset fault sweep detects 17/32 and every exact mutation breaks the oracle; overhead 1.003x | 🟩 Exact oracle; clean 20/20 + 14/14; exact barrier drop emits a diagnostic and breaks the oracle; overhead 1.005x |
 | **P0 PyTorch torch.mode** | 🟥 Current 12,284,128-byte object is rejected during relay planning because SOPP relay coordinates are not globally unique | 🟩 Exact value/index oracle; 4/4 strict clean runs complete at 140,334/140,334 accesses + 21,002/21,002 barriers + 38/38 fences with zero diagnostics in 18.97–21.76 seconds | 🟧 Exact oracle; 131,326/140,334 accesses patch, with 9,008 placement/lowering failures and 4,640/4,640 admitted barrier members | 🟥 Complete inventory and report planning, then the large-object patch exceeds the ordinary 30-second bound |
 | **P1 Sharktank TP1 prefill** | 🟩 Exact oracle; clean 352/352; exact drop is a precommitted qualified miss; overhead 1.26x | 🟩 Exact oracle; clean 352/352 + 46/46; exact drop emits a replay diagnostic; overhead 2.002x | 🟩 Exact oracle; clean 352/352 + 86/86; exact drop is a precommitted qualified miss; overhead 1.14x | 🟩 Exact oracle; clean 352/352 + 46/46; exact drop emits an attributed diagnostic; overhead 2.75x |

@@ -13,8 +13,10 @@ import argparse
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, replace
 import json
+import math
 import os
 from pathlib import Path
+import random
 import re
 import selectors
 import shlex
@@ -38,12 +40,19 @@ from consan_validation_support import (
 )
 
 SCHEMA_VERSION = 2
+EMPIRICAL_CAMPAIGN_SCHEMA_VERSION = 1
 WORKSPACE_ENV = "CONSAN_VALIDATION_WORKSPACE_DIR"
 TARGET_ENV = "CONSAN_VALIDATION_TARGET"
 PYTORCH_PYTHON_ENV = "CONSAN_VALIDATION_PYTORCH_PYTHON"
 SHARKTANK_PYTHON_ENV = "CONSAN_VALIDATION_SHARKTANK_PYTHON"
 TENSILE_PYTHON_ENV = "CONSAN_VALIDATION_TENSILE_PYTHON"
+RDNA4_MATMUL_DIR_ENV = "CONSAN_VALIDATION_RDNA4_MATMUL_DIR"
 TIMEOUT_SECONDS = 30
+EMPIRICAL_DEFAULT_ROUNDS = 10
+EMPIRICAL_DEFAULT_BOOTSTRAP_RESAMPLES = 10_000
+EMPIRICAL_DEFAULT_BASELINE_DRIFT_LIMIT = 0.05
+EMPIRICAL_MINIMUM_TIMED_MS = 250.0
+EMPIRICAL_MAX_INNER_REPETITIONS = 1_000_000
 PROCESS_OUTPUT_DRAIN_SECONDS = 2
 PROCESS_TERMINATION_GRACE_SECONDS = 5
 NATIVE_CDNA_TARGETS = frozenset(("gfx942", "gfx950"))
@@ -205,6 +214,7 @@ class Workload:
     tensile_expected_numeric_rows: int | None = None
     tensile_streamk_fixed_grid: int | None = None
     tensile_streamk_mode: int | None = None
+    self_timed_device_minimum_ms: float | None = None
 
 
 @dataclass(frozen=True)
@@ -737,6 +747,42 @@ WORKLOADS = (
         fault_families=("barrier-drop",),
         targets=("gfx1201",),
         run_timeout_seconds=120,
+    ),
+    Workload(
+        id="rdna4-matmul-fp16-production",
+        priority="P0",
+        corpus="rdna4-matmul",
+        kind="rdna4-matmul",
+        relative_path="build/rdna4_matmul_production",
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        fault_families=("barrier-drop", "lds-wrong-address"),
+        targets=("gfx1201",),
+        run_timeout_seconds=60,
+        self_timed_device_minimum_ms=EMPIRICAL_MINIMUM_TIMED_MS,
+    ),
+    Workload(
+        id="rdna4-matmul-fp8-production",
+        priority="P0",
+        corpus="rdna4-matmul",
+        kind="rdna4-matmul",
+        relative_path="build/rdna4_matmul_production",
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        fault_families=("barrier-drop", "lds-wrong-address"),
+        targets=("gfx1201",),
+        run_timeout_seconds=60,
+        self_timed_device_minimum_ms=EMPIRICAL_MINIMUM_TIMED_MS,
     ),
     Workload(
         id="llama-rdna4-mul-mat-vec-q",
@@ -1463,6 +1509,13 @@ def _hook_path(workspace: Path) -> Path:
     return candidates[0]
 
 
+def _rdna4_matmul_root(workspace: Path) -> Path:
+    configured = os.environ.get(RDNA4_MATMUL_DIR_ENV)
+    if configured:
+        return Path(os.path.abspath(Path(configured).expanduser()))
+    return workspace / "rdna4_matmul"
+
+
 def _required_paths(
     workspace: Path, workloads: tuple[Workload, ...]
 ) -> dict[str, Path]:
@@ -1479,6 +1532,8 @@ def _required_paths(
         paths["hip-moi"] = workspace / "hip-moi"
     if any(workload.corpus == "rocjitsu-test-corpus" for workload in workloads):
         paths["rocjitsu-test-corpus"] = workspace / "rocjitsu-test-corpus"
+    if any(workload.corpus == "rdna4-matmul" for workload in workloads):
+        paths["rdna4-matmul"] = _rdna4_matmul_root(workspace)
     if any(workload.kind == "tensile" for workload in workloads):
         tensile_paths = resolve_tensile_validation_paths(workspace)
         paths["tensilelite"] = tensile_paths.tensilelite
@@ -1668,6 +1723,16 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
             / "case.json",
             "executable": _llama_executable(workspace, target, workload.relative_path),
         }
+    if workload.kind == "rdna4-matmul":
+        root = _rdna4_matmul_root(workspace)
+        return {
+            "workload-source": Path(__file__).with_name(
+                "consan_rdna4_matmul_validation.py"
+            ),
+            "project-source": root / "rdna4_matmul.hip",
+            "project-build-script": root / "build_and_test.sh",
+            "executable": root / workload.relative_path,
+        }
     if workload.kind == "qwen":
         root = workspace / workload.relative_path
         data = root / "hf" / "qwen3-600m"
@@ -1836,7 +1901,7 @@ def _clean_environment(
             "RJ_CONSAN_LOG": "1",
         }
     )
-    if workload.kind in {"pytorch", "llama"}:
+    if workload.kind in {"pytorch", "llama", "rdna4-matmul"}:
         # These clients use a modern HSA runtime which returns after successful
         # rocprofiler registration unless legacy environment tools are
         # explicitly requested. ConSan is currently such a tool.
@@ -1990,7 +2055,11 @@ def _profile_runtime_defaults(
 
 
 def _qwen_command(
-    workspace: Path, target: str, overhead: bool, output: Path
+    workspace: Path,
+    target: str,
+    overhead: bool,
+    output: Path,
+    repetitions_override: int | None = None,
 ) -> list[str]:
     root = workspace / "iree-test-suites-build" / "torch_models" / "qwen3-600m"
     data = root / "hf" / "qwen3-600m"
@@ -2003,7 +2072,7 @@ def _qwen_command(
         f"--input=1x5xi64=@{data / 'inference_input.0.bin'}",
     ]
     if overhead:
-        repetitions = QWEN_OVERHEAD_REPETITIONS.get(target, 10)
+        repetitions = repetitions_override or QWEN_OVERHEAD_REPETITIONS.get(target, 10)
         command.extend(
             [
                 f"--benchmark_repetitions={repetitions}",
@@ -2052,15 +2121,24 @@ def _workload_command(
     workload: Workload,
     phase: str,
     output: Path,
+    inner_repetitions_override: int | None = None,
 ) -> list[str]:
     workload = _resolved_workload(target, workload)
     overhead = phase == "overhead"
     if workload.kind == "qwen":
-        return _qwen_command(workspace, target, overhead, output)
+        return _qwen_command(
+            workspace,
+            target,
+            overhead,
+            output,
+            inner_repetitions_override,
+        )
     if workload.kind == "sharktank":
         # The active architecture campaigns use one end-to-end repetition.
         # Keep both the outer process count and this inner suite count at one.
-        repetitions = _inner_repetitions(target, phase, workload)
+        repetitions = inner_repetitions_override or _inner_repetitions(
+            target, phase, workload
+        )
         return [
             str(_sharktank_python()),
             str(Path(__file__).with_name("consan_sharktank_validation.py")),
@@ -2079,7 +2157,9 @@ def _workload_command(
         # Large rows may declare isolated outer processes because repeated
         # instrumented dispatches accumulate bounded report state. Small rows
         # retain warm in-process timing, and simulator targets stay single-shot.
-        repetitions = _inner_repetitions(target, phase, workload)
+        repetitions = inner_repetitions_override or _inner_repetitions(
+            target, phase, workload
+        )
         return [
             str(_pytorch_python(workspace)),
             str(Path(__file__).with_name(workload.relative_path)),
@@ -2152,6 +2232,22 @@ def _workload_command(
             "--output-dir",
             str(output.parent / f"{output.stem}-llama-work"),
         ]
+    if workload.kind == "rdna4-matmul":
+        repetitions = inner_repetitions_override or 1
+        return [
+            sys.executable,
+            str(Path(__file__).with_name("consan_rdna4_matmul_validation.py")),
+            "--executable",
+            str(_rdna4_matmul_root(workspace) / workload.relative_path),
+            "--workload",
+            workload.id.removeprefix("rdna4-matmul-"),
+            "--phase",
+            "clean" if phase in {"clean", "fault"} else "warm",
+            "--repetitions",
+            str(repetitions),
+            "--label",
+            f"{workload.id}-{phase}",
+        ]
     executable = workspace / workload.relative_path
     selected_filter = (
         workload.fault_filter or workload.clean_filter
@@ -2216,6 +2312,8 @@ def _source_identities(workspace: Path, workload: Workload) -> list[dict | None]
         roots.append(paths.tensilelite)
     if workload.kind == "llama":
         roots.append(workspace / "rocjitsu-test-corpus")
+    if workload.kind == "rdna4-matmul":
+        roots.append(_rdna4_matmul_root(workspace))
     if workload.kind == "pytorch":
         roots.append(workspace / "pytorch")
     return [git_identity(root) for root in roots]
@@ -3087,31 +3185,37 @@ def _coverage_summary(
     return summary
 
 
-def _benchmark_median(path: Path) -> float:
+def _benchmark_samples(path: Path) -> list[float]:
     document = json.loads(path.read_text(encoding="utf-8"))
     rows = document.get("benchmarks", [])
-    medians = [
+    iterations = [
         row
         for row in rows
-        if row.get("aggregate_name") == "median"
+        if row.get("run_type") == "iteration"
         and str(row.get("name", "")).startswith("BM_main/")
     ]
-    if not medians:
-        medians = [
+    selected = iterations
+    if not selected:
+        selected = [
             row
             for row in rows
-            if row.get("run_type") == "iteration"
-            and row.get("repetitions") == 1
+            if row.get("aggregate_name") == "median"
             and str(row.get("name", "")).startswith("BM_main/")
         ]
-    if len(medians) != 1:
-        raise ValidationError(f"expected one Qwen benchmark median in {path}")
+    if not selected:
+        raise ValidationError(f"expected Qwen benchmark timing rows in {path}")
     scale = {"ns": 1e-6, "us": 1e-3, "ms": 1.0, "s": 1e3}
-    row = medians[0]
-    return float(row["real_time"]) * scale[row["time_unit"]]
+    try:
+        return [float(row["real_time"]) * scale[row["time_unit"]] for row in selected]
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValidationError(f"malformed Qwen benchmark timing in {path}") from error
 
 
-def _json_medians(log_text: str, workload_kind: str) -> dict[str, float]:
+def _benchmark_median(path: Path) -> float:
+    return statistics.median(_benchmark_samples(path))
+
+
+def _json_timing_samples(log_text: str, workload_kind: str) -> dict[str, list[float]]:
     documents = []
     for line in log_text.splitlines():
         if line.startswith("{"):
@@ -3122,10 +3226,53 @@ def _json_medians(log_text: str, workload_kind: str) -> dict[str, float]:
     if len(documents) != 1:
         raise ValidationError(f"expected one {workload_kind} JSON result")
     document = documents[0]
+    timings = {}
+    for key, value in document.items():
+        if not isinstance(value, dict):
+            continue
+        if "median_ms" in value:
+            samples = value.get("samples_ms")
+            if samples is None:
+                samples = [value["median_ms"]]
+            if (
+                not isinstance(samples, list)
+                or not samples
+                or any(
+                    not isinstance(sample, (int, float))
+                    or not math.isfinite(float(sample))
+                    or sample <= 0
+                    for sample in samples
+                )
+            ):
+                raise ValidationError(
+                    f"invalid {workload_kind} timing samples for {key}"
+                )
+            timings[key] = [float(sample) for sample in samples]
+        device_samples = value.get("device_samples_ms")
+        if device_samples is None and "device_median_ms" in value:
+            device_samples = [value["device_median_ms"]]
+        if device_samples is not None:
+            if (
+                not isinstance(device_samples, list)
+                or not device_samples
+                or any(
+                    not isinstance(sample, (int, float))
+                    or not math.isfinite(float(sample))
+                    or sample <= 0
+                    for sample in device_samples
+                )
+            ):
+                raise ValidationError(
+                    f"invalid {workload_kind} device timing samples for {key}"
+                )
+            timings[f"{key}:device"] = [float(sample) for sample in device_samples]
+    return timings
+
+
+def _json_medians(log_text: str, workload_kind: str) -> dict[str, float]:
     return {
-        key: float(value["median_ms"])
-        for key, value in document.items()
-        if isinstance(value, dict) and "median_ms" in value
+        key: statistics.median(values)
+        for key, values in _json_timing_samples(log_text, workload_kind).items()
     }
 
 
@@ -3133,7 +3280,7 @@ def _sharktank_medians(log_text: str) -> dict[str, float]:
     return _json_medians(log_text, "Sharktank")
 
 
-def _gtest_median(log_texts: list[str]) -> dict[str, float]:
+def _gtest_timing_samples(log_texts: list[str]) -> dict[str, list[float]]:
     pattern = re.compile(r"\[==========\].*\(([0-9]+) ms total\)")
     values = []
     for log_text in log_texts:
@@ -3141,7 +3288,308 @@ def _gtest_median(log_texts: list[str]) -> dict[str, float]:
         if not matches:
             raise ValidationError("missing GTest total latency")
         values.append(float(matches[-1]))
-    return {"process": statistics.median(values)}
+    return {"process": values}
+
+
+def _gtest_median(log_texts: list[str]) -> dict[str, float]:
+    return {
+        mode: statistics.median(values)
+        for mode, values in _gtest_timing_samples(log_texts).items()
+    }
+
+
+def _nonnegative_float(fields: dict[str, str], name: str) -> float | None:
+    try:
+        value = float(fields[name])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) and value >= 0.0 else None
+
+
+def _empirical_structural_metrics(log_text: str) -> dict[str, object]:
+    readers: dict[int, dict[str, object]] = {}
+    process_memory: dict[str, int] = {}
+    reasons = []
+
+    def parse(line: str, marker: str, context: str) -> dict[str, str] | None:
+        return _parse_log_fields(line, marker, context, reasons)
+
+    for line in log_text.splitlines():
+        fields = None
+        if "ConSan waitcheck timing reader=" in line:
+            fields = parse(line, "ConSan waitcheck timing ", "waitcheck timing")
+            if fields is not None:
+                reader = _unsigned(fields, "reader")
+                elapsed = _nonnegative_float(fields, "elapsed_ms")
+                if reader is None or elapsed is None:
+                    reasons.append("malformed waitcheck timing")
+                else:
+                    readers.setdefault(reader, {})["waitcheck_ms"] = elapsed
+        elif "ConSan MOI inventory end reader=" in line:
+            fields = parse(line, "ConSan MOI inventory end ", "MOI inventory timing")
+            if fields is not None:
+                reader = _unsigned(fields, "reader")
+                elapsed = _nonnegative_float(fields, "elapsed_ms")
+                if reader is None or elapsed is None:
+                    reasons.append("malformed MOI inventory timing")
+                else:
+                    readers.setdefault(reader, {})["inventory_ms"] = elapsed
+        elif "ConSan patch begin reader=" in line:
+            fields = parse(line, "ConSan patch begin ", "patch begin")
+            if fields is not None:
+                reader = _unsigned(fields, "reader")
+                byte_count = _unsigned(fields, "bytes")
+                if reader is None or byte_count is None:
+                    reasons.append("malformed patch begin")
+                else:
+                    readers.setdefault(reader, {})["original_bytes"] = byte_count
+        elif "ConSan patch end reader=" in line:
+            fields = parse(line, "ConSan patch end ", "patch end")
+            if fields is not None:
+                reader = _unsigned(fields, "reader")
+                elapsed = _nonnegative_float(fields, "elapsed_ms")
+                patches = _unsigned(fields, "patches")
+                if reader is None or elapsed is None or patches is None:
+                    reasons.append("patch end lacks empirical timing fields")
+                else:
+                    record = readers.setdefault(reader, {})
+                    record["transform_ms"] = elapsed
+                    record["patches"] = patches
+                    record["modified"] = _boolean(fields, "modified")
+                    record["outcome"] = fields.get("outcome")
+        elif "ConSan replacement reader=" in line:
+            fields = parse(line, "ConSan replacement ", "replacement image")
+            if fields is not None:
+                reader = _unsigned(fields, "original_reader")
+                byte_count = _unsigned(fields, "bytes")
+                if reader is None or byte_count is None:
+                    reasons.append("malformed replacement image")
+                else:
+                    readers.setdefault(reader, {})["patched_bytes"] = byte_count
+        elif "ConSan MOI resources reader=" in line:
+            fields = parse(line, "ConSan MOI resources ", "MOI resources")
+            if fields is not None:
+                reader = _unsigned(fields, "reader")
+                if reader is None:
+                    reasons.append("malformed MOI resources")
+                    continue
+                resource_names = (
+                    "explicit",
+                    "dead",
+                    "descriptor_growth",
+                    "spill",
+                    "unsupported",
+                    "planned_spill_slot_bytes",
+                    "emitted_spill_patches",
+                    "emitted_spill_slot_bytes",
+                    "alternative_attempts",
+                    "alternative_selected",
+                    "alternative_rejected",
+                    "alternative_superseded",
+                    "alternative_contributed",
+                    "alternative_vetoed",
+                )
+                resources = {name: _unsigned(fields, name) for name in resource_names}
+                if any(value is None for value in resources.values()):
+                    reasons.append("malformed MOI resources")
+                else:
+                    readers.setdefault(reader, {})["resources"] = resources
+        elif "ConSan MOI report memory required_bytes=" in line:
+            fields = parse(line, "ConSan MOI report memory ", "report memory")
+            if fields is not None:
+                for source, destination in (
+                    ("required_bytes", "report_required_bytes"),
+                    ("allocated_bytes", "report_allocated_bytes"),
+                    ("peak_live_bytes", "report_peak_live_bytes"),
+                    ("allocation_failures", "report_allocation_failures"),
+                    ("capacity_failures", "report_capacity_failures"),
+                    ("cleanup_failures", "report_cleanup_failures"),
+                ):
+                    value = _unsigned(fields, source)
+                    if value is None:
+                        reasons.append(f"malformed report memory field {source}")
+                    else:
+                        process_memory[destination] = value
+        elif "ConSan transform admission memory live_bytes=" in line:
+            fields = parse(
+                line,
+                "ConSan transform admission memory ",
+                "transform admission memory",
+            )
+            if fields is not None:
+                value = _unsigned(fields, "peak_reserved_bytes")
+                if value is None:
+                    reasons.append("malformed transform admission memory")
+                else:
+                    process_memory["transform_peak_reserved_bytes"] = value
+        elif "ConSan patched-image memory live_bytes=" in line:
+            fields = parse(line, "ConSan patched-image memory ", "patched image memory")
+            if fields is not None:
+                value = _unsigned(fields, "peak_image_bytes")
+                if value is None:
+                    reasons.append("malformed patched image memory")
+                else:
+                    process_memory["patched_image_peak_bytes"] = value
+        elif "ConSan patched-image growth memory live_bytes=" in line:
+            fields = parse(
+                line,
+                "ConSan patched-image growth memory ",
+                "patched image growth memory",
+            )
+            if fields is not None:
+                value = _unsigned(fields, "peak_growth_bytes")
+                if value is None:
+                    reasons.append("malformed patched image growth memory")
+                else:
+                    process_memory["patched_image_peak_growth_bytes"] = value
+
+    code_objects = []
+    for reader, record in sorted(readers.items()):
+        original = record.get("original_bytes")
+        patched = record.get("patched_bytes", original)
+        record["reader"] = reader
+        record["patched_bytes"] = patched
+        if isinstance(original, int) and isinstance(patched, int):
+            record["growth_bytes"] = patched - original
+            record["growth_ratio"] = patched / original if original else None
+        code_objects.append(record)
+    transformed = [
+        record["transform_ms"]
+        for record in code_objects
+        if isinstance(record.get("transform_ms"), float)
+    ]
+    return {
+        "accepted": not reasons and bool(transformed),
+        "reasons": reasons,
+        "code_objects": code_objects,
+        "total_transform_ms": sum(transformed),
+        "process_memory": process_memory,
+    }
+
+
+def _parse_amdgpu_kernel_metadata(text: str) -> dict[str, object]:
+    integer_fields = {
+        "group_segment_fixed_size",
+        "private_segment_fixed_size",
+        "sgpr_count",
+        "sgpr_spill_count",
+        "vgpr_count",
+        "vgpr_spill_count",
+        "agpr_count",
+        "accum_offset",
+        "wavefront_size",
+        "max_flat_workgroup_size",
+    }
+    kernels = []
+    current: dict[str, object] | None = None
+    for line in text.splitlines():
+        start = re.match(r"^  - \.([a-z_]+):\s*(.*?)\s*$", line)
+        if start is not None:
+            if current:
+                kernels.append(current)
+            current = {}
+            name, value = start.groups()
+            if name in integer_fields and value:
+                try:
+                    current[name] = int(value, 0)
+                except ValueError:
+                    current[name] = None
+        if current is None:
+            continue
+        match = re.match(r"^    \.([a-z_]+):\s*(.*?)\s*$", line)
+        if match is None:
+            continue
+        name, value = match.groups()
+        if name == "name":
+            current[name] = value
+        elif name in integer_fields:
+            try:
+                current[name] = int(value, 0)
+            except ValueError:
+                current[name] = None
+    if current:
+        kernels.append(current)
+    return {
+        "kernels": kernels,
+        "kernel_count": len(kernels),
+        "fields": sorted(
+            {name for kernel in kernels for name in kernel if name != "name"}
+        ),
+    }
+
+
+def _amdgpu_kernel_metadata(path: Path) -> dict[str, object]:
+    preferred = Path("/home/jakub/llvm/main/build/bin/llvm-readelf")
+    tool = preferred if preferred.is_file() else None
+    if tool is None:
+        discovered = shutil.which("llvm-readelf")
+        tool = Path(discovered) if discovered else None
+    if tool is None:
+        return {
+            "accepted": False,
+            "reason": "llvm-readelf is unavailable",
+            "tool": None,
+        }
+    completed = subprocess.run(
+        [str(tool), "--notes", str(path)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        timeout=30,
+    )
+    if completed.returncode != 0:
+        return {
+            "accepted": False,
+            "reason": completed.stderr.strip() or "llvm-readelf failed",
+            "tool": str(tool),
+        }
+    metadata = _parse_amdgpu_kernel_metadata(completed.stdout)
+    return {
+        "accepted": metadata["kernel_count"] > 0,
+        "reason": None if metadata["kernel_count"] > 0 else "no AMDGPU kernels found",
+        "tool": str(tool),
+        **metadata,
+    }
+
+
+def _retained_code_object_inventory(row_dir: Path) -> dict[str, object]:
+    records: dict[tuple[str, str], dict[str, object]] = {}
+    for path in sorted(row_dir.glob("code-objects-*/*.hsaco")):
+        match = _COVERAGE_DUMP_NAME.fullmatch(path.name)
+        if match is None:
+            continue
+        key = (match.group("dump_id"), match.group("reader"))
+        record = records.setdefault(
+            key,
+            {"dump_id": key[0], "reader": int(key[1])},
+        )
+        record[match.group("kind")] = {
+            "path": _retained_relative_path(row_dir, path),
+            "size": path.stat().st_size,
+            "sha256": sha256_file(path),
+            "metadata": _amdgpu_kernel_metadata(path),
+        }
+    pairs = []
+    for record in records.values():
+        original = record.get("original")
+        patched = record.get("patched")
+        if isinstance(original, dict) and isinstance(patched, dict):
+            record["growth_bytes"] = patched["size"] - original["size"]
+            record["growth_ratio"] = (
+                patched["size"] / original["size"] if original["size"] else None
+            )
+        pairs.append(record)
+    return {
+        "pairs": pairs,
+        "complete_pairs": sum("growth_bytes" in row for row in pairs),
+        "metadata_complete_pairs": sum(
+            "growth_bytes" in row
+            and row["original"]["metadata"]["accepted"]
+            and row["patched"]["metadata"]["accepted"]
+            for row in pairs
+        ),
+    }
 
 
 def _gtest_test_count(log_text: str) -> int | None:
@@ -3945,13 +4393,29 @@ def _run_profile(
     timeout: int,
     row_label: str | None = None,
     launcher: list[str] | None = None,
+    *,
+    row_dir_override: Path | None = None,
+    repetitions_override: int | None = None,
+    inner_repetitions_override: int | None = None,
+    discard_first_timing_sample: bool = False,
+    retain_code_objects: bool = False,
 ) -> dict:
     profile_id = profile or "baseline"
     result_phase = _result_phase(phase, profile, workload)
-    row_dir = artifact_root / workload.id / result_phase / (row_label or profile_id)
+    row_dir = row_dir_override or (
+        artifact_root / workload.id / result_phase / (row_label or profile_id)
+    )
     row_dir.mkdir(parents=True, exist_ok=False)
     hook = _hook_path(workspace)
-    repetitions = _outer_repetitions(target, phase, workload)
+    repetitions = (
+        repetitions_override
+        if repetitions_override is not None
+        else _outer_repetitions(target, phase, workload)
+    )
+    if repetitions <= 0:
+        raise ValidationError("profile repetitions must be positive")
+    if inner_repetitions_override is not None and inner_repetitions_override <= 0:
+        raise ValidationError("inner repetitions must be positive")
     coverage_contract = _coverage_contract_for_profile(workload, profile)
     logs = []
     commands = []
@@ -3961,11 +4425,20 @@ def _run_profile(
     qwen_json_paths = []
     for index in range(repetitions):
         benchmark_path = row_dir / f"benchmark-{index}.json"
-        command = _workload_command(workspace, target, workload, phase, benchmark_path)
+        command = _workload_command(
+            workspace,
+            target,
+            workload,
+            phase,
+            benchmark_path,
+            inner_repetitions_override,
+        )
         command = _with_launcher(launcher or [], command)
         log_path = row_dir / f"run-{index}.log"
         environment = _run_environment(profile, workload, hook, target, phase)
-        if result_phase == "coverage-output":
+        if profile is not None and (
+            result_phase == "coverage-output" or retain_code_objects
+        ):
             dump_dir = row_dir / f"code-objects-{index}"
             dump_dir.mkdir()
             environment["RJ_CONSAN_DUMP_DIR"] = str(dump_dir.resolve())
@@ -3985,22 +4458,41 @@ def _run_profile(
             qwen_json_paths.append(benchmark_path)
 
     timing = None
+    timing_samples = None
     if phase == "overhead" and all(code == 0 for code in returncodes):
         if workload.kind == "qwen":
-            timing = {
-                "dispatch": statistics.median(
-                    _benchmark_median(path) for path in qwen_json_paths
-                )
+            timing_samples = {
+                "dispatch": [
+                    value
+                    for path in qwen_json_paths
+                    for value in _benchmark_samples(path)
+                ]
             }
-        elif workload.kind in {"sharktank", "pytorch", "tensile", "llama"}:
-            per_run = [_json_medians(log, workload.kind.capitalize()) for log in logs]
+        elif workload.kind in {
+            "sharktank",
+            "pytorch",
+            "tensile",
+            "llama",
+            "rdna4-matmul",
+        }:
+            per_run = [
+                _json_timing_samples(log, workload.kind.capitalize()) for log in logs
+            ]
             keys = set.intersection(*(set(item) for item in per_run))
-            timing = {
-                key: statistics.median(item[key] for item in per_run)
+            timing_samples = {
+                key: [value for item in per_run for value in item[key]]
                 for key in sorted(keys)
             }
+            if discard_first_timing_sample:
+                timing_samples = {
+                    key: values[1:] if len(values) > 1 else values
+                    for key, values in timing_samples.items()
+                }
         else:
-            timing = _gtest_median(logs)
+            timing_samples = _gtest_timing_samples(logs)
+        timing = {
+            key: statistics.median(values) for key, values in timing_samples.items()
+        }
 
     coverage = None
     coverage_runs = None
@@ -4025,6 +4517,11 @@ def _run_profile(
         len(commands),
     )
     provenance_path = _workload_provenance_path(artifact_root, workload)
+    structural_metrics_runs = (
+        [_empirical_structural_metrics(log) for log in logs]
+        if profile is not None and retain_code_objects
+        else None
+    )
     result = {
         "schema_version": SCHEMA_VERSION,
         "workload": workload.id,
@@ -4035,7 +4532,15 @@ def _run_profile(
         "environment": recorded_environment,
         "returncodes": returncodes,
         "elapsed_seconds": elapsed_seconds,
+        "repetition_policy": {
+            "outer_processes": repetitions,
+            "inner_repetitions_override": inner_repetitions_override,
+            "discarded_first_timing_sample": discard_first_timing_sample,
+            "retained_code_objects": retain_code_objects,
+        },
         "timing_median_ms": timing,
+        "timing_samples_ms": timing_samples,
+        "structural_metrics_runs": structural_metrics_runs,
         "coverage": coverage,
         "coverage_runs": coverage_runs,
         "gtest_test_counts": gtest_test_counts,
@@ -4049,6 +4554,8 @@ def _run_profile(
         "sources": _source_identities(workspace, workload),
         "provenance": str(provenance_path),
     }
+    if profile is not None and retain_code_objects:
+        result["retained_code_objects"] = _retained_code_object_inventory(row_dir)
     if result_phase == "coverage-output":
         assert coverage_runs is not None
         result["coverage_acceptance"] = runtime_accepted
@@ -4106,6 +4613,282 @@ def _overhead_summary(results: list[dict]) -> dict:
         "baseline_policy": "mean-of-before-and-after-medians",
         "paired_baseline_median_ms": paired,
         "profiles": profiles,
+    }
+
+
+def _linear_quantile(values: list[float], probability: float) -> float:
+    if not values:
+        raise ValidationError("cannot summarize an empty sample")
+    if not 0.0 <= probability <= 1.0:
+        raise ValidationError("quantile probability must be between zero and one")
+    ordered = sorted(float(value) for value in values)
+    if len(ordered) == 1:
+        return ordered[0]
+    position = probability * (len(ordered) - 1)
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    fraction = position - lower
+    return ordered[lower] + fraction * (ordered[upper] - ordered[lower])
+
+
+def _bootstrap_median_interval(
+    values: list[float], *, resamples: int, seed: int
+) -> dict[str, float]:
+    if not values:
+        raise ValidationError("cannot bootstrap an empty sample")
+    if resamples <= 0:
+        raise ValidationError("bootstrap resamples must be positive")
+    if len(values) == 1:
+        lower = upper = float(values[0])
+    else:
+        generator = random.Random(seed)
+        medians = [
+            statistics.median(generator.choices(values, k=len(values)))
+            for _ in range(resamples)
+        ]
+        lower = _linear_quantile(medians, 0.025)
+        upper = _linear_quantile(medians, 0.975)
+    return {"lower": lower, "upper": upper}
+
+
+def _sample_summary(
+    values: list[float], *, bootstrap_resamples: int, bootstrap_seed: int
+) -> dict[str, object]:
+    if not values:
+        raise ValidationError("cannot summarize an empty sample")
+    q1 = _linear_quantile(values, 0.25)
+    q3 = _linear_quantile(values, 0.75)
+    return {
+        "count": len(values),
+        "minimum": min(values),
+        "q1": q1,
+        "median": statistics.median(values),
+        "q3": q3,
+        "maximum": max(values),
+        "iqr": q3 - q1,
+        "bootstrap_median_95": _bootstrap_median_interval(
+            values,
+            resamples=bootstrap_resamples,
+            seed=bootstrap_seed,
+        ),
+    }
+
+
+def _empirical_row_metrics(
+    result: dict,
+    *,
+    include_process: bool = True,
+    include_workload: bool = True,
+    prefix: str = "",
+) -> dict[str, float]:
+    elapsed = result.get("elapsed_seconds")
+    if not isinstance(elapsed, list) or not elapsed:
+        raise ValidationError("empirical row has no process elapsed samples")
+    metrics = {}
+    if include_process:
+        process_name = f"{prefix}:process" if prefix else "cold-process"
+        metrics[process_name] = statistics.median(elapsed) * 1000.0
+    timing = result.get("timing_median_ms")
+    if include_workload and isinstance(timing, dict):
+        metrics.update(
+            {
+                f"{prefix + ':' if prefix else ''}workload:{mode}": float(value)
+                for mode, value in timing.items()
+                if isinstance(mode, str) and isinstance(value, (int, float))
+            }
+        )
+    return metrics
+
+
+def _empirical_round_summary(
+    round_index: int,
+    order: list[str],
+    baseline_before: dict,
+    profile_results: dict[str, dict],
+    baseline_after: dict,
+    *,
+    baseline_drift_limit: float,
+    include_process_metric: bool = True,
+    include_workload_metrics: bool = True,
+    metric_prefix: str = "",
+) -> dict[str, object]:
+    rows = [
+        baseline_before,
+        *(profile_results[profile] for profile in order),
+        baseline_after,
+    ]
+    reasons = []
+    for label, result in (
+        ("baseline-before", baseline_before),
+        *((profile, profile_results[profile]) for profile in order),
+        ("baseline-after", baseline_after),
+    ):
+        if result.get("accepted") is not True:
+            reasons.append(f"{label} row rejected")
+
+    row_metrics = [
+        _empirical_row_metrics(
+            result,
+            include_process=include_process_metric,
+            include_workload=include_workload_metrics,
+            prefix=metric_prefix,
+        )
+        for result in rows
+    ]
+    common_metrics = set.intersection(*(set(metrics) for metrics in row_metrics))
+    if not common_metrics:
+        reasons.append("rows have no common timing metric")
+    metrics = {}
+    denominator = len(order) + 1
+    rows_accepted = not reasons
+    for metric in sorted(common_metrics):
+        before = row_metrics[0][metric]
+        after = row_metrics[-1][metric]
+        mean_baseline = statistics.mean((before, after))
+        drift = abs(after - before) / mean_baseline if mean_baseline > 0.0 else math.inf
+        metric_accepted = rows_accepted and drift <= baseline_drift_limit
+        if drift > baseline_drift_limit:
+            reasons.append(
+                f"{metric} baseline drift {drift:.6f} exceeds "
+                f"{baseline_drift_limit:.6f}"
+            )
+        profiles = {}
+        for position, profile in enumerate(order, start=1):
+            measured = row_metrics[position][metric]
+            fraction = position / denominator
+            interpolated = before + fraction * (after - before)
+            profiles[profile] = {
+                "position": position,
+                "timing_ms": measured,
+                "interpolated_baseline_ms": interpolated,
+                "slowdown": measured / interpolated if interpolated > 0.0 else None,
+            }
+        metrics[metric] = {
+            "accepted": metric_accepted,
+            "baseline_before_ms": before,
+            "baseline_after_ms": after,
+            "baseline_drift_fraction": drift,
+            "profiles": profiles,
+        }
+    metric_acceptance = [metric["accepted"] for metric in metrics.values()]
+    return {
+        "round": round_index,
+        "profile_order": order,
+        "rows_accepted": rows_accepted,
+        "usable": any(metric_acceptance),
+        "fully_accepted": bool(metric_acceptance) and all(metric_acceptance),
+        "reasons": reasons,
+        "metrics": metrics,
+    }
+
+
+def _combine_empirical_round_summaries(
+    round_index: int,
+    order: list[str],
+    schedules: dict[str, dict[str, object]],
+) -> dict[str, object]:
+    if not schedules:
+        raise ValidationError("empirical round has no timing schedules")
+    metrics = {}
+    for name, schedule in schedules.items():
+        if (
+            schedule.get("round") != round_index
+            or schedule.get("profile_order") != order
+        ):
+            raise ValidationError(
+                f"empirical {name} schedule does not match its parent round"
+            )
+        for metric, value in schedule["metrics"].items():
+            if metric in metrics:
+                raise ValidationError(
+                    f"empirical schedules duplicate timing metric {metric}"
+                )
+            metrics[metric] = value
+    reasons = [
+        f"{name}: {reason}"
+        for name, schedule in schedules.items()
+        for reason in schedule["reasons"]
+    ]
+    metric_acceptance = [metric["accepted"] for metric in metrics.values()]
+    return {
+        "round": round_index,
+        "profile_order": order,
+        "rows_accepted": all(
+            bool(schedule["rows_accepted"]) for schedule in schedules.values()
+        ),
+        "usable": any(metric_acceptance),
+        "fully_accepted": bool(metric_acceptance) and all(metric_acceptance),
+        "reasons": reasons,
+        "metrics": metrics,
+        "schedules": schedules,
+    }
+
+
+def _empirical_campaign_summary(
+    rounds: list[dict[str, object]],
+    profiles: tuple[str, ...],
+    *,
+    required_accepted_rounds: int,
+    bootstrap_resamples: int,
+    bootstrap_seed: int,
+) -> dict[str, object]:
+    metric_names = sorted(
+        {metric for round_result in rounds for metric in round_result["metrics"]}
+    )
+    profile_summaries = {}
+    insufficient = []
+    for profile_index, profile in enumerate(profiles):
+        profile_metrics = {}
+        for metric_index, metric in enumerate(metric_names):
+            samples = [
+                round_result["metrics"][metric]["profiles"][profile]
+                for round_result in rounds
+                if metric in round_result["metrics"]
+                and round_result["metrics"][metric]["accepted"]
+                and profile in round_result["metrics"][metric]["profiles"]
+            ]
+            if not samples:
+                insufficient.append(
+                    f"{profile}/{metric}: 0/{required_accepted_rounds} accepted rounds"
+                )
+                continue
+            seed = bootstrap_seed + profile_index * 1009 + metric_index
+            profile_metrics[metric] = {
+                "timing_ms": _sample_summary(
+                    [sample["timing_ms"] for sample in samples],
+                    bootstrap_resamples=bootstrap_resamples,
+                    bootstrap_seed=seed,
+                ),
+                "paired_baseline_ms": _sample_summary(
+                    [sample["interpolated_baseline_ms"] for sample in samples],
+                    bootstrap_resamples=bootstrap_resamples,
+                    bootstrap_seed=seed + 1,
+                ),
+                "slowdown": _sample_summary(
+                    [sample["slowdown"] for sample in samples],
+                    bootstrap_resamples=bootstrap_resamples,
+                    bootstrap_seed=seed + 2,
+                ),
+            }
+            if len(samples) < required_accepted_rounds:
+                insufficient.append(
+                    f"{profile}/{metric}: {len(samples)}/{required_accepted_rounds} "
+                    "accepted rounds"
+                )
+        profile_summaries[profile] = {"metrics": profile_metrics}
+    if not metric_names:
+        insufficient.append("campaign has no timing metrics")
+    return {
+        "schema_version": EMPIRICAL_CAMPAIGN_SCHEMA_VERSION,
+        "required_accepted_rounds": required_accepted_rounds,
+        "attempted_rounds": len(rounds),
+        "usable_rounds": sum(bool(round_result["usable"]) for round_result in rounds),
+        "fully_accepted_rounds": sum(
+            bool(round_result["fully_accepted"]) for round_result in rounds
+        ),
+        "accepted": not insufficient,
+        "reasons": insufficient,
+        "profiles": profile_summaries,
     }
 
 
@@ -4533,6 +5316,35 @@ def _fault_trials(fault: dict, profile: str) -> tuple[dict, list[dict[str, str]]
         ):
             raise ValidationError(f"invalid trial environment for {profile}")
     return policy, trials
+
+
+def _wilson_detection_interval(detections: int, trials: int) -> dict[str, float]:
+    if (
+        type(detections) is not int
+        or type(trials) is not int
+        or trials <= 0
+        or detections < 0
+        or detections > trials
+    ):
+        raise ValidationError("invalid detection count for Wilson interval")
+    z = 1.959963984540054
+    proportion = detections / trials
+    z_squared = z * z
+    denominator = 1.0 + z_squared / trials
+    center = (proportion + z_squared / (2.0 * trials)) / denominator
+    radius = (
+        z
+        * math.sqrt(
+            proportion * (1.0 - proportion) / trials
+            + z_squared / (4.0 * trials * trials)
+        )
+        / denominator
+    )
+    return {
+        "confidence": 0.95,
+        "lower": 0.0 if detections == 0 else max(0.0, center - radius),
+        "upper": 1.0 if detections == trials else min(1.0, center + radius),
+    }
 
 
 def _fault_trial_environment(
@@ -5304,6 +6116,10 @@ def _fault(args: argparse.Namespace) -> int:
                 "detector_policy": expected_detector,
                 "detections": detected,
                 "trials": len(profile_rows),
+                "detection_rate": detected / len(profile_rows),
+                "detection_wilson_95": _wilson_detection_interval(
+                    detected, len(profile_rows)
+                ),
                 "reasons": profile_reasons,
             }
         )
@@ -5328,6 +6144,478 @@ def _fault(args: argparse.Namespace) -> int:
     atomic_write_json(summary_path, summary)
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0 if summary["accepted"] else 1
+
+
+def _load_empirical_row(
+    row_dir: Path,
+    *,
+    target: str,
+    workload: Workload,
+    profile: str | None,
+    phase: str,
+    inner_repetitions_override: int | None,
+    discard_first_timing_sample: bool,
+    retain_code_objects: bool,
+) -> dict:
+    result_path = row_dir / "result.json"
+    try:
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValidationError(
+            f"cannot resume empirical row {result_path}: {error}"
+        ) from error
+    expected = {
+        "schema_version": SCHEMA_VERSION,
+        "target": target,
+        "workload": workload.id,
+        "profile": profile or "baseline",
+        "phase": _result_phase(phase, profile, workload),
+    }
+    mismatches = [
+        f"{key}={result.get(key)!r}, expected={value!r}"
+        for key, value in expected.items()
+        if result.get(key) != value
+    ]
+    if mismatches:
+        raise ValidationError(
+            f"empirical row conflicts with campaign {result_path}: "
+            + "; ".join(mismatches)
+        )
+    expected_repetition_policy = {
+        "outer_processes": 1,
+        "inner_repetitions_override": inner_repetitions_override,
+        "discarded_first_timing_sample": discard_first_timing_sample,
+        "retained_code_objects": retain_code_objects,
+    }
+    if result.get("repetition_policy") != expected_repetition_policy:
+        raise ValidationError(
+            f"empirical row repetition policy conflicts with campaign {result_path}"
+        )
+    return result
+
+
+def _preserve_incomplete_empirical_row(row_dir: Path) -> None:
+    suffix = 1
+    while True:
+        destination = row_dir.with_name(f"{row_dir.name}.incomplete-{suffix}")
+        if not destination.exists():
+            row_dir.rename(destination)
+            return
+        suffix += 1
+
+
+def _run_or_resume_empirical_row(
+    workspace: Path,
+    target: str,
+    workload: Workload,
+    profile: str | None,
+    phase: str,
+    artifact_root: Path,
+    timeout: int,
+    launcher: list[str],
+    row_dir: Path,
+    *,
+    resume: bool,
+    inner_repetitions_override: int | None = None,
+    discard_first_timing_sample: bool = False,
+    retain_code_objects: bool = False,
+) -> dict:
+    result_path = row_dir / "result.json"
+    if result_path.is_file():
+        if not resume:
+            raise ValidationError(f"empirical row already exists: {result_path}")
+        return _load_empirical_row(
+            row_dir,
+            target=target,
+            workload=workload,
+            profile=profile,
+            phase=phase,
+            inner_repetitions_override=inner_repetitions_override,
+            discard_first_timing_sample=discard_first_timing_sample,
+            retain_code_objects=retain_code_objects,
+        )
+    if row_dir.exists():
+        if not resume:
+            raise ValidationError(f"empirical row directory already exists: {row_dir}")
+        _preserve_incomplete_empirical_row(row_dir)
+    return _run_profile(
+        workspace,
+        target,
+        workload,
+        profile,
+        phase,
+        artifact_root,
+        timeout,
+        launcher=launcher,
+        row_dir_override=row_dir,
+        repetitions_override=1,
+        inner_repetitions_override=inner_repetitions_override,
+        discard_first_timing_sample=discard_first_timing_sample,
+        retain_code_objects=retain_code_objects,
+    )
+
+
+def _empirical_supports_warm_timing(target: str, workload: Workload) -> bool:
+    return (
+        target not in SINGLE_REPETITION_TARGETS
+        and workload.overhead_processes == 1
+        and (
+            workload.kind in {"qwen", "sharktank", "pytorch"}
+            or workload.self_timed_device_minimum_ms is not None
+        )
+    )
+
+
+def _empirical_timing_protocol(
+    target: str, workload: Workload, calibration: dict | None
+) -> dict[str, object]:
+    if not _empirical_supports_warm_timing(target, workload):
+        return {
+            "kind": "cold-process",
+            "minimum_timed_aggregate_ms": None,
+            "timed_inner_repetitions": None,
+            "command_inner_repetitions": None,
+            "discard_first_timing_sample": False,
+        }
+    if calibration is None or calibration.get("accepted") is not True:
+        raise ValidationError(
+            "warm empirical timing requires an accepted calibration row"
+        )
+    timing = calibration.get("timing_median_ms")
+    if not isinstance(timing, dict) or not timing:
+        raise ValidationError("warm empirical calibration has no workload timing")
+    values = [float(value) for value in timing.values()]
+    if any(not math.isfinite(value) or value <= 0.0 for value in values):
+        raise ValidationError(
+            "warm empirical calibration timing must be finite and positive"
+        )
+    if workload.self_timed_device_minimum_ms is not None:
+        if workload.self_timed_device_minimum_ms < EMPIRICAL_MINIMUM_TIMED_MS:
+            raise ValidationError(
+                "self-timed empirical workload does not meet the minimum timed "
+                "aggregate"
+            )
+        return {
+            "kind": "warm-device-self-timed",
+            "minimum_timed_aggregate_ms": workload.self_timed_device_minimum_ms,
+            "calibration_timing_median_ms": timing,
+            "timed_inner_repetitions": 1,
+            "command_inner_repetitions": 1,
+            "discard_first_timing_sample": False,
+        }
+    timed_repetitions = max(
+        1,
+        math.ceil(EMPIRICAL_MINIMUM_TIMED_MS / min(values)),
+    )
+    discard_first = workload.kind == "pytorch"
+    command_repetitions = timed_repetitions + int(discard_first)
+    if command_repetitions > EMPIRICAL_MAX_INNER_REPETITIONS:
+        raise ValidationError(
+            "warm empirical calibration exceeds the inner-repetition safety bound: "
+            f"required={command_repetitions}, "
+            f"maximum={EMPIRICAL_MAX_INNER_REPETITIONS}"
+        )
+    return {
+        "kind": "warm-host",
+        "minimum_timed_aggregate_ms": EMPIRICAL_MINIMUM_TIMED_MS,
+        "calibration_timing_median_ms": timing,
+        "timed_inner_repetitions": timed_repetitions,
+        "command_inner_repetitions": command_repetitions,
+        "discard_first_timing_sample": discard_first,
+    }
+
+
+def _empirical_config(
+    args: argparse.Namespace,
+    target: str,
+    workload: Workload,
+    profiles: tuple[str, ...],
+    max_rounds: int,
+    timeout: int,
+) -> dict[str, object]:
+    return {
+        "schema_version": EMPIRICAL_CAMPAIGN_SCHEMA_VERSION,
+        "protocol": "consan-gfx1201-empirical-v1",
+        "target": target,
+        "workload": workload.id,
+        "profiles": list(profiles),
+        "required_accepted_rounds": args.rounds,
+        "max_rounds": max_rounds,
+        "randomization_seed": args.seed,
+        "baseline_drift_limit": args.baseline_drift_limit,
+        "bootstrap_resamples": args.bootstrap_resamples,
+        "minimum_timed_aggregate_ms": EMPIRICAL_MINIMUM_TIMED_MS,
+        "maximum_inner_repetitions": EMPIRICAL_MAX_INNER_REPETITIONS,
+        "timeout_seconds": timeout,
+        "launcher": args.launcher,
+    }
+
+
+def _write_or_verify_empirical_config(path: Path, config: dict[str, object]) -> None:
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise ValidationError(
+                f"cannot read empirical campaign config {path}: {error}"
+            ) from error
+        if existing != config:
+            raise ValidationError(f"empirical campaign config conflicts with {path}")
+        return
+    atomic_write_json(path, config)
+
+
+def _empirical_campaign(args: argparse.Namespace) -> int:
+    selection = _resolve_workload_selection(args, allow_all=False)
+    target = selection.target
+    if target != "gfx1201":
+        raise ValidationError(
+            "the empirical study command currently requires physical gfx1201"
+        )
+    workload = selection.require_workload()
+    workspace = _workspace_from_environment()
+    timeout = args.timeout if args.timeout is not None else workload.run_timeout_seconds
+    doctor = _doctor(workspace, target, (workload.id,))
+    if not doctor["ok"]:
+        raise ValidationError("workspace doctor failed; run the doctor subcommand")
+    profiles = PROFILE_IDS if args.profile == "all" else (args.profile,)
+    max_rounds = args.max_rounds if args.max_rounds is not None else args.rounds * 2
+    if max_rounds < args.rounds:
+        raise ValidationError("--max-rounds must be at least --rounds")
+
+    artifact_root = args.artifact_root.resolve()
+    campaign_root = artifact_root / workload.id / "empirical-campaign"
+    if campaign_root.exists() and not args.resume:
+        raise ValidationError(
+            f"empirical campaign already exists; pass --resume or use a new root: {campaign_root}"
+        )
+    campaign_root.mkdir(parents=True, exist_ok=True)
+    _write_provenance(
+        workspace,
+        target,
+        workload,
+        _workload_provenance_path(artifact_root, workload).parent,
+    )
+    config = _empirical_config(args, target, workload, profiles, max_rounds, timeout)
+    _write_or_verify_empirical_config(campaign_root / "config.json", config)
+
+    admission_results = {}
+    admission_root = campaign_root / "admission"
+    for profile in (None, *profiles):
+        profile_id = profile or "baseline"
+        admission_results[profile_id] = _run_or_resume_empirical_row(
+            workspace,
+            target,
+            workload,
+            profile,
+            "clean",
+            artifact_root,
+            timeout,
+            args.launcher,
+            admission_root / profile_id,
+            resume=args.resume,
+            retain_code_objects=profile is not None,
+        )
+    admission_row_acceptance = {}
+    for profile, result in admission_results.items():
+        accepted = result.get("accepted") is True
+        if profile != "baseline":
+            structural_runs = result.get("structural_metrics_runs")
+            retained = result.get("retained_code_objects")
+            accepted = (
+                accepted
+                and isinstance(structural_runs, list)
+                and bool(structural_runs)
+                and all(run.get("accepted") is True for run in structural_runs)
+                and isinstance(retained, dict)
+                and retained.get("complete_pairs", 0) > 0
+                and retained.get("metadata_complete_pairs", 0) > 0
+            )
+        admission_row_acceptance[profile] = accepted
+    admission_accepted = all(admission_row_acceptance.values())
+    admission = {
+        "accepted": admission_accepted,
+        "rows": {
+            profile: {
+                "accepted": admission_row_acceptance[profile],
+                "runtime_accepted": result.get("accepted") is True,
+                "result": str(
+                    (admission_root / profile / "result.json").relative_to(
+                        artifact_root
+                    )
+                ),
+            }
+            for profile, result in admission_results.items()
+        },
+    }
+    if not admission_accepted:
+        campaign = {
+            **config,
+            "admission": admission,
+            "rounds": [],
+            "summary": {
+                "schema_version": EMPIRICAL_CAMPAIGN_SCHEMA_VERSION,
+                "accepted": False,
+                "reasons": ["clean admission rejected"],
+            },
+        }
+        atomic_write_json(campaign_root / "campaign.json", campaign)
+        print(json.dumps(campaign, indent=2, sort_keys=True))
+        return 1
+
+    calibration = None
+    calibration_record = None
+    if _empirical_supports_warm_timing(target, workload):
+        calibration_root = campaign_root / "calibration" / "baseline"
+        calibration = _run_or_resume_empirical_row(
+            workspace,
+            target,
+            workload,
+            None,
+            "overhead",
+            artifact_root,
+            timeout,
+            args.launcher,
+            calibration_root,
+            resume=args.resume,
+        )
+        calibration_record = {
+            "accepted": calibration.get("accepted") is True,
+            "result": str(
+                (calibration_root / "result.json").relative_to(artifact_root)
+            ),
+        }
+    timing_protocol = _empirical_timing_protocol(target, workload, calibration)
+    inner_repetitions = timing_protocol["command_inner_repetitions"]
+    discard_first_timing_sample = timing_protocol["discard_first_timing_sample"]
+
+    rounds = []
+    campaign = None
+    for round_index in range(max_rounds):
+        if campaign is not None and campaign["summary"]["accepted"]:
+            break
+        order = list(profiles)
+        random.Random(args.seed + round_index).shuffle(order)
+        round_root = campaign_root / "rounds" / f"round-{round_index:03d}"
+
+        def run_schedule(
+            name: str,
+            schedule_inner_repetitions: int | None,
+            discard_first: bool,
+            include_process: bool,
+            include_workload: bool,
+        ) -> dict[str, object]:
+            schedule_root = round_root / name
+            row_phase = (
+                "clean"
+                if name == "cold" and workload.self_timed_device_minimum_ms is not None
+                else "overhead"
+            )
+            before = _run_or_resume_empirical_row(
+                workspace,
+                target,
+                workload,
+                None,
+                row_phase,
+                artifact_root,
+                timeout,
+                args.launcher,
+                schedule_root / "00-baseline-before",
+                resume=args.resume,
+                inner_repetitions_override=schedule_inner_repetitions,
+                discard_first_timing_sample=discard_first,
+            )
+            profile_results = {}
+            for position, profile in enumerate(order, start=1):
+                profile_results[profile] = _run_or_resume_empirical_row(
+                    workspace,
+                    target,
+                    workload,
+                    profile,
+                    row_phase,
+                    artifact_root,
+                    timeout,
+                    args.launcher,
+                    schedule_root / f"{position:02d}-{profile}",
+                    resume=args.resume,
+                    inner_repetitions_override=schedule_inner_repetitions,
+                    discard_first_timing_sample=discard_first,
+                )
+            after_position = len(order) + 1
+            after = _run_or_resume_empirical_row(
+                workspace,
+                target,
+                workload,
+                None,
+                row_phase,
+                artifact_root,
+                timeout,
+                args.launcher,
+                schedule_root / f"{after_position:02d}-baseline-after",
+                resume=args.resume,
+                inner_repetitions_override=schedule_inner_repetitions,
+                discard_first_timing_sample=discard_first,
+            )
+            return _empirical_round_summary(
+                round_index,
+                order,
+                before,
+                profile_results,
+                after,
+                baseline_drift_limit=args.baseline_drift_limit,
+                include_process_metric=include_process,
+                include_workload_metrics=include_workload,
+                metric_prefix=name,
+            )
+
+        schedules = {
+            "cold": run_schedule(
+                "cold",
+                1,
+                False,
+                True,
+                workload.self_timed_device_minimum_ms is None,
+            ),
+        }
+        if _empirical_supports_warm_timing(target, workload):
+            schedules["warm"] = run_schedule(
+                "warm",
+                inner_repetitions,
+                discard_first_timing_sample,
+                False,
+                True,
+            )
+        round_summary = _combine_empirical_round_summaries(
+            round_index,
+            order,
+            schedules,
+        )
+        round_summary["row_results"] = [
+            str(path.relative_to(artifact_root))
+            for path in sorted(round_root.rglob("result.json"))
+        ]
+        atomic_write_json(round_root / "round.json", round_summary)
+        rounds.append(round_summary)
+        summary = _empirical_campaign_summary(
+            rounds,
+            profiles,
+            required_accepted_rounds=args.rounds,
+            bootstrap_resamples=args.bootstrap_resamples,
+            bootstrap_seed=args.seed,
+        )
+        campaign = {
+            **config,
+            "admission": admission,
+            "calibration": calibration_record,
+            "timing_protocol": timing_protocol,
+            "rounds": rounds,
+            "summary": summary,
+        }
+        atomic_write_json(campaign_root / "campaign.json", campaign)
+
+    assert campaign is not None
+    print(json.dumps(campaign, indent=2, sort_keys=True))
+    return 0 if campaign["summary"]["accepted"] else 1
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -5449,6 +6737,53 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="JSON argv prefix used to launch each workload process",
     )
 
+    study = subparsers.add_parser(
+        "study",
+        help="run a reproducible physical-gfx1201 empirical overhead campaign",
+    )
+    study.add_argument("--workload", choices=tuple(WORKLOAD_BY_ID), required=True)
+    study.add_argument("--profile", choices=(*PROFILE_IDS, "all"), default="all")
+    study.add_argument("--artifact-root", type=Path, required=True)
+    study.add_argument(
+        "--rounds",
+        type=int,
+        default=EMPIRICAL_DEFAULT_ROUNDS,
+        help="required number of accepted independently bracketed rounds",
+    )
+    study.add_argument(
+        "--max-rounds",
+        type=int,
+        help="maximum attempted rounds; defaults to twice --rounds",
+    )
+    study.add_argument("--seed", type=int, default=0)
+    study.add_argument(
+        "--baseline-drift-limit",
+        type=float,
+        default=EMPIRICAL_DEFAULT_BASELINE_DRIFT_LIMIT,
+    )
+    study.add_argument(
+        "--bootstrap-resamples",
+        type=int,
+        default=EMPIRICAL_DEFAULT_BOOTSTRAP_RESAMPLES,
+    )
+    study.add_argument(
+        "--timeout",
+        type=int,
+        help="override the workload timeout declared by the executable manifest",
+    )
+    study.add_argument(
+        "--launcher-json",
+        dest="launcher",
+        type=_launcher_argument,
+        default=[],
+        help="JSON argv prefix used to launch each workload process",
+    )
+    study.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse complete rows and preserve then retry interrupted rows",
+    )
+
     verify_coverage = subparsers.add_parser(
         "verify-coverage-output",
         help="replay and verify one retained coverage-output result",
@@ -5516,6 +6851,16 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     timeout = getattr(args, "timeout", None)
     if timeout is not None and timeout <= 0:
         parser.error("--timeout must be positive")
+    if getattr(args, "rounds", 1) <= 0:
+        parser.error("--rounds must be positive")
+    max_rounds = getattr(args, "max_rounds", None)
+    if max_rounds is not None and max_rounds <= 0:
+        parser.error("--max-rounds must be positive")
+    if getattr(args, "bootstrap_resamples", 1) <= 0:
+        parser.error("--bootstrap-resamples must be positive")
+    drift_limit = getattr(args, "baseline_drift_limit", 0.05)
+    if not 0.0 <= drift_limit < 1.0:
+        parser.error("--baseline-drift-limit must be in [0, 1)")
     if getattr(args, "health_timeout", 1) <= 0:
         parser.error("--health-timeout must be positive")
     if (getattr(args, "health_command_json", None) is None) != (
@@ -5596,6 +6941,8 @@ def main(argv: list[str] | None = None) -> int:
             return _inventory(args)
         if args.command == "fault":
             return _fault(args)
+        if args.command == "study":
+            return _empirical_campaign(args)
         return _run(args)
     except (OSError, ValidationError, ValueError, json.JSONDecodeError) as error:
         print(f"validation error: {error}", file=sys.stderr)
