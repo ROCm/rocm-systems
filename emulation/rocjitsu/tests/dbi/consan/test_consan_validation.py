@@ -3117,6 +3117,11 @@ class ConSanValidationTest(unittest.TestCase):
                 ),
                 mock.patch.object(
                     validation,
+                    "_workload_runtime_identity",
+                    return_value={"kind": "pytorch", "python_packages": {}},
+                ),
+                mock.patch.object(
+                    validation,
                     "_empirical_observation_snapshot",
                     side_effect=(
                         {"schema_version": 1, "captured_at_utc": "first"},
@@ -3143,9 +3148,37 @@ class ConSanValidationTest(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertEqual(first, workload_root / "provenance.json")
-        self.assertEqual(provenance["provenance_schema_version"], 1)
+        self.assertEqual(
+            provenance["provenance_schema_version"],
+            validation.PROVENANCE_SCHEMA_VERSION,
+        )
         self.assertEqual(provenance["machine"]["selected_kfd_nodes"], ["1"])
+        self.assertEqual(provenance["workload_runtime"]["kind"], "pytorch")
         self.assertEqual(provenance["observations"]["captured_at_utc"], "first")
+
+    def test_pytorch_runtime_identity_records_framework_and_generator(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+        with (
+            mock.patch.object(
+                validation,
+                "_pytorch_python",
+                return_value=Path("/frozen/python"),
+            ),
+            mock.patch.object(
+                validation,
+                "_command_identity",
+                return_value={"available": True, "output": "versions"},
+            ) as command_identity,
+        ):
+            identity = validation._workload_runtime_identity(
+                Path("/workspace"), workload
+            )
+        command = command_identity.call_args.args[0]
+        self.assertEqual(command[:2], ["/frozen/python", "-c"])
+        self.assertIn("torch_version", command[2])
+        self.assertIn("triton_version", command[2])
+        self.assertEqual(identity["kind"], "pytorch")
+        self.assertTrue(identity["python_packages"]["available"])
 
     def test_topk_explain_reports_strict_clean_contract(self) -> None:
         audit = validation._explain_contract(
@@ -3688,6 +3721,24 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(
             command[command.index("--output-dir") + 1],
             "/artifacts/benchmark-0-llama-work",
+        )
+
+    def test_llama_build_directory_can_be_pinned(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        with mock.patch.dict(
+            os.environ,
+            {validation.LLAMA_BUILD_DIR_ENV: "/frozen/llama-build"},
+        ):
+            command = validation._workload_command(
+                Path("/workspace"),
+                "gfx1201",
+                workload,
+                "clean",
+                Path("/artifacts/benchmark-0.json"),
+            )
+        self.assertEqual(
+            command[command.index("--executable") + 1],
+            "/frozen/llama-build/llama_cpp_mul_mat_vec_q",
         )
 
     def test_native_matvec_uses_fault_sensitive_realistic_shape(self) -> None:

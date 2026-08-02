@@ -110,6 +110,8 @@ Every campaign records, at minimum:
 - every workload repository commit, submodule state, and local patch;
 - the exact code-object hash and kernel names;
 - the TheRock SDK, compiler, HIP runtime, kernel driver, and firmware identity;
+- framework and kernel-generator package versions and module paths for generated
+  workloads;
 - the selected KFD node, PCI identity, `gfx1201` target, and visible-device
   environment;
 - all environment settings and exact commands;

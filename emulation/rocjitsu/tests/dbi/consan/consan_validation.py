@@ -43,12 +43,14 @@ from consan_validation_support import (
 
 SCHEMA_VERSION = 2
 EMPIRICAL_CAMPAIGN_SCHEMA_VERSION = 1
+PROVENANCE_SCHEMA_VERSION = 2
 WORKSPACE_ENV = "CONSAN_VALIDATION_WORKSPACE_DIR"
 TARGET_ENV = "CONSAN_VALIDATION_TARGET"
 PYTORCH_PYTHON_ENV = "CONSAN_VALIDATION_PYTORCH_PYTHON"
 SHARKTANK_PYTHON_ENV = "CONSAN_VALIDATION_SHARKTANK_PYTHON"
 TENSILE_PYTHON_ENV = "CONSAN_VALIDATION_TENSILE_PYTHON"
 RDNA4_MATMUL_DIR_ENV = "CONSAN_VALIDATION_RDNA4_MATMUL_DIR"
+LLAMA_BUILD_DIR_ENV = "CONSAN_VALIDATION_LLAMA_BUILD_DIR"
 LLVM_READELF_ENV = "CONSAN_VALIDATION_LLVM_READELF"
 TIMEOUT_SECONDS = 30
 EMPIRICAL_DEFAULT_ROUNDS = 10
@@ -1673,25 +1675,31 @@ def _tensile_python() -> Path:
 
 
 def _llama_executable(workspace: Path, target: str, name: str) -> Path:
-    candidates = (
-        workspace
-        / "rocjitsu-test-corpus-build"
-        / "kernels"
-        / target
-        / "cases"
-        / "llama.cpp"
-        / name,
-        workspace
-        / "rocjitsu-test-corpus"
-        / ".pytest-artifacts-rdna4-llama-baseline"
-        / "_suite_shards"
-        / "kernels_shard_0"
-        / "kernels"
-        / target
-        / "build"
-        / "cases"
-        / "llama.cpp"
-        / name,
+    candidates = []
+    configured = os.environ.get(LLAMA_BUILD_DIR_ENV)
+    if configured:
+        candidates.append(Path(os.path.abspath(Path(configured).expanduser())) / name)
+    candidates.extend(
+        (
+            workspace
+            / "rocjitsu-test-corpus-build"
+            / "kernels"
+            / target
+            / "cases"
+            / "llama.cpp"
+            / name,
+            workspace
+            / "rocjitsu-test-corpus"
+            / ".pytest-artifacts-rdna4-llama-baseline"
+            / "_suite_shards"
+            / "kernels_shard_0"
+            / "kernels"
+            / target
+            / "build"
+            / "cases"
+            / "llama.cpp"
+            / name,
+        )
     )
     return next(
         (candidate for candidate in candidates if candidate.is_file()), candidates[0]
@@ -2299,7 +2307,7 @@ def _write_provenance(
         files["llvm-readelf"] = llvm_readelf
     document = {
         "schema_version": SCHEMA_VERSION,
-        "provenance_schema_version": 1,
+        "provenance_schema_version": PROVENANCE_SCHEMA_VERSION,
         "target": target,
         "workload": workload.id,
         "files": {
@@ -2324,6 +2332,7 @@ def _write_provenance(
         },
         "machine": _machine_identity(target),
         "runtime_tools": _runtime_tool_identities(llvm_readelf, hook),
+        "workload_runtime": _workload_runtime_identity(workspace, workload),
         "observations": _empirical_observation_snapshot(),
     }
     normalized_document = json.loads(json.dumps(document))
@@ -2380,6 +2389,27 @@ def _command_identity(command: list[str], timeout: int = 10) -> dict[str, object
         "output": output[:limit],
         "output_sha256": hashlib.sha256(output.encode("utf-8")).hexdigest(),
         "output_truncated": len(output) > limit,
+    }
+
+
+def _workload_runtime_identity(
+    workspace: Path, workload: Workload
+) -> dict[str, object]:
+    if workload.kind != "pytorch":
+        return {"kind": workload.kind}
+    python = _pytorch_python(workspace)
+    script = (
+        "import json, torch, triton; "
+        "print(json.dumps({"
+        "'torch_version': torch.__version__, "
+        "'torch_hip_version': torch.version.hip, "
+        "'torch_file': torch.__file__, "
+        "'triton_version': getattr(triton, '__version__', None), "
+        "'triton_file': triton.__file__}, sort_keys=True))"
+    )
+    return {
+        "kind": workload.kind,
+        "python_packages": _command_identity([str(python), "-c", script]),
     }
 
 
