@@ -127,6 +127,8 @@ HIP_TEST_CASE(Contract_KernelLaunch_HipGetSymbolAddress_Default_ReturnsUsableDev
   // Launch a kernel that references the device global so the symbol is emitted
   // and resolvable in the device image on every runtime path.
   hipLaunchKernelGGL(TouchSymbolScalarKernel, dim3(1), dim3(1), 0, 0);
+  // Check launch/enqueue status first, then synchronize to surface any
+  // asynchronous execution error before resolving the device symbol.
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -148,6 +150,8 @@ HIP_TEST_CASE(Contract_KernelLaunch_HipGetSymbolSize_Default_MatchesDeclaredSize
   // Launch a kernel that references the device global array so the symbol is
   // emitted and resolvable in the device image on every runtime path.
   hipLaunchKernelGGL(TouchSymbolArrayKernel, dim3(1), dim3(1), 0, 0);
+  // Check launch/enqueue status first, then synchronize to surface any
+  // asynchronous execution error before resolving the device symbol.
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
