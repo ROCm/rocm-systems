@@ -43,7 +43,7 @@ from consan_validation_support import (
 
 SCHEMA_VERSION = 2
 EMPIRICAL_CAMPAIGN_SCHEMA_VERSION = 2
-PROVENANCE_SCHEMA_VERSION = 2
+PROVENANCE_SCHEMA_VERSION = 3
 WORKSPACE_ENV = "CONSAN_VALIDATION_WORKSPACE_DIR"
 TARGET_ENV = "CONSAN_VALIDATION_TARGET"
 PYTORCH_PYTHON_ENV = "CONSAN_VALIDATION_PYTORCH_PYTHON"
@@ -1580,7 +1580,11 @@ def _sharktank_python() -> Path:
 
 
 def _pytorch_runtime_probe(
-    python: Path, hook: Path, target: str, workload: Workload
+    python: Path,
+    hook: Path,
+    target: str,
+    workload: Workload,
+    workspace: Path,
 ) -> dict:
     """Proves that PyTorch can dispatch and that its HSA runtime loads ConSan."""
     probe_source = """
@@ -1611,7 +1615,7 @@ print(json.dumps({
 # and process mappings, so skip unrelated runtime shutdown.
 os._exit(0)
 """
-    environment = _clean_environment("supercollider", workload, hook, target)
+    environment = _clean_environment("supercollider", workload, hook, target, workspace)
     # This is a runtime-linkage canary, not a coverage row.  Avoid spending
     # preflight time on PyTorch's large bundled kernel object; the real rows
     # run without this filter and enforce complete coverage independently.
@@ -1890,6 +1894,7 @@ def _doctor(
                 _hook_path(workspace),
                 target,
                 pytorch_workloads[0],
+                workspace,
             )
         else:
             runtimes["pytorch"] = {
@@ -2352,7 +2357,6 @@ def _write_provenance(
     path = workload_root / "provenance.json"
     hook = _hook_path(workspace)
     files = {"hook": hook, **_input_files(workspace, target, workload)}
-    files.update(_runtime_library_paths())
     llvm_readelf = _llvm_readelf()
     if llvm_readelf is not None and llvm_readelf.is_file():
         files["llvm-readelf"] = llvm_readelf
@@ -2426,7 +2430,11 @@ def _read_identity_file(path: Path) -> dict[str, object]:
     return {"available": True, "value": value}
 
 
-def _command_identity(command: list[str], timeout: int = 10) -> dict[str, object]:
+def _command_identity(
+    command: list[str],
+    timeout: int = 10,
+    environment: dict[str, str] | None = None,
+) -> dict[str, object]:
     try:
         completed = subprocess.run(
             command,
@@ -2435,6 +2443,7 @@ def _command_identity(command: list[str], timeout: int = 10) -> dict[str, object
             stderr=subprocess.STDOUT,
             text=True,
             timeout=timeout,
+            env=environment,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         return {"available": False, "command": command, "reason": str(error)}
@@ -2447,6 +2456,76 @@ def _command_identity(command: list[str], timeout: int = 10) -> dict[str, object
         "output": output[:limit],
         "output_sha256": hashlib.sha256(output.encode("utf-8")).hexdigest(),
         "output_truncated": len(output) > limit,
+    }
+
+
+def _runtime_library_records(paths: dict[str, Path]) -> dict[str, object]:
+    records = {}
+    for label, path in paths.items():
+        try:
+            resolved = path.resolve(strict=True)
+        except OSError as error:
+            raise ValidationError(
+                f"cannot resolve loaded {label} runtime {path}: {error}"
+            ) from error
+        records[label] = {
+            "path": str(path),
+            "resolved_path": str(resolved),
+            "size": resolved.stat().st_size,
+            "sha256": sha256_file(resolved),
+        }
+    return records
+
+
+def _runtime_libraries_from_ldd_output(output: str) -> dict[str, Path]:
+    prefixes = {
+        "hip-runtime": "libamdhip64.so",
+        "hsa-runtime": "libhsa-runtime64.so",
+    }
+    matches: dict[str, set[Path]] = {label: set() for label in prefixes}
+    for line in output.splitlines():
+        match = re.match(r"^\s*(\S+)\s+=>\s+(\S+)", line)
+        if match is None or match.group(2) == "not":
+            continue
+        soname, loaded = match.groups()
+        for label, prefix in prefixes.items():
+            if soname.startswith(prefix):
+                matches[label].add(Path(loaded))
+    ambiguous = {label: paths for label, paths in matches.items() if len(paths) > 1}
+    if ambiguous:
+        raise ValidationError(
+            "dynamic loader reported multiple runtime libraries: "
+            + "; ".join(
+                f"{label}={','.join(sorted(str(path) for path in paths))}"
+                for label, paths in sorted(ambiguous.items())
+            )
+        )
+    return {label: next(iter(paths)) for label, paths in matches.items() if paths}
+
+
+def _native_runtime_identity(
+    executable: Path, environment: dict[str, str]
+) -> dict[str, object]:
+    ldd = shutil.which("ldd")
+    if ldd is None:
+        raise ValidationError("cannot verify native runtime closure: ldd is missing")
+    identity = _command_identity(
+        [ldd, str(executable)], timeout=TIMEOUT_SECONDS, environment=environment
+    )
+    if not identity.get("available"):
+        raise ValidationError(
+            "cannot verify native runtime closure: "
+            + json.dumps(identity, sort_keys=True)
+        )
+    libraries = _runtime_libraries_from_ldd_output(str(identity.get("output", "")))
+    missing = {"hip-runtime", "hsa-runtime"} - set(libraries)
+    if missing:
+        raise ValidationError(
+            "native runtime closure is missing " + ", ".join(sorted(missing))
+        )
+    return {
+        "loader": identity,
+        "loaded_runtime_libraries": _runtime_library_records(libraries),
     }
 
 
@@ -2530,6 +2609,9 @@ def _llama_runtime_identity(
         "identity_source": "validated dynamic-loader closure",
         "executable": str(runtime.executable),
         "libraries": libraries,
+        "loaded_runtime_libraries": _runtime_library_records(
+            _runtime_libraries_from_ldd_output(output)
+        ),
     }
 
 
@@ -2538,22 +2620,61 @@ def _workload_runtime_identity(
 ) -> dict[str, object]:
     if workload.kind == "llama":
         return _llama_runtime_identity(workspace, target, workload)
+    if workload.kind in {"gtest", "rdna4-matmul"}:
+        executable = _input_files(workspace, target, workload)["executable"]
+        environment = _clean_environment(
+            None, workload, Path("/unused-consan-hook"), target, workspace
+        )
+        return {
+            "kind": workload.kind,
+            "identity_source": "validated dynamic-loader closure",
+            "executable": str(executable),
+            **_native_runtime_identity(executable, environment),
+        }
     if workload.kind != "pytorch":
         return {
             "kind": workload.kind,
             "identity_source": "hashed provenance files",
         }
     python = _pytorch_python(workspace)
-    script = (
-        "import json, torch, triton; "
-        "print(json.dumps({"
-        "'torch_version': torch.__version__, "
-        "'torch_hip_version': torch.version.hip, "
-        "'torch_file': torch.__file__, "
-        "'triton_version': getattr(triton, '__version__', None), "
-        "'triton_file': triton.__file__}, sort_keys=True))"
+    script = """
+import json
+import pathlib
+
+import torch
+import triton
+
+torch.ones(1, device="cuda")
+torch.cuda.synchronize()
+mapped = sorted({
+    fields[-1]
+    for line in pathlib.Path("/proc/self/maps").read_text(encoding="utf-8").splitlines()
+    if len(fields := line.split()) >= 6 and fields[-1].startswith("/")
+})
+prefixes = {
+    "hip-runtime": "libamdhip64.so",
+    "hsa-runtime": "libhsa-runtime64.so",
+}
+runtime_libraries = {
+    label: [path for path in mapped if pathlib.Path(path).name.startswith(prefix)]
+    for label, prefix in prefixes.items()
+}
+print(json.dumps({
+    "torch_version": torch.__version__,
+    "torch_hip_version": torch.version.hip,
+    "torch_file": torch.__file__,
+    "triton_version": getattr(triton, "__version__", None),
+    "triton_file": triton.__file__,
+    "runtime_libraries": runtime_libraries,
+}, sort_keys=True))
+"""
+    packages = _command_identity(
+        [str(python), "-c", script],
+        timeout=TIMEOUT_SECONDS,
+        environment=_clean_environment(
+            None, workload, Path("/unused-consan-hook"), target, workspace
+        ),
     )
-    packages = _command_identity([str(python), "-c", script], timeout=TIMEOUT_SECONDS)
     if not packages.get("available"):
         raise ValidationError(
             "cannot record required PyTorch/Triton runtime identity: "
@@ -2571,6 +2692,7 @@ def _workload_runtime_identity(
         "torch_file",
         "triton_version",
         "triton_file",
+        "runtime_libraries",
     }
     if not isinstance(package_document, dict) or any(
         not package_document.get(name) for name in required
@@ -2586,11 +2708,24 @@ def _workload_runtime_identity(
                 )
             )
         )
+    runtime_candidates = package_document["runtime_libraries"]
+    if not isinstance(runtime_candidates, dict):
+        raise ValidationError("PyTorch runtime identity has invalid library closure")
+    runtime_paths = {}
+    for label in ("hip-runtime", "hsa-runtime"):
+        candidates = runtime_candidates.get(label)
+        if not isinstance(candidates, list) or len(candidates) != 1:
+            raise ValidationError(
+                f"PyTorch runtime identity needs exactly one loaded {label}: "
+                f"{candidates!r}"
+            )
+        runtime_paths[label] = Path(candidates[0])
     return {
         "kind": workload.kind,
-        "identity_source": "required framework and kernel-generator probe",
+        "identity_source": "framework probe and loaded process mappings",
         "python_packages": packages,
         "package_document": package_document,
+        "loaded_runtime_libraries": _runtime_library_records(runtime_paths),
     }
 
 
@@ -2655,26 +2790,6 @@ def _machine_identity(target: str) -> dict[str, object]:
             Path("/sys/module/amdgpu/srcversion")
         ),
     }
-
-
-def _runtime_library_paths() -> dict[str, Path]:
-    roots = [
-        Path(value)
-        for value in os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep)
-        if value
-    ]
-    rocm_path = os.environ.get("ROCM_PATH")
-    if rocm_path:
-        roots.append(Path(rocm_path) / "lib")
-    libraries = {}
-    for label, name in (
-        ("hsa-runtime", "libhsa-runtime64.so"),
-        ("hip-runtime", "libamdhip64.so"),
-    ):
-        match = next((root / name for root in roots if (root / name).is_file()), None)
-        if match is not None:
-            libraries[label] = match
-    return libraries
 
 
 def _unavailable_command_identity(name: str) -> dict[str, object]:
@@ -5477,13 +5592,15 @@ def _empirical_campaign_summary(
                 )
         structural_samples: dict[str, list[float]] = {}
         for round_result in rounds:
-            cold = round_result.get("schedules", {}).get("cold", {})
-            profile_structural = cold.get("structural_metrics", {}).get(profile)
-            if not isinstance(profile_structural, dict):
-                continue
-            for name, value in profile_structural.items():
-                if isinstance(value, (int, float)) and math.isfinite(float(value)):
-                    structural_samples.setdefault(name, []).append(float(value))
+            for schedule in round_result.get("schedules", {}).values():
+                if schedule.get("collects_structural_metrics") is not True:
+                    continue
+                profile_structural = schedule.get("structural_metrics", {}).get(profile)
+                if not isinstance(profile_structural, dict):
+                    continue
+                for name, value in profile_structural.items():
+                    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+                        structural_samples.setdefault(name, []).append(float(value))
         structural_metrics = {
             name: _sample_summary(
                 values,
@@ -5899,8 +6016,7 @@ def _load_fault(
         if (
             not isinstance(reach_witness, dict)
             or set(reach_witness) != {"kind", "evidence"}
-            or reach_witness.get("kind")
-            not in {"reviewed-unconditional-final-isa", "runtime-access-counter"}
+            or reach_witness.get("kind") != "reviewed-unconditional-final-isa"
             or not isinstance(reach_witness.get("evidence"), str)
             or not reach_witness["evidence"].strip()
         ):
@@ -6833,6 +6949,10 @@ def _fault(args: argparse.Namespace) -> int:
         reached_rows = [row for row in profile_rows if row.get("reached") is True]
         detected = sum(row.get("detector") == "detected" for row in reached_rows)
         oracle_manifestations = sum(row.get("oracle") == "fail" for row in reached_rows)
+        reach_outcomes = {}
+        for row in reached_rows:
+            outcome = str(row.get("reach_outcome"))
+            reach_outcomes[outcome] = reach_outcomes.get(outcome, 0) + 1
         expected_detector = policy.get("detector")
         profile_reasons = []
         if expected_detector == "statistical":
@@ -6868,8 +6988,9 @@ def _fault(args: argparse.Namespace) -> int:
                     row.get("admitted") is True for row in profile_rows
                 ),
                 "reached_trials": len(reached_rows),
+                "reach_outcomes": reach_outcomes,
                 "detections": detected,
-                "trials": len(reached_rows),
+                "trials": len(profile_rows),
                 "detection_rate": (
                     detected / len(reached_rows) if reached_rows else None
                 ),
@@ -7135,7 +7256,7 @@ def _empirical_config(
 ) -> dict[str, object]:
     return {
         "schema_version": EMPIRICAL_CAMPAIGN_SCHEMA_VERSION,
-        "protocol": "consan-gfx1201-empirical-v1",
+        "protocol": "consan-gfx1201-empirical-v2",
         "target": target,
         "workload": workload.id,
         "profiles": list(profiles),
@@ -7319,7 +7440,10 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
         if campaign is not None and campaign["summary"]["accepted"]:
             break
         order = list(profiles)
-        random.Random(args.seed + round_index).shuffle(order)
+        order_seed = _bootstrap_stream_seed(
+            args.seed, workload.id, "profile-order", str(round_index)
+        )
+        random.Random(order_seed).shuffle(order)
         round_root = campaign_root / "rounds" / f"round-{round_index:03d}"
 
         def run_schedule(
@@ -7328,6 +7452,7 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
             discard_first: bool,
             include_process: bool,
             include_workload: bool,
+            collect_structural_metrics: bool,
         ) -> dict[str, object]:
             schedule_root = round_root / name
             row_phase = (
@@ -7364,7 +7489,7 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
                     resume=args.resume,
                     inner_repetitions_override=schedule_inner_repetitions,
                     discard_first_timing_sample=discard_first,
-                    collect_structural_metrics=name == "cold",
+                    collect_structural_metrics=collect_structural_metrics,
                 )
             after_position = len(order) + 1
             after = _run_or_resume_empirical_row(
@@ -7393,7 +7518,8 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
                 metric_prefix=name,
             )
             schedule["structural_metrics"] = {}
-            if name == "cold":
+            schedule["collects_structural_metrics"] = collect_structural_metrics
+            if collect_structural_metrics:
                 for profile, result in profile_results.items():
                     try:
                         schedule["structural_metrics"][profile] = (
@@ -7403,6 +7529,9 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
                         schedule["reasons"].append(
                             f"{profile}: structural metrics rejected: {error}"
                         )
+                        schedule["rows_accepted"] = False
+                        schedule["usable"] = False
+                        schedule["fully_accepted"] = False
             return schedule
 
         schedules = {
@@ -7412,6 +7541,7 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
                 False,
                 True,
                 workload.self_timed_device_minimum_ms is None,
+                True,
             ),
         }
         if _empirical_supports_warm_timing(target, workload):
@@ -7421,6 +7551,7 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
                 discard_first_timing_sample,
                 False,
                 True,
+                False,
             )
         round_summary = _combine_empirical_round_summaries(
             round_index,

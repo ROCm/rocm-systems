@@ -59,7 +59,10 @@ class ConSanEmpiricalReportTest(unittest.TestCase):
                     "profile": "sampled",
                     "accepted": True,
                     "trials": 32,
+                    "attempted_trials": 32,
+                    "admitted_trials": 32,
                     "reached_trials": 31,
+                    "reach_outcomes": {"reviewed-unconditional-final-isa": 31},
                 }
             ],
         }
@@ -118,6 +121,40 @@ class ConSanEmpiricalReportTest(unittest.TestCase):
         self.assertEqual(signature["source_head"], "1" * 40)
         self.assertEqual(signature["hook"], "a" * 64)
         self.assertEqual(signature["selected_topology"]["1"]["name"], "gfx1201")
+
+    def test_workload_identity_rejects_changed_executable(self):
+        provenance = {
+            "workload": "kernel",
+            "files": {"executable": {"sha256": "a" * 64}},
+            "sources": [
+                {
+                    "root": "/checkout/corpus",
+                    "head": "1" * 40,
+                    "dirty": False,
+                }
+            ],
+            "workload_runtime": {
+                "loaded_runtime_libraries": {
+                    "hip-runtime": {"sha256": "b" * 64},
+                    "hsa-runtime": {"sha256": "c" * 64},
+                }
+            },
+        }
+        config = {
+            "file_labels": ["executable"],
+            "required_runtime_libraries": ["hip-runtime", "hsa-runtime"],
+            "source_heads": {"corpus": "1" * 40},
+        }
+        first = report.workload_provenance_signature(provenance, config)
+        provenance["files"]["executable"]["sha256"] = "d" * 64
+        second = report.workload_provenance_signature(provenance, config)
+        self.assertNotEqual(first, second)
+
+    def test_unknown_metric_and_ragged_markdown_fail_closed(self):
+        with self.assertRaisesRegex(report.StudyError, "unmapped empirical metric"):
+            report._metric_kind("sustained:workload:kernel")
+        with self.assertRaisesRegex(report.StudyError, "ragged row"):
+            report._markdown_table(["a", "b"], [["only-a"]])
 
     def test_structural_metrics_sum_only_modified_code_objects(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -202,7 +239,9 @@ class ConSanEmpiricalReportTest(unittest.TestCase):
             self.assertEqual(values["patch_ms"], 7.5)
             self.assertEqual(values["waitcheck_ms"], 4.0)
             self.assertEqual(values["inventory_ms"], 6.0)
-            self.assertEqual(values["clean_runs"], 2)
+            self.assertEqual(values["clean_gate_runs"], 2)
+            self.assertEqual(values["clean_gate_rejections"], 0)
+            self.assertEqual(values["unexpected_diagnostics"], 0)
 
 
 if __name__ == "__main__":

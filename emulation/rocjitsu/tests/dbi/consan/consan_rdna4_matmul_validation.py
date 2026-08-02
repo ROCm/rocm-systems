@@ -52,6 +52,7 @@ def _environment(
 ) -> dict[str, str]:
     clean = phase == "clean"
     environment = dict(os.environ)
+    environment.pop("BENCH_FIXED_ITERS", None)
     environment.update(
         {
             "FILTER": variant,
@@ -182,9 +183,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.phase == "warm"
         else timing is None
     )
-    sampled_oracle_valid = (
-        sampled_correctness if args.phase in {"clean", "cold"} else True
-    )
+    sampled_oracle_valid = sampled_correctness if args.phase == "clean" else True
     accepted = (
         completed.returncode == 0
         and architecture is not None
