@@ -934,6 +934,16 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
             if (vgpr >= base && vgpr < base + halves)
               clobbers = true;
           }
+          // A destination operand is not the only way to write a VGPR. Ask the instruction for the
+          // registers it writes without naming them, so a producer that touches this lane through a
+          // hidden definition cannot slip past the operand walk above.
+          if (!clobbers) {
+            RegisterSet implicit;
+            inst.implicit_defs(implicit);
+            if (implicit.contains(RegisterRef{RegClass::VGPR, vgpr, 1}) ||
+                implicit.contains(RegisterRef{RegClass::ACC_VGPR, vgpr, 1}))
+              clobbers = true;
+          }
           if (clobbers)
             return false;
         }
