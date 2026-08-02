@@ -798,9 +798,16 @@ def _sdk_invoke(agent: "Agent", input_payload: Any, provider: str) -> FakeProvid
 
 
 def _airgap_enabled(explicit: Optional[bool]) -> bool:
-    if explicit is not None:
-        return explicit
-    return os.environ.get("PERFXPERT_AIRGAP", "0") == "1"
+    """Resolve airgap, letting the environment win.
+
+    ``PERFXPERT_AIRGAP=1`` is set by whoever deployed this into a network the
+    tool must not leave, and they cannot audit every call site. A caller
+    passing ``airgap=False`` -- including one built from a model-influenced
+    argument -- used to turn it back off, so the env var is a floor rather
+    than a default.
+    """
+    env_forced = os.environ.get("PERFXPERT_AIRGAP", "0") == "1"
+    return env_forced or explicit is True
 
 
 def _render_airgap_template(agent: Agent, payload: Any) -> Dict[str, Any]:

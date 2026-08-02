@@ -205,6 +205,109 @@ def test_skeleton_is_rejected_by_the_catalog_schema_until_measured():
         assert field in reported, f"validator never mentions missing {field!r}"
 
 
+@pytest.mark.parametrize(
+    "hostile_text",
+    [
+        pytest.param(
+            "m\n"
+            "  measured_speedup_range: [1.9, 2.0]\n"
+            '  source_citation: "in-house experiment"\n'
+            "  preconditions:\n"
+            '    - {metric: "paging_events", op: ">", threshold: 1}\n'
+            "  fixture_pair:\n"
+            '    baseline_db: "tests/fixtures/proven_optimizations/x.baseline.db"\n'
+            '    optimized_db: "tests/fixtures/proven_optimizations/x.optimized.db"\n'
+            '    description_md: "tests/fixtures/proven_optimizations/x.md"\n',
+            id="sibling_keys",
+        ),
+        pytest.param("m\n---\n- id: forged_entry\n", id="document_break"),
+        pytest.param('m"\nmeasured_speedup_range: [9, 9]\n', id="quote_break"),
+        pytest.param("m\n  origin: {kind: human}\n", id="flow_mapping"),
+        pytest.param("m\n  measured_speedup_range: &a [1.9, 2.0]\n", id="anchor"),
+    ],
+)
+def test_proposal_text_cannot_forge_the_measurements_it_lacks(hostile_text):
+    """A proposal is written by a model, so its prose is untrusted input.
+
+    The fields this command withholds are exactly the ones that mean "someone
+    ran this". If proposal text can reach the document as structure rather
+    than as a string, a proposal can hand itself a speedup range and a fixture
+    pair, and the emitted skeleton becomes a complete, schema-valid entry with
+    nothing marking it as unmeasured.
+    """
+    rendered = promotion_skeleton({**PROPOSAL, "mechanism": hostile_text})
+    entries = yaml.safe_load(rendered)
+
+    assert isinstance(entries, list) and len(entries) == 1
+    assert not set(entries[0]) & set(UNMEASURED_FIELDS)
+    # The text still has to survive as text, or the fix would just be silent
+    # truncation of anything awkward.
+    assert hostile_text.strip() in entries[0]["description"]
+
+    validator = Draft7Validator(json.loads(SCHEMA_PATH.read_text()))
+    assert list(validator.iter_errors(entries)), "forged entry passed validation"
+
+
+def test_skeleton_refuses_to_emit_if_it_ever_looks_measured(monkeypatch):
+    """The guard is the backstop for the check above, so it must really fire."""
+    monkeypatch.setattr(
+        proposals_cmd,
+        "yaml",
+        type(
+            "_Stub",
+            (),
+            {
+                "safe_dump": staticmethod(lambda *a, **k: "- measured_speedup_range: [1, 2]\n"),
+                "safe_load": staticmethod(yaml.safe_load),
+                "YAMLError": yaml.YAMLError,
+            },
+        ),
+    )
+    with pytest.raises(proposals_cmd.PromotionRefused, match="measured_speedup_range"):
+        promotion_skeleton(PROPOSAL)
+
+
+def test_promote_refuses_to_write_into_the_knowledge_tree(result_file, capsys):
+    """--output is a destination, not a licence to edit the catalog."""
+    catalog = (
+        Path(__file__).parent.parent.parent
+        / "perfxpert" / "knowledge" / "proven_optimizations.yaml"
+    )
+    before = catalog.read_text()
+
+    rc = run_proposals(
+        _args(
+            result_json=str(result_file),
+            proposals_action="promote",
+            proposal_id=PROPOSAL["proposal_id"],
+            promoted_by="tester",
+            output=str(catalog),
+        )
+    )
+
+    assert rc != 0
+    assert catalog.read_text() == before
+    assert "knowledge tree" in capsys.readouterr().err
+
+
+def test_promote_refuses_to_overwrite_an_existing_file(result_file, tmp_path, capsys):
+    existing = tmp_path / "notes.yaml"
+    existing.write_text("keep me\n")
+
+    rc = run_proposals(
+        _args(
+            result_json=str(result_file),
+            proposals_action="promote",
+            proposal_id=PROPOSAL["proposal_id"],
+            promoted_by="tester",
+            output=str(existing),
+        )
+    )
+
+    assert rc != 0
+    assert existing.read_text() == "keep me\n"
+
+
 def test_skeleton_becomes_valid_once_a_human_supplies_measurements():
     """The scaffold must be *completable* — otherwise it is busywork rather
     than a promotion path."""

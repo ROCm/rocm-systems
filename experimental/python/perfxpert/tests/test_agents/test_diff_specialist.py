@@ -113,18 +113,32 @@ def test_model_cannot_override_wall_delta(stub_diff, fake_provider):
     assert result.wall_delta_pct == 8.0
 
 
-def test_model_still_supplies_narrative_and_confidence(stub_diff, fake_provider):
+def test_model_still_supplies_narrative(stub_diff, fake_provider):
     """Freezing the arithmetic must not mute the model's prose."""
     stub_diff()
     fake_provider.return_value = FakeProviderResponse(
-        structured_output={
-            "narrative": "matmul regressed 34%, now memory-bound.",
-            "confidence": 0.9,
-        },
+        structured_output={"narrative": "matmul regressed 34%, now memory-bound."},
     )
     result = ds_module.run_diff_specialist(_payload(), provider="anthropic")
     assert result.narrative == "matmul regressed 34%, now memory-bound."
-    assert result.confidence == 0.9
+
+
+def test_model_cannot_raise_confidence_in_its_own_verdict(stub_diff, fake_provider):
+    """Confidence describes the measurement, so the model does not set it.
+
+    Diff confidence is read as "how much do the two runs support this
+    verdict". A model that can raise it can make a verdict look better
+    supported than the data it came from, and only in live mode.
+    """
+    stub_diff()
+    fake_provider.return_value = FakeProviderResponse(
+        structured_output={"narrative": "n", "confidence": 0.99},
+    )
+    live = ds_module.run_diff_specialist(_payload(), provider="anthropic")
+    airgapped = ds_module.run_diff_specialist(_payload(), airgap=True)
+
+    assert live.confidence != 0.99
+    assert live.confidence == airgapped.confidence
 
 
 def test_missing_narrative_falls_back_to_template(stub_diff, fake_provider):
@@ -151,6 +165,81 @@ def test_live_and_airgap_agree_on_measured_fields(stub_diff, fake_provider):
     assert live.verdict == airgapped.verdict
     assert live.wall_delta_pct == airgapped.wall_delta_pct
     assert live.kernel_deltas == airgapped.kernel_deltas
+    assert live.confidence == airgapped.confidence
+
+
+def _diff_draft(tool, **overrides):
+    payload = {
+        "title": "Split the fused epilogue",
+        "hypothesis": "The regression tracks the fused epilogue.",
+        "mechanism": "Split it into its own launch and re-measure.",
+        "target_kernel": "matmul",
+        "evidence": [{"kind": "tool", "ref": tool, "observation": "matmul +34%"}],
+        "confidence": 0.4,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_diff_carries_an_exploratory_lane_when_enabled(
+    stub_diff, fake_provider, monkeypatch
+):
+    """Diff declares ADDITIVE_EXPLORATION, so the lane has to actually exist.
+
+    It once declared the capability without ever reading proposals out of the
+    response, which reads as a working feature from every angle except the
+    output.
+    """
+    monkeypatch.setenv("PERFXPERT_AGENT_CREATIVITY", "exploratory")
+    stub_diff()
+    tool = ds_module.build_diff_specialist().tools[0].name
+    fake_provider.return_value = FakeProviderResponse(
+        structured_output={
+            "narrative": "n",
+            "kernel_deltas": {"exploratory_proposals": [_diff_draft(tool)]},
+        },
+        tool_calls=[{"name": tool, "arguments": {}}],
+    )
+    result = ds_module.run_diff_specialist(_payload(), provider="anthropic")
+
+    proposals = result.kernel_deltas["exploratory_proposals"]
+    assert len(proposals) == 1
+    assert proposals[0]["specialist"] == "diff"
+    assert proposals[0]["status"] == "exploratory"
+    assert proposals[0]["confidence"] <= 0.5
+
+
+def test_diff_proposal_naming_an_uncompared_kernel_is_dropped(
+    stub_diff, fake_provider, monkeypatch
+):
+    monkeypatch.setenv("PERFXPERT_AGENT_CREATIVITY", "exploratory")
+    stub_diff()
+    tool = ds_module.build_diff_specialist().tools[0].name
+    fake_provider.return_value = FakeProviderResponse(
+        structured_output={
+            "narrative": "n",
+            "kernel_deltas": {
+                "exploratory_proposals": [_diff_draft(tool, target_kernel="[NEVER_RAN]")]
+            },
+        },
+        tool_calls=[{"name": tool, "arguments": {}}],
+    )
+    result = ds_module.run_diff_specialist(_payload(), provider="anthropic")
+    assert result.kernel_deltas["exploratory_proposals"] == []
+
+
+def test_diff_has_no_exploratory_lane_by_default(stub_diff, fake_provider):
+    stub_diff()
+    tool = ds_module.build_diff_specialist().tools[0].name
+    fake_provider.return_value = FakeProviderResponse(
+        structured_output={
+            "narrative": "n",
+            "kernel_deltas": {"exploratory_proposals": [_diff_draft(tool)]},
+        },
+        tool_calls=[{"name": tool, "arguments": {}}],
+    )
+    result = ds_module.run_diff_specialist(_payload(), provider="anthropic")
+    assert result.kernel_deltas["exploratory_proposals"] == []
 
 
 @pytest.mark.parametrize(

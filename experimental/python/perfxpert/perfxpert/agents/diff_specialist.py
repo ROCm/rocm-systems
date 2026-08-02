@@ -23,7 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from perfxpert.agents import schemas
+from perfxpert.agents import creativity, schemas
 from perfxpert.agents.framework import AgentCapability, Agent, ToolBinding, run_agent
 from perfxpert.tools import regression, roofline, trace_diff
 
@@ -124,22 +124,56 @@ def run_diff_specialist(
 
     if raw.get("_mode") == "airgap":
         narrative = _airgap_narrative(diff_result)
-        confidence = 0.7
     else:
         so = raw.get("structured_output") or {}
         narrative = so.get("narrative") or _airgap_narrative(diff_result)
-        confidence = float(so.get("confidence", 0.7))
+
+    proposals = creativity.proposals_from_response(
+        agent,
+        raw,
+        specialist="diff",
+        airgap=bool(raw.get("_mode") == "airgap"),
+        manifest=creativity.manifest_from_run(
+            agent,
+            raw,
+            kernels=_measured_kernel_names(regressions, improvements),
+        ),
+        provider=provider,
+        field_path=("kernel_deltas", "exploratory_proposals"),
+    )
 
     return schemas.DiffSpecialistOutput(
         wall_delta_pct=wall_delta_pct,
         kernel_deltas={
             "regressions": regressions,
             "improvements": improvements,
+            # ``kernel_deltas`` is typed as lists of plain dicts, so the lane
+            # is carried serialised here and re-validated by the schema.
+            "exploratory_proposals": [p.model_dump() for p in proposals],
         },
         verdict=verdict,  # type: ignore[arg-type]
         narrative=narrative,
-        confidence=max(0.0, min(1.0, confidence)),
+        # Deliberately not ``so.get("confidence")``. This says how well two
+        # measured runs support the verdict, which is a property of the data
+        # rather than something a model can assess -- and letting it move made
+        # the two modes disagree on a number consumers gate on.
+        confidence=0.7,
     )
+
+
+def _measured_kernel_names(*kernel_lists: List[Dict[str, Any]]) -> List[str]:
+    """Kernels this diff actually compared.
+
+    A proposal may only name one of these, so it cannot be about a kernel that
+    was never in either run.
+    """
+    names = []
+    for kernels in kernel_lists:
+        for kernel in kernels or []:
+            name = kernel.get("name") if isinstance(kernel, dict) else None
+            if name:
+                names.append(str(name))
+    return names
 
 
 __all__ = ["build_diff_specialist", "run_diff_specialist"]

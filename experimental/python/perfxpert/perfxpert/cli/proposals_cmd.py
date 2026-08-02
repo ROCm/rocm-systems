@@ -22,7 +22,15 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-__all__ = ["add_args", "run_proposals", "load_proposals", "promotion_skeleton"]
+import yaml
+
+__all__ = [
+    "add_args",
+    "run_proposals",
+    "load_proposals",
+    "promotion_skeleton",
+    "PromotionRefused",
+]
 
 
 # Fields a promoted entry must carry that a proposal cannot supply, because
@@ -246,11 +254,43 @@ def promotion_skeleton(
     bottleneck = _BOTTLENECK_BY_SPECIALIST.get(specialist, "mixed")
     entry_id = _suggest_id(proposal)
 
-    def _yaml_list(items: Any, indent: str) -> List[str]:
-        items = [item for item in (items or []) if item]
-        if not items:
-            return [f"{indent}[]  # TODO: fill in"]
-        return [f"{indent}- {json.dumps(str(item))}" for item in items]
+    description = "\n".join(
+        text
+        for text in (
+            str(proposal.get("hypothesis", "")).strip(),
+            str(proposal.get("mechanism", "")).strip(),
+        )
+        if text
+    )
+
+    origin: Dict[str, Any] = {
+        "kind": "promoted_proposal",
+        "proposal_id": str(proposal.get("proposal_id", "TODO")),
+    }
+    if specialist:
+        origin["specialist"] = specialist
+    origin["promoted_by"] = promoted_by or "TODO: your name"
+    origin["promoted_at"] = "TODO: YYYY-MM-DD"
+
+    entry = {
+        "id": entry_id,
+        "bottleneck_type": bottleneck,
+        "technique": str(proposal.get("title", "")),
+        "description": description,
+        "failure_modes": [
+            str(item) for item in (proposal.get("failure_modes") or []) if item
+        ],
+        "origin": origin,
+    }
+
+    # Serialised, never concatenated. Every value here is model-supplied, and
+    # hand-built YAML let a multiline field close the block it was written
+    # into and open sibling keys -- which is how a proposal could emit itself
+    # a measured_speedup_range and a fixture_pair and validate as a real
+    # catalog entry.
+    body = yaml.safe_dump(
+        [entry], sort_keys=False, default_flow_style=False, allow_unicode=True, width=1000
+    )
 
     lines = [
         "# Promotion skeleton — NOT a valid catalog entry yet, by design.",
@@ -267,31 +307,9 @@ def promotion_skeleton(
             "# Append to perfxpert/knowledge/proven_optimizations.yaml only after",
             "# the fixture pair exists and the gate cascade passes on it.",
             "",
-            f"- id: {entry_id}",
-            f"  bottleneck_type: {bottleneck}",
-            f"  technique: {json.dumps(str(proposal.get('title', '')))}",
-            "  description: >",
+            body.rstrip("\n"),
         ]
     )
-    for field in ("hypothesis", "mechanism"):
-        text = str(proposal.get(field, "")).strip()
-        if text:
-            lines.append(f"    {text}")
-
-    lines.append("  failure_modes:")
-    lines.extend(_yaml_list(proposal.get("failure_modes"), "    "))
-
-    lines.extend(
-        [
-            "  origin:",
-            "    kind: promoted_proposal",
-            f"    proposal_id: {proposal.get('proposal_id', 'TODO')}",
-        ]
-    )
-    if specialist:
-        lines.append(f"    specialist: {specialist}")
-    lines.append(f"    promoted_by: {json.dumps(promoted_by or 'TODO: your name')}")
-    lines.append('    promoted_at: "TODO: YYYY-MM-DD"')
 
     lines.extend(
         [
@@ -312,7 +330,63 @@ def promotion_skeleton(
             "",
         ]
     )
-    return "\n".join(lines)
+    rendered = "\n".join(lines)
+    _assert_still_unmeasured(rendered)
+    return rendered
+
+
+class PromotionRefused(RuntimeError):
+    """Raised when a skeleton would emit as a complete catalog entry."""
+
+
+def _refuse_output_path(path: Path) -> Optional[str]:
+    """Reject destinations that would make this command a promotion after all.
+
+    Writing a skeleton into the knowledge tree, or over an existing file,
+    turns "emit something for a human to finish" into "edit the catalog" --
+    which is the thing promotion is documented not to do.
+    """
+    try:
+        resolved = path.expanduser().resolve()
+    except (OSError, RuntimeError) as exc:
+        return f"cannot resolve output path: {exc}"
+
+    knowledge = (Path(__file__).parent.parent / "knowledge").resolve()
+    if resolved == knowledge or knowledge in resolved.parents:
+        return (
+            f"refusing to write into the knowledge tree ({resolved}). "
+            "Promotion emits a skeleton for review; it does not edit the catalog."
+        )
+    if path.is_symlink():
+        return f"refusing to write through a symlink: {path}"
+    if resolved.exists():
+        return f"refusing to overwrite an existing file: {resolved}"
+    return None
+
+
+def _assert_still_unmeasured(rendered: str) -> None:
+    """Refuse to emit a skeleton that could pass as a finished entry.
+
+    The measured fields are supposed to be absent, and this re-reads the
+    rendered text to confirm they are rather than trusting that the code above
+    left them out. Emitting a complete-looking entry is the one failure this
+    command must never have: it would put an unmeasured proposal into the
+    catalog with nothing to signal that nobody ever ran it.
+    """
+    try:
+        parsed = yaml.safe_load(rendered)
+    except yaml.YAMLError as exc:
+        raise PromotionRefused(f"skeleton is not parseable YAML: {exc}") from exc
+
+    if not isinstance(parsed, list) or len(parsed) != 1 or not isinstance(parsed[0], dict):
+        raise PromotionRefused("skeleton did not render as a single catalog entry")
+
+    present = sorted(set(parsed[0]) & set(UNMEASURED_FIELDS))
+    if present:
+        raise PromotionRefused(
+            "skeleton would validate as a measured entry; it supplies "
+            + ", ".join(present)
+        )
 
 
 def _suggest_id(proposal: Dict[str, Any]) -> str:
@@ -371,6 +445,10 @@ def run_proposals(args: argparse.Namespace) -> int:
         )
         output = getattr(args, "output", None)
         if output:
+            refusal = _refuse_output_path(Path(output))
+            if refusal:
+                print(f"error: {refusal}", file=sys.stderr)
+                return 2
             Path(output).write_text(rendered, encoding="utf-8")
             print(f"Wrote promotion skeleton to {output}")
         else:

@@ -83,6 +83,57 @@ def hostile_llm(monkeypatch):
     return invoked
 
 
+def _first_hot_kernel(payload):
+    """The name of a kernel this run actually measured, or None."""
+    kernels = payload.get("hot_kernels") if isinstance(payload, dict) else None
+    for kernel in kernels or []:
+        name = kernel.get("name") if isinstance(kernel, dict) else None
+        if name:
+            return str(name)
+    return None
+
+
+@pytest.fixture
+def exploring_llm(monkeypatch):
+    """Hostile on the vetted lane, and additionally emits a real proposal.
+
+    ``hostile_llm`` never produces a proposal that passes evidence binding, so
+    exploratory assertions written against it hold vacuously. This aims a
+    well-formed draft at a kernel the run measured and a tool the agent
+    declares, so the lane genuinely carries something and the caps and labels
+    on it get exercised.
+    """
+    invoked = []
+
+    def mock_invoke(agent, payload, provider):
+        invoked.append(agent.name)
+        structured = hostile_for(agent.output_schema)
+        tool_calls = []
+
+        fields = getattr(agent.output_schema, "model_fields", {}) or {}
+        kernel = _first_hot_kernel(payload)
+        tool = agent.tools[0].name if getattr(agent, "tools", None) else None
+        if "exploratory_proposals" in fields and kernel and tool:
+            structured["exploratory_proposals"] = [{
+                "title": "Stage the hot region in LDS",
+                "hypothesis": "The kernel re-reads the same rows from HBM.",
+                "mechanism": "Tile the loop and stage each tile in LDS.",
+                "target_kernel": kernel,
+                "evidence": [
+                    {"kind": "tool", "ref": tool, "observation": "re-read traffic"}
+                ],
+                "confidence": 0.4,
+            }]
+            tool_calls = [{"name": tool, "arguments": {}}]
+
+        return FakeProviderResponse(
+            structured_output=structured, tool_calls=tool_calls
+        )
+
+    monkeypatch.setattr("perfxpert.agents.framework._sdk_invoke", mock_invoke)
+    return invoked
+
+
 def _both_modes(method, payload, invoked):
     """Run the same call air-gapped and live; return (airgap_out, live_out)."""
     airgap_session = build_session(airgap=True)
@@ -209,7 +260,7 @@ def test_recommendation_ranking_identical_under_hostile_model(
 
 
 def test_exploratory_lane_is_the_only_permitted_divergence(
-    memory_bound_db, hostile_llm, monkeypatch
+    memory_bound_db, exploring_llm, monkeypatch
 ):
     """Parity is a claim about the vetted lane. Proposals may appear live and
     never air-gapped — that is the point of the lane — so the invariant is
@@ -220,8 +271,13 @@ def test_exploratory_lane_is_the_only_permitted_divergence(
         schemas.AnalysisInput(database_path=str(memory_bound_db))
     )
     payload = schemas.RecommendationInput(findings=findings, gfx_id="gfx942")
-    airgap_out, live_out = _both_modes("run_recommendation", payload, hostile_llm)
+    airgap_out, live_out = _both_modes("run_recommendation", payload, exploring_llm)
 
+    # Without this the rest of the test passes on an empty list, which is what
+    # it would produce if the lane stopped being wired up at all.
+    assert live_out.exploratory_proposals, (
+        "no proposal survived, so the assertions below check nothing"
+    )
     assert airgap_out.recommendations == live_out.recommendations
     assert airgap_out.exploratory_proposals == []
     for proposal in live_out.exploratory_proposals:

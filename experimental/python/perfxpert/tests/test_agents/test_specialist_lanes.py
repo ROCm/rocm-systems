@@ -164,6 +164,23 @@ def test_proposal_is_accepted_when_evidence_checks_out(
     assert proposal.provenance.provider == "anthropic"
 
 
+def test_over_confident_draft_is_dropped_not_quietly_clamped(
+    exploratory, fake_provider, memory_catalog
+):
+    """The ceiling is refusal, not correction.
+
+    Clamping 0.95 down to 0.5 would keep a proposal whose author misjudged how
+    strong its evidence was, and present it at the same confidence as one that
+    was honest about it. Nothing downstream could tell the two apart.
+    """
+    fake_provider.return_value = FakeProviderResponse(
+        structured_output={"exploratory_proposals": [_draft(confidence=0.95)]},
+        tool_calls=[{"name": "unified_memory.analyze_paging", "arguments": {}}],
+    )
+    result = ms_module.run_memory_specialist(_memory_input(), provider="anthropic")
+    assert result.exploratory_proposals == []
+
+
 def test_proposal_citing_an_uncalled_tool_is_dropped(
     exploratory, fake_provider, memory_catalog
 ):

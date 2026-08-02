@@ -328,8 +328,14 @@ def proposals_from_response(
     airgap: bool,
     manifest: EvidenceManifest,
     provider: str = "",
+    field_path: Sequence[str] = ("exploratory_proposals",),
 ) -> List["schemas.ExploratoryProposal"]:
     """Turn a model response's drafts into validated proposals.
+
+    ``field_path`` is where this agent's schema puts the lane. Most declare it
+    at the top level; Diff is at its output field cap and nests it under
+    ``kernel_deltas``, and a draft the model emits somewhere the schema does
+    not declare is discarded by output validation before it gets here.
 
     Returns an empty list whenever the effective tier is strict, which is
     every current configuration. Any failure here yields no proposals rather
@@ -339,8 +345,12 @@ def proposals_from_response(
     if effective_tier(agent, airgap=airgap) is not CreativityTier.EXPLORATORY:
         return []
 
-    structured = raw.get("structured_output") or {}
-    drafts = structured.get("exploratory_proposals") or []
+    node: Any = raw.get("structured_output") or {}
+    for key in field_path:
+        if not isinstance(node, dict):
+            return []
+        node = node.get(key)
+    drafts = node or []
     if not isinstance(drafts, list) or not drafts:
         return []
 

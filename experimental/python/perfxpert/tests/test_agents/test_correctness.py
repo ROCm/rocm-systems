@@ -172,6 +172,41 @@ def test_correctness_llm_alternative_is_filtered_against_history(fake_provider, 
     assert result.alternative_technique is None
 
 
+def test_correctness_will_not_forward_a_technique_the_model_invented(
+    fake_provider, monkeypatch
+):
+    """A next step has to come from the catalog or from history.
+
+    ``alternative_technique`` reads downstream as vetted advice -- it is what
+    the loop tries next. A model naming something nobody has ever run put an
+    invented technique in that slot, and only in live mode, so the two modes
+    disagreed on what to do next.
+    """
+    fake_provider.return_value = FakeProviderResponse(
+        structured_output={
+            "narrative": "n",
+            "alternative_technique": "quantum_warp_fusion",
+        },
+    )
+    monkeypatch.setattr(
+        cor_module,
+        "_tasks_query_by_kernel",
+        lambda kernel_name, root=None: [{"meta": {"technique": "launch_bounds"}}],
+    )
+    v = schemas.GateVerdictModel(
+        status="regressed", failing_gate="regression",
+        detail="total +12%", delta_pct=12.0,
+    )
+    payload = schemas.CorrectnessInput(
+        gate_verdict=v, kernel_name="[K1]", last_technique="launch_bounds",
+    )
+    live = cor_module.run_correctness(payload, provider="anthropic", airgap=False)
+    airgapped = cor_module.run_correctness(payload, airgap=True)
+
+    assert live.alternative_technique != "quantum_warp_fusion"
+    assert live.alternative_technique == airgapped.alternative_technique
+
+
 def test_correctness_uses_source_dir_task_store(tmp_path, monkeypatch):
     project_dir = tmp_path / "project"
     cwd_dir = tmp_path / "cwd"

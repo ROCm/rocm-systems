@@ -110,14 +110,6 @@ def _create_reject_follow_up(
     return _tasks_create(root=source_dir, title=title, meta=meta)
 
 
-def _select_untried_alternative(
-    candidate: Optional[str], tried: set[str], fallback: Optional[str]
-) -> Optional[str]:
-    if candidate and candidate not in tried:
-        return candidate
-    return fallback
-
-
 # -- Runner ---------------------------------------------------------------
 
 def run_correctness(
@@ -181,11 +173,10 @@ def run_correctness(
     else:
         so = raw.get("structured_output") or {}
         narrative = so.get("narrative", _airgap_narrative(verdict))
-        alternative = _select_untried_alternative(
-            so.get("alternative_technique"),
-            tried,
-            alternative,
-        )
+        # ``alternative`` stays as the history-derived value. Taking the
+        # model's ``alternative_technique`` let a Layer-1 agent name a
+        # technique nobody has ever run -- it reads as a vetted next step to
+        # everything downstream, and it made the two modes disagree.
 
     return schemas.CorrectnessOutput(
         verdict=verdict.status,

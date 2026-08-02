@@ -200,6 +200,40 @@ def test_run_agent_airgap_uses_template(monkeypatch, tmp_path):
     assert "airgap" in result.get("_mode", "").lower() or result.get("airgap") is True
 
 
+def test_airgap_env_var_cannot_be_turned_off_by_a_caller(monkeypatch, tmp_path):
+    """The env var is set by whoever owns the network, not by the caller.
+
+    It gets set once, at deploy time, by someone who cannot audit every call
+    site in the tool. An ``airgap=False`` argument reaching this from anywhere
+    -- a config default, a flag, a value derived from a model's output -- used
+    to switch it back off and let the run reach the network.
+    """
+    monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
+
+    fence = tmp_path / "x.md"
+    fence.write_text("short fence")
+    agent = Agent(
+        name="T", layer=1, fence_path=str(fence),
+        input_schema=dict, output_schema=dict, tools=[],
+    )
+
+    def explode(*args, **kwargs):
+        raise AssertionError("reached the provider despite PERFXPERT_AIRGAP=1")
+
+    monkeypatch.setattr(framework, "_sdk_invoke", explode)
+
+    result = run_agent(agent, input_payload={"user_query": "q"}, airgap=False)
+    assert result.get("_mode") == "airgap"
+
+
+def test_airgap_argument_still_works_when_the_env_var_is_unset(monkeypatch, tmp_path):
+    """The clamp is a floor, not a constant."""
+    monkeypatch.delenv("PERFXPERT_AIRGAP", raising=False)
+    assert framework._airgap_enabled(True) is True
+    assert framework._airgap_enabled(False) is False
+    assert framework._airgap_enabled(None) is False
+
+
 # -- Provider selection pass-through --------------------------------------
 
 
