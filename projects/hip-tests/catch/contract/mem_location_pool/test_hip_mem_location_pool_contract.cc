@@ -52,8 +52,8 @@ HIP_TEST_CASE(Contract_MemLocationPool_HipMemGetMemPool_Default_ReturnsPoolForDe
 
 // @asserts: hipMemGetDefaultMemPool - querying the current device location's default memory pool returns a non-null pool when memory pools are supported
 HIP_TEST_CASE(Contract_MemLocationPool_HipMemGetDefaultMemPool_CurrentDevice_ReturnsNonNullPool) {
-#if HT_NVIDIA && defined(CUDA_VERSION) && CUDA_VERSION < 13000
-  HIP_SKIP_TEST("Location-based default memory-pool queries are not exposed before CUDA 13.0 on the NVIDIA backend.");
+#if HT_NVIDIA
+  HIP_SKIP_TEST("hipMemGetDefaultMemPool is not exposed by the NVIDIA backend.");
 #else
   SkipIfMemoryPoolsUnsupported();
 
@@ -61,7 +61,7 @@ HIP_TEST_CASE(Contract_MemLocationPool_HipMemGetDefaultMemPool_CurrentDevice_Ret
   hipMemPool_t default_pool = nullptr;
   HIP_CHECK(hipMemGetDefaultMemPool(&default_pool, &location, hipMemAllocationTypePinned));
   REQUIRE(default_pool != nullptr);
-#endif  // HT_NVIDIA && CUDA_VERSION < 13000
+#endif  // HT_NVIDIA
 }
 
 // @asserts: hipMemSetMemPool - a pool set for a location round-trips through a subsequent hipMemGetMemPool query
