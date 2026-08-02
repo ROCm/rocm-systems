@@ -91,6 +91,7 @@ target from a clean source checkpoint instead:
 VENV=/path/to/therock-venv PRODUCTION_ONLY=1 \
   /path/to/rdna4_matmul/build_and_test.sh --help
 export CONSAN_VALIDATION_RDNA4_MATMUL_DIR=/path/to/rdna4_matmul
+export CONSAN_VALIDATION_LLVM_READELF=/path/to/llvm-readelf
 ```
 
 This target contains the ordinary uninstrumented FP16 and FP8 production
@@ -116,6 +117,11 @@ Every campaign records, at minimum:
   randomization seed; and
 - GPU temperature, clocks, and competing-process checks when those readings
   are available without changing the machine configuration.
+
+The versioned provenance artifact records explicit unavailable or failed-probe
+states. Dynamic observations are captured once when the campaign is created
+and preserved by `--resume`; stable source, binary, machine, and toolchain
+identity fields must still match on every resumed invocation.
 
 Use a new artifact root after any source, hook, binary, input, methodology, or
 failed-preparation change. Never merge samples from different checkpoints into
@@ -165,8 +171,10 @@ requires fresh processes. The native calibration fixes one iteration count for
 all engines in that campaign.
 
 A project-owned self-timed harness may satisfy the same 250 ms requirement
-internally. In that case the campaign records one aggregate device estimate per
-round, does not multiply the harness's own iteration loop, and uses separate
+internally. Its native calibration reports the exact launch count and measured
+aggregate; every instrumented row reuses that count and rejects an aggregate
+below 250 ms. The campaign records one aggregate device estimate per round,
+does not multiply the harness's own iteration loop, and uses separate
 oracle-only processes for the cold metric.
 
 Baseline drift is evaluated separately for every metric using the absolute
@@ -197,6 +205,7 @@ python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
   --target gfx1201 study \
   --workload pytorch-rdna4-compiled-softmax --profile all \
   --rounds 10 --seed 20260802 \
+  --timeout 120 \
   --artifact-root "$CONSAN_ARTIFACT_ROOT"
 ```
 
@@ -207,6 +216,11 @@ samples, and an atomically updated `campaign.json`. Passing `--resume` reuses
 complete matching rows; an interrupted row is preserved with an
 `incomplete-N` suffix before it is retried. A changed source, binary, command,
 or campaign configuration requires a new artifact root.
+
+Campaigns are collected per workload today. Performance collection is tracked
+by `bd-2wsf.3`, fault collection by `bd-2wsf.4`, and the cross-workload reader
+that verifies shared provenance and renders the recommendation tables by
+`bd-2wsf.6`; manual transcription is not an accepted final reporting path.
 
 ## Detection protocol
 
@@ -239,8 +253,14 @@ barrier ordering, and every atomic or fence family proposed for ordinary
 support. Prefer two independent workloads for a semantic family before making
 a broad keep or retire recommendation.
 
-Use fresh contained processes. A pilot may use ten executions, but a final
-detection estimate uses at least 30 independent reached trials per applicable
+Use fresh contained processes. Report attempted, mutation-admitted, and reached
+counts separately. A reached trial has complete installation evidence plus a
+detector-owned diagnostic, an independent-oracle manifestation, a runtime
+access counter, or a reviewed final-ISA proof that the selected instruction is
+unconditionally executed by the completed workload. Process completion alone
+is not a reach witness; timeouts without a direct witness do not enter the rate
+denominator. A pilot may
+use ten executions, but a final detection estimate uses at least 30 independent reached trials per applicable
 fault/engine pair; report hits/trials and a Wilson 95-percent confidence
 interval. Extend a predeclared row to 100 trials when its 30-trial interval is
 too wide to distinguish the recommendation categories. A deterministic claim

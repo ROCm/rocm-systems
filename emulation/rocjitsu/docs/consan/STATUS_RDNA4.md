@@ -40,9 +40,9 @@ oracle, and coverage evidence are valid.
 
 ## Current matrix
 
-19 of 21 workloads × 4 engines are assessed. The newly admitted production
-FP16 and FP8 matmul rows are intentionally gray until the empirical campaign
-tracked by `bd-2wsf` completes. Coverage counts use each engine's own
+All previously listed workloads have engine assessments. The newly admitted
+production FP16 and FP8 matmul rows are intentionally gray until the empirical
+campaign tracked by `bd-2wsf` completes. Coverage counts use each engine's own
 admitted-site model; in particular, Sampled reports split-barrier members where
 other engines report logical barriers.
 
