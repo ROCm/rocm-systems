@@ -3741,6 +3741,36 @@ class ConSanValidationTest(unittest.TestCase):
             "/frozen/llama-build/llama_cpp_mul_mat_vec_q",
         )
 
+    def test_pinned_llama_build_records_and_loads_ggml_libraries(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        build_directory = "/frozen/build/cases/llama.cpp"
+        with mock.patch.dict(
+            os.environ,
+            {
+                validation.LLAMA_BUILD_DIR_ENV: build_directory,
+                "LD_LIBRARY_PATH": "/runtime/lib",
+            },
+        ):
+            inputs = validation._input_files(Path("/workspace"), "gfx1201", workload)
+            environment = validation._clean_environment(
+                None, workload, Path("/hook.so"), "gfx1201"
+            )
+        self.assertEqual(
+            inputs["ggml-hip"],
+            Path(
+                "/frozen/build/third_party/llama.cpp/ggml/src/ggml-hip/"
+                "libggml-hip.so.0"
+            ),
+        )
+        self.assertEqual(
+            environment["LD_LIBRARY_PATH"].split(os.pathsep),
+            [
+                "/frozen/build/third_party/llama.cpp/ggml/src",
+                "/frozen/build/third_party/llama.cpp/ggml/src/ggml-hip",
+                "/runtime/lib",
+            ],
+        )
+
     def test_native_matvec_uses_fault_sensitive_realistic_shape(self) -> None:
         self.assertEqual(llama_validation.WORKLOADS["mul-mat-vec-q"]["n_embd"], 1024)
         self.assertEqual(llama_validation.WORKLOADS["mul-mat-vec-q"]["n_tokens"], 1)

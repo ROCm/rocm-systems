@@ -1706,6 +1706,17 @@ def _llama_executable(workspace: Path, target: str, name: str) -> Path:
     )
 
 
+def _llama_runtime_files(executable: Path) -> dict[str, Path]:
+    build_root = executable.parents[2]
+    source_root = build_root / "third_party" / "llama.cpp" / "ggml" / "src"
+    return {
+        "ggml": source_root / "libggml.so.0",
+        "ggml-base": source_root / "libggml-base.so.0",
+        "ggml-cpu": source_root / "libggml-cpu.so.0",
+        "ggml-hip": source_root / "ggml-hip" / "libggml-hip.so.0",
+    }
+
+
 def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, Path]:
     workload = _resolved_workload(target, workload)
     if workload.kind == "pytorch":
@@ -1733,6 +1744,7 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
             if workload.id == "llama-rdna4-mul-mat-vec-q"
             else "rms_norm"
         )
+        executable = _llama_executable(workspace, target, workload.relative_path)
         return {
             "python": Path(os.path.abspath(Path(sys.executable).expanduser())),
             "workload-source": Path(__file__).with_name("consan_llama_validation.py"),
@@ -1744,7 +1756,8 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
             / "llama.cpp"
             / case
             / "case.json",
-            "executable": _llama_executable(workspace, target, workload.relative_path),
+            "executable": executable,
+            **_llama_runtime_files(executable),
         }
     if workload.kind == "rdna4-matmul":
         root = _rdna4_matmul_root(workspace)
@@ -1914,6 +1927,20 @@ def _clean_environment(
     }
     if target is not None:
         environment["HIP_TARGET"] = target
+    if workload.kind == "llama" and os.environ.get(LLAMA_BUILD_DIR_ENV):
+        executable = (
+            Path(os.path.abspath(Path(os.environ[LLAMA_BUILD_DIR_ENV]).expanduser()))
+            / workload.relative_path
+        )
+        library_directories = list(
+            dict.fromkeys(
+                str(path.parent) for path in _llama_runtime_files(executable).values()
+            )
+        )
+        existing = environment.get("LD_LIBRARY_PATH")
+        if existing:
+            library_directories.append(existing)
+        environment["LD_LIBRARY_PATH"] = os.pathsep.join(library_directories)
     if profile is None:
         return environment
     config = PROFILES[profile]
