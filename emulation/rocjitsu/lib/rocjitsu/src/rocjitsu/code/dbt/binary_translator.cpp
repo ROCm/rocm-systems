@@ -1145,7 +1145,7 @@ scoped_call_liveness_edges(std::span<BasicBlock *const> blocks, std::span<const 
     std::span<const PcRelativeDataRelocation> data_relocations,
     std::span<const PcRelativeTextRelocation> code_relocations,
     std::span<const KdTranslation> translations, rj_code_arch_t host_arch, uint32_t target_mach,
-    std::vector<TranslationDiagnostic> &diagnostics) {
+    bool require_every_text_symbol_mapped, std::vector<TranslationDiagnostic> &diagnostics) {
   if (translated_text.size() < original_text_size)
     append_nop_padding(translated_text, original_text_size - translated_text.size(), host_arch);
 
@@ -1167,8 +1167,8 @@ scoped_call_liveness_edges(std::span<BasicBlock *const> blocks, std::span<const 
     }
   }
 
-  if (!patcher.replace_text(translated_text, text_relocations, data_relocations,
-                            code_relocations)) {
+  if (!patcher.replace_text(translated_text, text_relocations, data_relocations, code_relocations,
+                            require_every_text_symbol_mapped)) {
     append_error(diagnostics, DiagnosticKind::ResourceLimit,
                  "relocated .text could not be materialized safely; leaving code object unchanged");
     return std::nullopt;
@@ -2052,6 +2052,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // Set when a scope hosting a canonical copy had to grow its own descriptor to lower it. See the
   // assignment for why that combination cannot be made safe from inside the scope loop.
   bool canonical_host_outgrew_its_descriptor = false;
+  // Set when an unresolved indirect transfer was admitted only because every code address this
+  // object produces is relocated. That argument also covers addresses arriving from outside, which
+  // reach `.text` through a symbol, so while it is in force no `.text` symbol may keep its source
+  // value -- hence the tightening handed to replace_text() below.
+  bool relied_on_relocated_by_construction = false;
 
   // What one scope added to the three code-address containers, so a skipped scope can take it back.
   // The two vectors only ever grow within a scope, so a length restores them; canonical_placement
@@ -2832,6 +2837,12 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // relocate_text_symbols() tolerates so debug labels in padding do not refuse the object.
         const bool target_is_relocated_by_construction =
             object_produces_code_addresses && code_addresses_fully_accounted;
+        if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
+            !has_recovered_indirect_call && !has_relocation_table_call &&
+            !recovered_indirect_return && !direct_branch_delta &&
+            target_is_relocated_by_construction) {
+          relied_on_relocated_by_construction = true;
+        }
         if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
             !has_recovered_indirect_call && !has_relocation_table_call &&
             !recovered_indirect_return && !direct_branch_delta &&
@@ -3704,7 +3715,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   auto materialized = materialize_translated_code_object(
       std::move(patcher), std::move(translated_text), text.size(), text_relocations,
       data_relocations, code_relocations, descriptor_translations, host_arch_, target_mach_,
-      result.diagnostics);
+      relied_on_relocated_by_construction, result.diagnostics);
   if (!materialized)
     return leave_unchanged();
   result.elf_bytes = std::move(*materialized);

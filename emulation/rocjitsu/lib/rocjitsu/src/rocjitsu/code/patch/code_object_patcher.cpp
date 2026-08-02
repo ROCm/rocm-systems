@@ -429,7 +429,8 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
 [[nodiscard]] bool relocate_text_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
                                          std::span<const Elf64_Shdr> shdrs, size_t text_index,
                                          uint64_t old_text_size, uint64_t new_text_size,
-                                         std::span<const TextOffsetRelocation> relocations) {
+                                         std::span<const TextOffsetRelocation> relocations,
+                                         bool require_every_text_symbol_mapped) {
   if (relocations.empty())
     return true;
 
@@ -500,8 +501,13 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
         continue;
 
       const auto referenced = referenced_by_symtab.find(symtab_index);
+      // An unreferenced symbol normally may stay unmapped, because debug and tooling tables
+      // legitimately label padding this translation does not emit. When the caller is relying on
+      // every `.text` address being relocated, that tolerance is a hole: a host can resolve such a
+      // symbol and hand the stale address back in, so nothing may stay unmapped.
       const bool must_relocate =
-          referenced != referenced_by_symtab.end() && referenced->second.contains(i);
+          require_every_text_symbol_mapped ||
+          (referenced != referenced_by_symtab.end() && referenced->second.contains(i));
 
       uint64_t source_text_offset = symbol.st_value;
       if (ehdr.e_type != ET_REL) {
@@ -993,7 +999,8 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
 bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
                                      std::span<const TextOffsetRelocation> text_relocations,
                                      std::span<const PcRelativeDataRelocation> data_relocations,
-                                     std::span<const PcRelativeTextRelocation> code_relocations) {
+                                     std::span<const PcRelativeTextRelocation> code_relocations,
+                                     bool require_every_text_symbol_mapped) {
   // Keep fail-closed behavior for callers that assume word-aligned executable
   // sections; accepting a non-word-aligned replacement can break downstream
   // PC-relative patching and branch-distance checks.
@@ -1156,7 +1163,7 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
   }
   shdrs[*text_index].sh_size = new_text.size();
   if (!relocate_text_symbols(image_, header, shdrs, *text_index, text_size_, new_text.size(),
-                             text_relocations)) {
+                             text_relocations, require_every_text_symbol_mapped)) {
     return false;
   }
   if (!relocate_relative_text_addends(image_, header, shdrs, *text_index, text_size_,
