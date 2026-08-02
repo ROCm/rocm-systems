@@ -2,9 +2,9 @@
 
 Tracking: `bd-2wsf`
 
-Status: methodology frozen; the empirical runner is implemented and physical
-smoke-validated; corpus admission is in progress. No recommendation has been
-made.
+Status: methodology and corpus are frozen; the empirical runner is implemented
+and physical smoke-validated; performance and detection collection are in
+progress. No recommendation has been made.
 
 This study measures the practical cost and detection value of the four ConSan
 engines on physical `gfx1201`. Its final output is a recommendation for the
@@ -72,7 +72,7 @@ Initial candidates are deliberately broader than the final admitted set:
 | rdna4_matmul | Production FP16/FP8 WMMA matmul | High-rate LDS staging and barriers | Exact small-shape plus sampled 4096³ host reference | Manual racy variants and automatic final-ISA mutation | FP8 admitted for Sampled; other engine failures retained |
 | hip-moi | D128/WMMA attention | LDS handoff, barriers, register pressure | Existing exact reference | Automatic barrier mutation; manual source control if needed | D128 block admitted for all four engines |
 | hip-moi | Stream-K or tree atomic reduction | Atomics, fences, LDS coordination | Existing exact reference | Automatic order/scope mutation | Arrival counter admitted except Inline Shadow |
-| llama.cpp | Quantized matvec | Real quantized kernel with LDS, barriers, atomics, and fences | CPU result comparison | Automatic reviewed mutation | Admitted except Record/Replay |
+| llama.cpp | Quantized matvec | Real quantized LDS accesses and barrier behavior | CPU result comparison | Automatic reviewed mutation | Admitted except Record/Replay |
 | llama.cpp | RMS normalization | Small production reduction | CPU result comparison | Automatic mutation after an effective site is identified | Candidate |
 | Triton/PyTorch | Compiled or split online softmax | Generated LDS/barrier code | CPU-derived tensor comparison | Automatic reviewed mutation | Compiled softmax admitted except Record/Replay |
 | AITER or CK | One production attention, GEMM, reduction, or collective kernel | Library-generated high-performance code | Library reference or CPU comparison | Inventory-driven automatic mutation | Candidate |
@@ -100,7 +100,7 @@ The source and runtime lock is:
 | ConSan hook | SHA-256 `b72109fb27a9f2edd49dac504e3469b536613dae2b34eb8b5be7961a180a6a6d` |
 | rdna4_matmul | `03431b8af28be2c3cad828bec77dfe8836d4a555`; production executable SHA-256 `56ee1d612f91b746c4a0f029b7aab5cfc969be01ccb22a064806d7019ec2b608` |
 | hip-moi | `0fcd57def36188500a19abaf3b6bca3a6e773034`; D128 executable SHA-256 `0751f77dfcb4d1529acdfd5c37b6f3691e19cfa7a28bbef90e81f4ada621da4e`; Stream-K executable SHA-256 `9378b6b8a6b953f336bc71cfb597c702c6aea0123c4e6c9fb01b901266d29960` |
-| rocjitsu-test-corpus / llama.cpp | `5f1e7f57a8d502294e94e5b960aec71964f1b79d`; runner SHA-256 `1fbab008c93c0ee54f48406753876d42b1b94a356ea27cd5f9c385c9a8556ba4`; `libggml-hip` SHA-256 `b7026216d5355efefc54be22c0ac23a96bb2008a2484b755f437d56dab94dabd` |
+| rocjitsu-test-corpus / llama.cpp | `5f1e7f57a8d502294e94e5b960aec71964f1b79d`; runner SHA-256 `1fbab008c93c0ee54f48406753876d42b1b94a356ea27cd5f9c385c9a8556ba4`; ggml SHA-256 values: core `7268f0290a73a5a8cef8cf0d32d32490c706bba33d3686d64ce7a0230a77cd71`, base `b0fb7be4d4f0a1b694ad94a02abcedb7754dc1a7879f0e97f0bd353caddf5f10`, CPU `9c5d52ed0842d4e9db93c4e7f030e6efddd0988037c884b67850a06a783bd8bd`, HIP `b7026216d5355efefc54be22c0ac23a96bb2008a2484b755f437d56dab94dabd` |
 | PyTorch / Triton | PyTorch `2.14.0a0+rocm7.15.0a20260721`, HIP `7.15.0`, Triton `3.8.0` |
 
 The admitted launch and oracle set is:
@@ -108,7 +108,7 @@ The admitted launch and oracle set is:
 | Workload | Frozen launch and oracle | Code-object fingerprint | Inventory |
 |---|---|---|---|
 | `rdna4-matmul-fp8-production` | Exact `256x128x128` plus two sampled host-reference tiles at `4096³` | `fnv1a64:2ea902aa8104f911` | 227 LDS-access sites and 48 barrier sites in 24 sequences |
-| `llama-rdna4-mul-mat-vec-q` | One token, embedding 1024, independent CPU binary output, absolute tolerance `0.02` | `fnv1a64:de2f8cc9883dcdb8` | 88 barrier sites in 44 sequences |
+| `llama-rdna4-mul-mat-vec-q` | One token, embedding 1024, independent CPU binary output, absolute tolerance `0.02` | `fnv1a64:de2f8cc9883dcdb8` | Fault inventory: 88 barrier sites in 44 sequences; clean coverage: 462 access sites |
 | `d128-block` | One 64-thread workgroup, sequence 32, D128/V128, exact and sampled host-reference contexts | `fnv1a64:cebac378f1e018d9` | 8 barrier sites in 4 sequences |
 | `streamk-arrival` | One 64-thread workgroup, one `16x16` tile, two K16 partials, exact host-expected output | `fnv1a64:6a20802924b6e784` | 34 atomic sites with order and scope mutation identities |
 | `pytorch-rdna4-compiled-softmax` | Full-graph compiled FP32 softmax at `[128, 256]`, CPU `allclose` oracle | `fnv1a64:46555795a0b96f12` | 6 barrier sites in 3 sequences |
@@ -137,9 +137,17 @@ target from a clean source checkpoint instead:
 VENV=/path/to/therock-venv PRODUCTION_ONLY=1 \
   /path/to/rdna4_matmul/build_and_test.sh --help
 export CONSAN_VALIDATION_RDNA4_MATMUL_DIR=/path/to/rdna4_matmul
-export CONSAN_VALIDATION_LLAMA_BUILD_DIR=/path/to/llama/build/cases/llama.cpp
+export CONSAN_VALIDATION_LLAMA_BUILD_DIR=/path/to/llama/build
 export CONSAN_VALIDATION_LLVM_READELF=/path/to/llvm-readelf
 ```
+
+The llama setting names the CMake build root containing
+`cases/llama.cpp/<runner>` and `third_party/llama.cpp/ggml/src`. When it is
+set, that root is authoritative: a missing runner or shared-library closure is
+a validation error, with no fallback to another build. Both pinned and
+auto-discovered builds prepend the recorded ggml directories to
+`LD_LIBRARY_PATH`, and provenance verifies with the dynamic loader that the
+mapped ggml files are the files it hashes.
 
 This target contains the ordinary uninstrumented FP16 and FP8 production
 kernels and the same host oracles. RocJITsu still analyzes every kernel in the
@@ -167,10 +175,17 @@ Every campaign records, at minimum:
 - GPU temperature, clocks, and competing-process checks when those readings
   are available without changing the machine configuration.
 
-The versioned provenance artifact records explicit unavailable or failed-probe
-states. Dynamic observations are captured once when the campaign is created
-and preserved by `--resume`; stable source, binary, machine, and toolchain
-identity fields must still match on every resumed invocation.
+Optional machine observations record explicit unavailable or failed-probe
+states. Required workload identities, including PyTorch and Triton package
+identity and the llama dynamic-loader closure, fail the campaign when they
+cannot be recorded. Dynamic observations are captured once when the campaign
+is created and preserved by `--resume`; stable source, binary, machine, and
+toolchain identity fields must still match on every resumed invocation.
+
+The checkpoint artifact must be read with the validator commit named in its
+lock table. A provenance-schema change requires a fresh artifact root and a
+new clean-source checkpoint; the validator rejects an attempt to resume an old
+schema with a diagnostic that directs the operator to create a new root.
 
 Use a new artifact root after any source, hook, binary, input, methodology, or
 failed-preparation change. Never merge samples from different checkpoints into
