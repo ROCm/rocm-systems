@@ -79,15 +79,13 @@ The following diagram shows where each data model is created, what it contains, 
 
 ```mermaid
 flowchart LR
-    subgraph metric_extract.py
+    subgraph block30 ["Block 30 data (panel 3000)"]
+        DF[(Panel 3000\nDataFrames\nPre-computed metric\nvalues from\n3000_mem_bw.yaml)]
+    end
+
+    subgraph evaluator ["Analysis evaluator (cross-block boundary — HLD Decision 4)"]
         ME["extract_membw_metrics()\nLooks up each tree-referenced\nmetric key in the panel 3000\nDataFrames and returns\ntheir pre-computed values"]
-    end
-
-    subgraph engine.py
         ENG["evaluate_tree()\nWalks the tree top-down,\nevaluates metric vs threshold,\nsets each node to active /\ninactive / indeterminate"]
-    end
-
-    subgraph guidance.py
         GR["render_guidance()\nFills guidance templates\nwith actual metric values\nfor each active leaf node"]
     end
 
@@ -97,7 +95,12 @@ flowchart LR
         AR(["MemBwAnalysisResult\n- arch, availability\n- nodes: BottleneckNode[]\n- guidance_blocks: str[]"])
     end
 
-    DF[(Panel 3000\nDataFrames\nPre-computed metric\nvalues from\n3000_mem_bw.yaml)] --> ME
+    subgraph block3 ["Block 3 renderers (panel 300)"]
+        MC[[plot_mem_chart\nAdds stall indicator\nrows to cache panels]]
+        RG[[render_membw_guidance\nPrints condition / measured /\nimpact below the chart]]
+    end
+
+    DF --> ME
     TS{{membw_tree_spec.yaml\nNode definitions,\nthresholds, and\nguidance template IDs}} --> ENG
 
     ME -- "dict: metric key -> float\n(21 metrics)" --> ENG
@@ -109,9 +112,11 @@ flowchart LR
     GR -- "19 filled\ntemplate strings" --> AR
     ENG -- "GL1 + GL2 + EA\nroot nodes" --> AR
 
-    AR -- "active nodes +\nsupporting metrics" --> MC[[plot_mem_chart\nAdds stall indicator\nrows to cache panels]]
-    AR -- "guidance blocks" --> RG[[render_membw_guidance\nPrints condition / measured /\nimpact below the chart]]
+    AR -- "MemBwAnalysisResult\n(metadata, not raw\nblock 30 metrics)" --> MC
+    AR -- "guidance blocks" --> RG
 ```
+
+The diagram groups components into three zones to show the cross-block boundary (HLD Decision 4). Block 30 data (left) enters the analysis evaluator (center), which transforms raw metric values into a renderer-agnostic `MemBwAnalysisResult`. Only this typed analytical object -- containing boolean states, display labels, and pre-rendered guidance text -- crosses into the block 3 renderers (right). The renderers never see block 30 metric keys or DataFrames directly.
 
 - **SupportingMetric** -- created by `engine.py` for each metric referenced by a tree node. Carries the raw value and pre-formatted display string.
 - **BottleneckNode** -- assembled by `engine.py` as a recursive tree. Each node's `state` is set during evaluation. `supporting` metrics attach the evidence. `children` form the parent->child hierarchy.
@@ -511,7 +516,7 @@ src/rocprof_compute_analysis/membw/
 
 ## Metric Extraction
 
-The tree evaluator consumes pre-computed metric values from the panel 3000 DataFrames. All tree-referenced metrics use `SUM/SUM` formulas in the YAML, which the existing evaluation pipeline (`eval_metric()` in `evaluation_pipeline.py`) evaluates as direct ratios across all dispatches with no additional averaging. The resulting DataFrame values satisfy Decision 4's aggregation contract as-is.
+The tree evaluator consumes pre-computed metric values from the panel 3000 DataFrames. All tree-referenced metrics use `SUM/SUM` formulas in the YAML, which the existing evaluation pipeline (`eval_metric()` in `evaluation_pipeline.py`) evaluates as direct ratios across all dispatches with no additional averaging. The resulting DataFrame values satisfy Decision 5's aggregation contract as-is.
 
 `metric_extract.py` looks up each tree-referenced metric by its exact key string (e.g. `"L1 Cache - TCP stalled by UTCL1"`) in the panel 3000 table DataFrames and returns a `dict[str, float | None]`. Missing or NaN values map to `None`, which the tree evaluator treats as indeterminate.
 
@@ -575,6 +580,8 @@ The gfx9 memory chart renderer uses Rich composable panels and grids (10-column 
 
 ### `plot_mem_chart()` signature change
 
+This is the point where block 30 derived data enters the block 3 renderer (see HLD Decision 4: Cross-block data flow for analysis overlay). The `membw` parameter carries a `MemBwAnalysisResult` -- a renderer-agnostic analytical object, not raw block 30 metrics. When `None`, the chart renders exactly as it does today. This cross-block dependency is temporary; it disappears when block 30 metrics consolidate into block 3.
+
 ```python
 def plot_mem_chart(
     normal_unit: str,
@@ -583,7 +590,7 @@ def plot_mem_chart(
     chart_title: Optional[str] = None,
     gpu_arch: Optional[str] = None,
     peak_bw: Optional[PeakBandwidths] = None,
-    membw: MemBwAnalysisResult | None = None,   # NEW
+    membw: MemBwAnalysisResult | None = None,   # NEW (HLD Decision 4)
 ) -> str:
 ```
 

@@ -68,6 +68,8 @@ Downstream tools (Optiq) hardcode the memory chart structure rather than consumi
 |------|-------|
 | Optiq database persistence | Optiq support is under active discussion; the analysis result model should be JSON-serializable to facilitate future integration, but the export schema may change when Optiq support lands |
 | TUI / GUI rendering of annotations | Future work -- would consume the same analysis result model |
+| Output format beyond CLI text | The final output format (CLI text, HTML, structured JSON) is a separate front-end concern. This design produces a renderer-agnostic analysis result model; how that model is presented (CLI Rich panels, HTML files, Optiq-consumed JSON) is decoupled and can evolve independently. See Open Items for the HTML rendering and Optiq JSON schema discussions. |
+| Optiq JSON schema contract | An agreement exists to drive memory chart rendering via a JSON schema consumed by Optiq. Defining or extending that schema is a downstream integration concern under active discussion. This design ensures `MemBwAnalysisResult` is JSON-serializable and structurally compatible with a future schema, but the schema definition itself is out of scope. |
 
 ---
 
@@ -178,7 +180,19 @@ The CLI memory chart renderer uses Rich composable panels and grids to lay out t
 - One block per active **leaf** bottleneck (max 5 per NFR4)
 - Template structure: Condition / Measured / Impact (next steps format TBD)
 
-### Decision 4: Metric aggregation contract
+### Decision 4: Cross-block data flow for analysis overlay
+
+The memory chart renderer (block 3) currently receives data only from its own panel (`0300_memory_chart.yaml`). This design introduces a cross-block dependency: the `MemBwAnalysisResult` passed to `plot_mem_chart()` is derived from block 30 (`3000_mem_bw.yaml`) metrics.
+
+This is an intentional, temporary deviation from the convention that each block renders independently.
+
+**Why it is acceptable:**
+
+1. **What crosses the boundary is metadata, not raw metrics.** The chart renderer receives a `MemBwAnalysisResult` -- a typed analytical object containing boolean states, display labels, and pre-rendered guidance text. It does not read block 30 DataFrames or reference block 30 metric keys. The evaluator (`membw/engine.py`) is the boundary: it consumes block 30 data and produces renderer-agnostic analysis results.
+2. **The design is a phased path toward full consolidation.** Block 30 metrics are planned to merge into block 3 (see Open Items: "Consolidate block 30 into memory chart"). At that point, the cross-block dependency disappears -- all data sources will be under panel 300. This phase introduces the evaluator, the analysis result model, and the rendering integration while the metrics are still maturing under the `--experimental --membw-analysis` gate.
+3. **The `membw` parameter is optional.** When block 30 data is absent (wrong arch, missing counters, flag not set), `membw` is `None` and the chart renders exactly as it does today. Block 3 has no hard dependency on block 30.
+
+### Decision 5: Metric aggregation contract
 
 All ratio metrics used by the bottleneck tree **must** use pairwise `SUM(numerator) / SUM(denominator)` aggregation across selected kernels/dispatches.
 
@@ -309,6 +323,8 @@ End-to-end golden tests use the membw analysis test suite with baseline/optimize
 |------|-------|--------|
 | Removal of `--experimental` gate for `--membw-analysis` | TBD | To be decided -- may happen in this phase or be deferred to future work |
 | Structured export for downstream tools (PS4) | TBD | Optiq support is under active discussion; export schema may change when it lands |
+| HTML rendering for memory chart | TBD | CLI terminal width constraints (NFR2) limit annotation density. An HTML output path (similar to roofline) would remove these constraints and enable richer visualization. This is a separate front-end improvement that can be pursued independently once the analysis result model is stable. |
+| Optiq JSON schema alignment | TBD | An existing agreement calls for driving memory chart rendering via a JSON schema consumed by Optiq. The `MemBwAnalysisResult` model adds new data (bottleneck annotations, guidance blocks) that the schema must accommodate. Schema definition should be coordinated with the Optiq team during implementation. |
 | Counter single-pass feasibility sign-off on MI350 hardware | TBD | Before shipping |
 | Guidance template content for all GL2/EA leaf nodes | TBD | UX phase |
 | Guidance "next steps" field -- content, format, and whether to include | TBD | LLD discussion item |
