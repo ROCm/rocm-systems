@@ -226,10 +226,17 @@ def test_classification_identical_under_hostile_model(memory_bound_db, hostile_l
     ("run_latency_specialist", "LatencySpecialistInput", {}),
 ])
 def test_specialist_vetted_lane_identical_under_hostile_model(
-    method, payload_cls, kwargs, hostile_llm
+    method, payload_cls, kwargs, hostile_llm, monkeypatch
 ):
     """The vetted lane is catalog-ranked. A model cannot substitute its own
-    techniques, raise the confidence, or attach citations to them."""
+    techniques, raise the confidence, or attach citations to them.
+
+    Run in the exploratory tier deliberately. Under strict these specialists
+    do not call a model at all, so the claim would hold for the trivial reason
+    that nothing was consulted; the tier where a model is actually in the loop
+    is the one where "it cannot reach the vetted lane" means something.
+    """
+    monkeypatch.setenv("PERFXPERT_AGENT_CREATIVITY", "exploratory")
     payload = getattr(schemas, payload_cls)(
         gfx_id="gfx942", hot_kernels=[{"name": "[K1]", "pct": 0.4}], **kwargs
     )
@@ -242,10 +249,16 @@ def test_specialist_vetted_lane_identical_under_hostile_model(
 
 
 def test_recommendation_ranking_identical_under_hostile_model(
-    memory_bound_db, hostile_llm
+    memory_bound_db, hostile_llm, monkeypatch
 ):
     """Ranked advice, the chosen specialist, and plateau detection are all
-    rule outputs."""
+    rule outputs.
+
+    Exploratory tier for the same reason as the specialist case above:
+    Recommendation reaches a model only through its specialist, and only when
+    exploration is enabled.
+    """
+    monkeypatch.setenv("PERFXPERT_AGENT_CREATIVITY", "exploratory")
     findings = build_session(airgap=True).run_analysis(
         schemas.AnalysisInput(database_path=str(memory_bound_db))
     )

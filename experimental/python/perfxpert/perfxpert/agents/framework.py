@@ -812,6 +812,16 @@ def _sdk_invoke(agent: "Agent", input_payload: Any, provider: str) -> FakeProvid
 # -- Runtime --------------------------------------------------------------
 
 
+def airgap_enabled(explicit: Optional[bool] = None) -> bool:
+    """Whether this run is air-gapped, resolved the same way ``run_agent`` does.
+
+    Agents that decide whether to call the model at all need the same answer
+    the facade would reach, and resolving it separately would let the two
+    drift.
+    """
+    return _airgap_enabled(explicit)
+
+
 def _airgap_enabled(explicit: Optional[bool]) -> bool:
     """Resolve airgap, letting the environment win.
 
@@ -917,6 +927,7 @@ __all__ = [
     "HandoffPolicyViolation",
     "SessionTurnBudgetExceeded",
     "run_agent",
+    "airgap_enabled",
     "dispatch_tool",
     "dispatch_handoff",
     "validate_structured_output",

@@ -21,7 +21,14 @@ from perfxpert.agents import schemas
 from perfxpert.agents._predict_attach import attach_predictions_to_techniques
 from perfxpert.agents.compute_specialist import _rank_catalog_deterministic
 from perfxpert.agents import creativity
-from perfxpert.agents.framework import AgentCapability, Agent, ToolBinding, run_agent
+from perfxpert.agents.creativity import CreativityTier
+from perfxpert.agents.framework import (
+    AgentCapability,
+    Agent,
+    ToolBinding,
+    airgap_enabled,
+    run_agent,
+)
 from perfxpert.tools import arch, dependency_graph, interconnect, rccl_analysis
 
 
@@ -80,25 +87,28 @@ def run_latency_specialist(
 ) -> schemas.LatencySpecialistOutput:
     catalog = _fetch_catalog(payload.gfx_id)
     agent = build_latency_specialist()
+
+    # Vetted lane is deterministic in both modes; see memory_specialist for
+    # why the model no longer supplies techniques, and why the strict tier
+    # returns without a model call.
+    techniques = attach_predictions_to_techniques(
+        _rank_catalog_deterministic(catalog), payload
+    )
+
+    airgapped = airgap_enabled(airgap)
+    if creativity.effective_tier(agent, airgap=airgapped) is not CreativityTier.EXPLORATORY:
+        return schemas.LatencySpecialistOutput(
+            techniques=techniques,
+            confidence=0.6,
+            citations=[],
+        )
+
     raw = run_agent(
         agent,
         input_payload={**payload.model_dump(), "catalog": catalog},
         provider=provider,
         airgap=airgap,
     )
-
-    # Vetted lane is deterministic in both modes; see memory_specialist for
-    # why the model no longer supplies techniques.
-    techniques = attach_predictions_to_techniques(
-        _rank_catalog_deterministic(catalog), payload
-    )
-
-    if raw.get("_mode") == "airgap":
-        return schemas.LatencySpecialistOutput(
-            techniques=techniques,
-            confidence=0.6,
-            citations=[],
-        )
 
     return schemas.LatencySpecialistOutput(
         techniques=techniques,
@@ -108,7 +118,7 @@ def run_latency_specialist(
             agent,
             raw,
             specialist="latency",
-            airgap=bool(airgap),
+            airgap=airgapped,
             manifest=creativity.manifest_from_run(
                 agent,
                 raw,

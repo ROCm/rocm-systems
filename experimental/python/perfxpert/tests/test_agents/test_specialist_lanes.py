@@ -140,6 +140,51 @@ def test_no_proposals_without_the_configured_ceiling(fake_provider, memory_catal
     assert result.exploratory_proposals == []
 
 
+@pytest.mark.parametrize(
+    "module,runner,payload_cls",
+    [
+        (ms_module, "run_memory_specialist", "MemorySpecialistInput"),
+        (cs_module, "run_compute_specialist", "ComputeSpecialistInput"),
+        (ls_module, "run_latency_specialist", "LatencySpecialistInput"),
+    ],
+)
+def test_strict_tier_does_not_call_the_model_at_all(
+    monkeypatch, module, runner, payload_cls
+):
+    """RFC 0001: "In `strict` mode, return immediately" — no extra LLM call.
+
+    Every field these specialists publish is rule-derived, so under the
+    default tier the model has nothing to contribute. Calling it anyway spent
+    tokens and latency on a response that was discarded in full, and made a
+    provider failure able to take down a result the model was not part of.
+    """
+    monkeypatch.setattr(module, "_fetch_catalog", lambda gfx_id: list(CATALOG))
+
+    def explode(*args, **kwargs):
+        raise AssertionError("strict tier reached the provider")
+
+    monkeypatch.setattr("perfxpert.agents.framework._sdk_invoke", explode)
+
+    payload = getattr(schemas, payload_cls)(
+        gfx_id="gfx942", hot_kernels=[{"name": "[K1]", "pct": 0.4}]
+    )
+    result = getattr(module, runner)(payload, provider="anthropic")
+
+    assert [t["name"] for t in result.techniques] == ["coalesce_loads", "use_lds_tiling"]
+    assert result.exploratory_proposals == []
+
+
+def test_exploratory_tier_does_call_the_model(exploratory, fake_provider, memory_catalog):
+    """The counterpart: skipping the call must not disable the lane itself."""
+    fake_provider.return_value = FakeProviderResponse(
+        structured_output={"exploratory_proposals": [_draft()]},
+        tool_calls=[{"name": "unified_memory.analyze_paging", "arguments": {}}],
+    )
+    result = ms_module.run_memory_specialist(_memory_input(), provider="anthropic")
+    assert fake_provider.called
+    assert len(result.exploratory_proposals) == 1
+
+
 def test_no_proposals_in_airgap_even_when_enabled(exploratory, memory_catalog):
     result = ms_module.run_memory_specialist(_memory_input(), airgap=True)
     assert result.exploratory_proposals == []

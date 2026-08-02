@@ -17,7 +17,14 @@ from perfxpert.agents.compute_specialist import (
     _rank_catalog_deterministic,
 )
 from perfxpert.agents import creativity
-from perfxpert.agents.framework import AgentCapability, Agent, ToolBinding, run_agent
+from perfxpert.agents.creativity import CreativityTier
+from perfxpert.agents.framework import (
+    AgentCapability,
+    Agent,
+    ToolBinding,
+    airgap_enabled,
+    run_agent,
+)
 from perfxpert.tools import arch, bottleneck, predict_impact, unified_memory
 
 
@@ -81,12 +88,6 @@ def run_memory_specialist(
 ) -> schemas.MemorySpecialistOutput:
     catalog = _fetch_catalog(payload.gfx_id)
     agent = build_memory_specialist()
-    raw = run_agent(
-        agent,
-        input_payload={**payload.model_dump(), "catalog": catalog},
-        provider=provider,
-        airgap=airgap,
-    )
 
     # The vetted lane is deterministic in both modes. It used to be
     # `so.get("techniques", ...)`, which let a live model replace the whole
@@ -97,12 +98,25 @@ def run_memory_specialist(
         _rank_memory_catalog(catalog), payload
     )
 
-    if raw.get("_mode") == "airgap":
+    # RFC 0001 freezes the deterministic core before any model call, and
+    # returns here without one under the default strict tier: nothing in this
+    # schema is model-supplied, so the call was made and its result discarded
+    # in full -- paying tokens, latency, and a failure surface for a run the
+    # model cannot contribute to.
+    airgapped = airgap_enabled(airgap)
+    if creativity.effective_tier(agent, airgap=airgapped) is not CreativityTier.EXPLORATORY:
         return schemas.MemorySpecialistOutput(
             techniques=techniques,
             confidence=0.6,
             citations=[],
         )
+
+    raw = run_agent(
+        agent,
+        input_payload={**payload.model_dump(), "catalog": catalog},
+        provider=provider,
+        airgap=airgap,
+    )
 
     return schemas.MemorySpecialistOutput(
         techniques=techniques,
@@ -112,7 +126,7 @@ def run_memory_specialist(
             agent,
             raw,
             specialist="memory",
-            airgap=bool(airgap),
+            airgap=airgapped,
             manifest=creativity.manifest_from_run(
                 agent,
                 raw,
