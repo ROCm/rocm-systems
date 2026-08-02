@@ -33,12 +33,46 @@ guardrail tests, and a checked-in PerfXpert CI lane.
 
 ## Implementation status
 
-One prerequisite has already landed ahead of this RFC, because it is a
-correctness fix rather than a design change: the Trace-Diff specialist no
-longer lets a model replace `verdict`, `kernel_deltas`, or `wall_delta_pct`
-(finding 13). Its fence already required that behaviour, so the code was
-contradicting its own documented contract. See `agents/diff_specialist.py`
-and the new `tests/test_agents/test_diff_specialist.py`.
+Two prerequisites have already landed ahead of this RFC, because both are
+correctness fixes rather than design changes:
+
+1. **Trace-Diff determinism (finding 13).** The Trace-Diff specialist no
+   longer lets a model replace `verdict`, `kernel_deltas`, or
+   `wall_delta_pct`. Its fence already required that behaviour, so the code
+   was contradicting its own documented contract. See
+   `agents/diff_specialist.py` and `tests/test_agents/test_diff_specialist.py`.
+2. **Canonical agent inventory (finding 16, partial).** `perfxpert.agents`
+   claimed eight agents in its docstring but exported seven — Diff was absent
+   from the package surface, which is why every guardrail test that
+   enumerated agents inherited the same blind spot. The package now exposes
+   `AGENT_BUILDERS`, and the schema-field-cap, fence-size, and tool-allowlist
+   tests derive from it instead of keeping private lists.
+   `tests/test_agents/test_agent_inventory.py` discovers builders from the
+   package and fails if any is unregistered, so this cannot silently recur.
+
+3. **Phase 11A guardrail enforcement (findings 3, 7, 8, 9).** The framework
+   now validates model output against the declared schema and discards a
+   response carrying unknown or mistyped keys; `token_budget` reaches the SDK
+   as `ModelSettings(max_tokens=...)`; a session-scoped `RunPolicy` applies
+   `MAX_SESSION_LLM_TURNS`; SDK tool wrappers re-check the allowlist; and the
+   SDK-import guard recognises the canonical `agents` module it had been
+   missing. `FenceBuilder` now reads the canonical `agents/fence` files,
+   knows the Diff role, and is the single composition path — so `always.md`
+   reaches every live prompt, verified by test. The duplicate
+   `perfxpert/fence/slices/` copies are removed; they were never packaged in
+   the wheel, so the builder would have raised `FileNotFoundError` in an
+   installed environment.
+4. **Analysis determinism (finding 11, related).** `run_analysis` no longer
+   lets a live model replace `primary_bottleneck`, `confidence`,
+   `time_breakdown`, `hot_kernels`, or `counter_data_available`. This closes a
+   safety hole an existing test had encoded: with `counter_data_available`
+   false the rule returns `data_insufficient`, but a model claiming a real
+   bottleneck was accepted, producing exactly the recommendations the
+   data-insufficient warning promises never to emit.
+
+Still outstanding from finding 16: the fence/tool alignment parser in
+`test_root.py`. Unresolved question 7 is answered by item 3 — the duplicate
+slices are deleted while the `FenceBuilder` API is retained.
 
 Everything else in this document is still proposed and unimplemented.
 
@@ -137,7 +171,9 @@ documents. These findings are prerequisites for the design:
     explicit fence-size list, execution-tool checks, fence/tool alignment, and
     `FenceBuilder` roles. Construction still applies the tool and role-fence
     caps when Diff is built, but the claimed full-tree CI inventory is
-    incomplete.
+    incomplete. The root cause is that `perfxpert/agents/__init__.py` itself
+    omitted Diff. **Partly fixed ahead of this RFC** — see Implementation
+    status; fence/tool alignment and `FenceBuilder` roles remain.
 17. No checked-in workflow under the repository's top-level
     `.github/workflows/` references PerfXpert. The tests are suitable CI
     checks, but their execution currently depends on an external job not
@@ -750,7 +786,7 @@ Modify:
 - `tests/test_agents/test_schema_field_caps.py`,
   `test_fence_size_guardrail.py`, and
   `test_tool_allowlist_guardrail.py`
-  - enumerate all eight agents, including Diff.
+  - done — these now derive from `AGENT_BUILDERS`; see Implementation status.
 - `tests/test_agents/test_root.py`
   - make fence/tool alignment detect tool-like references outside the
     allowlist section or replace the fragile Markdown parser with canonical

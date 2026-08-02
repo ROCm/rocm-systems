@@ -234,3 +234,50 @@ def test_session_live_call_surfaces_non_retryable_provider_error(monkeypatch):
         session.run_root(schemas.RootInput(user_query="why slow?", database_path=None))
 
     assert seen == ["anthropic"]
+
+
+# -- Session turn budget (Phase 11A) ---------------------------------------
+
+
+def test_live_session_carries_a_turn_policy():
+    session = runtime_module.build_session(provider="anthropic")
+    assert session.policy is not None
+    assert session.policy.max_session_turns == 100
+    assert session.policy.turns_used == 0
+
+
+def test_airgap_session_has_no_turn_policy():
+    """No LLM turns are spent air-gapped, so there is nothing to budget."""
+    session = runtime_module.build_session(airgap=True)
+    assert session.policy is None
+
+
+def test_session_turn_cap_is_env_overridable(monkeypatch):
+    monkeypatch.setenv("PERFXPERT_MAX_SESSION_TURNS", "7")
+    session = runtime_module.build_session(provider="anthropic")
+    assert session.policy.max_session_turns == 7
+
+
+def test_invalid_turn_cap_falls_back_to_default(monkeypatch):
+    monkeypatch.setenv("PERFXPERT_MAX_SESSION_TURNS", "not-a-number")
+    session = runtime_module.build_session(provider="anthropic")
+    assert session.policy.max_session_turns == 100
+
+
+def test_session_policy_reaches_run_agent(monkeypatch):
+    """The policy is ambient, so agents need no signature change to honour it."""
+    from perfxpert.agents import framework
+
+    monkeypatch.setattr(
+        framework,
+        "_sdk_invoke",
+        lambda a, p, prov: framework.FakeProviderResponse(structured_output={}),
+    )
+    agent = framework.Agent(
+        name="T", layer=1, fence_path=None, input_schema=dict,
+        output_schema=dict, tools=[],
+    )
+    session = runtime_module.build_session(provider="anthropic")
+    with framework.active_policy(session.policy):
+        framework.run_agent(agent, {}, provider="anthropic", airgap=False)
+    assert session.policy.turns_used == 1

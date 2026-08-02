@@ -33,6 +33,7 @@ from perfxpert.agents import (
     root,
     schemas,
 )
+from perfxpert.agents.framework import RunPolicy, active_policy
 from perfxpert.runtime import ensure_not_recursive
 
 
@@ -118,6 +119,7 @@ class AnalysisSession:
     airgap: bool
     providers: tuple[str, ...] = ()
     api_key: Optional[str] = None
+    policy: Optional[RunPolicy] = None
 
     def _provider_name(self) -> str:
         return self.provider or DEFAULT_PROVIDER
@@ -139,7 +141,8 @@ class AnalysisSession:
             candidate_key = self.api_key if provider == self.provider else None
             try:
                 with _override_provider_env(provider, candidate_key):
-                    return fn(provider)
+                    with active_policy(self.policy):
+                        return fn(provider)
             except (RateLimitError, TransientError) as exc:
                 last_retryable = exc
                 if idx == len(providers) - 1:
@@ -257,6 +260,26 @@ def _airgap_from_env() -> bool:
     return os.environ.get("PERFXPERT_AIRGAP", "0") == "1"
 
 
+def _max_session_turns() -> int:
+    """Session-wide LLM turn cap.
+
+    ``gate_cascade`` has declared MAX_SESSION_LLM_TURNS since the original
+    spec; this is where it finally binds to something.
+    """
+    override = os.environ.get("PERFXPERT_MAX_SESSION_TURNS")
+    if override:
+        try:
+            return max(1, int(override))
+        except ValueError:
+            pass
+    try:
+        from perfxpert.runtime.gate_cascade import MAX_SESSION_LLM_TURNS
+
+        return int(MAX_SESSION_LLM_TURNS)
+    except Exception:  # pragma: no cover - defensive
+        return 100
+
+
 def build_session(
     *,
     provider: Optional[str] = None,
@@ -302,6 +325,7 @@ def build_session(
         providers=providers,
         airgap=is_airgap,
         api_key=None if is_airgap else api_key,
+        policy=None if is_airgap else RunPolicy(max_session_turns=_max_session_turns()),
     )
 
 

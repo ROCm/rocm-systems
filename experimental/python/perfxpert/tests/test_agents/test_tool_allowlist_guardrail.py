@@ -6,26 +6,8 @@ This test enumerates every agent builder and asserts the allowlist is clean.
 
 import pytest
 
-from perfxpert.agents import (
-    build_root_agent,
-    build_analysis_agent,
-    build_recommendation_agent,
-    build_correctness_agent,
-    build_compute_specialist,
-    build_memory_specialist,
-    build_latency_specialist,
-)
+from perfxpert.agents import AGENT_BUILDERS
 
-
-AGENT_BUILDERS = [
-    build_root_agent,
-    build_analysis_agent,
-    build_recommendation_agent,
-    build_correctness_agent,
-    build_compute_specialist,
-    build_memory_specialist,
-    build_latency_specialist,
-]
 
 EXECUTION_TOOLS = frozenset({
     # spec §5.8 execution class
@@ -34,7 +16,11 @@ EXECUTION_TOOLS = frozenset({
 })
 
 
-@pytest.mark.parametrize("builder", AGENT_BUILDERS)
+def _agent_id(builder):
+    return builder.__name__
+
+
+@pytest.mark.parametrize("builder", AGENT_BUILDERS, ids=_agent_id)
 def test_no_execution_tool_in_allowlist(builder):
     agent = builder()
     declared = {t.name for t in agent.tools}
@@ -45,7 +31,7 @@ def test_no_execution_tool_in_allowlist(builder):
     )
 
 
-@pytest.mark.parametrize("builder", AGENT_BUILDERS)
+@pytest.mark.parametrize("builder", AGENT_BUILDERS, ids=_agent_id)
 def test_allowlist_within_cap(builder):
     agent = builder()
     assert len(agent.tools) <= 5, f"{agent.name} has {len(agent.tools)} tools (cap 5)"

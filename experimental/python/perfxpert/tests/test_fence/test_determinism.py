@@ -9,7 +9,7 @@ from perfxpert.fence import FenceBuilder
 
 _SLICES_DIR = (
     Path(__file__).parent.parent.parent
-    / "perfxpert" / "fence" / "slices"
+    / "perfxpert" / "agents" / "fence"
 )
 
 
@@ -21,6 +21,7 @@ ROLES = [
     "compute_specialist",
     "memory_specialist",
     "latency_specialist",
+    "diff_specialist",
 ]
 
 
@@ -33,11 +34,27 @@ def test_bit_identical_across_three_calls():
         assert a == b == c, f"non-deterministic output for role={role}"
 
 
+def test_slices_directory_is_not_empty():
+    """Guard the glob below from vacuously passing if the directory moves."""
+    assert sorted(_SLICES_DIR.glob("*.md")), f"no fence slices under {_SLICES_DIR}"
+
+
 def test_each_slice_under_400_lines():
     for slice_path in sorted(_SLICES_DIR.glob("*.md")):
         lines = slice_path.read_text().splitlines()
         assert len(lines) <= 400, (
             f"slice {slice_path.name} has {len(lines)} lines (limit 400)"
+        )
+
+
+def test_composed_prose_under_400_lines():
+    """The cap applies to what the agent actually receives, not per file."""
+    from perfxpert.fence._builder import compose_prompt
+
+    for role in ROLES:
+        lines = compose_prompt(role).splitlines()
+        assert len(lines) <= 400, (
+            f"composed fence for {role} has {len(lines)} lines (limit 400)"
         )
 
 

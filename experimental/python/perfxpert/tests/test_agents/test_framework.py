@@ -3,8 +3,10 @@
 import inspect
 from functools import partial
 from types import SimpleNamespace
+from typing import Any, Dict, List
 
 import pytest
+from pydantic import BaseModel, ConfigDict
 
 from perfxpert.agents import framework
 from perfxpert.agents.framework import (
@@ -309,11 +311,12 @@ def test_sdk_invoke_wires_openai_agents_sdk(monkeypatch):
     captured = {}
 
     class _FakeSdkAgent:
-        def __init__(self, *, name, instructions, tools, model):
+        def __init__(self, *, name, instructions, tools, model, **kwargs):
             captured["agent_name"] = name
             captured["instructions"] = instructions
             captured["tools"] = list(tools)
             captured["model"] = model
+            captured["model_settings"] = kwargs.get("model_settings")
 
     class _FakeRunResult:
         def __init__(self):
@@ -355,8 +358,10 @@ def test_sdk_invoke_wires_openai_agents_sdk(monkeypatch):
 
     assert isinstance(resp, FakeProviderResponse)
     assert resp.structured_output == {"narrative": "hello", "recommendations": []}
-    # The SDK receives a sanitized tool name (dots → underscores)
-    assert captured["tools"] == [{"name": "intent_classify", "fn": _noop}]
+    # The SDK receives a sanitized tool name (dots → underscores) wrapped in
+    # the allowlist guard, so the callable is no longer the raw binding.
+    assert [t["name"] for t in captured["tools"]] == ["intent_classify"]
+    assert captured["tools"][0]["fn"]() is None
     # Default max_turns=10 when PERFXPERT_AGENTS_MAX_TURNS unset
     assert captured["max_turns"] == 10
     # Model resolved from _DEFAULT_MODELS["openai"]
@@ -377,7 +382,15 @@ def test_translate_tools_accepts_partial_callables(monkeypatch):
     monkeypatch.setattr(framework, "sdk_function_tool", _fake_function_tool)
 
     tool = ToolBinding(name="tasks.create", fn=partial(_create_at, "demo-app"))
-    wrapped = framework._translate_tools([tool])
+    agent = framework.Agent(
+        name="T",
+        layer=1,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=dict,
+        tools=[tool],
+    )
+    wrapped = framework._translate_tools(agent)
 
     assert captured["callable_name"] == "tasks_create"
     assert wrapped[0]["name"] == "tasks_create"
@@ -716,3 +729,246 @@ def test_sdk_invoke_maps_rate_limit_like_runtime_errors(monkeypatch):
 
     with pytest.raises(RateLimitError):
         framework._sdk_invoke(agent, {"user_query": "?"}, provider="openai")
+
+
+# -- Output validation (Phase 11A) -----------------------------------------
+
+
+class _SampleOutput(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    techniques: List[Dict[str, Any]]
+    confidence: float
+    citations: List[str] = []
+
+
+def _validating_agent() -> Agent:
+    return Agent(
+        name="Validating",
+        layer=2,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=_SampleOutput,
+        tools=[],
+    )
+
+
+def test_validation_accepts_a_complete_response():
+    agent = _validating_agent()
+    payload = {"techniques": [{"name": "x"}], "confidence": 0.5, "citations": []}
+    accepted, rejection = framework.validate_structured_output(agent, payload)
+    assert accepted == payload
+    assert rejection is None
+
+
+def test_validation_accepts_a_partial_response():
+    """Agents merge over a deterministic core, so omitted fields are normal."""
+    agent = _validating_agent()
+    accepted, rejection = framework.validate_structured_output(
+        agent, {"confidence": 0.5}
+    )
+    assert accepted == {"confidence": 0.5}
+    assert rejection is None
+
+
+def test_validation_rejects_unknown_fields():
+    """extra='forbid' is the injection guard; an unexpected key kills the response."""
+    agent = _validating_agent()
+    accepted, rejection = framework.validate_structured_output(
+        agent, {"confidence": 0.5, "exec_command": "rm -rf /"}
+    )
+    assert accepted is None
+    assert "exec_command" in rejection
+
+
+def test_validation_rejects_wrong_types():
+    agent = _validating_agent()
+    accepted, rejection = framework.validate_structured_output(
+        agent, {"techniques": "not-a-list"}
+    )
+    assert accepted is None
+    assert rejection
+
+
+def test_validation_rejects_non_object_payloads():
+    agent = _validating_agent()
+    accepted, rejection = framework.validate_structured_output(agent, ["a", "list"])
+    assert accepted is None
+    assert "JSON object" in rejection
+
+
+def test_validation_passes_through_when_schema_is_not_a_model():
+    """Test doubles declare output_schema=dict; nothing to validate against."""
+    agent = Agent(
+        name="Loose", layer=1, fence_path=None,
+        input_schema=dict, output_schema=dict, tools=[],
+    )
+    payload = {"anything": True}
+    accepted, rejection = framework.validate_structured_output(agent, payload)
+    assert accepted == payload
+    assert rejection is None
+
+
+def test_run_agent_discards_invalid_output(monkeypatch):
+    """An agent must fall back deterministically rather than see bad output."""
+    agent = _validating_agent()
+    monkeypatch.setattr(
+        framework,
+        "_sdk_invoke",
+        lambda a, p, prov: framework.FakeProviderResponse(
+            structured_output={"confidence": 0.5, "smuggled": "x"}
+        ),
+    )
+    result = run_agent(agent, {}, provider="openai", airgap=False)
+    assert result["structured_output"] is None
+    assert "smuggled" in result["output_rejected"]
+
+
+def test_run_agent_keeps_valid_output(monkeypatch):
+    agent = _validating_agent()
+    monkeypatch.setattr(
+        framework,
+        "_sdk_invoke",
+        lambda a, p, prov: framework.FakeProviderResponse(
+            structured_output={"confidence": 0.5}
+        ),
+    )
+    result = run_agent(agent, {}, provider="openai", airgap=False)
+    assert result["structured_output"] == {"confidence": 0.5}
+    assert result["output_rejected"] is None
+
+
+# -- Token budget (Phase 11A) ----------------------------------------------
+
+
+def test_token_budget_is_passed_to_the_sdk(monkeypatch):
+    """token_budget was declared on every agent but never reached the SDK."""
+    captured = {}
+
+    class _FakeSdkAgent:
+        def __init__(self, *, name, instructions, tools, model, **kwargs):
+            captured.update(kwargs)
+
+    class _FakeRunResult:
+        final_output = {}
+        new_items = []
+
+    monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
+    monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
+    monkeypatch.setattr(
+        framework, "SdkRunner",
+        SimpleNamespace(run_sync=lambda **kw: _FakeRunResult()),
+    )
+    monkeypatch.setattr(framework, "SdkRunConfig", lambda **kwargs: None)
+    monkeypatch.setattr(framework, "sdk_function_tool", lambda fn, **kw: fn)
+    monkeypatch.setattr(
+        framework, "_build_model_settings", lambda agent: {"max_tokens": agent.token_budget}
+    )
+
+    agent = Agent(
+        name="T", layer=2, fence_path=None, input_schema=dict,
+        output_schema=dict, tools=[], token_budget=3072,
+    )
+    framework._sdk_invoke(agent, {}, provider="openai")
+
+    assert captured["model_settings"] == {"max_tokens": 3072}
+
+
+def test_missing_model_settings_support_does_not_break_the_run(monkeypatch):
+    """An older SDK degrades to unbounded rather than failing."""
+    monkeypatch.setattr(framework, "_build_model_settings", lambda agent: None)
+    captured = {}
+
+    class _FakeSdkAgent:
+        def __init__(self, *, name, instructions, tools, model, **kwargs):
+            captured["kwargs"] = kwargs
+
+    class _FakeRunResult:
+        final_output = {}
+        new_items = []
+
+    monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
+    monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
+    monkeypatch.setattr(
+        framework, "SdkRunner",
+        SimpleNamespace(run_sync=lambda **kw: _FakeRunResult()),
+    )
+    monkeypatch.setattr(framework, "SdkRunConfig", lambda **kwargs: None)
+    monkeypatch.setattr(framework, "sdk_function_tool", lambda fn, **kw: fn)
+
+    agent = Agent(
+        name="T", layer=2, fence_path=None, input_schema=dict,
+        output_schema=dict, tools=[],
+    )
+    framework._sdk_invoke(agent, {}, provider="openai")
+    assert captured["kwargs"] == {}
+
+
+# -- Session turn budget (Phase 11A) ---------------------------------------
+
+
+def test_run_policy_counts_turns(monkeypatch):
+    monkeypatch.setattr(
+        framework, "_sdk_invoke",
+        lambda a, p, prov: framework.FakeProviderResponse(structured_output={}),
+    )
+    agent = Agent(
+        name="T", layer=1, fence_path=None, input_schema=dict,
+        output_schema=dict, tools=[],
+    )
+    policy = framework.RunPolicy(max_session_turns=3)
+    for _ in range(3):
+        run_agent(agent, {}, provider="openai", airgap=False, policy=policy)
+    assert policy.turns_used == 3
+
+
+def test_run_policy_rejects_turn_beyond_budget(monkeypatch):
+    monkeypatch.setattr(
+        framework, "_sdk_invoke",
+        lambda a, p, prov: framework.FakeProviderResponse(structured_output={}),
+    )
+    agent = Agent(
+        name="T", layer=1, fence_path=None, input_schema=dict,
+        output_schema=dict, tools=[],
+    )
+    policy = framework.RunPolicy(max_session_turns=1)
+    run_agent(agent, {}, provider="openai", airgap=False, policy=policy)
+    with pytest.raises(framework.SessionTurnBudgetExceeded):
+        run_agent(agent, {}, provider="openai", airgap=False, policy=policy)
+
+
+def test_airgap_run_does_not_consume_a_turn():
+    """No LLM call happens, so the session budget must not shrink."""
+    agent = Agent(
+        name="T", layer=1, fence_path=None, input_schema=dict,
+        output_schema=dict, tools=[],
+    )
+    policy = framework.RunPolicy(max_session_turns=1)
+    run_agent(agent, {}, airgap=True, policy=policy)
+    run_agent(agent, {}, airgap=True, policy=policy)
+    assert policy.turns_used == 0
+
+
+# -- Tool allowlist on the live SDK path (Phase 11A) -----------------------
+
+
+def test_sdk_tool_wrapper_enforces_the_allowlist():
+    """dispatch_tool's policy now sits on the live path, not just in tests."""
+    def _fn(**kwargs):
+        return "called"
+
+    binding = ToolBinding(name="arch.lookup_peaks", fn=_fn)
+    agent = Agent(
+        name="T", layer=2, fence_path=None, input_schema=dict,
+        output_schema=dict, tools=[binding],
+    )
+    guarded = framework._prepare_tool_callable_for_sdk(agent, binding)
+    assert guarded() == "called"
+
+    stripped = Agent(
+        name="T", layer=2, fence_path=None, input_schema=dict,
+        output_schema=dict, tools=[],
+    )
+    revoked = framework._prepare_tool_callable_for_sdk(stripped, binding)
+    with pytest.raises(framework.ToolAllowlistViolation):
+        revoked()

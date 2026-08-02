@@ -17,17 +17,23 @@ Runtime guardrails:
 - Tool dispatch rejects out-of-allowlist calls
 - Token budget per agent (provided by agent definitions)
 - Structured output validated against declared Pydantic schema
+- Session turn budget (carried by RunPolicy, owned by agents.runtime)
 """
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import json
 import logging
 import os
+from contextvars import ContextVar
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Type
+
+from pydantic import BaseModel, ConfigDict, ValidationError, create_model
 
 from perfxpert.providers._exceptions import (
     AuthError,
@@ -91,6 +97,75 @@ class HandoffPolicyViolation(RuntimeError):
     """Raised when an agent attempts a handoff not on its whitelist."""
 
 
+class SessionTurnBudgetExceeded(RuntimeError):
+    """Raised when a session exhausts MAX_SESSION_LLM_TURNS."""
+
+
+# -- Run policy -----------------------------------------------------------
+
+
+@dataclass
+class RunPolicy:
+    """Per-session limits carried across ``run_agent()`` calls.
+
+    ``agents.runtime`` owns one of these per :class:`AnalysisSession`. The
+    per-run turn cap (``PERFXPERT_AGENTS_MAX_TURNS``) bounds a single SDK
+    conversation; this bounds the whole session, which is the limit
+    ``gate_cascade.MAX_SESSION_LLM_TURNS`` always declared but never applied.
+    """
+
+    max_session_turns: int = 100
+    turns_used: int = 0
+
+    def consume_turn(self, agent_name: str) -> None:
+        if self.turns_used >= self.max_session_turns:
+            raise SessionTurnBudgetExceeded(
+                f"session exhausted its {self.max_session_turns}-turn LLM budget "
+                f"while dispatching {agent_name}"
+            )
+        self.turns_used += 1
+
+
+# The session's policy travels in a context variable rather than through every
+# run_* signature: agents are plain functions called from several entry points
+# (batch CLI, library API, MCP server) and threading a parameter through all of
+# them would put session bookkeeping in each agent's contract.
+_ACTIVE_POLICY: ContextVar[Optional[RunPolicy]] = ContextVar(
+    "perfxpert_run_policy", default=None
+)
+
+
+@contextlib.contextmanager
+def active_policy(policy: Optional[RunPolicy]) -> Iterator[None]:
+    """Apply ``policy`` to every ``run_agent()`` call in this context."""
+    token = _ACTIVE_POLICY.set(policy)
+    try:
+        yield
+    finally:
+        _ACTIVE_POLICY.reset(token)
+
+
+# -- Fence composition ----------------------------------------------------
+
+
+def _compose_fence_text(fence_path: str) -> str:
+    """Return the effective prompt text for ``fence_path``.
+
+    A recognised role gets the shared ``always.md`` policy composed in, via
+    the single builder path. Anything else (test fixtures pointing at a
+    temporary file) is read verbatim, so ad-hoc fences behave as before.
+    """
+    role = Path(fence_path).stem
+    try:
+        from perfxpert.fence._builder import compose_prompt, known_role
+
+        if known_role(role):
+            return compose_prompt(role)
+    except ImportError:  # pragma: no cover - fence package always ships
+        _LOG.warning("framework: fence builder unavailable; using role file verbatim")
+    return Path(fence_path).read_text()
+
+
 # -- Data classes ---------------------------------------------------------
 
 
@@ -149,7 +224,7 @@ class Agent:
             raise AgentConstructionError(f"Agent {self.name}: {len(tools)} tools declared (cap is 5)")
 
         if self.fence_path is not None:
-            text = Path(self.fence_path).read_text()
+            text = _compose_fence_text(self.fence_path)
             n = text.count("\n") + 1
             if n > 400:
                 raise AgentConstructionError(f"Agent {self.name}: fence has {n} lines (cap is 400)")
@@ -186,6 +261,59 @@ class Handoff:
             raise AgentConstructionError(f"Cannot skip layers ({self.source_layer} → {self.target_layer})")
 
 
+# -- Output validation ----------------------------------------------------
+#
+# Agents merge model output over a deterministic core, so a response that
+# omits a field is normal and must stay usable. A response carrying unknown
+# keys or wrong types is not: that is either a confused model or an injection
+# attempt, and trusting it would let unvalidated content reach the caller.
+#
+# So the declared output schema is mirrored into an all-optional model that
+# keeps ``extra="forbid"`` and the per-field types. Missing fields pass;
+# unknown or mistyped fields fail and the whole response is discarded, which
+# drops the agent onto its deterministic fallback.
+
+
+@lru_cache(maxsize=32)
+def _partial_model_for(schema: Type) -> Optional[Type[BaseModel]]:
+    """Build the all-optional mirror of ``schema``, or None if not a model."""
+    if not (isinstance(schema, type) and issubclass(schema, BaseModel)):
+        return None
+    fields: Dict[str, Any] = {}
+    for name, info in schema.model_fields.items():
+        fields[name] = (Optional[info.annotation], None)
+    return create_model(
+        f"Partial{schema.__name__}",
+        __config__=ConfigDict(extra="forbid"),
+        **fields,
+    )
+
+
+def validate_structured_output(
+    agent: "Agent", structured_output: Optional[Dict[str, Any]]
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Return ``(accepted_output, rejection_reason)`` for a model response.
+
+    ``accepted_output`` is None when the response is unusable; callers then
+    fall back to their deterministic path.
+    """
+    if structured_output is None:
+        return None, None
+    if not isinstance(structured_output, dict):
+        return None, f"expected a JSON object, got {type(structured_output).__name__}"
+
+    partial = _partial_model_for(agent.output_schema)
+    if partial is None:
+        # Test doubles may declare a plain dict schema; nothing to check.
+        return structured_output, None
+
+    try:
+        partial(**structured_output)
+    except ValidationError as exc:
+        return None, str(exc)
+    return structured_output, None
+
+
 # -- SDK abstraction ------------------------------------------------------
 
 
@@ -220,6 +348,28 @@ def _resolve_model(provider: str) -> str:
     if provider == "private":
         return f"private/{model}"
     return model
+
+
+def _build_model_settings(agent: "Agent") -> Any:
+    """Translate ``agent.token_budget`` into SDK ModelSettings.
+
+    Returns None when the SDK is too old to expose ModelSettings, so an
+    unsupported install degrades to the previous unbounded behaviour rather
+    than failing the run.
+    """
+    try:
+        from agents.model_settings import ModelSettings  # type: ignore[import-not-found]
+    except ImportError:  # pragma: no cover - depends on SDK version
+        try:
+            from agents import ModelSettings  # type: ignore[import-not-found]
+        except ImportError:
+            _LOG.debug("framework: SDK exposes no ModelSettings; token budget not applied")
+            return None
+    try:
+        return ModelSettings(max_tokens=agent.token_budget)
+    except Exception as exc:  # pragma: no cover - defensive
+        _LOG.warning("framework: could not apply token budget (%s)", exc)
+        return None
 
 
 def _build_sdk_run_config(provider: str) -> Any:
@@ -376,44 +526,48 @@ def _sanitize_tool_name(name: str) -> str:
     return name.replace(".", "_")
 
 
-def _prepare_tool_callable_for_sdk(fn: Callable[..., Any], tool_name: str) -> Callable[..., Any]:
-    """Ensure SDK introspection has function metadata for bound callables."""
-    safe_name = _sanitize_tool_name(tool_name)
-    if inspect.isfunction(fn) or inspect.ismethod(fn):
-        if not getattr(fn, "__name__", None):
-            try:
-                setattr(fn, "__name__", safe_name)
-                setattr(fn, "__qualname__", safe_name)
-            except Exception:  # pragma: no cover - unusual callable object
-                pass
-        return fn
+def _prepare_tool_callable_for_sdk(agent: "Agent", tb: ToolBinding) -> Callable[..., Any]:
+    """Wrap a binding so every SDK invocation re-checks the allowlist.
+
+    The SDK is only handed the agent's declared tools, so this is a second
+    line of defence rather than the primary one. It matters because it puts
+    :func:`dispatch_tool`'s policy on the live path instead of leaving it as
+    a helper that only tests call.
+    """
+    safe_name = _sanitize_tool_name(tb.name)
 
     def _sdk_tool_wrapper(*args: Any, **kwargs: Any) -> Any:
-        return fn(*args, **kwargs)
+        if not agent.has_tool(tb.name):
+            raise ToolAllowlistViolation(
+                f"Agent {agent.name} attempted to call {tb.name!r}; "
+                f"allowlist: {[t.name for t in agent.tools]}"
+            )
+        return tb.fn(*args, **kwargs)
 
     _sdk_tool_wrapper.__name__ = safe_name
     _sdk_tool_wrapper.__qualname__ = safe_name
+    _sdk_tool_wrapper.__doc__ = getattr(tb.fn, "__doc__", None)
     try:
-        _sdk_tool_wrapper.__signature__ = inspect.signature(fn)  # type: ignore[attr-defined]
+        _sdk_tool_wrapper.__signature__ = inspect.signature(tb.fn)  # type: ignore[attr-defined]
     except (TypeError, ValueError):  # pragma: no cover - best effort
         pass
     return _sdk_tool_wrapper
 
 
-def _translate_tools(tools: List[ToolBinding]) -> List[Any]:
-    """Wrap our ToolBinding list in openai-agents function_tool decorators.
+def _translate_tools(agent: "Agent") -> List[Any]:
+    """Wrap an agent's ToolBindings in openai-agents function_tool decorators.
 
-    The SDK expects FunctionTool objects; we wrap each binding's plain
-    callable in ``function_tool`` so the runtime exposes it as a callable
-    tool. Dots in our internal names (``intent.classify``) are rewritten to
-    underscores to satisfy the OpenAI ``^[a-zA-Z0-9_-]+$`` constraint.
+    The SDK expects FunctionTool objects; we wrap each binding's callable in
+    ``function_tool`` so the runtime exposes it as a callable tool. Dots in
+    our internal names (``intent.classify``) are rewritten to underscores to
+    satisfy the OpenAI ``^[a-zA-Z0-9_-]+$`` constraint.
     """
     if sdk_function_tool is None:
         return []
     wrapped: List[Any] = []
-    for tb in tools:
+    for tb in agent.tools:
         try:
-            sdk_callable = _prepare_tool_callable_for_sdk(tb.fn, tb.name)
+            sdk_callable = _prepare_tool_callable_for_sdk(agent, tb)
             wrapped.append(
                 sdk_function_tool(
                     sdk_callable,
@@ -552,11 +706,16 @@ def _sdk_invoke(agent: "Agent", input_payload: Any, provider: str) -> FakeProvid
         )
 
     model = _resolve_model(provider)
-    tools = _translate_tools(list(agent.tools))
+    tools = _translate_tools(agent)
     instructions = agent.fence_text or (
         f"You are the {agent.name} agent. "
         "Follow the JSON payload contract defined in the perfxpert fence."
     )
+
+    sdk_kwargs: Dict[str, Any] = {}
+    model_settings = _build_model_settings(agent)
+    if model_settings is not None:
+        sdk_kwargs["model_settings"] = model_settings
 
     try:
         sdk_agent = SdkAgent(
@@ -564,6 +723,7 @@ def _sdk_invoke(agent: "Agent", input_payload: Any, provider: str) -> FakeProvid
             instructions=instructions,
             tools=tools,
             model=model,
+            **sdk_kwargs,
         )
     except Exception as exc:  # pragma: no cover - defensive
         raise RuntimeError(f"framework: failed to construct SDK Agent: {exc}") from exc
@@ -630,21 +790,41 @@ def run_agent(
     *,
     provider: str = "anthropic",
     airgap: Optional[bool] = None,
+    policy: Optional[RunPolicy] = None,
 ) -> Dict[str, Any]:
     """Run an agent through the SDK (or airgap template).
 
     This is the single entry point agent modules call. Agents never
     import openai_agents; they compose ToolBinding/Handoff objects and
     let the facade handle execution.
+
+    A response that fails :func:`validate_structured_output` is dropped:
+    ``structured_output`` comes back None and ``output_rejected`` carries the
+    reason, so the calling agent falls through to its deterministic path
+    instead of forwarding unvalidated content.
     """
     if _airgap_enabled(airgap):
         return _render_airgap_template(agent, input_payload)
 
+    effective_policy = policy if policy is not None else _ACTIVE_POLICY.get()
+    if effective_policy is not None:
+        effective_policy.consume_turn(agent.name)
+
     resp = _sdk_invoke(agent, input_payload, provider)
+    accepted, rejection = validate_structured_output(agent, resp.structured_output)
+    if rejection is not None:
+        _LOG.warning(
+            "framework: discarding %s output that failed %s validation: %s",
+            agent.name,
+            getattr(agent.output_schema, "__name__", agent.output_schema),
+            rejection,
+        )
+
     return {
         "text": resp.text,
         "tool_calls": resp.tool_calls,
-        "structured_output": resp.structured_output,
+        "structured_output": accepted,
+        "output_rejected": rejection,
         "handoff": resp.handoff,
     }
 
@@ -674,11 +854,14 @@ __all__ = [
     "Agent",
     "Handoff",
     "ToolBinding",
+    "RunPolicy",
     "FakeProviderResponse",
     "AgentConstructionError",
     "ToolAllowlistViolation",
     "HandoffPolicyViolation",
+    "SessionTurnBudgetExceeded",
     "run_agent",
     "dispatch_tool",
     "dispatch_handoff",
+    "validate_structured_output",
 ]

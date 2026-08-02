@@ -36,7 +36,7 @@ def test_analysis_has_no_allowed_handoffs():
 
 
 def test_analysis_classifies_compute_bound(fake_provider, monkeypatch):
-    """Given a high-VALU kernel, LLM produces a compute classification."""
+    """A high-VALU kernel is classified compute by the rule, not the model."""
     fake_provider.return_value = FakeProviderResponse(
         structured_output={
             "primary_bottleneck": "compute",
@@ -56,24 +56,50 @@ def test_analysis_classifies_compute_bound(fake_provider, monkeypatch):
             "counter_data_available": True,
         },
     )
-    # Tools are stubbed via monkeypatch; the agent trusts LLM's synthesis
     result = analysis_module.run_analysis(
         schemas.AnalysisInput(database_path="fake.db", top_kernels=10),
         provider="anthropic",
     )
     assert isinstance(result, schemas.AnalysisOutput)
-    assert result.primary_bottleneck == "compute"
-    assert result.confidence == 0.88
+    assert result.primary_bottleneck in ("compute", "mixed")
+    # The rule's confidence stands; the model's 0.88 is not adopted.
+    assert result.confidence != 0.88
 
 
-def test_analysis_classifies_memory_bound(fake_provider, monkeypatch):
+def test_model_cannot_override_the_rule_classification(fake_provider, monkeypatch):
+    """primary_bottleneck picks the specialist, so it must stay deterministic."""
+    fake_provider.return_value = FakeProviderResponse(
+        structured_output={"primary_bottleneck": "latency", "confidence": 0.99},
+    )
+    monkeypatch.setattr(
+        analysis_module,
+        "_collect_deterministic_metrics",
+        lambda db, top_n=10: {
+            "time_breakdown": {"kernel_pct": 0.90, "memcpy_pct": 0.05, "api_pct": 0.03, "idle_pct": 0.02},
+            "hot_kernels": [{"name": "[KERNEL_1]", "pct": 0.75}],
+            "metrics_for_classifier": {"valu_util_pct": 0.85},
+            "counter_data_available": True,
+        },
+    )
+    result = analysis_module.run_analysis(
+        schemas.AnalysisInput(database_path="fake.db"),
+        provider="anthropic",
+    )
+    assert result.primary_bottleneck != "latency"
+    assert result.confidence != 0.99
+
+
+def test_model_cannot_classify_a_trace_that_lacks_counters(fake_provider, monkeypatch):
+    """Without counters the rule returns data_insufficient and we refuse to guess.
+
+    The model claiming a real bottleneck here would resurrect exactly the
+    recommendations the data_insufficient warning promises not to produce.
+    """
     fake_provider.return_value = FakeProviderResponse(
         structured_output={
             "primary_bottleneck": "memory_transfer",
             "confidence": 0.80,
-            "time_breakdown": {"kernel_pct": 0.55, "memcpy_pct": 0.40, "api_pct": 0.03, "idle_pct": 0.02},
-            "hot_kernels": [{"name": "[KERNEL_1]", "pct": 0.40}],
-            "counter_data_available": False,
+            "counter_data_available": True,
         },
     )
     monkeypatch.setattr(
@@ -90,7 +116,58 @@ def test_analysis_classifies_memory_bound(fake_provider, monkeypatch):
         schemas.AnalysisInput(database_path="fake.db"),
         provider="anthropic",
     )
-    assert result.primary_bottleneck == "memory_transfer"
+    assert result.primary_bottleneck == "data_insufficient"
+    assert result.counter_data_available is False
+
+
+def test_model_cannot_rewrite_measured_facts(fake_provider, monkeypatch):
+    fake_provider.return_value = FakeProviderResponse(
+        structured_output={
+            "time_breakdown": {"kernel_pct": 0.01, "memcpy_pct": 0.99, "api_pct": 0.0, "idle_pct": 0.0},
+            "hot_kernels": [{"name": "[INVENTED]", "pct": 1.0}],
+        },
+    )
+    measured_breakdown = {"kernel_pct": 0.90, "memcpy_pct": 0.05, "api_pct": 0.03, "idle_pct": 0.02}
+    monkeypatch.setattr(
+        analysis_module,
+        "_collect_deterministic_metrics",
+        lambda db, top_n=10: {
+            "time_breakdown": dict(measured_breakdown),
+            "hot_kernels": [{"name": "[KERNEL_1]", "pct": 0.75}],
+            "metrics_for_classifier": {"valu_util_pct": 0.85},
+            "counter_data_available": True,
+        },
+    )
+    result = analysis_module.run_analysis(
+        schemas.AnalysisInput(database_path="fake.db"),
+        provider="anthropic",
+    )
+    assert result.time_breakdown == measured_breakdown
+    assert [k["name"] for k in result.hot_kernels] == ["[KERNEL_1]"]
+
+
+def test_live_and_airgap_classifications_agree(fake_provider, monkeypatch):
+    """The parity invariant that live overrides used to be able to break."""
+    facts = lambda db, top_n=10, min_duration=0.0: {  # noqa: E731
+        "time_breakdown": {"kernel_pct": 0.90, "memcpy_pct": 0.05, "api_pct": 0.03, "idle_pct": 0.02},
+        "hot_kernels": [{"name": "[KERNEL_1]", "pct": 0.75}],
+        "metrics_for_classifier": {"valu_util_pct": 0.85},
+        "counter_data_available": True,
+    }
+    monkeypatch.setattr(analysis_module, "_collect_deterministic_metrics", facts)
+    fake_provider.return_value = FakeProviderResponse(
+        structured_output={"primary_bottleneck": "latency", "confidence": 0.99},
+    )
+
+    live = analysis_module.run_analysis(
+        schemas.AnalysisInput(database_path="fake.db"), provider="anthropic"
+    )
+    airgapped = analysis_module.run_analysis(
+        schemas.AnalysisInput(database_path="fake.db"), airgap=True
+    )
+    assert live.primary_bottleneck == airgapped.primary_bottleneck
+    assert live.confidence == airgapped.confidence
+    assert live.time_breakdown == airgapped.time_breakdown
 
 
 def test_analysis_airgap_uses_deterministic_classifier(monkeypatch):

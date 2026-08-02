@@ -13,6 +13,7 @@ VALID_ROLES = [
     "compute_specialist",
     "memory_specialist",
     "latency_specialist",
+    "diff_specialist",
 ]
 
 
@@ -60,3 +61,44 @@ def test_bottleneck_specialization_included():
     fb = FenceBuilder()
     text = fb.build("recommendation", bottleneck="memory_transfer")
     assert "memory" in text.lower()
+
+
+# -- The builder is the live composition path (Phase 11A) ------------------
+
+
+def test_live_agent_prompt_is_the_builder_output():
+    """Agents used to read one role file directly, bypassing composition."""
+    from perfxpert.agents import AGENT_BUILDERS
+    from perfxpert.fence._builder import compose_prompt
+    from pathlib import Path
+
+    for build in AGENT_BUILDERS:
+        agent = build()
+        role = Path(agent.fence_path).stem
+        assert agent.fence_text == compose_prompt(role), (
+            f"{agent.name} prompt diverges from the composed fence for {role!r}"
+        )
+
+
+def test_shared_fence_reaches_every_live_agent_exactly_once():
+    from perfxpert.agents import AGENT_BUILDERS
+
+    marker = "# PerfXpert Always Fence"
+    for build in AGENT_BUILDERS:
+        agent = build()
+        assert agent.fence_text.count(marker) == 1, (
+            f"{agent.name} contains the shared fence "
+            f"{agent.fence_text.count(marker)} times (want exactly 1)"
+        )
+
+
+def test_every_agent_role_is_known_to_the_builder():
+    from pathlib import Path
+
+    from perfxpert.agents import AGENT_BUILDERS
+    from perfxpert.fence._builder import known_role
+
+    for build in AGENT_BUILDERS:
+        agent = build()
+        role = Path(agent.fence_path).stem
+        assert known_role(role), f"builder does not know role {role!r} ({agent.name})"

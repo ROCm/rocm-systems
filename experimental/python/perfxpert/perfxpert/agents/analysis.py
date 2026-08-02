@@ -648,15 +648,18 @@ def run_analysis(
             counter_data_available=facts["counter_data_available"],
         )
 
-    so = raw.get("structured_output") or {}
+    # Every AnalysisOutput field is a measurement or a rule verdict, and
+    # primary_bottleneck decides which specialist Recommendation routes to.
+    # Letting the model rewrite these made live routing diverge from the
+    # air-gap classifier and could flip counter_data_available, silently
+    # bypassing the "no counters, no recommendations" refusal. The model's
+    # narrative is still available to callers via raw["text"].
     return schemas.AnalysisOutput(
-        primary_bottleneck=_validated_bottleneck_type(
-            so.get("primary_bottleneck", rule_verdict["type"])
-        ),
-        confidence=so.get("confidence", rule_verdict["confidence"]),
-        time_breakdown=so.get("time_breakdown", facts["time_breakdown"]),
-        hot_kernels=so.get("hot_kernels", facts["hot_kernels"]),
-        counter_data_available=so.get("counter_data_available", facts["counter_data_available"]),
+        primary_bottleneck=_validated_bottleneck_type(rule_verdict["type"]),
+        confidence=rule_verdict["confidence"],
+        time_breakdown=facts["time_breakdown"],
+        hot_kernels=facts["hot_kernels"],
+        counter_data_available=facts["counter_data_available"],
     )
 
 
