@@ -10,6 +10,8 @@ PerfXpert, jump to [../contributing/README.md](../contributing/README.md).
 | Install + run your first analysis | [getting-started.md](getting-started.md) |
 | Run the first-time wizard (`perfxpert init`) | [getting-started.md §3.3](getting-started.md#33-first-run--perfxpert-init) |
 | Understand how the agent brain works at runtime | [agentic-mode.md](agentic-mode.md) |
+| Understand exploratory proposals (model ideas, kept separate from advice) | [bounded-specialist-creativity.md](bounded-specialist-creativity.md) |
+| Demo exploratory proposals to another engineer | [demoing-bounded-creativity.md](demoing-bounded-creativity.md) |
 | Drive PerfXpert from a coding backend (opencode / claude / codex / gemini) | [backends.md](backends.md) |
 | Embed the agent hierarchy in your own Python code | [python-api.md](python-api.md) |
 
