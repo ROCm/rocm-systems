@@ -106,7 +106,9 @@ def _available_value(value: Any) -> Any:
     return value
 
 
-def provenance_signature(provenance: dict[str, Any]) -> dict[str, Any]:
+def provenance_signature(
+    provenance: dict[str, Any], required_runtime_tools: Iterable[str] = ()
+) -> dict[str, Any]:
     machine = provenance.get("machine", {})
     selected_nodes = machine.get("selected_kfd_nodes", [])
     topology = machine.get("kfd_topology", {})
@@ -119,22 +121,74 @@ def provenance_signature(provenance: dict[str, Any]) -> dict[str, Any]:
         for node in selected_nodes
     }
     runtime_tools = provenance.get("runtime_tools", {})
-    tool_outputs = {
-        name: runtime_tools.get(name, {}).get("output_sha256")
-        for name in ("amdclang++", "llvm-readelf", "python", "rocminfo")
-    }
+    tool_outputs = {}
+    for name in required_runtime_tools:
+        identity = runtime_tools.get(name, {})
+        output_hash = identity.get("output_sha256")
+        _require(
+            identity.get("available") is True
+            and isinstance(output_hash, str)
+            and len(output_hash) == 64,
+            f"required runtime tool {name} has no usable identity",
+        )
+        tool_outputs[name] = output_hash
     return {
         "target": provenance.get("target"),
         "source_head": _source_head(provenance, "rocm-systems"),
         "hook": _file_hash(provenance, "hook"),
-        "hip_runtime": _file_hash(provenance, "hip-runtime"),
-        "hsa_runtime": _file_hash(provenance, "hsa-runtime"),
         "llvm_readelf": _file_hash(provenance, "llvm-readelf"),
         "selectors": provenance.get("environment_selectors"),
         "selected_topology": selected_topology,
         "uname": machine.get("uname"),
         "driver_source": machine.get("amdgpu_module_source_version"),
         "tool_outputs": tool_outputs,
+    }
+
+
+def _source_heads(provenance: dict[str, Any]) -> dict[str, str]:
+    output = {}
+    for source in provenance.get("sources", []):
+        if not isinstance(source, dict):
+            continue
+        name = Path(str(source.get("root", ""))).name
+        head = source.get("head")
+        _require(
+            isinstance(head, str) and len(head) == 40,
+            f"source {name} has no commit identity",
+        )
+        _require(source.get("dirty") is False, f"source {name} was dirty")
+        output[name] = head
+    return output
+
+
+def workload_provenance_signature(
+    provenance: dict[str, Any], config: dict[str, Any]
+) -> dict[str, Any]:
+    file_hashes = {
+        label: _file_hash(provenance, label) for label in config.get("file_labels", [])
+    }
+    runtime = provenance.get("workload_runtime", {})
+    libraries = runtime.get("loaded_runtime_libraries", {})
+    runtime_hashes = {}
+    for label in config.get("required_runtime_libraries", []):
+        value = libraries.get(label, {}).get("sha256")
+        _require(
+            isinstance(value, str) and len(value) == 64,
+            f"{provenance.get('workload')}: missing loaded {label} identity",
+        )
+        runtime_hashes[label] = value
+    observed_sources = _source_heads(provenance)
+    expected_sources = config.get("source_heads", {})
+    for name, head in expected_sources.items():
+        _require(
+            observed_sources.get(name) == head,
+            f"{provenance.get('workload')}: source {name} mismatch",
+        )
+    return {
+        "files": file_hashes,
+        "runtime_libraries": runtime_hashes,
+        "package_document": runtime.get("package_document"),
+        "sources": {name: observed_sources[name] for name in expected_sources},
     }
 
 
@@ -152,10 +206,13 @@ def validate_common_provenance(
     detection: list[tuple[str, Path, dict[str, Any]]],
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
     provenances: dict[str, dict[str, Any]] = {}
-    for name, path, _ in performance:
+    workload_by_artifact = {}
+    for name, path, campaign in performance:
         provenances[name] = _read_json(_performance_provenance_path(path))
+        workload_by_artifact[name] = campaign.get("workload")
     for name, path, summary in detection:
         provenances[name] = _read_json(_detection_provenance_path(path))
+        workload_by_artifact[name] = summary.get("workload")
         spec_hash = summary.get("fault_spec", {}).get("sha256")
         _require(
             spec_hash == manifest.get("fault_spec_sha256"),
@@ -163,9 +220,16 @@ def validate_common_provenance(
         )
 
     first_name = next(iter(provenances))
-    reference = provenance_signature(provenances[first_name])
+    required_tools = manifest.get("required_runtime_tools", [])
     for name, provenance in provenances.items():
-        signature = provenance_signature(provenance)
+        _require(
+            provenance.get("provenance_schema_version")
+            == manifest.get("provenance_schema_version"),
+            f"{name}: provenance schema mismatch",
+        )
+    reference = provenance_signature(provenances[first_name], required_tools)
+    for name, provenance in provenances.items():
+        signature = provenance_signature(provenance, required_tools)
         _require(
             signature == reference,
             f"{name}: stable provenance differs from {first_name}",
@@ -180,6 +244,26 @@ def validate_common_provenance(
     _require(
         reference["hook"] == manifest.get("hook_sha256"), "ConSan hook hash mismatch"
     )
+    workload_configs = manifest.get("workload_identities", {})
+    grouped: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    for name, provenance in provenances.items():
+        workload = workload_by_artifact[name]
+        config = workload_configs.get(workload)
+        _require(isinstance(config, dict), f"missing identity lock for {workload}")
+        grouped.setdefault(str(workload), []).append(
+            (name, workload_provenance_signature(provenance, config))
+        )
+    for workload, identities in grouped.items():
+        _require(
+            len(identities) >= 2,
+            f"{workload}: performance and detection identities are not both present",
+        )
+        reference_name, workload_reference = identities[0]
+        for name, identity in identities[1:]:
+            _require(
+                identity == workload_reference,
+                f"{workload}: runtime identity differs between {reference_name} and {name}",
+            )
     return reference, provenances
 
 
@@ -217,16 +301,16 @@ def _coverage_reason(result: dict[str, Any]) -> str:
     return "clean admission rejected"
 
 
-def _metric_kind(metric: str) -> str | None:
+def _metric_kind(metric: str) -> str:
     if metric == "cold:process":
         return "cold_process"
-    if metric.startswith("cold:workload:") and not metric.endswith(":device"):
-        return "cold_workload"
+    if metric.startswith("cold:workload:"):
+        return "cold_device" if metric.endswith(":device") else "cold_workload"
     if metric.startswith("warm:workload:") and metric.endswith(":device"):
         return "warm_device"
     if metric.startswith("warm:workload:"):
         return "warm_host"
-    return None
+    raise StudyError(f"unmapped empirical metric {metric}")
 
 
 def extract_metric_cells(
@@ -247,8 +331,6 @@ def extract_metric_cells(
         profile_cells: dict[str, dict[str, Any]] = {}
         for metric_name, metric in metrics.items():
             kind = _metric_kind(metric_name)
-            if kind is None:
-                continue
             _require(
                 kind not in profile_cells,
                 f"{workload}/{profile}: duplicate {kind} metric",
@@ -292,20 +374,44 @@ def _round_results(campaign_path: Path) -> Iterable[dict[str, Any]]:
                 yield _read_json(_result_path(campaign_path, relative))
 
 
+def _run_count(result: dict[str, Any]) -> int:
+    return max(1, len(result.get("returncodes") or []))
+
+
+def _unexpected_diagnostic_count(result: dict[str, Any]) -> int:
+    total = 0
+    coverage_runs = result.get("coverage_runs") or [result.get("coverage", {})]
+    for coverage in coverage_runs:
+        if not isinstance(coverage, dict):
+            continue
+        value = coverage.get("diagnostics", {}).get("diagnostic_count", 0)
+        if isinstance(value, int):
+            total += value
+    return total
+
+
 def structural_metrics(
     campaign_path: Path, campaign: dict[str, Any]
 ) -> dict[str, dict[str, Any]]:
     profiles = set(campaign.get("timed_profiles", []))
     samples: dict[str, list[dict[str, float]]] = {profile: [] for profile in profiles}
-    clean_runs: dict[str, int] = {profile: 0 for profile in profiles}
+    clean_gate_runs: dict[str, int] = {profile: 0 for profile in profiles}
+    clean_gate_rejections: dict[str, int] = {profile: 0 for profile in profiles}
+    unexpected_diagnostics: dict[str, int] = {profile: 0 for profile in profiles}
     metadata_nonzero: dict[str, int] = {profile: 0 for profile in profiles}
+    metadata_compared: dict[str, int] = {profile: 0 for profile in profiles}
     for profile in profiles:
         admission = _admission_result(campaign_path, campaign, profile)
-        if admission.get("accepted") is True:
-            clean_runs[profile] += max(1, len(admission.get("returncodes") or []))
+        clean_gate_runs[profile] += _run_count(admission)
+        unexpected_diagnostics[profile] += _unexpected_diagnostic_count(admission)
+        if admission.get("accepted") is not True:
+            clean_gate_rejections[profile] += _run_count(admission)
         for pair in admission.get("retained_code_objects", {}).get("pairs", []):
             kernels = pair.get("kernel_metadata_delta", {}).get("kernels", {})
             for delta in kernels.values():
+                metadata_compared[profile] += sum(
+                    1 for value in delta.values() if isinstance(value, (int, float))
+                )
                 metadata_nonzero[profile] += sum(
                     1
                     for value in delta.values()
@@ -313,9 +419,13 @@ def structural_metrics(
                 )
     for result in _round_results(campaign_path):
         profile = result.get("profile")
-        if profile not in profiles or result.get("accepted") is not True:
+        if profile not in profiles:
             continue
-        clean_runs[profile] += max(1, len(result.get("returncodes") or []))
+        clean_gate_runs[profile] += _run_count(result)
+        unexpected_diagnostics[profile] += _unexpected_diagnostic_count(result)
+        if result.get("accepted") is not True:
+            clean_gate_rejections[profile] += _run_count(result)
+            continue
         for structural in result.get("structural_metrics_runs") or []:
             if (
                 not isinstance(structural, dict)
@@ -389,25 +499,33 @@ def structural_metrics(
             key: _median([sample[key] for sample in values]) for key in values[0]
         }
         medians["samples"] = len(values)
-        medians["clean_runs"] = clean_runs[profile]
+        medians["clean_gate_runs"] = clean_gate_runs[profile]
+        medians["clean_gate_rejections"] = clean_gate_rejections[profile]
+        medians["unexpected_diagnostics"] = unexpected_diagnostics[profile]
         medians["metadata_nonzero_fields"] = metadata_nonzero[profile]
+        medians["metadata_compared_fields"] = metadata_compared[profile]
         output[profile] = medians
     return output
 
 
 def collect_performance(
     manifest: dict[str, Any], performance: list[tuple[str, Path, dict[str, Any]]]
-) -> tuple[list[dict[str, Any]], dict[tuple[str, str], int]]:
+) -> tuple[list[dict[str, Any]], dict[tuple[str, str], dict[str, int]]]:
     allowed = set(manifest.get("allowed_unqualified_metrics", []))
     expected_workloads = set(manifest.get("performance_workloads", []))
     found_workloads = {campaign.get("workload") for _, _, campaign in performance}
     _require(found_workloads == expected_workloads, "performance workload set mismatch")
     rows: list[dict[str, Any]] = []
-    clean_runs: dict[tuple[str, str], int] = {}
+    clean_gates: dict[tuple[str, str], dict[str, int]] = {}
+    observed_rejected_campaigns = set()
     for artifact, path, campaign in performance:
         workload = campaign.get("workload")
         _require(
             campaign.get("schema_version") == 2, f"{workload}: campaign schema mismatch"
+        )
+        _require(
+            campaign.get("protocol") == manifest.get("campaign_protocol"),
+            f"{workload}: campaign protocol mismatch",
         )
         _require(
             campaign.get("target") == manifest.get("target"),
@@ -433,6 +551,31 @@ def collect_performance(
             f"{workload}: timed profiles differ from admitted profiles",
         )
         cells = extract_metric_cells(campaign, allowed)
+        campaign_summary = campaign.get("summary", {})
+        campaign_reasons = campaign_summary.get("reasons", [])
+        expected_reasons = manifest.get("allowed_rejected_campaigns", {}).get(workload)
+        if campaign_summary.get("accepted") is not True:
+            _require(
+                isinstance(expected_reasons, list)
+                and campaign_reasons == expected_reasons,
+                f"{workload}: rejected campaign is not exactly allowlisted",
+            )
+            observed_rejected_campaigns.add(workload)
+        else:
+            _require(
+                expected_reasons is None,
+                f"{workload}: manifest allowlists an accepted campaign",
+            )
+        derived_reasons = sorted(
+            f"{profile}/{cell['metric']}: {cell['count']}/{cell['required']} accepted rounds"
+            for profile, profile_cells in cells.items()
+            for cell in profile_cells.values()
+            if not cell["qualified"]
+        )
+        _require(
+            sorted(campaign_reasons) == derived_reasons,
+            f"{workload}: campaign rejection reasons do not match underqualified metrics",
+        )
         structural = structural_metrics(path, campaign)
         for profile in PROFILE_ORDER:
             admission = _admission_result(path, campaign, profile)
@@ -453,7 +596,24 @@ def collect_performance(
                 "structural": structural.get(profile),
             }
             if is_admitted:
-                clean_runs[(workload, profile)] = int(structural[profile]["clean_runs"])
+                gate = structural[profile]
+                _require(
+                    gate["clean_gate_rejections"] == 0,
+                    f"{workload}/{profile}: clean gate rejected a retained run",
+                )
+                _require(
+                    gate["unexpected_diagnostics"] == 0,
+                    f"{workload}/{profile}: clean gate observed diagnostics",
+                )
+                _require(
+                    gate["metadata_compared_fields"] > 0,
+                    f"{workload}/{profile}: no metadata fields were compared",
+                )
+                clean_gates[(workload, profile)] = {
+                    "runs": int(gate["clean_gate_runs"]),
+                    "rejections": int(gate["clean_gate_rejections"]),
+                    "diagnostics": int(gate["unexpected_diagnostics"]),
+                }
             rows.append(row)
     _require(
         not (
@@ -467,7 +627,12 @@ def collect_performance(
         ),
         "manifest names an underqualified cell that was not observed",
     )
-    return rows, clean_runs
+    _require(
+        observed_rejected_campaigns
+        == set(manifest.get("allowed_rejected_campaigns", {})),
+        "manifest rejected-campaign allowlist does not match observed campaigns",
+    )
+    return rows, clean_gates
 
 
 def collect_detection(
@@ -517,14 +682,26 @@ def collect_detection(
                 )
                 continue
             trials = item.get("trials")
+            attempted = item.get("attempted_trials")
+            admitted = item.get("admitted_trials")
             reached = item.get("reached_trials")
             _require(
-                isinstance(trials, int) and trials >= 30,
+                isinstance(attempted, int) and attempted >= 30,
                 f"{workload}/{fault}/{profile}: too few trials",
             )
             _require(
-                reached == trials,
+                trials == attempted and admitted == attempted and reached == attempted,
                 f"{workload}/{fault}/{profile}: not every final trial reached",
+            )
+            reach_outcomes = item.get("reach_outcomes")
+            _require(
+                isinstance(reach_outcomes, dict)
+                and all(
+                    isinstance(name, str) and isinstance(count, int) and count >= 0
+                    for name, count in reach_outcomes.items()
+                )
+                and sum(reach_outcomes.values()) == reached,
+                f"{workload}/{fault}/{profile}: invalid reach evidence summary",
             )
             _require(
                 item.get("accepted") is True,
@@ -537,8 +714,9 @@ def collect_detection(
                     "fault": fault,
                     "profile": profile,
                     "applicable": True,
-                    "trials": trials,
+                    "trials": attempted,
                     "reached": reached,
+                    "reach_outcomes": reach_outcomes,
                     "detections": item.get("detections"),
                     "detection_rate": item.get("detection_rate"),
                     "detection_interval": item.get("detection_wilson_95"),
@@ -559,7 +737,7 @@ def collect_complexity(manifest: dict[str, Any], source_root: Path) -> dict[str,
     for relative in config.get("source_directories", []):
         directory = source_root / relative
         _require(directory.is_dir(), f"missing complexity source directory {directory}")
-        all_source_paths.update(path for path in directory.iterdir() if path.is_file())
+        all_source_paths.update(path for path in directory.rglob("*") if path.is_file())
     all_source_paths = {
         path
         for path in all_source_paths
@@ -569,6 +747,17 @@ def collect_complexity(manifest: dict[str, Any], source_root: Path) -> dict[str,
         "files": len(all_source_paths),
         "lines": sum(_count_lines(path) for path in all_source_paths),
     }
+    source_digest = hashlib.sha256()
+    for path in sorted(all_source_paths):
+        source_digest.update(path.relative_to(source_root).as_posix().encode("utf-8"))
+        source_digest.update(b"\0")
+        source_digest.update(path.read_bytes())
+        source_digest.update(b"\0")
+    source_tree_sha256 = source_digest.hexdigest()
+    _require(
+        source_tree_sha256 == config.get("source_tree_sha256"),
+        "complexity source tree differs from the frozen inventory",
+    )
     test_paths: set[Path] = set()
     for relative in config.get("test_directories", []):
         directory = source_root / relative
@@ -608,7 +797,11 @@ def collect_complexity(manifest: dict[str, Any], source_root: Path) -> dict[str,
                 "risk": item.get("risk"),
             }
         )
-    return {"shared": shared, "engines": engines}
+    return {
+        "shared": shared,
+        "source_tree_sha256": source_tree_sha256,
+        "engines": engines,
+    }
 
 
 def _fmt_number(value: Any, digits: int = 2) -> str:
@@ -635,6 +828,10 @@ def _mib(value: Any) -> str:
 
 
 def _markdown_table(headers: list[str], rows: list[list[str]]) -> list[str]:
+    _require(
+        all(len(row) == len(headers) for row in rows),
+        f"Markdown table has {len(headers)} headers and a ragged row",
+    )
     output = [
         "| " + " | ".join(headers) + " |",
         "|" + "|".join("---" for _ in headers) + "|",
@@ -651,7 +848,7 @@ def render_markdown(
     signature: dict[str, Any],
     performance: list[dict[str, Any]],
     detection: list[dict[str, Any]],
-    clean_runs: dict[tuple[str, str], int],
+    clean_gates: dict[tuple[str, str], dict[str, int]],
     complexity: dict[str, Any],
 ) -> str:
     lines = [
@@ -693,6 +890,7 @@ def render_markdown(
                 admission,
                 _fmt_metric(cells.get("cold_process")),
                 _fmt_metric(cells.get("cold_workload")),
+                _fmt_metric(cells.get("cold_device")),
                 _fmt_metric(cells.get("warm_host")),
                 _fmt_metric(cells.get("warm_device")),
                 row["artifact"],
@@ -706,6 +904,7 @@ def render_markdown(
                 "Admission",
                 "Cold process",
                 "Cold workload",
+                "Cold device",
                 "Warm host",
                 "Warm device",
                 "Artifact",
@@ -740,7 +939,8 @@ def render_markdown(
                 str(int(structural.get("descriptor_growth", 0))),
                 str(int(structural.get("spill", 0))),
                 str(int(structural.get("unsupported", 0))),
-                str(int(structural.get("metadata_nonzero_fields", 0))),
+                f"{int(structural.get('metadata_nonzero_fields', 0))} / "
+                f"{int(structural.get('metadata_compared_fields', 0))} compared",
                 str(structural.get("samples")),
             ]
         )
@@ -788,22 +988,38 @@ def render_markdown(
                     "—",
                     "—",
                     "—",
+                    "—",
+                    "—",
                     row["artifact"],
                 ]
             )
             continue
         interval = row["detection_interval"]
-        false_positive = clean_runs.get((row["workload"], row["profile"]))
+        gate = clean_gates.get((row["workload"], row["profile"]))
+        reach_labels = {
+            "detector-owned-runtime-diagnostic": "detector runtime",
+            "independent-oracle-manifestation": "oracle runtime",
+            "reviewed-unconditional-final-isa": "reviewed proof",
+        }
+        reach_basis = "; ".join(
+            f"{reach_labels.get(name, name)}={count}"
+            for name, count in sorted(row["reach_outcomes"].items())
+        )
         detection_rows.append(
             [
                 row["workload"],
                 row["fault"],
                 PROFILE_LABELS[row["profile"]],
                 f"{row['reached']}/{row['trials']}",
+                reach_basis,
                 f"{row['oracle_manifestations']}/{row['trials']}",
                 f"{row['detections']}/{row['trials']} ({row['detection_rate'] * 100:.1f}%)",
                 f"{interval['lower'] * 100:.1f}–{interval['upper'] * 100:.1f}%",
-                f"0/{false_positive} clean runs" if false_positive is not None else "—",
+                (
+                    f"pass ({gate['runs']} runs; {gate['diagnostics']} diagnostics)"
+                    if gate is not None
+                    else "—"
+                ),
                 row["artifact"],
             ]
         )
@@ -814,6 +1030,7 @@ def render_markdown(
                 "Fault",
                 "Engine",
                 "Reached",
+                "Reach basis",
                 "Oracle failures",
                 "Diagnoses",
                 "Wilson 95%",
@@ -887,11 +1104,11 @@ def build_report(manifest_path: Path, artifact_base: Path, source_root: Path) ->
     signature, _ = validate_common_provenance(
         manifest, performance_documents, detection_documents
     )
-    performance, clean_runs = collect_performance(manifest, performance_documents)
+    performance, clean_gates = collect_performance(manifest, performance_documents)
     detection = collect_detection(manifest, detection_documents)
     complexity = collect_complexity(manifest, source_root)
     return render_markdown(
-        manifest, signature, performance, detection, clean_runs, complexity
+        manifest, signature, performance, detection, clean_gates, complexity
     )
 
 

@@ -3121,11 +3121,6 @@ class ConSanValidationTest(unittest.TestCase):
                 ),
                 mock.patch.object(
                     validation,
-                    "_runtime_library_paths",
-                    return_value={},
-                ),
-                mock.patch.object(
-                    validation,
                     "_machine_identity",
                     return_value={"selected_kfd_nodes": ["1"]},
                 ),
@@ -3196,6 +3191,10 @@ class ConSanValidationTest(unittest.TestCase):
             "torch_file": "/frozen/torch/__init__.py",
             "triton_version": "3.8",
             "triton_file": "/frozen/triton/__init__.py",
+            "runtime_libraries": {
+                "hip-runtime": ["/frozen/libamdhip64.so.7"],
+                "hsa-runtime": ["/frozen/libhsa-runtime64.so.1"],
+            },
         }
         with (
             mock.patch.object(
@@ -3211,6 +3210,14 @@ class ConSanValidationTest(unittest.TestCase):
                     "output": json.dumps(package_document),
                 },
             ) as command_identity,
+            mock.patch.object(
+                validation,
+                "_runtime_library_records",
+                return_value={
+                    "hip-runtime": {"sha256": "a" * 64},
+                    "hsa-runtime": {"sha256": "b" * 64},
+                },
+            ),
         ):
             identity = validation._workload_runtime_identity(
                 Path("/workspace"), "gfx1201", workload
@@ -3225,6 +3232,10 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(identity["kind"], "pytorch")
         self.assertTrue(identity["python_packages"]["available"])
         self.assertEqual(identity["package_document"], package_document)
+        self.assertEqual(
+            set(identity["loaded_runtime_libraries"]),
+            {"hip-runtime", "hsa-runtime"},
+        )
 
     def test_pytorch_runtime_identity_is_required(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
@@ -3245,11 +3256,30 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_native_runtime_identity_names_hashed_provenance_files(self) -> None:
         workload = validation.WORKLOAD_BY_ID["d128-block"]
-        identity = validation._workload_runtime_identity(
-            Path("/workspace"), "gfx1201", workload
-        )
+        with (
+            mock.patch.object(
+                validation,
+                "_input_files",
+                return_value={"executable": Path("/workspace/d128")},
+            ),
+            mock.patch.object(
+                validation,
+                "_native_runtime_identity",
+                return_value={
+                    "loaded_runtime_libraries": {
+                        "hip-runtime": {"sha256": "a" * 64},
+                        "hsa-runtime": {"sha256": "b" * 64},
+                    }
+                },
+            ),
+        ):
+            identity = validation._workload_runtime_identity(
+                Path("/workspace"), "gfx1201", workload
+            )
         self.assertEqual(identity["kind"], workload.kind)
-        self.assertEqual(identity["identity_source"], "hashed provenance files")
+        self.assertEqual(
+            identity["identity_source"], "validated dynamic-loader closure"
+        )
 
     def test_llama_runtime_identity_matches_dynamic_loader_closure(self) -> None:
         workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
@@ -3695,6 +3725,7 @@ class ConSanValidationTest(unittest.TestCase):
                     workspace / "rocjitsu-build" / hook_suffix,
                     "gfx1201",
                     workload,
+                    workspace,
                 )
         self.assertTrue(runtime["ok"])
         self.assertEqual(run.call_args.args[0][-1], str(hook.resolve()))
@@ -4908,6 +4939,16 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(aggregate_ms, 253.25)
         self.assertEqual(timing_matches, 1)
 
+    def test_rdna4_matmul_environment_clears_ambient_fixed_iterations(self) -> None:
+        variant = rdna4_matmul_validation.WORKLOADS["fp8-production"]
+        with mock.patch.dict(os.environ, {"BENCH_FIXED_ITERS": "7"}, clear=False):
+            calibrated = rdna4_matmul_validation._environment(
+                variant, 1, "warm", None, 250.0
+            )
+            fixed = rdna4_matmul_validation._environment(variant, 1, "warm", 19, 250.0)
+        self.assertNotIn("BENCH_FIXED_ITERS", calibrated)
+        self.assertEqual(fixed["BENCH_FIXED_ITERS"], "19")
+
     def test_json_timing_parser_accepts_device_only_measurements(self) -> None:
         document = {
             "matmul": {
@@ -5901,6 +5942,16 @@ class ConSanValidationTest(unittest.TestCase):
             loaded["reach_witness"]["kind"],
             "reviewed-unconditional-final-isa",
         )
+
+        document["faults"][0]["reach_witness"]["kind"] = "runtime-access-counter"
+        with temporary_root() as root:
+            path = root / "faults.json"
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(validation.ValidationError, "reach_witness"):
+                validation._load_fault(path, "gfx1201", workload, "drop")
+        document["faults"][0]["reach_witness"][
+            "kind"
+        ] = "reviewed-unconditional-final-isa"
 
         document["faults"][0]["site_provenance"]["corpus_commit"] = "short"
         with temporary_root() as root:

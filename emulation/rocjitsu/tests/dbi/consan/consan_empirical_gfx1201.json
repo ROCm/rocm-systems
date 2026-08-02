@@ -1,6 +1,14 @@
 {
   "schema_version": 1,
   "target": "gfx1201",
+  "provenance_schema_version": 3,
+  "campaign_protocol": "consan-gfx1201-empirical-v2",
+  "required_runtime_tools": [
+    "amdclang++",
+    "llvm-readelf",
+    "python",
+    "rocminfo"
+  ],
   "collection_date": "2026-08-02",
   "source_head": "cff57df4c926bc02483de04417632ec83320aaec",
   "hook_sha256": "b72109fb27a9f2edd49dac504e3469b536613dae2b34eb8b5be7961a180a6a6d",
@@ -29,6 +37,61 @@
     "pytorch-rdna4-compiled-softmax/sampled/cold:process",
     "pytorch-rdna4-compiled-softmax/inline-shadow/cold:process"
   ],
+  "allowed_rejected_campaigns": {
+    "pytorch-rdna4-compiled-softmax": [
+      "supercollider/cold:process: 7/10 accepted rounds",
+      "sampled/cold:process: 7/10 accepted rounds",
+      "inline-shadow/cold:process: 7/10 accepted rounds"
+    ]
+  },
+  "workload_identities": {
+    "rdna4-matmul-fp8-production": {
+      "file_labels": [
+        "executable",
+        "project-source",
+        "project-build-script",
+        "workload-source"
+      ],
+      "required_runtime_libraries": ["hip-runtime", "hsa-runtime"],
+      "source_heads": {
+        "rdna4_matmul": "03431b8af28be2c3cad828bec77dfe8836d4a555"
+      }
+    },
+    "llama-rdna4-mul-mat-vec-q": {
+      "file_labels": [
+        "executable",
+        "ggml",
+        "ggml-base",
+        "ggml-cpu",
+        "ggml-hip",
+        "case",
+        "workload-source"
+      ],
+      "required_runtime_libraries": ["hip-runtime", "hsa-runtime"],
+      "source_heads": {
+        "rocjitsu-test-corpus": "5f1e7f57a8d502294e94e5b960aec71964f1b79d"
+      }
+    },
+    "d128-block": {
+      "file_labels": ["executable"],
+      "required_runtime_libraries": ["hip-runtime", "hsa-runtime"],
+      "source_heads": {
+        "hip-moi": "0fcd57def36188500a19abaf3b6bca3a6e773034"
+      }
+    },
+    "streamk-arrival": {
+      "file_labels": ["executable"],
+      "required_runtime_libraries": ["hip-runtime", "hsa-runtime"],
+      "source_heads": {
+        "hip-moi": "0fcd57def36188500a19abaf3b6bca3a6e773034"
+      }
+    },
+    "pytorch-rdna4-compiled-softmax": {
+      "file_labels": ["python", "workload-source"],
+      "required_runtime_libraries": ["hip-runtime", "hsa-runtime"],
+      "source_heads": {}
+    }
+  },
   "detection_cases": [
     {
       "workload": "rdna4-matmul-fp8-production",
@@ -64,6 +127,7 @@
     "bd-2wsf-detection-cff57df4c9-softmax-20260802"
   ],
   "complexity": {
+    "source_tree_sha256": "d4c89bb774b02f0d0aa2f3ffeca934a0fd3bf96dae482db21b532ff256674742",
     "source_directories": [
       "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan",
       "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/hooks/consan"
