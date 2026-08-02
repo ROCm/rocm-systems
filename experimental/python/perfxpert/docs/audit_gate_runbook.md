@@ -41,6 +41,23 @@ Three verdicts:
 | PARTIAL (pending) | All non-nightly green; nightly inputs not yet collected | Wait for nightly CI; do NOT merge breaking changes yet |
 | NO-GO | One or more PR-lane thresholds failed | Fix failing area, re-run |
 
+### What the dashboard measures
+
+`airgap_identical_rate` runs `tests/test_integration/test_airgap_parity.py`
+directly. It previously read a snapshot directory that no test wrote, so the
+metric reported `pending` on every run and its gate never blocked anything.
+
+`red_team_pass_count` checks each attack in `EXPECTED_ATTACK_IDS` by ID rather
+than counting files in `_attack_outcomes/`. That directory also accumulates
+gitignored scratch runs (`sol_gate_unmocked_*.json`), which inflated the count
+locally, and a bare count would let a regressed attack hide behind an extra
+file while still totalling 14.
+
+A metric that could not be measured is reported as `-1` and fails its gate.
+Only genuinely out-of-lane inputs (nightly jobs, unset sign-off) report
+`pending`, which does not block. `--allow-partial` downgrades a pending
+verdict to a warning; it does not excuse a failed gate.
+
 ## Interpreting a NO-GO
 
 Each metric maps to a failure region:

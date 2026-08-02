@@ -70,9 +70,34 @@ correctness fixes rather than design changes:
    bottleneck was accepted, producing exactly the recommendations the
    data-insufficient warning promises never to emit.
 
-Still outstanding from finding 16: the fence/tool alignment parser in
-`test_root.py`. Unresolved question 7 is answered by item 3 — the duplicate
-slices are deleted while the `FenceBuilder` API is retained.
+5. **Audit gate honesty (finding 16).** The fence/tool alignment check now
+   derives its cases from `AGENT_BUILDERS`, fails instead of skipping when a
+   fence is missing, and parses both bullet styles used across the fences —
+   the bare `- arch.lookup_peaks` form and the backticked
+   `` - `trace_diff.diff_runs` — primary; ... `` form, which the old parser
+   turned into a sentence that could never match a tool name. The exit
+   dashboard measures air-gap parity by running the parity suite instead of
+   reading a snapshot directory no test ever wrote; verifies each red-team
+   attack by ID rather than counting files (the directory also collects
+   gitignored `sol_gate_unmocked_*` scratch runs, and a bare count let a
+   regressed attack hide behind an extra file); reports an unmeasurable
+   metric as a failure rather than as `pending`; and defines each threshold
+   once instead of twice. A path-filtered CPU-only PR workflow now runs the
+   guardrail suites.
+
+Unresolved question 7 is answered by item 3 — the duplicate slices are
+deleted while the `FenceBuilder` API is retained.
+
+**Observation for a later phase, not addressed here.** The reverse of the
+fence/tool check — every tool an agent can call is listed in its fence
+allowlist section — currently fails for six of eight agents:
+`tasks.*` at Root and Correctness, `analysis.hotspots` and
+`analysis.time_breakdown` at Analysis, and `*_techniques.catalog` at the
+three technique specialists. Most look deliberate: the fences describe the
+YAML catalogs and the task backbone in prose, explicitly calling them "YAML
+lookups, not MCP tools". Deciding whether those belong in the bullet list is
+a fence-authoring question rather than a guardrail defect, so it is recorded
+rather than enforced.
 
 Everything else in this document is still proposed and unimplemented.
 

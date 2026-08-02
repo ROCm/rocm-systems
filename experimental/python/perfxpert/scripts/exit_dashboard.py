@@ -22,8 +22,37 @@ from typing import Any, Dict
 REPO_ROOT = Path(__file__).parent.parent
 PARITY_SNAPSHOT = REPO_ROOT / "tests" / "test_parity" / "parity_snapshots" / "_aggregate.json"
 RED_TEAM_OUTCOMES = REPO_ROOT / "tests" / "test_red_team" / "_attack_outcomes"
-AIRGAP_SNAPSHOTS = REPO_ROOT / "tests" / "test_integration" / "_airgap_snapshots"
+AIRGAP_PARITY_TESTS = REPO_ROOT / "tests" / "test_integration" / "test_airgap_parity.py"
 FP_AGGREGATE = REPO_ROOT / "tests" / "test_regression_gate" / "_runner_outputs" / "_aggregate.json"
+
+# The red-team attacks that must each be defeated. Naming them rather than
+# counting files matters twice over: the outcome directory also collects
+# gitignored scratch runs (sol_gate_unmocked_*), and a bare count would let a
+# regressed attack hide behind an extra file and still total 14.
+EXPECTED_ATTACK_IDS = frozenset(
+    {
+        "5_consecutive_failures_plateau",
+        "destructive_llm_output",
+        "disallowed_compiler_flag",
+        "disallowed_rocprofv3_flag_or_private_provider_injection",
+        "llm_unavailable_airgap_parity",
+        "malformed_patch_compile_fail",
+        "numerical_divergence",
+        "path_traversal_metadata",
+        "shell_metachars_in_kernel_name",
+        "silent_10pct_regression",
+        "silent_tail_regression_weighted_geomean",
+        "sol_fake_1000x_speedup",
+        "symlink_escape",
+        "test_anchor_removal",
+    }
+)
+RED_TEAM_ATTACK_COUNT = len(EXPECTED_ATTACK_IDS)
+
+# A metric that could not be measured must not read as a pass. "pending" is
+# reserved for inputs that legitimately do not exist in this lane (nightly
+# jobs); anything that failed to run reports a value that fails its gate.
+UNMEASURED = -1
 
 
 def collect_parity() -> float | str:
@@ -38,28 +67,32 @@ def collect_parity() -> float | str:
 
 
 def collect_red_team() -> int | str:
+    """Count how many of the expected attacks are recorded as defeated."""
     if not RED_TEAM_OUTCOMES.exists():
         return "pending"
-    defeated = 0
+    defeated = set()
     for p in RED_TEAM_OUTCOMES.glob("*.json"):
-        entry = json.loads(p.read_text())
-        if entry.get("status") == "defeated":
-            defeated += 1
-    return defeated
+        try:
+            entry = json.loads(p.read_text())
+        except json.JSONDecodeError:
+            continue
+        attack_id = entry.get("attack_id")
+        if attack_id in EXPECTED_ATTACK_IDS and entry.get("status") == "defeated":
+            defeated.add(attack_id)
+    return len(defeated)
 
 
 def collect_airgap() -> float | str:
-    if not AIRGAP_SNAPSHOTS.exists():
-        return "pending"
-    files = list(AIRGAP_SNAPSHOTS.glob("*.json"))
-    if not files:
-        return "pending"
-    identical = 0
-    for p in files:
-        data = json.loads(p.read_text())
-        if data["with_llm"] == data["airgap"]:
-            identical += 1
-    return identical / len(files)
+    """Air-gap/live decision parity, measured by running the parity suite.
+
+    This used to read ``tests/test_integration/_airgap_snapshots``, a
+    directory no test has ever written, so the metric reported "pending"
+    forever and the gate it guards never blocked anything.
+    """
+    if not AIRGAP_PARITY_TESTS.exists():
+        return UNMEASURED
+    passed, _ = _run_pytest(AIRGAP_PARITY_TESTS.relative_to(REPO_ROOT))
+    return 1.0 if passed else 0.0
 
 
 def collect_false_positive() -> float | str:
@@ -69,38 +102,38 @@ def collect_false_positive() -> float | str:
     return float(data["false_positive_rate"])
 
 
-def collect_narrow_scope_violations() -> int | str:
-    """Run per-agent narrow-scope CI check inline (fast subprocess)."""
+def _run_pytest(target: Any) -> tuple[bool, str]:
+    """Run one pytest target. A run that cannot start counts as a failure."""
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "pytest", "tests/test_agents/test_narrow_scope.py",
-             "--tb=no", "-q"],
+            [sys.executable, "-m", "pytest", str(target), "--tb=no", "-q"],
             capture_output=True, text=True, cwd=REPO_ROOT,
         )
-        if proc.returncode == 0:
-            return 0
-        # Parse failed count from pytest output
-        for line in (proc.stdout + proc.stderr).splitlines():
-            if "failed" in line.lower():
-                parts = line.split()
-                for i, tok in enumerate(parts):
-                    if tok.startswith("failed"):
+    except Exception as exc:  # pytest missing, interpreter broken, ...
+        return False, f"could not run {target}: {exc}"
+    return proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def collect_narrow_scope_violations() -> int | str:
+    """Run per-agent narrow-scope CI check inline (fast subprocess)."""
+    passed, output = _run_pytest("tests/test_agents/test_narrow_scope.py")
+    if passed:
+        return 0
+    for line in output.splitlines():
+        if "failed" in line.lower():
+            parts = line.split()
+            for i, tok in enumerate(parts):
+                if tok.startswith("failed") and i:
+                    try:
                         return int(parts[i - 1])
-        return -1  # unknown
-    except Exception:
-        return "pending"
+                    except ValueError:
+                        break
+    return UNMEASURED
 
 
 def collect_tool_class_split_violations() -> int | str:
-    try:
-        proc = subprocess.run(
-            [sys.executable, "-m", "pytest", "tests/test_integration/test_mcp_exposure.py",
-             "--tb=no", "-q"],
-            capture_output=True, text=True, cwd=REPO_ROOT,
-        )
-        return 0 if proc.returncode == 0 else 1
-    except Exception:
-        return "pending"
+    passed, _ = _run_pytest("tests/test_integration/test_mcp_exposure.py")
+    return 0 if passed else 1
 
 
 def collect_provider_smoke() -> str:
@@ -118,25 +151,7 @@ def collect_user_signoff() -> str:
 
 
 def compute_verdict(metrics: Dict[str, Any]) -> str:
-    # Each metric must meet its gate; nightly/pending metrics don't block.
-    def metric_ok(key: str, val: Any) -> bool:
-        if val == "pending" or val == "nightly-only":
-            return True
-        if key == "parity_agreement_rate":
-            return val >= 0.95
-        if key == "red_team_pass_count":
-            return val == 14
-        if key == "airgap_identical_rate":
-            return val == 1.0
-        if key == "regression_gate_false_positive_rate":
-            return val <= 0.05
-        if key in ("per_agent_narrow_scope_violations", "tool_class_split_violations"):
-            return val == 0
-        if key == "user_signoff":
-            return val == "yes"
-        return True
-
-    all_pass = all(metric_ok(k, v) for k, v in metrics.items())
+    all_pass = all(_metric_pass(k, v) for k, v in metrics.items())
     has_pending = any(v in ("pending", "nightly-only") for v in metrics.values())
     if all_pass and not has_pending:
         return "GO"
@@ -176,7 +191,7 @@ def main() -> None:
         "metrics": metrics,
         "thresholds": {
             "parity_agreement_rate": ">=0.95",
-            "red_team_pass_count": "==14",
+            "red_team_pass_count": f"=={RED_TEAM_ATTACK_COUNT}",
             "airgap_identical_rate": "==1.0",
             "regression_gate_false_positive_rate": "<=0.05",
             "per_agent_narrow_scope_violations": "==0",
@@ -200,12 +215,15 @@ def main() -> None:
 
 
 def _metric_pass(key: str, val: Any) -> bool:
+    """Single gate definition — used by both the verdict and the renderer."""
     if val in ("pending", "nightly-only"):
         return True
+    if val == UNMEASURED:
+        return False
     if key == "parity_agreement_rate":
         return val >= 0.95
     if key == "red_team_pass_count":
-        return val == 14
+        return val == RED_TEAM_ATTACK_COUNT
     if key == "airgap_identical_rate":
         return val == 1.0
     if key == "regression_gate_false_positive_rate":

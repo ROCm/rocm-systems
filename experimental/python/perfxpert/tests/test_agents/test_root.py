@@ -4,10 +4,12 @@ Each test scripts the mocked LLM response and asserts the routing /
 handoff / output shape.
 """
 
+import re
 from pathlib import Path
 import pytest
 from unittest.mock import MagicMock
 
+from perfxpert.agents import AGENT_BUILDERS
 from perfxpert.agents import root as root_module
 from perfxpert.agents import schemas
 from perfxpert.agents.framework import (
@@ -313,25 +315,39 @@ def test_root_tasks_bindings_are_real():
 
 # -- Fence allowlist helper -----------------------------------------------
 
-def _extract_fence_tool_names(fence_text):
-    """Parse Tool allowlist section from a fence markdown file.
+_TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 
-    Returns set of tool names. Stops at next ## heading or EOF.
+
+def _extract_fence_tool_names(fence_text):
+    """Parse the Tool allowlist section(s) of a fence markdown file.
+
+    Bullets are written two ways across the fences: a bare name
+    (``- arch.lookup_peaks``) and a backticked name with a trailing
+    description (``- `trace_diff.diff_runs` — primary; ...``). Taking the
+    whole bullet as the name turned the second form into a sentence, which
+    could never match a declared tool, so out-of-allowlist entries in those
+    fences went unnoticed.
     """
     in_section = False
     tools = set()
     for line in fence_text.splitlines():
         stripped = line.strip()
-        if stripped.startswith("## ") and "Tool allowlist" in stripped:
-            in_section = True
+        if stripped.startswith("## "):
+            in_section = "Tool allowlist" in stripped
             continue
-        if in_section:
-            if stripped.startswith("## "):
-                break
-            if stripped.startswith("- "):
-                tool_name = stripped[2:].strip()
-                if tool_name:
-                    tools.add(tool_name)
+        if not in_section or not stripped.startswith("- "):
+            continue
+        candidate = stripped[2:].strip()
+        if candidate.startswith("`"):
+            end = candidate.find("`", 1)
+            if end == -1:
+                continue
+            candidate = candidate[1:end]
+        elif candidate.split():
+            candidate = candidate.split()[0]
+        candidate = candidate.strip().strip("`").rstrip(".,;:")
+        if _TOOL_NAME_RE.match(candidate):
+            tools.add(candidate)
     return tools
 
 
@@ -353,44 +369,64 @@ def test_root_fence_tools_match_allowlist():
 
 # -- Fence / allowlist alignment for ALL agents (design N29 full audit) --
 
-def _agent_fence_allowlist_cases():
+def _agent_id(builder):
+    return builder.__name__
+
+
+@pytest.mark.parametrize("builder", AGENT_BUILDERS, ids=_agent_id)
+def test_all_agents_fence_tools_subset_of_allowlist(builder):
+    """Every fence-listed tool must appear in code allowlist (design N29).
+
+    Derived from AGENT_BUILDERS rather than a hand-written list, which had
+    silently omitted the Diff specialist. A missing fence fails instead of
+    skipping: an agent with no fence runs with no declared role.
+    """
     from pathlib import Path
-    from perfxpert.agents import (
-        analysis as analysis_mod,
-        recommendation as rec_mod,
-        correctness as cor_mod,
-        compute_specialist as cs_mod,
-        memory_specialist as ms_mod,
-        latency_specialist as ls_mod,
-    )
-    return [
-        ("Root", root_module.build_root_agent,
-         Path(root_module.__file__).parent / "fence" / "root.md"),
-        ("Analysis", analysis_mod.build_analysis_agent,
-         Path(analysis_mod.__file__).parent / "fence" / "analysis.md"),
-        ("Recommendation", rec_mod.build_recommendation_agent,
-         Path(rec_mod.__file__).parent / "fence" / "recommendation.md"),
-        ("Correctness", cor_mod.build_correctness_agent,
-         Path(cor_mod.__file__).parent / "fence" / "correctness.md"),
-        ("ComputeSpecialist", cs_mod.build_compute_specialist,
-         Path(cs_mod.__file__).parent / "fence" / "compute_specialist.md"),
-        ("MemorySpecialist", ms_mod.build_memory_specialist,
-         Path(ms_mod.__file__).parent / "fence" / "memory_specialist.md"),
-        ("LatencySpecialist", ls_mod.build_latency_specialist,
-         Path(ls_mod.__file__).parent / "fence" / "latency_specialist.md"),
-    ]
 
-
-@pytest.mark.parametrize("agent_name,builder,fence_path", _agent_fence_allowlist_cases())
-def test_all_agents_fence_tools_subset_of_allowlist(agent_name, builder, fence_path):
-    """Every fence-listed tool must appear in code allowlist (design N29)."""
-    if not fence_path.exists():
-        pytest.skip(f"No fence file for {agent_name}: {fence_path}")
     agent = builder()
+    assert agent.fence_path, f"{agent.name} declares no fence"
+    fence_path = Path(agent.fence_path)
+    assert fence_path.exists(), f"{agent.name}: fence file missing at {fence_path}"
+
     allowed = {t.name for t in agent.tools}
-    fence_text = fence_path.read_text()
-    fence_tools = _extract_fence_tool_names(fence_text)
+    fence_tools = _extract_fence_tool_names(fence_path.read_text())
     violations = fence_tools - allowed
     assert not violations, (
-        f"{agent_name}: fence lists tools NOT in allowlist: {violations}"
+        f"{agent.name}: fence lists tools NOT in allowlist: {violations}"
     )
+
+
+@pytest.mark.parametrize("builder", AGENT_BUILDERS, ids=_agent_id)
+def test_fence_allowlist_section_is_parseable(builder):
+    """Guard the subset check above from passing on an empty parse.
+
+    Every agent declares tools and every fence documents them, so extracting
+    nothing means the parser stopped matching the markdown, not that the
+    fence is clean.
+    """
+    from pathlib import Path
+
+    agent = builder()
+    fence_tools = _extract_fence_tool_names(Path(agent.fence_path).read_text())
+    assert fence_tools, (
+        f"{agent.name}: parsed no tool names from its fence allowlist section"
+    )
+
+
+def test_parser_handles_both_bullet_styles():
+    fence = (
+        "## Tool allowlist (max 5)\n"
+        "\n"
+        "- arch.lookup_peaks\n"
+        "- `trace_diff.diff_runs` — primary; emits the whole diff dict in one\n"
+        "  call. ALWAYS call this first.\n"
+        "\n"
+        "Prose mentioning `tasks.next` must not be picked up.\n"
+        "\n"
+        "## Output schema\n"
+        "- not.a_tool_here\n"
+    )
+    assert _extract_fence_tool_names(fence) == {
+        "arch.lookup_peaks",
+        "trace_diff.diff_runs",
+    }
