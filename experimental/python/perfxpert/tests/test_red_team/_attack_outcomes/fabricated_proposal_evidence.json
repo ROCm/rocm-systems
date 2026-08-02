@@ -1,0 +1,13 @@
+{
+  "attack_id": "fabricated_proposal_evidence",
+  "status": "defeated",
+  "details": {
+    "rejected_vectors": [
+      "uncalled_tool",
+      "unmeasured_kernel",
+      "no_evidence",
+      "near_miss_kernel_name",
+      "end_to_end_uncalled_tool"
+    ]
+  }
+}

@@ -42,6 +42,21 @@ def test_agents_md_is_nontrivial():
     assert "never" in agents.lower() or "NEVER" in agents
 
 
+def test_agents_md_states_the_two_lane_contract():
+    """The orchestrator is the last mile: it decides how proposals reach the
+    user. If it presents them as vetted advice, every guardrail behind it is
+    moot, so the separation has to be stated where that decision is made."""
+    agents = (CONFIG_DIR / "AGENTS.md").read_text()
+
+    assert "exploratory_proposals" in agents, "orchestrator never told the field exists"
+    # Told what the field is, and what it is not.
+    assert "not" in agents.lower() and "advice" in agents.lower()
+    for required in ("unproven", "recommendations", "evidence"):
+        assert required in agents.lower(), f"two-lane contract omits {required!r}"
+    # Told not to merge the lanes when presenting.
+    assert "merge" in agents.lower()
+
+
 def test_theme_has_prompt_prefix_branding():
     theme = json.loads((CONFIG_DIR / "amd-theme.json").read_text())
     assert "ROCm PerfXpert" in theme.get("prompt_prefix", "")

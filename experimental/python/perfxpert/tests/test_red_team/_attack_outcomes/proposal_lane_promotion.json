@@ -1,0 +1,15 @@
+{
+  "attack_id": "proposal_lane_promotion",
+  "status": "defeated",
+  "details": {
+    "vetted_lane_after_attack": [
+      "coalesce_loads"
+    ],
+    "attempts_blocked": [
+      "claimed_runtime_fields",
+      "exceeded_confidence_ceiling",
+      "relabelled_status",
+      "wrote_into_vetted_lane"
+    ]
+  }
+}

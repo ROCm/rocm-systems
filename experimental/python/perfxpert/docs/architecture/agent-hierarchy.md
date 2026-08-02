@@ -124,9 +124,13 @@ flowchart TD
 
 ## Fence-slice pattern
 
-Each agent's system prompt lives in `perfxpert/agents/fence/<agent>.md`
-and is loaded verbatim at runtime — no runtime string concatenation of
-prose. Slices are enforced at ≤ 400 lines by CI.
+Each agent's system prompt lives in `perfxpert/agents/fence/<agent>.md`.
+At construction the prompt is composed by `FenceBuilder.compose_prompt()`
+as exactly `always.md` + the agent's own slice — the only concatenation
+performed, and the reason the shared safety preamble is guaranteed to
+reach every agent rather than relying on each slice to restate it. No
+other prose is assembled at runtime. The composed result is enforced at
+≤ 400 lines by CI.
 
 Slice files (one per agent, plus `always.md` loaded into every agent):
 
@@ -154,6 +158,56 @@ Why fence-slicing:
 3. **Reviewability** — every slice change shows as a small diff. The
    prior monolithic reference guide (removed in Phase 7.1) made
    cross-agent behavior hard to reason about in a single review pass.
+
+## Two lanes: vetted advice and exploratory proposals
+
+Specialists answer in two lanes, and the distinction is the reason a
+model can contribute at all without weakening the guarantees the rest of
+this document describes.
+
+| | Vetted lane (`techniques`) | Exploratory lane (`exploratory_proposals`) |
+|---|---|---|
+| Source | benchmarked catalog in `knowledge/*.yaml` | model, per-run |
+| Ranking | deterministic rules | not ranked; never merged with vetted advice |
+| Air-gap vs live | identical | live only |
+| Confidence | catalog-derived | capped at 0.5 |
+| Status | advice | hypothesis, until a human promotes it |
+
+The vetted lane is not model-influenced. A specialist builds its ranked
+technique list, confidence, and citations from the catalog and discards
+whatever the model returned for those fields — which is what keeps
+air-gap and live output identical (`tests/test_integration/test_airgap_parity.py`
+asserts this against a model actively trying to break it).
+
+The exploratory lane is where model output actually lands, and it is
+constrained rather than trusted:
+
+- **Off by default.** Requires `agent_creativity: exploratory`, a live
+  session, and an agent declaring `AgentCapability.ADDITIVE_EXPLORATION`.
+  Air-gap always resolves to strict, so parity holds by construction.
+  Only tier-2 specialists may declare the capability; the framework
+  rejects it on tiers 0 and 1, so nothing that makes a routing or
+  accept/revert decision can propose.
+- **Evidence-bound.** Every proposal is checked against an
+  `EvidenceManifest` built from the tools actually called and the
+  kernels actually measured in that run. A proposal citing a tool that
+  never ran, or a kernel that was never profiled, is rejected.
+- **Runtime-identified.** `proposal_id` (a content hash), `status`,
+  `specialist`, and provenance are stamped by the runtime. The draft
+  schema the model fills in has no fields for them, so a model cannot
+  assign itself authorship or a status of "recommended".
+- **Capped.** At most 3 proposals per specialist.
+
+Recommendation carries proposals through in a separate field rather than
+folding them into `recommendations`, and deduplicates them by id. They
+are never fed to impact prediction and never deduplicated against vetted
+advice, because the two lanes are held to different evidentiary
+standards. Promotion into the catalog is a human step — see
+`perfxpert proposals` and
+[contributing/proven_optimizations.md](../contributing/proven_optimizations.md).
+
+Design rationale and the full threat model are in
+[RFC 0001](../rfcs/0001-bounded-specialist-creativity.md).
 
 ## Invoking the hierarchy
 

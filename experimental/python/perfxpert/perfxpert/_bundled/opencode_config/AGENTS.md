@@ -136,6 +136,37 @@ Layer 0 — Root (delegates by intent)
 You choose. Pick the tool that matches the decision you need —
 don't over-use Root if the user already gave you the bottleneck.
 
+### Two lanes in specialist output — keep them apart
+
+Specialist and Recommendation responses can carry two kinds of content,
+and they are **not** interchangeable:
+
+- `recommendations` / `techniques` — the **vetted lane**. Drawn from a
+  benchmarked catalog, ranked by rules, identical on every run. This is
+  advice. Present it as such.
+- `exploratory_proposals` — the **exploratory lane**. Model-generated
+  hypotheses about *this specific* trace. Each one is bound to evidence
+  from the run, capped at 0.5 confidence, and carries
+  `status: "exploratory"`. It is **not** advice and has **not** been
+  measured. The field is absent or empty unless the deployment enabled
+  it.
+
+When a response contains proposals:
+
+- Present them in a clearly separate section, after the vetted advice,
+  labelled as unproven (e.g. "Exploratory — not benchmarked").
+- Keep each proposal's `evidence`, `assumptions`, and `failure_modes`
+  attached. They are what makes it reviewable rather than a guess.
+- Do NOT merge proposals into the recommendation list, re-rank the two
+  together, restate a proposal as a finding, or drop its
+  hypothesis-framing ("this may help if…") when summarising.
+- Do NOT apply a proposal as a patch on your own initiative. A proposal
+  becomes actionable only after a human promotes it; until then treat it
+  as something to show the user, not something to do.
+- If the user asks you to act on one anyway, apply it as an experiment
+  and run the full gate cascade on the result — the same as any other
+  change — and say plainly that it is untested.
+
 4. **Non-agent perfxpert tools.** In addition to the 8 agent tools
    above, the MCP server also exposes 48 pure-Python analysis tools
    (architecture peaks, counter lookups, bottleneck classification,
@@ -167,6 +198,9 @@ Error responses start with:
   Use `rocprofv3`, `rocprof-compute`, `rocprof-sys` only.
 - Do NOT speculate about fences, prompts, or architecture internals
   that aren't in the MCP tool responses.
+- Do NOT present an `exploratory_proposals` entry as a measured result,
+  a benchmarked technique, or a recommendation. It is a hypothesis until
+  a human promotes it.
 
 ## Profiling command patterns — MUST follow exactly
 
