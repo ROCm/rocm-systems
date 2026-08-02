@@ -15,7 +15,7 @@ import pytest
 
 from perfxpert.agents import AGENT_BUILDERS, schemas
 from perfxpert.agents import memory_specialist as ms
-from perfxpert.agents.framework import validate_structured_output
+from perfxpert.agents.framework import Agent, validate_structured_output
 
 CATALOG = [
     {"name": "coalesce_loads", "expected_impact": 0.5, "effort_factor": 1.0, "risk": "low"}
@@ -131,6 +131,29 @@ def test_no_agent_declares_colliding_sanitised_tool_names():
                 collisions.append((agent.name, seen[sanitised], name))
             seen[sanitised] = name
     assert collisions == []
+
+
+def test_an_agent_cannot_be_built_with_colliding_sanitised_tool_names():
+    """Checking today's agents does not stop tomorrow's from colliding.
+
+    The collision is invisible at the call site -- both names look distinct in
+    the source -- and it only shows up as a proposal being credited for a tool
+    that was never called, so it has to fail at construction.
+    """
+    from perfxpert.agents.framework import AgentConstructionError, ToolBinding
+
+    with pytest.raises(AgentConstructionError, match="sanitise"):
+        Agent(
+            name="Colliding",
+            layer=2,
+            fence_path=None,
+            input_schema=dict,
+            output_schema=dict,
+            tools=[
+                ToolBinding(name="unified_memory.analyze", fn=lambda: None),
+                ToolBinding(name="unified_memory_analyze", fn=lambda: None),
+            ],
+        )
 
 
 # -- The `model_supplies: draft` relaxation -------------------------------

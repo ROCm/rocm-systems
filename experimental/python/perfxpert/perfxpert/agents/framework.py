@@ -243,6 +243,21 @@ class Agent:
         if len(tools) > 5:
             raise AgentConstructionError(f"Agent {self.name}: {len(tools)} tools declared (cap is 5)")
 
+        # The SDK reports tool calls with dots rewritten to underscores, and
+        # the evidence manifest maps those back by sanitised name. Two tools
+        # that sanitise alike would make that mapping ambiguous, so a proposal
+        # could cite one while the other was the tool actually called.
+        by_sanitized: Dict[str, str] = {}
+        for tool in tools:
+            key = tool.name.replace(".", "_")
+            if key in by_sanitized and by_sanitized[key] != tool.name:
+                raise AgentConstructionError(
+                    f"Agent {self.name}: {by_sanitized[key]!r} and {tool.name!r} both "
+                    f"sanitise to {key!r}, so tool calls between them are "
+                    "indistinguishable in the SDK run record"
+                )
+            by_sanitized[key] = tool.name
+
         if self.capability is AgentCapability.ADDITIVE_EXPLORATION and self.layer != 2:
             raise AgentConstructionError(
                 f"Agent {self.name}: additive_exploration requires layer=2, got "
