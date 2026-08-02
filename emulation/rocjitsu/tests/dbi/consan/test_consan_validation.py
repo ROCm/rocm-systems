@@ -5013,6 +5013,8 @@ class ConSanValidationTest(unittest.TestCase):
                     "complete_pairs": 1,
                     "metadata_complete_pairs": 1,
                 }
+                if profile == "record-replay":
+                    result["accepted"] = False
             return result
 
         with temporary_root() as root:
@@ -5024,7 +5026,7 @@ class ConSanValidationTest(unittest.TestCase):
                     "--workload",
                     workload.id,
                     "--profile",
-                    "sampled",
+                    "all",
                     "--rounds",
                     "1",
                     "--max-rounds",
@@ -5063,6 +5065,16 @@ class ConSanValidationTest(unittest.TestCase):
                 ).read_text(encoding="utf-8")
             )
         self.assertTrue(campaign["summary"]["accepted"])
+        self.assertEqual(campaign["admission"]["rejected_profiles"], ["record-replay"])
+        self.assertEqual(
+            campaign["timed_profiles"],
+            ["supercollider", "sampled", "inline-shadow"],
+        )
+        record_replay_calls = [
+            call for call in calls if call["profile"] == "record-replay"
+        ]
+        self.assertEqual(len(record_replay_calls), 1)
+        self.assertIn("admission", record_replay_calls[0]["row_dir"].parts)
         warm_calls = [call for call in calls if "warm" in call["row_dir"].parts]
         self.assertTrue(warm_calls)
         self.assertTrue(all(call["inner"] == 250 for call in warm_calls))

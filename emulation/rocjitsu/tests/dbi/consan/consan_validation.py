@@ -42,7 +42,7 @@ from consan_validation_support import (
 )
 
 SCHEMA_VERSION = 2
-EMPIRICAL_CAMPAIGN_SCHEMA_VERSION = 1
+EMPIRICAL_CAMPAIGN_SCHEMA_VERSION = 2
 PROVENANCE_SCHEMA_VERSION = 2
 WORKSPACE_ENV = "CONSAN_VALIDATION_WORKSPACE_DIR"
 TARGET_ENV = "CONSAN_VALIDATION_TARGET"
@@ -7139,6 +7139,7 @@ def _empirical_config(
         "target": target,
         "workload": workload.id,
         "profiles": list(profiles),
+        "admission_policy": "time every admitted requested profile",
         "required_accepted_rounds": args.rounds,
         "max_rounds": max_rounds,
         "randomization_seed": args.seed,
@@ -7233,9 +7234,19 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
                 and retained.get("metadata_complete_pairs", 0) > 0
             )
         admission_row_acceptance[profile] = accepted
-    admission_accepted = all(admission_row_acceptance.values())
+    baseline_accepted = admission_row_acceptance["baseline"]
+    admitted_profiles = tuple(
+        profile for profile in profiles if admission_row_acceptance[profile]
+    )
+    rejected_profiles = tuple(
+        profile for profile in profiles if not admission_row_acceptance[profile]
+    )
+    timing_eligible = baseline_accepted and bool(admitted_profiles)
     admission = {
-        "accepted": admission_accepted,
+        "accepted": timing_eligible,
+        "all_requested_profiles_accepted": not rejected_profiles,
+        "admitted_profiles": list(admitted_profiles),
+        "rejected_profiles": list(rejected_profiles),
         "rows": {
             profile: {
                 "accepted": admission_row_acceptance[profile],
@@ -7249,20 +7260,32 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
             for profile, result in admission_results.items()
         },
     }
-    if not admission_accepted:
+    if not timing_eligible:
+        reasons = []
+        if not baseline_accepted:
+            reasons.append("baseline clean admission rejected")
+        if not admitted_profiles:
+            reasons.append("no requested profile passed clean admission")
         campaign = {
             **config,
             "admission": admission,
+            "timed_profiles": [],
             "rounds": [],
             "summary": {
                 "schema_version": EMPIRICAL_CAMPAIGN_SCHEMA_VERSION,
                 "accepted": False,
-                "reasons": ["clean admission rejected"],
+                "reasons": reasons,
+                "requested_profiles": list(profiles),
+                "timed_profiles": [],
+                "rejected_profiles": list(rejected_profiles),
             },
         }
         atomic_write_json(campaign_root / "campaign.json", campaign)
         print(json.dumps(campaign, indent=2, sort_keys=True))
         return 1
+
+    requested_profiles = profiles
+    profiles = admitted_profiles
 
     calibration = None
     calibration_record = None
@@ -7418,9 +7441,13 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
             bootstrap_seed=args.seed,
             require_structural_metrics=True,
         )
+        summary["requested_profiles"] = list(requested_profiles)
+        summary["timed_profiles"] = list(profiles)
+        summary["rejected_profiles"] = list(rejected_profiles)
         campaign = {
             **config,
             "admission": admission,
+            "timed_profiles": list(profiles),
             "calibration": calibration_record,
             "timing_protocol": timing_protocol,
             "rounds": rounds,
