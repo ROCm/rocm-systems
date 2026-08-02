@@ -2796,6 +2796,20 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // new home. This is what makes a C++ virtual call translatable -- its target comes out of a
         // vtable slot that no dataflow fact can name, and no amount of consumer-side analysis will
         // ever name it.
+        //
+        // The permission is object-wide because the question it answers is. A consumer cannot tell
+        // where a loaded 64-bit word came from, so tying it to this transfer's provenance is not
+        // available; what makes it sound is that both routes into `.text` are covered. Addresses
+        // the object computes for itself are the ones code_addresses_fully_accounted ranges over.
+        // An address supplied from outside -- a kernarg holding a device function pointer, or a
+        // pointer another code object resolved -- can only have been obtained from a `.text`
+        // symbol, and relocate_text_symbols() rewrites those and refuses the whole object when a
+        // referenced text symbol has no exact offset map. Translation happens at load, so there is
+        // no window in which a caller could have captured a pre-translation value.
+        //
+        // What that leaves is narrow and worth stating: a host that derives an entry from a symbol
+        // plus a byte offset, and a symbol that is present but unreferenced, which
+        // relocate_text_symbols() tolerates so debug labels in padding do not refuse the object.
         const bool target_is_relocated_by_construction =
             object_produces_code_addresses && code_addresses_fully_accounted;
         if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
