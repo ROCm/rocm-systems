@@ -113,6 +113,18 @@ __global__ void ddaAllReduceFlatSimpleWarpsync(
     }
   }
 
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  __atomic_signal_fence(__ATOMIC_SEQ_CST);
+#if defined(__gfx1250__)
+  asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0");
+#else
+  asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)");
+#endif
+  __atomic_signal_fence(__ATOMIC_SEQ_CST);
+#else
+  __threadfence_system();
+#endif
+
   // Arrival barrier (between phase 1 and phase 2). The reserved 1 MiB front
   // region is split into per-rank sub-regions (flag_perRankBytes each), indexed
   // by global warp id. Each warp's lanes [0, nRanks) publish this epoch's flag
