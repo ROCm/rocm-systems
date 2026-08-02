@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -116,21 +117,41 @@ def _run_pytest(target: Any) -> tuple[bool, str]:
     return proc.returncode == 0, proc.stdout + proc.stderr
 
 
+# The three per-agent narrow-scope guardrails. Each is parametrized over
+# AGENT_BUILDERS, so a new agent is covered the moment it is registered.
+NARROW_SCOPE_SUITES = (
+    "tests/test_agents/test_tool_allowlist_guardrail.py",  # <=5 tools, none execution-class
+    "tests/test_agents/test_fence_size_guardrail.py",      # <=400 composed fence lines
+    "tests/test_agents/test_schema_field_caps.py",         # <=10 input, <=5 output fields
+)
+
+
 def collect_narrow_scope_violations() -> int | str:
-    """Run per-agent narrow-scope CI check inline (fast subprocess)."""
-    passed, output = _run_pytest("tests/test_agents/test_narrow_scope.py")
-    if passed:
-        return 0
-    for line in output.splitlines():
-        if "failed" in line.lower():
-            parts = line.split()
-            for i, tok in enumerate(parts):
-                if tok.startswith("failed") and i:
-                    try:
-                        return int(parts[i - 1])
-                    except ValueError:
-                        break
-    return UNMEASURED
+    """Count per-agent narrow-scope violations across the guardrail suites.
+
+    Previously pointed at `tests/test_agents/test_narrow_scope.py`, which does
+    not exist — so this measured nothing. Every suite named here is checked to
+    exist before running, because a metric silently reporting zero violations
+    against a file that isn't there is worse than no metric at all.
+    """
+    total = 0
+    for suite in NARROW_SCOPE_SUITES:
+        if not (REPO_ROOT / suite).exists():
+            return UNMEASURED
+        passed, output = _run_pytest(suite)
+        if passed:
+            continue
+        count = _parse_failure_count(output)
+        if count is None:
+            return UNMEASURED
+        total += count
+    return total
+
+
+def _parse_failure_count(output: str) -> int | None:
+    """Pull the failure count out of a pytest summary line."""
+    match = re.search(r"(\d+) failed", output)
+    return int(match.group(1)) if match else None
 
 
 def collect_tool_class_split_violations() -> int | str:

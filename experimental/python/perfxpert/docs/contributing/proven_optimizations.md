@@ -74,6 +74,7 @@ the human step that supplies both.
 Start from the proposal to avoid retyping its reasoning:
 
 ```bash
+# SKIP-SAMPLE — needs a saved agent result and a real proposal id
 perfxpert proposals list result.json                  # what came back
 perfxpert proposals show result.json pxp-exp-<id>     # evidence + failure modes
 perfxpert proposals promote result.json pxp-exp-<id> \

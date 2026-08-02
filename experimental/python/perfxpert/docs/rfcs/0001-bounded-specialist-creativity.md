@@ -85,6 +85,50 @@ correctness fixes rather than design changes:
    once instead of twice. A path-filtered CPU-only PR workflow now runs the
    guardrail suites.
 
+6. **Phase 11B — inert contract layer.** `agents/creativity.py` holds the
+   tier lattice, evidence manifest, and proposal construction;
+   `agent_creativity` (`strict` by default) is a deployment-level config
+   with no MCP argument, so a caller cannot ask for a more creative answer.
+   The proposal schemas landed frozen and `extra="forbid"`, split into the
+   draft a model fills in and the final proposal the runtime stamps.
+   `DiffSpecialistOutput` was already at the five-field output cap, so its
+   lane nests under `kernel_deltas` behind a validator restricting that dict
+   to three known keys. The lane shipped wired but always empty.
+
+7. **Phase 11C — exploratory lane enabled, vetted lane frozen.** The
+   specialists no longer consult model output for `techniques`,
+   `confidence`, or `citations`; the catalog ranking is used in both modes
+   and the model's version is discarded. That is what makes air-gap and live
+   output identical rather than merely intended to be. Model contribution
+   now lands only in the exploratory lane, where each proposal is checked
+   against an `EvidenceManifest` of the tools actually called and kernels
+   actually measured, capped at three per specialist and 0.5 confidence, and
+   given a content-addressed id. Recommendation carries proposals through in
+   a separate field, deduplicated by id and never against vetted advice.
+
+8. **Phase 11D — lane boundary hardened.** Two red-team attacks (14 → 16)
+   attack the boundary rather than assuming it holds: promotion into the
+   vetted lane from every reachable direction, and fabricated evidence
+   underneath a proposal. The parity suite needed the same treatment — it
+   mocked the model echoing the air-gap answer back, so it passed whether or
+   not the runtime consulted the model. It now runs a model returning
+   hostile output on every deterministic field, and the fixture records
+   invocations so the suite fails rather than silently passing if a live
+   session ever falls back to air-gap. The bundled `AGENTS.md` states the
+   two-lane contract, since the orchestrator decides how proposals reach the
+   user and every guardrail behind it is moot if it presents them as advice.
+
+9. **Phase 11E — human promotion path.** `perfxpert proposals
+   list|show|promote` makes a proposal reviewable and lets a reviewer seed a
+   catalog entry from it. `promote` deliberately cannot complete: the four
+   fields that require running the experiment are emitted commented out, so
+   the skeleton fails schema validation until a human supplies them.
+   Stubbing them with placeholders was tried first and was wrong — `[1.0,
+   1.0]` and `"TODO"` are type-valid, so a skeleton pasted in unedited
+   validated cleanly, which is precisely the hole the step exists to close.
+   An optional `origin` block records the originating proposal id and
+   specialist; it records provenance without lowering the bar.
+
 Unresolved question 7 is answered by item 3 — the duplicate slices are
 deleted while the `FenceBuilder` API is retained.
 
@@ -99,7 +143,15 @@ lookups, not MCP tools". Deciding whether those belong in the bullet list is
 a fence-authoring question rather than a guardrail defect, so it is recorded
 rather than enforced.
 
-Everything else in this document is still proposed and unimplemented.
+All five phases (11A–11E) have landed. The feature ships off: exploration
+requires `agent_creativity: exploratory`, a live session, and an agent
+declaring `additive_exploration`, so a default deployment behaves exactly as
+it did before this RFC.
+
+What remains open is operational rather than structural — the rollout
+questions in *Unresolved questions* below (which surfaces display proposals,
+whether a pilot precedes wider enablement) and the fence-authoring
+observation above.
 
 ## Motivation
 

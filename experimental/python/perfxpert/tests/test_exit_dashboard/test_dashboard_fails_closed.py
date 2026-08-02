@@ -63,6 +63,31 @@ def test_airgap_metric_reads_a_target_that_exists(dash):
     )
 
 
+def test_narrow_scope_metric_runs_suites_that_exist(dash):
+    """Same failure as the old air-gap snapshot directory: the metric pointed
+    at `tests/test_agents/test_narrow_scope.py`, which was never written, so it
+    measured nothing at all."""
+    assert dash.NARROW_SCOPE_SUITES, "no narrow-scope suites configured"
+    for suite in dash.NARROW_SCOPE_SUITES:
+        assert (dash.REPO_ROOT / suite).exists(), f"narrow-scope target missing: {suite}"
+
+
+def test_narrow_scope_metric_is_unmeasured_when_a_suite_is_missing(dash, monkeypatch):
+    monkeypatch.setattr(dash, "NARROW_SCOPE_SUITES", ("tests/test_agents/nope.py",))
+    assert dash.collect_narrow_scope_violations() == dash.UNMEASURED
+
+
+def test_narrow_scope_metric_sums_violations_across_suites(dash, monkeypatch):
+    monkeypatch.setattr(dash, "_run_pytest", lambda target: (False, "2 failed, 5 passed in 1s"))
+    expected = 2 * len(dash.NARROW_SCOPE_SUITES)
+    assert dash.collect_narrow_scope_violations() == expected
+
+
+def test_failure_count_parser_reads_a_pytest_summary(dash):
+    assert dash._parse_failure_count("3 failed, 512 passed in 8.32s") == 3
+    assert dash._parse_failure_count("18 passed in 0.21s") is None
+
+
 def test_verdict_and_renderer_share_one_gate_definition(dash):
     """Both used to carry their own copy of every threshold."""
     import inspect

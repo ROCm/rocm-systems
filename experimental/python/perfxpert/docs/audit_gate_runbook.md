@@ -18,7 +18,7 @@ pip install -e '.[dev]'
 # 2. Run the parity suite
 pytest -m parity -v
 
-# 3. Run the red-team suite (14 attacks)
+# 3. Run the red-team suite (16 attacks)
 pytest -m red_team -v
 
 # 4. Run the regression-gate false-positive suite
@@ -51,7 +51,16 @@ metric reported `pending` on every run and its gate never blocked anything.
 than counting files in `_attack_outcomes/`. That directory also accumulates
 gitignored scratch runs (`sol_gate_unmocked_*.json`), which inflated the count
 locally, and a bare count would let a regressed attack hide behind an extra
-file while still totalling 14.
+file while still totalling the expected number.
+
+`per_agent_narrow_scope_violations` sums failures across the three
+per-agent guardrail suites (tool allowlist, fence size, schema field caps),
+each parametrized over `AGENT_BUILDERS` so a new agent is covered as soon as
+it is registered. It previously pointed at
+`tests/test_agents/test_narrow_scope.py`, a file that does not exist — the
+same phantom-input failure as the air-gap snapshot directory above. The
+collector now checks each suite exists and reports unmeasured if one does
+not.
 
 A metric that could not be measured is reported as `-1` and fails its gate.
 Only genuinely out-of-lane inputs (nightly jobs, unset sign-off) report
@@ -65,10 +74,10 @@ Each metric maps to a failure region:
 | Metric | Likely root cause |
 |--------|-------------------|
 | `parity_agreement_rate < 0.95` | Parity/fixture drift — new path diverges from expected |
-| `red_team_pass_count < 14` | Sanitizer, allowlist, or gate_cascade bug |
+| `red_team_pass_count < 16` | Sanitizer, allowlist, gate_cascade, or proposal-lane bug |
 | `airgap_identical_rate < 1.0` | `intent_classifier` or `gate_cascade` grew a dependency on the LLM |
 | `regression_gate_false_positive_rate > 0.05` | `regression.compare_runs` threshold tuning |
-| `per_agent_narrow_scope_violations > 0` | Fence exceeded 400 lines / agent exceeded 5 tools |
+| `per_agent_narrow_scope_violations > 0` | Fence exceeded 400 lines, agent exceeded 5 tools, or a schema exceeded its field cap. Summed across the three suites in `NARROW_SCOPE_SUITES`; reported unmeasured (a failure) if any is missing. |
 | `tool_class_split_violations > 0` | An EXECUTION tool was registered with MCP |
 
 ## Adding a new parity fixture
@@ -79,8 +88,13 @@ Each metric maps to a failure region:
 
 ## Adding a new attack
 
-The 14-attack count is normative (spec §5.8 + §7). Adding a 15th attack
-requires an RFC + normative update to the spec. Prefer:
+The attack count is normative (spec §5.8 + §7) and currently 16: the
+original 14 plus `proposal_lane_promotion` and
+`fabricated_proposal_evidence`, added under
+[RFC 0001](rfcs/0001-bounded-specialist-creativity.md) because the
+exploratory lane introduced a boundary a model could try to cross. Raising
+the count again requires an RFC + normative update to the spec, and the new
+ID must be added to `EXPECTED_ATTACK_IDS`. Prefer:
 
 - Parameterizing an existing attack's test (more vectors, same attack class).
 - Adding a fuzz property to `test_sanitizer_fuzz.py` (supplementary, not counted).
