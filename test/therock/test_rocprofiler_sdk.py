@@ -36,6 +36,7 @@ def setup_env():
     environ_vars["HIP_PATH"] = str(THEROCK_PATH)
     environ_vars["ROCPROFILER_METRICS_PATH"] = str(ROCPROFILER_SDK_PATH)
     environ_vars["HIP_PLATFORM"] = "amd"
+    environ_vars["ROCPROFILER_PC_SAMPLING_BETA_ENABLED"] = "1"
 
     old_ld_lib_path = os.getenv("LD_LIBRARY_PATH", "").split(":")
     environ_vars["LD_LIBRARY_PATH"] = ":".join(
