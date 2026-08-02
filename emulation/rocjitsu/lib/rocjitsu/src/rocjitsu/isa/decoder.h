@@ -12,8 +12,10 @@
 #include "rocjitsu/isa/execution_backend.h"
 #include "util/arena_alloc.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string_view>
 
 namespace rocjitsu {
@@ -33,15 +35,18 @@ class Decoder {
 public:
   /// @brief Maximum encoded instruction length accepted by any decoder.
   ///
-  /// @details GFX1250 scaled WMMA instructions pair two VOP3P encodings and
+  /// @details CDNA3/CDNA4 VOP3PX2 MFMA and GFX1250 scaled WMMA instructions
   /// occupy four dwords. Decode windows must provide this many readable words,
   /// zero-padding words beyond the available instruction stream.
-  static constexpr size_t kMaximumInstructionWords = 4;
+  static constexpr std::size_t kMaximumInstructionWords = 4;
 
   virtual ~Decoder();
 
   /// @brief Decode a binary instruction.
   /// @param[in] inst Pointer to the binary instruction encoding.
+  /// @pre @p inst addresses enough readable words for the encoded instruction,
+  /// up to kMaximumInstructionWords. Bounded or untrusted streams should use
+  /// decode_window so trailing words are supplied safely.
   /// @returns Decoded Instruction pointer (pool or heap allocated).
   virtual Instruction *decode(const rj_code_binary_inst_t *inst) = 0;
 
@@ -55,6 +60,19 @@ public:
   /// @param[in] src_loc Source byte offset in the decoded text stream.
   /// @returns Decoded Instruction pointer (pool or heap allocated).
   Instruction *decode(const rj_code_binary_inst_t *inst, uint64_t src_loc);
+
+  /// @brief Safely decode from a bounded instruction stream.
+  ///
+  /// @details Uses the original stream when it contains a complete maximum-size
+  /// decode window. At the tail, copies the remaining words into zero-padded
+  /// local storage while preserving the decoded instruction's raw-encoding
+  /// lifetime. Use this overload whenever the available stream extent is known.
+  /// @param[in] words Remaining instruction words beginning at the instruction.
+  /// @param[in] src_loc Source byte offset in the decoded text stream.
+  /// @returns Decoded Instruction pointer (pool or heap allocated).
+  /// @throws util::InvalidInst if @p words is empty, the decoded instruction is
+  /// truncated, or a decoder reports an invalid instruction size.
+  Instruction *decode_window(std::span<const rj_code_binary_inst_t> words, uint64_t src_loc = 0);
 
   /// @brief Create a decoder for the given architecture.
   static std::unique_ptr<Decoder> create(rj_code_arch_t arch);

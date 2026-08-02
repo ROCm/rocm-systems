@@ -235,7 +235,10 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
 
         Instruction *raw_inst = nullptr;
         try {
-          raw_inst = decoder.decode(&inst_data[pc], byte_offset);
+          const std::size_t remaining_words =
+              static_cast<std::size_t>((range_end - byte_offset) / sizeof(uint32_t));
+          raw_inst = decoder.decode_window(
+              std::span<const uint32_t>(&inst_data[pc], remaining_words), byte_offset);
         } catch (const util::InvalidInst &error) {
           throw util::InvalidInst(std::string(error.what()) + " at .text byte offset " +
                                       std::to_string(byte_offset),

@@ -28,6 +28,7 @@ RJ_DIAGNOSTIC_POP
 #include <memory>
 #include <optional>
 #include <set>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -698,12 +699,13 @@ void disassemble_window(const MappedLocation &mapped, rj_code_arch_t arch, uint6
   std::vector<uint32_t> words(reinterpret_cast<const uint32_t *>(mapped.text->section->data()),
                               reinterpret_cast<const uint32_t *>(mapped.text->section->data()) +
                                   mapped.text->size / sizeof(uint32_t));
-  words.resize(words.size() + 2);
 
   while (decode_offset < mapped.text->size && decode_offset <= range_end) {
     std::unique_ptr<Instruction> inst;
     try {
-      inst.reset(decoder->decode(&words[decode_offset / sizeof(uint32_t)]));
+      const std::size_t word_index = decode_offset / sizeof(uint32_t);
+      inst.reset(decoder->decode_window(std::span<const uint32_t>(words).subspan(word_index),
+                                        decode_offset));
     } catch (const util::Exception &ex) {
       std::cerr << "decode failed at .text+" << hex_value(decode_offset) << ": " << ex.what()
                 << "\n";

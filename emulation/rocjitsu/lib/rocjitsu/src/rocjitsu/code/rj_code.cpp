@@ -5,8 +5,10 @@
 
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/target_registry.h"
+#include "util/except.h"
 
 #include <cstring>
+#include <span>
 #include <unordered_map>
 
 using namespace rocjitsu;
@@ -128,14 +130,30 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
   for (const auto *sec : obj->co->text_sections()) {
     const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
     std::size_t inst_data_size = sec->size() / sizeof(uint32_t);
+    const std::span<const uint32_t> words(inst_data, inst_data_size);
     // Each executable section owns a separate data buffer, so decoding starts
     // at word zero for each section.
     std::size_t word_index = 0;
     while (word_index < inst_data_size) {
-      auto *raw_inst = decoder->decode(&inst_data[word_index]);
+      Instruction *raw_inst = nullptr;
+      try {
+        raw_inst = decoder->decode_window(words.subspan(word_index), word_index * sizeof(uint32_t));
+      } catch (const util::Exception &) {
+        return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+      }
       std::unique_ptr<Instruction> inst(raw_inst);
+      if (!inst)
+        return ROCJITSU_STATUS_ERROR;
+
+      const int inst_size = inst->size();
+      if (inst_size <= 0 || inst_size % static_cast<int>(sizeof(uint32_t)) != 0)
+        return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+      const std::size_t inst_words = static_cast<std::size_t>(inst_size) / sizeof(uint32_t);
+      if (inst_words > inst_data_size - word_index)
+        return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+
       owned->list.push_back(*inst);
-      word_index += static_cast<std::size_t>(inst->size()) / sizeof(uint32_t);
+      word_index += inst_words;
       owned->storage.push_back(std::move(inst));
     }
   }

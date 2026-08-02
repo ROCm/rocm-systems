@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace rocjitsu {
@@ -77,12 +78,10 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
     return std::nullopt;
   }
 
-  // One extra zero word of slack so the decoder can always read a trailing
-  // second word for an 8-byte instruction whose first word is the last body
-  // word. build_probe_callable already verified the body decodes cleanly and is
-  // not truncated; this guards the independent decode here. See probe_callable.
+  // decode_window independently supplies bounded zero padding even though
+  // build_probe_callable already verified the body is not truncated.
   const size_t num_words = callable.body_words.size();
-  std::vector<uint32_t> words(num_words + 1, 0);
+  std::vector<uint32_t> words(num_words);
   std::copy(callable.body_words.begin(), callable.body_words.end(), words.begin());
 
   ProbeClobberSummary summary;
@@ -92,7 +91,8 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
 
   size_t w = 0;
   while (w < num_words) {
-    std::unique_ptr<Instruction> inst(decoder->decode(&words[w]));
+    std::unique_ptr<Instruction> inst(
+        decoder->decode_window(std::span<const uint32_t>(words).subspan(w), w * sizeof(uint32_t)));
     if (!inst) {
       report(error_out, "failed to decode probe body while summarizing clobbers");
       return std::nullopt;

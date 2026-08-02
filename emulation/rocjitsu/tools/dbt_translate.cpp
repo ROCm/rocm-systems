@@ -95,7 +95,8 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
         continue;
       }
       try {
-        std::unique_ptr<Instruction> inst(decoder->decode(&words[pc]));
+        std::unique_ptr<Instruction> inst(decoder->decode_window(
+            std::span<const uint32_t>(words + pc, word_count - pc), pc * sizeof(uint32_t)));
         if (!inst) {
           record_decode_failure(section_report, pc * sizeof(uint32_t), "decode returned null");
           if (include_disassembly) {
@@ -316,8 +317,11 @@ collect_executable_sections(const AmdGpuCodeObject &object) {
     return "<source offset out of range>";
 
   const auto *words = reinterpret_cast<const uint32_t *>(text->data());
+  const size_t word_index = offset / sizeof(uint32_t);
+  const size_t word_count = text->size() / sizeof(uint32_t);
   try {
-    std::unique_ptr<Instruction> inst(decoder->decode(&words[offset / sizeof(uint32_t)]));
+    std::unique_ptr<Instruction> inst(decoder->decode_window(
+        std::span<const uint32_t>(words + word_index, word_count - word_index), offset));
     if (!inst)
       return "<decode returned null>";
     return inst->disassemble();
@@ -338,7 +342,8 @@ collect_executable_sections(const AmdGpuCodeObject &object) {
   size_t pc = 0;
   while (pc < words.size()) {
     try {
-      std::unique_ptr<Instruction> inst(decoder->decode(&words[pc]));
+      std::unique_ptr<Instruction> inst(
+          decoder->decode_window(words.subspan(pc), pc * sizeof(uint32_t)));
       if (!inst) {
         lines.push_back("<decode returned null>");
         ++pc;

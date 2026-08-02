@@ -668,14 +668,12 @@ struct Analyzer {
     state.expert_scheduling.enabled = supports_expert_scheduling(arch);
     RegisterSet local_ready_regs;
     std::optional<PendingWaitGroup> pending_wait_group;
-    std::vector<uint32_t> padded(words.begin(), words.end());
-    padded.resize(padded.size() + Decoder::kMaximumInstructionWords - 1);
-
     size_t word_index = 0;
     while (word_index < words.size()) {
       std::unique_ptr<Instruction> inst;
       try {
-        inst.reset(decoder->decode(&padded[word_index]));
+        inst.reset(
+            decoder->decode_window(words.subspan(word_index), word_index * sizeof(uint32_t)));
       } catch (const util::Exception &ex) {
         set_analysis_error(section_name, word_index * sizeof(uint32_t), ex);
         return;

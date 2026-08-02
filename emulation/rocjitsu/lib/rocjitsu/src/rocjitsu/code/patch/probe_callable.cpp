@@ -154,10 +154,10 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     return std::nullopt;
   }
 
-  // Copy the body into an aligned word buffer. One extra zero word of slack so
-  // the decoder succeeds in the event of a malformed input
+  // Copy the body into an aligned word buffer. decode_window supplies bounded
+  // zero padding when validating a malformed trailing instruction.
   const size_t num_words = sym.body_size / sizeof(uint32_t);
-  std::vector<uint32_t> words(num_words + 1, 0);
+  std::vector<uint32_t> words(num_words);
   std::memcpy(words.data(), image.data() + sym.body_file_offset, sym.body_size);
 
   auto decoder = Decoder::create(arch);
@@ -172,7 +172,8 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   bool last_has_src0 = false;
   size_t w = 0;
   while (w < num_words) {
-    std::unique_ptr<Instruction> inst(decoder->decode(&words[w]));
+    std::unique_ptr<Instruction> inst(
+        decoder->decode_window(std::span<const uint32_t>(words).subspan(w), w * sizeof(uint32_t)));
     if (inst == nullptr) {
       report(error_out, "probe body failed to decode");
       return std::nullopt;

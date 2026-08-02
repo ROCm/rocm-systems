@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdint>
@@ -139,11 +140,16 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
   return analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
 }
 
+constexpr std::array<uint32_t, 4> kGfx1250ScaledWmma{
+    0xcc3a0200u,
+    0x42020d04u,
+    0xcc336008u,
+    0x04223110u,
+};
+
 TEST(WaitcheckTest, ReachableGfx1250DecodePreservesFourWordInstruction) {
-  const std::vector<uint32_t> program{
-      0xcc3a0200u, 0x42020d04u, 0xcc336008u, 0x04223110u,
-      0xbfb00000u, // s_endpgm.
-  };
+  std::vector<uint32_t> program(kGfx1250ScaledWmma.begin(), kGfx1250ScaledWmma.end());
+  program.push_back(0xbfb00000u); // s_endpgm.
   TestCodeObject code_object(program);
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
@@ -1126,6 +1132,24 @@ TEST(WaitcheckTest, ReportsMissingLoadcntBeforeUse) {
   EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
   EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
   EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250StreamDecodePreservesFourWordInstructionAtEnd) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(16));
+  program.insert(program.end(), kGfx1250ScaledWmma.begin(), kGfx1250ScaledWmma.end());
+
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  const auto diagnostic =
+      std::ranges::find_if(report.diagnostics, [](const WaitcheckDiagnostic &candidate) {
+        return candidate.instruction.starts_with("v_wmma_scale16_f32_16x16x128_f8f6f4");
+      });
+  ASSERT_NE(diagnostic, report.diagnostics.end()) << diagnostic_summary(report);
+  EXPECT_EQ(diagnostic->counter, WaitCounterKind::Load);
+  EXPECT_EQ(diagnostic->access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(diagnostic->reg, (RegisterRef{RegClass::VGPR, 16, 1}));
 }
 
 TEST(WaitcheckTest, AcceptsLoadcntZeroBeforeUse) {
