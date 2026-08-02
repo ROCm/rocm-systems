@@ -1674,20 +1674,30 @@ def _tensile_python() -> Path:
     )
 
 
-def _llama_executable(workspace: Path, target: str, name: str) -> Path:
-    candidates = []
+@dataclass(frozen=True)
+class LlamaRuntime:
+    build_root: Path
+    executable: Path
+    libraries: dict[str, Path]
+
+
+def _llama_runtime_files(build_root: Path) -> dict[str, Path]:
+    source_root = build_root / "third_party" / "llama.cpp" / "ggml" / "src"
+    return {
+        "ggml": source_root / "libggml.so",
+        "ggml-base": source_root / "libggml-base.so",
+        "ggml-cpu": source_root / "libggml-cpu.so",
+        "ggml-hip": source_root / "ggml-hip" / "libggml-hip.so",
+    }
+
+
+def _llama_runtime(workspace: Path, target: str, name: str) -> LlamaRuntime:
     configured = os.environ.get(LLAMA_BUILD_DIR_ENV)
     if configured:
-        candidates.append(Path(os.path.abspath(Path(configured).expanduser())) / name)
-    candidates.extend(
-        (
-            workspace
-            / "rocjitsu-test-corpus-build"
-            / "kernels"
-            / target
-            / "cases"
-            / "llama.cpp"
-            / name,
+        build_roots = (Path(os.path.abspath(Path(configured).expanduser())),)
+    else:
+        build_roots = (
+            workspace / "rocjitsu-test-corpus-build" / "kernels" / target,
             workspace
             / "rocjitsu-test-corpus"
             / ".pytest-artifacts-rdna4-llama-baseline"
@@ -1695,26 +1705,45 @@ def _llama_executable(workspace: Path, target: str, name: str) -> Path:
             / "kernels_shard_0"
             / "kernels"
             / target
-            / "build"
-            / "cases"
-            / "llama.cpp"
-            / name,
+            / "build",
         )
+
+    failures = []
+    for build_root in build_roots:
+        executable = build_root / "cases" / "llama.cpp" / name
+        libraries = _llama_runtime_files(build_root)
+        missing = [
+            path for path in (executable, *libraries.values()) if not path.is_file()
+        ]
+        if not missing:
+            return LlamaRuntime(build_root, executable, libraries)
+        failures.append((build_root, missing))
+
+    details = "; ".join(
+        f"{build_root}: missing {', '.join(str(path) for path in missing)}"
+        for build_root, missing in failures
     )
-    return next(
-        (candidate for candidate in candidates if candidate.is_file()), candidates[0]
-    )
+    if configured:
+        raise ValidationError(
+            f"{LLAMA_BUILD_DIR_ENV} must name a complete llama build root; {details}"
+        )
+    raise ValidationError(f"cannot locate a complete llama runtime; checked {details}")
 
 
-def _llama_runtime_files(executable: Path) -> dict[str, Path]:
-    build_root = executable.parents[2]
-    source_root = build_root / "third_party" / "llama.cpp" / "ggml" / "src"
-    return {
-        "ggml": source_root / "libggml.so.0",
-        "ggml-base": source_root / "libggml-base.so.0",
-        "ggml-cpu": source_root / "libggml-cpu.so.0",
-        "ggml-hip": source_root / "ggml-hip" / "libggml-hip.so.0",
-    }
+def _llama_executable(workspace: Path, target: str, name: str) -> Path:
+    return _llama_runtime(workspace, target, name).executable
+
+
+def _llama_library_environment(
+    runtime: LlamaRuntime, environment: dict[str, str]
+) -> None:
+    library_directories = list(
+        dict.fromkeys(str(path.parent) for path in runtime.libraries.values())
+    )
+    existing = environment.get("LD_LIBRARY_PATH")
+    if existing:
+        library_directories.append(existing)
+    environment["LD_LIBRARY_PATH"] = os.pathsep.join(library_directories)
 
 
 def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, Path]:
@@ -1744,7 +1773,7 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
             if workload.id == "llama-rdna4-mul-mat-vec-q"
             else "rms_norm"
         )
-        executable = _llama_executable(workspace, target, workload.relative_path)
+        runtime = _llama_runtime(workspace, target, workload.relative_path)
         return {
             "python": Path(os.path.abspath(Path(sys.executable).expanduser())),
             "workload-source": Path(__file__).with_name("consan_llama_validation.py"),
@@ -1756,8 +1785,8 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
             / "llama.cpp"
             / case
             / "case.json",
-            "executable": executable,
-            **_llama_runtime_files(executable),
+            "executable": runtime.executable,
+            **runtime.libraries,
         }
     if workload.kind == "rdna4-matmul":
         root = _rdna4_matmul_root(workspace)
@@ -1915,6 +1944,7 @@ def _clean_environment(
     workload: Workload,
     hook: Path,
     target: str | None = None,
+    workspace: Path | None = None,
 ) -> dict[str, str]:
     if target is not None:
         workload = _resolved_workload(target, workload)
@@ -1927,20 +1957,13 @@ def _clean_environment(
     }
     if target is not None:
         environment["HIP_TARGET"] = target
-    if workload.kind == "llama" and os.environ.get(LLAMA_BUILD_DIR_ENV):
-        executable = (
-            Path(os.path.abspath(Path(os.environ[LLAMA_BUILD_DIR_ENV]).expanduser()))
-            / workload.relative_path
-        )
-        library_directories = list(
-            dict.fromkeys(
-                str(path.parent) for path in _llama_runtime_files(executable).values()
+    if workload.kind == "llama":
+        if workspace is None or target is None:
+            raise ValidationError(
+                "llama runtime environment requires a workspace and target"
             )
-        )
-        existing = environment.get("LD_LIBRARY_PATH")
-        if existing:
-            library_directories.append(existing)
-        environment["LD_LIBRARY_PATH"] = os.pathsep.join(library_directories)
+        runtime = _llama_runtime(workspace, target, workload.relative_path)
+        _llama_library_environment(runtime, environment)
     if profile is None:
         return environment
     config = PROFILES[profile]
@@ -1969,10 +1992,11 @@ def _run_environment(
     hook: Path,
     target: str,
     phase: str,
+    workspace: Path | None = None,
 ) -> dict[str, str]:
     if phase not in {"clean", "overhead"}:
         raise ValidationError(f"unsupported validation phase: {phase}")
-    environment = _clean_environment(profile, workload, hook, target)
+    environment = _clean_environment(profile, workload, hook, target, workspace)
     if _coverage_contract_for_profile(workload, profile):
         # The contract is a property of this exact workload/profile execution,
         # so both correctness and paired-overhead rows use the same bounded,
@@ -2359,7 +2383,7 @@ def _write_provenance(
         },
         "machine": _machine_identity(target),
         "runtime_tools": _runtime_tool_identities(llvm_readelf, hook),
-        "workload_runtime": _workload_runtime_identity(workspace, workload),
+        "workload_runtime": _workload_runtime_identity(workspace, target, workload),
         "observations": _empirical_observation_snapshot(),
     }
     normalized_document = json.loads(json.dumps(document))
@@ -2370,6 +2394,13 @@ def _write_provenance(
             raise ValidationError(
                 f"cannot read existing provenance {path}: {error}"
             ) from error
+        existing_schema = existing.get("provenance_schema_version")
+        if existing_schema != PROVENANCE_SCHEMA_VERSION:
+            raise ValidationError(
+                "provenance schema changed "
+                f"from {existing_schema!r} to {PROVENANCE_SCHEMA_VERSION}; "
+                f"use a new artifact root instead of resuming {path}"
+            )
         stable_existing = {
             key: value for key, value in existing.items() if key != "observations"
         }
@@ -2419,11 +2450,99 @@ def _command_identity(command: list[str], timeout: int = 10) -> dict[str, object
     }
 
 
-def _workload_runtime_identity(
-    workspace: Path, workload: Workload
+def _llama_runtime_identity(
+    workspace: Path, target: str, workload: Workload
 ) -> dict[str, object]:
+    runtime = _llama_runtime(workspace, target, workload.relative_path)
+    ldd = shutil.which("ldd")
+    if ldd is None:
+        raise ValidationError("cannot verify llama runtime closure: ldd is missing")
+    environment = _clean_environment(
+        None, workload, Path("/unused-consan-hook"), target, workspace
+    )
+    try:
+        completed = subprocess.run(
+            [ldd, str(runtime.executable)],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=TIMEOUT_SECONDS,
+            env=environment,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValidationError(
+            f"cannot verify llama runtime closure with ldd: {error}"
+        ) from error
+    output = completed.stdout or ""
+    if completed.returncode != 0:
+        raise ValidationError(
+            "cannot verify llama runtime closure: "
+            f"ldd exited with status {completed.returncode}: {output.strip()}"
+        )
+
+    loaded_paths = []
+    missing_names = []
+    for line in output.splitlines():
+        match = re.match(r"^\s*(\S+)\s+=>\s+(\S+)", line)
+        if match is None or not match.group(1).startswith("libggml"):
+            continue
+        if match.group(2) == "not":
+            missing_names.append(match.group(1))
+            continue
+        loaded_paths.append(Path(match.group(2)))
+    if missing_names:
+        raise ValidationError(
+            "llama runtime closure has unresolved libraries: "
+            + ", ".join(sorted(missing_names))
+        )
+
+    libraries = {}
+    unmatched = list(loaded_paths)
+    for label, expected in runtime.libraries.items():
+        expected_real = expected.resolve(strict=True)
+        match = next(
+            (
+                candidate
+                for candidate in unmatched
+                if candidate.resolve(strict=True) == expected_real
+            ),
+            None,
+        )
+        if match is None:
+            raise ValidationError(
+                "llama loader did not resolve the recorded runtime library "
+                f"{label} from {expected}"
+            )
+        unmatched.remove(match)
+        libraries[label] = {
+            "recorded_path": str(expected),
+            "loader_path": str(match),
+            "resolved_path": str(expected_real),
+        }
+    if unmatched:
+        raise ValidationError(
+            "llama loader resolved unrecorded ggml libraries: "
+            + ", ".join(str(path) for path in unmatched)
+        )
+    return {
+        "kind": workload.kind,
+        "identity_source": "validated dynamic-loader closure",
+        "executable": str(runtime.executable),
+        "libraries": libraries,
+    }
+
+
+def _workload_runtime_identity(
+    workspace: Path, target: str, workload: Workload
+) -> dict[str, object]:
+    if workload.kind == "llama":
+        return _llama_runtime_identity(workspace, target, workload)
     if workload.kind != "pytorch":
-        return {"kind": workload.kind}
+        return {
+            "kind": workload.kind,
+            "identity_source": "hashed provenance files",
+        }
     python = _pytorch_python(workspace)
     script = (
         "import json, torch, triton; "
@@ -2434,9 +2553,44 @@ def _workload_runtime_identity(
         "'triton_version': getattr(triton, '__version__', None), "
         "'triton_file': triton.__file__}, sort_keys=True))"
     )
+    packages = _command_identity([str(python), "-c", script], timeout=TIMEOUT_SECONDS)
+    if not packages.get("available"):
+        raise ValidationError(
+            "cannot record required PyTorch/Triton runtime identity: "
+            + json.dumps(packages, sort_keys=True)
+        )
+    try:
+        package_document = json.loads(str(packages.get("output", "")))
+    except json.JSONDecodeError as error:
+        raise ValidationError(
+            "PyTorch/Triton runtime identity did not emit valid JSON"
+        ) from error
+    required = {
+        "torch_version",
+        "torch_hip_version",
+        "torch_file",
+        "triton_version",
+        "triton_file",
+    }
+    if not isinstance(package_document, dict) or any(
+        not package_document.get(name) for name in required
+    ):
+        raise ValidationError(
+            "PyTorch/Triton runtime identity is missing required fields: "
+            + ", ".join(
+                sorted(
+                    required
+                    - set(
+                        package_document if isinstance(package_document, dict) else ()
+                    )
+                )
+            )
+        )
     return {
         "kind": workload.kind,
-        "python_packages": _command_identity([str(python), "-c", script]),
+        "identity_source": "required framework and kernel-generator probe",
+        "python_packages": packages,
+        "package_document": package_document,
     }
 
 
@@ -4825,7 +4979,9 @@ def _run_profile(
         )
         command = _with_launcher(launcher or [], command)
         log_path = row_dir / f"run-{index}.log"
-        environment = _run_environment(profile, workload, hook, target, phase)
+        environment = _run_environment(
+            profile, workload, hook, target, phase, workspace
+        )
         if profile is not None and (
             result_phase == "coverage-output" or retain_code_objects
         ):
@@ -5585,7 +5741,9 @@ def _inventory(args: argparse.Namespace) -> int:
     family_runs = []
     aggregate_records = {"sites": set(), "sequences": set(), "destinations": set()}
     for family in _fault_families(target, workload):
-        environment = _clean_environment("supercollider", workload, hook, target)
+        environment = _clean_environment(
+            "supercollider", workload, hook, target, workspace
+        )
         # Clean qualification uses compact level-1 summaries. Fault inventory
         # explicitly requests level 2 because it consumes per-site identities.
         environment["RJ_CONSAN_LOG"] = "2"
@@ -5840,8 +5998,9 @@ def _fault_trial_environment(
     fault: dict,
     policy: dict,
     trial: dict[str, str],
+    workspace: Path | None = None,
 ) -> dict[str, str]:
-    environment = _clean_environment(profile, workload, hook, target)
+    environment = _clean_environment(profile, workload, hook, target, workspace)
     environment["CTEST_PARALLEL_LEVEL"] = "1"
     environment.update(fault["environment"])
     if policy.get("detector") in {"detected", "statistical"}:
@@ -5940,7 +6099,14 @@ def _fault_audit(
         if policy.get("disposition") != "not-applicable":
             for index, trial in enumerate(trials):
                 environment = _fault_trial_environment(
-                    profile, workload, hook, target, fault, policy, trial
+                    profile,
+                    workload,
+                    hook,
+                    target,
+                    fault,
+                    policy,
+                    trial,
+                    workspace,
                 )
                 trial_audits.append(
                     {
@@ -6084,10 +6250,15 @@ def _explain_contract(
         for profile in profiles:
             result_phase = _result_phase("clean", profile, workload)
             environment = _run_environment(
-                profile, workload, _hook_path(workspace), target, "clean"
+                profile,
+                workload,
+                _hook_path(workspace),
+                target,
+                "clean",
+                workspace,
             )
             inherited = _clean_environment(
-                None, workload, _hook_path(workspace), target
+                None, workload, _hook_path(workspace), target, workspace
             )
             harness_environment = {
                 name: value
@@ -6543,7 +6714,14 @@ def _fault(args: argparse.Namespace) -> int:
         for index, trial in enumerate(trials):
             name = f"{fault['id']}-{profile}-{index}"
             environment = _fault_trial_environment(
-                profile, workload, hook, target, fault, policy, trial
+                profile,
+                workload,
+                hook,
+                target,
+                fault,
+                policy,
+                trial,
+                workspace,
             )
             enabled_mutations = [
                 key
@@ -6612,7 +6790,9 @@ def _fault(args: argparse.Namespace) -> int:
             for identity in identities:
                 invocation.extend(["--site-id", identity])
             invocation.extend(["--", *command])
-            child_environment = _clean_environment(None, workload, hook, target)
+            child_environment = _clean_environment(
+                None, workload, hook, target, workspace
+            )
             child_environment["CTEST_PARALLEL_LEVEL"] = "1"
             subprocess.run(invocation, env=child_environment, check=False)
             result_path = root / name / "result.json"

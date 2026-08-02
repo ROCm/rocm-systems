@@ -195,6 +195,15 @@ def assert_current_replay_log(test: unittest.TestCase, log_text: str) -> None:
                 test.assertIn(field, line)
 
 
+def create_llama_runtime_fixture(build_root: Path, executable_name: str) -> None:
+    executable = build_root / "cases" / "llama.cpp" / executable_name
+    executable.parent.mkdir(parents=True, exist_ok=True)
+    executable.write_bytes(b"executable")
+    for library in validation._llama_runtime_files(build_root).values():
+        library.parent.mkdir(parents=True, exist_ok=True)
+        library.write_bytes(b"library")
+
+
 class ConSanValidationTest(unittest.TestCase):
     def test_launcher_json_is_an_exact_argv_prefix(self) -> None:
         self.assertEqual(
@@ -2835,6 +2844,11 @@ class ConSanValidationTest(unittest.TestCase):
                 mock.patch.object(
                     validation, "_source_identities", return_value=[source]
                 ),
+                mock.patch.object(
+                    validation,
+                    "_workload_runtime_identity",
+                    return_value={"kind": "pytorch", "python_packages": {}},
+                ),
             ):
                 validation._write_provenance(
                     root, "gfx1201", workload, provenance.parent
@@ -3047,6 +3061,11 @@ class ConSanValidationTest(unittest.TestCase):
                 mock.patch.object(
                     validation, "_source_identities", return_value=[source]
                 ),
+                mock.patch.object(
+                    validation,
+                    "_workload_runtime_identity",
+                    return_value={"kind": "pytorch", "python_packages": {}},
+                ),
             ):
                 validation._write_provenance(
                     root, "gfx1201", workload, provenance.parent
@@ -3127,6 +3146,7 @@ class ConSanValidationTest(unittest.TestCase):
                         {"schema_version": 1, "captured_at_utc": "first"},
                         {"schema_version": 1, "captured_at_utc": "second"},
                         {"schema_version": 1, "captured_at_utc": "third"},
+                        {"schema_version": 1, "captured_at_utc": "fourth"},
                     ),
                 ),
             ):
@@ -3136,6 +3156,18 @@ class ConSanValidationTest(unittest.TestCase):
                 second = validation._write_provenance(
                     root, "gfx1201", workload, workload_root
                 )
+                original_provenance = first.read_text(encoding="utf-8")
+                old_schema = json.loads(original_provenance)
+                old_schema["provenance_schema_version"] = 1
+                first.write_text(json.dumps(old_schema), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    validation.ValidationError,
+                    "provenance schema changed.*use a new artifact root",
+                ):
+                    validation._write_provenance(
+                        root, "gfx1201", workload, workload_root
+                    )
+                first.write_text(original_provenance, encoding="utf-8")
                 workload_input.write_bytes(b"changed")
                 with self.assertRaisesRegex(
                     validation.ValidationError,
@@ -3158,6 +3190,13 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_pytorch_runtime_identity_records_framework_and_generator(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+        package_document = {
+            "torch_version": "2.14",
+            "torch_hip_version": "7.15",
+            "torch_file": "/frozen/torch/__init__.py",
+            "triton_version": "3.8",
+            "triton_file": "/frozen/triton/__init__.py",
+        }
         with (
             mock.patch.object(
                 validation,
@@ -3167,18 +3206,83 @@ class ConSanValidationTest(unittest.TestCase):
             mock.patch.object(
                 validation,
                 "_command_identity",
-                return_value={"available": True, "output": "versions"},
+                return_value={
+                    "available": True,
+                    "output": json.dumps(package_document),
+                },
             ) as command_identity,
         ):
             identity = validation._workload_runtime_identity(
-                Path("/workspace"), workload
+                Path("/workspace"), "gfx1201", workload
             )
         command = command_identity.call_args.args[0]
         self.assertEqual(command[:2], ["/frozen/python", "-c"])
         self.assertIn("torch_version", command[2])
         self.assertIn("triton_version", command[2])
+        self.assertEqual(
+            command_identity.call_args.kwargs["timeout"], validation.TIMEOUT_SECONDS
+        )
         self.assertEqual(identity["kind"], "pytorch")
         self.assertTrue(identity["python_packages"]["available"])
+        self.assertEqual(identity["package_document"], package_document)
+
+    def test_pytorch_runtime_identity_is_required(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+        with (
+            mock.patch.object(
+                validation,
+                "_command_identity",
+                return_value={"available": False, "reason": "timed out"},
+            ),
+            self.assertRaisesRegex(
+                validation.ValidationError,
+                "required PyTorch/Triton runtime identity",
+            ),
+        ):
+            validation._workload_runtime_identity(
+                Path("/workspace"), "gfx1201", workload
+            )
+
+    def test_native_runtime_identity_names_hashed_provenance_files(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["d128-block"]
+        identity = validation._workload_runtime_identity(
+            Path("/workspace"), "gfx1201", workload
+        )
+        self.assertEqual(identity["kind"], workload.kind)
+        self.assertEqual(identity["identity_source"], "hashed provenance files")
+
+    def test_llama_runtime_identity_matches_dynamic_loader_closure(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        with temporary_root() as workspace:
+            build_root = workspace / "frozen-build"
+            create_llama_runtime_fixture(build_root, workload.relative_path)
+            libraries = validation._llama_runtime_files(build_root)
+            ldd_output = "\n".join(
+                f"lib{label}.so.0 => {path} (0x1000)"
+                for label, path in libraries.items()
+            )
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {validation.LLAMA_BUILD_DIR_ENV: str(build_root)},
+                ),
+                mock.patch.object(validation.shutil, "which", return_value="/bin/ldd"),
+                mock.patch.object(
+                    validation.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess(
+                        ["/bin/ldd"], 0, stdout=ldd_output
+                    ),
+                ),
+            ):
+                identity = validation._workload_runtime_identity(
+                    workspace, "gfx1201", workload
+                )
+        self.assertEqual(identity["kind"], "llama")
+        self.assertEqual(set(identity["libraries"]), set(libraries))
+        self.assertEqual(
+            identity["identity_source"], "validated dynamic-loader closure"
+        )
 
     def test_topk_explain_reports_strict_clean_contract(self) -> None:
         audit = validation._explain_contract(
@@ -3702,21 +3806,28 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_llama_rdna4_command_uses_gpu_cpu_oracle_wrapper(self) -> None:
         workload = validation.WORKLOAD_BY_ID["llama-rdna4-rms-norm"]
-        command = validation._workload_command(
-            Path("/workspace"),
-            "gfx1201",
-            workload,
-            "clean",
-            Path("/artifacts/benchmark-0.json"),
-        )
+        with (
+            temporary_root() as workspace,
+            mock.patch.dict(
+                os.environ, {validation.LLAMA_BUILD_DIR_ENV: ""}, clear=False
+            ),
+        ):
+            build_root = (
+                workspace / "rocjitsu-test-corpus-build" / "kernels" / "gfx1201"
+            )
+            create_llama_runtime_fixture(build_root, workload.relative_path)
+            command = validation._workload_command(
+                workspace,
+                "gfx1201",
+                workload,
+                "clean",
+                Path("/artifacts/benchmark-0.json"),
+            )
         self.assertTrue(command[1].endswith("consan_llama_validation.py"))
         self.assertEqual(command[command.index("--workload") + 1], "rms-norm")
         self.assertEqual(
             command[command.index("--executable") + 1],
-            (
-                "/workspace/rocjitsu-test-corpus-build/kernels/gfx1201/"
-                "cases/llama.cpp/llama_cpp_rms_norm"
-            ),
+            str(build_root / "cases" / "llama.cpp" / workload.relative_path),
         )
         self.assertEqual(
             command[command.index("--output-dir") + 1],
@@ -3725,51 +3836,134 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_llama_build_directory_can_be_pinned(self) -> None:
         workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
-        with mock.patch.dict(
-            os.environ,
-            {validation.LLAMA_BUILD_DIR_ENV: "/frozen/llama-build"},
-        ):
-            command = validation._workload_command(
-                Path("/workspace"),
-                "gfx1201",
-                workload,
-                "clean",
-                Path("/artifacts/benchmark-0.json"),
-            )
+        with temporary_root() as root:
+            build_root = root / "frozen-llama-build"
+            create_llama_runtime_fixture(build_root, workload.relative_path)
+            with mock.patch.dict(
+                os.environ,
+                {validation.LLAMA_BUILD_DIR_ENV: str(build_root)},
+            ):
+                command = validation._workload_command(
+                    Path("/workspace"),
+                    "gfx1201",
+                    workload,
+                    "clean",
+                    Path("/artifacts/benchmark-0.json"),
+                )
         self.assertEqual(
             command[command.index("--executable") + 1],
-            "/frozen/llama-build/llama_cpp_mul_mat_vec_q",
+            str(build_root / "cases" / "llama.cpp" / workload.relative_path),
         )
+
+    def test_configured_llama_build_is_authoritative_and_fail_closed(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        with temporary_root() as workspace:
+            fallback = workspace / "rocjitsu-test-corpus-build" / "kernels" / "gfx1201"
+            create_llama_runtime_fixture(fallback, workload.relative_path)
+            configured = workspace / "missing-configured-build"
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {validation.LLAMA_BUILD_DIR_ENV: str(configured)},
+                ),
+                self.assertRaisesRegex(
+                    validation.ValidationError,
+                    validation.LLAMA_BUILD_DIR_ENV,
+                ),
+            ):
+                validation._workload_command(
+                    workspace,
+                    "gfx1201",
+                    workload,
+                    "clean",
+                    Path("/artifacts/benchmark-0.json"),
+                )
 
     def test_pinned_llama_build_records_and_loads_ggml_libraries(self) -> None:
         workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
-        build_directory = "/frozen/build/cases/llama.cpp"
-        with mock.patch.dict(
-            os.environ,
-            {
-                validation.LLAMA_BUILD_DIR_ENV: build_directory,
-                "LD_LIBRARY_PATH": "/runtime/lib",
-            },
-        ):
-            inputs = validation._input_files(Path("/workspace"), "gfx1201", workload)
-            environment = validation._clean_environment(
-                None, workload, Path("/hook.so"), "gfx1201"
-            )
+        with temporary_root() as root:
+            build_root = root / "frozen-build"
+            create_llama_runtime_fixture(build_root, workload.relative_path)
+            with mock.patch.dict(
+                os.environ,
+                {
+                    validation.LLAMA_BUILD_DIR_ENV: str(build_root),
+                    "LD_LIBRARY_PATH": "/runtime/lib",
+                },
+            ):
+                inputs = validation._input_files(
+                    Path("/workspace"), "gfx1201", workload
+                )
+                environment = validation._clean_environment(
+                    None,
+                    workload,
+                    Path("/hook.so"),
+                    "gfx1201",
+                    Path("/workspace"),
+                )
         self.assertEqual(
             inputs["ggml-hip"],
-            Path(
-                "/frozen/build/third_party/llama.cpp/ggml/src/ggml-hip/"
-                "libggml-hip.so.0"
-            ),
+            build_root
+            / "third_party"
+            / "llama.cpp"
+            / "ggml"
+            / "src"
+            / "ggml-hip"
+            / "libggml-hip.so",
         )
         self.assertEqual(
             environment["LD_LIBRARY_PATH"].split(os.pathsep),
             [
-                "/frozen/build/third_party/llama.cpp/ggml/src",
-                "/frozen/build/third_party/llama.cpp/ggml/src/ggml-hip",
+                str(build_root / "third_party/llama.cpp/ggml/src"),
+                str(build_root / "third_party/llama.cpp/ggml/src/ggml-hip"),
                 "/runtime/lib",
             ],
         )
+
+    def test_unpinned_llama_build_uses_its_recorded_runtime_libraries(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        with (
+            temporary_root() as workspace,
+            mock.patch.dict(
+                os.environ,
+                {validation.LLAMA_BUILD_DIR_ENV: "", "LD_LIBRARY_PATH": "/runtime/lib"},
+                clear=False,
+            ),
+        ):
+            build_root = (
+                workspace / "rocjitsu-test-corpus-build" / "kernels" / "gfx1201"
+            )
+            create_llama_runtime_fixture(build_root, workload.relative_path)
+            environment = validation._clean_environment(
+                None, workload, Path("/hook.so"), "gfx1201", workspace
+            )
+        self.assertEqual(
+            environment["LD_LIBRARY_PATH"].split(os.pathsep),
+            [
+                str(build_root / "third_party/llama.cpp/ggml/src"),
+                str(build_root / "third_party/llama.cpp/ggml/src/ggml-hip"),
+                "/runtime/lib",
+            ],
+        )
+
+    def test_llama_runtime_reports_missing_shared_library_layout(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        with temporary_root() as workspace:
+            build_root = workspace / "incomplete-build"
+            executable = build_root / "cases" / "llama.cpp" / workload.relative_path
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"executable")
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {validation.LLAMA_BUILD_DIR_ENV: str(build_root)},
+                ),
+                self.assertRaisesRegex(
+                    validation.ValidationError,
+                    "complete llama build root",
+                ),
+            ):
+                validation._input_files(workspace, "gfx1201", workload)
 
     def test_native_matvec_uses_fault_sensitive_realistic_shape(self) -> None:
         self.assertEqual(llama_validation.WORKLOADS["mul-mat-vec-q"]["n_embd"], 1024)
