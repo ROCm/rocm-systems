@@ -186,12 +186,7 @@ endif()
 if(TTD_DISASM_COMPILE_DEFS)
     target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ${TTD_DISASM_COMPILE_DEFS})
 endif()
-target_compile_definitions(
-    rocprof-trace-decoder-objects
-    PRIVATE ROCPROF_TRACE_DECODER_BUILDING_LIBRARY
-            ROCPROF_TRACE_DECODER_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
-            ROCPROF_TRACE_DECODER_VERSION_MINOR=${PROJECT_VERSION_MINOR}
-            ROCPROF_TRACE_DECODER_VERSION_PATCH=${PROJECT_VERSION_PATCH})
+target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ROCPROF_TRACE_DECODER_BUILDING_LIBRARY)
 set_target_properties(rocprof-trace-decoder-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 option(ARCH_MODEL "Enable ARCH_MODEL stitcher path" OFF)
