@@ -1943,9 +1943,6 @@ struct VectorLaneFlowState {
 // banking may exceed 255 (bank*256 + selector). The ABI table only defines the
 // convention for v0-255, so a banked register above that range is NOT proven
 // callee-saved and must fail closed rather than be masked down to its selector.
-[[nodiscard]] bool is_callee_saved_vgpr(uint16_t phys_vgpr) {
-  return phys_vgpr >= 40 && phys_vgpr <= 255 && ((phys_vgpr - 40) % 16) < 8;
-}
 
 void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<AnalysisBlock> &blocks,
                                      std::vector<IndirectCallFixup> &recovered,
@@ -2397,6 +2394,10 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 }
 
 } // namespace
+
+bool is_callee_saved_vgpr(uint16_t phys_vgpr) {
+  return phys_vgpr >= 40 && phys_vgpr <= 255 && ((phys_vgpr - 40) % 16) < 8;
+}
 
 std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,

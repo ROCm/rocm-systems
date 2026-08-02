@@ -135,6 +135,15 @@ struct PcAddressBuilder {
 ///        section actually contains a recoverable indirect consumer, because a
 ///        section with no dynamic transfer has no stale-PC branch hazard to
 ///        prove anything about.
+/// @brief Whether an AMDGPU physical VGPR is callee-saved by the ABI.
+///
+/// @details A callee-saved VGPR keeps its value across a call, so a value stashed
+/// there is still the caller's after the callee returns. @p phys_vgpr is the
+/// resolved physical index; gfx1250 VGPR_MSB banking can push it past 255, and the
+/// ABI table only covers v0-v255, so a banked register above that range is not
+/// proven callee-saved and reports false.
+[[nodiscard]] bool is_callee_saved_vgpr(uint16_t phys_vgpr);
+
 /// @returns Recovered indirect branch/call metadata.
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,

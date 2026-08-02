@@ -897,10 +897,14 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
           if (lane_mnemonic == "s_set_vgpr_msb" || lane_mnemonic == "s_setreg_b32" ||
               lane_mnemonic == "s_setreg_imm32_b32")
             return false;
-          // A call between the save and the read can clobber the lane inside the callee, which this
-          // walk does not model.
-          if ((inst.flags() & INDIRECT_CALL) != 0 || lane_mnemonic == "s_call_i64" ||
-              lane_mnemonic == "s_swap_pc_i64" || lane_mnemonic == "s_swappc_b64")
+          // A call only endangers the stash if the callee is allowed to write the lane's register.
+          // The ABI keeps callee-saved VGPRs across a call, which is exactly what makes the
+          // non-leaf save/call/restore shape legitimate, so those survive; a caller-saved register
+          // may be overwritten inside the callee and fails closed.
+          const bool is_call = (inst.flags() & INDIRECT_CALL) != 0 ||
+                               lane_mnemonic == "s_call_i64" || lane_mnemonic == "s_swap_pc_i64" ||
+                               lane_mnemonic == "s_swappc_b64";
+          if (is_call && !is_callee_saved_vgpr(vgpr))
             return false;
           const Operand *vdst = inst.dst_operand(0);
           const bool writes_lane =
@@ -972,6 +976,14 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     enum class Effect { kNone, kRestores, kRedefines };
     auto effect_on = [&](const Instruction &inst, uint16_t sgpr, BasicBlock *block,
                          bool allow_lane_restore) {
+      // A call writes the tracked pair without naming it whenever the callee does: the scalar ABI
+      // has no callee-saved SGPRs that a translated body may rely on here, so any call between the
+      // definition and the use invalidates the value. The call instruction's own destination list
+      // does not mention it, which is why this is checked before the operand walk.
+      const std::string_view sgpr_mnemonic = inst.mnemonic();
+      if ((inst.flags() & INDIRECT_CALL) != 0 || sgpr_mnemonic == "s_call_i64" ||
+          sgpr_mnemonic == "s_swap_pc_i64" || sgpr_mnemonic == "s_swappc_b64")
+        return Effect::kRedefines;
       bool defines = false;
       for (int i = 0; i < inst.num_dst_operands(); ++i) {
         const Operand *dst = inst.dst_operand(i);
@@ -980,6 +992,14 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         const auto base = static_cast<uint16_t>(dst->encoding_value());
         const int halves = dst->size_bits() > 32 ? dst->size_bits() / 32 : 1;
         if (sgpr >= base && sgpr < base + halves)
+          defines = true;
+      }
+      // Destination operands are not the only way to write an SGPR; ask the instruction for the
+      // ones it writes without naming them.
+      if (!defines) {
+        RegisterSet implicit;
+        inst.implicit_defs(implicit);
+        if (implicit.contains(RegisterRef{RegClass::SGPR, sgpr, 1}))
           defines = true;
       }
       if (!defines)
