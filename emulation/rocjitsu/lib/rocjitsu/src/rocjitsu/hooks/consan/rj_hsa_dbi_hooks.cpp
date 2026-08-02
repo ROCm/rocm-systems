@@ -3149,6 +3149,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     dump_code_object_bytes(*config, dump_id, code_object_reader.handle, "original",
                            std::span<const uint8_t>(bytes, size));
 
+    const auto transform_begin = std::chrono::steady_clock::now();
     const auto waitcheck_begin = std::chrono::steady_clock::now();
     (void)run_waitcheck_preflight(std::span<const uint8_t>(bytes, size), code_object_reader.handle);
     log_message(kLogInfo, "ConSan waitcheck timing reader=%llu elapsed_ms=%.3f",
@@ -3657,13 +3658,16 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     install_action = rocjitsu::consan_install_action(patch_result, config->fail_closed);
     log_message(kLogInfo,
                 "ConSan patch end reader=%llu visited=%s modified=%s outcome=%s errors=%zu "
-                "warnings=%zu patches=%zu",
+                "warnings=%zu patches=%zu elapsed_ms=%.3f",
                 static_cast<unsigned long long>(code_object_reader.handle),
                 patch_result.visited_code_object ? "true" : "false",
                 patch_result.modified ? "true" : "false",
                 rocjitsu::consan_transform_outcome_name(patch_result.outcome),
                 patch_result.errors.size(), patch_result.warnings.size(),
-                patch_result.patches.size());
+                patch_result.patches.size(),
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                          transform_begin)
+                    .count());
     if (consan_log_level_enabled(kLogInfo) && patch_result.flat_selection_telemetry) {
       const rocjitsu::ConSanFlatSelectionTelemetry &selection =
           *patch_result.flat_selection_telemetry;

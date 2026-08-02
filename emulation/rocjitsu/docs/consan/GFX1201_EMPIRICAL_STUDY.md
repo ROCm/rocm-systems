@@ -2,7 +2,9 @@
 
 Tracking: `bd-2wsf`
 
-Status: methodology draft; no recommendation has been made.
+Status: methodology frozen; the empirical runner is implemented and physical
+smoke-validated; corpus admission is in progress. No recommendation has been
+made.
 
 This study measures the practical cost and detection value of the four ConSan
 engines on physical `gfx1201`. Its final output is a recommendation for the
@@ -67,7 +69,7 @@ Initial candidates are deliberately broader than the final admitted set:
 
 | Source family | Candidate workload | Primary stress | Oracle | Fault route | Status |
 |---|---|---|---|---|---|
-| rdna4_matmul | Production FP16/FP8 WMMA matmul | High-rate LDS staging and barriers | Sampled host numeric reference | Manual racy variants and automatic final-ISA mutation | Candidate |
+| rdna4_matmul | Production FP16/FP8 WMMA matmul | High-rate LDS staging and barriers | Exact small-shape plus sampled 4096³ host reference | Manual racy variants and automatic final-ISA mutation | Harness admitted; engine cells under qualification |
 | hip-moi | D128/WMMA attention | LDS handoff, barriers, register pressure | Existing exact reference | Automatic barrier mutation; manual source control if needed | Candidate |
 | hip-moi | Stream-K or tree atomic reduction | Atomics, fences, LDS coordination | Existing exact reference | Automatic order/scope mutation | Candidate |
 | llama.cpp | Quantized matvec | Real quantized kernel with LDS, barriers, atomics, and fences | CPU result comparison | Automatic reviewed mutation | Candidate |
@@ -79,6 +81,24 @@ An admitted workload must have a bounded production-relevant launch shape, an
 independent correctness oracle, a stable baseline command, source and binary
 identity, and at least one ConSan-visible supported site. Tiny shapes used only
 for compilation or smoke tests are not performance evidence.
+
+The `rdna4_matmul` source-level instrumentation catalog is not the workload
+binary: loading that catalog would make RocJITsu transform hundreds of
+unexecuted experimental kernels. Build the project-owned production-only
+target from a clean source checkpoint instead:
+
+```sh
+VENV=/path/to/therock-venv PRODUCTION_ONLY=1 \
+  /path/to/rdna4_matmul/build_and_test.sh --help
+export CONSAN_VALIDATION_RDNA4_MATMUL_DIR=/path/to/rdna4_matmul
+```
+
+This target contains the ordinary uninstrumented FP16 and FP8 production
+kernels and the same host oracles. RocJITsu still analyzes every kernel in the
+loaded production object; no RocJITsu kernel filter or coverage relaxation is
+used. Clean and cold rows run the exact small-shape oracle plus a two-tile
+sampled host oracle at 4096³ without the benchmark loop. Warm rows use the
+harness's device events, fixed warmups, and at least 250 ms of timed dispatches.
 
 ## Frozen provenance
 
@@ -137,11 +157,23 @@ to a warm row.
 
 The default final collection uses at least ten independent process rounds. A
 round brackets the instrumented modes with native baseline-before and
-baseline-after samples; engine order is randomized from a recorded seed. Each
+baseline-after samples; engine order is randomized from a recorded seed. A
+warm-capable workload has separate cold and warm schedules in each round. Each
 warm sample performs an untimed correctness-preserving warmup and enough timed
 iterations to exceed 250 ms in aggregate, unless the workload's state contract
-requires fresh processes. Reject a round when either baseline fails its oracle
-or their drift exceeds 5 percent.
+requires fresh processes. The native calibration fixes one iteration count for
+all engines in that campaign.
+
+A project-owned self-timed harness may satisfy the same 250 ms requirement
+internally. In that case the campaign records one aggregate device estimate per
+round, does not multiply the harness's own iteration loop, and uses separate
+oracle-only processes for the cold metric.
+
+Baseline drift is evaluated separately for every metric using the absolute
+difference divided by the mean of the two bracketing baselines. A metric sample
+is rejected when either baseline fails its oracle or drift exceeds 5 percent;
+other stable metrics from the same round remain usable. The campaign passes
+only after every reported engine/metric cell has at least ten accepted rounds.
 
 For each metric, retain every raw sample. Report the median paired slowdown,
 interquartile range, and a 95-percent bootstrap confidence interval. The paired
@@ -157,6 +189,24 @@ Collect these structural costs beside timing:
 - spills, relay/island counts, and unsupported or failed placements; and
 - instrumentation-owned host and device allocations, including high-water
   marks and overflow state.
+
+The checked-in runner exposes this contract through `study`. For example:
+
+```sh
+python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
+  --target gfx1201 study \
+  --workload pytorch-rdna4-compiled-softmax --profile all \
+  --rounds 10 --seed 20260802 \
+  --artifact-root "$CONSAN_ARTIFACT_ROOT"
+```
+
+The artifact root contains frozen provenance, clean admission rows with
+original and patched code objects, an uninstrumented timing calibration,
+deterministically scheduled cold and warm round directories, raw host/device
+samples, and an atomically updated `campaign.json`. Passing `--resume` reuses
+complete matching rows; an interrupted row is preserved with an
+`incomplete-N` suffix before it is retried. A changed source, binary, command,
+or campaign configuration requires a new artifact root.
 
 ## Detection protocol
 
