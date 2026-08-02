@@ -1,0 +1,163 @@
+{
+  "schema_version": 2,
+  "target": "gfx1201",
+  "evidence_model": "precommitted final detection study at exact sites from the frozen five-workload inventory after separate one-trial pilots",
+  "review_required": false,
+  "workloads": {
+    "rdna4-matmul-fp8-production": {
+      "faults": [{
+        "id": "barrier-drop",
+        "family": "barrier-drop",
+        "environment": {
+          "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+          "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:2ea902aa8104f911|kernel=_Z21fp8_wmma_tiled_kernelILi16ELi8ELb1ELb0EL8SyncMode0EN4tsan10NoopPolicyELi8ELi2ELi4ELi4EEvPKhS4_Pfiii|kind=barrier|pc=0x0000000000003a10|mnemonic=s_barrier_signal|occurrence=0",
+          "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:2ea902aa8104f911|kernel=_Z21fp8_wmma_tiled_kernelILi16ELi8ELb1ELb0EL8SyncMode0EN4tsan10NoopPolicyELi8ELi2ELi4ELi4EEvPKhS4_Pfiii|event=barrier|pc=0x0000000000003a10|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:2ea902aa8104f911|kernel=_Z21fp8_wmma_tiled_kernelILi16ELi8ELb1ELb0EL8SyncMode0EN4tsan10NoopPolicyELi8ELi2ELi4ELi4EEvPKhS4_Pfiii|event=barrier|pc=0x0000000000003a18|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+        },
+        "site_provenance": {
+          "corpus_commit": "03431b8af28be2c3cad828bec77dfe8836d4a555",
+          "executable": "rdna4_matmul_production",
+          "inventory_run": "bd-2wsf-corpus-admission-833029ddd0-20260802/rdna4-matmul-fp8-production/inventory"
+        },
+        "reach_witness": {
+          "kind": "reviewed-unconditional-final-isa",
+          "evidence": "The frozen FP8 production kernel enters this first barrier sequence on every launched workgroup before the K-loop body."
+        },
+        "profiles": {
+          "supercollider": {"disposition": "not-applicable", "reason": "clean admission rejected"},
+          "record-replay": {"disposition": "not-applicable", "reason": "clean admission rejected"},
+          "sampled": {"detector": "not_detected", "oracle": "pass", "trial_axis": {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": {"start": 0, "stop": 32}}},
+          "inline-shadow": {"disposition": "not-applicable", "reason": "clean admission rejected"}
+        }
+      }]
+    },
+    "llama-rdna4-mul-mat-vec-q": {
+      "faults": [{
+        "id": "barrier-drop",
+        "family": "barrier-drop",
+        "environment": {
+          "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+          "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:de2f8cc9883dcdb8|kernel=_ZL13mul_mat_vec_qIL9ggml_type2ELi1ELb0ELb0EEvPKvS2_PKi31ggml_cuda_mm_fusion_args_devicePfj15HIP_vector_typeIjLj3EEjjjS8_jjjS8_jjjj|kind=barrier|pc=0x000000000000b6c8|mnemonic=s_barrier_signal|occurrence=0",
+          "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:de2f8cc9883dcdb8|kernel=_ZL13mul_mat_vec_qIL9ggml_type2ELi1ELb0ELb0EEvPKvS2_PKi31ggml_cuda_mm_fusion_args_devicePfj15HIP_vector_typeIjLj3EEjjjS8_jjjS8_jjjj|event=barrier|pc=0x000000000000b6c8|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:de2f8cc9883dcdb8|kernel=_ZL13mul_mat_vec_qIL9ggml_type2ELi1ELb0ELb0EEvPKvS2_PKi31ggml_cuda_mm_fusion_args_devicePfj15HIP_vector_typeIjLj3EEjjjS8_jjjS8_jjjj|event=barrier|pc=0x000000000000b6cc|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+        },
+        "site_provenance": {
+          "corpus_commit": "5f1e7f57a8d502294e94e5b960aec71964f1b79d",
+          "executable": "llama_cpp_mul_mat_vec_q",
+          "inventory_run": "bd-2wsf-corpus-admission-833029ddd0-20260802/llama-rdna4-mul-mat-vec-q/inventory"
+        },
+        "reach_witness": {
+          "kind": "reviewed-unconditional-final-isa",
+          "evidence": "The frozen type-2 quantized matvec launch selects this specialization and crosses its first barrier sequence before producing output."
+        },
+        "profiles": {
+          "supercollider": {"detector": "not_detected", "oracle": "pass", "trials": [{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}]},
+          "record-replay": {"disposition": "not-applicable", "reason": "clean admission rejected"},
+          "sampled": {"detector": "statistical", "minimum_detections": 1, "oracle": "any", "trial_axis": {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": {"start": 0, "stop": 32}}},
+          "inline-shadow": {"detector": "detected", "oracle": "any", "trials": [{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}]}
+        }
+      }]
+    },
+    "d128-block": {
+      "faults": [{
+        "id": "barrier-drop",
+        "family": "barrier-drop",
+        "environment": {
+          "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+          "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:cebac378f1e018d9|function=_ZL20__work_group_barrierj|kind=barrier|pc=0x000000000000a51c|mnemonic=s_barrier_signal|occurrence=0",
+          "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:cebac378f1e018d9|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000a51c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:cebac378f1e018d9|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000a520|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+        },
+        "site_provenance": {
+          "corpus_commit": "0fcd57def36188500a19abaf3b6bca3a6e773034",
+          "executable": "hip_moi_instrumented_rdna4_d128_attention_block_test",
+          "inventory_run": "bd-2wsf-corpus-admission-833029ddd0-20260802/d128-block/inventory"
+        },
+        "reach_witness": {
+          "kind": "reviewed-unconditional-final-isa",
+          "evidence": "The one-workgroup D128 block calls the barrier helper on the unconditional LDS producer-to-consumer path."
+        },
+        "profiles": {
+          "supercollider": {"detector": "not_detected", "oracle": "fail", "trials": [{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}]},
+          "record-replay": {"detector": "detected", "oracle": "fail", "trials": [{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}]},
+          "sampled": {"detector": "statistical", "minimum_detections": 1, "oracle": "fail", "trial_axis": {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": {"start": 0, "stop": 32}}},
+          "inline-shadow": {"detector": "detected", "oracle": "fail", "trials": [{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}]}
+        }
+      }]
+    },
+    "streamk-arrival": {
+      "faults": [
+        {
+          "id": "atomic-weaken-order",
+          "family": "atomic-weaken-order",
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER": "1",
+            "RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE": "release",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:6a20802924b6e784|function=_ZN7hip_moi6detail27atomic_fetch_add_with_scopeILi4EiEET0_PS2_S2_NS_19atomic_memory_orderE|kind=atomic|pc=0x00000000000289b0|mnemonic=flat_atomic_add_u32|occurrence=3"
+          },
+          "site_provenance": {
+            "corpus_commit": "0fcd57def36188500a19abaf3b6bca3a6e773034",
+            "executable": "hip_moi_instrumented_rdna4_wmma_streamk_arrival_counter_test",
+            "inventory_run": "bd-2wsf-corpus-admission-833029ddd0-20260802/streamk-arrival/inventory"
+          },
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The fixed two-partial Stream-K launch reaches the agent-scope release arrival-counter increment before the final tile consumer."
+          },
+          "profiles": {
+            "supercollider": {"detector": "not_detected", "oracle": "pass", "trials": [{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}]},
+            "record-replay": {"detector": "detected", "oracle": "pass", "trials": [{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}]},
+            "sampled": {"detector": "not_detected", "oracle": "pass", "trial_axis": {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": {"start": 0, "stop": 32}}},
+            "inline-shadow": {"disposition": "not-applicable", "reason": "clean admission rejected"}
+          }
+        },
+        {
+          "id": "atomic-weaken-scope",
+          "family": "atomic-weaken-scope",
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:6a20802924b6e784|function=_ZN7hip_moi6detail27atomic_fetch_add_with_scopeILi4EiEET0_PS2_S2_NS_19atomic_memory_orderE|kind=atomic|pc=0x00000000000289b0|mnemonic=flat_atomic_add_u32|occurrence=3"
+          },
+          "site_provenance": {
+            "corpus_commit": "0fcd57def36188500a19abaf3b6bca3a6e773034",
+            "executable": "hip_moi_instrumented_rdna4_wmma_streamk_arrival_counter_test",
+            "inventory_run": "bd-2wsf-corpus-admission-833029ddd0-20260802/streamk-arrival/inventory"
+          },
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The fixed two-partial Stream-K launch reaches the agent-scope release arrival-counter increment before the final tile consumer."
+          },
+          "profiles": {
+            "supercollider": {"detector": "not_detected", "oracle": "pass", "trials": [{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}]},
+            "record-replay": {"detector": "detected", "oracle": "pass", "trials": [{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}]},
+            "sampled": {"detector": "not_detected", "oracle": "pass", "trial_axis": {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": {"start": 0, "stop": 32}}},
+            "inline-shadow": {"disposition": "not-applicable", "reason": "clean admission rejected"}
+          }
+        }
+      ]
+    },
+    "pytorch-rdna4-compiled-softmax": {
+      "faults": [{
+        "id": "barrier-drop",
+        "family": "barrier-drop",
+        "environment": {
+          "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+          "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:46555795a0b96f12|kernel=triton_per_fused__softmax_prepare_softmax_online_0|kind=barrier|pc=0x000000000000040c|mnemonic=s_barrier_signal|occurrence=4",
+          "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:46555795a0b96f12|kernel=triton_per_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x000000000000040c|mnemonic=s_barrier_signal|occurrence=4|sequence=singleton|associated-with=fnv1a64:46555795a0b96f12|kernel=triton_per_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000410|mnemonic=s_barrier_wait|occurrence=5|sequence=singleton"
+        },
+        "site_provenance": {
+          "corpus_commit": "833029ddd01960957d257b7b39602b2a3d701c74",
+          "executable": "python",
+          "inventory_run": "bd-2wsf-corpus-admission-833029ddd0-20260802/pytorch-rdna4-compiled-softmax/inventory"
+        },
+        "reach_witness": {
+          "kind": "reviewed-unconditional-final-isa",
+          "evidence": "Every program in the frozen full-graph 128x256 softmax kernel crosses the final signal/wait sequence before the output store."
+        },
+        "profiles": {
+          "supercollider": {"detector": "not_detected", "oracle": "pass", "trials": [{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}]},
+          "record-replay": {"disposition": "not-applicable", "reason": "clean admission rejected"},
+          "sampled": {"detector": "statistical", "minimum_detections": 1, "oracle": "any", "trial_axis": {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": {"start": 0, "stop": 32}}},
+          "inline-shadow": {"detector": "detected", "oracle": "any", "trials": [{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}]}
+        }
+      }]
+    }
+  }
+}

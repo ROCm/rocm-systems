@@ -85,8 +85,10 @@ or GPU reset is not by itself a ConSan diagnostic.
 - [VALIDATION.md](VALIDATION.md): reproducible physical, simulator, and offline
   gates behind those ledgers.
 - [GFX1201_EMPIRICAL_STUDY.md](GFX1201_EMPIRICAL_STUDY.md): the frozen
-  methodology and evolving evidence for comparing engine overhead, detection
-  yield, and implementation complexity on physical gfx1201.
+  methodology and empirical recommendation comparing engine overhead,
+  detection yield, and implementation complexity on physical gfx1201.
+- [GFX1201_EMPIRICAL_RESULTS.md](GFX1201_EMPIRICAL_RESULTS.md): generated
+  performance, detection, structural, and complexity tables for that study.
 - [SPILLING.md](SPILLING.md): ConSan register selection, ownership, private
   layout, and runtime integration.
 - [AMDGPU register spilling](../spilling.md): reusable RocJitsu allocation and

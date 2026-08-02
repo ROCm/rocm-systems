@@ -2,9 +2,9 @@
 
 Tracking: `bd-2wsf`
 
-Status: methodology and corpus are frozen; the empirical runner is implemented
-and physical smoke-validated; performance and detection collection are in
-progress. No recommendation has been made.
+Status: complete physical-gfx1201 performance and detection campaigns have
+been analyzed with a checked-in provenance-verifying reader. The recommendation
+below is final for this frozen study and is awaiting its single local review.
 
 This study measures the practical cost and detection value of the four ConSan
 engines on physical `gfx1201`. Its final output is a recommendation for the
@@ -375,29 +375,148 @@ summed into a synthetic score.
 
 ## Results
 
-No cell is populated from recollection. Each result links to a retained
-artifact root that satisfies this document.
+No cell is populated from recollection. The complete generated tables, sample
+counts, confidence intervals, structural measurements, mechanical complexity
+inventory, and artifact names are in
+[GFX1201_EMPIRICAL_RESULTS.md](GFX1201_EMPIRICAL_RESULTS.md). The checked-in
+reader discovers the exact artifacts named by `consan_empirical_gfx1201.json`,
+verifies their shared source, hook, runtime, toolchain, selected-device, and
+fault-spec provenance, and then renders that file. Regenerate and verify it
+from the workspace root with:
+
+```sh
+python3 rocm-systems/emulation/rocjitsu/tests/dbi/consan/consan_empirical_report.py \
+  --artifact-base artifacts \
+  --output rocm-systems/emulation/rocjitsu/docs/consan/GFX1201_EMPIRICAL_RESULTS.md
+python3 rocm-systems/emulation/rocjitsu/tests/dbi/consan/consan_empirical_report.py \
+  --artifact-base artifacts \
+  --check rocm-systems/emulation/rocjitsu/docs/consan/GFX1201_EMPIRICAL_RESULTS.md
+```
+
+The final fault specification is
+`consan_validation_faults_gfx1201_empirical.json`, byte-for-byte identical to
+the precommitted specification used by all 522 final trials. Its SHA-256 is
+`31199ce68876dc02792285c853a281770b83fc101af71a4d4c5ed5875743e5cf`.
 
 ### Performance and resource summary
 
-| Workload | Engine | Admission | Cold ratio | Warm host ratio | Warm device ratio | Object growth | Runtime memory | Notes |
-|---|---|---|---:|---:|---:|---:|---:|---|
-| TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+- **Sampled is the only engine admitted on all five workloads.** SuperCollider
+  admitted four, Inline Shadow three, and Record/Replay two. Rejected pairs
+  remain explicit evidence: FP8 undercoverage affected SuperCollider and Inline
+  Shadow; Record/Replay had incomplete FP8 history, failed to transform llama,
+  and emitted 512 clean access-conflict diagnoses on softmax; Inline Shadow did
+  not cover the Stream-K accesses or atomics.
+- **Warm cost was moderate where a workload supported meaningful repetition.**
+  Sampled slowed the production FP8 device loop by 4.72x. On generated softmax,
+  warm host/device slowdowns were 1.02x/1.02x for SuperCollider,
+  1.44x/2.47x for Sampled, and 1.67x/3.34x for Inline Shadow. The three softmax
+  cold-process cells reached only 7/10 stable brackets and are deliberately
+  excluded; its cold-workload and warm cells are qualified.
+- **Fresh-process native tests are dominated by one-time analysis and
+  transformation.** Cold-workload slowdowns ranged from 11.23x to 14.89x for
+  llama, 19.97x to 24.52x for D128, and 47.30x to 61.87x for Stream-K. These are
+  operational costs for short sanitizer reproductions, not steady-state kernel
+  throughput estimates.
+- **State and object costs separate the engines more clearly.** SuperCollider
+  used no report allocation in admitted rows and grew modified objects by
+  1.01x to 1.57x. Sampled used 0.01 MiB to 0.66 MiB of peak live report memory
+  and grew objects by 1.13x to 3.83x. Inline Shadow reached 48.02 MiB of report
+  memory on D128 and softmax and grew the tiny softmax object by 7.80x.
+  Record/Replay used 18.66 MiB to 57.61 MiB on its two admitted workloads.
+  No accepted row spilled registers, and the retained code-object metadata had
+  no nonzero SGPR, VGPR, LDS, private-segment, or spill-count delta. The roughly
+  4.6 GiB transform peak is a shared reserved virtual-address budget, not
+  resident memory.
 
 ### Detection summary
 
-| Workload | Fault class | Engine | Reached trials | Oracle failures | Diagnoses | Detection estimate | 95% interval | False positives | Notes |
-|---|---|---|---:|---:|---:|---:|---:|---:|---|
-| TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+- **Inline Shadow was deterministic for every admitted barrier case:** 90/90
+  diagnoses across llama, D128, and generated softmax, with a 95% lower bound
+  of 88.6% within each 30-trial row. It diagnosed all 30 softmax trials even
+  though the independent output oracle passed every time.
+- **Sampled traded breadth and low state for workload-dependent yield.** It
+  diagnosed 25/32 llama trials (78.1%, 95% interval 61.2% to 89.0%), 8/32 D128
+  trials (25.0%, 13.3% to 42.1%), and 2/32 softmax trials (6.25%, 1.7% to
+  20.1%). It diagnosed 0/32 FP8 trials, where the injected barrier drop also
+  produced no oracle manifestation, and 0/64 Stream-K atomic order/scope
+  trials.
+- **Record/Replay supplied unique synchronization evidence.** It diagnosed
+  30/30 D128 barrier trials and all 60/60 Stream-K order/scope trials. None of
+  the Stream-K output oracles failed, so those 60 diagnoses are evidence not
+  obtainable from the workload result alone.
+- **SuperCollider diagnosed none of the admitted final faults:** 0/90 barrier
+  trials and 0/60 atomic order/scope trials. The strongest miss was D128, where
+  the independent oracle failed in 30/30 trials while SuperCollider remained
+  silent.
+- Every applicable final trial was admitted and reached, every before/after
+  device probe passed, and every clean admitted campaign produced zero
+  unexpected diagnoses. Non-applicable engine/workload pairs were never
+  counted as misses.
 
 ### Complexity summary
 
-| Engine | Unique coverage | Production/test surface | Runtime/ABI burden | Target-specific burden | Observed failure modes | Maintenance risk |
-|---|---|---|---|---|---|---|
-| SuperCollider | TBD | TBD | TBD | TBD | TBD | TBD |
-| Record/Replay | TBD | TBD | TBD | TBD | TBD | TBD |
-| Sampled | TBD | TBD | TBD | TBD | TBD | TBD |
-| Inline Shadow | TBD | TBD | TBD | TBD | TBD | TBD |
+- The shared ConSan production directories contain 65 text/build files and
+  81,531 lines. These shared analysis, placement, ABI, hook, configuration, and
+  report paths dominate the maintenance floor for every MOI engine.
+- SuperCollider has 7,334 lines in four dedicated emitter files. It is
+  comparatively stateless but carries substantial target-instruction emission
+  surface and supplied no detection value in the final corpus: **medium risk**.
+- Record/Replay has only 2,065 lines in four dedicated files, but that count
+  excludes its dependence on the shared MOI placement/report stack. Its device
+  history, dispatch directory, replay, saturation, provenance-repair, cleanup,
+  and completeness states make it **high risk** despite the smaller dedicated
+  count.
+- Sampled has 4,085 dedicated lines across access, sync, and host causal-window
+  files. It has the broadest admission and smallest MOI reports, but its offset,
+  stride, publication, and confidence requirements create a continuing
+  statistical-test obligation: **medium-high risk**.
+- Inline Shadow has 10,159 dedicated lines across five model, atomic, and
+  emission files, the largest engine-owned surface. Combined with its report
+  allocation and placement pressure, its deterministic detection comes at
+  **high risk**.
+
+## Empirical recommendation
+
+The recommendation is to make **Sampled the default general-purpose gfx1201
+ConSan mode**, while being explicit that a single run is only a sample. It is
+the only mode that cleanly admitted the entire corpus, its warm cost and report
+state were lower than Inline Shadow on the repeated workloads, and it found
+real barrier defects in native llama, owned HIP, and generated Triton kernels.
+Qualification and user guidance should prescribe a bounded offset sweep when
+confidence matters. The ordinary Sampled contract should not claim atomic
+order/scope coverage: both Stream-K faults were 0/32.
+
+Keep **Inline Shadow as an opt-in deterministic barrier/LDS diagnostic** only
+after its normal clean-coverage gate passes. Its 90/90 detection record is the
+best barrier evidence in the study, including diagnoses before output
+corruption. It should not claim ordinary FP8 or Stream-K support at this
+checkpoint, and its 48 MiB report allocation and largest dedicated code surface
+make it a poor default.
+
+Narrow **Record/Replay to an expert opt-in synchronization mode**, with atomic
+order and scope as its primary unique contract. Its 60/60 Stream-K result is
+the only evidence for those two fault classes, so retiring it would lose useful
+coverage. It should not be advertised as broadly supported until the FP8
+history, llama transformation, and clean softmax-diagnostic failures are fixed.
+Its high cold cost and report/ABI burden rule it out as the default.
+
+Remove **SuperCollider from the ordinary race-detection surface** and retain it
+only as an explicitly experimental perturbation probe while deciding whether
+to delete it. Its lower memory and object costs do not compensate for 0/150
+diagnoses, including 0/30 on an always-manifesting D128 defect. A future attempt
+to restore ordinary support needs a separately reviewed fault class that
+demonstrates unique detections; low overhead alone is insufficient.
+
+### Limits of the conclusion
+
+This is a physical-gfx1201 result for five frozen workloads and six exact-site
+fault cases. It does not establish the same performance or support contract on
+other targets. The barrier cases create real uncoordinated LDS execution, but
+the study does not cover every global-memory race pattern. The FP8 miss is
+qualified by zero oracle manifestations in all 32 trials. Sampled intervals are
+specific to the standard-v1 offset sweep, and a wider workload or fault corpus
+may change its yield. All implementation changes that follow from this
+recommendation require ordinary target-regression qualification.
 
 ## Recommendation rule
 
