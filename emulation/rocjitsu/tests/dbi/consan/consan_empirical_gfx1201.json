@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "target": "gfx1201",
+  "collection_date": "2026-08-02",
+  "source_head": "cff57df4c926bc02483de04417632ec83320aaec",
+  "hook_sha256": "b72109fb27a9f2edd49dac504e3469b536613dae2b34eb8b5be7961a180a6a6d",
+  "fault_spec_sha256": "31199ce68876dc02792285c853a281770b83fc101af71a4d4c5ed5875743e5cf",
+  "fault_spec_path": "emulation/rocjitsu/tests/dbi/consan/consan_validation_faults_gfx1201_empirical.json",
+  "required_rounds": 10,
+  "randomization_seed": 20260802,
+  "baseline_drift_limit": 0.05,
+  "bootstrap_resamples": 10000,
+  "performance_workloads": [
+    "rdna4-matmul-fp8-production",
+    "llama-rdna4-mul-mat-vec-q",
+    "d128-block",
+    "streamk-arrival",
+    "pytorch-rdna4-compiled-softmax"
+  ],
+  "performance_artifacts": [
+    "bd-2wsf-perf-cff57df4c9-fp8-20260802",
+    "bd-2wsf-perf-cff57df4c9-llama-20260802",
+    "bd-2wsf-perf-cff57df4c9-d128-20260802",
+    "bd-2wsf-perf-cff57df4c9-streamk-20260802",
+    "bd-2wsf-perf-cff57df4c9-softmax-20260802"
+  ],
+  "allowed_unqualified_metrics": [
+    "pytorch-rdna4-compiled-softmax/supercollider/cold:process",
+    "pytorch-rdna4-compiled-softmax/sampled/cold:process",
+    "pytorch-rdna4-compiled-softmax/inline-shadow/cold:process"
+  ],
+  "detection_cases": [
+    {
+      "workload": "rdna4-matmul-fp8-production",
+      "fault": "barrier-drop"
+    },
+    {
+      "workload": "llama-rdna4-mul-mat-vec-q",
+      "fault": "barrier-drop"
+    },
+    {
+      "workload": "d128-block",
+      "fault": "barrier-drop"
+    },
+    {
+      "workload": "streamk-arrival",
+      "fault": "atomic-weaken-order"
+    },
+    {
+      "workload": "streamk-arrival",
+      "fault": "atomic-weaken-scope"
+    },
+    {
+      "workload": "pytorch-rdna4-compiled-softmax",
+      "fault": "barrier-drop"
+    }
+  ],
+  "detection_artifacts": [
+    "bd-2wsf-detection-cff57df4c9-fp8-20260802",
+    "bd-2wsf-detection-cff57df4c9-llama-20260802",
+    "bd-2wsf-detection-cff57df4c9-d128-20260802",
+    "bd-2wsf-detection-cff57df4c9-streamk-order-20260802",
+    "bd-2wsf-detection-cff57df4c9-streamk-scope-20260802",
+    "bd-2wsf-detection-cff57df4c9-softmax-20260802"
+  ],
+  "complexity": {
+    "source_directories": [
+      "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan",
+      "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/hooks/consan"
+    ],
+    "test_directories": [
+      "emulation/rocjitsu/tests",
+      "emulation/rocjitsu/lib/rocjitsu/test"
+    ],
+    "engines": {
+      "supercollider": {
+        "dedicated_files": [
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_supercollider.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_supercollider_common.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_supercollider_flat.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_supercollider_lds.inc"
+        ],
+        "test_pattern": "supercollider|SuperCollider",
+        "runtime_model": "stateless perturbation and read-back; no persistent report allocation in admitted rows",
+        "failure_modes": "FP8 undercoverage; zero diagnoses in all six final fault cases",
+        "risk": "medium: isolated emitters, but large target-specific flat/LDS instruction surface"
+      },
+      "record-replay": {
+        "dedicated_files": [
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_record_atomic.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_record_replay.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_record_replay_types.h.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
+        ],
+        "test_pattern": "record[_-]?replay|RecordReplay",
+        "runtime_model": "bounded device histories, dispatch directory, host replay, saturation and provenance repair",
+        "failure_modes": "FP8 history incomplete; llama transform failure; clean softmax diagnostics",
+        "risk": "high: unique replay ABI and host post-processing with multiple capacity and completeness states"
+      },
+      "sampled": {
+        "dedicated_files": [
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_sampled_access.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_sampled_sync.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
+        ],
+        "test_pattern": "sampled|Sampled",
+        "runtime_model": "bounded sampled watchpoints and causal sync windows with runtime offset/stride selection",
+        "failure_modes": "probabilistic barrier yield; zero diagnoses for both Stream-K atomic weakenings",
+        "risk": "medium-high: broad admission and small reports, but sampling and causal-window state require statistical tests"
+      },
+      "inline-shadow": {
+        "dedicated_files": [
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_inline_atomic.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_inline_model.h.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_inline_shadow_emission.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_shadow_models.h.inc"
+        ],
+        "test_pattern": "inline[_-]?shadow|InlineShadow",
+        "runtime_model": "device-side shadow state, inline atomic protocol, report buffer, and host decoding",
+        "failure_modes": "FP8 access undercoverage; Stream-K access and atomic undercoverage",
+        "risk": "high: largest dedicated emission/model surface and high report memory on small kernels"
+      }
+    }
+  }
+}
