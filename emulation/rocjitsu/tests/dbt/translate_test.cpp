@@ -1835,6 +1835,52 @@ TEST(CodeObjectPatcher, ReplaceTextRejectsCodeRelocationTargetPastEndOfText) {
       << "the last instruction in .text is a legitimate branch destination";
 }
 
+TEST(CodeObjectPatcher, ResolvesAllocatedDataPayloadsAndEndpoints) {
+  std::array<Elf64_Shdr, 5> sections{};
+  sections[0].sh_addr = 0x1000;
+  sections[0].sh_size = 0x8;
+  sections[1].sh_flags = SHF_ALLOC;
+  sections[1].sh_addr = 0x2000;
+  sections[1].sh_size = 0x10;
+  sections[2].sh_flags = SHF_ALLOC;
+  sections[2].sh_addr = 0x2010;
+  sections[2].sh_size = 0;
+  sections[3].sh_flags = SHF_ALLOC;
+  sections[3].sh_addr = 0x2010;
+  sections[3].sh_size = 0x8;
+  sections[4].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
+  sections[4].sh_addr = 0x3000;
+  sections[4].sh_size = 0x8;
+
+  struct Case {
+    uint64_t target;
+    size_t section_index;
+    uint64_t section_offset;
+  };
+  for (const Case &test :
+       {Case{0x2000, 1, 0}, Case{0x200f, 1, 0xf}, Case{0x2011, 3, 1}, Case{0x2018, 3, 8}}) {
+    const auto resolved = resolve_allocated_data_section_address(sections, test.target);
+    ASSERT_TRUE(resolved.has_value()) << "target 0x" << std::hex << test.target;
+    EXPECT_EQ(resolved->section_index, test.section_index);
+    EXPECT_EQ(resolved->section_offset, test.section_offset);
+  }
+  EXPECT_TRUE(resolve_allocated_data_section_address(sections, 0x2010))
+      << "either nonempty section may own their shared boundary";
+
+  std::array<Elf64_Shdr, 1> empty_section{};
+  empty_section[0].sh_flags = SHF_ALLOC;
+  empty_section[0].sh_addr = 0x4000;
+  EXPECT_FALSE(resolve_allocated_data_section_address(empty_section, 0x4000));
+  EXPECT_FALSE(resolve_allocated_data_section_address(sections, 0x1000));
+  EXPECT_FALSE(resolve_allocated_data_section_address(sections, 0x2019));
+  EXPECT_FALSE(resolve_allocated_data_section_address(sections, 0x2100));
+  EXPECT_FALSE(resolve_allocated_data_section_address(sections, 0x3000));
+
+  ASSERT_TRUE(resolve_allocated_data_section_address(sections, 0x2010));
+  EXPECT_FALSE(resolve_pc_relative_data_section_address(sections, 0x2010, 0x2010, 0x8))
+      << "source text takes precedence over a data section ending at the same address";
+}
+
 TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
   auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
   AmdGpuCodeObject co(image.data(), image.size());
@@ -10863,7 +10909,7 @@ TEST(BinaryTranslatorE2E, Gfx1250RefusesDeviceFunctionBodyHeldByAnUnnamedPointer
   EXPECT_EQ(result.elf_bytes, image);
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250RepointsPcRelativeDataAddressAfterRelocation) {
+TEST(BinaryTranslatorE2E, Gfx1250RepointsPcRelativeDataRangeBoundsAfterRelocation) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   constexpr uint32_t kGfx1250SNop = 0xBF800000u;
   constexpr uint32_t kGfx1250GetPcS0 = 0xBE804700u;    // s_get_pc_i64 s[0:1]
@@ -10880,9 +10926,6 @@ TEST(BinaryTranslatorE2E, Gfx1250RepointsPcRelativeDataAddressAfterRelocation) {
       kGfx1250SNop,        kGfx1250SNop,    kGfx1250SNop,     kGfx1250GetPcS0, kGfx1250AddNcU64S0,
       0u /*lit lo*/,       0u /*lit hi*/,   kGfx1250SetPcS30,
   };
-  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
-
-  // Locate .text and a real non-executable allocated target, then point the literal at it.
   const auto sections = [](std::span<const uint8_t> img) {
     rocjitsu::Elf64_Ehdr ehdr{};
     std::memcpy(&ehdr, img.data(), sizeof(ehdr));
@@ -10891,69 +10934,90 @@ TEST(BinaryTranslatorE2E, Gfx1250RepointsPcRelativeDataAddressAfterRelocation) {
                 ehdr.e_shnum * sizeof(rocjitsu::Elf64_Shdr));
     return shdrs;
   };
-  auto shdrs = sections(image);
-  const auto text = std::ranges::find_if(shdrs, [](const rocjitsu::Elf64_Shdr &s) {
-    return (s.sh_flags & rocjitsu::SHF_EXECINSTR) != 0;
-  });
-  const auto data = std::ranges::find_if(shdrs, [](const rocjitsu::Elf64_Shdr &s) {
-    return (s.sh_flags & rocjitsu::SHF_ALLOC) != 0 && (s.sh_flags & rocjitsu::SHF_EXECINSTR) == 0 &&
-           s.sh_size != 0;
-  });
-  ASSERT_NE(text, shdrs.end());
-  ASSERT_NE(data, shdrs.end());
 
-  const uint64_t source_getpc_result =
-      text->sh_addr + kCalleeWord * sizeof(uint32_t) + sizeof(uint32_t);
-  const uint64_t target_vaddr = data->sh_addr;
-  const uint64_t source_literal = target_vaddr - source_getpc_result;
-  std::memcpy(image.data() + text->sh_offset + (kCalleeWord + 2) * sizeof(uint32_t),
-              &source_literal, sizeof(source_literal));
+  const auto verify_target = [&](bool points_one_past_end) {
+    SCOPED_TRACE(points_one_past_end ? "one-past-end pointer" : "section-start pointer");
+    auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
 
-  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
-  ASSERT_TRUE(source.is_valid());
-  rocjitsu::BinaryTranslator translator(
-      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
-      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
-                               rocjitsu::ProcessorRevision::Gfx1250A0));
-  const auto result = translator.translate(source);
-  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
-                                                          : result.diagnostics.front().message);
+    // Locate .text and a real non-executable allocated target, then point the literal at either
+    // bound of that section. Both bounds are valid values in a compiler-generated [begin, end)
+    // pair, and both must follow the section when text growth shifts it.
+    auto shdrs = sections(image);
+    const auto text = std::ranges::find_if(shdrs, [](const rocjitsu::Elf64_Shdr &s) {
+      return (s.sh_flags & rocjitsu::SHF_EXECINSTR) != 0;
+    });
+    const auto data = std::ranges::find_if(shdrs, [](const rocjitsu::Elf64_Shdr &s) {
+      return (s.sh_flags & rocjitsu::SHF_ALLOC) != 0 &&
+             (s.sh_flags & rocjitsu::SHF_EXECINSTR) == 0 && s.sh_size != 0;
+    });
+    ASSERT_NE(text, shdrs.end());
+    ASSERT_NE(data, shdrs.end());
 
-  // Find the relocated getpc by its encoding; the callee moved, so its offset is not known up
-  // front.
-  auto out_shdrs = sections(result.elf_bytes);
-  const auto out_text = std::ranges::find_if(out_shdrs, [](const rocjitsu::Elf64_Shdr &s) {
-    return (s.sh_flags & rocjitsu::SHF_EXECINSTR) != 0;
-  });
-  const auto out_data = std::ranges::find_if(out_shdrs, [](const rocjitsu::Elf64_Shdr &s) {
-    return (s.sh_flags & rocjitsu::SHF_ALLOC) != 0 && (s.sh_flags & rocjitsu::SHF_EXECINSTR) == 0 &&
-           s.sh_size != 0;
-  });
-  ASSERT_NE(out_text, out_shdrs.end());
-  ASSERT_NE(out_data, out_shdrs.end());
+    const uint64_t source_getpc_result =
+        text->sh_addr + kCalleeWord * sizeof(uint32_t) + sizeof(uint32_t);
+    const uint64_t target_section_offset = points_one_past_end ? data->sh_size : 0;
+    const uint64_t target_vaddr = data->sh_addr + target_section_offset;
+    const uint64_t source_literal = target_vaddr - source_getpc_result;
+    std::memcpy(image.data() + text->sh_offset + (kCalleeWord + 2) * sizeof(uint32_t),
+                &source_literal, sizeof(source_literal));
 
-  std::optional<size_t> getpc_word;
-  for (size_t i = 0; i + 3 < out_text->sh_size / sizeof(uint32_t); ++i) {
-    uint32_t word = 0;
-    std::memcpy(&word, result.elf_bytes.data() + out_text->sh_offset + i * sizeof(uint32_t),
-                sizeof(word));
-    if (word == kGfx1250GetPcS0) {
-      getpc_word = i;
-      break;
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    const auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+
+    // Find the relocated getpc by its encoding; the callee moved, so its offset is not known up
+    // front.
+    auto out_shdrs = sections(result.elf_bytes);
+    const auto out_text = std::ranges::find_if(out_shdrs, [](const rocjitsu::Elf64_Shdr &s) {
+      return (s.sh_flags & rocjitsu::SHF_EXECINSTR) != 0;
+    });
+    const auto out_data = std::ranges::find_if(out_shdrs, [](const rocjitsu::Elf64_Shdr &s) {
+      return (s.sh_flags & rocjitsu::SHF_ALLOC) != 0 &&
+             (s.sh_flags & rocjitsu::SHF_EXECINSTR) == 0 && s.sh_size != 0;
+    });
+    ASSERT_NE(out_text, out_shdrs.end());
+    ASSERT_NE(out_data, out_shdrs.end());
+
+    std::optional<size_t> getpc_word;
+    for (size_t i = 0; i + 3 < out_text->sh_size / sizeof(uint32_t); ++i) {
+      uint32_t word = 0;
+      std::memcpy(&word, result.elf_bytes.data() + out_text->sh_offset + i * sizeof(uint32_t),
+                  sizeof(word));
+      if (word == kGfx1250GetPcS0) {
+        getpc_word = i;
+        break;
+      }
     }
-  }
-  ASSERT_TRUE(getpc_word.has_value()) << "the callee body must survive into translated text";
-  ASSERT_NE(*getpc_word, kCalleeWord) << "the callee must have moved, or this proves nothing";
+    ASSERT_TRUE(getpc_word.has_value()) << "the callee body must survive into translated text";
+    ASSERT_NE(*getpc_word, kCalleeWord) << "the callee must have moved, or this proves nothing";
 
-  uint64_t relocated_literal = 0;
-  std::memcpy(&relocated_literal,
-              result.elf_bytes.data() + out_text->sh_offset + (*getpc_word + 2) * sizeof(uint32_t),
-              sizeof(relocated_literal));
-  const uint64_t relocated_getpc_result =
-      out_text->sh_addr + *getpc_word * sizeof(uint32_t) + sizeof(uint32_t);
-  EXPECT_EQ(relocated_getpc_result + relocated_literal, out_data->sh_addr)
-      << "the relocated body must still reach the same data address";
-  EXPECT_NE(relocated_literal, source_literal) << "the body moved, so the literal had to change";
+    uint64_t relocated_literal = 0;
+    std::memcpy(&relocated_literal,
+                result.elf_bytes.data() + out_text->sh_offset +
+                    (*getpc_word + 2) * sizeof(uint32_t),
+                sizeof(relocated_literal));
+    const uint64_t relocated_getpc_result =
+        out_text->sh_addr + *getpc_word * sizeof(uint32_t) + sizeof(uint32_t);
+    EXPECT_EQ(relocated_getpc_result + relocated_literal, out_data->sh_addr + target_section_offset)
+        << "the relocated body must still reach the same data address";
+    EXPECT_NE(relocated_literal, source_literal) << "the body moved, so the literal had to change";
+
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(translated.is_valid());
+    const auto second = translator.translate(translated);
+    ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
+                                                            : second.diagnostics.front().message);
+    EXPECT_EQ(second.elf_bytes, result.elf_bytes);
+  };
+
+  ASSERT_NO_FATAL_FAILURE(verify_target(false));
+  ASSERT_NO_FATAL_FAILURE(verify_target(true));
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnExcludedBarrierSignalIsfirst) {

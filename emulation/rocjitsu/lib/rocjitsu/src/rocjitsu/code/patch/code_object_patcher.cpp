@@ -822,6 +822,29 @@ void adjust_kernel_descriptor_entry_offsets_in_moved_sections(
 
 } // namespace
 
+std::optional<AllocatedDataSectionAddress>
+resolve_allocated_data_section_address(std::span<const Elf64_Shdr> sections, uint64_t vaddr) {
+  const auto section = std::ranges::find_if(sections, [&](const Elf64_Shdr &candidate) {
+    return (candidate.sh_flags & SHF_ALLOC) != 0 && (candidate.sh_flags & SHF_EXECINSTR) == 0 &&
+           candidate.sh_size != 0 && vaddr >= candidate.sh_addr &&
+           vaddr - candidate.sh_addr <= candidate.sh_size;
+  });
+  if (section == sections.end())
+    return std::nullopt;
+  return AllocatedDataSectionAddress{
+      .section_index = static_cast<size_t>(section - sections.begin()),
+      .section_offset = vaddr - section->sh_addr,
+  };
+}
+
+std::optional<AllocatedDataSectionAddress>
+resolve_pc_relative_data_section_address(std::span<const Elf64_Shdr> sections, uint64_t vaddr,
+                                         uint64_t text_vaddr, uint64_t text_size) {
+  if (vaddr >= text_vaddr && vaddr - text_vaddr < text_size)
+    return std::nullopt;
+  return resolve_allocated_data_section_address(sections, vaddr);
+}
+
 CodeObjectPatcher::CodeObjectPatcher(const AmdGpuCodeObject &obj)
     : image_(obj.image_data(), obj.image_data() + obj.image_size()), text_offset_(0), text_size_(0),
       text_vaddr_(0), text_tail_size_(0) {
@@ -839,6 +862,19 @@ std::span<uint8_t> CodeObjectPatcher::text_bytes() {
 
 std::span<const uint8_t> CodeObjectPatcher::text_bytes() const {
   return {image_.data() + text_offset_, text_size_};
+}
+
+std::vector<Elf64_Shdr> CodeObjectPatcher::section_headers() const {
+  if (image_.size() < sizeof(Elf64_Ehdr))
+    return {};
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image_.data(), sizeof(header));
+  const uint64_t table_size = static_cast<uint64_t>(header.e_shnum) * sizeof(Elf64_Shdr);
+  if (header.e_shentsize != sizeof(Elf64_Shdr) || header.e_shoff > image_.size() ||
+      table_size > image_.size() - header.e_shoff) {
+    return {};
+  }
+  return read_section_headers(image_, header);
 }
 
 bool CodeObjectPatcher::has_relocations_within_text() const {
@@ -1018,7 +1054,7 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
 
   auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image_.data());
   auto header = *ehdr;
-  auto shdrs = read_section_headers(image_, header);
+  auto shdrs = section_headers();
   auto phdrs = read_program_headers(image_, header);
 
   const auto text_index = find_text_section(shdrs, text_offset_, text_size_);
@@ -1042,17 +1078,15 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
         sizeof(uint64_t) > new_text.size() - relocation.target_literal_offset) {
       return false;
     }
-    const auto section = std::ranges::find_if(shdrs, [&](const Elf64_Shdr &candidate) {
-      return (candidate.sh_flags & SHF_ALLOC) != 0 && (candidate.sh_flags & SHF_EXECINSTR) == 0 &&
-             relocation.source_target_vaddr >= candidate.sh_addr &&
-             relocation.source_target_vaddr - candidate.sh_addr < candidate.sh_size;
-    });
-    if (section == shdrs.end())
+    const auto target =
+        resolve_allocated_data_section_address(shdrs, relocation.source_target_vaddr);
+    if (!target)
       return false;
-    resolved_data_relocations.push_back(
-        {.relocation = relocation,
-         .target_section = static_cast<size_t>(section - shdrs.begin()),
-         .target_section_offset = relocation.source_target_vaddr - section->sh_addr});
+    // In a well-formed image, abutting allocated sections lie on the same side of .text and shift
+    // by the same delta below, so either section reconstructs their shared boundary after growth.
+    resolved_data_relocations.push_back({.relocation = relocation,
+                                         .target_section = target->section_index,
+                                         .target_section_offset = target->section_offset});
   }
   const uint64_t old_text_end_file = text_offset_ + text_size_;
   const uint64_t old_text_end_vaddr = text_header.sh_addr + text_size_;
@@ -1117,8 +1151,9 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
 
   std::memcpy(image_.data() + text_offset_, new_text.data(), new_text.size());
   for (const ResolvedDataRelocation &resolved : resolved_data_relocations) {
+    // Unlike a code target, a data address may be the non-dereferenced end of a [begin, end) range.
     if (resolved.target_section >= shdrs.size() ||
-        resolved.target_section_offset >= shdrs[resolved.target_section].sh_size) {
+        resolved.target_section_offset > shdrs[resolved.target_section].sh_size) {
       return false;
     }
     const uint64_t target_vaddr =

@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -33,6 +35,25 @@ struct PcRelativeDataRelocation {
   uint64_t source_target_vaddr = 0;
 };
 
+/// @brief Section-relative location of an address in allocated non-executable storage.
+struct AllocatedDataSectionAddress {
+  size_t section_index = 0;
+  uint64_t section_offset = 0;
+};
+
+/// @brief Resolve a data address, including a nonempty section's one-past-end value.
+///
+/// @details Returns the first allocated, non-executable, nonempty section that contains @p vaddr or
+/// ends there. Empty sections do not own an endpoint. If two sections meet at @p vaddr, callers
+/// must not rely on which one is returned.
+[[nodiscard]] std::optional<AllocatedDataSectionAddress>
+resolve_allocated_data_section_address(std::span<const Elf64_Shdr> sections, uint64_t vaddr);
+
+/// @brief Resolve a PC-relative data target without reclassifying an address inside source text.
+[[nodiscard]] std::optional<AllocatedDataSectionAddress>
+resolve_pc_relative_data_section_address(std::span<const Elf64_Shdr> sections, uint64_t vaddr,
+                                         uint64_t text_vaddr, uint64_t text_size);
+
 /// @brief One relocated literal64 PC builder whose target is inside `.text`.
 ///
 /// @details Separate from PcRelativeDataRelocation because the target is named by a final `.text`
@@ -60,6 +81,8 @@ public:
   std::span<const uint8_t> text_bytes() const;
 
   std::span<const uint8_t> image_bytes() const { return {image_.data(), image_.size()}; }
+  /// @brief Validated raw section headers, including SHT_NOBITS entries.
+  [[nodiscard]] std::vector<Elf64_Shdr> section_headers() const;
   uint64_t text_offset() const { return text_offset_; }
   uint64_t text_size() const { return text_size_; }
 
