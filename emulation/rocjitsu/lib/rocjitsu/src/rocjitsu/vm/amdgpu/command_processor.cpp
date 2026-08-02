@@ -475,10 +475,9 @@ void CommandProcessor::startup() {
   // thread). on_cu_idle() dispatches inline and calls ComputeUnitCore::schedule_work()
   // on those CUs, which mutates their non-atomic executing_/tick_event_ and pushes to
   // the partition event queue without synchronization — safe only same-partition. The
-  // recursive-bisection partitioner (topology.partition(), run in the engine's
-  // create() before startup) could in principle split a CP from a CU under
-  // num_threads > 1; assert here (after partitioning, before the run loop) so any such
-  // split fails loudly rather than silently racing.
+  // generic balanced partitioner could in principle split a CP from a CU under
+  // num_threads > 1; assert here (after partitioning, before the run loop) so any
+  // such split fails loudly rather than silently racing.
   for ([[maybe_unused]] const auto *cu : cus_)
     assert(cu->partition_id() == partition_id() &&
            "CommandProcessor and its compute units must share one partition");
@@ -2037,7 +2036,9 @@ constexpr uint32_t GCR_GFX1250_CONTROL_DW = 3;
 constexpr uint32_t GCR_GFX1250_GL2_DISCARD_BIT = 1u << 13;
 constexpr uint32_t GCR_GFX1250_GL2_INV_BIT = 1u << 14;
 constexpr uint32_t GCR_GFX1250_GL2_WB_BIT = 1u << 15;
-constexpr uint32_t COPY_LINEAR_WAITSIGNAL_GFX11_PLUS_SIZE = 19;
+constexpr uint32_t COPY_LINEAR_WAIT_DWORDS = 7;
+constexpr uint32_t COPY_LINEAR_BODY_DWORDS = 6;
+constexpr uint32_t COPY_LINEAR_SIGNAL_DWORDS = 5;
 constexpr uint32_t FENCE_64B_GFX11_PLUS_SIZE = 5;
 constexpr uint32_t POLL_MEM_64B_GFX11_PLUS_SIZE = 8;
 constexpr uint32_t COPY_LINEAR_BROADCAST_FLAG = 1u << 27;
@@ -2152,15 +2153,18 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
     case sdma::OP_COPY: {
       if (uses_gfx11_plus_sdma_packets() && sub_op == sdma::SUBOP_COPY_LINEAR &&
           (header & ((1u << 30) | (1u << 31)))) {
-        if (rpos + sdma::COPY_LINEAR_WAITSIGNAL_GFX11_PLUS_SIZE > wpos) {
+        const bool has_wait = (header & (1u << 30)) != 0;
+        const bool has_signal = (header & (1u << 31)) != 0;
+        // WAIT and SIGNAL blocks are absent, not padded, when their header bit
+        // is clear. Account for those blocks before decoding the shifted body.
+        const uint32_t copy_base = 1 + (has_wait ? sdma::COPY_LINEAR_WAIT_DWORDS : 0);
+        const uint32_t signal_base = copy_base + sdma::COPY_LINEAR_BODY_DWORDS;
+        const uint32_t packet_dwords =
+            signal_base + (has_signal ? sdma::COPY_LINEAR_SIGNAL_DWORDS : 0);
+        if (rpos + packet_dwords > wpos) {
           rpos = wpos;
           continue;
         }
-
-        constexpr uint32_t COPY_BASE = 8;
-        constexpr uint32_t SIGNAL_BASE = 14;
-        bool has_wait = (header & (1u << 30)) != 0;
-        bool has_signal = (header & (1u << 31)) != 0;
 
         if (has_wait) {
           uint32_t wait_func = dw(1) & 0x7;
@@ -2186,11 +2190,11 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         uint64_t signal_data = 0;
         bool signal_decrement = false;
         if (has_signal) {
-          uint32_t signal_op = dw(SIGNAL_BASE) & 0x7F;
-          signal_addr = (static_cast<uint64_t>(dw(SIGNAL_BASE + 1) & ~0x7u)) |
-                        (static_cast<uint64_t>(dw(SIGNAL_BASE + 2)) << 32);
-          signal_data = static_cast<uint64_t>(dw(SIGNAL_BASE + 3)) |
-                        (static_cast<uint64_t>(dw(SIGNAL_BASE + 4)) << 32);
+          uint32_t signal_op = dw(signal_base) & 0x7F;
+          signal_addr = (static_cast<uint64_t>(dw(signal_base + 1) & ~0x7u)) |
+                        (static_cast<uint64_t>(dw(signal_base + 2)) << 32);
+          signal_data = static_cast<uint64_t>(dw(signal_base + 3)) |
+                        (static_cast<uint64_t>(dw(signal_base + 4)) << 32);
 
           if (signal_addr > 0x1000 && signal_op == 0x70) {
             signal_ptr = static_cast<int64_t *>(resolve(signal_addr));
@@ -2201,11 +2205,11 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           }
         }
 
-        uint32_t count = (dw(COPY_BASE) & 0x3FFFFFFF) + 1;
-        uint64_t src_va = static_cast<uint64_t>(dw(COPY_BASE + 2)) |
-                          (static_cast<uint64_t>(dw(COPY_BASE + 3)) << 32);
-        uint64_t dst_va = static_cast<uint64_t>(dw(COPY_BASE + 4)) |
-                          (static_cast<uint64_t>(dw(COPY_BASE + 5)) << 32);
+        uint32_t count = (dw(copy_base) & 0x3FFFFFFF) + 1;
+        uint64_t src_va = static_cast<uint64_t>(dw(copy_base + 2)) |
+                          (static_cast<uint64_t>(dw(copy_base + 3)) << 32);
+        uint64_t dst_va = static_cast<uint64_t>(dw(copy_base + 4)) |
+                          (static_cast<uint64_t>(dw(copy_base + 5)) << 32);
         auto *src_ptr = resolve(src_va);
         auto *dst_ptr = resolve(dst_va);
         if (!src_ptr || !dst_ptr) {
@@ -2229,7 +2233,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
               .fetch_sub(static_cast<int64_t>(signal_data), std::memory_order_release);
         }
 
-        pkt_dwords = sdma::COPY_LINEAR_WAITSIGNAL_GFX11_PLUS_SIZE;
+        pkt_dwords = packet_dwords;
         break;
       }
 
