@@ -64,6 +64,48 @@ This example is intentionally small but realistic: it shows the level of
 specificity reviewers expect for technique naming, conservative speedup ranges,
 and failure modes.
 
+## Promoting an exploratory proposal
+
+A specialist running in exploratory mode can emit proposals — hypotheses
+about one specific run. A proposal is not a case study and cannot become
+one on its own: it has no measurement and no fixture pair. Promotion is
+the human step that supplies both.
+
+Start from the proposal to avoid retyping its reasoning:
+
+```bash
+perfxpert proposals list result.json                  # what came back
+perfxpert proposals show result.json pxp-exp-<id>     # evidence + failure modes
+perfxpert proposals promote result.json pxp-exp-<id> \
+    --promoted-by "your.name" -o entry.yaml
+```
+
+`promote` emits a skeleton, not an entry. It carries over the technique
+name, description, and failure modes, and records where the idea came
+from:
+
+```yaml
+  origin:
+    kind: promoted_proposal
+    proposal_id: pxp-exp-804bbd0183b1a289
+    specialist: memory
+    promoted_by: "your.name"
+    promoted_at: "2026-08-01"
+```
+
+The four fields that require measurement — `measured_speedup_range`,
+`source_citation`, `preconditions`, `fixture_pair` — are emitted commented
+out, so the skeleton **fails schema validation until you fill them in**.
+That is deliberate: placeholder values like `[1.0, 1.0]` would validate,
+and a skeleton pasted in unedited would put unmeasured advice in the
+catalog. Missing keys fail loudly and name themselves.
+
+From there it is the normal path: build the fixture pair, run the gates,
+fill in the measured range, open the PR. `origin` records the provenance;
+it does not lower the bar. A promoted proposal is held to exactly the
+same evidence standard as any other entry — which is the only reason
+anything in this file can be trusted.
+
 ## Fixture construction
 
 Use `tests/fixtures/proven_optimizations/_build_fixtures.py` as the

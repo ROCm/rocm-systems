@@ -182,6 +182,25 @@ def main(argv=None):
     )
     _ci_cmd.add_args(ci_parser)
 
+    # ------------------------------------------------------------------
+    # proposals subcommand
+    # ------------------------------------------------------------------
+    from perfxpert.cli import proposals_cmd as _proposals_cmd
+
+    proposals_parser = subparsers.add_parser(
+        "proposals",
+        help="Review exploratory proposals and scaffold catalog promotion",
+        description=(
+            "Exploratory proposals are specialist hypotheses about a single\n"
+            "run — unmeasured, and not recommendations. Review them here and\n"
+            "scaffold a catalog entry once you have measured one. Promotion\n"
+            "is deliberately not automated: a catalog entry needs a before/\n"
+            "after fixture pair that only running the experiment produces."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _proposals_cmd.add_args(proposals_parser)
+
     if argv is None:
         argv = sys.argv[1:]
 
@@ -256,6 +275,8 @@ def main(argv=None):
         sys.exit(_diff_cmd.run_diff(args))
     elif args.subcommand == "ci":
         sys.exit(_ci_cmd.run_ci(args))
+    elif args.subcommand == "proposals":
+        sys.exit(_proposals_cmd.run_proposals(args))
     else:
         parser.print_help()
         sys.exit(1)

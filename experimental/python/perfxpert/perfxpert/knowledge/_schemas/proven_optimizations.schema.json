@@ -77,6 +77,38 @@
         "type": "array",
         "items": {"type": "string", "pattern": "^gfx[0-9a-f]+$"},
         "description": "Optional — defaults to all archs if omitted"
+      },
+      "origin": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "description": "Optional — where the idea came from. Entries without it are assumed human-authored. Recording a proposal origin does not lower the bar for entry: a promoted proposal still needs its own measured_speedup_range and fixture_pair, which is what promotion means.",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["human", "promoted_proposal"],
+            "description": "'promoted_proposal' means a specialist's exploratory proposal seeded this entry and a human then measured it"
+          },
+          "proposal_id": {
+            "type": "string",
+            "pattern": "^pxp-exp-[0-9a-f]{16}$",
+            "description": "Content-addressed ID the runtime assigned to the originating proposal"
+          },
+          "specialist": {
+            "type": "string",
+            "enum": ["compute", "memory", "latency", "diff"],
+            "description": "Which specialist proposed it"
+          },
+          "promoted_by": {
+            "type": "string",
+            "description": "Human who ran the experiment and vouches for the measurement"
+          },
+          "promoted_at": {
+            "type": "string",
+            "format": "date",
+            "description": "ISO-8601 date of promotion"
+          }
+        }
       }
     }
   }
