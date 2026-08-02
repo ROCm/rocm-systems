@@ -3,8 +3,12 @@
 Compares a baseline rocprofiler-sdk database against a new one and
 synthesises a structured verdict (improved / regressed / neutral) plus a
 short narrative. Delegates the arithmetic to
-:func:`perfxpert.tools.trace_diff.diff_runs`; this agent owns the
-ranking / classification / narrative-synthesis layer.
+:func:`perfxpert.tools.trace_diff.diff_runs`.
+
+``wall_delta_pct``, ``kernel_deltas`` and ``verdict`` are derived from
+that tool output alone. The model contributes ``narrative`` and
+``confidence`` only — a model-supplied verdict or delta list is ignored,
+so the same trace pair yields the same verdict live and air-gapped.
 
 Tool allowlist (3 of 5 cap used):
   trace_diff.diff_runs, regression.compare_runs, roofline.classify
@@ -124,11 +128,6 @@ def run_diff_specialist(
         so = raw.get("structured_output") or {}
         narrative = so.get("narrative") or _airgap_narrative(diff_result)
         confidence = float(so.get("confidence", 0.7))
-        llm_verdict = so.get("verdict")
-        if llm_verdict in {"improved", "regressed", "neutral"}:
-            verdict = llm_verdict
-        regressions = list(so.get("regressions", regressions))
-        improvements = list(so.get("improvements", improvements))
 
     return schemas.DiffSpecialistOutput(
         wall_delta_pct=wall_delta_pct,
