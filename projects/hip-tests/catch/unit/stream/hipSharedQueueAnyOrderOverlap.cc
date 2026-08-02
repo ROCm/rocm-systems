@@ -64,8 +64,8 @@ __global__ void ConsumerKernel(const int* buf, int* seen) { seen[0] = buf[0]; }
 
 // Long-running write then a dependent add on the same stream (intra-stream RAW hazard).
 __global__ void SpinSetKernel(int* buf, int val, long long spin) {
-  long long s = clock64();
-  while (clock64() < s + spin) {}
+  long long s = clock_function();
+  while (clock_function() - s < spin) {}
   buf[0] = val;
 }
 __global__ void AddDeltaKernel(int* buf, int delta) { buf[0] += delta; }
@@ -202,7 +202,11 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_EventDependencyHonored") {
 TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_IntraStreamOrderAcrossActivation") {
   constexpr int kIters = 200;
   constexpr int kBase = 5, kDelta = 7, kExpect = kBase + kDelta;
-  constexpr long long kSpin = 4000000;  // long first kernel so a racing second is observable
+
+  int ticks_per_ms = 0;  // hipDeviceAttributeWallClockRate is in kHz, i.e. ticks per millisecond
+  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, 0));
+  if (ticks_per_ms == 0) ticks_per_ms = 1000;
+  const long long kSpin = 2LL * ticks_per_ms;  // long first kernel so a racing second is observable
 
   for (int it = 0; it < kIters; ++it) {
     hipStream_t a, b;
