@@ -241,6 +241,7 @@ extern "C" void __hipOnError(const void *err_info);
 // During stream capture some actions, such as a call to hipMalloc, may be unsafe and prohibited
 // during capture. It is allowed only in relaxed mode.
 #define CHECK_STREAM_CAPTURE_SUPPORTED()                                                           \
+  hip::pruneInvalidatedCaptureStreams();                                                           \
   if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeThreadLocal ||                          \
       hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {                               \
     if (!hip::tls.capture_streams_.empty()) {                                                      \
@@ -260,6 +261,7 @@ extern "C" void __hipOnError(const void *err_info);
 
 // Helper: invalidate all capturing streams and return an error code.
 #define INVALIDATE_ALL_CAPTURING_AND_RETURN(err)                                                   \
+  hip::pruneInvalidatedCaptureStreams();                                                           \
   if (!g_allCapturingStreams.empty()) {                                                            \
     for (auto stream : g_allCapturingStreams) {                                                    \
       stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                                 \
@@ -798,5 +800,8 @@ namespace hip {
   extern amd::Monitor g_captureStreamsLock;
   extern amd::Monitor g_streamSetLock;
   extern std::unordered_set<hip::Stream*> g_allCapturingStreams;
+  // Prune terminally-invalidated stream captures from the tracking lists above
+  // so an abandoned capture cannot permanently gate allocation/sync for the process.
+  void pruneInvalidatedCaptureStreams();
 } // namespace hip
 #endif  // HIP_SRC_HIP_INTERNAL_H

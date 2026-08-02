@@ -20,6 +20,41 @@ amd::Monitor g_captureStreamsLock{};
 // StreamCaptureset lock
 amd::Monitor g_streamSetLock{};
 std::unordered_set<hip::Stream*> g_allCapturingStreams;
+
+// An invalidated stream capture is terminal: its capture graph is dead and every
+// subsequent capture API on that stream returns hipErrorStreamCaptureInvalidated.
+// Normally hipStreamEndCapture removes the stream from the tracking lists below,
+// but if the application abandons the capture (e.g. it throws out of the capture
+// region without calling hipStreamEndCapture) the invalidated entry lingers and
+// keeps the "is any stream capturing?" gate permanently true - which makes every
+// later hipMalloc/hipHostMalloc return hipErrorStreamCaptureUnsupported (900) and
+// every later hipMemcpy/hipMemset return hipErrorStreamCaptureImplicit. Prune such
+// terminal entries so an abandoned capture on one stream cannot poison unrelated
+// work process-wide. Active captures are never pruned.
+void pruneInvalidatedCaptureStreams() {
+  auto isDead = [](hip::Stream* s) {
+    return s->GetCaptureStatus() == hipStreamCaptureStatusInvalidated;
+  };
+  {
+    amd::ScopedLock lock(g_captureStreamsLock);
+    g_captureStreams.erase(
+        std::remove_if(g_captureStreams.begin(), g_captureStreams.end(), isDead),
+        g_captureStreams.end());
+  }
+  {
+    amd::ScopedLock lock(g_streamSetLock);
+    for (auto it = g_allCapturingStreams.begin(); it != g_allCapturingStreams.end();) {
+      if (isDead(*it)) {
+        it = g_allCapturingStreams.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  auto& cs = hip::tls.capture_streams_;
+  cs.erase(std::remove_if(cs.begin(), cs.end(), isDead), cs.end());
+}
+
 hipError_t ihipGraphDebugDotPrint(hip::Graph* graph, const char* path, unsigned int flags);
 hipError_t ihipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_t* dependencies,
                                                size_t numDependencies, unsigned int flags);
@@ -1285,18 +1320,31 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
   const auto& it = std::find(hip::tls.capture_streams_.begin(), hip::tls.capture_streams_.end(), s);
   if (s->GetCaptureMode() != hipStreamCaptureModeRelaxed) {
     if (it == hip::tls.capture_streams_.end()) {
-      return hipErrorStreamCaptureWrongThread;
+      // A still-active capture missing from this thread's list really is a
+      // wrong-thread EndCapture. An already-invalidated capture may have been
+      // pruned from the tracking lists (see pruneInvalidatedCaptureStreams);
+      // fall through so the invalidated-capture handling below returns
+      // hipErrorStreamCaptureInvalidated as expected.
+      if (s->GetCaptureStatus() != hipStreamCaptureStatusInvalidated) {
+        return hipErrorStreamCaptureWrongThread;
+      }
+    } else {
+      hip::tls.capture_streams_.erase(it);
     }
-    hip::tls.capture_streams_.erase(it);
   }
   if (s->GetCaptureMode() == hipStreamCaptureModeGlobal) {
     amd::ScopedLock lock(g_captureStreamsLock);
-    g_captureStreams.erase(std::find(g_captureStreams.begin(), g_captureStreams.end(), s));
+    auto git = std::find(g_captureStreams.begin(), g_captureStreams.end(), s);
+    if (git != g_captureStreams.end()) {
+      g_captureStreams.erase(git);
+    }
   }
   {
     amd::ScopedLock lock(g_streamSetLock);
-    g_allCapturingStreams.erase(
-        std::find(g_allCapturingStreams.begin(), g_allCapturingStreams.end(), s));
+    auto ait = std::find(g_allCapturingStreams.begin(), g_allCapturingStreams.end(), s);
+    if (ait != g_allCapturingStreams.end()) {
+      g_allCapturingStreams.erase(ait);
+    }
   }
   // If capture was invalidated, due to a violation of the rules of stream capture
   if (s->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
