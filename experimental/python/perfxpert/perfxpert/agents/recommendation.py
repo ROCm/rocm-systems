@@ -21,7 +21,13 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from perfxpert.agents import compute_specialist, latency_specialist, memory_specialist, schemas
+from perfxpert.agents import (
+    compute_specialist,
+    creativity,
+    latency_specialist,
+    memory_specialist,
+    schemas,
+)
 from perfxpert.agents.framework import Agent, ToolBinding, run_agent
 from perfxpert.tools import plateau, profiling, trace_fingerprint
 
@@ -123,6 +129,8 @@ def run_recommendation(
     plateau_info = _plateau_check(payload.edit_history)
     plateau_detected = bool(plateau_info.get("plateau_detected", False))
 
+    proposals: List[schemas.ExploratoryProposal] = []
+
     if bottleneck == "data_insufficient":
         _warn_data_insufficient()
         specialist_used = "none"
@@ -137,6 +145,7 @@ def run_recommendation(
         )
         spec_out = _run_specialist_compute(spec_input, provider=provider, airgap=airgap)
         techniques = list(spec_out.techniques)
+        proposals = list(getattr(spec_out, "exploratory_proposals", []) or [])
     elif bottleneck == "memory_transfer":
         gfx_id = _require_gfx_id(payload)
         specialist_used = "memory"
@@ -146,6 +155,7 @@ def run_recommendation(
         )
         spec_out = _run_specialist_memory(spec_input, provider=provider, airgap=airgap)
         techniques = list(spec_out.techniques)
+        proposals = list(getattr(spec_out, "exploratory_proposals", []) or [])
     elif bottleneck in ("latency", "api_overhead"):
         gfx_id = _require_gfx_id(payload)
         specialist_used = "latency"
@@ -156,6 +166,7 @@ def run_recommendation(
         )
         spec_out = _run_specialist_latency(spec_input, provider=provider, airgap=airgap)
         techniques = list(spec_out.techniques)
+        proposals = list(getattr(spec_out, "exploratory_proposals", []) or [])
     elif bottleneck == "mixed":
         specialist_used = "none"
         techniques = [
@@ -191,6 +202,11 @@ def run_recommendation(
         recommendations=techniques,
         specialist_used=specialist_used,
         plateau_detected=plateau_detected,
+        # Carried through untouched. Proposals are deduplicated only by
+        # server-generated id, never against seen_recommendation_hashes: the
+        # two lanes have different evidentiary standards, so letting them
+        # suppress each other would hide one behind the other.
+        exploratory_proposals=creativity.dedupe_proposals(proposals),
     )
 
 

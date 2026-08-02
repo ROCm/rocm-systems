@@ -16,6 +16,7 @@ from perfxpert.agents.compute_specialist import (
     _promote_named_technique,
     _rank_catalog_deterministic,
 )
+from perfxpert.agents import creativity
 from perfxpert.agents.framework import AgentCapability, Agent, ToolBinding, run_agent
 from perfxpert.tools import arch, bottleneck, predict_impact, unified_memory
 
@@ -87,23 +88,39 @@ def run_memory_specialist(
         airgap=airgap,
     )
 
+    # The vetted lane is deterministic in both modes. It used to be
+    # `so.get("techniques", ...)`, which let a live model replace the whole
+    # catalog ranking with invented entries that then carried the same
+    # authority as a proven technique. A model now contributes through the
+    # exploratory lane instead, where its output is labelled as unproven.
+    techniques = attach_predictions_to_techniques(
+        _rank_memory_catalog(catalog), payload
+    )
+
     if raw.get("_mode") == "airgap":
-        techniques = attach_predictions_to_techniques(
-            _rank_memory_catalog(catalog), payload
-        )
         return schemas.MemorySpecialistOutput(
             techniques=techniques,
             confidence=0.6,
             citations=[],
         )
 
-    so = raw.get("structured_output") or {}
-    raw_techniques = so.get("techniques", _rank_memory_catalog(catalog))
-    techniques = attach_predictions_to_techniques(raw_techniques, payload)
     return schemas.MemorySpecialistOutput(
         techniques=techniques,
-        confidence=so.get("confidence", 0.6),
-        citations=so.get("citations", []),
+        confidence=0.6,
+        citations=[],
+        exploratory_proposals=creativity.proposals_from_response(
+            agent,
+            raw,
+            specialist="memory",
+            airgap=bool(airgap),
+            manifest=creativity.manifest_from_run(
+                agent,
+                raw,
+                kernels=[k.get("name", "") for k in payload.hot_kernels],
+                catalog_entries=[t.get("name", "") for t in techniques],
+            ),
+            provider=provider,
+        ),
     )
 
 

@@ -102,3 +102,46 @@ def test_every_agent_role_is_known_to_the_builder():
         agent = build()
         role = Path(agent.fence_path).stem
         assert known_role(role), f"builder does not know role {role!r} ({agent.name})"
+
+
+# -- Two-lane contract (Phase 11C) -----------------------------------------
+
+
+def test_exploration_capable_agents_are_told_about_both_lanes():
+    """An agent that can propose must be told what a proposal is."""
+    from perfxpert.agents import AGENT_BUILDERS
+    from perfxpert.agents.framework import AgentCapability
+
+    for build in AGENT_BUILDERS:
+        agent = build()
+        if agent.capability is not AgentCapability.ADDITIVE_EXPLORATION:
+            continue
+        assert "## Two lanes" in agent.fence_text, agent.name
+        assert "exploratory_proposals" in agent.fence_text, agent.name
+
+
+def test_catalog_only_agents_are_not_invited_to_propose():
+    """Otherwise a model would emit a lane the runtime discards."""
+    from perfxpert.agents import AGENT_BUILDERS
+    from perfxpert.agents.framework import AgentCapability
+
+    for build in AGENT_BUILDERS:
+        agent = build()
+        if agent.capability is AgentCapability.CATALOG_ONLY:
+            assert "## Two lanes" not in agent.fence_text, agent.name
+
+
+def test_fence_states_the_confidence_ceiling_and_proposal_cap():
+    from perfxpert.agents import build_memory_specialist
+
+    text = build_memory_specialist().fence_text
+    assert "0.5" in text
+    assert "at most 3" in text
+
+
+def test_fence_forbids_claiming_runtime_owned_fields():
+    from perfxpert.agents import build_memory_specialist
+
+    text = build_memory_specialist().fence_text
+    for owned in ("proposal_id", "status", "specialist", "provenance"):
+        assert owned in text, owned

@@ -209,7 +209,13 @@ class RecommendationOutput(_FrozenModel):
     # Carried separately from `recommendations` on purpose: proposals are
     # unverified, so they are never ranked against vetted advice, never
     # deduplicated against it, and never fed to impact prediction.
-    exploratory_proposals: List[ExploratoryProposal] = Field(default_factory=list)
+    exploratory_proposals: List[ExploratoryProposal] = Field(
+        default_factory=list,
+        # A model emits drafts here; the runtime replaces them with validated
+        # proposals. Marked so output validation does not discard a response
+        # for supplying a draft where a final proposal is declared.
+        json_schema_extra={"model_supplies": "draft"},
+    )
 
 
 # -- Correctness (Layer 1) -------------------------------------------------
@@ -261,7 +267,13 @@ class ComputeSpecialistOutput(_FrozenModel):
     techniques: List[Dict[str, Any]]  # [{name, rationale, expected_impact, effort, risk}]
     confidence: float = Field(..., ge=0.0, le=1.0)
     citations: List[str] = Field(default_factory=list)
-    exploratory_proposals: List[ExploratoryProposal] = Field(default_factory=list)
+    exploratory_proposals: List[ExploratoryProposal] = Field(
+        default_factory=list,
+        # A model emits drafts here; the runtime replaces them with validated
+        # proposals. Marked so output validation does not discard a response
+        # for supplying a draft where a final proposal is declared.
+        json_schema_extra={"model_supplies": "draft"},
+    )
 
 
 class MemorySpecialistInput(_FrozenModel):
@@ -275,7 +287,13 @@ class MemorySpecialistOutput(_FrozenModel):
     techniques: List[Dict[str, Any]]
     confidence: float = Field(..., ge=0.0, le=1.0)
     citations: List[str] = Field(default_factory=list)
-    exploratory_proposals: List[ExploratoryProposal] = Field(default_factory=list)
+    exploratory_proposals: List[ExploratoryProposal] = Field(
+        default_factory=list,
+        # A model emits drafts here; the runtime replaces them with validated
+        # proposals. Marked so output validation does not discard a response
+        # for supplying a draft where a final proposal is declared.
+        json_schema_extra={"model_supplies": "draft"},
+    )
 
 
 class LatencySpecialistInput(_FrozenModel):
@@ -289,7 +307,13 @@ class LatencySpecialistOutput(_FrozenModel):
     techniques: List[Dict[str, Any]]
     confidence: float = Field(..., ge=0.0, le=1.0)
     citations: List[str] = Field(default_factory=list)
-    exploratory_proposals: List[ExploratoryProposal] = Field(default_factory=list)
+    exploratory_proposals: List[ExploratoryProposal] = Field(
+        default_factory=list,
+        # A model emits drafts here; the runtime replaces them with validated
+        # proposals. Marked so output validation does not discard a response
+        # for supplying a draft where a final proposal is declared.
+        json_schema_extra={"model_supplies": "draft"},
+    )
 
 
 # -- Diff specialist (Layer 2) --------------------------------------------

@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from perfxpert.agents import schemas
 from perfxpert.agents._predict_attach import attach_predictions_to_techniques
+from perfxpert.agents import creativity
 from perfxpert.agents.framework import AgentCapability, Agent, ToolBinding, run_agent
 from perfxpert.tools import arch, compiler, kernel_fusion, roofline
 
@@ -123,22 +124,35 @@ def run_compute_specialist(
         airgap=airgap,
     )
 
+    # Vetted lane is deterministic in both modes; see memory_specialist for
+    # why the model no longer supplies techniques.
+    ranked = _rank_compute_catalog(catalog, payload)
+    techniques = attach_predictions_to_techniques(ranked, payload)
+
     if raw.get("_mode") == "airgap":
-        ranked = _rank_compute_catalog(catalog, payload)
-        techniques = attach_predictions_to_techniques(ranked, payload)
         return schemas.ComputeSpecialistOutput(
             techniques=techniques,
             confidence=0.6,
             citations=[],
         )
 
-    so = raw.get("structured_output") or {}
-    raw_techniques = so.get("techniques", _rank_compute_catalog(catalog, payload))
-    techniques = attach_predictions_to_techniques(raw_techniques, payload)
     return schemas.ComputeSpecialistOutput(
         techniques=techniques,
-        confidence=so.get("confidence", 0.6),
-        citations=so.get("citations", []),
+        confidence=0.6,
+        citations=[],
+        exploratory_proposals=creativity.proposals_from_response(
+            agent,
+            raw,
+            specialist="compute",
+            airgap=bool(airgap),
+            manifest=creativity.manifest_from_run(
+                agent,
+                raw,
+                kernels=[k.get("name", "") for k in payload.hot_kernels],
+                catalog_entries=[t.get("name", "") for t in techniques],
+            ),
+            provider=provider,
+        ),
     )
 
 

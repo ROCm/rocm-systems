@@ -308,7 +308,14 @@ def _partial_model_for(schema: Type) -> Optional[Type[BaseModel]]:
         return None
     fields: Dict[str, Any] = {}
     for name, info in schema.model_fields.items():
-        fields[name] = (Optional[info.annotation], None)
+        extra = info.json_schema_extra
+        if isinstance(extra, dict) and extra.get("model_supplies") == "draft":
+            # The declared type is what the runtime constructs, not what the
+            # model sends. Checking the model's draft against it would reject
+            # every well-formed response; the draft is validated separately.
+            fields[name] = (Optional[Any], None)
+        else:
+            fields[name] = (Optional[info.annotation], None)
     return create_model(
         f"Partial{schema.__name__}",
         __config__=ConfigDict(extra="forbid"),

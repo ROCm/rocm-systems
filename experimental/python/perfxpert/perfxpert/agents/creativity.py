@@ -27,11 +27,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from enum import Enum
 from typing import Any, Iterable, List, Optional, Sequence, Tuple
 
 from perfxpert.agents import schemas
 from perfxpert.agents.framework import AgentCapability
+
+_LOG = logging.getLogger(__name__)
 
 # Confidence ceiling for an unverified proposal. Not a claim that novel ideas
 # are unlikely — it stops an unmeasured proposal from numerically
@@ -264,9 +267,110 @@ def dedupe_proposals(
     return out
 
 
+# -- Runtime entry point --------------------------------------------------
+
+
+def configured_ceiling() -> CreativityTier:
+    """Session ceiling from configuration.
+
+    Deliberately not a function argument anywhere it is used: the ceiling is
+    a deployment decision, and a parameter would give a calling model a
+    handle to raise its own limit.
+    """
+    try:
+        from perfxpert.config import load_config
+
+        return CreativityTier(load_config().agent_creativity)
+    except Exception:  # pragma: no cover - unreadable config falls back safely
+        return CreativityTier.STRICT
+
+
+def effective_tier(agent: Any, *, airgap: bool) -> CreativityTier:
+    return resolve_tier(
+        configured_ceiling(), airgap=airgap, capability=agent.capability
+    )
+
+
+def manifest_from_run(
+    agent: Any,
+    raw: dict,
+    *,
+    kernels: Iterable[str] = (),
+    catalog_entries: Iterable[str] = (),
+) -> EvidenceManifest:
+    """Build the manifest from what this run actually did.
+
+    Only tools the agent both declares and called are admissible. The SDK
+    reports sanitised names (dots rewritten to underscores), so those are
+    mapped back to the declared names before matching.
+    """
+    declared = {t.name for t in agent.tools}
+    by_sanitized = {name.replace(".", "_"): name for name in declared}
+
+    called = set()
+    for entry in raw.get("tool_calls") or []:
+        name = entry.get("name") if isinstance(entry, dict) else None
+        if name in declared:
+            called.add(name)
+        elif name in by_sanitized:
+            called.add(by_sanitized[name])
+
+    return EvidenceManifest(
+        tool_calls=called, kernels=kernels, catalog_entries=catalog_entries
+    )
+
+
+def proposals_from_response(
+    agent: Any,
+    raw: dict,
+    *,
+    specialist: str,
+    airgap: bool,
+    manifest: EvidenceManifest,
+    provider: str = "",
+) -> List["schemas.ExploratoryProposal"]:
+    """Turn a model response's drafts into validated proposals.
+
+    Returns an empty list whenever the effective tier is strict, which is
+    every current configuration. Any failure here yields no proposals rather
+    than propagating: the exploratory lane is an addition, so it must never
+    be able to break a run that would otherwise have succeeded.
+    """
+    if effective_tier(agent, airgap=airgap) is not CreativityTier.EXPLORATORY:
+        return []
+
+    structured = raw.get("structured_output") or {}
+    drafts = structured.get("exploratory_proposals") or []
+    if not isinstance(drafts, list) or not drafts:
+        return []
+
+    provenance = schemas.ProposalProvenance(
+        provider=provider,
+        model=str(raw.get("model", "")),
+    )
+    try:
+        accepted, rejected = build_proposals(
+            drafts,
+            specialist=specialist,
+            manifest=manifest,
+            provenance=provenance,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        _LOG.warning("creativity: proposal construction failed (%s)", exc)
+        return []
+
+    for reason in rejected:
+        _LOG.info("creativity: rejected %s proposal — %s", specialist, reason)
+    return accepted
+
+
 __all__ = [
     "AgentCapability",
     "CreativityTier",
+    "configured_ceiling",
+    "effective_tier",
+    "manifest_from_run",
+    "proposals_from_response",
     "EvidenceManifest",
     "ProposalRejected",
     "MAX_EXPLORATORY_CONFIDENCE",

@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 from perfxpert.agents import schemas
 from perfxpert.agents._predict_attach import attach_predictions_to_techniques
 from perfxpert.agents.compute_specialist import _rank_catalog_deterministic
+from perfxpert.agents import creativity
 from perfxpert.agents.framework import AgentCapability, Agent, ToolBinding, run_agent
 from perfxpert.tools import arch, dependency_graph, interconnect, rccl_analysis
 
@@ -86,23 +87,36 @@ def run_latency_specialist(
         airgap=airgap,
     )
 
+    # Vetted lane is deterministic in both modes; see memory_specialist for
+    # why the model no longer supplies techniques.
+    techniques = attach_predictions_to_techniques(
+        _rank_catalog_deterministic(catalog), payload
+    )
+
     if raw.get("_mode") == "airgap":
-        techniques = attach_predictions_to_techniques(
-            _rank_catalog_deterministic(catalog), payload
-        )
         return schemas.LatencySpecialistOutput(
             techniques=techniques,
             confidence=0.6,
             citations=[],
         )
 
-    so = raw.get("structured_output") or {}
-    raw_techniques = so.get("techniques", _rank_catalog_deterministic(catalog))
-    techniques = attach_predictions_to_techniques(raw_techniques, payload)
     return schemas.LatencySpecialistOutput(
         techniques=techniques,
-        confidence=so.get("confidence", 0.6),
-        citations=so.get("citations", []),
+        confidence=0.6,
+        citations=[],
+        exploratory_proposals=creativity.proposals_from_response(
+            agent,
+            raw,
+            specialist="latency",
+            airgap=bool(airgap),
+            manifest=creativity.manifest_from_run(
+                agent,
+                raw,
+                kernels=[k.get("name", "") for k in payload.hot_kernels],
+                catalog_entries=[t.get("name", "") for t in techniques],
+            ),
+            provider=provider,
+        ),
     )
 
 
