@@ -11,6 +11,7 @@
 #include "device/rocm/rockernel.hpp"
 #include "device/rocm/rocsched.hpp"
 #include "utils/debug.hpp"
+#include "utils/flags.hpp"
 #include <algorithm>
 #include <map>
 
@@ -488,10 +489,12 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
                                            amd::CopyMetadata& copyMetadata) const {
   hsa_status_t status = HSA_STATUS_SUCCESS;
   uint32_t copyMask = 0;
-  bool kUseRegularCopyApi = false;
   constexpr size_t kRetainCountThreshold = 8;
   const bool requireSDMA =
       (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA);
+  // ROC_SDMA_ENGINE_SELECT: 2=disabled -> skip engine selection, let ROCr pick the engine.
+  // requireSDMA (e.g. P2P) still needs the on_engine path, so it is honored here.
+  bool kUseRegularCopyApi = (ROC_SDMA_ENGINE_SELECT == 2) && !requireSDMA;
   bool forceSDMA = requireSDMA;
   HwQueueEngine engine = HwQueueEngine::Unknown;
 

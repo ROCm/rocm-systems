@@ -247,6 +247,7 @@ performance:
   Performance_DeviceHeapMemoryAllocation: *level_2
   Performance_PerfBufferCopySpeedAll2All_Inter_GPU: *level_2
   Performance_hipPerfMemcpyAsyncSpeed_test: *level_2
+  Performance_hipPerfConcurrentStreamCopy: *level_2
   Performance_hipPerfMemsetAsyncSpeed_test: *level_2
   Performance_hipPerfHostNumaAlloc_test: *level_2
   Performance_hipPerfDeviceConcurrency: *level_2

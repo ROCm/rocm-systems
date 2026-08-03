@@ -1181,6 +1181,9 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
   uint32_t rec_mask = 0;
   DmaPreferredEngine(dst_agent, src_agent, &rec_mask);
   uint32_t rec_sdma_eng = NthSdmaEngine(rec_mask, 0);
+  LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+           "DmaCopy (ROCr self-select): preferred rec_mask=0x%x, chosen rec_sdma_eng=%d, size=%zu",
+           rec_mask, rec_sdma_eng, size);
   if (rec_sdma_eng)
     return DmaCopyOnEngine(dst, dst_agent, src, src_agent, size,
                            dep_signals, out_signal, rec_sdma_eng, false);
@@ -1289,6 +1292,11 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
+  LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+           "DmaCopyOnEngine: entry requested engine_offset=%d (from CLR mask), "
+           "num_h2d_d2h_engines=%d, num_p2p_engines=%d",
+           engine_offset, num_h2d_d2h_engines_, num_p2p_engines_);
+
   // check if dst and src are the same gpu or over xGMI.
   bool is_same_gpu = (src_agent.public_handle().handle == dst_agent.public_handle().handle) &&
                      (dst_agent.public_handle().handle == public_handle_.handle);
@@ -1334,6 +1342,12 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
   SetCopyRequestRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
   lazy_ptr<core::Blit>& blit = GetBlitObject(engine_offset);
+
+  LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+           "DmaCopyOnEngine: final engine_offset=%d (blits_[%d]), isSDMA=%d, "
+           "is_same_gpu=%d, is_p2p=%d, force_sdma=%d, size=%zu",
+           engine_offset, engine_offset, blit->isSDMA() ? 1 : 0, is_same_gpu ? 1 : 0,
+           is_p2p ? 1 : 0, force_copy_on_sdma ? 1 : 0, size);
 
   if (profiling_enabled()) {
     // Track the agent so we could translate the resulting timestamp to system

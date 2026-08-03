@@ -4188,8 +4188,8 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
                               : device_.maxSdmaWriteMask_;
 
   // Simple round-robin path if all engines have equal bandwidth
-  // Disabled by default - use preferred engine logic for current GPUs
-  constexpr bool kUseSimpleRR = false;
+  // Gated by ROC_SDMA_ENGINE_SELECT: 1=round-robin. 0=default (preferred/exclusivity).
+  const bool kUseSimpleRR = (ROC_SDMA_ENGINE_SELECT == 1);
 
   if (kUseSimpleRR) {
     // Simple round-robin: just cycle through valid engines
