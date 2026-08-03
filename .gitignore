@@ -19,5 +19,3 @@ __pycache__
 /.rocshmem-worktree
 /projects/cuid/_build
 build/
-/projects/rocr-debug-agent/_build/html
-/projects/rocr-debug-agent/_build
