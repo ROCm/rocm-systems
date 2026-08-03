@@ -273,6 +273,7 @@ static const RcclHwCounterDesc rcclHwcMlx5[] = {
   HWC("resp_cqe_flush_error",       HWC_IB_SYSFS, "resp_cqe_flush_error"),
   HWC("resp_local_length_error",    HWC_IB_SYSFS, "resp_local_length_error"),
   HWC("resp_remote_access_errors",  HWC_IB_SYSFS, "resp_remote_access_errors"),
+  HWC("rx_icrc_encapsulated",       HWC_IB_SYSFS, "rx_icrc_encapsulated"),
 
   /* RDMA request traffic (context for the error rates) */
   HWC("rx_write_requests",          HWC_IB_SYSFS, "rx_write_requests"),
