@@ -1252,7 +1252,12 @@ static void capture_drvmemcpy3d_impl(T& a, hrr_api_id_t api_id,
     // so the blob would be an expected output nothing ever validates.
     size_t n = p->WidthInBytes * p->Height * p->Depth;
     if (n > 0) {
-      if (is_async && stream) {
+      // The null stream needs the sync too: hipDrvMemcpy3DAsync(p, nullptr) is
+      // still asynchronous, so skipping it can snapshot dstHost before the copy
+      // lands and record a stale expected output. hipStreamSynchronize(nullptr)
+      // is valid and waits on the blocking streams, which is what the app itself
+      // would have to do before reading dstHost.
+      if (is_async) {
         hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
         if (sync_r != hipSuccess) {
           LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d): D2H drv blob skipped",

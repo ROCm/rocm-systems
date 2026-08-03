@@ -2335,7 +2335,12 @@ static hipError_t replay_memcpy3d_d2h(PlaybackContext& ctx,
     if (is_async) {
         r = hipMemcpyAsync(actual.data(), src_live, byte_count,
                            hipMemcpyDeviceToHost, stream);
-        if (stream) (void)hipStreamSynchronize(stream);
+        // A recorded default stream translates to nullptr, and that is still the
+        // stream this readback was issued on, so sync unconditionally or the
+        // comparison below races the copy. Propagating the sync failure keeps a
+        // dead device from being reported as a data mismatch. Both match the
+        // sibling 2D path in replay_memcpy2d().
+        if (r == hipSuccess) r = hipStreamSynchronize(stream);
     } else {
         r = hipMemcpy(actual.data(), src_live, byte_count, hipMemcpyDeviceToHost);
     }
