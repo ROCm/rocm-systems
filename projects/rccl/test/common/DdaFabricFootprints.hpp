@@ -8,11 +8,14 @@
 
 // DDA fabric scratch footprints, mirrored from the launcher headers so tests can
 // compute expected sizes without pulling the device kernel headers everywhere.
-// The mirrors are pinned to the real constants by static_assert in
-// DdaFabricEpochTests.cpp (which builds in the Release fixtures target), so a
-// production stride/cap change fails the build rather than silently passing.
-// Kept lightweight (only <cstddef>) so the Release epoch TU need not include the
-// kernel headers except at the one static_assert site. Mirror sources:
+// Every mirror below (all seven per-tier caps, both slot strides, the two sizeof
+// values and the data-elems count) is pinned to its real constant by a
+// static_assert in DdaFabricEpochTests.cpp, which builds in the Release-capable
+// rccl-UnitTestsFixtures target -- so a production stride/cap change fails that
+// build rather than silently passing. The only piece not pinnable that way is the
+// literal 2 bank factor, since ddaLL*ScratchSize are static-inline in .cu TUs.
+// Kept lightweight (only <cstddef>) so most TUs need not pull the kernel headers.
+// Mirror sources:
 //   kLLTierMaxBytes    : kDdaLLArMaxBytes / kDdaLLAgMaxPerRankBytes /
 //                        kDdaLLA2AMaxPerChunkBytes / kDdaLLRsMaxBytes  (all 128 KiB)
 //   kLL128TierMaxBytes : kDdaLL128AgMaxPerRankBytes / kDdaLL128A2AMaxPerChunkBytes /
@@ -34,9 +37,10 @@ constexpr size_t kLL128LineBytes    = 128;    // sizeof(LLLine128)
 // Payload words -> 128B lines. Production uses `bytes >> 3` (truncating); every
 // caller here passes a multiple of 8 (the predicates reject bytes % 8 != 0), so
 // truncation and ceil agree. bytes/8 matches production literally.
-inline size_t ddaLL128LinesForBytes(size_t bytes) {
-    const size_t words = bytes / 8; // precondition: bytes % 8 == 0
-    return (words + kLL128DataElems - 1) / kLL128DataElems;
+constexpr size_t ddaLL128LinesForBytes(size_t bytes) {
+    // precondition: bytes % 8 == 0 (predicates reject otherwise), so bytes/8
+    // matches production's `bytes >> 3`. constexpr so it can pin the slot stride.
+    return (bytes / 8 + kLL128DataElems - 1) / kLL128DataElems;
 }
 
 // Fixed LL footprint (all four LL tiers): 2 banks * nRanks slots *

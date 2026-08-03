@@ -39,13 +39,21 @@
 #include "dda_init_detail.h" // ddaLLEpochCount, kDdaFabricLLArMaxBlocks, kDdaLLAgMaxBlocksPerPeer, DDA_FABRIC_MAXBLOCKS, DDA_FABRIC_BUFFER_SIZE
 #include "fabric_gpu_barrier.h" // meta::comms::kDdaMaxNranks
 
-// Real launcher constants, to pin the DdaFabricFootprints.hpp mirrors at compile
-// time. This TU builds under hipcc in the Release fixtures target, so including
-// the (device-code-bearing) kernel headers is fine, and the static_asserts below
-// run in Release CI -- a production stride/cap change fails this build.
-#include "algorithms/CollCommon_ll128.h"                       // meta::comms::{LLLine128,kDdaLL128DataElems}
-#include "algorithms/all_reduce/all_reduce_dda_ll.h"           // meta::comms::{kDdaLLArMaxBytes,LLPacket16}
-#include "algorithms/all_gather/all_gather_dda_fabric_ll128.h" // meta::comms::kDdaLL128AgMaxPerRankBytes
+// Real launcher constants, to pin every DdaFabricFootprints.hpp mirror at compile
+// time. These test sources compile as host TUs with __HIP_PLATFORM_AMD__ defined
+// and link hip::device, so including the device-code-bearing kernel headers is
+// fine (nothing instantiates the kernels); device/TestOp128.cpp is the precedent.
+// The static_asserts below build in the Release-capable rccl-UnitTestsFixtures
+// target -- a production stride/cap change fails this build. LLPacket16 comes from
+// CollCommon.h (pulled via dda_init_detail.h).
+#include "algorithms/CollCommon_ll128.h"                            // meta::comms::{LLLine128,kDdaLL128DataElems}
+#include "algorithms/all_reduce/all_reduce_dda_ll.h"                // kDdaLLArMaxBytes, kDdaLLArSlotStridePkts
+#include "algorithms/all_gather/all_gather_dda_fabric_ll.h"         // kDdaLLAgMaxPerRankBytes
+#include "algorithms/alltoall/alltoall_dda_fabric_ll.h"            // kDdaLLA2AMaxPerChunkBytes
+#include "algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll.h" // kDdaLLRsMaxBytes
+#include "algorithms/all_gather/all_gather_dda_fabric_ll128.h"      // kDdaLL128AgMaxPerRankBytes, kDdaLL128AgSlotStrideLines
+#include "algorithms/alltoall/alltoall_dda_fabric_ll128.h"          // kDdaLL128A2AMaxPerChunkBytes
+#include "algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll128.h" // kDdaLL128RsMaxBytes
 
 #include "gtest/gtest.h"
 
@@ -56,14 +64,23 @@
 
 namespace RcclUnitTesting {
 
-// Compile-time tie between the footprint mirrors and the real launcher constants
-// (the per-tier caps for RS/A2A are additionally pinned at runtime by the
-// exact-boundary tests in DdaFabricScratchTests.cpp, which call the real predicates).
+// Compile-time tie between every footprint mirror and the real launcher
+// constants. All independently-declared per-tier caps are asserted (not just one
+// per family), plus the two derived slot strides -- a correct cap with a
+// redefined stride would still yield a wrong footprint.
 static_assert(kLLPacketBytes == sizeof(meta::comms::LLPacket16), "LLPacket16 size mirror drift");
 static_assert(kLL128LineBytes == sizeof(meta::comms::LLLine128), "LLLine128 size mirror drift");
 static_assert(kLL128DataElems == static_cast<size_t>(meta::comms::kDdaLL128DataElems), "LL128 data-elems mirror drift");
-static_assert(kLLTierMaxBytes == meta::comms::kDdaLLArMaxBytes, "LL tier cap mirror drift");
-static_assert(kLL128TierMaxBytes == meta::comms::kDdaLL128AgMaxPerRankBytes, "LL128 tier cap mirror drift");
+static_assert(kLLTierMaxBytes == meta::comms::kDdaLLArMaxBytes, "LL AR cap mirror drift");
+static_assert(kLLTierMaxBytes == meta::comms::kDdaLLAgMaxPerRankBytes, "LL AG cap mirror drift");
+static_assert(kLLTierMaxBytes == meta::comms::kDdaLLA2AMaxPerChunkBytes, "LL A2A cap mirror drift");
+static_assert(kLLTierMaxBytes == meta::comms::kDdaLLRsMaxBytes, "LL RS cap mirror drift");
+static_assert(kLL128TierMaxBytes == meta::comms::kDdaLL128AgMaxPerRankBytes, "LL128 AG cap mirror drift");
+static_assert(kLL128TierMaxBytes == meta::comms::kDdaLL128A2AMaxPerChunkBytes, "LL128 A2A cap mirror drift");
+static_assert(kLL128TierMaxBytes == meta::comms::kDdaLL128RsMaxBytes, "LL128 RS cap mirror drift");
+static_assert(kLLTierMaxBytes / 8 == meta::comms::kDdaLLArSlotStridePkts, "LL slot-stride mirror drift");
+static_assert(ddaLL128LinesForBytes(kLL128TierMaxBytes) == meta::comms::kDdaLL128AgSlotStrideLines,
+              "LL128 slot-stride mirror drift");
 
 namespace {
 
@@ -209,7 +226,7 @@ TEST(DdaFabricEpochStaticTest, EpochCount_CoversWidestCollective) {
 // The AllGather-LL launcher has no runtime clamp; it relies on
 // ddaLLAgBlocksPerPeer capping per-peer blocks at kDdaLLAgMaxBlocksPerPeer. (The
 // LL128 AG/A2A launchers instead clamp blocksPerPeer against epochLen at runtime,
-// since RCCL_DDA_LL128_AG_MAXBPP can raise their cap.) That compile-time cap must
+// since RCCL_DDA_LL128_AG_MAXBPP / _A2A_MAXBPP can raise their cap.) That compile-time cap must
 // keep the AG-LL grid within the epoch array for every rank count and MAXBLOCKS.
 TEST(DdaFabricEpochStaticTest, AllGatherGridAlwaysFitsEpochArray) {
     for (int arMaxBlocks : {1, kDdaFabricLLArMaxBlocks, DDA_FABRIC_MAXBLOCKS}) {

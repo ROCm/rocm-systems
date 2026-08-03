@@ -35,6 +35,7 @@
 #include "common/DdaFabricFootprints.hpp"
 #include "common/DdaFabricTestHelpers.hpp"
 
+#include "dda_init_detail.h" // DDA_FABRIC_BUFFER_SIZE (the shipped scratch size)
 #include "dda_all_gather.h"
 #include "dda_all_reduce.h"
 #include "dda_alltoall.h"
@@ -55,7 +56,8 @@ namespace {
 // 4 * float32 = 16 B clears every non-scratch gate: %16 (AG/A2A), %8 (AR/RS),
 // all MaxBytes caps, op == ncclSum. So the scratch clause alone decides.
 constexpr int    kValidElemCount  = 4;
-constexpr size_t kTooSmallScratch = 8; // below any tier footprint
+constexpr size_t kTooSmallScratch = 8;                       // below any tier footprint
+constexpr size_t kAmpleScratch    = DDA_FABRIC_BUFFER_SIZE;  // the shipped scratch buffer
 
 } // namespace
 
@@ -70,7 +72,7 @@ class DdaFabricScratchTest : public DdaFabricFixture {
 // ---------------------------------------------------------------------------
 
 TEST_F(DdaFabricScratchTest, AllReduce_LL_GatesOnScratchCapacity) {
-    mockComm_.comm.ddaScratchBytes = DDA_FABRIC_BUFFER_SIZE;
+    mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(
         ncclAllReduceDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32, ncclSum));
     mockComm_.comm.ddaScratchBytes = kTooSmallScratch;
@@ -79,7 +81,7 @@ TEST_F(DdaFabricScratchTest, AllReduce_LL_GatesOnScratchCapacity) {
 }
 
 TEST_F(DdaFabricScratchTest, AllReduce_LL128_GatesOnScratchCapacity) {
-    mockComm_.comm.ddaScratchBytes = DDA_FABRIC_BUFFER_SIZE;
+    mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(ncclAllReduceDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32, ncclSum));
     mockComm_.comm.ddaScratchBytes = kTooSmallScratch;
@@ -88,14 +90,14 @@ TEST_F(DdaFabricScratchTest, AllReduce_LL128_GatesOnScratchCapacity) {
 }
 
 TEST_F(DdaFabricScratchTest, AllGather_LL_GatesOnScratchCapacity) {
-    mockComm_.comm.ddaScratchBytes = DDA_FABRIC_BUFFER_SIZE;
+    mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(ncclAllGatherDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
     mockComm_.comm.ddaScratchBytes = kTooSmallScratch;
     EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
 }
 
 TEST_F(DdaFabricScratchTest, AllGather_LL128_GatesOnScratchCapacity) {
-    mockComm_.comm.ddaScratchBytes = DDA_FABRIC_BUFFER_SIZE;
+    mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(
         ncclAllGatherDdaFabricLL128Eligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
     mockComm_.comm.ddaScratchBytes = kTooSmallScratch;
@@ -104,14 +106,14 @@ TEST_F(DdaFabricScratchTest, AllGather_LL128_GatesOnScratchCapacity) {
 }
 
 TEST_F(DdaFabricScratchTest, AllToAll_LL_GatesOnScratchCapacity) {
-    mockComm_.comm.ddaScratchBytes = DDA_FABRIC_BUFFER_SIZE;
+    mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(ncclAllToAllDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
     mockComm_.comm.ddaScratchBytes = kTooSmallScratch;
     EXPECT_FALSE(ncclAllToAllDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
 }
 
 TEST_F(DdaFabricScratchTest, AllToAll_LL128_GatesOnScratchCapacity) {
-    mockComm_.comm.ddaScratchBytes = DDA_FABRIC_BUFFER_SIZE;
+    mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(
         ncclAllToAllDdaFabricLL128Eligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
     mockComm_.comm.ddaScratchBytes = kTooSmallScratch;
@@ -120,7 +122,7 @@ TEST_F(DdaFabricScratchTest, AllToAll_LL128_GatesOnScratchCapacity) {
 }
 
 TEST_F(DdaFabricScratchTest, ReduceScatter_LL_GatesOnScratchCapacity) {
-    mockComm_.comm.ddaScratchBytes = DDA_FABRIC_BUFFER_SIZE;
+    mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(ncclReduceScatterDdaFabricLLEligible(
         mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32, ncclSum));
     mockComm_.comm.ddaScratchBytes = kTooSmallScratch;
@@ -129,7 +131,7 @@ TEST_F(DdaFabricScratchTest, ReduceScatter_LL_GatesOnScratchCapacity) {
 }
 
 TEST_F(DdaFabricScratchTest, ReduceScatter_LL128_GatesOnScratchCapacity) {
-    mockComm_.comm.ddaScratchBytes = DDA_FABRIC_BUFFER_SIZE;
+    mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(ncclReduceScatterDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32, ncclSum));
     mockComm_.comm.ddaScratchBytes = kTooSmallScratch;
@@ -277,7 +279,7 @@ TEST_F(DdaFabricScratchTest, AllReduce_LL128_EffectiveCapShrinksWithRanks) {
     // because AR-LL128 scratch scales with nRanks * message.
     const size_t oneGiB = static_cast<size_t>(1) << 30;
     const size_t count  = oneGiB / sizeof(float);
-    mockComm_.comm.ddaScratchBytes = DDA_FABRIC_BUFFER_SIZE;
+    mockComm_.comm.ddaScratchBytes = kAmpleScratch;
 
     mockComm_.comm.nRanks = 2;
     EXPECT_TRUE(
@@ -297,14 +299,14 @@ TEST_F(DdaFabricScratchTest, AllReduce_LL128_EffectiveCapShrinksWithRanks) {
 // The per-message alignment gate differs across siblings: AR/RS require %8, AG/A2A
 // require %16. count=2 float32 (8 B) is aligned for AR-LL but not AG-LL.
 TEST_F(DdaFabricScratchTest, AlignmentGateDiffersAcrossCollectives) {
-    mockComm_.comm.ddaScratchBytes = DDA_FABRIC_BUFFER_SIZE;
+    mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, 2, ncclFloat32, ncclSum));
     EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, 2, ncclFloat32));
 }
 
 // A zero count is rejected before the scratch check, even with ample scratch.
 TEST_F(DdaFabricScratchTest, ZeroCountIneligibleRegardlessOfScratch) {
-    mockComm_.comm.ddaScratchBytes = DDA_FABRIC_BUFFER_SIZE;
+    mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, 0, ncclFloat32, ncclSum));
     EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, 0, ncclFloat32));
 }
