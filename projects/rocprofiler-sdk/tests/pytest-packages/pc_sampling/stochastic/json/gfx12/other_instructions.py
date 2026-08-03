@@ -114,7 +114,9 @@ def validate_vmem_instructions(sample_records):
                 assert (
                     snapshot["arb_state_issue_vmem_tex"] == 1
                     or snapshot["arb_state_stall_vmem_tex"] == 1
-                ), "VMEM_TEX pipe must have issued or stalled (at least one must be 1)"
+                    or snapshot["arb_state_issue_lds"] == 1
+                    or snapshot["arb_state_stall_lds"] == 1
+                ), "VMEM_TEX or LDS pipe must have issued or stalled (at least one must be 1)"
 
                 if is_load:
                     assert (

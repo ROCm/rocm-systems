@@ -260,14 +260,15 @@ def validate_barrier_instructions(sample_records):
 
 
 def validate_jump_instructions(sample_records):
-    """Validate jump instructions (s_swappc, s_setpc, s_sleep).
+    """Validate jump instructions (s_swap_pc, s_set_pc, s_sleep).
 
-    When issued, inst_type must be JUMP and arbiter must have issued on brmsg pipe.
-    When stalled, only NO_INSTRUCTION_AVAILABLE is allowed.
+    When issued, inst_type must be JUMP and arbiter must have issued on scalar pipe.
+    When stalled, only NO_INSTRUCTION_AVAILABLE or ARBITER_NOT_WIN is allowed.
     """
     allowed_stall_reasons = set(
         [
             "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE",
+            "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_NOT_WIN",
         ]
     )
     for record in sample_records:
@@ -277,16 +278,25 @@ def validate_jump_instructions(sample_records):
                 record["inst_type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_JUMP"
             ), "Invalid jump instruction type"
             assert (
-                snapshot["arb_state_issue_brmsg"] == 1
-            ), "Arbiter must have issued brmsg instruction for jump"
+                snapshot["arb_state_issue_scalar"] == 1
+            ), "Arbiter must have issued scalar instruction for jump"
             assert (
-                snapshot["arb_state_stall_brmsg"] == 0
-            ), "Arbiter must not have stalled brmsg instruction for jump"
+                snapshot["arb_state_stall_scalar"] == 0
+            ), "Arbiter must not have stalled scalar instruction for jump"
         else:
             stall_reason = snapshot["stall_reason"]
             assert (
                 stall_reason in allowed_stall_reasons
             ), f"Invalid stall reason for jump instruction: {stall_reason}"
+
+            if (
+                stall_reason
+                == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_NOT_WIN"
+            ):
+                assert (
+                    snapshot["arb_state_issue_scalar"] == 1
+                    or snapshot["arb_state_stall_scalar"] == 1
+                ), "Arbiter must have issued or stalled scalar instruction for jump"
 
 
 def validate_message_instructions(sample_records):

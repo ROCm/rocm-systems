@@ -90,8 +90,8 @@ instructions_with_types = [
     ("s_wait", "WAITCNT"),  # WAITCNT (specific)
     ("s_sendmsg", "MESSAGE"),  # MESSAGE (specific)
     ("s_barrier", "BARRIER"),  # BARRIER (specific)
-    ("s_swappc", "JUMP"),  # JUMP (specific)
-    ("s_setpc", "JUMP"),  # JUMP
+    ("s_swap_pc", "JUMP"),  # JUMP (specific)
+    ("s_set_pc", "JUMP"),  # JUMP
     ("s_branch", "BRANCH"),  # BRANCH
     ("s_cbranch", "BRANCH"),  # BRANCH (conditional)
     ("s_wakeup", "S_WAKEUP"),  # NO_INST type, but goes through the brmsg arbiter.
@@ -119,7 +119,7 @@ inst_type_verify_functions = {
 
 # Function to classify instructions based on the Trie
 def classify_instruction_by_prefix(prefix_tree, instruction):
-    # extracting the base of the instruction (e.g., s_mov_*, v_mov_*, s_setpc_*, ...)
+    # extracting the base of the instruction (e.g., s_mov_*, v_mov_*, s_set_pc_*, ...)
     base_instruction = instruction.split()[0]
 
     # Classify based on the Trie (general classification)
