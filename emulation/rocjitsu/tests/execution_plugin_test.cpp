@@ -35,6 +35,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/soc.h"
+#include "scoped_temp.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 
@@ -56,6 +57,8 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <cstring>
 #include <format>
+#include <fstream>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <set>
@@ -2427,18 +2430,22 @@ TEST(RaceDetectorPluginOutputTest, DispatchLineUsesReadableNameAndExactSymbol) {
             std::string::npos);
 }
 
-TEST(ExecutionPluginGroupTest, OwnsSingleSinkThroughPluginDestruction) {
+TEST(ExecutionPluginGroupTest, OwnsConfiguredSinkForRetainedGroupLifetime) {
   std::vector<std::string> events;
+  std::shared_ptr<ExecutionPluginGroup> plugin_group;
   {
     PluginSinkConfig sink_config;
     sink_config.emplace<DestructionTrackingSink>(events);
-    ExecutionPluginGroup plugin_group(std::move(sink_config));
-    ASSERT_TRUE(plugin_group.add(std::make_unique<DestructorWritingPlugin>(events)));
+    plugin_group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    ASSERT_TRUE(plugin_group->add(std::make_unique<DestructorWritingPlugin>(events)));
   }
+
+  EXPECT_TRUE(events.empty());
+  plugin_group.reset();
   EXPECT_EQ(events, (std::vector<std::string>{"write:destroyed\n", "plugin", "sink"}));
 }
 
-TEST(ExecutionPluginGroupTest, OwnsCompositeChildrenThroughPluginDestruction) {
+TEST(ExecutionPluginGroupTest, FansOutToEveryConfiguredSink) {
   std::vector<std::string> events;
   {
     PluginSinkConfig sink_config;
@@ -2453,6 +2460,24 @@ TEST(ExecutionPluginGroupTest, OwnsCompositeChildrenThroughPluginDestruction) {
   EXPECT_EQ(events[1], "write:destroyed\n");
   EXPECT_EQ(events[2], "plugin");
   EXPECT_EQ(std::count(events.begin() + 3, events.end(), "sink"), 2);
+}
+
+TEST(ExecutionPluginGroupTest, OwnsFileSinkThroughPluginDestruction) {
+  test::ScopedTempDirectory sink_directory("rocjitsu-plugin-sink-lifetime-");
+  const std::string log_path = sink_directory.path() + "/destructor_writer.log";
+  std::vector<std::string> events;
+  {
+    PluginSinkConfig sink_config;
+    sink_config.set_file_directory(sink_directory.path());
+    ExecutionPluginGroup plugin_group(std::move(sink_config));
+    ASSERT_TRUE(plugin_group.add(std::make_unique<DestructorWritingPlugin>(events)));
+  }
+
+  EXPECT_EQ(events, (std::vector<std::string>{"plugin"}));
+  std::ifstream log(log_path);
+  ASSERT_TRUE(log);
+  const std::string contents{std::istreambuf_iterator<char>(log), std::istreambuf_iterator<char>()};
+  EXPECT_EQ(contents, "destroyed\n");
 }
 
 } // namespace

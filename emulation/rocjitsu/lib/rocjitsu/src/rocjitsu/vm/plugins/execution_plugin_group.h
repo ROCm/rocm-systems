@@ -23,6 +23,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -50,8 +51,13 @@ using OwnedPlugin = std::unique_ptr<ExecutionPlugin, PluginDeleter>;
 /// @brief Host destroy trampoline for in-tree plugins created with `new`.
 inline void delete_execution_plugin(void *p) { delete static_cast<ExecutionPlugin *>(p); }
 
-/// @brief Complete sink configuration transferred into an ExecutionPluginGroup.
+/// @brief Move-only sink configuration transferred into an ExecutionPluginGroup.
 struct PluginSinkConfig {
+  /// Add an owned sink and return a reference to it.
+  ///
+  /// The reference remains valid while this configuration, or the
+  /// ExecutionPluginGroup that receives it, owns the sink. Moving the
+  /// configuration transfers ownership without moving the sink itself.
   template <typename Sink, typename... Args> Sink &emplace(Args &&...args) {
     static_assert(std::is_base_of_v<PluginSink, Sink>, "Sink must derive from PluginSink");
     auto sink = std::make_unique<Sink>(std::forward<Args>(args)...);
@@ -60,6 +66,7 @@ struct PluginSinkConfig {
     return result;
   }
 
+  /// Enable one per-plugin FileSink rooted at @p directory.
   void set_file_directory(std::string directory) { file_directory_ = std::move(directory); }
 
 private:
@@ -208,7 +215,7 @@ public:
     return *instance;
   }
 
-protected:
+private:
   /// Internal fanout over sinks whose lifetime is guaranteed by the owning
   /// group or SinkBundle. It is deliberately not part of the public sink API.
   class FanoutSink final : public PluginSink {
@@ -226,18 +233,24 @@ protected:
     std::vector<PluginSink *> children_;
   };
 
+protected:
   /// Owns one fanout sink and any per-fanout child sinks. Member order ensures
   /// the fanout is destroyed before the children it references.
-  struct SinkBundle {
-    std::vector<std::unique_ptr<PluginSink>> children;
-    std::unique_ptr<FanoutSink> fanout;
+  class SinkBundle {
+  public:
+    SinkBundle() = default;
 
-    PluginSink *get() const { return fanout.get(); }
+    [[nodiscard]] PluginSink *get() const { return fanout_.get(); }
+
+  private:
+    friend class ExecutionPluginGroup;
+    std::vector<std::unique_ptr<PluginSink>> children_;
+    std::unique_ptr<FanoutSink> fanout_;
   };
 
   /// Build a sink combining configured sinks + optional file sink.
   /// Returns an empty bundle if no sinks are configured.
-  SinkBundle build_sink_bundle(const std::string &file_name) {
+  [[nodiscard]] SinkBundle build_sink_bundle(const std::string &file_name) const {
     bool has_file = !sink_dir_.empty() && !file_name.empty();
     if (configured_sinks_.empty() && !has_file)
       return {};
@@ -250,24 +263,26 @@ protected:
       auto fs = std::make_unique<FileSink>(sink_dir_ + "/" + file_name);
       if (fs->is_open()) {
         fanout->add(*fs);
-        result.children.push_back(std::move(fs));
+        result.children_.push_back(std::move(fs));
       } else if (fanout->empty()) {
         // Preserve output when the file was the only requested destination.
         // Do not add stderr when another configured sink is already usable,
         // because doing so would unexpectedly duplicate output.
         auto fallback = std::make_unique<StderrSink>();
         fanout->add(*fallback);
-        result.children.push_back(std::move(fallback));
+        result.children_.push_back(std::move(fallback));
       }
     }
-    result.fanout = std::move(fanout);
+    result.fanout_ = std::move(fanout);
     return result;
   }
 
+private:
+  // These sinks are declared before plugin entries so plugins and their local
+  // fanouts are destroyed before the configured sinks they reference.
   std::vector<std::unique_ptr<PluginSink>> configured_sinks_;
   std::string sink_dir_;
 
-private:
   /// Owns the sink assigned to one plugin. The plugin is declared last and is
   /// therefore destroyed before its sink bundle.
   struct PluginEntry {
@@ -275,8 +290,6 @@ private:
     OwnedPlugin plugin;
   };
 
-  // Entries are declared after configured sinks, so plugins and their local
-  // fanouts are destroyed before the configured sinks they reference.
   std::vector<PluginEntry> plugins_;
 };
 

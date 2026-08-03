@@ -144,8 +144,8 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
   return true;
 }
 
-/// Configure output sinks on @p group from the optional top-level `sinks`
-/// object. Defaults to a single stderr sink when absent.
+/// Parse owned output sinks from the optional top-level `sinks` object.
+/// Defaults to a single stderr sink when absent.
 ///
 /// @code{.json}
 ///   "sinks": { "types": ["stderr", "file"], "dir": "/tmp/out" }
