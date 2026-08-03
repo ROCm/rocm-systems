@@ -1106,6 +1106,136 @@ TEST_F(DbgTrapDaemonTest, ForeignClientCannotDriveAnothersSession) {
   EXPECT_EQ(disable(), 0); // A tears down its session (closes the notifier)
 }
 
+// GET_DEVICE_SNAPSHOT through the production daemon dispatch, over the same
+// cases the local path pins (count probe, zero stride, null buffer, an entry at
+// the struct stride, and more entries than devices).
+//
+// The RemoteDriverDbgSnapshotTest suite answers with serve_one_ioctl_reply(), a
+// stand-in that never runs reconstruct_embedded_pointers(): it echoes the arg
+// struct and whatever tail the test tells it to. That is the right tool for
+// pinning what the *client* does with a reply, but it can agree with a daemon
+// that does not exist. rj_vm_execute_as() is the real thing -- it repoints
+// snapshot_buf_ptr at the inline tail and hands the request to SimulatedKfd --
+// so running the local contract through it is what makes the two transports
+// comparable rather than separately self-consistent.
+TEST_F(DbgTrapDaemonTest, DeviceSnapshotDispatchMatchesTheLocalContract) {
+  int notifier = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(notifier, 0);
+  ASSERT_EQ(enable_with_notifier(notifier, nullptr), 0);
+
+  constexpr uint32_t kEntryBytes = sizeof(kfd_dbg_device_info_entry);
+  constexpr uint32_t kDeviceTotal = 1; // the fixture config declares one GPU
+  constexpr uint8_t kSentinel = 0xAB;
+
+  // Lay the request out the way the transport does: the arg struct followed by
+  // the inline tail that stands in for the caller's snapshot buffer. A tail is
+  // what triggers the daemon's pointer reconstruction, so `tail_bytes == 0`
+  // models the requests the client sends without one (count probe, zero
+  // stride) -- there snapshot_buf_ptr survives as the client gave it, which is
+  // why those cases pass a real buffer and assert it stays untouched.
+  struct SnapshotResult {
+    int rc;
+    kfd_ioctl_dbg_trap_args args;
+    std::vector<uint8_t> tail;
+  };
+  auto run_snapshot = [&](uint32_t num_devices, uint32_t entry_size, size_t tail_bytes,
+                          uint64_t buf_ptr) {
+    std::vector<uint8_t> payload(sizeof(kfd_ioctl_dbg_trap_args) + tail_bytes, kSentinel);
+    kfd_ioctl_dbg_trap_args snap{};
+    snap.pid = static_cast<uint32_t>(kClientPid);
+    snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+    snap.device_snapshot.num_devices = num_devices;
+    snap.device_snapshot.entry_size = entry_size;
+    snap.device_snapshot.snapshot_buf_ptr = buf_ptr;
+    std::memcpy(payload.data(), &snap, sizeof(snap));
+
+    SnapshotResult result{};
+    result.rc = execute(AMDKFD_IOC_DBG_TRAP, payload.data(), payload.size(), -1, nullptr);
+    std::memcpy(&result.args, payload.data(), sizeof(result.args));
+    result.tail.assign(payload.begin() + sizeof(kfd_ioctl_dbg_trap_args), payload.end());
+    return result;
+  };
+  auto all_sentinel = [](const std::vector<uint8_t> &bytes, size_t from, size_t to) {
+    return std::all_of(bytes.begin() + from, bytes.begin() + to,
+                       [](uint8_t byte) { return byte == kSentinel; });
+  };
+
+  // A null buffer is rejected before any output is written, exactly as
+  // DbgTrapDeviceSnapshotRejectsNullBufferWithoutWritingOutputs pins locally.
+  // No tail, so the reconstruction leaves the null in place for the driver to
+  // find -- this is the case the RemoteDriver rejects client-side, because on
+  // the wire a null pointer would otherwise arrive as a reconstructed tail.
+  {
+    constexpr uint32_t kRequested = 2;
+    constexpr uint32_t kStride = kEntryBytes + 16;
+    auto null_buf = run_snapshot(kRequested, kStride, 0, 0);
+    EXPECT_EQ(null_buf.rc, -EINVAL);
+    EXPECT_EQ(null_buf.args.device_snapshot.num_devices, kRequested);
+    EXPECT_EQ(null_buf.args.device_snapshot.entry_size, kStride);
+  }
+
+  // Count-only probe: no capacity, so the total is reported and nothing is
+  // written.
+  {
+    std::array<uint8_t, kEntryBytes> caller_buf{};
+    caller_buf.fill(kSentinel);
+    auto probe = run_snapshot(0, kEntryBytes, 0, reinterpret_cast<uint64_t>(caller_buf.data()));
+    EXPECT_EQ(probe.rc, 0);
+    EXPECT_EQ(probe.args.device_snapshot.num_devices, kDeviceTotal);
+    EXPECT_EQ(probe.args.device_snapshot.entry_size, kEntryBytes);
+    EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(),
+                            [](uint8_t byte) { return byte == kSentinel; }));
+  }
+
+  // Zero stride: success, the total reported, entry_size(OUT) zero, no bytes
+  // written -- DbgTrapDeviceSnapshotZeroStrideReportsCountAndWritesNothing.
+  {
+    std::array<uint8_t, kEntryBytes> caller_buf{};
+    caller_buf.fill(kSentinel);
+    auto zero_stride =
+        run_snapshot(kDeviceTotal, 0, 0, reinterpret_cast<uint64_t>(caller_buf.data()));
+    EXPECT_EQ(zero_stride.rc, 0);
+    EXPECT_EQ(zero_stride.args.device_snapshot.num_devices, kDeviceTotal);
+    EXPECT_EQ(zero_stride.args.device_snapshot.entry_size, 0u);
+    EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(),
+                            [](uint8_t byte) { return byte == kSentinel; }));
+  }
+
+  // One entry at the compact stride the client transmits: the agent lands in
+  // the tail, which is the buffer the client scatters into the caller's slots.
+  {
+    auto filled = run_snapshot(kDeviceTotal, kEntryBytes, kEntryBytes, 0xDEADBEEF);
+    ASSERT_EQ(filled.rc, 0);
+    EXPECT_EQ(filled.args.device_snapshot.num_devices, kDeviceTotal);
+    EXPECT_EQ(filled.args.device_snapshot.entry_size, kEntryBytes);
+    ASSERT_EQ(filled.tail.size(), kEntryBytes);
+    kfd_dbg_device_info_entry entry{};
+    std::memcpy(&entry, filled.tail.data(), sizeof(entry));
+    EXPECT_EQ(entry.gpu_id, kGpuId);
+    // The same fields rocdbgapi's agent_snapshot fatal-errors on if zero.
+    EXPECT_NE(entry.simd_count, 0u);
+    EXPECT_NE(entry.max_waves_per_simd, 0u);
+    EXPECT_NE(entry.array_count, 0u);
+    EXPECT_NE(entry.num_xcc, 0u);
+  }
+
+  // Capacity beyond the device total: the driver fills what exists and leaves
+  // the rest of the buffer as the caller left it.
+  {
+    auto oversized = run_snapshot(kDeviceTotal + 1, kEntryBytes, 2 * kEntryBytes, 0xDEADBEEF);
+    ASSERT_EQ(oversized.rc, 0);
+    EXPECT_EQ(oversized.args.device_snapshot.num_devices, kDeviceTotal);
+    ASSERT_EQ(oversized.tail.size(), 2 * kEntryBytes);
+    kfd_dbg_device_info_entry entry{};
+    std::memcpy(&entry, oversized.tail.data(), sizeof(entry));
+    EXPECT_EQ(entry.gpu_id, kGpuId);
+    EXPECT_TRUE(all_sentinel(oversized.tail, kEntryBytes, 2 * kEntryBytes))
+        << "the daemon wrote past the devices it enumerated";
+  }
+
+  EXPECT_EQ(disable(), 0);
+}
+
 // --- RemoteDriver DBG_TRAP GET_DEVICE_SNAPSHOT response copy-back ---
 //
 // The client saves the caller's snapshot buffer pointer and capacity
