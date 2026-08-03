@@ -41,7 +41,7 @@
 #include <rocprofiler-sdk/cxx/constants.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 namespace rocprofiler
 {

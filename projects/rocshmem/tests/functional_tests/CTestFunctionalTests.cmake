@@ -167,6 +167,9 @@ set(TEST_host_wait_until_some_status 148)
 set(TEST_teamreducescatter 149)
 set(TEST_broadcast_wave 150)
 set(TEST_alltoall_wave 151)
+set(TEST_fcollect_wave 152)
+set(TEST_reduce_wave 153)
+set(TEST_teamreducescatterwave 154)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -227,9 +230,9 @@ function(write_install_test_definition TEST_NAME TEST_COMMAND TEST_LABELS TEST_T
             # Relative from working dir: ../../../../share/rocshmem/test_wrapper.sh
             list(APPEND INSTALL_CMD_PARTS "../../../../share/rocshmem/test_wrapper.sh")
         elseif("${part}" STREQUAL "$<TARGET_FILE:rocshmem_functional_tests>")
-            # Executable is at: <install>/share/rocshmem/rocshmem_functional_tests
-            # Relative from working dir: ../../../../share/rocshmem/rocshmem_functional_tests
-            list(APPEND INSTALL_CMD_PARTS "../../../../share/rocshmem/rocshmem_functional_tests")
+            # Executable is at: <install>/bin/rocshmem_functional_tests
+            # Relative from working dir bin/rocshmem/tests/functional: ../../../rocshmem_functional_tests
+            list(APPEND INSTALL_CMD_PARTS "../../../rocshmem_functional_tests")
         elseif("${part}" STREQUAL "${CMAKE_COMMAND}")
             # Replace build-host cmake path with portable system env
             # This prevents build-host absolute paths from leaking into install files
@@ -1072,6 +1075,11 @@ function(add_coll_tests)
     begin_test_group(CATEGORY "COLLECTIVE;WAVE" TIER full BACKENDS "ipc;gda" GPUS "all")
         add_rocshmem_functional_test(NAME broadcast_wave RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME alltoall_wave RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 512)
+        add_rocshmem_functional_test(NAME fcollect_wave RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME reduce_wave RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME teamreducescatterwave RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME teamreducescatterwave RANKS 4 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME teamreducescatterwave RANKS 8 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
     end_test_group()
 endfunction()
 

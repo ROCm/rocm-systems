@@ -6,6 +6,7 @@
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/except.h"
 
@@ -48,7 +49,7 @@ std::array<uint32_t, N> read_sgpr_group(const Wavefront &wf, int reg, bool allow
     throw util::UnimplementedInst("tensor DMA non-SGPR descriptor operand");
   const uint32_t base = wf.sgpr_alloc().base + static_cast<uint32_t>(reg);
   for (size_t i = 0; i < N; ++i)
-    words[i] = wf.cu().read_sgpr(base + static_cast<uint32_t>(i));
+    words[i] = amdgpu::RegisterAccess(wf).read_sgpr(base + static_cast<uint32_t>(i));
   return words;
 }
 

@@ -32,6 +32,7 @@
 #include "backends/amd_smi/backend.hpp"
 #include "backends/amd_smi/device.hpp"
 #include "backends/amd_smi/wrapper.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "core/agent.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
@@ -58,6 +59,7 @@
 #include <new>
 #include <stdexcept>
 #include <sys/resource.h>
+#include <type_traits>
 #include <vector>
 
 namespace rocprofsys::pmc
@@ -115,7 +117,7 @@ using gpu_collector_t =
 
 #if ROCPROFILER_VERSION >= 600
 using gpu_perf_counter_provider_t = device_providers::rocprofiler_sdk::provider<
-    backends::rocprofiler_sdk::backend_factory>;
+    backends::rocprofiler_sdk::backend_factory<::rocprofsys::rocprofiler_sdk::backend>>;
 using gpu_perf_counter_collector_t =
     collectors::gpu_perf_counter::collector<gpu_perf_counter_provider_t>;
 #endif

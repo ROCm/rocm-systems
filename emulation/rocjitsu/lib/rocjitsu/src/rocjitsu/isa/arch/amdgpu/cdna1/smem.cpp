@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -412,7 +413,7 @@ void SStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
   for (uint32_t i = 0; i < 1; ++i)
-    d->store_data[i] = cu.read_sgpr(sdata_base + i);
+    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -440,7 +441,7 @@ void SStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
   for (uint32_t i = 0; i < 2; ++i)
-    d->store_data[i] = cu.read_sgpr(sdata_base + i);
+    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -468,7 +469,7 @@ void SStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
   for (uint32_t i = 0; i < 4; ++i)
-    d->store_data[i] = cu.read_sgpr(sdata_base + i);
+    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -496,7 +497,7 @@ void SScratchStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
   for (uint32_t i = 0; i < 1; ++i)
-    d->store_data[i] = cu.read_sgpr(sdata_base + i);
+    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -524,7 +525,7 @@ void SScratchStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
   for (uint32_t i = 0; i < 2; ++i)
-    d->store_data[i] = cu.read_sgpr(sdata_base + i);
+    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -552,7 +553,7 @@ void SScratchStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
   for (uint32_t i = 0; i < 4; ++i)
-    d->store_data[i] = cu.read_sgpr(sdata_base + i);
+    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -580,7 +581,7 @@ void SBufferStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
   for (uint32_t i = 0; i < 1; ++i)
-    d->store_data[i] = cu.read_sgpr(sdata_base + i);
+    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -608,7 +609,7 @@ void SBufferStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
   for (uint32_t i = 0; i < 2; ++i)
-    d->store_data[i] = cu.read_sgpr(sdata_base + i);
+    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -636,7 +637,7 @@ void SBufferStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
   for (uint32_t i = 0; i < 4; ++i)
-    d->store_data[i] = cu.read_sgpr(sdata_base + i);
+    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }

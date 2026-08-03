@@ -24,14 +24,9 @@ namespace {
 using nccl_dda_detail::DdaFabricBarrierState;
 
 template <typename T>
-static ncclResult_t ncclAllToAllDdaFabricTyped(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclComm* comm,
-    cudaStream_t stream) {
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr ||
-      comm->ddaPeerPtrsDev == nullptr ||
+static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
+                                               cudaStream_t stream) {
+  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaFabricBarrierState == nullptr) {
     return ncclInvalidUsage;
   }
@@ -39,11 +34,8 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(
   const int nRanks = comm->nRanks;
   const size_t totalCount = count * nRanks;
   if (totalCount * sizeof(T) > comm->ddaScratchBytes) {
-    WARN(
-        "DDA fabric alltoall: total element count %zu needs %zu bytes; comm scratch is %zu bytes",
-        totalCount,
-        totalCount * sizeof(T),
-        comm->ddaScratchBytes);
+    WARN("DDA fabric alltoall: total element count %zu needs %zu bytes; comm scratch is %zu bytes", totalCount,
+         totalCount * sizeof(T), comm->ddaScratchBytes);
     return ncclInvalidArgument;
   }
 
@@ -53,33 +45,29 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
 
-  auto* barrierState =
-      static_cast<DdaFabricBarrierState*>(comm->ddaFabricBarrierState);
+  auto* barrierState = static_cast<DdaFabricBarrierState*>(comm->ddaFabricBarrierState);
   meta::comms::FabricGpuBarrier barrierHost = barrierState->barrierHost;
 
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  INFO(NCCL_COLL,
-       "DDA fabric AllToAll: launching kernel: nRanks=%d count=%zu grid=%u block=%u%s",
-       nRanks, count, grid.x, block.x,
-       (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
+  INFO(NCCL_COLL, "DDA fabric AllToAll: launching kernel: nRanks=%d count=%zu grid=%u block=%u%s", nRanks, count,
+       grid.x, block.x, (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
+
+  CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
 
   switch (nRanks) {
   case 4:
     meta::comms::ddaAllToAllFabric<T, 4><<<grid, block, 0, stream>>>(
-        d_ipcbuffs, static_cast<T*>(recvbuff), count,
-        static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
     break;
   case 8:
     meta::comms::ddaAllToAllFabric<T, 8><<<grid, block, 0, stream>>>(
-        d_ipcbuffs, static_cast<T*>(recvbuff), count,
-        static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
     break;
   default:
     meta::comms::ddaAllToAllFabric<T, 0><<<grid, block, 0, stream>>>(
-        d_ipcbuffs, static_cast<T*>(recvbuff), count,
-        static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
     break;
   }
 
@@ -90,12 +78,8 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(
 
 } // namespace
 
-bool ncclAllToAllDdaFabricEligible(
-    ncclComm* comm,
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype) {
+bool ncclAllToAllDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                   ncclDataType_t datatype) {
   (void)sendbuff;
   (void)recvbuff;
   if (comm == nullptr || comm->bootstrap == nullptr) {
@@ -103,8 +87,7 @@ bool ncclAllToAllDdaFabricEligible(
   }
   // Fabric path: requires its own handler + barrier state. Fabric handle
   // exchange works across nodes within an MNNVL clique.
-  if (comm->ddaFabricMemHandler == nullptr ||
-      comm->ddaFabricBarrierState == nullptr) {
+  if (comm->ddaFabricMemHandler == nullptr || comm->ddaFabricBarrierState == nullptr) {
     return false;
   }
   if (comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
@@ -116,8 +99,7 @@ bool ncclAllToAllDdaFabricEligible(
   if (comm->nRanks < 2 || comm->nRanks > meta::comms::kDdaMaxNranks) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 &&
-      datatype != ncclBfloat16) {
+  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return false;
   }
 
@@ -135,18 +117,11 @@ bool ncclAllToAllDdaFabricEligible(
   return true;
 }
 
-ncclResult_t ncclAllToAllDdaFabric(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    ncclComm* comm,
-    cudaStream_t stream) {
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 &&
-      datatype != ncclBfloat16) {
+ncclResult_t ncclAllToAllDdaFabric(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                   ncclComm* comm, cudaStream_t stream) {
+  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return ncclInvalidArgument;
   }
   int typeSize = ncclTypeSize(datatype);
-  return ncclAllToAllDdaFabricTyped<int8_t>(
-      sendbuff, recvbuff, count * typeSize, comm, stream);
+  return ncclAllToAllDdaFabricTyped<int8_t>(sendbuff, recvbuff, count * typeSize, comm, stream);
 }

@@ -51,6 +51,7 @@
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
@@ -172,6 +173,9 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 ///     program terminator, and branch_offset_bytes() is nullopt.
 ///   - anchor.mnemonic() is not in the small PC-relative denylist
 ///     (s_getpc_b64, s_call_b64, s_setpc_b64, s_swappc_b64, s_rfe_*).
+///   - anchor is not s_clause. Because this predicate has no surrounding
+///     instruction-stream context, Instrumentor additionally rejects anchors
+///     among the following instructions covered by an s_clause.
 ///
 /// @p arch is accepted now so a future denylist can grow ISA-specific entries
 /// without an API change; today's checks are uniform across all AMDGPU ISAs.
@@ -368,6 +372,10 @@ private:
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).
   std::unordered_map<uint64_t, const Instruction *> offset_to_inst_;
+  // .text-relative byte offsets that cannot be trampoline anchors because they
+  // are among the following instructions covered by an s_clause. The s_clause
+  // instruction itself is rejected by is_relocatable_anchor().
+  std::unordered_set<uint64_t> clause_blocked_offsets_;
   bool blocks_built_ = false;
 
   // Returns false if no decoder exists for arch_ (RV32I/RV64I/INVALID/etc.);

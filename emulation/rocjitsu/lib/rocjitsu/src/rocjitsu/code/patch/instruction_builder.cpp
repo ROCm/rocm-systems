@@ -17,6 +17,7 @@ enum class ScalarSop2Op {
   SubU32,
   AddcU32,
   SubbU32,
+  AddNcU64,
 };
 
 /// @brief Return the SOP2 opcode number for scalar arithmetic on @p arch.
@@ -25,6 +26,7 @@ enum class ScalarSop2Op {
 /// architecture-specific opcode mapping lives with the instruction packers
 /// instead of the static recovery matcher.
 [[nodiscard]] std::optional<uint8_t> scalar_sop2_opcode(rj_code_arch_t arch, ScalarSop2Op op) {
+  // \NPI new ISA family: classify its scalar SOP2 opcode mapping here.
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
   case ROCJITSU_CODE_ARCH_CDNA2:
@@ -35,7 +37,6 @@ enum class ScalarSop2Op {
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
     switch (op) {
     case ScalarSop2Op::AddU32:
       return 0;
@@ -45,6 +46,24 @@ enum class ScalarSop2Op {
       return 4;
     case ScalarSop2Op::SubbU32:
       return 5;
+    case ScalarSop2Op::AddNcU64:
+      return std::nullopt;
+    }
+    return std::nullopt;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    // gfx1250 retains the legacy 32-bit arithmetic opcodes and adds the
+    // SCC-neutral 64-bit scalar add used by its canonical PC builders.
+    switch (op) {
+    case ScalarSop2Op::AddU32:
+      return 0;
+    case ScalarSop2Op::SubU32:
+      return 1;
+    case ScalarSop2Op::AddcU32:
+      return 4;
+    case ScalarSop2Op::SubbU32:
+      return 5;
+    case ScalarSop2Op::AddNcU64:
+      return 83;
     }
     return std::nullopt;
   case ROCJITSU_CODE_ARCH_RV32I:
@@ -126,7 +145,27 @@ bool patch_pcrel_branch_offset(const Instruction &inst, std::span<uint32_t> word
 bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch, uint16_t pc_sreg,
                              int64_t delta) {
   constexpr uint16_t kLiteralOperand = 255;
+  constexpr uint16_t kLiteral64Operand = 254;
   constexpr uint16_t kInlineInt0 = 128;
+
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+    // gfx1250's SCC-neutral s_add_nc_u64 is both the compiler's canonical PC
+    // materialization and the smallest safe relocation replacement. Positive
+    // 32-bit deltas need one literal word; negative or wider deltas use the
+    // literal64 form so modulo-2^64 addition preserves their full bit pattern.
+    const uint64_t raw_delta = static_cast<uint64_t>(delta);
+    const bool use_literal32 = delta >= 0 && raw_delta <= std::numeric_limits<uint32_t>::max();
+    auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddNcU64);
+    if (!opcode)
+      return false;
+    words.push_back(build_sop2_encoding(arch, *opcode, pc_sreg, pc_sreg,
+                                        use_literal32 ? kLiteralOperand : kLiteral64Operand));
+    words.push_back(static_cast<uint32_t>(raw_delta));
+    if (!use_literal32)
+      words.push_back(static_cast<uint32_t>(raw_delta >> 32));
+    return true;
+  }
+
   const bool negative = delta < 0;
   const uint64_t magnitude =
       negative ? (~static_cast<uint64_t>(delta) + 1u) : static_cast<uint64_t>(delta);

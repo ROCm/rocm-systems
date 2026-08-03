@@ -538,7 +538,7 @@ TEST(MfmaSimdBenchmark, F64_16x16x4_f64) {
 }
 
 // f32-input MFMA shapes (no F16C convert; specialization gain is the
-// addressing-unroll + raw vgpr_data + no-heap, not a convert).
+// addressing-unroll + raw raw_vgpr_data + no-heap, not a convert).
 TEST(MfmaSimdBenchmark, F32_32x32x2_f32_Specialized) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;

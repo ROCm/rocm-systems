@@ -50,7 +50,7 @@ class ROContext : public Context {
   __device__ void putmem_nbi(void *dest, const void *source, size_t nelems,
                              int pe);
 
-  __device__ void getmem_nbi(void *dest, const void *source, size_t size,
+  __device__ void getmem_nbi(void *dest, const void *source, size_t nelems,
                              int pe);
 
   __device__ void fence();
@@ -94,12 +94,20 @@ class ROContext : public Context {
   __device__ T g(const T *source, int pe);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ int reduce(rocshmem_team_t team, T *dest, const T *source,
+  __device__ int reduce_wg(rocshmem_team_t team, T *dest, const T *source,
                         int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_scatter_wg(rocshmem_team_t team, T *dest, const T *source,
                                    int nreduce);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_wave(rocshmem_team_t team, T *dest, const T *source,
+                             int nreduce);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_scatter_wave(rocshmem_team_t team, T *dest, const T *source,
+                                     int nreduce);
 
   template <typename T>
   __device__ void put(T *dest, const T *source, size_t nelems, int pe);
@@ -163,10 +171,10 @@ class ROContext : public Context {
                             
   template <typename T>
   __device__ int broadcast_wave(rocshmem_team_t team,
-                                T *dest, const T* source, int nelement, int PE_root);
+                                T *dest, const T* source, int nelems, int PE_root);
 
   __device__ int broadcastmem_wave(rocshmem_team_t team,
-                                  void *dest, const void* source, int nelement, int PE_root);
+                                  void *dest, const void* source, int nelems, int PE_root);
 
   template <typename T>
   __device__ void alltoall_wg(rocshmem_team_t team, T *dest, const T *source,
@@ -190,8 +198,18 @@ class ROContext : public Context {
                                   const void* source, int nelems);
 
   template <typename T>
-  __device__ void fcollect(rocshmem_team_t team, T *dest, const T *source,
+  __device__ void fcollect_wg(rocshmem_team_t team, T *dest, const T *source,
                            int nelems);
+
+  __device__ void fcollectmem_wg(rocshmem_team_t team, void *dest,
+                                  const void *source, int nelems);
+
+  template <typename T>
+  __device__ int fcollect_wave(rocshmem_team_t team, T *dest, const T *source,
+                               int nelems);
+
+  __device__ int fcollectmem_wave(rocshmem_team_t team, void *dest,
+                                  const void *source, int nelems);
 
   __device__ void putmem_wg(void *dest, const void *source, size_t nelems,
                             int pe);
@@ -202,7 +220,7 @@ class ROContext : public Context {
   __device__ void putmem_nbi_wg(void *dest, const void *source, size_t nelems,
                                 int pe);
 
-  __device__ void getmem_nbi_wg(void *dest, const void *source, size_t size,
+  __device__ void getmem_nbi_wg(void *dest, const void *source, size_t nelems,
                                 int pe);
 
   __device__ void putmem_wave(void *dest, const void *source, size_t nelems,
@@ -214,7 +232,7 @@ class ROContext : public Context {
   __device__ void putmem_nbi_wave(void *dest, const void *source, size_t nelems,
                                   int pe);
 
-  __device__ void getmem_nbi_wave(void *dest, const void *source, size_t size,
+  __device__ void getmem_nbi_wave(void *dest, const void *source, size_t nelems,
                                   int pe);
 
   template <typename T>

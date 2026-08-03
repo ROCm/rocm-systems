@@ -57,7 +57,7 @@ env:
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
   ROCM_PATH: "/opt/rocm"
 
-  EXCLUDED_TESTS: "fork.*|jacobi-usm-sys-run|jacobi-roctx.*|jpeg-decode-.*|selective-region-region-1-filter.*|selective-region-region-2-and-3.*|selective-region-no-marker-region-1-filter.*|kfd-.*|unified-memory-output-sys-run|rccl-alltoall-perf-sys-run"
+  EXCLUDED_TESTS: "fork.*|jacobi-usm-sys-run|jacobi-roctx.*|jpeg-decode-.*|kfd-.*|unified-memory-output-sys-run|rccl-alltoall-perf-sys-run"
   EXCLUDED_LABELS: "thread_limit"
 
 jobs:
@@ -98,6 +98,7 @@ jobs:
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
     permissions:
       packages: read
+      checks: write
     defaults:
       run:
         shell: bash
@@ -144,11 +145,15 @@ jobs:
 
       - name: Install Latest Nightly ROCm
         run: |
-          set -e
-          mkdir ${{ env.ROCM_PATH }}
-          TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+')
-          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-multiarch.tar.gz -C ${{ env.ROCM_PATH }}
-          echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+          set -euo pipefail
+          tarball=$(ls /opt/rocm-*-multiarch.tar.gz | head -n 1)
+          TARBALL_ROCM_VERSION=$(basename "${tarball}" | sed -E 's/^rocm-([0-9]+\.[0-9]+\.[0-9]+)-multiarch\.tar\.gz$/\1/')
+          mkdir -p "${ROCM_PATH}"
+          tar -xf "${tarball}" -C "${ROCM_PATH}"
+          echo "ROCM_VERSION=${TARBALL_ROCM_VERSION}" >> "${GITHUB_ENV}"
+          echo "${ROCM_PATH}/bin" >> "${GITHUB_PATH}"
+          echo "${ROCM_PATH}/llvm/bin" >> "${GITHUB_PATH}"
+          echo "ROCm ${TARBALL_ROCM_VERSION} installed to: ${ROCM_PATH}"
           echo "✅ ROCm Installation Complete!"
 
       - name: Output TheRock Manifest
@@ -163,14 +168,18 @@ jobs:
           python3 -m pip --version
           python3 -m pip install --break-system-packages -r requirements.txt
 
-      - name: Configure, Build, and Test
-        id: run_ci
-        timeout-minutes: ${{ steps.setup_env.outputs.mode == 'Nightly' && 120 || 60 }}
+      - name: Generate CI scripts
+        timeout-minutes: 5
+        shell: bash
         working-directory: projects/rocprofiler-systems
+        env:
+          GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: |
-          set -e
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           git config --global --add safe.directory ${PWD}
+          echo "CMake: $(cmake --version | head -n 1)"
           INCLUDED_LABELS="${{ steps.setup_env.outputs.included_labels }}"
           LABEL_ARG=""
           if [ -n "${INCLUDED_LABELS}" ]; then
@@ -178,11 +187,12 @@ jobs:
           fi
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
-          python3 ./scripts/run-ci.py -B build \
-            --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }} \
+          python3 ./scripts/run-ci.py --stage generate \
+            --name "${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}" \
             --build-jobs 16 \
             --site ${{ matrix.system.runner }} \
             --mode ${{ steps.setup_env.outputs.mode }} \
+            -B build \
             -- \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
@@ -201,6 +211,64 @@ jobs:
             -LE "${{ steps.setup_env.outputs.excluded_labels }}" \
             ${LABEL_ARG}
 
+      - name: Configure
+        timeout-minutes: 15
+        shell: bash
+        working-directory: projects/rocprofiler-systems
+        env:
+          GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
+          LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
+          python3 ./scripts/run-ci.py --stage configure \
+            --name "${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}" \
+            -B build
+
+      - name: Build
+        timeout-minutes: 45
+        shell: bash
+        working-directory: projects/rocprofiler-systems
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
+          LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
+          python3 ./scripts/run-ci.py --stage build \
+            --name "${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}" \
+            -B build
+
+      - name: CDash link
+        if: always()
+        shell: bash
+        working-directory: projects/rocprofiler-systems
+        run: |
+          python3 ./scripts/run-ci.py --stage cdash-link \
+            --name "${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}"
+
+      - name: Test
+        timeout-minutes: 60
+        shell: bash
+        working-directory: projects/rocprofiler-systems
+        run: |
+          PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
+          LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
+          python3 ./scripts/run-ci.py --stage test \
+            --name "${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}" \
+            -B build
+
+      - name: Publish test results
+        if: always()
+        uses: EnricoMi/publish-unit-test-result-action@d0a4676d0e0b938bc201470d88276b7c74c712b3 # v2.24.0
+        with:
+          files: projects/rocprofiler-systems/build/test-results.xml
+          check_name: "Tests — Ubuntu ${{ matrix.system.os-release }} • ${{ matrix.system.gpu }}"
+          comment_mode: 'off'
+          check_run: false
+          job_summary: true
+
       - name: Check for Leftover Buffered Files
         timeout-minutes: 5
         working-directory: projects/rocprofiler-systems/
@@ -213,10 +281,3 @@ jobs:
           else
             echo "✓ No buffered storage files found in /tmp"
           fi
-
-      - name: Output Logs
-        if: failure() && steps.run_ci.outcome == 'failure'
-        working-directory: projects/rocprofiler-systems
-        run: |
-          echo "❌ Run Failed: Now outputting LastTest.log files for detailed logs..."
-          cat build/Testing/Temporary/LastTest*.log

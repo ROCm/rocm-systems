@@ -19,22 +19,19 @@
 namespace meta::comms {
 
 // Helper macro for catching HIP errors
-#define HIP_CALL(cmd)                                                                   \
-    do {                                                                                \
-        hipError_t error = (cmd);                                                       \
-        if (error != hipSuccess)                                                        \
-        {                                                                               \
-            std::cerr << "Encountered HIP error (" << hipGetErrorString(error)          \
-                      << ") at line " << __LINE__ << " in file " << __FILE__ << "\n";   \
-        }                                                                               \
-    } while (0)
+#define HIP_CALL(cmd) \
+  do { \
+    hipError_t error = (cmd); \
+    if (error != hipSuccess) { \
+      std::cerr << "Encountered HIP error (" << hipGetErrorString(error) << ") at line " << __LINE__ << " in file " \
+                << __FILE__ << "\n"; \
+    } \
+  } while (0)
 
-DeviceBuffer::DeviceBuffer(
-    std::size_t size, bool useVmm, struct ncclMemManager* manager)
-    : size_(size), manager_(manager) {
+DeviceBuffer::DeviceBuffer(std::size_t size, bool useVmm, struct ncclMemManager* manager)
+  : size_(size), manager_(manager) {
   if (useVmm && ncclCuMemEnable()) {
-    ncclResult_t res = ncclCuMemAlloc(
-        &ptr_, &vmmHandle_, ncclCuMemHandleType, size, manager_);
+    ncclResult_t res = ncclCuMemAlloc(&ptr_, &vmmHandle_, ncclCuMemHandleType, size, manager_);
     if (res == ncclSuccess && ptr_ != nullptr) {
       isVmm_ = true;
       return;
@@ -65,11 +62,7 @@ DeviceBuffer::~DeviceBuffer() {
 }
 
 DeviceBuffer::DeviceBuffer(DeviceBuffer&& other) noexcept
-    : ptr_(other.ptr_),
-      size_(other.size_),
-      isVmm_(other.isVmm_),
-      manager_(other.manager_),
-      vmmHandle_(other.vmmHandle_) {
+  : ptr_(other.ptr_), size_(other.size_), isVmm_(other.isVmm_), manager_(other.manager_), vmmHandle_(other.vmmHandle_) {
   other.ptr_ = nullptr;
   other.size_ = 0;
   other.isVmm_ = false;
