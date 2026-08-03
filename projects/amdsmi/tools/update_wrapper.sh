@@ -69,14 +69,15 @@ fi
 
 DOCKER_TTY_FLAGS=(-i)
 if [ -t 0 ]; then DOCKER_TTY_FLAGS=(-t -i); fi
+
 docker run --rm "${DOCKER_TTY_FLAGS[@]}" --volume "$DIR":/src:rw "$IMAGE_REF" bash -c "
 cp -r /src /tmp/src \
-    && cd /tmp/src \
-    && rm -rf build .cache \
-    && cmake -B build -DBUILD_WRAPPER=ON $ENABLE_ESMI_LIB \
-    && make -C build -j $(nproc) \
-    && cp /tmp/src/py-interface/amdsmi_wrapper.py /src/py-interface/amdsmi_wrapper.py \
-    && chown --reference /src/py-interface/CMakeLists.txt /src/py-interface/amdsmi_wrapper.py"
+&& cd /tmp/src \
+&& rm -rf build .cache \
+&& cmake -B build -DBUILD_WRAPPER=ON $ENABLE_ESMI_LIB \
+&& make -C build -j \$(nproc) \
+&& cp /tmp/src/py-interface/amdsmi_wrapper.py /src/py-interface/amdsmi_wrapper.py \
+&& chown --reference /src/py-interface/CMakeLists.txt /src/py-interface/amdsmi_wrapper.py"
 
 echo -e "Generated new wrapper!
 [$DIR/py-interface/amdsmi_wrapper.py]"

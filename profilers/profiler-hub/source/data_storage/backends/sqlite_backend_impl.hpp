@@ -18,6 +18,11 @@
     USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD > 0
 #    include <rocprofiler-sdk-rocpd/sql.h>
 #    include <rocprofiler-sdk-rocpd/types.h>
+#    include <rocprofiler-sdk-rocpd/version.h>
+// rocpd_sql_load_schema() and its callback gained a schema_version parameter in
+// rocprofiler-sdk-rocpd 1.3.2 (upstream PR #5267). Older installs (e.g. ROCm <= 7.2,
+// version 1.3.1) still use the 8-argument signature without it.
+#    define PROFILER_HUB_ROCPD_SQL_HAS_SCHEMA_VERSION (ROCPD_VERSION >= 10302)
 #else
 #    include <regex>
 
@@ -62,6 +67,9 @@ void
 load_schema_cb(rocpd_sql_engine_t /*unused*/,
                rocpd_sql_schema_kind_t /*unused*/,
                rocpd_sql_options_t /*unused*/,
+#    if PROFILER_HUB_ROCPD_SQL_HAS_SCHEMA_VERSION
+               rocpd_version_triplet_t /*unused*/,
+#    endif
                const rocpd_sql_schema_jinja_variables_t* /*unused*/,
                const char* /*unused*/,
                const char* schema_content,
@@ -92,9 +100,15 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
     };
 
     std::string query;
-    auto        status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
+#    if PROFILER_HUB_ROCPD_SQL_HAS_SCHEMA_VERSION
+    rocpd_version_triplet_t schema_version{ 0, 0, 0 };  // 0,0,0 = latest available schema
+#    endif
+    auto status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
                                         schema_kind,
                                         ROCPD_SQL_OPTIONS_NONE,
+#    if PROFILER_HUB_ROCPD_SQL_HAS_SCHEMA_VERSION
+                                        schema_version,
+#    endif
                                         &info,
                                         load_schema_cb,
                                         nullptr,

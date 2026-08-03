@@ -39,13 +39,13 @@
 ///            compatible, it is assumed that the client will default-initialize all structs.
 ///
 /// @ingroup LibInit
-#define PAL_INTERFACE_MAJOR_VERSION 986
+#define PAL_INTERFACE_MAJOR_VERSION 998
 
 /// Minimum major interface version. This is the minimum interface version PAL supports in order to support backward
 /// compatibility. When it is equal to PAL_INTERFACE_MAJOR_VERSION, only the latest interface version is supported.
 ///
 /// @ingroup LibInit
-#define PAL_MINIMUM_INTERFACE_MAJOR_VERSION 916
+#define PAL_MINIMUM_INTERFACE_MAJOR_VERSION 948
 
 /// Minimum supported major interface version for devdriver library. This is the minimum interface version of the
 /// devdriver library that PAL is backwards compatible to.
@@ -67,7 +67,6 @@
  */
 #define PAL_INTERFACE_VERSION (PAL_INTERFACE_MAJOR_VERSION << 16)
 
-#if PAL_COMPILE_TYPE != 0
 // Static asserts to ensure clients define PAL_CLIENT_INTERFACE_MAJOR_VERSION and that it falls in the supported range.
 #ifndef PAL_CLIENT_INTERFACE_MAJOR_VERSION
     static_assert(false, "The client must link against 'palUtil' or 'pal' in CMake!");
@@ -75,6 +74,5 @@
     static_assert((PAL_CLIENT_INTERFACE_MAJOR_VERSION >= PAL_MINIMUM_INTERFACE_MAJOR_VERSION) &&
                   (PAL_CLIENT_INTERFACE_MAJOR_VERSION <= PAL_INTERFACE_MAJOR_VERSION),
                   "The specified PAL_CLIENT_INTERFACE_MAJOR_VERSION is not supported.");
-#endif
 #endif
 

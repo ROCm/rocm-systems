@@ -8,16 +8,16 @@
 #include "common/defines.h"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
-#include "common/json_config.hpp"
 #include "common/path.hpp"
 #include "core/argparse.hpp"
 #include "core/mproc.hpp"
 #include "core/timemory.hpp"
 
+#include <spdlog/fmt/ranges.h>
+
 #include <timemory/log/macros.hpp>
 #include <timemory/signals/signal_handlers.hpp>
 #include <timemory/utility/argparse.hpp>
-#include <timemory/utility/join.hpp>
 
 #include <algorithm>
 #include <array>
@@ -43,7 +43,6 @@ namespace env_vars  = rocprofsys::env_vars;
 namespace utils     = rocprofsys::common_utils;
 using settings      = ::rocprofsys::settings;
 using parser_data_t = rocprofsys::argparse::parser_data;
-using namespace ::timemory::join;
 
 namespace
 {
@@ -78,13 +77,6 @@ reset_color()
 {
     return monochrome_flag().load(std::memory_order_relaxed) ? std::string_view{}
                                                              : ANSI_RESET;
-}
-
-std::string_view
-basename_of(std::string_view path)
-{
-    const auto slash = path.rfind('/');
-    return (slash == std::string_view::npos) ? path : path.substr(slash + 1);
 }
 
 int
@@ -362,8 +354,7 @@ tool_runner::prepare_command(const char* exe)
     new_argv.reserve(data.out.command.size() + LAUNCHER_INJECT_SLOTS);
     for(const auto& arg : data.out.command)
     {
-        if(!injected &&
-           basename_of(arg).find(data.out.launcher) != std::string_view::npos)
+        if(!injected && path::filename(arg).find(data.out.launcher) != std::string::npos)
         {
             new_argv.emplace_back(exe);
             new_argv.emplace_back("--");
@@ -374,10 +365,9 @@ tool_runner::prepare_command(const char* exe)
 
     if(!injected)
     {
-        throw std::runtime_error(
-            join("", "Unable to match launcher \"", data.out.launcher,
-                 "\" to any arguments on the command line: \"",
-                 join(array_config{ " ", "", "" }, data.out.command), "\""));
+        throw std::runtime_error(fmt::format(
+            R"(Unable to match launcher "{}" to any arguments on the command line: "{}")",
+            data.out.launcher, fmt::join(data.out.command, " ")));
     }
 
     data.out.command = std::move(new_argv);
@@ -494,7 +484,7 @@ tool_runner::do_full_parse()
     rocprofsys::argparse::init_parser(data);
     signals::disable_signal_detection(signals::signal_settings::get_enabled());
 
-    auto parser = parser_t{ std::string{ basename_of(argv[0]) }, build_description() };
+    auto parser = parser_t{ path::filename(argv[0]), build_description() };
 
     configure_parser(parser);
 
