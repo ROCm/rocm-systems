@@ -51,13 +51,16 @@ find_package(Python3 REQUIRED)
 # generally needed
 find_package(rocprofiler-sdk REQUIRED)
 
-# rocSHMEM's installed config may call find_dependency(NUMA). Add ROCm's nested
-# rocm_sysdeps prefix so the integration tests can resolve numa-config.cmake.
-foreach(_rocm_root ${rocprofiler-sdk_ROOT_DIR} ${ROCM_PATH} /opt/rocm)
-    if(EXISTS "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA")
-        list(PREPEND CMAKE_PREFIX_PATH "${_rocm_root}/lib/rocm_sysdeps")
-    endif()
-endforeach()
+# rocSHMEM's installed config may call find_dependency(NUMA). Honor a user-provided
+# NUMA_DIR; otherwise use the first packaged ROCm configuration that is available.
+if(NOT NUMA_DIR)
+    foreach(_rocm_root ${rocprofiler-sdk_ROOT_DIR} ${ROCM_PATH} /opt/rocm)
+        if(EXISTS "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA/numa-config.cmake")
+            set(NUMA_DIR "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA")
+            break()
+        endif()
+    endforeach()
+endif()
 
 find_package(rocprofiler_sdk_pytest REQUIRED)
 

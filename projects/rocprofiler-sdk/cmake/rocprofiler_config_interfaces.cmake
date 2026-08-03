@@ -116,14 +116,16 @@ if(rocm_version_FOUND)
          "${rocm_version_DIR}/lib/cmake")
 endif()
 
-# rocSHMEM's installed config may call find_dependency(NUMA). ROCm ships numa-config.cmake
-# under the nested rocm_sysdeps prefix, which is not searched by default, so add that
-# prefix when it is available.
-foreach(_rocm_root ${rocm_version_DIR} ${ROCM_PATH} ${ROCPROFILER_DEFAULT_ROCM_PATH})
-    if(EXISTS "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA")
-        list(PREPEND CMAKE_PREFIX_PATH "${_rocm_root}/lib/rocm_sysdeps")
-    endif()
-endforeach()
+# rocSHMEM's installed config may call find_dependency(NUMA). Honor a user-provided
+# NUMA_DIR; otherwise use the first packaged ROCm configuration that is available.
+if(NOT NUMA_DIR)
+    foreach(_rocm_root ${rocm_version_DIR} ${ROCM_PATH} ${ROCPROFILER_DEFAULT_ROCM_PATH})
+        if(EXISTS "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA/numa-config.cmake")
+            set(NUMA_DIR "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA")
+            break()
+        endif()
+    endforeach()
+endif()
 
 find_package(
     hip
