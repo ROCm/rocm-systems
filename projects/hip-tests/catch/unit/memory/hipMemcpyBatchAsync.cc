@@ -194,32 +194,32 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Negative) {
 
   SECTION("Null destination array") {
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(nullptr, src_ptrs.data(), sizes.data(), kCount, nullptr,
-                                        attrs_idxs, 0, stream_guard.stream()),
+                                        attrs_idxs, 0, nullptr, stream_guard.stream()),
                     hipErrorInvalidValue);
   }
 
   SECTION("Null source array") {
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dst_ptrs.data(), nullptr, sizes.data(), kCount, nullptr,
-                                        attrs_idxs, 0, stream_guard.stream()),
+                                        attrs_idxs, 0, nullptr, stream_guard.stream()),
                     hipErrorInvalidValue);
   }
 
   SECTION("Null sizes array") {
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), nullptr, kCount, nullptr,
-                                        attrs_idxs, 0, stream_guard.stream()),
+                                        attrs_idxs, 0, nullptr, stream_guard.stream()),
                     hipErrorInvalidValue);
   }
 
   SECTION("Zero count") {
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), 0, nullptr,
-                                        attrs_idxs, 0, stream_guard.stream()),
+                                        attrs_idxs, 0, nullptr, stream_guard.stream()),
                     hipErrorInvalidValue);
   }
 
   SECTION("Null destination element") {
     dst_ptrs[1] = nullptr;
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount,
-                                        nullptr, attrs_idxs, 0, stream_guard.stream()),
+                                        nullptr, attrs_idxs, 0, nullptr, stream_guard.stream()),
                     hipErrorInvalidValue);
   }
 
@@ -262,7 +262,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Negative) {
   SECTION("Null fail index on zero size") {
     sizes[1] = 0;
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount,
-                                        nullptr, attrs_idxs, 0, stream_guard.stream()),
+                                        nullptr, attrs_idxs, 0, nullptr, stream_guard.stream()),
                     hipErrorInvalidValue);
   }
 
@@ -270,7 +270,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Negative) {
     src_ptrs[1] = static_cast<void*>(src_allocs[1].ptr() + 1);
     sizes[1] = kSmallCopySize;
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount,
-                                        nullptr, attrs_idxs, 0, stream_guard.stream()),
+                                        nullptr, attrs_idxs, 0, nullptr, stream_guard.stream()),
                     hipErrorInvalidValue);
   }
 
@@ -278,7 +278,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Negative) {
     dst_ptrs[1] = static_cast<void*>(dst_allocs[1].ptr() + 1);
     sizes[1] = kSmallCopySize;
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount,
-                                        nullptr, attrs_idxs, 0, stream_guard.stream()),
+                                        nullptr, attrs_idxs, 0, nullptr, stream_guard.stream()),
                     hipErrorInvalidValue);
   }
 }
@@ -313,13 +313,13 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Negative) {
   SECTION("Null attrs with nonzero numAttrs") {
     HIP_CHECK_ERROR(
         hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount, nullptr,
-                            attrs_idxs.data(), 1, stream_guard.stream()),
+                            attrs_idxs.data(), 1, nullptr, stream_guard.stream()),
         hipErrorInvalidValue);
   }
 
   SECTION("Null attrsIdxs with nonzero numAttrs") {
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount,
-                                        attrs.data(), nullptr, 1, stream_guard.stream()),
+                                        attrs.data(), nullptr, 1, nullptr, stream_guard.stream()),
                     hipErrorInvalidValue);
   }
 
@@ -327,14 +327,14 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Negative) {
     attrs_idxs[0] = 1;
     HIP_CHECK_ERROR(
         hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount, attrs.data(),
-                            attrs_idxs.data(), 1, stream_guard.stream()),
+                            attrs_idxs.data(), 1, nullptr, stream_guard.stream()),
         hipErrorInvalidValue);
   }
 
   SECTION("numAttrs exceeds count") {
     HIP_CHECK_ERROR(
         hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount, attrs.data(),
-                            attrs_idxs.data(), kCount + 1, stream_guard.stream()),
+                            attrs_idxs.data(), kCount + 1, nullptr, stream_guard.stream()),
         hipErrorInvalidValue);
   }
 
@@ -342,7 +342,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Negative) {
     attrs_idxs[1] = 0;
     HIP_CHECK_ERROR(
         hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount, attrs.data(),
-                            attrs_idxs.data(), 2, stream_guard.stream()),
+                            attrs_idxs.data(), 2, nullptr, stream_guard.stream()),
         hipErrorInvalidValue);
   }
 
@@ -350,7 +350,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Negative) {
     attrs_idxs[1] = kCount;
     HIP_CHECK_ERROR(
         hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount, attrs.data(),
-                            attrs_idxs.data(), 2, stream_guard.stream()),
+                            attrs_idxs.data(), 2, nullptr, stream_guard.stream()),
         hipErrorInvalidValue);
   }
 
@@ -358,7 +358,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Negative) {
     attrs[0].srcAccessOrder = hipMemcpySrcAccessOrderInvalid;
     HIP_CHECK_ERROR(
         hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount, attrs.data(),
-                            attrs_idxs.data(), 1, stream_guard.stream()),
+                            attrs_idxs.data(), 1, nullptr, stream_guard.stream()),
         hipErrorInvalidValue);
   }
 }
@@ -395,7 +395,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_Swap) {
 
   hipError_t status =
       hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), src_ptrs.size(), &attr,
-                          attrs_idxs, 1, stream_guard.stream());
+                          attrs_idxs, 1, nullptr, stream_guard.stream());
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
   }
@@ -455,7 +455,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_Functional) {
   }
 
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), copy_count, &attr,
-                                attrs_idxs, 1, stream_guard.stream()));
+                                attrs_idxs, 1, nullptr, stream_guard.stream()));
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
 
   if (pointer_pattern == PointerPattern::kBroadcastSource) {
@@ -493,7 +493,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2D_Functional) {
   FillHostBuffers(src, copy_size);
 
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), copy_count, nullptr,
-                                nullptr, 0, stream_guard.stream()));
+                                nullptr, 0, nullptr, stream_guard.stream()));
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
 
   VerifyDeviceBuffers(dst_ptrs, copy_size);
@@ -529,7 +529,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2D_Pageable_DuringApiCall_SourceAccess) 
   FillHostBuffers(src, copy_size, kOriginalValue);
 
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), copy_count, &attr,
-                                attrs_idxs, 1, stream_guard.stream()));
+                                attrs_idxs, 1, nullptr, stream_guard.stream()));
   FillHostBuffers(src, copy_size, kAlteredValue);
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
   VerifyDeviceBuffers(dst_ptrs, copy_size, kOriginalValue);
@@ -571,7 +571,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2D_Pageable_Stream_SourceAccess) {
                              stream_guard.stream()));
   }
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), copy_count, &attr,
-                                attrs_idxs, 1, stream_guard.stream()));
+                                attrs_idxs, 1, nullptr, stream_guard.stream()));
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
 
   VerifyDeviceBuffers(dst_ptrs, copy_size, kStreamProducedValue);
@@ -605,7 +605,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2H_Functional) {
   FillDeviceBuffers(src_ptrs, copy_size, kPatternValue);
 
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), copy_count, nullptr,
-                                nullptr, 0, stream_guard.stream()));
+                                nullptr, 0, nullptr, stream_guard.stream()));
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
 
   VerifyHostBuffers(dst, copy_size);
@@ -640,7 +640,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2H_Functional) {
   FillHostBuffers(src, copy_size);
 
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), copy_count, nullptr,
-                                nullptr, 0, stream_guard.stream()));
+                                nullptr, 0, nullptr, stream_guard.stream()));
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
 
   VerifyHostBuffers(dst, copy_size);
@@ -696,7 +696,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_Functional) {
   HIP_CHECK(hipMemcpy(d2h_src.ptr(), source.data(), copy_size, hipMemcpyHostToDevice));
 
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), sizes.size(),
-                                nullptr, nullptr, 0, stream_guard.stream()));
+                                nullptr, nullptr, 0, nullptr, stream_guard.stream()));
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
 
   std::vector<int> result(copy_elements);
@@ -754,7 +754,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Stream) {
     }
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount, nullptr,
-                                  nullptr, 0, stream_guard.stream()));
+                                  nullptr, 0, nullptr, stream_guard.stream()));
     HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
 
     VerifyDeviceBuffers(dst_ptrs, kSmallCopySize);
@@ -835,7 +835,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Functional) {
   FillDeviceBuffers(src_ptrs, copy_size, kPatternValue);
   HIP_CHECK(hipSetDevice(stream_device));
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), sizes.size(), &attr,
-                                attrs_idxs, 1, stream_guard.stream()));
+                                attrs_idxs, 1, nullptr, stream_guard.stream()));
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
 
   VerifyDeviceBuffers(dst_ptrs, copy_size);
@@ -1620,7 +1620,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_swap_cp) {
 
   size_t failIdx = 0;
   hipError_t err = hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1,
-                                       stream);
+                                       &failIdx, stream);
   if (err == hipErrorNotSupported) {
     HIP_CHECK(hipStreamDestroy(stream));
     HIP_CHECK(hipFree(d_a));
@@ -1686,7 +1686,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_HD_Swap) {
 
   size_t failIdx = 0;
   hipError_t err = hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1,
-                                       stream);
+                                       &failIdx, stream);
   if (err == hipErrorNotSupported) {
     HIP_CHECK(hipStreamDestroy(stream));
     HIP_CHECK(hipHostFree(h_pinned));
@@ -2684,39 +2684,39 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_NegativeTsts) {
   size_t failIdx;
   SECTION("Dst Array as nullptr") {
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(nullptr, srcPtr, sizes, count, nullptr,
-                                        attrsIdxs, numAttrs, stream),
+                                        attrsIdxs, numAttrs, &failIdx, stream),
                     hipErrorInvalidValue);
   }
   SECTION("Src Array as nullptr") {
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dstPtr, nullptr, sizes, count, nullptr,
-                                        attrsIdxs, numAttrs, stream),
+                                        attrsIdxs, numAttrs, &failIdx, stream),
                     hipErrorInvalidValue);
   }
   SECTION("Count as zero") {
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dstPtr, srcPtr, sizes, 0, nullptr,
-                                        attrsIdxs, numAttrs, stream),
+                                        attrsIdxs, numAttrs, &failIdx, stream),
                     hipErrorInvalidValue);
   }
   SECTION("sizes Array as nullptr") {
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dstPtr, srcPtr, nullptr, count, nullptr,
-                                        attrsIdxs, numAttrs, stream),
+                                        attrsIdxs, numAttrs, &failIdx, stream),
                     hipErrorInvalidValue);
   }
 #if 0 // Enable these tests when support for memcpy attributes is enabled.
   SECTION("Number of Attributes as zero") {
     HIP_CHECK_ERROR(
-        hipMemcpyBatchAsync(dstPtr, srcPtr, sizes, count, attr, attrsIdxs, 0, stream),
+        hipMemcpyBatchAsync(dstPtr, srcPtr, sizes, count, attr, attrsIdxs, 0, &failIdx, stream),
         hipErrorInvalidValue);
   }
   SECTION("Attr Array as nullptr") {
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dstPtr, srcPtr, sizes, count, nullptr, attrsIdxs, numAttrs,
-                                        stream),
+                                        &failIdx, stream),
                     hipErrorInvalidValue);
   }
 
   SECTION("attrsIdxs Array as nullptr") {
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dstPtr, srcPtr, sizes, count, attr, nullptr, numAttrs,
-                                        stream),
+                                        &failIdx, stream),
                     hipErrorInvalidValue);
   }
 #endif
