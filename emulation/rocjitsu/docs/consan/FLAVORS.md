@@ -138,22 +138,24 @@ intended.
 
 ## Choosing a flavor and engine
 
-For most structured investigations, start with the **MOI Record/Replay**
-engine. It combines a clean, inspectable host-side model with broad static-site
-instrumentation. Loading the hook selects MOI Record/Replay by default;
-`RJ_CONSAN_MODE=record-replay` may be stated explicitly in a saved command.
+Loading the hook currently selects **MOI Record/Replay** by default. It remains
+the inspectable expert engine for synchronization history. On gfx1201, however,
+the [empirical study](GFX1201_EMPIRICAL_STUDY.md) recommends **MOI Sampled** for
+ordinary barrier/LDS triage and Record/Replay for expert atomic order/scope
+investigations. Other targets require their own empirical qualification.
 
-That recommendation is not a completeness claim. Record/Replay retains a
+Record/Replay's inspectable role is not a completeness claim. It retains a
 bounded first-light snapshot: each static slot is claimed once for a loaded
 code object, and generation filtering compares only records from the same
-hardware dispatch. Consequently, complete static patch coverage does not
-imply complete dynamic-history retention or fault-detection sensitivity; a
-clean replay remains inconclusive.
+hardware dispatch. Consequently, complete static patch coverage does not imply
+complete dynamic-history retention or fault-detection sensitivity; a clean
+replay remains inconclusive.
 
 - Choose **MOI Inline Shadow** when the strongest current supported-form,
   immediate device-side attribution matters more than its higher device work.
 - Choose **MOI Sampled** for broad statistical runs where lower retained
-  state matters more than detecting every individual manifestation.
+  state matters more than detecting every individual manifestation. Sweep
+  multiple runtime offsets when confidence matters.
 - Choose the **SuperCollider flavor** for its complementary
   perturbation/value-instability signal, especially when structured causality
   is unnecessary or MOI's bounded evidence misses the manifestation.
@@ -161,3 +163,8 @@ clean replay remains inconclusive.
 Commands and ordinary no-tuning defaults are in [USAGE.md](USAGE.md), while
 [DESIGN.md](DESIGN.md) defines the detailed
 algorithms, report layouts, instruction coverage, and semantic boundaries.
+
+The pseudocode in the gfx1201 empirical study is the canonical audience-facing
+explainer for the four probe shapes. This file remains the detailed phase and
+data-path comparison; future target studies should link to those explanations
+rather than copy them.
