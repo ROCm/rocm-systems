@@ -94,7 +94,7 @@ def _zero_multimem_handle() -> ncclMultimemHandle:
 
 @cute.native_struct
 class LsaBarrierSession:
-    """LSA (Locally Shared Address) barrier session — intra-node, peer-access
+    """LSA (Load/Store Accessible) barrier session — intra-node, peer-access
     based. Constructed via :func:`lsa_session`."""
 
     ptr: _LLVMPtrType

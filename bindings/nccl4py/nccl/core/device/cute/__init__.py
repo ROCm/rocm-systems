@@ -1,4 +1,18 @@
-"""User-facing CuTeDSL bindings for the NCCL device API.
+"""Experimental CuTeDSL bindings for the NCCL device API.
+
+.. warning::
+
+    Experimental and unstable. This subpackage carries no semantic-versioning
+    guarantee: symbols may change or be removed in any release before nccl4py
+    1.0.
+
+    The selected ``libnccl_device.bc`` must match exactly the NCCL version
+    nccl4py was built against -- the ``bindings`` version reported by
+    ``nccl.core.show_versions()``. Resolution prefers
+    ``$NCCL_HOME/lib/libnccl_device.bc`` and otherwise uses the copy from the
+    installed ``nvidia-nccl-cu12`` / ``nvidia-nccl-cu13`` wheel. No version
+    check is performed; a mismatch can cause link errors or incorrect kernel
+    behavior.
 
 See ``examples/cute/main.py`` for a complete, runnable example.
 """

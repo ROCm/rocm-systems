@@ -134,7 +134,7 @@ class NCCLConfig(LowppSpec, lowpp_cls=_nccl_bindings.Config):
     """Maximum number of peers any rank will concurrently communicate with using P2P (NCCL 2.30+). Positive integer. If unset, NCCL uses the communicator size."""
 
     graph_stream_ordering: int | None = None
-    """Whether NCCL preserves stream-ordering semantics for collectives captured into CUDA graphs. Supported values are 0 (disabled) or 1 (enabled). Cannot be combined with ``graph_usage_mode=2``. Also controllable via the ``NCCL_GRAPH_STREAM_ORDERING`` environment variable. If unset, NCCL uses 1."""
+    """Whether NCCL preserves stream-ordering semantics for collectives captured into CUDA graphs. Supported values are 0 (disabled) or 1 (enabled). The value 0 cannot be combined with ``graph_usage_mode=2``. Also controllable via the ``NCCL_GRAPH_STREAM_ORDERING`` environment variable. If unset, NCCL uses 1."""
 
 
 @dataclass(frozen=True)
@@ -167,7 +167,7 @@ class TeamRequirement:
     Pass a tuple of these as :py:attr:`NCCLDevCommRequirements.teams`. When
     ``multimem`` is True, NCCL allocates a multicast handle for the team,
     retrievable afterwards via
-    :py:meth:`~nccl.core.resources.DevCommResource.multimem_handle`.
+    :py:meth:`~nccl.core.DevCommResource.multimem_handle`.
     """
 
     team: NCCLTeam
@@ -179,8 +179,8 @@ class LsaBarrierRequirement:
     """Requests an LSA barrier resource on ``team`` with ``n_barriers`` barriers.
 
     Add to :py:attr:`NCCLDevCommRequirements.resources`; the finalized
-    :py:class:`~nccl.core.resources.LsaBarrierHandle` is returned in
-    :py:attr:`~nccl.core.resources.DevCommResource.resource_handles`.
+    :py:class:`~nccl.core.LsaBarrierHandle` is returned in
+    :py:attr:`~nccl.core.DevCommResource.resource_handles`.
     """
 
     team: NCCLTeam
@@ -192,8 +192,8 @@ class GinBarrierRequirement:
     """Requests a GIN barrier resource on ``team`` with ``n_barriers`` barriers.
 
     Add to :py:attr:`NCCLDevCommRequirements.resources`; the finalized
-    :py:class:`~nccl.core.resources.GinBarrierHandle` is returned in
-    :py:attr:`~nccl.core.resources.DevCommResource.resource_handles`.
+    :py:class:`~nccl.core.GinBarrierHandle` is returned in
+    :py:attr:`~nccl.core.DevCommResource.resource_handles`.
     """
 
     team: NCCLTeam
@@ -207,8 +207,8 @@ class LLA2ARequirement:
     ``max_element_size`` bytes each.
 
     Add to :py:attr:`NCCLDevCommRequirements.resources`; the finalized
-    :py:class:`~nccl.core.resources.LLA2AHandle` is returned in
-    :py:attr:`~nccl.core.resources.DevCommResource.resource_handles`.
+    :py:class:`~nccl.core.LLA2AHandle` is returned in
+    :py:attr:`~nccl.core.DevCommResource.resource_handles`.
     """
 
     n_blocks: int
@@ -255,7 +255,7 @@ class NCCLDevCommRequirements(LowppSpec, lowpp_cls=_nccl_bindings.DevCommRequire
     """LSA low-latency all-to-all slot count. If unset, NCCL uses 0."""
 
     gin_force_enable: bool | None = None
-    """Force-enable GPU Interconnect Network. If unset, NCCL uses False."""
+    """Force-enable GPU-Initiated Networking (GIN). If unset, NCCL uses False."""
 
     gin_context_count: int | None = None
     """Number of GIN contexts (hint; actual count may differ). If unset, NCCL uses 4."""
@@ -294,12 +294,12 @@ class NCCLDevCommRequirements(LowppSpec, lowpp_cls=_nccl_bindings.DevCommRequire
     keeping first-appearance order; multimem is requested for a team if any of
     its entries sets it. A team requested with ``multimem=True`` yields a
     multimem handle retrievable via
-    :py:meth:`~nccl.core.resources.DevCommResource.multimem_handle`."""
+    :py:meth:`~nccl.core.DevCommResource.multimem_handle`."""
 
     resources: tuple[LsaBarrierRequirement | GinBarrierRequirement | LLA2ARequirement, ...] = ()
     """Device resource requirements (LSA/GIN barriers, low-latency all-to-all).
     Each entry yields, in order, a handle in
-    :py:attr:`~nccl.core.resources.DevCommResource.resource_handles`. Entries are
+    :py:attr:`~nccl.core.DevCommResource.resource_handles`. Entries are
     kept as-is (not merged): each is a distinct resource."""
 
 
@@ -1073,7 +1073,7 @@ class Communicator:
 
     @property
     def gin_type(self) -> NcclGinType:
-        """GPU Interconnect Network (GIN) type.
+        """GPU-Initiated Networking (GIN) type.
 
         If equal to NcclGinType.NONE, a device communicator cannot be
         created with GIN resources.
@@ -1087,7 +1087,7 @@ class Communicator:
 
     @property
     def n_lsa_teams(self) -> int:
-        """Number of Local Shared Array (LSA) teams for this communicator.
+        """Number of Load/Store Accessible (LSA) teams for this communicator.
 
         Raises:
             NcclInvalid: If the communicator is not initialized.
@@ -1098,7 +1098,7 @@ class Communicator:
 
     @property
     def team_world(self) -> NCCLTeam:
-        """The world team for this communicator: ``{nranks, rank, 1}``.
+        """The world team for this communicator.
 
         Raises:
             NcclInvalid: If the communicator is not initialized.
@@ -1109,7 +1109,7 @@ class Communicator:
 
     @property
     def team_lsa(self) -> NCCLTeam:
-        """The LSA team for this communicator: ``{lsaSize, lsaSelf, 1}``.
+        """The LSA team for this communicator.
 
         Raises:
             NcclInvalid: If the communicator is not initialized.
@@ -1120,8 +1120,7 @@ class Communicator:
 
     @property
     def team_rail(self) -> NCCLTeam:
-        """The rail team for this communicator:
-        ``{nranks/lsaSize, rank/lsaSize, lsaSize}``.
+        """The rail team for this communicator.
 
         Raises:
             NcclInvalid: If the communicator is not initialized.
@@ -1173,9 +1172,6 @@ class Communicator:
 
         Raises:
             NcclInvalid: If the communicator is not initialized.
-
-        See Also:
-            :c:func:`ncclTeamRankToWorld`
         """
         self._check_valid("team_rank_to_world")
         team_lowpp = team._to_lowpp()
@@ -1201,9 +1197,6 @@ class Communicator:
 
         Raises:
             NcclInvalid: If the communicator is not initialized.
-
-        See Also:
-            :c:func:`ncclTeamRankToLsa`
         """
         self._check_valid("team_rank_to_lsa")
         team_lowpp = team._to_lowpp()
@@ -1352,9 +1345,10 @@ class Communicator:
         that transfers the local buffer contents to the target peer's
         registered window and notifies that peer. The peer can wait for
         this signal (and thus for the put to complete) using
-        :py:meth:`wait_signal`. The peer's memory must be registered with
-        :py:meth:`register_window`; pass the peer's window handle as
-        ``peer_window`` (e.g. obtained via an allgather of window handles).
+        :py:meth:`wait_signal`. Both the peer's memory and ``local_buffer``
+        must be registered with :py:meth:`register_window`; pass the peer's
+        window handle as ``peer_window`` (e.g. obtained via an allgather of
+        window handles).
 
         Args:
             local_buffer: Source buffer whose contents are put to the peer.
@@ -1509,9 +1503,9 @@ class Communicator:
             sendbuf: Source buffer containing data to be reduced.
             recvbuf: Destination buffer for the reduced result. Only used on
                 the root rank in Reduce mode.
-            op: Reduction operator (e.g. :py:data:`~nccl.core.SUM`,
-                :py:data:`~nccl.core.MAX`, :py:data:`~nccl.core.MIN`,
-                :py:data:`~nccl.core.AVG`, :py:data:`~nccl.core.PROD`, or a
+            op: Reduction operator (e.g. :py:attr:`NcclRedOp.SUM`,
+                :py:attr:`NcclRedOp.MAX`, :py:attr:`NcclRedOp.MIN`,
+                :py:attr:`NcclRedOp.AVG`, :py:attr:`NcclRedOp.PROD`, or a
                 :py:class:`~nccl.core.CustomRedOp`).
             root: Root rank that receives the reduced result (0 to
                 ``nranks - 1``). If ``None``, performs an all-reduce.
@@ -1609,9 +1603,9 @@ class Communicator:
         Args:
             sendbuf: Source buffer (size ``>= nranks * recvcount`` elements).
             recvbuf: Destination buffer with ``recvcount`` elements.
-            op: Reduction operator (e.g. :py:data:`~nccl.core.SUM`,
-                :py:data:`~nccl.core.MAX`, :py:data:`~nccl.core.MIN`,
-                :py:data:`~nccl.core.AVG`, :py:data:`~nccl.core.PROD`, or a
+            op: Reduction operator (e.g. :py:attr:`NcclRedOp.SUM`,
+                :py:attr:`NcclRedOp.MAX`, :py:attr:`NcclRedOp.MIN`,
+                :py:attr:`NcclRedOp.AVG`, :py:attr:`NcclRedOp.PROD`, or a
                 :py:class:`~nccl.core.CustomRedOp`).
             stream: CUDA stream for the operation. Defaults to ``None`` (the
                 default stream).
@@ -2073,6 +2067,10 @@ class Communicator:
         self, requirements: NCCLDevCommRequirements | None = None
     ) -> DevCommResource:
         """Creates a device communicator for device-side NCCL operations.
+
+        This is a collective call: every rank in the communicator must
+        participate. When called inside a group, the result may not be filled
+        in until the group completes.
 
         Device communicators enable direct GPU kernel access to NCCL
         communication primitives. Multiple device communicators can be

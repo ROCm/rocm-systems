@@ -37,12 +37,9 @@ __all__ = [
 
 
 class MultimemHandle(LowppView, lowpp_cls=_nccl_bindings.MultimemHandle):
-    """Read-only, live view of ``ncclMultimemHandle_t``.
-
-    Multimem handles are produced by NCCL during device communicator creation.
-    Users should pass returned handles back to NCCL APIs rather than
-    constructing them directly. Fields read the underlying struct directly, so
-    values NCCL writes after a non-blocking call are always current.
+    """Multimem handle, returned by
+    :py:meth:`~nccl.core.DevCommResource.multimem_handle` for a team requested
+    with ``multimem=True``. Pass it to device-side multimem operations.
     """
 
     @property
@@ -52,8 +49,10 @@ class MultimemHandle(LowppView, lowpp_cls=_nccl_bindings.MultimemHandle):
 
 
 class LsaBarrierHandle(LowppView, lowpp_cls=_nccl_bindings.LsaBarrierHandle):
-    """Read-only, live view of an LSA barrier resource, returned by device
-    communicator creation. Pass it to device-side barrier sessions.
+    """LSA barrier handle, returned by
+    :py:attr:`~nccl.core.DevCommResource.resource_handles` for each
+    :py:class:`~nccl.core.LsaBarrierRequirement`. Pass it to device-side
+    barrier sessions.
     """
 
     @property
@@ -68,8 +67,10 @@ class LsaBarrierHandle(LowppView, lowpp_cls=_nccl_bindings.LsaBarrierHandle):
 
 
 class GinBarrierHandle(LowppView, lowpp_cls=_nccl_bindings.GinBarrierHandle):
-    """Read-only, live view of a GIN barrier resource, returned by device
-    communicator creation. Pass it to device-side barrier sessions.
+    """GIN barrier handle, returned by
+    :py:attr:`~nccl.core.DevCommResource.resource_handles` for each
+    :py:class:`~nccl.core.GinBarrierRequirement`. Pass it to device-side
+    barrier sessions.
     """
 
     @property
@@ -79,8 +80,10 @@ class GinBarrierHandle(LowppView, lowpp_cls=_nccl_bindings.GinBarrierHandle):
 
 
 class LLA2AHandle(LowppView, lowpp_cls=_nccl_bindings.LLA2AHandle):
-    """Read-only, live view of a low-latency all-to-all resource, returned by
-    device communicator creation. Pass it to device-side all-to-all sessions.
+    """Low-latency all-to-all handle, returned by
+    :py:attr:`~nccl.core.DevCommResource.resource_handles` for each
+    :py:class:`~nccl.core.LLA2ARequirement`. Pass it to device-side all-to-all
+    sessions.
     """
 
     @property
@@ -273,17 +276,12 @@ class RegisteredWindowHandle(CommResource):
 
     @property
     def is_valid(self) -> bool:
-        """Whether the resource has been initialized and is still valid (not closed)."""
-        return not self._closed and self._handle.ptr
+        """Whether the window is still registered (not closed, handle non-null)."""
+        return not self._closed and bool(self._handle.ptr)
 
     @property
     def handle(self) -> int:
-        """Window handle for NCCL operations.
-
-        Raises:
-            RuntimeError: If the window has been deregistered or the handle
-                is invalid.
-        """
+        """Window handle for NCCL operations, or ``0`` once deregistered."""
         return int(self._handle.ptr)
 
     @property
@@ -329,7 +327,7 @@ class RegisteredWindowHandle(CommResource):
         handle produced during device communicator creation.
 
         Args:
-            multimem: A :class:`MultimemHandle` returned by
+            multimem: A :py:class:`~nccl.core.MultimemHandle` returned by
                 :py:meth:`DevCommResource.multimem_handle`.
             offset: Byte offset within the window buffer. Defaults to 0.
 
@@ -553,6 +551,13 @@ class DevCommResource(CommResource):
         each lookup creates a new facade over the same storage. It remains
         backed by the resource until the device communicator is closed.
 
+        Args:
+            team: The team the handle was requested for, as an entry of the
+                ``teams`` requirement used to create this device communicator.
+
+        Returns:
+            The :py:class:`~nccl.core.MultimemHandle` NCCL filled in for ``team``.
+
         Raises:
             RuntimeError: If the device communicator has been closed.
             KeyError: If ``team`` was not requested with ``multimem=True`` in
@@ -573,12 +578,13 @@ class DevCommResource(CommResource):
         self,
     ) -> tuple[LsaBarrierHandle | GinBarrierHandle | LLA2AHandle, ...]:
         """Finalized resource handles, in the order of
-        :py:attr:`~nccl.core.communicator.NCCLDevCommRequirements.resources`.
+        :py:attr:`~nccl.core.NCCLDevCommRequirements.resources`.
 
         ``resource_handles[i]`` corresponds to ``requirements.resources[i]`` and
-        is a :class:`LsaBarrierHandle`, :class:`GinBarrierHandle`, or
-        :class:`LLA2AHandle` depending on the requirement. Each remains backed by
-        this resource until the device communicator is closed.
+        is an :py:class:`~nccl.core.LsaBarrierHandle`,
+        :py:class:`~nccl.core.GinBarrierHandle`, or
+        :py:class:`~nccl.core.LLA2AHandle` depending on the requirement. Each
+        remains backed by this resource until the device communicator is closed.
         """
         self._check_valid()
         handles = []

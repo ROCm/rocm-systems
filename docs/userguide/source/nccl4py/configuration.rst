@@ -10,13 +10,21 @@ flag enums they consume.
 NCCLConfig
 ==========
 
-Used by :py:meth:`Communicator.init`, :py:meth:`Communicator.split`,
-:py:meth:`Communicator.shrink`, and :py:meth:`Communicator.grow`. Fields
-left unset (``None``) remain at NCCL's internal default; values are
-validated by the C library when the config is consumed.
+Used by :py:meth:`Communicator.init`, :py:meth:`Communicator.initialize`,
+:py:meth:`Communicator.split`, :py:meth:`Communicator.shrink`, and
+:py:meth:`Communicator.grow`. Fields left unset (``None``) remain at NCCL's
+internal default; values are validated by the C library when the config is
+consumed.
 
 .. autoclass:: NCCLConfig
    :members:
+
+CTAPolicy
+=========
+
+.. autoclass:: CTAPolicy
+   :members:
+   :exclude-members: Default, Efficiency, Zero
 
 NCCLDevCommRequirements
 =======================
@@ -27,9 +35,28 @@ Used by :py:meth:`Communicator.create_dev_comm`. Fields left unset
 .. autoclass:: NCCLDevCommRequirements
    :members:
 
-CTAPolicy
-=========
+Requirement entries
+===================
 
-.. autoclass:: CTAPolicy
+The element types of :py:attr:`NCCLDevCommRequirements.teams` and
+:py:attr:`NCCLDevCommRequirements.resources`.
+
+TeamRequirement
+---------------
+.. autoclass:: TeamRequirement
    :members:
-   :exclude-members: Default, Efficiency, Zero
+
+LsaBarrierRequirement
+---------------------
+.. autoclass:: LsaBarrierRequirement
+   :members:
+
+GinBarrierRequirement
+---------------------
+.. autoclass:: GinBarrierRequirement
+   :members:
+
+LLA2ARequirement
+----------------
+.. autoclass:: LLA2ARequirement
+   :members:
