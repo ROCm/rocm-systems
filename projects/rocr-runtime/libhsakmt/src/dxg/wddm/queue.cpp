@@ -663,7 +663,7 @@ hsa_status_t ComputeQueue::KernelDispatchAqlToPm4(char* cpu, hsa_kernel_dispatch
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   int major = device->Major();
-  int i = ib_size;
+  uint32_t i = ib_size;
 
   const amd_kernel_code_t* kernel_object =
       (const amd_kernel_code_t*)GetKernelObjAddr(packet->kernel_object);
@@ -816,7 +816,7 @@ hsa_status_t ComputeQueue::BarrierGenericAqlToPm4(char* cpu, hsa_barrier_and_pac
   }
 
   int major = device->Major();
-  int i = ib_size;
+  uint32_t i = ib_size;
 
   if (packet->completion_signal.handle != 0) {
     amd_signal_t* signal = (amd_signal_t*)packet->completion_signal.handle;
@@ -910,7 +910,7 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* pac
     pr_debug("pm4_addr[%d]=%#x\n", i, pm4_addr[i]);
   }
 
-  int i = ib_size;
+  uint32_t i = ib_size;
 
   if (process_packet) {
     int major = device->Major();

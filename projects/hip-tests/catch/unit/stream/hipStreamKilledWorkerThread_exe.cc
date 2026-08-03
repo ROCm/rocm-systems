@@ -25,7 +25,9 @@ __global__ void NoopKernel() {}
 #include <tlhelp32.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <iostream>
+#include <string>
 #include <vector>
 
 namespace {
@@ -102,6 +104,19 @@ int main() {
   const std::vector<DWORD> after_stream_create = GetCurrentProcessThreadIds();
   const std::vector<DWORD> worker_thread_ids =
       GetNewThreadIds(before_stream_create, after_stream_create);
+
+  // ROCr backend doesn't create per-stream worker threads like PAL does
+  // Check if GPU_ENABLE_PAL env var is set to determine backend
+  const char* pal_enabled = std::getenv("GPU_ENABLE_PAL");
+  const bool using_rocr = (pal_enabled != nullptr && std::string(pal_enabled) == "0");
+
+  if (using_rocr) {
+    // ROCr backend: test is not applicable, exit successfully
+    std::cout << "ROCr backend detected, skipping worker thread test (not applicable)" << std::endl;
+    HIP_CHECK(hipStreamDestroy(stream));
+    return 0;
+  }
+
   if (worker_thread_ids.size() != 1) {
     std::cerr << "Expected one HIP worker thread, found " << worker_thread_ids.size() << std::endl;
     return 1;
