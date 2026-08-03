@@ -129,6 +129,44 @@ signal_less_teardown();
 void
 signal_less_quiesce();
 
+// Observability for the signal-less path. Every stage of
+// eligible-batch -> registered -> EOP proven -> handed off -> finalized bumps a
+// counter, so a break anywhere in the chain is visible in one log line instead of
+// requiring a rebuild. Bumps are skipped entirely unless signal-less is active,
+// so the default path pays one predictable branch.
+enum class signal_less_counter
+{
+    batch_eligible = 0,   // a batch qualified and published its packets untouched
+    entry_registered,     // pending entries the hub accepted
+    register_refused,     // the hub refused a batch eligibility had accepted
+    eop_proven,           // firmware EOP claimed a pending entry
+    eop_unmatched,        // firmware EOP found no pending entry (key mismatch?)
+    handoff_submitted,    // proven completion accepted by the task group
+    handoff_retried,      // rejected; parked in the retry owner
+    finalizer_emitted,    // RESULT_READY: record emitted with KFD timestamps
+    finalizer_no_timing,  // COMPLETED_NO_TIMING: retired, no record
+    kCount
+};
+
+struct signal_less_counters
+{
+    uint64_t batch_eligible      = 0;
+    uint64_t entry_registered    = 0;
+    uint64_t register_refused    = 0;
+    uint64_t eop_proven          = 0;
+    uint64_t eop_unmatched       = 0;
+    uint64_t handoff_submitted   = 0;
+    uint64_t handoff_retried     = 0;
+    uint64_t finalizer_emitted   = 0;
+    uint64_t finalizer_no_timing = 0;
+};
+
+void
+note_signal_less(signal_less_counter which, uint64_t n = 1);
+
+signal_less_counters
+signal_less_stats();
+
 // pthread_atfork CHILD handler entry point (design requirement 8).
 //
 // RESTRICTED CONTEXT: this runs in a forked child where only the forking thread

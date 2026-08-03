@@ -571,13 +571,17 @@ no_signal_finalize(kfd::signal_less_hub_t::proven&& proven)
         _corr_id->sub_ref_count();
     };
 
-    kfd::run_no_signal_finalizer(proven.start_ticks,
-                                 proven.end_ticks,
-                                 _payload.enqueue_ts,
-                                 common::timestamp_ns(),
-                                 _convert,
-                                 _emit,
-                                 _retire);
+    const auto _outcome = kfd::run_no_signal_finalizer(proven.start_ticks,
+                                                       proven.end_ticks,
+                                                       _payload.enqueue_ts,
+                                                       common::timestamp_ns(),
+                                                       _convert,
+                                                       _emit,
+                                                       _retire);
+
+    kfd::note_signal_less(_outcome == kfd::finalize_outcome::result_ready
+                              ? kfd::signal_less_counter::finalizer_emitted
+                              : kfd::signal_less_counter::finalizer_no_timing);
 }
 
 // Hand a proven completion to the async task group. Moves out of `proven` only
@@ -674,7 +678,11 @@ signal_less_batch_eligible(Queue*                                            que
     // fail once the key resolved.
     _inputs.payload_constructible = true;
 
-    if(kfd::batch_is_signal_less_eligible(_inputs)) return true;
+    if(kfd::batch_is_signal_less_eligible(_inputs))
+    {
+        kfd::note_signal_less(kfd::signal_less_counter::batch_eligible);
+        return true;
+    }
     keys_out->clear();
     return false;
 }
@@ -1013,11 +1021,37 @@ write_interceptor(Queue*                                queue,
                 }
             }
 
+
+            {
+                auto tracer_data = _packet_data.callback_record;
+                tracing::execute_phase_enter_callbacks(
+                    _packet_data.tracing_data.callback_contexts,
+                    thr_id,
+                    internal_corr_id,
+                    _packet_data.tracing_data.external_correlation_ids,
+                    ancestor_corr_id,
+                    ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                    ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
+                    tracer_data);
+            }
+
+            // map all the external correlation ids (after enqueue enter phase) for all the contexts
+            // captured by the info session
+            tracing::update_external_correlation_ids(
+                _packet_data.tracing_data.external_correlation_ids,
+                thr_id,
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
+
             // Signal-less: stage this dispatch's owned pending entry. The whole
             // batch is registered below, before the packets publish, so a firmware
             // record can never arrive for a dispatch the hub has not heard of.
             // The payload holds value data and stable ids only -- no Queue&, no
             // context pointers beyond the validated tracing_data, no signal handle.
+            //
+            // Staged HERE, after the enqueue-phase callbacks and after the external
+            // correlation ids are mapped: a snapshot taken earlier carries ids that
+            // were never mapped for this dispatch, and the completion record built
+            // from it would be wrong.
             if(_signal_less_batch && _signal_less_keys[i].has_value())
             {
                 auto _reg           = kfd::signal_less_hub_t::registration{};
@@ -1040,26 +1074,6 @@ write_interceptor(Queue*                                queue,
 
                 _signal_less_regs.emplace_back(std::move(_reg));
             }
-
-            {
-                auto tracer_data = _packet_data.callback_record;
-                tracing::execute_phase_enter_callbacks(
-                    _packet_data.tracing_data.callback_contexts,
-                    thr_id,
-                    internal_corr_id,
-                    _packet_data.tracing_data.external_correlation_ids,
-                    ancestor_corr_id,
-                    ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
-                    ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
-                    tracer_data);
-            }
-
-            // map all the external correlation ids (after enqueue enter phase) for all the contexts
-            // captured by the info session
-            tracing::update_external_correlation_ids(
-                _packet_data.tracing_data.external_correlation_ids,
-                thr_id,
-                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
 
             // Stores the instrumentation pkt (i.e. AQL packets for counter collection)
             // along with an ID of the client we got the packet from (this will be returned via
@@ -1097,15 +1111,22 @@ write_interceptor(Queue*                                queue,
         // know about. Eligibility already asked the hub to accept these keys while
         // holding the queue's gate_lock, and the keys carry this queue's own submit
         // indices, so no other thread can have claimed them since.
+        const auto _signal_less_count = _signal_less_regs.size();
         if(_signal_less_batch &&
            !kfd::signal_less_hub().register_batch(std::move(_signal_less_regs)))
         {
+            kfd::note_signal_less(kfd::signal_less_counter::register_refused);
             // Unreachable by the argument above. The packets have already skipped
             // their completion signals and cannot be put back on the signal path,
             // so the only safe outcome is the leak-and-shout policy: these
             // dispatches emit no record and their correlation ids are not retired.
             ROCP_WARNING << "KFD dispatch-log: signal-less batch registration was refused after "
                             "eligibility accepted it; these dispatches will not complete";
+        }
+        else if(_signal_less_batch)
+        {
+            kfd::note_signal_less(kfd::signal_less_counter::entry_registered,
+                                  _signal_less_count);
         }
 
         // A signal-less batch has no completion signal to wait on -- the firmware

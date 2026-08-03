@@ -483,9 +483,14 @@ drain_records(dlog_session* s)
             if(rec.start_known) signal_less_hub().note_start(key, rec.start_ticks);
             if(auto _proven = signal_less_hub().prove_eop(key, rec.end_ticks, rec.loss_free))
             {
+                note_signal_less(signal_less_counter::eop_proven);
                 hand_off_proven(std::move(*_proven));
                 return;
             }
+            // No pending entry claimed this record. With signal-less active that
+            // means the reader's key does not match the one the enqueue path
+            // registered -- the counter makes that visible instead of silent.
+            note_signal_less(signal_less_counter::eop_unmatched);
 
             // Signal-backed dispatch: unchanged rendezvous deposit. An EOP with no
             // START carries no interval, so there is nothing to deposit for it.
@@ -753,6 +758,23 @@ reader_loop()
         _stats.hits,
         _stats.misses,
         _stats.fallbacks);
+
+    // Signal-less chain, reported from the reader too so the break point is
+    // visible even if teardown does not run. Silent unless the feature is active.
+    const auto _sl = signal_less_stats();
+    ROCP_WARNING_IF(_sl.batch_eligible > 0 || _sl.eop_unmatched > 0) << fmt::format(
+        "KFD dispatch-log signal-less chain: {} eligible batch(es) -> {} registered ({} refused) "
+        "-> {} EOP proven / {} unmatched -> {} handed off ({} retried) -> {} emitted / {} "
+        "no-timing",
+        _sl.batch_eligible,
+        _sl.entry_registered,
+        _sl.register_refused,
+        _sl.eop_proven,
+        _sl.eop_unmatched,
+        _sl.handoff_submitted,
+        _sl.handoff_retried,
+        _sl.finalizer_emitted,
+        _sl.finalizer_no_timing);
 }
 }  // namespace
 

@@ -62,6 +62,9 @@ signal_less_feature_enabled()
     return _enabled;
 }
 
+// Free-standing counters (constant-initialized, so no lazy-init behind them).
+std::atomic<uint64_t> g_counters[static_cast<size_t>(signal_less_counter::kCount)] = {};
+
 // Constant-initialized (no guard variable, no dynamic initialization), so the
 // atfork child handler can store to it with no lazy-init machinery behind it.
 std::atomic<bool> g_child_stale{false};
@@ -117,6 +120,34 @@ retry()
 }
 }  // namespace
 
+void
+note_signal_less(signal_less_counter which, uint64_t n)
+{
+    // Nothing is counted unless the feature is actually active, so the default
+    // path never touches these atomics.
+    if(!signal_less_feature_enabled() || !signal_less_fully_wired()) return;
+    g_counters[static_cast<size_t>(which)].fetch_add(n, std::memory_order_relaxed);
+}
+
+signal_less_counters
+signal_less_stats()
+{
+    auto _at = [](signal_less_counter c) {
+        return g_counters[static_cast<size_t>(c)].load(std::memory_order_relaxed);
+    };
+    auto _s                = signal_less_counters{};
+    _s.batch_eligible      = _at(signal_less_counter::batch_eligible);
+    _s.entry_registered    = _at(signal_less_counter::entry_registered);
+    _s.register_refused    = _at(signal_less_counter::register_refused);
+    _s.eop_proven          = _at(signal_less_counter::eop_proven);
+    _s.eop_unmatched       = _at(signal_less_counter::eop_unmatched);
+    _s.handoff_submitted   = _at(signal_less_counter::handoff_submitted);
+    _s.handoff_retried     = _at(signal_less_counter::handoff_retried);
+    _s.finalizer_emitted   = _at(signal_less_counter::finalizer_emitted);
+    _s.finalizer_no_timing = _at(signal_less_counter::finalizer_no_timing);
+    return _s;
+}
+
 bool
 signal_less_child_stale()
 {
@@ -160,7 +191,12 @@ hand_off_proven(signal_less_hub_t::proven&& p)
     auto& _ops = ops_storage();
 
     auto _result = _ops.submit(p);
-    if(_result == submit_result::accepted) return;
+    if(_result == submit_result::accepted)
+    {
+        note_signal_less(signal_less_counter::handoff_submitted);
+        return;
+    }
+    note_signal_less(signal_less_counter::handoff_retried);
 
     // The executor is closing: stop trying, the flush will finalize what is held.
     if(_result == submit_result::rejected_permanent) retry().close();
@@ -368,9 +404,20 @@ signal_less_teardown()
     auto _steps = real_teardown_steps{};
     run_signal_less_teardown(_steps);
 
-    ROCP_INFO << fmt::format(
-        "KFD dispatch-log: signal-less teardown complete ({} retry-owned completion(s) finalized, "
-        "{} still-pending dispatch(es) stranded)",
+    const auto _c = signal_less_stats();
+    ROCP_WARNING << fmt::format(
+        "KFD dispatch-log signal-less summary: {} eligible batch(es), {} entry(ies) registered ({} "
+        "refused), {} EOP proven / {} unmatched, {} handed off ({} retried), {} record(s) emitted, "
+        "{} completed without timing; teardown finalized {} retry-owned and stranded {}",
+        _c.batch_eligible,
+        _c.entry_registered,
+        _c.register_refused,
+        _c.eop_proven,
+        _c.eop_unmatched,
+        _c.handoff_submitted,
+        _c.handoff_retried,
+        _c.finalizer_emitted,
+        _c.finalizer_no_timing,
         _steps.flushed,
         _steps.leaked);
 }
