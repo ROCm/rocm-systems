@@ -65,10 +65,6 @@ concept tracing_kind_for =
     std::same_as<TracingKind, typename SdkBackend::callback_tracing_kind_t> ||
     std::same_as<TracingKind, typename SdkBackend::buffer_tracing_kind_t>;
 
-// Constrains Externals to sdk_tracing_config's DI surface (settings, feature
-// flags, ROCm domain/event config, finalize-on-error state). A mismatch fails
-// at class declaration, not deep in a method body. `default_sdk_externals`
-// is the production policy; tests supply a mock.
 template <typename Externals>
 concept sdk_tracing_config_externals = requires(std::string_view setting_name) {
     typename Externals::Settings;
@@ -102,9 +98,6 @@ public:
         std::string              domain_defaults;
     };
 
-    /// @brief Gather the ROCm domain choices/description/default value that
-    /// should be registered as the ROCPROFSYS_ROCM_DOMAINS setting. Pure data
-    /// gathering — performs no insertion into any settings store.
     static domain_choice_settings domain_settings();
 
     struct operation_setting_spec
@@ -115,10 +108,6 @@ public:
         std::vector<std::string> operation_choices;
     };
 
-    /// @brief Gather the per-domain operation-filter settings (inclusive,
-    /// exclusive, and backtrace-annotation env vars) that should be
-    /// registered for every domain with named operations. Performs no
-    /// insertion into any settings store.
     static std::vector<operation_setting_spec> operation_settings();
 
     static version_info get_version();
@@ -134,8 +123,6 @@ public:
 
     static std::vector<std::int32_t> get_operations(
         typename SdkBackend::buffer_tracing_kind_t kindv);
-
-    static std::vector<std::string> get_rocm_events();
 
     static std::unordered_set<std::int32_t> get_backtrace_operations(
         typename SdkBackend::callback_tracing_kind_t kindv);
@@ -160,7 +147,7 @@ private:
     static std::unordered_set<std::int32_t> parse_operation_string(
         TracingKind tracing_kind, const std::string& operations_setting = {});
 
-    template <typename TracingKind, typename OperationItems>
+    template <typename OperationItems>
     static std::unordered_set<std::int32_t> operation_ids_for_tracing_kind(
         const std::string& operations_setting, const OperationItems& operation_items);
 
@@ -301,7 +288,7 @@ sdk_tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind
 // ─── operation_ids_for_tracing_kind (tracing kind + optional setting) ────────
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-template <typename TracingKind, typename OperationItems>
+template <typename OperationItems>
 std::unordered_set<std::int32_t>
 sdk_tracing_config<SdkBackend, Externals>::operation_ids_for_tracing_kind(
     const std::string& operations_setting_env_name, const OperationItems& operation_items)
@@ -509,36 +496,33 @@ sdk_tracing_config<SdkBackend, Externals>::operation_settings()
     auto result = std::vector<operation_setting_spec>{};
 
     auto gather_domain_f = [&result](std::string_view domain_name,
-                                     const auto&      concrete_domain) {
-        auto operation_choices = std::vector<std::string>{};
-        operation_choices.insert(operation_choices.end(),
-                                 concrete_domain.operations.begin(),
-                                 concrete_domain.operations.end());
-
-        auto names = assemble_operation_env_names_for_domain(domain_name,
-                                                             !operation_choices.empty());
+                                     const auto&      domain_operations) {
+        const auto names = assemble_operation_env_names_for_domain(
+            domain_name, !domain_operations.empty());
         if(!names)
         {
             return;
         }
 
         result.push_back(operation_setting_spec{
-            names->operations_include_env_name, names->operations_exclude_env_name,
+            names->operations_include_env_name,
+            names->operations_exclude_env_name,
             names->operations_annotate_backtrace_env_name,
-            std::move(operation_choices) });
+            { domain_operations.begin(), domain_operations.end() } });
     };
 
-    gather_domain_f("MARKER_API",
-                    callback_tracing_info[SdkBackend::CALLBACK_TRACING_MARKER_CORE_API]);
+    gather_domain_f(
+        "MARKER_API",
+        callback_tracing_info[SdkBackend::CALLBACK_TRACING_MARKER_CORE_API].operations);
 
     for(const auto& itr : callback_tracing_info)
     {
-        gather_domain_f(itr.name, itr);
+        gather_domain_f(itr.name, itr.operations);
     }
 
     for(const auto& itr : buffered_tracing_info)
     {
-        gather_domain_f(itr.name, itr);
+        gather_domain_f(itr.name, itr.operations);
     }
 
     return result;
@@ -936,14 +920,6 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domains()
     }
 
     return data;
-}
-
-template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
-std::vector<std::string>
-sdk_tracing_config<SdkBackend, Externals>::get_rocm_events()
-{
-    return rocprofsys::delimit(Externals::get_rocm_events_setting(), " ,;\t\n");
 }
 
 template <typename SdkBackend, typename Externals>

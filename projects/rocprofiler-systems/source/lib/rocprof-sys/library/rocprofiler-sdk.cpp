@@ -2487,7 +2487,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     auto _callback_domains = sdk_tracing_config_t::get_callback_domains();
     auto _buffered_domain  = sdk_tracing_config_t::get_buffered_domains();
-    auto _counter_events   = sdk_tracing_config_t::get_rocm_events();
+    auto _counter_events   = config::get_rocm_counter_events();
     auto _version          = sdk_tracing_config_t::get_version();
     if(_version.formatted() == 0)
     {
@@ -2628,14 +2628,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             _data->primary_ctx, buffer_size, watermark,
             ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
             &_data->memory_alloc_buffer));
+
         if(_data->memory_alloc_buffer.handle == 0UL)
         {
             LOG_CRITICAL("Failed to create memory allocation buffer");
             ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
             ::std::abort();
         }
-        auto _ops = sdk_tracing_config_t::get_operations(
-            ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);
 
         ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
             _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION, nullptr, 0,

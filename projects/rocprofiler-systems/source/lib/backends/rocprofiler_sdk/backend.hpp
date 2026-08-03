@@ -5,6 +5,8 @@
 
 #include "backends/rocprofiler_sdk/types.hpp"
 
+#include <rocprofiler-sdk/version.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -441,25 +443,23 @@ public:
         return status;
     }
 
-    /// Cached: the full domain x operation walk is a real SDK cost.
     [[nodiscard]] static const callback_name_info_t& get_callback_tracing_names()
     {
-        static const auto names = Wrapper::get_callback_tracing_names();
-        return names;
+        static const auto cached_names = Wrapper::get_callback_tracing_names();
+        return cached_names;
     }
 
     [[nodiscard]] static const buffer_name_info_t& get_buffer_tracing_names()
     {
-        static const auto names = Wrapper::get_buffer_tracing_names();
-        return names;
+        static const auto cached_names = Wrapper::get_buffer_tracing_names();
+        return cached_names;
     }
 
     static timestamp_t get_timestamp() noexcept
     {
-        timestamp_t ts{};
-        // Return code is always Wrapper::STATUS_SUCCESS.
-        (void) Wrapper::get_timestamp(&ts);
-        return ts;
+        timestamp_t timestamp{};
+        (void) Wrapper::get_timestamp(&timestamp);
+        return timestamp;
     }
 
     static const char* get_status_string(status_t status) noexcept

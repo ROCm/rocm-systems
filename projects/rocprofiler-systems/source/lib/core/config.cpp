@@ -2891,6 +2891,14 @@ get_gpu_perf_counters()
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
+std::vector<std::string>
+get_rocm_counter_events()
+{
+    static auto _v = get_config()->find(std::string{ env_vars::ROCM_EVENTS });
+    return rocprofsys::delimit(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), " ,;\t\n");
+}
+
 bool
 get_trace_thread_locks()
 {

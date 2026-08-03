@@ -41,12 +41,6 @@ struct default_sdk_externals
                    std::string{ ::rocprofsys::env_vars::ROCM_DOMAINS })
             .value_or(std::string{});
     }
-    static std::string get_rocm_events_setting()
-    {
-        return ::rocprofsys::get_setting_value<std::string>(
-                   std::string{ ::rocprofsys::env_vars::ROCM_EVENTS })
-            .value_or(std::string{});
-    }
     static std::string get_gpu_perf_counters()
     {
         return ::rocprofsys::get_gpu_perf_counters();

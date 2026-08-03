@@ -58,7 +58,6 @@ enum backend_tag : int
     buffered_operations                          = 87,
     buffered_domains_memory_copy                 = 88,
     buffered_domains_aliases                     = 89,
-    rocm_events                                  = 90,
     buffered_domains_kfd_events                  = 91,
     buffered_domains_kfd_individual              = 92,
     buffered_domains_allocation                  = 93,
@@ -306,10 +305,10 @@ register_rocm_domains(const std::shared_ptr<fake_settings>& config)
 
 // ─── Externals mock ───────────────────────────────────────────────────────────
 //
-// get_callback_domains() / get_buffered_domains() / get_rocm_events() read through
-// the Externals policy. Mocking it lets tests supply a private fake_settings
-// registry and control the RCCLP/OMPT/unified-memory-profiling flags without ever
-// touching rocprofsys::settings::instance().
+// get_callback_domains() / get_buffered_domains() read through the Externals
+// policy. Mocking it lets tests supply a private fake_settings registry and
+// control the RCCLP/OMPT/unified-memory-profiling flags without ever touching
+// rocprofsys::settings::instance().
 
 class gmock_sdk_externals
 {
@@ -319,7 +318,6 @@ public:
     MOCK_METHOD(bool, get_use_ompt, ());
     MOCK_METHOD(bool, get_use_unified_memory_profiling, ());
     MOCK_METHOD(std::string, get_rocm_domains, ());
-    MOCK_METHOD(std::string, get_rocm_events_setting, ());
     MOCK_METHOD(std::optional<std::string>, get_setting_value, (std::string_view));
     MOCK_METHOD(void, set_state, (std::uint32_t) );
 };
@@ -338,10 +336,6 @@ struct mock_sdk_externals
         return g_mock_externals->get_use_unified_memory_profiling();
     }
     static std::string get_rocm_domains() { return g_mock_externals->get_rocm_domains(); }
-    static std::string get_rocm_events_setting()
-    {
-        return g_mock_externals->get_rocm_events_setting();
-    }
     static std::optional<std::string> get_setting_value(std::string_view s)
     {
         return g_mock_externals->get_setting_value(s);
@@ -367,7 +361,7 @@ protected:
 };
 
 // Fixture for functions that read through the Externals policy
-// (get_callback_domains, get_buffered_domains, get_rocm_events).
+// (get_callback_domains, get_buffered_domains).
 class sdk_tracing_config_domains_test : public ::testing::Test
 {
 protected:
@@ -1474,28 +1468,6 @@ TEST_F(sdk_tracing_config_domains_test,
     EXPECT_THAT(sut::get_backtrace_operations(backend_t::BUFFER_TRACING_MEMORY_COPY),
                 gtest::UnorderedElementsAre(k_memory_copy_host_to_device,
                                             k_memory_copy_device_to_host));
-}
-
-// ─── get_rocm_events ──────────────────────────────────────────────────────────
-
-using rocm_events_sut =
-    sdk_tracing_config<tagged_backend<rocm_events>, mock_sdk_externals>;
-
-TEST_F(sdk_tracing_config_domains_test, get_rocm_events_splits_delimited_setting_string)
-{
-    EXPECT_CALL(*g_mock_externals, get_rocm_events_setting)
-        .WillOnce(gtest::Return(std::string{ "EventA,EventB;EventC" }));
-
-    EXPECT_THAT(rocm_events_sut::get_rocm_events(),
-                gtest::ElementsAre("EventA", "EventB", "EventC"));
-}
-
-TEST_F(sdk_tracing_config_domains_test, get_rocm_events_returns_empty_for_empty_setting)
-{
-    EXPECT_CALL(*g_mock_externals, get_rocm_events_setting)
-        .WillOnce(gtest::Return(std::string{}));
-
-    EXPECT_THAT(rocm_events_sut::get_rocm_events(), gtest::IsEmpty());
 }
 
 }  // namespace rocprofsys::rocprofiler_sdk::testing
