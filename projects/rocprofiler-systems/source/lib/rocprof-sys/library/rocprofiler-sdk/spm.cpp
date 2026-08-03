@@ -186,7 +186,7 @@ parse_requested_counters(const request& req)
 bool
 requested_on_device(const requested_counter& counter, std::uint64_t device_id)
 {
-    return !counter.device_id || *counter.device_id == device_id;
+    return !counter.device_id.has_value() || *counter.device_id == device_id;
 }
 
 bool
