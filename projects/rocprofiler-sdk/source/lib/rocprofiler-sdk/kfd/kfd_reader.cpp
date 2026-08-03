@@ -440,6 +440,41 @@ drain_records(dlog_session* s)
         });
 }
 
+// Loud one-shot overrun report. Reader thread only, so the local static needs no
+// synchronization. Detection/telemetry only: an overrun already dropped records
+// by the time it is observed, and Phase 0 does not change what completes.
+void
+warn_on_overrun(const drain_state& d)
+{
+    static bool warned = false;
+    if(d.overruns == 0 || warned) return;
+    warned = true;
+    ROCP_WARNING << fmt::format(
+        "KFD dispatch-log: ring OVERRUN ({} occurrence(s), at least {} record(s) dropped) -- the "
+        "firmware lapped the reader, so those dispatches have no dispatch-log timestamps. Raise "
+        "the ring with ROCPROFILER_KFD_DISPATCH_LOG_SIZE_MB (currently {} MB max).",
+        d.overruns,
+        d.lost_records,
+        kDlogMaxRingMb);
+}
+
+// KFD_DLOG_STREAM_OP_STATUS is DIAGNOSTICS ONLY: the kernel's counters are logged
+// but never gate a decision (wptr is the design's sole overrun authority).
+void
+log_stream_status(const dlog_session& s)
+{
+    if(s.stream_fd < 0) return;
+    auto args = kfd_dlog_stream_args{};
+    args.op   = KFD_DLOG_STREAM_OP_STATUS;
+    if(ioctl(s.stream_fd, KFD_DLOG_STREAM_IOC, &args) != 0) return;
+    ROCP_INFO << fmt::format(
+        "KFD dispatch-log status: flags=0x{:x} records_read={} source_overruns={} copy_faults={}",
+        args.status.status,
+        args.status.records_read,
+        args.status.source_overruns,
+        args.status.copy_faults);
+}
+
 void
 stop_reader()
 {
@@ -558,18 +593,25 @@ reader_loop()
             uint64_t now_ns = common::timestamp_ns();
 
             total_seen += drain_records(&st.session);
+            warn_on_overrun(st.session.drain);
 
             if(now_ns - last_evict_ns >= kEvictIntervalNs)
             {
                 st.session.drain.evict_stale(now_ns, kStartMaxAgeNs);
                 results_map().evict_stale(now_ns, kResultMaxAgeNs);
+                log_stream_status(st.session);
                 last_evict_ns = now_ns;
             }
         }
     }
 
     // Final drain to catch late records.
-    if(st.session_ready.load(std::memory_order_acquire)) total_seen += drain_records(&st.session);
+    if(st.session_ready.load(std::memory_order_acquire))
+    {
+        total_seen += drain_records(&st.session);
+        warn_on_overrun(st.session.drain);
+        log_stream_status(st.session);
+    }
 
     // Misses are dispatches whose completion callback ran before the reader had
     // deposited their firmware record; they silently used HSA timestamps.

@@ -106,6 +106,21 @@ struct drain_state
     // (doorbell_off << 32 | dispatch_id).
     std::unordered_map<uint64_t, pending_start> pending_starts = {};
 
+    // Overrun telemetry. Phase 0 is DETECTION ONLY: the recovery in drain_pipes()
+    // is unchanged, so pairing/timestamp behavior is exactly as before. The
+    // producer has lapped the reader once `w - rptr` reaches region_slots -- its
+    // next write target is then the slot at rptr, so that record is lost or torn.
+    uint64_t overruns     = 0;  // laps observed (before or during a scan)
+    uint64_t lost_records = 0;  // records the producer advanced past the safe window
+
+    bool note_overrun(uint64_t dist, uint32_t region_slots)
+    {
+        if(dist < region_slots) return false;
+        ++overruns;
+        lost_records += dist - region_slots + 1;
+        return true;
+    }
+
     // Age out unmatched starts (queue died mid-dispatch, ring overwrite) so the
     // map cannot grow unbounded. now_ns/max_age_ns passed in for testability.
     size_t evict_stale(uint64_t now_ns, uint64_t max_age_ns)
@@ -182,6 +197,7 @@ drain_pipes(const uint8_t*           records_base,
         uint64_t scan = state.rptr[p];
 
         if(w <= scan) continue;
+        const bool overran = state.note_overrun(w - scan, region_slots);
         // Overrun recovery: if the producer lapped us, resume just behind it. In a
         // power-of-two ring, w - region_slots aliases the producer's current slot,
         // so +1 keeps recovery strictly behind it.
@@ -216,6 +232,13 @@ drain_pipes(const uint8_t*           records_base,
                 // eop with no matching start: dropped; that dispatch uses HSA.
             }
         }
+
+        // Re-read the producer frontier: a lap DURING the scan means the slots just
+        // read may have been overwritten under us. Detection only (the pairs are
+        // still published, as before).
+        if(!overran)
+            state.note_overrun(__atomic_load_n(&wptr_arr[p], __ATOMIC_ACQUIRE) - state.rptr[p],
+                               region_slots);
 
         state.rptr[p] = w;
         __atomic_store_n(&rptr_arr[p], w, __ATOMIC_RELEASE);
