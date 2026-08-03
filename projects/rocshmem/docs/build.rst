@@ -20,7 +20,8 @@ Requirements
 
 * ROCm 6.4.0 or later, including the :doc:`HIP runtime <hip:index>`. For more information, see `ROCm installation for Linux <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/>`_.
 
-  * ROCm 7.0 or later is required for the VMM POSIX memory allocator (``USE_HEAP_DEVICE_VMM_POSIX``).
+  * ROCm 7.2 or later is required for the VMM POSIX memory allocator (``ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix``).
+  * ROCm 7.14 or later with AMD SMI fabric handle support is required for the VMM Fabric memory allocator (``ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_fabric``).
 
 * The following AMD GPUs have been fully tested for compatibility with rocSHMEM:
 
@@ -133,35 +134,39 @@ tests, as they require MPI to run.
 Memory allocator options
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-rocSHMEM provides several GPU memory allocator options that control how the symmetric heap is allocated:
+rocSHMEM provides several GPU memory allocator options that control how the symmetric heap is allocated.
+The allocator is selected at runtime via the ``ROCSHMEM_HEAP_ALLOCATOR_TYPE`` environment variable:
 
-* **USE_HEAP_DEVICE_FINEGRAIN** (default): GPU memory with fine-grained coherency. Provides CPU access to GPU memory with cache coherency.
+* **finegrained** (default): GPU memory with fine-grained coherency. Provides CPU access to GPU memory with cache coherency.
 
-* **USE_HEAP_DEVICE_COARSEGRAIN**: GPU memory with coarse-grained coherency. Better performance for GPU-only access patterns.
+* **coarsegrained**: GPU memory with coarse-grained coherency. Better performance for GPU-only access patterns.
 
-* **USE_HEAP_DEVICE_UNCACHED**: GPU memory in uncached mode (requires ROCm 5.5+). May provide better performance on some architectures.
+* **uncached**: GPU memory in uncached mode (requires ROCm 5.5+). May provide better performance on some architectures.
 
-* **USE_HEAP_DEVICE_VMM_POSIX**: GPU memory using Virtual Memory Management (VMM) with POSIX file descriptor-based IPC (requires ROCm 7.0+).
+* **vmm_posix**: GPU memory using Virtual Memory Management (VMM) with POSIX file descriptor-based IPC (requires ROCm 7.2+).
   This allocator uses advanced HIP VMM APIs (``hipMemCreate``, ``hipMemAddressReserve``, ``hipMemMap``) and
   cross-process file descriptor sharing via Linux kernel syscalls (``pidfd_open``, ``pidfd_getfd``).
 
   .. note::
 
-    The VMM POSIX allocator requires:
+    The ``vmm_posix`` allocator requires:
 
-    * ROCm 7.0 or newer
+    * ROCm 7.2 or newer
     * Linux kernel 5.6 or newer
     * TCP Bootstrap-based initialization (not compatible with MPI-based initialization)
 
-    This allocator is experimental and primarily intended for advanced use cases requiring fine-grained control over GPU memory management and IPC mechanisms.
 
-These options are mutually exclusive. To use a non-default allocator, pass the corresponding flag to the build configuration scripts. For example:
+* **vmm_fabric**: GPU memory using VMM with fabric handle-based IPC (requires ROCm 7.14+ with AMD SMI fabric handle support).
+  This allocator is only supported on gfx1250 (MI455) GPUs.
+
+To select a non-default allocator, set the environment variable before launching the application. For example:
 
 .. code-block:: bash
 
-  cd projects/rocshmem/build
-  cmake .. -DUSE_HEAP_DEVICE_COARSEGRAIN=ON -DUSE_HEAP_DEVICE_FINEGRAIN=OFF
-  cmake --build . --parallel 8
+  export ROCSHMEM_HEAP_ALLOCATOR_TYPE=coarsegrained
+  mpiexec -np 2 ./my_rocshmem_app
+
+For a full description of accepted values and defaults, see :ref:`rocshmem-api-env-variables`.
 
 Profiling and tracing support
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

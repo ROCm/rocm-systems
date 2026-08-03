@@ -103,6 +103,14 @@ struct ncclSocketOp {
   int offset; // Current progress offset
 };
 
+#if !defined(__CUDA_ARCH__) && (defined(NCCL_OS_WINDOWS) || defined(NCCL_OS_LINUX))
+// IPv4 subnet-match helper split out of matchSubnet() so the exact boolean that
+// interface selection depends on can be unit-tested (upstream NCCL PR #2047).
+static inline bool rcclMatchSubnetV4(struct in_addr local, struct in_addr remote, struct in_addr mask) {
+  return (local.s_addr & mask.s_addr) == (remote.s_addr & mask.s_addr);
+}
+#endif
+
 const char* ncclSocketToString(const union ncclSocketAddress* addr, char* buf, const int numericHostForm = 1);
 ncclResult_t ncclSocketGetAddrFromString(union ncclSocketAddress* ua, const char* ip_port_pair);
 ncclResult_t ncclFindInterfaceMatchSubnet(char* ifName, union ncclSocketAddress* localAddr,

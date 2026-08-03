@@ -43,6 +43,9 @@ if(HIP_PLATFORM MATCHES "amd")
                 hipStreamLegacy.cc
 
              )
+  if(WIN32)
+    set(TEST_SRC ${TEST_SRC} hipStreamKilledWorkerThread.cc)
+  endif()
 else()
   set(TEST_SRC
       ${TEST_SRC}
@@ -66,3 +69,13 @@ set_source_files_properties(hipStreamLegacy_exe.cc PROPERTIES LANGUAGE ${GPGPU_L
 
 add_dependencies(StreamTest hipStreamLegacy_exe)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipStreamLegacy_exe)
+
+if(WIN32 AND HIP_PLATFORM MATCHES "amd")
+  add_executable(hipStreamKilledWorkerThread_exe EXCLUDE_FROM_ALL
+                 hipStreamKilledWorkerThread_exe.cc)
+  set_source_files_properties(hipStreamKilledWorkerThread_exe.cc PROPERTIES
+                              LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(hipStreamKilledWorkerThread_exe ${GPGPU_LINKER_LIBRARIES})
+  add_dependencies(StreamTest hipStreamKilledWorkerThread_exe)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipStreamKilledWorkerThread_exe)
+endif()

@@ -2320,6 +2320,7 @@ class TestDeriveMemoryLowerAll:
             ('DS_READ2_B32', 'ds_read2', ExecModel.VECTOR),
             ('DS_WRITE2_B32', 'ds_write2', ExecModel.VECTOR),
             ('DS_ADD_U32', 'ds_atomic', ExecModel.VECTOR),
+            ('DS_STOREXCHG_2ADDR_RTN_B32', 'ds_atomic2', ExecModel.VECTOR),
             ('DS_BPERMUTE_B32', 'ds_permute', ExecModel.VECTOR),
             ('DS_SWIZZLE_B32', 'ds_swizzle', ExecModel.VECTOR),
             ('DS_LOAD_ADDTID_B32', 'ds_read_addtid', ExecModel.VECTOR),
@@ -2858,3 +2859,16 @@ class TestDeriveFingerprinting:
         block_add = derive_sema_block(sem_add)
         block_sub = derive_sema_block(sem_sub)
         assert fingerprint(block_add) != fingerprint(block_sub)
+
+    def test_two_address_exchange_differs_from_single_address_exchange(self):
+        single = _FakeSem('DS_STOREXCHG_RTN_B32', 'ds_atomic', 'swap')
+        dual = _FakeSem('DS_STOREXCHG_2ADDR_RTN_B32', 'ds_atomic2', 'swap')
+        for sem in (single, dual):
+            sem.elem_size = 4
+            sem.num_elems = 1
+            sem.sign_extend = False
+
+        single_block = derive_sema_block(single)
+        dual_block = derive_sema_block(dual)
+
+        assert fingerprint(single_block) != fingerprint(dual_block)

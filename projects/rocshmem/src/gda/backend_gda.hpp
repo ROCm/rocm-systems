@@ -413,7 +413,7 @@ class GDABackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  HdpProxy<HIPHostAllocator> hdp_proxy_{};
+  HdpProxy hdp_proxy_{};
 
   /**
    * @brief Holds a copy of the default context for host functions
@@ -493,7 +493,7 @@ class GDABackend : public Backend {
    *                         lifetime and is closed only after deregistration.
    * @return The registered ibv_mr on success, nullptr otherwise.
    */
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   struct ibv_mr *register_symm_buffer_mr(
       struct ibv_pd *pd, hipMemGenericAllocationHandle_t gen_handle,
       bool use_dmabuf, void *iova, size_t length, int *out_fd);

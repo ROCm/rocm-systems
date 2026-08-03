@@ -2335,7 +2335,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   TRACE(NCCL_INIT, "rank %d nranks %d - DONE", rank, nranks);
 
 exit:
-  if (ncclOsCpuCount(comm->cpuAffinity)) ncclOsSetAffinity(affinitySave);
+  if (ncclOsCpuCount(comm->cpuAffinity)) ncclOsSetAffinity(comm->cpuAffinity); // RCCL 2.29.7 behavior: leave calling thread pinned to GPU-local NUMA
   /* If split resource is shared, we are not able to unlink the proxy ops pool here since the child comm can
    * attach the proxy ops pool of parent at any time; otherwise, unlink it here to make sure the pool will be
    * properly cleaned up. */
@@ -2719,8 +2719,9 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
         NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
         comm->forcePatEnable = false;
-        size_t tempBufSize =
-          (comm->nNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
+        size_t tempBufSize = (comm->nNodes >= 32) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE
+                             : (comm->nNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2
+                                                    : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 4;
         NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalAGTempBuffer), tempBufSize, comm->memManager), res, fail);
         comm->hierarchicalCommsInitialized = true;
         INFO(NCCL_INIT, "Hierarchical AllGather: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
