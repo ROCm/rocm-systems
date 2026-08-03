@@ -80,6 +80,8 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
       expand_operand_register(defs, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Def,
                               unknown_vgpr_defs);
       has_vector_def |= is_vector_def(*ref);
+    } else if (auto sc = op->to_special_reg_class()) {
+      defs.expand(RegisterRef{*sc, 0, 1}); // singleton special def
     }
   }
   has_exec_masked_vector_def = has_vector_def && !ignores_exec;
@@ -96,6 +98,8 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
     if (auto ref = op->to_register_ref())
       expand_operand_register(uses, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Use,
                               unknown_vgpr_defs);
+    else if (auto sc = op->to_special_reg_class())
+      uses.expand(RegisterRef{*sc, 0, 1}); // singleton special use
   }
 
   if (vgpr_msb == nullptr) {

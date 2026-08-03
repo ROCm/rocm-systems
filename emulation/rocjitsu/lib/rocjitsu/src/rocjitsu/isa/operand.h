@@ -188,6 +188,17 @@ public:
   /// parse the display string returned by name().
   [[nodiscard]] virtual std::optional<RegisterRef> to_register_ref() const;
 
+  /// @brief Map this operand to the architectural special register it denotes.
+  ///
+  /// @details Returns the special RegClass (EXEC/VCC/SCC/M0/PC) for a fieldless
+  /// architectural special operand, or nullopt for everything else. This is the
+  /// special-register counterpart of to_register_ref(): special registers are
+  /// recorded as singleton members of a RegisterSet, which scratch-allocation
+  /// liveness projects out with ordinary_only() so they never look allocatable.
+  /// ISA-specific subclasses override this from the generated fieldless operand
+  /// policy effect column; the base returns nullopt.
+  [[nodiscard]] virtual std::optional<RegClass> to_special_reg_class() const;
+
   /// @brief Raw encoding value from the instruction binary.
   int encoding_value() const { return encoding_value_; }
 
