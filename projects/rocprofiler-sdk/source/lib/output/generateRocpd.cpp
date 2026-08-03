@@ -256,8 +256,8 @@ read_file(rocpd_sql_engine_t                        engine,
     _schema       = replace_uuid(*_db, schema_content);
 }
 
-std::string
-read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
+bool
+load_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options   = ROCPD_SQL_OPTIONS_NONE;
@@ -266,17 +266,30 @@ read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
     _variables.uuid = db.uuid.c_str();
     _variables.guid = db.guid.c_str();
 
-    ROCPD_CHECK(rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
-                                      schema_kind,
-                                      _options,
-                                      _version,
-                                      &_variables,
-                                      read_file,
-                                      nullptr,
-                                      0,
-                                      &db));
+    if(auto _status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
+                                            schema_kind,
+                                            _options,
+                                            _version,
+                                            &_variables,
+                                            read_file,
+                                            nullptr,
+                                            0,
+                                            &db);
+       _status != ROCPD_STATUS_SUCCESS)
+    {
+        ROCP_ERROR << fmt::format(
+            "[load_schema_file] Failed to load rocpd SQL schema (kind={}, version={}.{}.{}); "
+            "rocpd output will not be generated. {} :: {}",
+            static_cast<int>(schema_kind),
+            _version.major,
+            _version.minor,
+            _version.patch,
+            rocpd_get_status_name(_status),
+            rocpd_get_status_string(_status));
+        return false;
+    }
 
-    return db.schemas.at(schema_kind);
+    return true;
 }
 
 int
@@ -1074,9 +1087,20 @@ write_rocpd(
         db.guid = fmt::format("{}", uuid_v7);
         db.uuid = fmt::format("_{}", replace_all(uuid_v7, '-', "_"));
 
-        // reading schemata
-        auto table_schema = read_schema_file(db, ROCPD_SQL_SCHEMA_ROCPD_TABLES);
-        auto output_file  = get_output_filename(cfg, "results", "db");
+        // Load every schema before touching the output file so a mismatch cannot leave a partial
+        // database behind.
+        for(auto schema_kind : {ROCPD_SQL_SCHEMA_ROCPD_TABLES,
+                                ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
+                                ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
+                                ROCPD_SQL_SCHEMA_ROCPD_METADATA,
+                                ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
+                                ROCPD_SQL_SCHEMA_ROCPD_INDEXES})
+        {
+            if(!load_schema_file(db, schema_kind)) return;
+        }
+
+        const auto& table_schema = db.schemas.at(ROCPD_SQL_SCHEMA_ROCPD_TABLES);
+        auto        output_file  = get_output_filename(cfg, "results", "db");
         if(fs::exists(output_file)) fs::remove(output_file);
 
         SQLITE3_CHECK(sqlite3_open_v2(
@@ -1092,7 +1116,7 @@ write_rocpd(
                         ROCPD_SQL_SCHEMA_ROCPD_METADATA,
                         ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS})
         {
-            auto views_schema = read_schema_file(db, itr);
+            const auto& views_schema = db.schemas.at(itr);
             execute_raw_sql_statements(conn, views_schema);
         }
     }
@@ -2244,8 +2268,8 @@ write_rocpd(
         }
 
         {
-            auto _sqlgenperf_rocpd = get_simple_timer("SQL indexing");
-            auto indexes_schema    = read_schema_file(db, ROCPD_SQL_SCHEMA_ROCPD_INDEXES);
+            auto        _sqlgenperf_rocpd = get_simple_timer("SQL indexing");
+            const auto& indexes_schema    = db.schemas.at(ROCPD_SQL_SCHEMA_ROCPD_INDEXES);
             execute_raw_sql_statements(conn, indexes_schema);
         }
     }
