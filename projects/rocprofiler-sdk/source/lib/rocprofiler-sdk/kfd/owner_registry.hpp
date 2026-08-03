@@ -25,6 +25,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <atomic>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
@@ -76,6 +77,7 @@ public:
     // Re-registering an existing token replaces its previous ownership.
     add_result add_queue(uint64_t queue_token, uint32_t gpu_id, std::optional<uint32_t> slot)
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return add_result::slot_unknown;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         remove_locked(queue_token);
 
@@ -92,6 +94,7 @@ public:
 
     void remove_queue(uint64_t queue_token)
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         remove_locked(queue_token);
     }
@@ -105,6 +108,7 @@ public:
     // one of the colliding queues dies and ownership looks injective again.
     bool is_injective(uint32_t gpu_id, uint32_t slot) const
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return false;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         if(unresolved_locked(gpu_id) != 0) return false;
         return owners_locked(gpu_id, slot) == 1;
@@ -115,6 +119,7 @@ public:
     // that is already being torn down.
     std::optional<uint32_t> slot_of(uint64_t queue_token) const
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return std::nullopt;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         auto it = m_by_queue.find(queue_token);
         if(it == m_by_queue.end()) return std::nullopt;
@@ -123,21 +128,32 @@ public:
 
     size_t owners_of(uint32_t gpu_id, uint32_t slot) const
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return 0;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         return owners_locked(gpu_id, slot);
     }
 
     size_t unresolved_queues(uint32_t gpu_id) const
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return 0;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         return unresolved_locked(gpu_id);
     }
 
     size_t live_queues() const
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return 0;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         return m_by_queue.size();
     }
+
+    // pthread_atfork child handler (requirement 8). One atomic store; every
+    // operation above tests it BEFORE taking m_mu, so a forked child never touches
+    // the inherited mutex or map. An abandoned registry reports no live queues and
+    // no known slot, which is what makes every slot non-injective in the child.
+    void abandon_in_child() { m_abandoned.store(true, std::memory_order_release); }
+
+    bool abandoned() const { return m_abandoned.load(std::memory_order_acquire); }
 
 private:
     struct queue_entry
@@ -177,6 +193,7 @@ private:
         return (it == m_unresolved.end()) ? 0 : it->second;
     }
 
+    std::atomic<bool>                                 m_abandoned  = {false};
     mutable std::mutex                                m_mu         = {};
     std::unordered_map<uint64_t, queue_entry>         m_by_queue   = {};
     std::map<std::pair<uint32_t, uint32_t>, size_t>   m_owners     = {};
@@ -191,29 +208,37 @@ public:
     // True exactly once per queue: the caller then enables profiling on it.
     bool mark(uint64_t queue_token)
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return false;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         return m_enabled.insert(queue_token).second;
     }
 
     void forget(uint64_t queue_token)
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         m_enabled.erase(queue_token);
     }
 
     bool enabled(uint64_t queue_token) const
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return false;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         return m_enabled.count(queue_token) != 0;
     }
 
     size_t size() const
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return 0;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         return m_enabled.size();
     }
 
+    // Same one-store child gate as the registry above.
+    void abandon_in_child() { m_abandoned.store(true, std::memory_order_release); }
+
 private:
+    std::atomic<bool>              m_abandoned = {false};
     mutable std::mutex             m_mu      = {};
     std::unordered_set<uint64_t>   m_enabled = {};
 };

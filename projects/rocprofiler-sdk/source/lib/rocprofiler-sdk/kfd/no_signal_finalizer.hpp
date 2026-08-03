@@ -25,6 +25,7 @@
 #include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/kfd/correlation_types.hpp"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -144,6 +145,10 @@ public:
     template <typename FinalizeFn>
     bool hold(ProvenT&& p, FinalizeFn&& finalize_in_place)
     {
+        // A forked child drops the completion on the floor rather than touching the
+        // inherited mutex or running a finalizer whose task group no longer exists.
+        if(m_abandoned.load(std::memory_order_acquire)) return false;
+
         auto _overflow = std::optional<ProvenT>{};
         {
             auto lk = std::lock_guard<std::mutex>{m_mu};
@@ -166,6 +171,8 @@ public:
     template <typename SubmitFn, typename FinalizeFn>
     size_t flush(SubmitFn&& submit, FinalizeFn&& finalize_in_place)
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return 0;
+
         auto _taken = std::vector<ProvenT>{};
         bool _closed = false;
         {
@@ -186,23 +193,35 @@ public:
     // finalized in place by the next flush.
     void close()
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return;
         auto lk  = std::lock_guard<std::mutex>{m_mu};
         m_closed = true;
     }
 
     bool closed() const
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return true;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         return m_closed;
     }
 
     size_t size() const
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return 0;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         return m_held.size();
     }
 
+    // pthread_atfork child handler (requirement 8). One atomic store, checked
+    // before m_mu by every operation above, so a forked child neither locks the
+    // inherited mutex nor finalizes a completion into a task group whose workers
+    // did not survive the fork.
+    void abandon_in_child() { m_abandoned.store(true, std::memory_order_release); }
+
+    bool abandoned() const { return m_abandoned.load(std::memory_order_acquire); }
+
 private:
+    std::atomic<bool>    m_abandoned = {false};
     mutable std::mutex   m_mu     = {};
     std::vector<ProvenT> m_held   = {};
     bool                 m_closed = false;

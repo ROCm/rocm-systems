@@ -632,6 +632,7 @@ signal_less_batch_eligible(Queue*                                            que
     // Cheapest gate first: with the feature off (the default) this is one
     // predictable branch and NO extra session or doorbell work, so the signal
     // path is bit-for-bit what it was before signal-less existed.
+    if(kfd::signal_less_child_stale()) return false;
     if(!kfd::signal_less_feature_enabled() || !kfd::signal_less_fully_wired()) return false;
 
     const auto _gpu_id = queue->get_agent().get_rocp_agent()->gpu_id;

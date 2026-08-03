@@ -26,6 +26,7 @@
 // the HSA runtime, or the reader thread (test seam S2).
 
 #include "lib/rocprofiler-sdk/kfd/dispatch_hub.hpp"
+#include "lib/rocprofiler-sdk/kfd/no_signal_finalizer.hpp"
 #include "lib/rocprofiler-sdk/kfd/owner_registry.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 
@@ -36,6 +37,11 @@
 #include <thread>
 #include <unordered_set>
 #include <vector>
+
+#include <cstdlib>
+
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace
 {
@@ -1044,4 +1050,183 @@ TEST(DispatchHub, concurrent_destroy_and_registration_stay_consistent)
     EXPECT_EQ(hub.live_entries(), 0u);
     EXPECT_LE(prover.load(), kSlots);
     EXPECT_EQ(tracked_payload::live.load(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Unit 7: fork epoch / child abandonment (requirement 8, U19)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// Inherited process-wide state, mirroring production: function-local statics, so
+// a forked child inherits them AND runs their destructors at a normal exit().
+hub_t&
+forked_hub()
+{
+    static auto _v = hub_t{};
+    return _v;
+}
+
+OwnerRegistry&
+forked_registry()
+{
+    static auto _v = OwnerRegistry{};
+    return _v;
+}
+
+retry_owner<int>&
+forked_retry()
+{
+    static auto _v = retry_owner<int>{};
+    return _v;
+}
+
+// Everything a child must be able to call without touching an inherited mutex.
+// Returns true when every entry point reported "disabled/empty".
+bool
+all_entry_points_short_circuit()
+{
+    bool ok = true;
+
+    ok = ok && !register_one(forked_hub(), key_of(40, 99));
+    ok = ok && !forked_hub().prove_eop(key_of(40, 1), 1, true).has_value();
+    ok = ok && !forked_hub().note_start(key_of(40, 1), 1);
+    ok = ok && !forked_hub().leak(key_of(40, 1)).has_value();
+    ok = ok && forked_hub().live_entries() == 0;
+    ok = ok && forked_hub().tombstones() == 0;
+    ok = ok && forked_hub().outstanding(1) == 0;
+    ok = ok && !forked_hub().is_quarantined(40);
+    ok = ok && !forked_hub().is_closing(40);
+    ok = ok && !forked_hub().is_ledgered(500);
+    ok = ok && forked_hub().mode() == session_mode::child_stale;
+    ok = ok && forked_hub().quarantine_slot(40).empty();
+    ok = ok && forked_hub().close_queue(1).empty();
+    ok = ok && forked_hub().drain_for_teardown().first.empty();
+    ok = ok && forked_hub().poison(session_mode::loss_poisoned).first.empty();
+
+    ok = ok && forked_registry().live_queues() == 0;
+    ok = ok && !forked_registry().is_injective(0, 40);
+    ok = ok && !forked_registry().slot_of(1).has_value();
+    ok = ok && forked_registry().owners_of(0, 40) == 0;
+    ok = ok && forked_registry().unresolved_queues(0) == 0;
+
+    ok = ok && forked_retry().size() == 0;
+    ok = ok && forked_retry().closed();
+    // A completion arriving in a child is dropped, never finalized: the task group
+    // that would run the finalizer did not survive the fork.
+    bool finalized = false;
+    ok = ok && !forked_retry().hold(7, [&finalized](int&&) { finalized = true; });
+    ok = ok && !finalized;
+    ok = ok && forked_retry().flush([](int&) { return submit_result::accepted; },
+                                    [&finalized](int&&) { finalized = true; }) == 0;
+    ok = ok && !finalized;
+
+    return ok;
+}
+}  // namespace
+
+// Every entry point on every Phase-2 shared object short-circuits once abandoned,
+// so a child never reaches the lock behind it.
+TEST(fork_safety, abandoned_objects_short_circuit_every_entry_point)
+{
+    forked_registry().add_queue(1, 0, uint32_t{40});
+    register_one(forked_hub(), key_of(40, 1), /*corr_id=*/500);
+    forked_retry().hold(1, [](int&&) {});
+
+    forked_hub().abandon_in_child();
+    forked_registry().abandon_in_child();
+    forked_retry().abandon_in_child();
+
+    EXPECT_TRUE(forked_hub().abandoned());
+    EXPECT_TRUE(forked_registry().abandoned());
+    EXPECT_TRUE(forked_retry().abandoned());
+    EXPECT_TRUE(all_entry_points_short_circuit());
+}
+
+// U19: a REAL fork. The child abandons its inherited state exactly as the atfork
+// handler does, exercises the entry points, and leaves through a normal exit() so
+// the inherited statics' destructors actually run. It must not hang, crash, or
+// double-free, and the parent must be unaffected.
+TEST(fork_safety, forked_child_short_circuits_and_survives_normal_exit)
+{
+    // Populate in the parent so the child inherits non-empty state.
+    auto parent_only = hub_t{};
+    ASSERT_TRUE(register_one(parent_only, key_of(9, 1)));
+
+    pid_t pid = fork();
+    ASSERT_NE(pid, -1);
+
+    if(pid == 0)
+    {
+        // CHILD. Exactly the atfork handler's work: atomic stores only.
+        forked_hub().abandon_in_child();
+        forked_registry().abandon_in_child();
+        forked_retry().abandon_in_child();
+
+        const bool ok = all_entry_points_short_circuit();
+
+        // Normal exit(): runs static destructors over the abandoned state. The
+        // plan requires exercising this, not just the handler.
+        std::exit(ok ? 0 : 2);
+    }
+
+    int status = 0;
+    ASSERT_EQ(waitpid(pid, &status, 0), pid);
+    EXPECT_TRUE(WIFEXITED(status)) << "child did not exit normally";
+    if(WIFEXITED(status))
+    {
+        EXPECT_EQ(WEXITSTATUS(status), 0) << "child entry points did not short-circuit";
+    }
+
+    // The parent is untouched by the child's abandonment.
+    EXPECT_EQ(parent_only.live_entries(), 1u);
+    EXPECT_TRUE(parent_only.prove_eop(key_of(9, 1), 5, true).has_value());
+}
+
+// The child must survive even when the fork happens while another thread is
+// hammering the shared objects -- the case where an inherited mutex can be left
+// permanently locked. Without the abandoned check preceding every lock, the child
+// would deadlock here and the test would time out.
+TEST(fork_safety, child_survives_a_fork_taken_under_contention)
+{
+    auto  hub  = hub_t{};
+    auto  stop = std::atomic<bool>{false};
+    auto  busy = std::thread{[&hub, &stop]() {
+        for(uint32_t i = 0; !stop.load(); ++i)
+        {
+            register_one(hub, key_of(1, i % 512));
+            hub.prove_eop(key_of(1, i % 512), 1, true);
+            hub.live_entries();
+        }
+    }};
+
+    for(int i = 0; i < 8; ++i)
+    {
+        pid_t pid = fork();
+        ASSERT_NE(pid, -1);
+        if(pid == 0)
+        {
+            // The inherited hub's mutex may be locked by the thread that did not
+            // survive; abandoning makes every entry point avoid it entirely.
+            hub.abandon_in_child();
+            const bool ok = hub.live_entries() == 0 && !register_one(hub, key_of(1, 7)) &&
+                            !hub.prove_eop(key_of(1, 7), 1, true).has_value();
+            // _exit, not exit: this case is about not DEADLOCKING on an inherited
+            // locked mutex. The busy thread's allocations are unreachable in the
+            // child (its stack is gone), so a normal exit's leak check would report
+            // a fork artifact rather than a defect. Destructor safety at a normal
+            // exit() is covered by the test above.
+            _exit(ok ? 0 : 2);
+        }
+        int status = 0;
+        ASSERT_EQ(waitpid(pid, &status, 0), pid);
+        EXPECT_TRUE(WIFEXITED(status));
+        if(WIFEXITED(status))
+        {
+            EXPECT_EQ(WEXITSTATUS(status), 0);
+        }
+    }
+
+    stop.store(true);
+    busy.join();
 }

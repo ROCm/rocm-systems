@@ -123,6 +123,21 @@ signal_less_teardown();
 void
 signal_less_quiesce();
 
+// pthread_atfork CHILD handler entry point (design requirement 8).
+//
+// RESTRICTED CONTEXT: this runs in a forked child where only the forking thread
+// survives, so it performs atomic scalar stores ONLY -- no mutex, no allocation,
+// no map access, no logging, no join. It marks the signal-less epoch stale and
+// abandons each Phase-2 shared object that ALREADY EXISTS; it never constructs
+// one, because construction would allocate.
+void
+signal_less_abandon_in_child();
+
+// True in a process that inherited signal-less state across a fork. Every entry
+// point below and in signal_less.hpp tests this before touching anything.
+bool
+signal_less_child_stale();
+
 // Whether HW profiling should be enabled lazily (only on a queue's first
 // SIGNAL-path batch) instead of at queue creation.
 //

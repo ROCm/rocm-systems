@@ -60,6 +60,10 @@ signal_less_feature_enabled()
     return _enabled;
 }
 
+// Constant-initialized (no guard variable, no dynamic initialization), so the
+// atfork child handler can store to it with no lazy-init machinery behind it.
+std::atomic<bool> g_child_stale{false};
+
 namespace
 {
 // Installed once at interposition init, before any queue exists, and published
@@ -111,6 +115,34 @@ retry()
 }
 }  // namespace
 
+bool
+signal_less_child_stale()
+{
+    return g_child_stale.load(std::memory_order_acquire);
+}
+
+void
+signal_less_abandon_in_child()
+{
+    // Async-signal-safe by construction: every statement below is either an atomic
+    // scalar store or a load of an already-initialized static pointer. Nothing
+    // locks, allocates, logs, joins, or frees.
+    //
+    // static_object<T>::get() returns the placement-new'd pointer WITHOUT
+    // constructing it, so an object this process never created stays uncreated --
+    // there is nothing to abandon in that case. These accessors must live in this
+    // TU: static_object's default context type is per-translation-unit, so get()
+    // from anywhere else would observe a different (null) instantiation.
+    g_child_stale.store(true, std::memory_order_release);
+
+    if(auto* _hub = common::static_object<signal_less_hub_t>::get()) _hub->abandon_in_child();
+    if(auto* _reg = common::static_object<OwnerRegistry>::get()) _reg->abandon_in_child();
+    if(auto* _prof = common::static_object<ProfilingEnableTracker>::get())
+        _prof->abandon_in_child();
+    if(auto* _retry = common::static_object<retry_owner<signal_less_hub_t::proven>>::get())
+        _retry->abandon_in_child();
+}
+
 void
 install_signal_less_ops(signal_less_ops ops)
 {
@@ -121,6 +153,7 @@ install_signal_less_ops(signal_less_ops ops)
 void
 hand_off_proven(signal_less_hub_t::proven&& p)
 {
+    if(g_child_stale.load(std::memory_order_acquire)) return;
     if(!ops_ready().load(std::memory_order_acquire)) return;
     auto& _ops = ops_storage();
 
@@ -142,6 +175,7 @@ hand_off_proven(signal_less_hub_t::proven&& p)
 size_t
 flush_retry_owner_now()
 {
+    if(g_child_stale.load(std::memory_order_acquire)) return 0;
     if(!ops_ready().load(std::memory_order_acquire)) return 0;
     auto& _ops = ops_storage();
     return retry().flush(_ops.submit, _ops.finalize_in_place);
@@ -168,6 +202,7 @@ profiling_tracker()
 void
 add_live_queue(uint64_t queue_token, uint32_t gpu_id, std::optional<uint32_t> doorbell_slot)
 {
+    if(g_child_stale.load(std::memory_order_acquire)) return;
     auto _result = owner_registry().add_queue(queue_token, gpu_id, doorbell_slot);
     if(_result != OwnerRegistry::add_result::collision) return;
 
@@ -192,6 +227,7 @@ add_live_queue(uint64_t queue_token, uint32_t gpu_id, std::optional<uint32_t> do
 void
 begin_close_signal_less_queue(uint64_t queue_token)
 {
+    if(g_child_stale.load(std::memory_order_acquire)) return;
     auto _slot = owner_registry().slot_of(queue_token);
     if(!_slot) return;
     // Hub lock is taken and released inside; the caller fences gate_lock next.
@@ -201,6 +237,7 @@ begin_close_signal_less_queue(uint64_t queue_token)
 void
 finish_close_signal_less_queue(uint64_t queue_token)
 {
+    if(g_child_stale.load(std::memory_order_acquire)) return;
     auto _slot = owner_registry().slot_of(queue_token);
     if(!_slot) return;
 
@@ -227,6 +264,7 @@ finish_close_signal_less_queue(uint64_t queue_token)
 void
 remove_live_queue(uint64_t queue_token)
 {
+    if(g_child_stale.load(std::memory_order_acquire)) return;
     owner_registry().remove_queue(queue_token);
     profiling_tracker().forget(queue_token);
 }
@@ -234,6 +272,7 @@ remove_live_queue(uint64_t queue_token)
 bool
 signal_less_lazy_profiling()
 {
+    if(g_child_stale.load(std::memory_order_acquire)) return false;
     return signal_less_feature_enabled() && signal_less_fully_wired();
 }
 
@@ -246,6 +285,7 @@ note_signal_less_losses()
 bool
 signal_less_id_is_leaked(uint64_t correlation_id)
 {
+    if(g_child_stale.load(std::memory_order_acquire)) return false;
     if(!any_leaked().load(std::memory_order_acquire)) return false;
     return signal_less_hub().is_ledgered(correlation_id);
 }
@@ -314,6 +354,10 @@ struct real_teardown_steps
 void
 signal_less_teardown()
 {
+    // A forked child abandoned everything and owns none of it: running the
+    // teardown there would join threads that do not exist.
+    if(g_child_stale.load(std::memory_order_acquire)) return;
+
     // With the feature off there is no hub work, no retry-owner work and no
     // reader->task handoff, so the ordering constraint does not apply and the
     // existing finalize path is left byte-for-byte as it was.
@@ -332,6 +376,7 @@ signal_less_teardown()
 void
 signal_less_quiesce()
 {
+    if(g_child_stale.load(std::memory_order_acquire)) return;
     if(!signal_less_feature_enabled() || !signal_less_fully_wired()) return;
     if(!ops_ready().load(std::memory_order_acquire)) return;
     auto& _ops = ops_storage();
@@ -352,7 +397,9 @@ kfd_selection_enabled()
 {
     // Emitting a KFD timestamp requires the whole signal-less path, not just the
     // env flag: until it is fully wired this stays false and every dispatch keeps
-    // the Phase 1 behavior (HSA timestamps, signals retained).
+    // the Phase 1 behavior (HSA timestamps, signals retained). A forked child is
+    // never eligible regardless.
+    if(g_child_stale.load(std::memory_order_acquire)) return false;
     return signal_less_feature_enabled() && signal_less_fully_wired();
 }
 }  // namespace kfd

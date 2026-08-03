@@ -289,6 +289,7 @@ public:
 
     bool is_closing(uint32_t doorbell_slot) const
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return false;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         return m_closing.count(doorbell_slot) != 0;
     }
@@ -368,6 +369,7 @@ public:
 
     bool is_quarantined(uint32_t doorbell_slot) const
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return false;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         return m_quarantined.count(doorbell_slot) != 0;
     }
@@ -375,6 +377,7 @@ public:
     // ++ on register, -- on any terminal transition (invariant 7).
     size_t outstanding(uint64_t queue_token) const
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return 0;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         auto it = m_outstanding.find(queue_token);
         return (it == m_outstanding.end()) ? 0 : it->second;
@@ -382,12 +385,14 @@ public:
 
     size_t live_entries() const
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return 0;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         return m_entries.size();
     }
 
     size_t tombstones() const
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return 0;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         return m_tombstones.size();
     }
@@ -396,22 +401,27 @@ public:
 
     session_mode mode() const
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return session_mode::child_stale;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         return m_mode;
     }
 
     void set_mode(session_mode m)
     {
+        if(m_abandoned.load(std::memory_order_acquire)) return;
         auto lk = std::lock_guard<std::mutex>{m_mu};
         m_mode  = m;
     }
 
     // --- fork -------------------------------------------------------------
 
-    // pthread_atfork child handler (requirement 8). Async-signal-safe: ONE
-    // relaxed-ordering atomic store, no mutex, no allocation, no map access, no
-    // logging. Every hub operation checks this first and short-circuits, so the
-    // inherited map and mutex are abandoned untouched and never destroyed.
+    // pthread_atfork child handler (requirement 8). Async-signal-safe: ONE atomic
+    // store, no mutex, no allocation, no map access, no logging. EVERY operation
+    // -- mutating and query alike -- tests this BEFORE it would take m_mu, so a
+    // child never touches an inherited mutex that a vanished thread may have held
+    // locked at the moment of the fork.
+    //
+    // The abandoned state is deliberately one-way: nothing un-abandons a child.
     void abandon_in_child() { m_abandoned.store(true, std::memory_order_release); }
 
     bool abandoned() const { return m_abandoned.load(std::memory_order_acquire); }

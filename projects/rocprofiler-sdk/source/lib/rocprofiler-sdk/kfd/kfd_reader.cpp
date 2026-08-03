@@ -619,6 +619,11 @@ disable_reader_in_child()
     // the DoorbellMap lock a vanished thread may have been holding.
     disable_kfd_dispatch_log();
 
+    // Mark the signal-less epoch stale and abandon the Phase-2 shared objects that
+    // already exist. Atomic scalar stores only -- it constructs nothing, locks
+    // nothing, allocates nothing and logs nothing (see its definition).
+    signal_less_abandon_in_child();
+
     auto& st = state();
     st.session_ready.store(false, std::memory_order_relaxed);
     // Latch unavailable: setup_mu may have been held by a thread that did not
