@@ -217,8 +217,8 @@ void LivenessAnalysis::collect_global_register_usage(KernelBlockScope blocks,
         global_vgpr_usage_is_complete_ = false;
 
       const InstDefUse accesses(inst, gfx1250_vgpr_msb_.get(), UnknownVgprDefPolicy::ExpandAll);
-      globally_used_registers_ |= accesses.defs;
-      globally_used_registers_ |= accesses.uses;
+      globally_used_registers_ |= accesses.defs.ordinary_only();
+      globally_used_registers_ |= accesses.uses.ordinary_only();
     }
   }
 }
