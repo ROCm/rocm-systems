@@ -1180,10 +1180,15 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
   // Recommended SDMA engine copies only have gang factor 1
   uint32_t rec_mask = 0;
   DmaPreferredEngine(dst_agent, src_agent, &rec_mask);
-  uint32_t rec_sdma_eng = NthSdmaEngine(rec_mask, 0);
+  // Spread concurrent copies across the preferred engines instead of always
+  // picking the first one. NthSdmaEngine indexes set bits (k % popcount), so a
+  // free-running per-agent counter round-robins within rec_mask and stays
+  // mask-aware (no effect when rec_mask has a single engine).
+  uint32_t rr_k = NextSdmaUserQueueEngineId();
+  uint32_t rec_sdma_eng = NthSdmaEngine(rec_mask, rr_k);
   LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-           "DmaCopy (ROCr self-select): preferred rec_mask=0x%x, chosen rec_sdma_eng=%d, size=%zu",
-           rec_mask, rec_sdma_eng, size);
+           "DmaCopy (ROCr self-select): preferred rec_mask=0x%x, rr_k=%u, chosen rec_sdma_eng=%d, size=%zu",
+           rec_mask, rr_k, rec_sdma_eng, size);
   if (rec_sdma_eng)
     return DmaCopyOnEngine(dst, dst_agent, src, src_agent, size,
                            dep_signals, out_signal, rec_sdma_eng, false);
