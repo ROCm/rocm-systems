@@ -705,6 +705,18 @@ endif()
 rj_configure_target(launch_preload_test TEST)
 rj_add_gtest_tests(launch_preload_test)
 
+# --- CLI ROCm visibility tests ---
+# rocm_visibility.cpp ships in the launch-preload library for build convenience,
+# but its tests get their own executable so they mirror the source structure.
+
+add_executable(rocm_visibility_test rocm_visibility_test.cpp)
+target_link_libraries(
+    rocm_visibility_test
+    PRIVATE rocjitsu_cli_launch_preload GTest::gtest_main
+)
+rj_configure_target(rocm_visibility_test TEST)
+rj_add_gtest_tests(rocm_visibility_test)
+
 # --- DBI probe fixture test ---
 # Loads a real amdclang++-compiled rj_nop_probe device ELF and exercises the
 # probe symbol resolver against it. Needs the compiled fixture (amdclang++ +
