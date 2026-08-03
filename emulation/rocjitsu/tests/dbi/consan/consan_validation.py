@@ -228,6 +228,8 @@ class Workload:
     empirical_device_timed_minimum_ms: float | None = None
     device_timing_max_iterations: int | None = None
     device_timing_warmup_iterations: int = 5
+    device_timing_calibration_iterations: int | None = None
+    device_timing_aggregate_headroom: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -731,6 +733,8 @@ WORKLOADS = (
         overhead_processes=1,
         fault_families=("barrier-drop",),
         targets=("gfx1201",),
+        device_timing_calibration_iterations=100,
+        device_timing_aggregate_headroom=1.25,
     ),
     Workload(
         id="pytorch-rdna4-split-softmax",
@@ -1118,6 +1122,34 @@ def _validate_coverage_output_contract(workload: Workload) -> None:
 def _validate_workload_manifest() -> None:
     for workload in WORKLOADS:
         _validate_coverage_output_contract(workload)
+        if workload.device_timing_calibration_iterations is not None:
+            if workload.device_timing_calibration_iterations <= 0:
+                raise RuntimeError(
+                    f"{workload.id} device timing calibration count must be positive"
+                )
+            if workload.kind == "pytorch" and (
+                workload.device_timing_calibration_iterations < 2
+            ):
+                raise RuntimeError(
+                    f"{workload.id} device timing calibration needs a retained "
+                    "sample after discarding the compile transient"
+                )
+            if workload.warm_timing_mode not in {
+                "host-json",
+                "device-json",
+                "device-fixed",
+                "device-gtest",
+            }:
+                raise RuntimeError(
+                    f"{workload.id} device timing calibration requires warm timing"
+                )
+        if (
+            not math.isfinite(workload.device_timing_aggregate_headroom)
+            or workload.device_timing_aggregate_headroom < 1.0
+        ):
+            raise RuntimeError(
+                f"{workload.id} device timing aggregate headroom must be at least one"
+            )
         if (
             workload.id in STREAMK_WORKLOAD_IDS
             and workload.fault_families != STREAMK_FAULT_FAMILIES
@@ -7444,10 +7476,34 @@ def _empirical_timing_protocol(
             "command_inner_repetitions": fixed_iterations,
             "discard_first_timing_sample": False,
         }
+    calibration_floor = dict(qualifying_timing)
+    timing_samples = calibration.get("timing_samples_ms")
+    if isinstance(timing_samples, dict):
+        for mode in qualifying_timing:
+            samples = timing_samples.get(mode)
+            if isinstance(samples, list) and samples:
+                sample_values = [float(value) for value in samples]
+                if any(
+                    not math.isfinite(value) or value <= 0.0 for value in sample_values
+                ):
+                    raise ValidationError(
+                        "warm empirical calibration samples must be finite and "
+                        "positive"
+                    )
+                calibration_floor[mode] = min(sample_values)
     device_minimum = _empirical_device_timed_minimum(workload)
+    if (
+        not math.isfinite(workload.device_timing_aggregate_headroom)
+        or workload.device_timing_aggregate_headroom < 1.0
+    ):
+        raise ValidationError("device timing aggregate headroom must be at least one")
     timed_repetitions = max(
         1,
-        math.ceil(device_minimum / min(values)),
+        math.ceil(
+            device_minimum
+            * workload.device_timing_aggregate_headroom
+            / min(calibration_floor.values())
+        ),
     )
     if (
         workload.device_timing_max_iterations is not None
@@ -7477,7 +7533,9 @@ def _empirical_timing_protocol(
             )
         ),
         "minimum_timed_aggregate_ms": device_minimum,
+        "timed_aggregate_headroom": workload.device_timing_aggregate_headroom,
         "calibration_timing_median_ms": qualifying_timing,
+        "calibration_timing_floor_ms": calibration_floor,
         "timed_inner_repetitions": timed_repetitions,
         "command_inner_repetitions": command_repetitions,
         "discard_first_timing_sample": discard_first,
@@ -7521,6 +7579,10 @@ def _empirical_config(
         ),
         "maximum_inner_repetitions": EMPIRICAL_MAX_INNER_REPETITIONS,
         "workload_maximum_device_iterations": workload.device_timing_max_iterations,
+        "device_timing_calibration_iterations": (
+            workload.device_timing_calibration_iterations
+        ),
+        "device_timing_aggregate_headroom": workload.device_timing_aggregate_headroom,
         "timeout_seconds": timeout,
         "launcher": args.launcher,
     }
@@ -7676,6 +7738,8 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
             args.launcher,
             calibration_root,
             resume=args.resume,
+            inner_repetitions_override=(workload.device_timing_calibration_iterations),
+            discard_first_timing_sample=(workload.kind == "pytorch"),
             collect_gtest_device_timing=(workload.warm_timing_mode == "device-gtest"),
             minimum_device_timed_aggregate_ms=(workload.self_timed_device_minimum_ms),
         )
