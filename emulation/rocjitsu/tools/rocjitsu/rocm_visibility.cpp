@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
-#include <cstdlib>
+#include <cstddef>
 #include <format>
 
 namespace rocjitsu::cli {
@@ -21,6 +21,23 @@ std::string_view trim(std::string_view text) {
 }
 
 std::string gpu_uuid(uint64_t unique_id) { return std::format("GPU-{:016X}", unique_id); }
+
+constexpr std::string_view kGpuUuidPrefix = "GPU-";
+constexpr std::string_view kNoUuidSentinel = "GPU-XX";
+constexpr size_t kMinGpuUuidSelectorLength = kGpuUuidPrefix.size() + 1;
+constexpr size_t kMaxGpuUuidSelectorLength = kGpuUuidPrefix.size() + 2 * sizeof(uint64_t);
+
+/// @brief Whether @p token is spelled as a GPU UUID prefix rather than as a device ordinal.
+/// @details The accepted window is ROCR's own: "GPU-" followed by at least one and at most 16 hex
+/// digits of the 64-bit KFD unique ID, which is the "GPU-{:016X}" spelling gpu_uuid() produces and
+/// the 5..20 token-length check in
+/// projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_filter_device.cpp:119. "GPU-XX" is
+/// the sentinel ROCR reports for agents without UUID support, so it never names a device. Both
+/// selector paths share this predicate on purpose; only the matching below each call site differs.
+bool is_gpu_uuid_selector(std::string_view token) {
+  return token.size() >= kMinGpuUuidSelectorLength && token.size() <= kMaxGpuUuidSelectorLength &&
+         token.starts_with(kGpuUuidPrefix) && token != kNoUuidSentinel;
+}
 
 std::string join_comma(const std::vector<std::string> &tokens) {
   std::string result;
@@ -71,7 +88,7 @@ std::vector<VisibleGpu> filter_rocr_visible_gpus(const std::vector<VisibleGpu> &
                    [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
 
     std::optional<size_t> index;
-    if (token.size() >= 5 && token.size() <= 20 && token.starts_with("GPU-") && token != "GPU-XX") {
+    if (is_gpu_uuid_selector(token)) {
       for (size_t candidate = 0; candidate < gpus.size(); ++candidate) {
         if (gpus[candidate].unique_id == 0 ||
             !gpu_uuid(gpus[candidate].unique_id).starts_with(token))
@@ -111,10 +128,25 @@ std::vector<VisibleGpu> filter_client_visible_gpus(const std::vector<VisibleGpu>
     const size_t comma = rest.find(',');
     std::string token(comma == std::string_view::npos ? rest : rest.substr(0, comma));
 
-    if (token.find("GPU-") != std::string::npos) {
+    // The spelling guard is the only thing this path borrows from filter_rocr_visible_gpus, and
+    // its window makes rocjitsu STRICTER than the runtime this path models: CLR gates on a bare
+    // find("GPU-") with no length or sentinel check
+    // (projects/clr/rocclr/device/rocm/rocdevice.cpp:431-444), so CLR resolves the token "GPU-" to
+    // agent 0. Diverging is safe only because CLR never sees a token rocjitsu rejected:
+    // filter_client_visible_gpus runs only in DBT guest mode, where main.cpp unconditionally
+    // rewrites the client selector to normalized_client_visible_devices()'s canonical numeric
+    // list before execvp. Do not restore CLR parity here without also removing that rewrite.
+    //
+    // Everything below the guard stays CLR-shaped, preserving the deliberate ROCR-vs-CLR split
+    // that DuplicateAndReorderedSelectorsMatchRuntimeBehavior documents: the break makes the
+    // first match win rather than terminating on ambiguity, the compare is case-sensitive
+    // because this path never uppercases, and a token that fails the guard or matches no agent
+    // needs no early return -- it falls through to the numeric parse below, which rejects it and
+    // terminates selection.
+    if (is_gpu_uuid_selector(token)) {
       for (size_t candidate = 0; candidate < gpus.size(); ++candidate) {
         if (gpus[candidate].unique_id != 0 &&
-            gpu_uuid(gpus[candidate].unique_id).find(token) != std::string::npos) {
+            gpu_uuid(gpus[candidate].unique_id).starts_with(token)) {
           token = std::to_string(candidate);
           break;
         }

@@ -78,6 +78,14 @@ TEST(RocmVisibilityTest, MalformedSelectorsTerminateSelection) {
   EXPECT_TRUE(rocjitsu::cli::filter_client_visible_gpus(test_gpus(), "01").empty());
   EXPECT_TRUE(rocjitsu::cli::filter_client_visible_gpus(test_gpus(), "00").empty());
 
+  // The client UUID guard rejects malformed spellings rather than substring-matching them onto the
+  // first agent: too short to carry a body, the ROCR no-UUID sentinel, and one hex digit past the
+  // 20-char maximum. Each falls through to the numeric parse, which terminates selection.
+  EXPECT_TRUE(rocjitsu::cli::filter_client_visible_gpus(test_gpus(), "GPU-").empty());
+  EXPECT_TRUE(rocjitsu::cli::filter_client_visible_gpus(test_gpus(), "GPU-XX").empty());
+  EXPECT_TRUE(
+      rocjitsu::cli::filter_client_visible_gpus(test_gpus(), "GPU-11111111111111111").empty());
+
   const auto rocr_prefix = rocjitsu::cli::filter_rocr_visible_gpus(test_gpus(), "0,GPU-,1");
   ASSERT_EQ(1u, rocr_prefix.size());
   EXPECT_EQ(100u, rocr_prefix[0].gpu_id);
@@ -85,6 +93,11 @@ TEST(RocmVisibilityTest, MalformedSelectorsTerminateSelection) {
   const auto client_prefix = rocjitsu::cli::filter_client_visible_gpus(test_gpus(), "1,00,2");
   ASSERT_EQ(1u, client_prefix.size());
   EXPECT_EQ(101u, client_prefix[0].gpu_id);
+
+  const auto client_uuid_prefix =
+      rocjitsu::cli::filter_client_visible_gpus(test_gpus(), "1,GPU-,2");
+  ASSERT_EQ(1u, client_uuid_prefix.size());
+  EXPECT_EQ(101u, client_uuid_prefix[0].gpu_id);
 }
 
 TEST(RocmVisibilityTest, DuplicateAndReorderedSelectorsMatchRuntimeBehavior) {
