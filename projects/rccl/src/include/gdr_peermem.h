@@ -9,12 +9,15 @@
 #define NCCL_GDR_PEERMEM_H_
 
 // Scan a NULL-terminated list of `memory_peers` base directories for a registered
-// peer-memory client. A real client registers itself as a named subdirectory (e.g.
-// `amdkfd`), so the presence of any such subdirectory means a client is loaded.
+// peer-memory client, returning 1 if one is found and 0 otherwise. Shared by the
+// net_ib and net_ib_cast transports.
 //
-// The base-path list is passed in (rather than hardcoded) so the detection can be
-// exercised against a mock sysfs tree in unit tests. Returns 1 if a client
-// subdirectory is found in any of the given paths, 0 otherwise.
+// Registering a client always creates a subdirectory named after that client holding a
+// `version` attribute, so any subdirectory carrying a `version` is a client whatever its
+// name; matching on `amdkfd` alone would miss every other client.
+//
+// The base-path list is a parameter rather than hardcoded so unit tests can aim the scan
+// at a mock sysfs tree.
 int ncclIbScanPeerMemClients(const char* const* basePaths);
 
 #endif  // NCCL_GDR_PEERMEM_H_

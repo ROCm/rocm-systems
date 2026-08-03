@@ -149,6 +149,7 @@ set(SRC_FILES
   include/fabric_init.h
   include/fabric_gpu_barrier.h
   include/fabric_mem_handler.h
+  include/gdr_peermem.h
   include/gdrwrap.h
   include/git_version.h
   include/graph.h
@@ -332,6 +333,7 @@ set(SRC_FILES
   misc/api_trace.c
   misc/api_trace.cc
 # misc/cudawrap.cc
+  misc/gdr_peermem.cc
 # misc/gdrwrap.cc
   misc/ibvsymbols.cc
   misc/ibvwrap.cc
@@ -433,8 +435,6 @@ set(SRC_FILES
   transport/net_ib/connect.cc
   transport/net_ib/connect.h
   transport/net_ib/gdr.cc
-  transport/net_ib/gdr_peermem.cc
-  transport/net_ib/gdr_peermem.h
   transport/net_ib/gin.cc
   transport/net_ib/gin.h
   transport/net_ib/init.cc

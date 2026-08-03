@@ -57,13 +57,19 @@ class GdrPeerMem : public ::testing::Test {
     ASSERT_NE(f, nullptr) << "failed to create " << Path(rel);
     std::fclose(f);
   }
+
+  // A fully registered client: a named subdirectory holding a `version` attribute.
+  void MakeClient(const std::string& rel) {
+    MakeDir(rel);
+    MakeFile(rel + "/version");
+  }
 };
 
 }  // namespace
 
-// A registered client (named subdirectory) is detected.
+// A registered client (named subdirectory with a `version` attribute) is detected.
 TEST_F(GdrPeerMem, ClientPresent_SubdirDetected) {
-  MakeDir("memory_peers/amdkfd");
+  MakeClient("memory_peers/amdkfd");
   const std::string base = Path("memory_peers");
   const char* paths[] = {base.c_str(), nullptr};
   EXPECT_EQ(ncclIbScanPeerMemClients(paths), 1);
@@ -95,10 +101,27 @@ TEST_F(GdrPeerMem, FilesOnly_NotDetected) {
   EXPECT_EQ(ncclIbScanPeerMemClients(paths), 0);
 }
 
-// A hidden subdirectory (leading dot) is skipped, proving the dotfile filter
-// rejects real entries and not just "." / "..".
+// Detection is client-name agnostic: a client that is not `amdkfd` is still found.
+TEST_F(GdrPeerMem, ClientPresent_NonAmdkfdName) {
+  MakeClient("memory_peers/some_other_client");
+  const std::string base = Path("memory_peers");
+  const char* paths[] = {base.c_str(), nullptr};
+  EXPECT_EQ(ncclIbScanPeerMemClients(paths), 1);
+}
+
+// A subdirectory without a `version` attribute is not a registered client. Keying on
+// `version` rather than on the dirent type is what makes readdir's DT_UNKNOWN irrelevant.
+TEST_F(GdrPeerMem, SubdirWithoutVersion_NotDetected) {
+  MakeDir("memory_peers/not_a_client");
+  const std::string base = Path("memory_peers");
+  const char* paths[] = {base.c_str(), nullptr};
+  EXPECT_EQ(ncclIbScanPeerMemClients(paths), 0);
+}
+
+// A hidden subdirectory (leading dot) is skipped even when it looks like a complete
+// client, proving the dotfile filter rejects real entries and not just "." / "..".
 TEST_F(GdrPeerMem, HiddenSubdirIgnored) {
-  MakeDir("memory_peers/.hidden");
+  MakeClient("memory_peers/.hidden");
   const std::string base = Path("memory_peers");
   const char* paths[] = {base.c_str(), nullptr};
   EXPECT_EQ(ncclIbScanPeerMemClients(paths), 0);
@@ -107,7 +130,7 @@ TEST_F(GdrPeerMem, HiddenSubdirIgnored) {
 // The scan walks the list in order: a client found in a later base path is
 // detected even when earlier ones are absent.
 TEST_F(GdrPeerMem, MultipleBasePaths_SecondHasClient) {
-  MakeDir("second/amdkfd");
+  MakeClient("second/amdkfd");
   const std::string p0 = Path("first_absent");
   const std::string p1 = Path("second");
   const char* paths[] = {p0.c_str(), p1.c_str(), nullptr};
@@ -117,17 +140,11 @@ TEST_F(GdrPeerMem, MultipleBasePaths_SecondHasClient) {
 // A match in the first base path short-circuits: detection succeeds without
 // requiring the remaining paths to exist.
 TEST_F(GdrPeerMem, FirstMatchShortCircuits) {
-  MakeDir("first/amdkfd");
+  MakeClient("first/amdkfd");
   const std::string p0 = Path("first");
   const std::string p1 = Path("second_absent");
   const char* paths[] = {p0.c_str(), p1.c_str(), nullptr};
   EXPECT_EQ(ncclIbScanPeerMemClients(paths), 1);
 }
-
-// NOTE: the DT_UNKNOWN acceptance branch (a dirent whose type the filesystem
-// does not report) cannot be forced deterministically here — tmpfs/ext4 fill
-// d_type with concrete values (DT_DIR/DT_REG), so readdir never returns
-// DT_UNKNOWN for these sandbox entries. The DT_DIR-accept and DT_REG-reject
-// paths above cover the behavior that matters in practice.
 
 }  // namespace RcclUnitTesting

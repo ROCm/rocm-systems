@@ -6,6 +6,7 @@
  *************************************************************************/
 
 #include "common_cast.h"
+#include "gdr_peermem.h"
 // Introduce RCCL_FORCE_ENABLE_GDRDMA to force load GPU-NIC RDMA module
 // Use ONLY for debugging!
 RCCL_PARAM(IbCastForceEnableGdrdma, "FORCE_ENABLE_GDRDMA", -1);
@@ -28,26 +29,12 @@ static void ibGdrSupportInitOnce() {
   }
 
   if (IbCastGdrModuleLoaded == 0) {
-    // Check for `memory_peers` directory containing `amdkfd/version`
-    // This `memory_peers` directory is created by NIC-GPU driver interaction
-    // On Linux kernel 5.15.0 (e.g. Ubuntu 22.04), `memory_peers` is created under `/sys/kernel/mm/`
-    // However, on newer kernels like Ubuntu 24.04.1 (Linux kernel 6.8.0) or Ubuntu 22.04.4 HWE (Linux kernel 6.5.0),
-    // this `memory_peers` directory is either not created (go to else-if condition)
-    // or created under a different path like `/sys/kernel/` or `/sys/` (depending on your ib_peer_mem module)
-    const char* memory_peers_paths[] = {"/sys/kernel/mm/memory_peers/amdkfd/version",
-                                        "/sys/kernel/memory_peers/amdkfd/version", "/sys/memory_peers/amdkfd/version",
-                                        NULL};
-    int i = 0;
-    while (memory_peers_paths[i]) {
-      if (access(memory_peers_paths[i], F_OK) == 0) {
-        IbCastGdrModuleLoaded = 1;
-        INFO(NCCL_INIT, "Found %s", memory_peers_paths[i]);
-        break;
-      } else {
-        IbCastGdrModuleLoaded = 0;
-      }
-      ++i;
-    }
+    // `memory_peers` lives under `/sys/kernel/mm/` on Linux 5.15 (e.g. Ubuntu 22.04); newer kernels
+    // may omit it or place it under `/sys/kernel/` or `/sys/`, depending on the ib_peer_mem module.
+    const char* memory_peers_paths[] = {"/sys/kernel/mm/memory_peers", "/sys/kernel/memory_peers",
+                                        "/sys/memory_peers", NULL};
+
+    if (ncclIbScanPeerMemClients(memory_peers_paths)) IbCastGdrModuleLoaded = 1;
 
     char strValue[MAX_STR_LEN];
     ncclTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue);
@@ -55,27 +42,6 @@ static void ibGdrSupportInitOnce() {
       int roMode = ncclParamIbCastPciRelaxedOrdering();
       ncclTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue);
       if (strcmp(strValue, "1") == 0 && roMode == 0) IbCastGdrModuleLoaded = 0;
-    }
-
-    if (IbCastGdrModuleLoaded == 0) {
-      // Check for `ib_register_peer_memory_client` symbol in `/proc/kallsyms`
-      // if your system uses native OS ib_peer module
-      char buf[256];
-      FILE* fp = NULL;
-      fp = fopen("/proc/kallsyms", "r");
-
-      if (fp == NULL) {
-        INFO(NCCL_INIT, "Could not open /proc/kallsyms");
-      } else {
-        while (fgets(buf, sizeof(buf), fp) != NULL) {
-          if (strstr(buf, "t ib_register_peer_memory_client") != NULL ||
-              strstr(buf, "T ib_register_peer_memory_client") != NULL) {
-            IbCastGdrModuleLoaded = 1;
-            INFO(NCCL_INIT, "Found ib_register_peer_memory_client in /proc/kallsyms");
-            break;
-          }
-        }
-      }
     }
   }
 #else

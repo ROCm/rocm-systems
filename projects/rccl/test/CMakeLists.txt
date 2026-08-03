@@ -431,23 +431,20 @@ if(BUILD_TESTS)
     endif()
   endif()
 
-  # rccl-UnitTestsGdr: Compiles the net_ib peer-memory detection helper
-  # (gdr_peermem.cc) directly so the sysfs scan can be exercised against a mock
-  # `memory_peers` tree in a temp directory. The helper is pure (no HIP, no
-  # librccl.so symbols, no GPU), so this target builds in Release and Debug.
+  # rccl-UnitTestsGdr: Compiles the peer-memory detection helper (gdr_peermem.cc,
+  # shared by the net_ib and net_ib_cast transports) directly so the sysfs scan can
+  # be exercised against a mock `memory_peers` tree in a temp directory. The helper
+  # is pure (no HIP, no librccl.so symbols, no GPU), so this target builds in
+  # Release and Debug.
   list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsGdr)
 
   set(TEST_GDR_SOURCE_FILES
     GdrPeerMemTests.cpp
-    ../src/transport/net_ib/gdr_peermem.cc
+    ../src/misc/gdr_peermem.cc
     common/main_altrsmi.cpp
   )
 
   add_executable(rccl-UnitTestsGdr ${TEST_GDR_SOURCE_FILES})
-
-  # GdrPeerMemTests.cpp and gdr_peermem.cc include the helper header from its
-  # source directory (net_ib is not on the default test include path).
-  target_include_directories(rccl-UnitTestsGdr PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/transport/net_ib)
   # rccl-UnitTestsAmdSmi: tests for the amdsmi_wrap layer.
   #
   # AmdSmiFabricTests.cpp covers the fabric predicates and struct layout pinned in

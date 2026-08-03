@@ -9,6 +9,9 @@
 #include "debug.h"
 
 #include <dirent.h>
+#include <limits.h>
+#include <stdio.h>
+#include <unistd.h>
 
 int ncclIbScanPeerMemClients(const char* const* basePaths) {
   int found = 0;
@@ -18,12 +21,18 @@ int ncclIbScanPeerMemClients(const char* const* basePaths) {
     struct dirent* entry;
     while ((entry = readdir(dir)) != NULL) {
       if (entry->d_name[0] == '.') continue;
-      if (entry->d_type != DT_DIR && entry->d_type != DT_UNKNOWN) continue;
+      // Registration only completes once the client's sysfs group, and so its `version`
+      // attribute, is in place, so probing for `version` avoids trusting readdir's d_type.
+      char versionPath[PATH_MAX];
+      int len = snprintf(versionPath, sizeof(versionPath), "%s/%s/version", basePaths[i], entry->d_name);
+      if (len < 0 || len >= (int)sizeof(versionPath)) continue;
+      if (access(versionPath, F_OK) != 0) continue;
       found = 1;
       INFO(NCCL_INIT, "Found peer memory client %s/%s", basePaths[i], entry->d_name);
       break;
     }
     closedir(dir);
   }
+  if (found == 0) INFO(NCCL_INIT, "No peer memory client found, GDR via peermem disabled");
   return found;
 }

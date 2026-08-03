@@ -33,11 +33,8 @@ static void ibGdrSupportInitOnce() {
   }
 
   if (ncclIbGdrModuleLoaded == 0) {
-    // A peer-memory client registers itself as a named subdirectory of `memory_peers` (e.g. `amdkfd`),
-    // so any subdirectory means a client is loaded. Probing for the `ib_register_peer_memory_client`
-    // symbol instead gives false positives: many kernels export it with no client registered.
-    // `memory_peers` is created under `/sys/kernel/mm/` on Linux kernel 5.15.0 (e.g. Ubuntu 22.04), but on
-    // newer kernels it may be absent or live under `/sys/kernel/` or `/sys/`, depending on the ib_peer_mem module
+    // `memory_peers` lives under `/sys/kernel/mm/` on Linux 5.15 (e.g. Ubuntu 22.04); newer kernels
+    // may omit it or place it under `/sys/kernel/` or `/sys/`, depending on the ib_peer_mem module.
     const char* memory_peers_paths[] = {"/sys/kernel/mm/memory_peers", "/sys/kernel/memory_peers",
                                         "/sys/memory_peers", NULL};
 
