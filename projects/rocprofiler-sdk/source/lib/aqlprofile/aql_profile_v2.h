@@ -627,8 +627,8 @@ typedef struct aqlprofile_att_buffer_status_t
     bool     is_too_late;
     bool     error;
     uint64_t read_offset;
-    // Set when the hardware is no longer running the trace even though it was never stopped by
-    // software. Only meaningful if _size covers this field; the caller must restart the trace.
+    // Set when the hardware is no longer running the trace; the caller must restart it to
+    // collect more data. Only meaningful if _size covers this field.
     bool trace_stopped;
 } aqlprofile_att_buffer_status_t;
 

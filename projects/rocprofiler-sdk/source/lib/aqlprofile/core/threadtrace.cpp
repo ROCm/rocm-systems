@@ -441,12 +441,9 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
 
         if(pm4_factory->IsGFX11())
         {
-            // gfx11 erratum: the final write granule of a buffer may not be committed before the
-            // hardware raises the full bit. SQ_THREAD_TRACE_WPTR holds OFFSET (bits 28:0, in write
-            // granules relative to the active buffer's base) and BUFFER_ID (bit 31, the buffer the
-            // hardware is currently filling). Swap n drains the buffer that was living in
-            // BUF(n % 2), so a matching BUFFER_ID means the hardware has not switched away yet and
-            // OFFSET still describes how far it got in the buffer we are about to hand out.
+            // WPTR reports how far the hardware has written, in 32-byte units, plus which of the
+            // two buffers it is writing into. Swap n hands out buffer n % 2, so if that is still
+            // the one being written, the last 32 bytes may not have landed yet.
             constexpr uint32_t WPTR_BUF_ID = 1u << 31;
 
             const uint32_t wptr = control.wptr_doublebuffer;
@@ -455,7 +452,7 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
             if(((wptr & WPTR_BUF_ID) != 0) == ((out->num_swaps % 2) != 0))
             {
                 const size_t written = (wptr & sqttbuilder->GetWritePtrMask()) * blk;
-                // Exclude the final granule only when the hardware never reached it.
+                // Drop those bytes only if the hardware never got that far.
                 if(written + blk <= out->read_size) out->read_size -= blk;
             }
         }

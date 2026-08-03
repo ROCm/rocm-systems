@@ -350,13 +350,13 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         }
 
         // Hardware buffers can fill before a newly-created producer gets its first CPU timeslice.
-        // Arm the worker first, then enable SQTT, and do not return to the application until the
-        // producer has observed completion and performed its initial status poll.
+        // Start the worker first, then enable the trace, and do not return to the application
+        // until the producer has finished its first status poll.
         while(!worker_data->producer_waiting.load(std::memory_order_acquire))
             std::this_thread::yield();
 
-        // The producer is parked on this signal, so it must be raised even when the trace is
-        // already being torn down, otherwise the thread would never be joinable.
+        // The producer is waiting on this signal, so it must be raised even when the trace is
+        // already shutting down, or that thread would never exit.
         att_queue_submit_signal_last(*queue, start_packets, *shared_signal);
 
         while(!worker_data->producer_ready.load(std::memory_order_acquire) &&
@@ -366,7 +366,7 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
     else
     {
         // Submit without waiting so multiple agents can be launched in parallel. The caller waits
-        // on all returned signals after every agent has been armed.
+        // on all returned signals after every agent has been started.
         auto unique_signal =
             att_queue_submit_signal_last(*queue, control_packet_copy->before_krn_pkt);
         shared_signal = std::shared_ptr<hsa_signal_t>(std::move(unique_signal));

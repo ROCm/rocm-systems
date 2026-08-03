@@ -147,8 +147,8 @@ public:
     virtual size_t GetWritePtrMask() const = 0;
     // Returns size of block in bytes per increment in WPTR
     virtual size_t GetWritePtrBlk() const = 0;
-    // Returns the STATUS bits that are set while an active trace owns the hardware, or 0 when
-    // the architecture provides no such indication.
+    // Returns the STATUS bits that stay set while a trace is running, or 0 if this architecture
+    // has no such indication.
     virtual size_t GetTraceOwnerMask() const = 0;
     // Returns number of bits used for TTrace buffer alignment (e.g. 12 for 4KB alignment)
     virtual size_t BufferAlignment() const = 0;
@@ -401,9 +401,8 @@ public:
         {
             SetGRBMToBroadcast(cmd_buffer);
 
-            // gfx11 latches the buffer registers while SQTT is armed, so re-programming them
-            // under a live trace leaves it running against a stale configuration. Disable the
-            // trace and wait for the engine to go idle before touching BASE/SIZE below.
+            // gfx11 only picks up new buffer addresses while the trace is off, so stop it and
+            // wait for it to go idle before the BASE/SIZE writes below.
             if(Primitives::GFXIP_LEVEL == 11)
             {
                 builder.BuildWriteShRegPacket(
@@ -853,7 +852,7 @@ public:
                                            Primitives::COPY_DATA_SEL_COUNT_1DW_PRM,
                                            false);
 
-        // gfx11 can drop out of trace mode on its own, which only shows up in STATUS.
+        // The owner id in STATUS is the only way to tell whether the trace is still running.
         if(Primitives::GFXIP_LEVEL == 11)
             builder.BuildCopyRegDataPacket(cmd_buffer,
                                            Primitives::SQ_THREAD_TRACE_STATUS_ADDR,

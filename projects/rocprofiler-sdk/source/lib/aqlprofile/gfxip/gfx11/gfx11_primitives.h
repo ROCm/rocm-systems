@@ -791,7 +791,7 @@ public:
             SQ_THREAD_TRACE_STATUS2__BUF0_FULL_MASK | SQ_THREAD_TRACE_STATUS2__BUF1_FULL_MASK,
         TT_WRITE_PTR_MASK = SQ_THREAD_TRACE_WPTR__OFFSET_MASK,
         TT_LOCKDOWN_FAIL  = SQ_THREAD_TRACE_STATUS2__PACKET_LOST_BUF_NO_LOCKDOWN_MASK,
-        // Held by the VMID that armed the trace and cleared when the SQ stops tracing.
+        // Set to the id of whoever started the trace, and cleared once the trace stops running.
         TT_OWNER_MASK = SQ_THREAD_TRACE_STATUS__OWNER_VMID_MASK
     };
 

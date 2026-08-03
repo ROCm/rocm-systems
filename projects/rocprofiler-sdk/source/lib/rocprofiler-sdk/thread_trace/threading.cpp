@@ -348,8 +348,8 @@ producer_loop(
         }
         else if(buffer_packet.trace_stopped)
         {
-            // The hardware left trace mode on its own. Collect whatever it managed to write, then
-            // re-arm so the rest of the dispatch is still captured.
+            // Save whatever the trace managed to write, then start it again so the rest of the
+            // dispatch is still captured.
             ROCP_INFO << "Thread trace stopped unexpectedly, restarting";
             if(!stop_trace()) break;
             iterate_trace();
