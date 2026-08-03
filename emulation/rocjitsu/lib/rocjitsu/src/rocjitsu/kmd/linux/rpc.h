@@ -206,32 +206,27 @@ inline ssize_t rpc_recv_msg(int sock, void *data, size_t data_len, int *fds = nu
 /// @param sock Connected Unix domain socket fd.
 /// @param buffer Buffer to read into.
 /// @param total_bytes Number of bytes to read.
-/// @param[out] bytes_read_out Optional; on return holds the number of bytes
-/// actually taken off the socket, which on failure is how much of the frame was
-/// consumed and abandoned. A caller that has to decide whether the stream is
-/// still parseable needs this: a failure at zero bytes leaves the next header on
-/// a frame boundary, any other failure does not.
 /// @retval true All bytes were read successfully.
 /// @retval false Connection closed or recv(2) returned an error (errno is set).
-inline bool rpc_recv_exact(int sock, void *buffer, size_t total_bytes,
-                           size_t *bytes_read_out = nullptr) {
+/// @note Deliberately reports no byte count, unlike rpc_send_exact(). A sender
+/// needs the zero-versus-partial distinction because a frame that never started
+/// leaves the stream aligned; a receiver does not, because by the time a reply
+/// is read the request is already on the wire, so any failure -- including one
+/// at zero bytes -- leaves the peer's answer, or the tail of it, unclaimed and
+/// the stream unparseable. Every failure here is terminal.
+inline bool rpc_recv_exact(int sock, void *buffer, size_t total_bytes) {
   auto *cursor = static_cast<uint8_t *>(buffer);
   size_t remaining = total_bytes;
-  auto report = [&](bool complete) {
-    if (bytes_read_out)
-      *bytes_read_out = total_bytes - remaining;
-    return complete;
-  };
   while (remaining > 0) {
     ssize_t bytes_read = recv(sock, cursor, remaining, 0);
     if (bytes_read < 0 && errno == EINTR)
       continue;
     if (bytes_read <= 0)
-      return report(false);
+      return false;
     cursor += bytes_read;
     remaining -= static_cast<size_t>(bytes_read);
   }
-  return report(true);
+  return true;
 }
 
 /// @brief Send exactly `total_bytes` bytes to a socket, handling partial writes.
