@@ -312,22 +312,6 @@ public:
         return 0;
     }
 
-    /// @brief Build a GPU command that writes @p num_dwords zeros into device-visible
-    /// memory at @p dst_addr. Used to deterministically clear the PMC result buffer on
-    /// the GPU before the COPY_DATA reads of every collection.
-    ///
-    /// Default is a no-op so architectures that do not need (or implement) this keep
-    /// their existing behavior; it is scoped to GFX11 via the override in
-    /// Gfx11CmdBuilder. This is a general correctness hardening (a reused result buffer
-    /// whose per-instance slots may not all be written should still read back defined
-    /// zeros), primarily motivated by WSL/dxg where the result buffer is not
-    /// zero-initialized by the allocator and is reused across collections (see
-    /// GpuPmcBuilder::ZeroOutput / pmc create path).
-    virtual void BuildZeroMemoryPacket(CmdBuffer* /*cmdbuf*/,
-                                       const void* /*dst_addr*/,
-                                       uint32_t /*num_dwords*/)
-    {}
-
 private:
     const reg_base_offset_table* const ip_offset_table;
 };

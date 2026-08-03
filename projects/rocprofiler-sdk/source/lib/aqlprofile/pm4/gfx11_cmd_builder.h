@@ -346,46 +346,6 @@ public:
         }
     }
 
-    // General correctness hardening (primarily motivated by WSL/dxg, but not WSL-specific):
-    // the PMC result buffer is allocated once and reused for every collection, so any
-    // per-instance (e.g. per-WGP) result slot whose COPY_DATA does not land would otherwise
-    // return stale/garbage rather than a defined zero. dxg-backed device memory is not
-    // zero-initialized (unlike KFD's kernel-zeroed mmap pages), which is what first exposed
-    // it. This emits an on-device WRITE_DATA that zeros the whole result region; because it
-    // is baked into the (replayed) read command buffer, the zeroing runs on the GPU, ordered
-    // before the COPY_DATA reads, on every collection -- coherence-proof unlike a host
-    // memset. This is the gfx11 implementation of the builder override; other arches keep
-    // the default no-op.
-    void BuildZeroMemoryPacket(CmdBuffer*  cmdbuf,
-                               const void* dst_addr,
-                               uint32_t    num_dwords) override
-    {
-        if(num_dwords == 0) return;
-
-        // WRITE_DATA layout: header + control + addr_lo + addr_hi + num_dwords data words
-        uint32_t header =
-            MakePacket3Header(PACKET3_WRITE_DATA, (4 + num_dwords) * sizeof(uint32_t));
-
-        uint32_t dword2 = 0;
-        dword2 |= PACKET3_WRITE_DATA__DST_SEL(PACKET3_WRITE_DATA__DST_SEL__TC_L2);
-        dword2 |= PACKET3_WRITE_DATA__ADDR_INCR(PACKET3_WRITE_DATA__ADDR_INCR__INCREMENT_ADDRESS);
-        dword2 |= PACKET3_WRITE_DATA__WR_CONFIRM(
-            PACKET3_WRITE_DATA__WR_CONFIRM__WAIT_FOR_WRITE_CONFIRMATION);
-
-        // dst_addr must be 4-byte aligned; encode as a dword (byte address >> 2)
-        uint32_t dword3 = PACKET3_WRITE_DATA__DST_MEM_ADDR_LO((PtrLow32(dst_addr) >> 2));
-        uint32_t dword4 = PACKET3_WRITE_DATA__DST_MEM_ADDR_HI(PtrHigh32(dst_addr));
-
-        uint32_t pm4mec_write_data_cmd[4] = {header, dword2, dword3, dword4};
-        APPEND_COMMAND_WRAPPER(cmdbuf, pm4mec_write_data_cmd);
-
-        for(uint32_t i = 0; i < num_dwords; ++i)
-        {
-            uint32_t zero = 0;
-            APPEND_COMMAND_WRAPPER(cmdbuf, zero);
-        }
-    }
-
     void BuildNopPacket(CmdBuffer* cmdbuf, uint32_t num_dwords)
     {
         uint32_t header = MakePacket3Header(PACKET3_NOP, num_dwords * sizeof(uint32_t));
