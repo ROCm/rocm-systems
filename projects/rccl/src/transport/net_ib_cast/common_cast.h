@@ -323,6 +323,7 @@ struct ncclIbRequest {
   uint64_t id;
   int nreqs;
   struct IbCastQpSchedDesc desc;
+  uint64_t tel_post_ts;
   union {
     struct {
       int size;
@@ -428,6 +429,7 @@ struct ncclIbQp {
   int8_t ctsQpSlot;
   int channelId;
   bool isDataQp;
+  int telQpSlot;
 };
 
 // We need to support NCCL_NET_MAX_REQUESTS for each concurrent receive
@@ -608,6 +610,7 @@ struct ncclIbSendComm {
   int ar; // Use adaptive routing when all merged devices have it enabled
   uint64_t putSignalScratchpad;
   bool useCtsOffload;
+  int telChId; // Telemetry: NCCL channel ID for this communicator
 };
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and
@@ -697,6 +700,7 @@ struct ncclIbRecvComm {
   // and only the wr_id is updated before posting a receive work request.
   struct ibv_recv_wr ibRecvWorkRequest;
   bool useCtsOffload;
+  int telChId; // Telemetry: NCCL channel ID for this communicator
 };
 static_assert((offsetof(struct ncclIbRecvComm, remCtsFifo) % 32) == 0,
               "ncclIbRecvComm ctsFifo must be 32-byte aligned");

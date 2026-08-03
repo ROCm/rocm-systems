@@ -10,6 +10,7 @@
 #include "checks.h"
 #include "plugin.h"
 #include "nccl_net.h"
+#include "net_telemetry.h"
 
 #include <string.h>
 #include <errno.h>
@@ -339,6 +340,7 @@ static ncclResult_t ncclNetPluginFinalize(struct ncclComm* comm, int pluginIndex
 }
 
 ncclResult_t ncclNetInit(struct ncclComm* comm) {
+  rcclTelemetryInit();
   bool ncclNetPluginInitialized = false;
   std::call_once(initPluginLibsOnceFlag, initPluginLibsOnceFunc);
   std::lock_guard<std::mutex> lock(netPluginMutex);

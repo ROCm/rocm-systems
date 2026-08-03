@@ -8,6 +8,7 @@
 #include "connect_cast.h"
 #include "common_cast.h"
 #include "p2p_resiliency_cast.h"
+#include "net_telemetry.h"
 
 NCCL_PARAM(IbCastGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbCastRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
@@ -479,6 +480,7 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
 }
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs) {
+  qp->telQpSlot = -1;
   if (createQpAttrs->oooRq) {
     NCCLCHECK(ncclIbCreateQpMlx5(createQpAttrs, qp));
     return ncclSuccess;
@@ -1075,6 +1077,23 @@ ib_recv_dev_list:
 
   // Create QPs on the sender side
   NCCLCHECKGOTO(IbCastSenderQpsCreate(comm, &meta, channelId), ret, fail);
+
+  comm->telChId = channelId;
+
+  for (int i = 0; i < comm->base.vProps.ndevs; i++) {
+    int ibDevN = comm->base.vProps.devs[i];
+    int numQpsForDev = 0;
+    for (int q = 0; q < comm->base.nqps; q++)
+      if (comm->base.qps[q].devIndex == i) numQpsForDev++;
+    int startSlot = rcclTelemetrySetupChannel(ibDevN, channelId, numQpsForDev, 1 /*isDataQp*/);
+    if (startSlot >= 0) {
+      int slotOffset = 0;
+      for (int q = 0; q < comm->base.nqps; q++) {
+        if (comm->base.qps[q].devIndex == i)
+          comm->base.qps[q].telQpSlot = startSlot + slotOffset++;
+      }
+    }
+  }
 
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     ncclIbSendCommDev* commDev = comm->devs + i;
@@ -1751,6 +1770,23 @@ ib_recv:
   NCCLCHECKGOTO(IbCastReceiverQpsCreateToRts(rComm, &remMeta, &meta, channelId), ret, fail);
   if (rComm->prepostReceiveWorkRequests) {
     NCCLCHECKGOTO(IbCastReceiverPrePostReceiveWorkRequests(rComm), ret, fail);
+  }
+
+  rComm->telChId = channelId;
+
+  for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
+    int telIbDevN = rComm->base.vProps.devs[i];
+    int numQpsForDev = 0;
+    for (int q = 0; q < rComm->base.nqps; q++)
+      if (rComm->base.qps[q].devIndex == i) numQpsForDev++;
+    int startSlot = rcclTelemetrySetupChannel(telIbDevN, channelId, numQpsForDev, 0 /*isCtsQp*/);
+    if (startSlot >= 0) {
+      int slotOffset = 0;
+      for (int q = 0; q < rComm->base.nqps; q++) {
+        if (rComm->base.qps[q].devIndex == i)
+          rComm->base.qps[q].telQpSlot = startSlot + slotOffset++;
+      }
+    }
   }
 
   // Store the remote CTS FIFO info provided by the remote peer

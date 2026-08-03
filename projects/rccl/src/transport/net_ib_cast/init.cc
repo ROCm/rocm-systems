@@ -7,6 +7,7 @@
 
 #include "common_cast.h"
 #include "p2p_resiliency_recovery_cast.h"
+#include "net_telemetry.h"
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
@@ -355,12 +356,15 @@ const char* ibCastProviderName[] = {
 };
 
 ncclResult_t IbCastFinalizeDevices(void) {
-  netRefCount--;
+  if (--netRefCount == 0) {
+    rcclTelemetryFlush();
+  }
   return ncclSuccess;
 }
 
 extern int64_t IbCastArThreshold;
 ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+  rcclTelemetryInit();
   ncclResult_t ret = ncclSuccess;
   if (netRefCount++) return ret;
   IbCastProfilerFunction = profFunction;
@@ -533,6 +537,14 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             ncclSetThreadName(IbCastAsyncThread.native_handle(), "NCCL IbAsync %2d", IbCastNDevs);
             IbCastAsyncThread.detach();
 
+            // Register device with telemetry
+            {
+              char telEthDev[64];
+              rcclTelemetryGetEthDevice(IbCastDevs[IbCastNDevs].devName, telEthDev, sizeof(telEthDev));
+              rcclTelemetryRegisterDevice(IbCastNDevs, IbCastDevs[IbCastNDevs].devName,
+                                          telEthDev, "IB-CAST");
+            }
+
             IbCastNDevs++;
             nPorts++;
           }
@@ -652,6 +664,7 @@ fail:
 
 ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config, ncclDebugLogger_t logFunction,
                         ncclProfilerCallback_t profFunction) {
+  rcclTelemetryInit();
   ncclResult_t ret = ncclSuccess;
   ncclNetCommConfig_t* netCommConfig = nullptr;
   NCCLCHECK(IbCastInitDevices(logFunction, profFunction));

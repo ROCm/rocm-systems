@@ -12,6 +12,7 @@
 #ifdef ENABLE_FAULT_INJECTION
 #include "net_ib_ops_fault.h"
 #endif
+#include "net_telemetry.h"
 
 NCCL_PARAM(IbCastArThreshold, "IB_AR_THRESHOLD", -2);
 int64_t IbCastArThreshold = 8192;
@@ -30,6 +31,7 @@ ncclResult_t IbCastGetRequest(struct ncclIbNetCommBase* base, struct ncclIbReque
       r->sock = NULL;
       memset(r->devBases, 0, sizeof(r->devBases));
       memset(r->events, 0, sizeof(r->events));
+      r->tel_post_ts = 0;
       *req = r;
       return ncclSuccess;
     }
@@ -302,7 +304,15 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       }
     }
 #endif
+    if (rcclTelemetryEnabled && i == 0) {
+      int64_t _tel_ns = rcclTelemetryGetNs();
+      for (int r=0; r<nreqs; r++) reqs[r]->tel_post_ts = _tel_ns;
+    }
+
     NCCLCHECK(wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr));
+
+    if (qp->telQpSlot >= 0)
+      rcclTelemetryWqePosted(comm->base.vProps.devs[qp->devIndex], comm->telChId, qp->telQpSlot, 1);
 
     // Update the send offset and addresses for the next QP according to the
     // actual data size that was sent on the current QP, for every request
@@ -481,6 +491,8 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
     TIME_START(0);
     NCCLCHECK(IbCastMultiSend(comm, slot, nqps, startQpIndex, wrrSched, useWriteOp));
 
+    rcclTelemetryBytes(comm->base.vProps.devs[0], 1, (uint64_t)size);
+
     comm->base.fifoHead++;
     TIME_STOP(0);
     return ncclSuccess;
@@ -632,16 +644,22 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       if (comm->prepostReceiveWorkRequests) {
         continue;
       }
+      if (rcclTelemetryEnabled && i == 0)
+        req->tel_post_ts = rcclTelemetryGetNs();
       // Post receive work request on the QP
       if (comm->base.recvMatchingScheme != BY_ORDER) {
         if (comm->base.rxPosts[qpIndex] < NET_IB_MAX_REQUESTS) {
           comm->ibRecvWorkRequest.wr_id = qpIndex;
           NCCLCHECK(IbCastPostRecvWorkRequest(qp->qp, &comm->ibRecvWorkRequest));
           comm->base.rxPosts[qpIndex]++;
+          if (qp->telQpSlot >= 0)
+            rcclTelemetryWqePosted(comm->base.vProps.devs[qp->devIndex], comm->telChId, qp->telQpSlot, 0);
         }
       } else {
         comm->ibRecvWorkRequest.wr_id = req - comm->base.reqs;
         NCCLCHECK(IbCastPostRecvWorkRequest(qp->qp, &comm->ibRecvWorkRequest));
+        if (qp->telQpSlot >= 0)
+          rcclTelemetryWqePosted(comm->base.vProps.devs[qp->devIndex], comm->telChId, qp->telQpSlot, 0);
       }
 #ifdef NCCL_ENABLE_NET_PROFILING
       // Start a QP event for every request in the multirecv and every qp
@@ -820,6 +838,13 @@ static inline ncclResult_t IbCastRequestComplete(struct ncclIbRequest* r, int* d
   TRACE(NCCL_NET, "NET/IB: %s: %s request completed (req=%p, comm=%p, id=%ld, type=%s)", __func__,
         r->base->isSend ? "Send" : "Recv", r, r->base, r->id, IbCastReqTypeStr[r->type]);
   *done = 1;
+  if (r->devBases[0]) {
+    int telDev = r->devBases[0]->ibDevN;
+    int telCh = r->base->isSend
+      ? ((struct ncclIbSendComm*)(r->base))->telChId
+      : ((struct ncclIbRecvComm*)(r->base))->telChId;
+    rcclTelemetryChannelCompleted(telDev, telCh);
+  }
   if (sizes && r->type == NCCL_NET_IB_REQ_RECV) {
     TRACE(NCCL_NET, "NET/IB: %s: Recv request completed (req=%p, comm=%p, id=%ld, type=%s, nreqs=%d)", __func__, r,
           r->base, r->id, IbCastReqTypeStr[r->type], r->nreqs);
@@ -827,6 +852,8 @@ static inline ncclResult_t IbCastRequestComplete(struct ncclIbRequest* r, int* d
       (r->nreqs > 1 || r->recv.cmplsRecords->sizes[0] > 0) ? r->recv.cmplsRecords->sizes : &(r->recv.aggSize);
     for (int i = 0; i < r->nreqs; i++) {
       sizes[i] = sizesToReport[i];
+      if (r->devBases[0])
+        rcclTelemetryBytes(r->devBases[0]->ibDevN, 0, (uint64_t)sizes[i]);
 #ifdef NCCL_ENABLE_NET_PROFILING
       for (int j = 0; j < r->pInfo[i].nEventHandles; j++) {
         NCCLCHECK(IbCastProfilerFunction(&r->pInfo[i].qpEventHandles[j], ncclProfilerNetEventStop, NULL, 0, NULL));
@@ -1044,6 +1071,13 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
                                        NULL));
 #endif
     }
+    // One CQE == one WQE completion on one QP; record once (not per sub-request).
+    if (rcclTelemetryEnabled) {
+      ncclIbQp* telQp = NULL; int telQpIdx = -1;
+      if (IbCastCommBaseGetQpByQpNum(commBase, devIndex, wc->qp_num, &telQp, &telQpIdx) == ncclSuccess
+          && telQp && telQp->telQpSlot >= 0)
+        rcclTelemetryWqeComplete(commBase->vProps.devs[devIndex], telQp->channelId, telQp->telQpSlot, req->tel_post_ts);
+    }
   } else {
     if (wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
       if (req->type == NCCL_NET_IB_REQ_UNUSED && commBase->resiliency) {
@@ -1070,6 +1104,12 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
       }
       TRACE(NCCL_NET, "NET/IB: %s: Got completion for a recv request (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)",
             __func__, req, req->base, req->id, devIndex, wc->qp_num);
+      if (rcclTelemetryEnabled) {
+        ncclIbQp* telQp = NULL; int telQpIdx = -1;
+        if (IbCastCommBaseGetQpByQpNum(commBase, devIndex, wc->qp_num, &telQp, &telQpIdx) == ncclSuccess
+            && telQp && telQp->telQpSlot >= 0)
+          rcclTelemetryWqeComplete(commBase->vProps.devs[devIndex], telQp->channelId, telQp->telQpSlot, req->tel_post_ts);
+      }
       struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)commBase;
 
       if (recvComm->prepostReceiveWorkRequests) {
@@ -1187,6 +1227,7 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
             WARN("NET/IB: %s: Got CQE with error (devIndex=%d, req=%p, comm=%p (%s), wr_id=%lu, qp_num=%d)", __func__,
                  i, r, r->base, r->base->isSend ? "send" : "recv", wc->wr_id, wc->qp_num);
             IbCastLogCompletionWithError(r->base, wc, i);
+            rcclTelemetryCqError(r->devBases[i]->ibDevN);
             // If resiliency is not enabled, we cannot recover from any error.
             return ncclRemoteError;
           }
