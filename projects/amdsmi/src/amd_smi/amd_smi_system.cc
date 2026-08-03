@@ -306,9 +306,8 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
     // prerequisite not satisfied, etc.). This must NOT be fatal to amdsmi_init()
     // - GPU and NIC functionality must remain usable. Skip CPU population and
     // continue, mirroring the non-fatal BRCM/AI NIC discovery paths.
-    std::cerr << "\tESMI not initialized: CPU (HSMP) driver not found. "
-              << "Load the amd_hsmp kernel module and enable HSMP in BIOS to "
-              << "enable AMD CPU support. Skipping CPU discovery." << std::endl;
+    std::cerr << "\tESMI not initialized; skipping CPU discovery "
+              << "(load amd_hsmp with HSMP enabled in BIOS for AMD CPU support)." << std::endl;
     return AMDSMI_STATUS_SUCCESS;
   }
 

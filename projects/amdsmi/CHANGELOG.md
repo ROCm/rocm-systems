@@ -98,10 +98,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
-- **Improved messaging and documentation when the CPU (HSMP) driver is absent**.  
-  - When `amd_hsmp` is not loaded, the ESMI-not-initialized notice now names the `amd_hsmp` kernel module and BIOS HSMP requirement and is written to `stderr` instead of `stdout`. CPU discovery remains non-fatal.
-  - Documented in the README that `amdsmi_init(AMDSMI_INIT_AMD_CPUS)` and the `amd-smi` CPU commands require the `amd_hsmp` kernel module.
-
 - **Fixed `amd-smi set --power-cap` rejecting the minimum allowed value**.  
   - The lower bound is now inclusive, so setting the power cap to the exact minimum of the reported range (e.g. `210` when the range is 210-300W) succeeds instead of failing validation, matching the inclusive range shown in the error message.
 
