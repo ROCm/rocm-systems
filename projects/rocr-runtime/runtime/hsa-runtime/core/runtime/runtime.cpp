@@ -2617,8 +2617,15 @@ hsa_status_t Runtime::Load() {
 
   loader_.reset(amd::hsa::loader::Loader::Create(&loader_context_));
 
-  // Probe aqlprofile availability once and cache the result
+  // Probe aqlprofile availability once and cache the result. If the plain
+  // library name cannot be found, retry with the version-suffixed file name
+  // (libhsa-amd-aqlprofile64.so.1) for installs that ship only that file and
+  // omit the unversioned dev symlink.
   aqlprofile_lib_ = os::LoadLib(kAqlProfileLib);
+  if (aqlprofile_lib_ == nullptr) {
+    aqlprofile_lib_ = os::LoadLib(std::string(kAqlProfileLib) + "." +
+                                  std::to_string(hsa_ven_amd_aqlprofile_VERSION_MAJOR));
+  }
 
   // Load extensions
   LoadExtensions();
