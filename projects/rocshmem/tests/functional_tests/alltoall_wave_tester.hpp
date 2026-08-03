@@ -66,6 +66,7 @@ class AlltoallWaveTester : public Tester {
    */
   int num_teams = 39;
   rocshmem_team_t *alltoall_wave_world_dup;
+  int *error_flag;
 };
 
 #include "alltoall_wave_tester.cpp"
