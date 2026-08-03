@@ -172,16 +172,19 @@ TEST(no_signal_finalizer, sanity_failure_is_completed_no_timing)
 {
     auto conv = converter{};
 
-    // Converted interval ends after now_ns.
+    // Converted interval ends beyond now_ns PLUS the conversion slack. A few ms
+    // past now is expected and accepted (see accepts_a_converted_end_slightly_
+    // past_now); this is far enough out to be a record from somewhere else.
     {
-        auto obs     = observer{};
-        auto outcome = run_no_signal_finalizer(std::optional<uint64_t>{500},
-                                               900,
-                                               /*enqueue_ts=*/0,
-                                               /*now_ns=*/1000,
-                                               conv.fn(),
-                                               obs.emit_fn(),
-                                               obs.retire_fn());
+        auto obs        = observer{};
+        auto passthru   = converter{true, /*epoch=*/0};
+        auto outcome    = run_no_signal_finalizer(std::optional<uint64_t>{1},
+                                                  /*end_ticks=*/1000 + kKfdFutureSlackNs + 1,
+                                                  /*enqueue_ts=*/0,
+                                                  /*now_ns=*/1000,
+                                                  passthru.fn(),
+                                                  obs.emit_fn(),
+                                                  obs.retire_fn());
         EXPECT_EQ(outcome, finalize_outcome::completed_no_timing);
         EXPECT_EQ(obs.emits, 0);
         EXPECT_EQ(obs.retires, 1);
@@ -216,6 +219,32 @@ TEST(no_signal_finalizer, sanity_failure_is_completed_no_timing)
         EXPECT_EQ(obs.emits, 0);
         EXPECT_EQ(obs.retires, 1);
     }
+}
+
+// The shape that actually occurs on hardware: the converted firmware end lands a
+// couple of milliseconds past the `now` the finalizer sampled, because the tick
+// conversion's correlation is only periodically re-synced. This must produce a
+// record -- rejecting it discarded every dispatch on gfx1201.
+TEST(no_signal_finalizer, accepts_a_converted_end_slightly_past_now)
+{
+    constexpr uint64_t now   = 1'000'000'000;
+    constexpr uint64_t skew  = 2'700'000;  // measured 2.0-2.7 ms
+    auto               obs   = observer{};
+    // Converts ticks straight through, so end lands at now + skew.
+    auto               conv  = converter{true, /*epoch=*/0};
+
+    auto outcome = run_no_signal_finalizer(std::optional<uint64_t>{now - 5'000'000},
+                                           now + skew,
+                                           /*enqueue_ts=*/0,
+                                           now,
+                                           conv.fn(),
+                                           obs.emit_fn(),
+                                           obs.retire_fn());
+
+    EXPECT_EQ(outcome, finalize_outcome::result_ready);
+    EXPECT_EQ(obs.emits, 1);
+    EXPECT_EQ(obs.retires, 1);
+    EXPECT_EQ(obs.end, now + skew);
 }
 
 // A throwing client callback must NOT skip cleanup: the scope destructor retires

@@ -86,10 +86,29 @@ TEST(kfd_time_is_sane, accepts_interval_inside_the_dispatch_window)
     EXPECT_TRUE(kfd_time_is_sane(100, 300, 100, 300));
 }
 
+// A converted firmware end legitimately lands a few ms past a CPU `now` sampled
+// right behind it -- the tick-conversion correlation is only periodically
+// re-synced. Measured at 2.0-2.7 ms on gfx1201; rejecting that discarded every
+// record, so the upper bound carries kKfdFutureSlackNs of tolerance.
+TEST(kfd_time_is_sane, accepts_a_converted_end_slightly_past_now)
+{
+    constexpr uint64_t now = 1'000'000'000;
+
+    EXPECT_TRUE(kfd_time_is_sane(now - 5'000'000, now + 2'700'000, 0, now));  // observed skew
+    EXPECT_TRUE(kfd_time_is_sane(0, now + kKfdFutureSlackNs, 0, now));        // exactly the bound
+
+    // Beyond the slack is still rejected: that is not conversion jitter, it is a
+    // record from somewhere else.
+    EXPECT_FALSE(kfd_time_is_sane(0, now + kKfdFutureSlackNs + 1, 0, now));
+    EXPECT_FALSE(kfd_time_is_sane(0, now + 5'000'000'000, 0, now));  // 5 s out
+}
+
 TEST(kfd_time_is_sane, rejects_records_outside_the_dispatch_window)
 {
     EXPECT_FALSE(kfd_time_is_sane(99, 250, 100, 300));   // starts before enqueue
-    EXPECT_FALSE(kfd_time_is_sane(150, 301, 100, 300));  // ends after now
+    // Ends beyond now + the conversion slack (a few hundred ns past now is now
+    // tolerated on purpose; see accepts_a_converted_end_slightly_past_now).
+    EXPECT_FALSE(kfd_time_is_sane(150, 301 + kKfdFutureSlackNs, 100, 300));
     EXPECT_FALSE(kfd_time_is_sane(250, 150, 100, 300));  // inverted interval
     EXPECT_FALSE(kfd_time_is_sane(150, 150, 100, 300));  // zero-length interval
 }

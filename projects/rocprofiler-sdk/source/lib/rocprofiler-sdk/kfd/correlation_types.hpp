@@ -54,14 +54,35 @@ struct correlation_key
     bool operator!=(const correlation_key& rhs) const { return !(*this == rhs); }
 };
 
+// How far past a CPU timestamp a converted firmware end may legitimately land.
+//
+// hsa_amd_profiling_convert_tick_to_system_domain maps GPU ticks onto the system
+// domain through a correlation that is re-synced periodically, so the converted
+// value and a CPU timestamp sampled at nearly the same instant disagree by that
+// correlation's granularity and drift. Measured on gfx1201, a just-completed
+// dispatch's converted end lands 2.0-2.7 ms AFTER a `now` sampled right behind
+// it -- which a hard `end <= now` rejects outright, discarding every valid
+// record. That skew is inherent to the conversion, not a symptom of a bad record.
+//
+// 100 ms keeps roughly 40x margin over the observed skew while staying orders of
+// magnitude below what this bound exists to catch: a stale record from a previous
+// generation or a lapped ring slot, which is seconds out, not milliseconds. The
+// discrimination that actually separates dispatches is the correlation key
+// (doorbell slot + dispatch index + generation) plus the start >= enqueue_ts
+// lower bound; this bound only rejects the implausibly-future.
+constexpr uint64_t kKfdFutureSlackNs = 100'000'000;  // 100 ms
+
 // Whether a firmware record's converted (system-domain) timestamps are usable:
-// they must form a positive interval that fits inside the dispatch's own CPU
-// window [enqueue_ts, now_ns]. A record taken for the wrong dispatch lands
-// outside those bounds, so the caller falls back to HSA timestamps.
+// they must form a positive interval that starts no earlier than the dispatch's
+// own enqueue and ends no later than now plus the conversion slack above. A
+// record taken for the wrong dispatch lands outside those bounds, so the caller
+// emits no KFD timestamps for it.
 inline bool
 kfd_time_is_sane(uint64_t start_ns, uint64_t end_ns, uint64_t enqueue_ts, uint64_t now_ns)
 {
-    return start_ns < end_ns && start_ns >= enqueue_ts && end_ns <= now_ns;
+    // now_ns is a boot-relative nanosecond count, so the addition cannot overflow.
+    return start_ns < end_ns && start_ns >= enqueue_ts &&
+           end_ns <= now_ns + kKfdFutureSlackNs;
 }
 
 // std::hash-compatible functor for correlation_key. Combines the three 32-bit
