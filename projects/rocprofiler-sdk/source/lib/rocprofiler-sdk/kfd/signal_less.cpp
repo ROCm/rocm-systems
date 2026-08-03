@@ -23,11 +23,12 @@
 #include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 
 #include "lib/common/environment.hpp"
-
-#include <fmt/core.h>
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
+
+#include <fmt/core.h>
 
 #include <atomic>
 #include <utility>
