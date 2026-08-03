@@ -378,6 +378,8 @@ def get_arch_guard(fn):
       cond = "(defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
   elif fn.acc == "1":
       cond = "defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)"
+  elif fn.unroll in ("8", "16", "32"):
+      cond = "defined(__gfx1250__)"
 
   return cond
 
@@ -688,7 +690,13 @@ specialized_filelist.sort(key=_compile_cost_key)
 
 # Write the list of specialized files for CMake consumption
 with open(os.path.join(gensrc, "specialized_files.txt"), "w") as f:
-  for filename, func_name, guard, _ in specialized_filelist:
-    f.write("%s %s %s\n" % (filename, func_name, guard or ""))
+  for filename, func_name, guard, fn in specialized_filelist:
+    if fn.unroll in ("8", "16", "32"):
+      cmake_guard = "defined(__gfx1250__)"
+      if guard and "ENABLE_LL128" in guard:
+        cmake_guard += " && defined(ENABLE_LL128)"
+    else:
+      cmake_guard = guard or ""
+    f.write("%s %s %s\n" % (filename, func_name, cmake_guard))
 
 print("-- Generated %d specialized kernel files in %s" % (len(specialized_filelist), specialized_dir))
