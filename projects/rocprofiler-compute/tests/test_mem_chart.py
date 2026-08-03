@@ -827,30 +827,37 @@ GFX9_SAMPLE_METRICS = {
 class TestPlotMemChartGfx9:
     """Tests for gfx9 plot_mem_chart - CDNA memory chart generation."""
 
-    def test_returns_non_empty_string(self):
-        """Full sample metrics produce a non-empty chart string."""
-        result = mem_chart_gfx9.plot_mem_chart(
-            dict(GFX9_SAMPLE_METRICS), chart_title=DEFAULT_TITLE
+    def test_full_sample_metrics_render_without_na_placeholders(self):
+        output = common.strip_ansi(
+            mem_chart_gfx9.plot_mem_chart(
+                dict(GFX9_SAMPLE_METRICS),
+                chart_title=DEFAULT_TITLE,
+            )
         )
-        assert isinstance(result, str)
-        assert len(result) > 0
+        assert isinstance(output, str)
+        assert len(output) > 0
+        assert "N/A" not in output
 
-    def test_empty_metrics(self):
-        """Empty metric dict still produces a non-empty chart (N/A placeholders)."""
-        result = mem_chart_gfx9.plot_mem_chart({}, chart_title=DEFAULT_TITLE)
-        assert isinstance(result, str)
-        assert len(result) > 0
+    def test_empty_metrics_render_expected_placeholders(self):
+        output = common.strip_ansi(
+            mem_chart_gfx9.plot_mem_chart({}, chart_title=DEFAULT_TITLE)
+        )
+        assert isinstance(output, str)
+        assert len(output) > 0
 
-    def test_partial_metrics(self):
-        """Partial metric dict still produces a non-empty chart."""
-        partial = {
-            "Wavefront Occupancy": 4,
-            "L2 Hit": 75,
-            "HBM Rd": 100,
-        }
-        result = mem_chart_gfx9.plot_mem_chart(partial, chart_title=DEFAULT_TITLE)
-        assert isinstance(result, str)
-        assert len(result) > 0
+        # The renderer consumes 55 keys but emits 54 uppercase placeholders because
+        # missing Active CUs/Num CUs render together as "n/a: N/A".
+        assert output.count("N/A") == 54
+
+    def test_partial_metrics_render_values_and_placeholders(self):
+        partial = {"HBM Rd": 100}
+        output = common.strip_ansi(
+            mem_chart_gfx9.plot_mem_chart(partial, chart_title=DEFAULT_TITLE)
+        )
+        assert isinstance(output, str)
+        assert len(output) > 0
+        assert "Rd:  100" in output
+        assert "N/A" in output
 
     def test_contains_complete_cdna_architecture(self):
         """CDNA output contains every component enabled by the renderer."""
@@ -900,6 +907,121 @@ class TestPlotMemChartGfx9:
         assert re.search(r"<(?!-+>)-{3,}", output)
         assert re.search(r"(?<![<-])-{3,}>", output)
         assert re.search(r"<-{3,}>", output)
+
+    @pytest.mark.parametrize(
+        (
+            "metric_name",
+            "metric_value",
+            "expected_text",
+            "expected_row_index",
+            "expected_column_slice",
+        ),
+        [
+            pytest.param(
+                "LDS Req",
+                1234,
+                "Req: 1234",
+                7,
+                slice(78, 95),
+                id="lds-request",
+            ),
+            pytest.param(
+                "LDS Latency",
+                321,
+                "Lat:    321 cycles",
+                9,
+                slice(95, 122),
+                id="lds-latency",
+            ),
+            pytest.param(
+                "L2 Hit",
+                87,
+                "Hit:     87 %",
+                9,
+                slice(140, 165),
+                id="l2-hit-rate",
+            ),
+            pytest.param(
+                "L2 Rd Lat",
+                2468,
+                "Rd:   2468",
+                27,
+                slice(140, 165),
+                id="l2-read-latency",
+            ),
+            pytest.param(
+                "L2 Wr Lat",
+                1357,
+                "Wr:   1357",
+                29,
+                slice(140, 165),
+                id="l2-write-latency",
+            ),
+            pytest.param(
+                "VL1 Hit",
+                2581,
+                "Hit:   2581 %",
+                15,
+                slice(95, 122),
+                id="vector-l1-hit-rate",
+            ),
+            pytest.param(
+                "sL1D Lat",
+                3692,
+                "Lat:   3692 cycles",
+                29,
+                slice(95, 122),
+                id="scalar-l1d-latency",
+            ),
+            pytest.param(
+                "IL1 Hit",
+                4703,
+                "Hit:   4703 %",
+                35,
+                slice(95, 122),
+                id="instruction-l1-hit-rate",
+            ),
+            pytest.param(
+                "Fabric Rd Lat",
+                5814,
+                "Rd:   5814",
+                20,
+                slice(183, 207),
+                id="fabric-read-latency",
+            ),
+            pytest.param(
+                "HBM Rd",
+                6925,
+                "Rd: 6925",
+                18,
+                slice(207, 221),
+                id="hbm-read-bandwidth",
+            ),
+        ],
+    )
+    def test_metric_routes_to_expected_chart_region(
+        self,
+        metric_name,
+        metric_value,
+        expected_text,
+        expected_row_index,
+        expected_column_slice,
+    ):
+        output_lines = common.strip_ansi(
+            mem_chart_gfx9.plot_mem_chart(
+                {metric_name: metric_value},
+                chart_title=DEFAULT_TITLE,
+            )
+        ).splitlines()
+
+        assert expected_text in output_lines[expected_row_index][expected_column_slice]
+
+    def test_empty_placeholders_do_not_render_metric_suffixes(self):
+        output = common.strip_ansi(
+            mem_chart_gfx9.plot_mem_chart({}, chart_title=DEFAULT_TITLE)
+        )
+
+        assert re.search(r"N/A[ \t]*(?:%|cycles)", output) is None
 
 
 @pytest.mark.parametrize(
