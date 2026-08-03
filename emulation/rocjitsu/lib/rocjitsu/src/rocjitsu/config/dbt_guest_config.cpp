@@ -151,8 +151,7 @@ DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
       false);
 }
 
-void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view value,
-                                    std::string_view source) {
+void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view value) {
   if (!config.enabled || config.host.gpu_id != 0)
     return;
 
@@ -161,7 +160,7 @@ void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view val
   const char *end = begin + value.size();
   auto [ptr, error] = std::from_chars(begin, end, gpu_id);
   if (error != std::errc{} || ptr != end || gpu_id == 0)
-    throw std::runtime_error(std::string(source) + " must contain a nonzero KFD gpu_id");
+    throw std::runtime_error("runtime config handoff must contain a nonzero KFD gpu_id");
   config.host.gpu_id = gpu_id;
 }
 
@@ -218,7 +217,7 @@ std::optional<DbtRuntimeConfigHandoff> parse_dbt_runtime_config_handoff(std::str
 DbtGuestConfig load_dbt_guest_config_from_handoff(const DbtRuntimeConfigHandoff &handoff) {
   DbtGuestConfig config = load_dbt_guest_config_from_file(handoff.config_path);
   if (handoff.resolved_gpu_id) {
-    apply_resolved_dbt_host_gpu_id(config, *handoff.resolved_gpu_id, "runtime config handoff");
+    apply_resolved_dbt_host_gpu_id(config, *handoff.resolved_gpu_id);
   } else if (config.enabled && config.host.gpu_id == 0) {
     throw std::runtime_error("runtime config handoff must contain a resolved KFD gpu_id for "
                              "automatic DBT host selection");

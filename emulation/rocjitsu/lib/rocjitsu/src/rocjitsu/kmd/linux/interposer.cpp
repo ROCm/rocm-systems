@@ -1239,7 +1239,11 @@ public:
           return nullptr;
         }
       } catch (const std::exception &e) {
-        util::Logger::debug_print("rocjitsu: failed to load child config: ", e.what());
+        // This is where a broken runtime handoff lands, including an enabled DBT config
+        // with no resolved host gpu_id. Failing closed leaves the process with a null
+        // driver and an opaque downstream failure, so the reason must be audible in a
+        // default build the way the hook layer's equivalent refusal already is.
+        util::Logger::warn("rocjitsu: failed to load child config: ", e.what());
         destroy_local_vm();
         in_construction = false;
         return nullptr;

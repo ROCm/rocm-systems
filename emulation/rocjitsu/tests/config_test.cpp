@@ -572,9 +572,9 @@ TEST(ConfigLoaderTest, AppliesResolvedDbtHostGpuId) {
   config::DbtGuestConfig simulator = automatic;
   simulator.host.backend = config::DbtExecutionBackend::Simulator;
 
-  config::apply_resolved_dbt_host_gpu_id(automatic, "28851", "test handoff");
-  config::apply_resolved_dbt_host_gpu_id(explicit_id, "28851", "test handoff");
-  config::apply_resolved_dbt_host_gpu_id(simulator, "28851", "test handoff");
+  config::apply_resolved_dbt_host_gpu_id(automatic, "28851");
+  config::apply_resolved_dbt_host_gpu_id(explicit_id, "28851");
+  config::apply_resolved_dbt_host_gpu_id(simulator, "28851");
 
   EXPECT_EQ(automatic.host.gpu_id, 28851u);
   EXPECT_EQ(explicit_id.host.gpu_id, 8716u);
@@ -587,9 +587,7 @@ TEST(ConfigLoaderTest, RejectsInvalidResolvedDbtHostGpuId) {
   for (std::string_view value : invalid_values) {
     config::DbtGuestConfig dbt;
     dbt.enabled = true;
-    EXPECT_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, value, "test handoff"),
-                 std::runtime_error)
-        << value;
+    EXPECT_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, value), std::runtime_error) << value;
   }
 }
 
@@ -598,8 +596,7 @@ TEST(ConfigLoaderTest, ExplicitDbtHostGpuIdOverridesResolvedHandoff) {
   dbt.enabled = true;
   dbt.host.gpu_id = 8716;
 
-  EXPECT_NO_THROW(
-      config::apply_resolved_dbt_host_gpu_id(dbt, "invalid-but-ignored", "test handoff"));
+  EXPECT_NO_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, "invalid-but-ignored"));
   EXPECT_EQ(dbt.host.gpu_id, 8716u);
 }
 
@@ -669,9 +666,8 @@ TEST(ConfigLoaderTest, RejectsEmptyResolvedGpuIdLineForEnabledDbt) {
 
   config::DbtGuestConfig dbt;
   dbt.enabled = true;
-  EXPECT_THROW(
-      config::apply_resolved_dbt_host_gpu_id(dbt, *handoff->resolved_gpu_id, "test handoff"),
-      std::runtime_error);
+  EXPECT_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, *handoff->resolved_gpu_id),
+               std::runtime_error);
 }
 
 TEST(ConfigLoaderTest, LoadsDbtRuntimeConfigHandoffFromInvocationDirectory) {

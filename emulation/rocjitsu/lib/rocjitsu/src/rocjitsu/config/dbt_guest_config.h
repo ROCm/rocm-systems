@@ -110,8 +110,7 @@ DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path);
 /// @details Child processes read this value from the second line of the
 /// per-invocation config handoff. Explicit nonzero config values remain authoritative.
 /// @throws std::runtime_error when @p value is not a nonzero KFD gpu_id.
-void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view value,
-                                    std::string_view source);
+void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view value);
 
 /// @brief Atomically write the per-invocation runtime config handoff.
 /// @returns false when enabled DBT lacks a resolved host GPU or the handoff cannot be published.
