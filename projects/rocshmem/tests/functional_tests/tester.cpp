@@ -668,7 +668,8 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
         testers.push_back(new AMOStandardTester<int>(args));
       break;
     case PingPongTestType:
-      test_name = "PingPong";
+      test_name = (args.num_wgs > 1) ? "PingPong (W>1: bidir BW)"
+                                     : "PingPong";
       testers.push_back(new PingPongTester(args));
       break;
     case PingAllTestType:
@@ -966,7 +967,8 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
 #if defined(USE_GDA)
     case QpPingPongTestType:
-      test_name = "QP-Direct PingPong";
+      test_name = (args.num_wgs > 1) ? "QP-Direct PingPong (W>1: bidir BW)"
+                                     : "QP-Direct PingPong";
       testers.push_back(new QpPingPongTester(args));
       break;
     case QpPutNbiTestType:
@@ -976,7 +978,8 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
 #endif
 #if defined(USE_SDMA)
     case SdmaPingPongTestType:
-      test_name = "SDMA-Direct PingPong";
+      test_name = (args.num_wgs > 1) ? "SDMA-Direct PingPong (W>1: bidir BW)"
+                                     : "SDMA-Direct PingPong";
       testers.push_back(new SdmaPingPongTester(args));
       break;
     case SdmaPutNbiTestType:

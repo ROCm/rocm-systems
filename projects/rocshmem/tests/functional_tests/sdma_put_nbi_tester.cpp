@@ -54,7 +54,7 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
     int target_local = 1 - my_local;
 
     sdma_anvil::SdmaQueueDeviceHandle *handle =
-        sdma.deviceHandles_d[target_local * sdma.numChannels + 0];
+        sdma.deviceHandles_d[target_local * sdma.numChannels + sdma.sdmaChannel];
 
     char *my_base = ipc.ipc_bases[my_local];
     char *remote_base = ipc.ipc_bases[target_local];

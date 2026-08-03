@@ -160,7 +160,7 @@ void QpPingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                      args.op_type, _shmem_context);
 
   num_msgs = (loop + args.skip) * gridSize.x;
-  num_timed_msgs = loop;
+  num_timed_msgs = loop * gridSize.x;
 }
 
 void QpPingPongTester::verifyResults([[maybe_unused]] size_t size) {}

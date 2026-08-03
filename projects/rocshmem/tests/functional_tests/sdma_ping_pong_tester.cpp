@@ -63,7 +63,7 @@ __global__ void SdmaPingPongTest(int loop, int skip,
     int target_local = 1 - my_local;
 
     sdma_anvil::SdmaQueueDeviceHandle *handle =
-        sdma.deviceHandles_d[target_local * sdma.numChannels + 0];
+        sdma.deviceHandles_d[target_local * sdma.numChannels + sdma.sdmaChannel];
 
     int wg_id = hipBlockIdx_x;
 
@@ -162,7 +162,7 @@ void SdmaPingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                      _shmem_context);
 
   num_msgs = (loop + args.skip) * gridSize.x;
-  num_timed_msgs = loop;
+  num_timed_msgs = loop * gridSize.x;
 }
 
 void SdmaPingPongTester::verifyResults([[maybe_unused]] size_t size) {}
