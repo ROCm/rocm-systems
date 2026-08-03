@@ -27,7 +27,6 @@
 #include <rocshmem/rocshmem.hpp>
 #include "gda/context_gda_device.hpp"
 #include "gda/queue_pair.hpp"
-#include "constmem.hpp"
 
 using namespace rocshmem;
 
@@ -46,7 +45,7 @@ __global__ void QpPutNbiTest(int loop, int skip, long long int *start_time,
 
   if (threadIdx.x == 0) {
     GDAContext *gda_ctx = reinterpret_cast<GDAContext *>(ctx.ctx_opaque);
-    int pe = constmem.my_pe;
+    int pe = rocshmem_ctx_my_pe(ctx);
     int target = 1 - pe;
 
     QueuePair &qp = gda_ctx->qps[target];
@@ -58,6 +57,9 @@ __global__ void QpPutNbiTest(int loop, int skip, long long int *start_time,
 
     int wg_id = hipBlockIdx_x;
     int start_slot = (batch - (skip % batch)) % batch;
+
+    // Drain all setup loads from HBM before entering the timed loop.
+    __builtin_amdgcn_s_waitcnt(0);
 
     for (int i = 0; i < loop + skip; i++) {
       int slot = (start_slot + i) % batch;

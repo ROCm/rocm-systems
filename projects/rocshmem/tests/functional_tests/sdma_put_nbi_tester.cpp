@@ -28,7 +28,6 @@
 #include "context.hpp"
 #include "ipc_policy.hpp"
 #include "sdma/anvil_device.hpp"
-#include "constmem.hpp"
 
 using namespace rocshmem;
 
@@ -48,22 +47,23 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
 
   if (threadIdx.x == 0) {
     Context *base_ctx = reinterpret_cast<Context *>(ctx.ctx_opaque);
-    auto &sdma = base_ctx->ipcImpl_.sdmaImpl_;
+    auto &ipc = base_ctx->ipcImpl_;
+    auto &sdma = ipc.sdmaImpl_;
 
-    int pe = constmem.my_pe;
-    int target = 1 - pe;
-
-    int target_local_pe{-1};
-    base_ctx->ipcImpl_.isIpcAvailable(pe, target, &target_local_pe);
+    int my_local = ipc.shm_rank;
+    int target_local = 1 - my_local;
 
     sdma_anvil::SdmaQueueDeviceHandle *handle =
-        sdma.deviceHandles_d[target_local_pe * sdma.numChannels + 0];
+        sdma.deviceHandles_d[target_local * sdma.numChannels + 0];
 
-    char *my_base = base_ctx->ipcImpl_.ipc_bases[pe];
-    char *remote_base = base_ctx->ipcImpl_.ipc_bases[target];
+    char *my_base = ipc.ipc_bases[my_local];
+    char *remote_base = ipc.ipc_bases[target_local];
 
     int wg_id = hipBlockIdx_x;
     int start_slot = (batch - (skip % batch)) % batch;
+
+    // Drain all setup loads from HBM before entering the timed loop.
+    __builtin_amdgcn_s_waitcnt(0);
 
     for (int i = 0; i < loop + skip; i++) {
       int slot = (start_slot + i) % batch;

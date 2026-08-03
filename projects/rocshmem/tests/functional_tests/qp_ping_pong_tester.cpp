@@ -28,7 +28,6 @@
 #include "gda/context_gda_device.hpp"
 #include "gda/queue_pair.hpp"
 #include "assembly.hpp"
-#include "constmem.hpp"
 
 using namespace rocshmem;
 
@@ -55,7 +54,7 @@ __global__ void QpPingPongTest(int loop, int skip, long long int *start_time,
 
   if (threadIdx.x == 0) {
     GDAContext *gda_ctx = reinterpret_cast<GDAContext *>(ctx.ctx_opaque);
-    int pe = constmem.my_pe;
+    int pe = rocshmem_ctx_my_pe(ctx);
     int target = 1 - pe;
 
     QueuePair &qp = gda_ctx->qps[target];
@@ -80,6 +79,9 @@ __global__ void QpPingPongTest(int loop, int skip, long long int *start_time,
     uintptr_t sig_offset =
         reinterpret_cast<uintptr_t>(my_sig) - local_base;
     void *remote_sig = reinterpret_cast<void *>(remote_base + sig_offset);
+
+    // Drain all setup loads from HBM before entering the timed loop.
+    __builtin_amdgcn_s_waitcnt(0);
 
     for (int i = 0; i < loop + skip; i++) {
       if (i == skip) {
