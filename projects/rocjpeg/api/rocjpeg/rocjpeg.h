@@ -368,6 +368,39 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamH
  */
 RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *destination);
 
+/**
+ * @fn RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedAsync(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
+ * @ingroup group_amd_rocjpeg
+ * @brief Submits a batch of JPEG decode operations without waiting for the output.
+ *
+ * This function submits all images in the batch to the hardware decoder and returns immediately
+ * without waiting for the decodes to complete or copying the results to destination buffers.
+ * Use rocJpegDecodeBatchedSync() to wait for completion and retrieve the decoded output.
+ *
+ * @param handle The rocJPEG handle.
+ * @param jpeg_stream_handles An array of rocJPEG stream handles representing the input JPEG streams.
+ * @param batch_size The number of JPEG streams in the batch.
+ * @param decode_params An array of RocJpegDecodeParams structs representing the decode parameters for each image.
+ * @param destinations An array of RocJpegImage structs representing the output decoded images.
+ * @return A RocJpegStatus indicating the success or failure of the submit operation.
+ */
+RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedAsync(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
+
+/**
+ * @fn RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedSync(RocJpegHandle handle, RocJpegImage *destinations, int batch_size);
+ * @ingroup group_amd_rocjpeg
+ * @brief Synchronizes a pending asynchronous batched JPEG decode.
+ *
+ * This function must be used in conjunction with rocJpegDecodeBatchedAsync to wait for all
+ * submitted decodes in the batch to complete and copy the results to the destination buffers.
+ *
+ * @param handle The rocJPEG handle.
+ * @param destinations An array of RocJpegImage pointers identifying the pending batch, as passed to rocJpegDecodeBatchedAsync.
+ * @param batch_size The number of images in the batch.
+ * @return A RocJpegStatus indicating the success or failure of the sync operation.
+ */
+RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedSync(RocJpegHandle handle, RocJpegImage *destinations, int batch_size);
+
 #if defined(__cplusplus)
   }
 #endif

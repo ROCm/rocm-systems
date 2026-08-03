@@ -45,6 +45,8 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeBatched(RocJpegHandle handle, RocJpegStrea
 const char* ROCJPEGAPI rocJpegGetErrorName(RocJpegStatus rocjpeg_status);
 RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
 RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *destination);
+RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedAsync(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
+RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedSync(RocJpegHandle handle, RocJpegImage *destinations, int batch_size);
 }
 
 namespace rocjpeg {
@@ -62,6 +64,8 @@ void UpdateDispatchTable(RocJpegDispatchTable* ptr_dispatch_table) {
     ptr_dispatch_table->pfn_rocjpeg_get_error_name = rocjpeg::rocJpegGetErrorName;
     ptr_dispatch_table->pfn_rocjpeg_decode_async = rocjpeg::rocJpegDecodeAsync;
     ptr_dispatch_table->pfn_rocjpeg_decode_sync = rocjpeg::rocJpegDecodeSync;
+    ptr_dispatch_table->pfn_rocjpeg_decode_batched_async = rocjpeg::rocJpegDecodeBatchedAsync;
+    ptr_dispatch_table->pfn_rocjpeg_decode_batched_sync = rocjpeg::rocJpegDecodeBatchedSync;
 }
 
 #if ROCJPEG_ROCPROFILER_REGISTER > 0
@@ -147,14 +151,17 @@ ROCJPEG_ENFORCE_ABI(RocJpegDispatchTable, pfn_rocjpeg_get_error_name, 8)
 // ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION == 1
 ROCJPEG_ENFORCE_ABI(RocJpegDispatchTable, pfn_rocjpeg_decode_async, 9)
 ROCJPEG_ENFORCE_ABI(RocJpegDispatchTable, pfn_rocjpeg_decode_sync, 10)
+// ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION == 2
+ROCJPEG_ENFORCE_ABI(RocJpegDispatchTable, pfn_rocjpeg_decode_batched_async, 11)
+ROCJPEG_ENFORCE_ABI(RocJpegDispatchTable, pfn_rocjpeg_decode_batched_sync, 12)
 
 // If ROCJPEG_ENFORCE_ABI entries are added for each new function pointer in the table,
 // the number below will be one greater than the number in the last ROCJPEG_ENFORCE_ABI line. For example:
-//  ROCJPEG_ENFORCE_ABI(<table>, <functor>, 10)
-//  ROCJPEG_ENFORCE_ABI_VERSIONING(<table>, 11) <- 10 + 1 = 11
-ROCJPEG_ENFORCE_ABI_VERSIONING(RocJpegDispatchTable, 11)
+//  ROCJPEG_ENFORCE_ABI(<table>, <functor>, 12)
+//  ROCJPEG_ENFORCE_ABI_VERSIONING(<table>, 13) <- 12 + 1 = 13
+ROCJPEG_ENFORCE_ABI_VERSIONING(RocJpegDispatchTable, 13)
 
-static_assert(ROCJPEG_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION == 1,
+static_assert(ROCJPEG_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION == 2,
               "If you encounter this error, add the new ROCJPEG_ENFORCE_ABI(...) code for the updated function pointers, "
               "and then modify this check to ensure it evaluates to true.");
 #endif

@@ -424,6 +424,102 @@ RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, i
     return ROCJPEG_STATUS_SUCCESS;
 }
 /**
+ * @brief Submits a batch of JPEG decode operations and stores pending state for all images.
+ */
+RocJpegStatus RocJpegDecoder::DecodeBatchedAsync(RocJpegStreamHandle *jpeg_streams, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations) {
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(jpeg_streams) + ", " + ROCJPEG_TOSTR(batch_size) + ", " + RocJpegFmtPtr(decode_params) + ", " + RocJpegFmtPtr(destinations));
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (jpeg_streams == nullptr || decode_params == nullptr || destinations == nullptr) {
+        CriticalLog(g_rocjpeg_logger, "Null pointer");
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+    for (int i = 0; i < batch_size; i++) {
+        if (pending_decodes_.count(&destinations[i]) > 0) {
+            ErrorLog(g_rocjpeg_logger, "An async decode is already pending for destination at index " + ROCJPEG_TOSTR(i));
+            FunctionExitLog(g_rocjpeg_logger);
+            return ROCJPEG_STATUS_INVALID_PARAMETER;
+        }
+    }
+
+    std::vector<JpegStreamParameters> jpeg_streams_params(batch_size);
+    for (int i = 0; i < batch_size; i++) {
+        auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_streams[i]);
+        const JpegStreamParameters *jpeg_stream_params = rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters();
+        jpeg_streams_params[i] = *jpeg_stream_params;
+    }
+
+    VcnJpegSpec current_vcn_jpeg_spec = jpeg_vaapi_decoder_.GetCurrentVcnJpegSpec();
+    std::vector<VASurfaceID> surface_ids(batch_size);
+
+    for (int i = 0; i < batch_size; i += current_vcn_jpeg_spec.num_jpeg_cores) {
+        int batch_end = std::min(i + static_cast<int>(current_vcn_jpeg_spec.num_jpeg_cores), batch_size);
+        int current_batch_size = batch_end - i;
+
+        RocJpegStatus rocjpeg_status = jpeg_vaapi_decoder_.SubmitDecodeBatched(jpeg_streams_params.data() + i, current_batch_size, &decode_params[i], surface_ids.data() + i);
+        if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+            FunctionExitLog(g_rocjpeg_logger);
+            return rocjpeg_status;
+        }
+    }
+
+    for (int i = 0; i < batch_size; i++) {
+        AsyncDecodeState state;
+        state.jpeg_stream_params = jpeg_streams_params[i];
+        state.decode_params = decode_params[i];
+        state.surface_id = surface_ids[i];
+        pending_decodes_.emplace(&destinations[i], std::move(state));
+    }
+
+    FunctionExitLog(g_rocjpeg_logger);
+    return ROCJPEG_STATUS_SUCCESS;
+}
+
+/**
+ * @brief Synchronizes all pending asynchronous decodes for a batch and copies/converts the output.
+ */
+RocJpegStatus RocJpegDecoder::DecodeBatchedSync(RocJpegImage *destinations, int batch_size) {
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(destinations) + ", " + ROCJPEG_TOSTR(batch_size));
+    if (destinations == nullptr) {
+        CriticalLog(g_rocjpeg_logger, "Null pointer");
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+
+    std::vector<AsyncDecodeState> states(batch_size);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (int i = 0; i < batch_size; i++) {
+            auto it = pending_decodes_.find(&destinations[i]);
+            if (it == pending_decodes_.end()) {
+                ErrorLog(g_rocjpeg_logger, "No asynchronous decode is pending for destination at index " + ROCJPEG_TOSTR(i));
+                FunctionExitLog(g_rocjpeg_logger);
+                return ROCJPEG_STATUS_INVALID_PARAMETER;
+            }
+            states[i] = std::move(it->second);
+            pending_decodes_.erase(it);
+        }
+    }
+
+    // Finalize each image without holding the mutex
+    for (int i = 0; i < batch_size; i++) {
+        RocJpegStatus rocjpeg_status = FinalizeDecode(states[i].surface_id, &states[i].jpeg_stream_params, &states[i].decode_params, &destinations[i]);
+        if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+            jpeg_vaapi_decoder_.SetSurfaceAsIdle(states[i].surface_id);
+            // Release remaining surface IDs
+            for (int j = i + 1; j < batch_size; j++) {
+                jpeg_vaapi_decoder_.SetSurfaceAsIdle(states[j].surface_id);
+            }
+            FunctionExitLog(g_rocjpeg_logger);
+            return rocjpeg_status;
+        }
+    }
+
+    FunctionExitLog(g_rocjpeg_logger);
+    return ROCJPEG_STATUS_SUCCESS;
+}
+
+/**
  * @brief Retrieves the image information from the JPEG stream.
  *
  * This function retrieves the number of components, chroma subsampling, widths, and heights
