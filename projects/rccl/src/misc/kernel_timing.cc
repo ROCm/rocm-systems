@@ -12,25 +12,27 @@
  * measurable and carries the packet processor's own start/end timestamps.
  *
  * Those timestamps originate in ROCr, which writes them into the dispatch's
- * completion signal. HIP does not expose that signal, so on the first timed
- * dispatch its handle is located inside the runtime's own structures: memory
- * reachable from the event is scanned for something ROCr accepts as a signal it
- * has timed. Only the location is discovered. The timestamps themselves come
- * from hsa_amd_profiling_get_dispatch_time on every harvest, so nothing depends
- * on how HIP happens to cache or convert them. If no signal is found, timing
- * stays off for the process rather than reporting numbers we cannot vouch for.
+ * completion signal. HIP does not expose that signal, so it is reached by three
+ * pointer hops through the runtime's own event objects. Where those hops go
+ * differs between ROCm releases, and the version number cannot be used to tell
+ * the releases apart, so the offsets are settled by measurement at startup: a
+ * dispatch is issued between two clock readings and each known layout is tried
+ * against it, keeping the one whose timestamps land inside that bracket. Only
+ * the offsets are chosen this way. The timestamps themselves come from
+ * hsa_amd_profiling_get_dispatch_time on every harvest, so nothing depends on
+ * how HIP happens to cache or convert them. If no layout fits, timing stays off
+ * for the process rather than reporting numbers we cannot vouch for.
  */
 
 #include "kernel_timing.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
-#include <fcntl.h>
 #include <mutex>
-#include <set>
 #include <time.h>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -48,27 +50,10 @@
 RCCL_PARAM(KernelTiming, "KERNEL_TIMING", 0);
 RCCL_PARAM(KernelTimingInflight, "KERNEL_TIMING_INFLIGHT", 1024);
 RCCL_PARAM(KernelTimingCapacity, "KERNEL_TIMING_CAPACITY", 65536);
-RCCL_PARAM(KernelTimingHarvestOnLaunch, "KERNEL_TIMING_HARVEST_ON_LAUNCH", 0);
-RCCL_PARAM(KernelTimingScanWords, "KERNEL_TIMING_SCAN_WORDS", 32);
-RCCL_PARAM(KernelTimingScanDepth, "KERNEL_TIMING_SCAN_DEPTH", 3);
 
 namespace {
 
 /* ---------- reading the dispatch timestamps out of an event ---------- */
-
-/* Walking runtime-owned memory means occasionally following a value that is not
- * a pointer. Going through /proc/self/mem turns that into an error return
- * instead of a fault. Only discovery pays for this; the steady-state path
- * dereferences the validated chain directly. */
-int probeFd() {
-  static int fd = open("/proc/self/mem", O_RDONLY);
-  return fd;
-}
-
-bool probeRead(uint64_t addr, void* out, size_t n) {
-  if (addr < 0x10000 || (addr & 7)) return false;
-  return pread(probeFd(), out, n, (off_t)addr) == (ssize_t)n;
-}
 
 /* Guards the per-dispatch reads. A word that held a pointer for one dispatch
  * may hold anything for the next, and a bad dereference would take the
@@ -76,7 +61,7 @@ bool probeRead(uint64_t addr, void* out, size_t n) {
  * first. The map is cached: a hit costs a binary search, and only a miss goes
  * back to the kernel. */
 class MappedRanges {
- public:
+public:
   bool readable(uint64_t addr, size_t n) {
     if (addr < 0x10000 || (addr & 7)) return false;
     std::lock_guard<std::mutex> guard(lock_);
@@ -97,7 +82,7 @@ class MappedRanges {
     return ok;
   }
 
- private:
+private:
   void refresh() {
     ranges_.clear();
     FILE* f = fopen("/proc/self/maps", "r");
@@ -135,41 +120,58 @@ MappedRanges& mappedRanges() {
   return m;
 }
 
+/* The clock ROCr reports dispatch timestamps in, so that records can be read
+ * against the host's view of when a launch happened. */
+uint64_t bootNs() {
+  struct timespec ts;
+  clock_gettime(CLOCK_BOOTTIME, &ts);
+  return (uint64_t)ts.tv_sec * 1000000000ull + ts.tv_nsec;
+}
+
 /* Where the event keeps the handle of the completion signal its dispatch was
- * issued with: a sequence of pointer hops from the event object, then the byte
- * offset of the handle word. */
-struct Chain {
-  int hop[4];
-  int nhop = 0;
-  int leaf = -1;
-  bool valid() const { return leaf >= 0; }
+ * issued with. A hipEvent_t is a hip::Event, which holds an amd::Event, which
+ * holds the hardware event carrying the signal, so three byte offsets describe
+ * the whole route.
+ *
+ * These come from compiling that traversal against the headers of every ROCm 7
+ * and later tag and reading the displacements out of the generated code, which
+ * tools/kernel-timing/dispatch-time/layout_offsets.sh does. Sixty-odd tags
+ * produce three distinct answers. They are not ordered by version and cannot be
+ * selected by it: TheRock 7.10 and 7.12 both report HIP 7.2.0 and disagree.
+ * Which one is right here is therefore established by trying them. */
+struct Layout {
+  int event;    /* hip::Event  -> amd::Event*        */
+  int amdEvent; /* amd::Event  -> hardware event*    */
+  int signal;   /* hardware event -> signal handle   */
+  const char* releases;
 };
 
-bool followChain(void* event, const Chain& c, uint64_t* handle) {
+const Layout kLayouts[] = {
+  {176, 280, 16, "ROCm 7.1-7.3, TheRock 7.9-7.11"},
+  {168, 280, 16, "TheRock 7.12"},
+  {88, 248, 16, "TheRock 7.13 and later, ROCm 10"},
+};
+constexpr int kNumLayouts = (int)(sizeof(kLayouts) / sizeof(kLayouts[0]));
+
+/* The layout in use, once one has been established. A property of the runtime,
+ * so it is settled once for the process rather than per communicator. */
+const Layout* g_layout = nullptr;
+
+bool followLayout(void* event, const Layout& l, uint64_t* handle) {
   uint64_t p = (uint64_t)event;
-  for (int i = 0; i < c.nhop; ++i) {
-    if (!mappedRanges().readable(p + c.hop[i], 8)) return false;
-    p = *(uint64_t*)(p + c.hop[i]);
-  }
-  if (!mappedRanges().readable(p + c.leaf, 8)) return false;
-  *handle = *(uint64_t*)(p + c.leaf);
+  if (!mappedRanges().readable(p + l.event, 8)) return false;
+  p = *(uint64_t*)(p + l.event);
+  if (!mappedRanges().readable(p + l.amdEvent, 8)) return false;
+  p = *(uint64_t*)(p + l.amdEvent);
+  if (!mappedRanges().readable(p + l.signal, 8)) return false;
+  *handle = *(uint64_t*)(p + l.signal);
   return true;
 }
-
-/* How much of the runtime's object graph discovery is willing to look at. The
- * defaults reach the signal in the runtimes tried so far; a layout that keeps
- * it further away can be reached by raising them, at the cost of a longer
- * one-time scan. */
-constexpr int kMaxScanWords = 128;
-int scanWords() {
-  int n = (int)rcclParamKernelTimingScanWords();
-  return n < 8 ? 8 : (n > kMaxScanWords ? kMaxScanWords : n);
-}
-int scanDepth() { return (int)rcclParamKernelTimingScanDepth(); }
 
 #if defined(__HIP_PLATFORM_AMD__)
 hsa_agent_t g_gpuAgents[16];
 int g_nGpuAgents = 0;
+std::once_flag g_gpuAgentsOnce;
 
 hsa_status_t collectGpuAgent(hsa_agent_t a, void*) {
   hsa_device_type_t t;
@@ -186,7 +188,7 @@ hsa_status_t collectGpuAgent(hsa_agent_t a, void*) {
  * therefore matched to the communicator's device by PCI address rather than by
  * enumeration order, which HIP and HSA need not share. */
 bool agentForDevice(int dev, hsa_agent_t* out) {
-  if (g_nGpuAgents == 0) hsa_iterate_agents(collectGpuAgent, nullptr);
+  std::call_once(g_gpuAgentsOnce, []() { (void)hsa_iterate_agents(collectGpuAgent, nullptr); });
 
   cudaDeviceProp prop;
   if (cudaGetDeviceProperties(&prop, dev) != cudaSuccess) return false;
@@ -203,14 +205,6 @@ bool agentForDevice(int dev, hsa_agent_t* out) {
   return false;
 }
 
-/* Why a discovery attempt ended where it did, for the failure log. */
-struct DiscoveryStats {
-  int blocks = 0;    /* memory blocks reachable from the event */
-  int signals = 0;   /* words that look like an amd_signal_t handle */
-  int stamped = 0;   /* those carrying a plausible timestamp pair */
-  int oracleOk = 0;  /* those ROCr agreed to report a dispatch time for */
-};
-
 bool dispatchTimeFromSignal(uint64_t handle, hsa_agent_t agent, uint64_t* startNs, uint64_t* endNs) {
   hsa_signal_t sig;
   sig.handle = handle;
@@ -222,147 +216,163 @@ bool dispatchTimeFromSignal(uint64_t handle, hsa_agent_t agent, uint64_t* startN
   return true;
 }
 
-/* Screens a candidate word before it is handed to the runtime -- passing a
- * bogus handle to hsa_amd_profiling_get_dispatch_time would fault inside ROCr.
- * A ROCr signal handle is a pointer to amd_signal_t, so the header can be read
- * through /proc/self/mem first and rejected without risk. */
-bool searchSignal(uint64_t handle, hsa_agent_t agent, uint64_t* startNs, uint64_t* endNs, DiscoveryStats* st) {
-  struct {
-    int64_t kind;
-    int64_t value;
-    uint64_t mailbox;
-    uint32_t id, reserved;
-    uint64_t startTs, endTs;
-  } hdr;
-  if (!probeRead(handle, &hdr, sizeof(hdr))) return false;
-  if (hdr.kind != AMD_SIGNAL_KIND_USER) return false;
-  st->signals++;
-  if (hdr.startTs == 0 || hdr.endTs <= hdr.startTs) return false;
-  st->stamped++;
-
-  if (!dispatchTimeFromSignal(handle, agent, startNs, endNs)) return false;
-  st->oracleOk++;
-  return true;
-}
-
 /* ROCr reads the whole amd_signal_t, so the handle has to be known-good before
  * it is passed in, not merely non-null. */
 bool signalLooksLive(uint64_t handle) {
   if (!mappedRanges().readable(handle, sizeof(amd_signal_t))) return false;
   return *(const int64_t*)handle == AMD_SIGNAL_KIND_USER;
 }
-#else
-struct DiscoveryStats {
-  int blocks = 0, signals = 0, stamped = 0, oracleOk = 0;
+
+/* RCCL_KERNEL_TIMING_LAYOUT: unset tries each layout in turn, "none" skips the
+ * probe entirely, and 1..N pins one -- which still has to pass the same check,
+ * so a pin that has gone stale fails the way a bad probe does. Read here rather
+ * than declared as a parameter because those carry integers only. */
+enum {
+  kLayoutProbeAll = -1,
+  kLayoutOff = -2
 };
+
+int requestedLayout() {
+  const char* s = ncclGetEnv("RCCL_KERNEL_TIMING_LAYOUT");
+  if (s == nullptr || s[0] == '\0') return kLayoutProbeAll;
+  if (strcmp(s, "none") == 0) return kLayoutOff;
+  char* end = nullptr;
+  long v = strtol(s, &end, 10);
+  if (end != s && *end == '\0' && v >= 1 && v <= kNumLayouts) return (int)(v - 1);
+  WARN("KERNEL_TIMING: RCCL_KERNEL_TIMING_LAYOUT=%s is not \"none\" or 1-%d; probing instead", s, kNumLayouts);
+  return kLayoutProbeAll;
+}
+
+/* Settles which layout this runtime uses, on a dispatch issued here so that
+ * nothing depends on a collective having run yet. A candidate has to survive
+ * the mapping checks, be a signal ROCr recognises, and report a window inside
+ * the bracket taken around the dispatch -- offsets that address the wrong words
+ * do not produce a window a few microseconds wide in the right place. */
+bool resolveLayout(int dev, hsa_agent_t agent) {
+  const int want = requestedLayout();
+  if (want == kLayoutOff) {
+    INFO(NCCL_INIT, "KERNEL_TIMING: layout probe disabled by RCCL_KERNEL_TIMING_LAYOUT=none");
+    return false;
+  }
+
+  int previous = -1;
+  if (cudaGetDevice(&previous) != cudaSuccess) return false;
+  if (cudaSetDevice(dev) != cudaSuccess) return false;
+
+  cudaStream_t stream = nullptr;
+  cudaEvent_t event = nullptr;
+  uint64_t before = 0, after = 0;
+  bool dispatched = false;
+
+  if (cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking) == cudaSuccess &&
+      cudaEventCreateWithFlags(&event, cudaEventDefault | hipEventDisableSystemFence) == cudaSuccess) {
+    before = bootNs();
+    if (cudaEventRecord(event, stream) == cudaSuccess && cudaStreamSynchronize(stream) == cudaSuccess) {
+      after = bootNs();
+      dispatched = true;
+    }
+  }
+
+  if (dispatched) {
+    for (int i = 0; i < kNumLayouts; i++) {
+      if (want != kLayoutProbeAll && want != i) continue;
+      const Layout& l = kLayouts[i];
+      uint64_t handle = 0, start = 0, end = 0;
+      if (followLayout(event, l, &handle) && signalLooksLive(handle) &&
+          dispatchTimeFromSignal(handle, agent, &start, &end) && start >= before && end <= after) {
+        g_layout = &l;
+        INFO(NCCL_INIT, "KERNEL_TIMING: layout %d (+%d, +%d, +%d), as built for %s", i + 1, l.event, l.amdEvent,
+             l.signal, l.releases);
+        break;
+      }
+    }
+  }
+
+  if (event != nullptr) (void)cudaEventDestroy(event);
+  if (stream != nullptr) (void)cudaStreamDestroy(stream);
+  (void)cudaSetDevice(previous);
+
+  if (g_layout == nullptr) {
+    WARN("KERNEL_TIMING: no known event layout fits this ROCm (tried %d), timing disabled; "
+         "tools/kernel-timing/dispatch-time/layout_offsets.sh derives the offsets for a new release",
+         want == kLayoutProbeAll ? kNumLayouts : 1);
+  }
+  return g_layout != nullptr;
+}
+#else
 struct hsa_agent_t {
   uint64_t handle;
 };
-bool dispatchTimeFromSignal(uint64_t, hsa_agent_t, uint64_t*, uint64_t*) { return false; }
-bool signalLooksLive(uint64_t) { return false; }
+bool agentForDevice(int, hsa_agent_t*) {
+  return false;
+}
+bool dispatchTimeFromSignal(uint64_t, hsa_agent_t, uint64_t*, uint64_t*) {
+  return false;
+}
+bool signalLooksLive(uint64_t) {
+  return false;
+}
+bool resolveLayout(int, hsa_agent_t) {
+  return false;
+}
 #endif
-
-void walk(uint64_t base, int depth, int* hop, int nhop, std::set<uint64_t>& seen,
-          void (*visit)(uint64_t base, const uint64_t* words, const int* hop, int nhop, void* arg), void* arg) {
-  if (depth > scanDepth() || !seen.insert(base).second) return;
-  const int nw = scanWords();
-  uint64_t w[kMaxScanWords];
-  if (!probeRead(base, w, nw * sizeof(uint64_t))) return;
-  visit(base, w, hop, nhop, arg);
-  if (nhop == (int)(sizeof(Chain::hop) / sizeof(int))) return;
-  for (int i = 0; i < nw; ++i) {
-    hop[nhop] = i * 8;
-    walk(w[i], depth + 1, hop, nhop + 1, seen, visit, arg);
-  }
-}
-
-struct SignalSearch {
-  uint64_t startNs, endNs;
-  bool found;
-  Chain chain;
-  hsa_agent_t agent;
-  DiscoveryStats stats;
-};
-
-void visitForSignal(uint64_t, const uint64_t* w, const int* hop, int nhop, void* arg) {
-  SignalSearch* s = (SignalSearch*)arg;
-  if (s->found) return;
-  s->stats.blocks++;
-  const int nw = scanWords();
-  for (int i = 0; i < nw; ++i) {
-    if (searchSignal(w[i], s->agent, &s->startNs, &s->endNs, &s->stats)) {
-      for (int h = 0; h < nhop; ++h) s->chain.hop[h] = hop[h];
-      s->chain.nhop = nhop;
-      s->chain.leaf = i * 8;
-      s->found = true;
-      return;
-    }
-  }
-}
-
-/* Locates the completion signal of a dispatch that has already run, reachable
- * from its event. Only the location is discovered; the timestamps themselves
- * come from ROCr on every harvest, so nothing depends on how the HIP runtime
- * caches or converts them. */
-Chain discoverChain(void* event, int dev, hsa_agent_t* agent, DiscoveryStats* stats) {
-  Chain none;
-#if defined(__HIP_PLATFORM_AMD__)
-  SignalSearch ss;
-  ss.found = false;
-  if (!agentForDevice(dev, &ss.agent)) return none;
-
-  int hop[4];
-  {
-    std::set<uint64_t> seen;
-    walk((uint64_t)event, 0, hop, 0, seen, visitForSignal, &ss);
-  }
-  *stats = ss.stats;
-  if (!ss.found) return none;
-
-  /* The chain is only trusted if walking it from the event reaches the same
-   * signal ROCr just answered for. */
-  uint64_t handle = 0, s = 0, e = 0;
-  if (followChain(event, ss.chain, &handle) && dispatchTimeFromSignal(handle, ss.agent, &s, &e) &&
-      s == ss.startNs && e == ss.endNs) {
-    *agent = ss.agent;
-    return ss.chain;
-  }
-#endif
-  return none;
-}
 
 } // namespace
 
 /* ---------- per-communicator state ---------- */
 
 struct ncclKernelTimingCtx {
-  std::mutex lock;
-  Chain chain;
+  /* Launchers only touch the ticket counters and their uniquely owned slot.
+   * Drains are serialized separately, so timestamp extraction never holds a
+   * lock needed by a launch. */
+  std::mutex drainLock;
+  /* Which agent ROCr should convert this device's ticks with. The layout is a
+   * property of the runtime and is held once for the process; the agent is per
+   * device and so lives here. */
   hsa_agent_t agent;
-  /* A chain is believed only once it has produced a plausible, fresh window for
-   * a second dispatch; a location that merely happens to hold some signal would
-   * not survive that. */
-  enum { kDiscover, kConfirm, kReady } phase = kDiscover;
-  uint64_t confirmStartNs = 0;
-  bool disabled = false;
 
-  /* Dispatches launched but not yet harvested, in launch order. A slot is
-   * reserved before the launch and armed only once it has been issued. */
-  std::vector<cudaEvent_t> inflightEvent;
-  std::vector<ncclKernelTimingRecord> inflightRec;
-  std::vector<bool> inflightArmed;
-  std::vector<uint64_t> inflightArmNs;
-  uint64_t inflightHead = 0, inflightTail = 0;
+  enum SlotState : uint64_t {
+    kFree = 0,
+    kReserved = 1,
+    kArmed = 2,
+    kCancelled = 3
+  };
+  struct Slot {
+    std::atomic<uint64_t> state;
+    cudaEvent_t event;
+    ncclKernelTimingRecord rec;
+    Slot() : state(0), event(nullptr) {}
+  };
+  Slot* inflightSlot = nullptr;
+  uint64_t inflight = 0;
+  std::atomic<uint64_t> inflightHead{0};
+  std::atomic<uint64_t> inflightTail{0};
 
   /* Completed records awaiting a drain. */
   std::vector<ncclKernelTimingRecord> ring;
   uint64_t ringHead = 0, ringTail = 0;
-  uint64_t dropped = 0;
+  std::atomic<uint64_t> dropped{0};
   /* Why harvests were discarded, for the teardown summary. */
-  uint64_t dropChain = 0, dropDead = 0, dropUntimed = 0, dropStale = 0, dropBusy = 0;
+  std::atomic<uint64_t> dropUnread{0}, dropDead{0}, dropUntimed{0}, dropQuery{0}, dropBusy{0}, dropOverflow{0},
+    dropCancelled{0};
 
-  uint64_t seq = 0;
+  std::atomic<uint64_t> seq{0};
 };
+
+constexpr uint64_t kSlotStateBits = 2;
+constexpr uint64_t kSlotStateMask = (1ull << kSlotStateBits) - 1;
+
+uint64_t slotWord(uint64_t ticket, ncclKernelTimingCtx::SlotState state) {
+  return (ticket << kSlotStateBits) | (uint64_t)state;
+}
+
+uint64_t slotTicket(uint64_t word) {
+  return word >> kSlotStateBits;
+}
+
+ncclKernelTimingCtx::SlotState slotState(uint64_t word) {
+  return (ncclKernelTimingCtx::SlotState)(word & kSlotStateMask);
+}
 
 bool ncclKernelTimingEnabled() {
 #if defined(__HIP_PLATFORM_AMD__)
@@ -376,21 +386,42 @@ ncclResult_t ncclKernelTimingCommInit(struct ncclComm* comm) {
   comm->kernelTiming = nullptr;
   if (!ncclKernelTimingEnabled()) return ncclSuccess;
 
+  hsa_agent_t agent;
+  if (!agentForDevice(comm->cudaDev, &agent)) {
+    WARN("KERNEL_TIMING: no HSA agent matches device %d, kernel timing disabled", comm->cudaDev);
+    return ncclSuccess;
+  }
+
+  /* One probe serves the process: every communicator here is talking to the
+   * same HIP runtime, and it is the runtime that decides the layout. */
+  static std::once_flag probed;
+  std::call_once(probed, [&]() { (void)resolveLayout(comm->cudaDev, agent); });
+  if (g_layout == nullptr) return ncclSuccess;
+
   int inflight = (int)rcclParamKernelTimingInflight();
   int capacity = (int)rcclParamKernelTimingCapacity();
   if (inflight < 8) inflight = 8;
   if (capacity < inflight) capacity = inflight;
 
   ncclKernelTimingCtx* ctx = new ncclKernelTimingCtx();
-  ctx->inflightEvent.resize(inflight, nullptr);
-  ctx->inflightRec.resize(inflight);
-  ctx->inflightArmed.resize(inflight, false);
-  ctx->inflightArmNs.resize(inflight, 0);
+  ctx->agent = agent;
+  ctx->inflight = (uint64_t)inflight;
+  ctx->inflightSlot = new ncclKernelTimingCtx::Slot[inflight];
   ctx->ring.resize(capacity);
   for (int i = 0; i < inflight; i++) {
-    /* Timing must stay enabled on these events; they are the timestamp source. */
-    if (cudaEventCreateWithFlags(&ctx->inflightEvent[i], cudaEventDefault) != cudaSuccess) {
-      for (int j = 0; j < i; j++) (void)cudaEventDestroy(ctx->inflightEvent[j]);
+    ctx->inflightSlot[i].state.store(slotWord((uint64_t)i, ncclKernelTimingCtx::kFree), std::memory_order_relaxed);
+    /* Timing must stay enabled on these events; they are the timestamp source.
+     * hipEventDisableSystemFence: this event is never inspected for data-visibility
+     * (nothing outside this file ever sees it), only polled for its HSA dispatch
+     * timestamps, so it doesn't need the runtime's implicit system-scope release
+     * fence. Without this flag, binding the event to the dispatch upgrades the AQL
+     * packet's acquire/release fence scope from AGENT to SYSTEM (see ROCclr's
+     * ihipLaunchKernelCommand / addSystemScope_), which is a real GPU-side stall on
+     * every timed dispatch. */
+    if (cudaEventCreateWithFlags(&ctx->inflightSlot[i].event,
+                                 cudaEventDefault | hipEventDisableSystemFence) != cudaSuccess) {
+      for (int j = 0; j < i; j++) (void)cudaEventDestroy(ctx->inflightSlot[j].event);
+      delete[] ctx->inflightSlot;
       delete ctx;
       WARN("KERNEL_TIMING: could not create events, kernel timing disabled");
       return ncclSuccess;
@@ -405,13 +436,20 @@ ncclResult_t ncclKernelTimingCommFree(struct ncclComm* comm) {
   ncclKernelTimingCtx* ctx = comm->kernelTiming;
   if (ctx == nullptr) return ncclSuccess;
   comm->kernelTiming = nullptr;
-  if (ctx->dropped) {
-    INFO(NCCL_INIT, "KERNEL_TIMING: %lu dispatches went untimed (chain %lu, dead %lu, untimed %lu, stale %lu, busy %lu)",
-         ctx->dropped, ctx->dropChain, ctx->dropDead, ctx->dropUntimed, ctx->dropStale, ctx->dropBusy);
+  uint64_t dropped = ctx->dropped.load(std::memory_order_relaxed);
+  if (dropped != 0) {
+    INFO(NCCL_INIT,
+         "KERNEL_TIMING: %lu dispatches went untimed "
+         "(unread %lu, dead %lu, untimed %lu, query %lu, busy %lu, overflow %lu, cancelled %lu)",
+         dropped, ctx->dropUnread.load(std::memory_order_relaxed), ctx->dropDead.load(std::memory_order_relaxed),
+         ctx->dropUntimed.load(std::memory_order_relaxed), ctx->dropQuery.load(std::memory_order_relaxed),
+         ctx->dropBusy.load(std::memory_order_relaxed), ctx->dropOverflow.load(std::memory_order_relaxed),
+         ctx->dropCancelled.load(std::memory_order_relaxed));
   }
-  for (size_t i = 0; i < ctx->inflightEvent.size(); i++) {
-    if (ctx->inflightEvent[i]) (void)cudaEventDestroy(ctx->inflightEvent[i]);
+  for (uint64_t i = 0; i < ctx->inflight; i++) {
+    if (ctx->inflightSlot[i].event) (void)cudaEventDestroy(ctx->inflightSlot[i].event);
   }
+  delete[] ctx->inflightSlot;
   delete ctx;
   return ncclSuccess;
 }
@@ -422,166 +460,194 @@ void pushRecord(ncclKernelTimingCtx* ctx, const ncclKernelTimingRecord& rec) {
   uint64_t capacity = ctx->ring.size();
   if (ctx->ringHead - ctx->ringTail == capacity) {
     ctx->ringTail++; /* overwrite oldest */
-    ctx->dropped++;
+    ctx->dropped.fetch_add(1, std::memory_order_relaxed);
+    ctx->dropOverflow.fetch_add(1, std::memory_order_relaxed);
   }
   ctx->ring[ctx->ringHead % capacity] = rec;
   ctx->ringHead++;
 }
 
-/* Moves every completed dispatch from the in-flight queue into the ring. Called
- * from the launch path, so it must never block: it stops at the first dispatch
- * still running. */
-void harvest(ncclKernelTimingCtx* ctx, int dev) {
-  if (ctx->disabled) return;
-  uint64_t inflight = ctx->inflightEvent.size();
-  while (ctx->inflightTail != ctx->inflightHead) {
-    uint64_t slot = ctx->inflightTail % inflight;
-    if (!ctx->inflightArmed[slot]) {
-      /* Reserved but never issued: its event holds whatever the previous use
-       * left behind, so drop it. */
-      ctx->inflightTail++;
-      continue;
-    }
-    cudaEvent_t ev = ctx->inflightEvent[slot];
-    if (cudaEventQuery(ev) != cudaSuccess) break;
+/* Moves completed dispatches into the output ring. Only a drain calls this:
+ * event queries and ROCr timestamp conversion must never run on a launch
+ * thread. A reserved slot is still between Begin and Commit, so stop rather
+ * than recycling its event underneath the launcher. */
+void harvest(ncclKernelTimingCtx* ctx) {
+  uint64_t ticket = ctx->inflightTail.load(std::memory_order_relaxed);
+  while (ticket != ctx->inflightHead.load(std::memory_order_acquire)) {
+    ncclKernelTimingCtx::Slot& slot = ctx->inflightSlot[ticket % ctx->inflight];
+    uint64_t word = slot.state.load(std::memory_order_acquire);
+    if (slotTicket(word) != ticket || slotState(word) == ncclKernelTimingCtx::kFree ||
+        slotState(word) == ncclKernelTimingCtx::kReserved)
+      break;
 
-    if (ctx->phase == ncclKernelTimingCtx::kDiscover) {
-      DiscoveryStats st;
-      ctx->chain = discoverChain(ev, dev, &ctx->agent, &st);
-      if (!ctx->chain.valid()) {
-        ctx->disabled = true;
-        WARN("KERNEL_TIMING: could not locate the dispatch completion signal in this ROCm runtime; timing "
-             "disabled (blocks %d, signals %d, stamped %d, timed %d)",
-             st.blocks, st.signals, st.stamped, st.oracleOk);
+    if (slotState(word) == ncclKernelTimingCtx::kCancelled) {
+      ctx->dropped.fetch_add(1, std::memory_order_relaxed);
+      ctx->dropCancelled.fetch_add(1, std::memory_order_relaxed);
+    } else {
+      cudaError_t query = cudaEventQuery(slot.event);
+      if (query == cudaErrorNotReady) break;
+
+      ncclKernelTimingRecord rec = slot.rec;
+      if (query != cudaSuccess) {
+        ctx->dropped.fetch_add(1, std::memory_order_relaxed);
+        ctx->dropQuery.fetch_add(1, std::memory_order_relaxed);
       } else {
-        ctx->phase = ncclKernelTimingCtx::kConfirm;
-        INFO(NCCL_INIT, "KERNEL_TIMING: dispatch completion signal located (%d hops, leaf +%d)", ctx->chain.nhop,
-             ctx->chain.leaf);
-      }
-    }
-
-    if (!ctx->disabled) {
-      ncclKernelTimingRecord rec = ctx->inflightRec[slot];
-      uint64_t handle = 0;
-      struct timespec ts;
-      clock_gettime(CLOCK_BOOTTIME, &ts);
-      uint64_t nowNs = (uint64_t)ts.tv_sec * 1000000000ull + ts.tv_nsec;
-      /* A signal that outlived its dispatch and was handed to some later packet
-       * would report a window that cannot belong to this launch, so anything
-       * outside the interval between the launch call and now is discarded
-       * rather than reported. */
-      if (!followChain(ev, ctx->chain, &handle)) {
-        ctx->dropped++, ctx->dropChain++;
-      } else if (!signalLooksLive(handle)) {
-        ctx->dropped++, ctx->dropDead++;
-      } else if (!dispatchTimeFromSignal(handle, ctx->agent, &rec.startNs, &rec.endNs)) {
-        ctx->dropped++, ctx->dropUntimed++;
-      } else if (rec.startNs < ctx->inflightArmNs[slot] || rec.endNs > nowNs) {
-        ctx->dropped++, ctx->dropStale++;
-      } else if (ctx->phase == ncclKernelTimingCtx::kConfirm) {
-        /* First use of the chain outside discovery. Repeating the window it was
-         * discovered with would mean the location is some fixed signal rather
-         * than this dispatch's. */
-        if (ctx->confirmStartNs == 0) {
-          ctx->confirmStartNs = rec.startNs;
-        } else if (rec.startNs == ctx->confirmStartNs) {
-          ctx->disabled = true;
-          WARN("KERNEL_TIMING: dispatch timestamps do not track the dispatch; timing disabled");
+        uint64_t handle = 0;
+        if (!followLayout(slot.event, *g_layout, &handle)) {
+          ctx->dropped.fetch_add(1, std::memory_order_relaxed);
+          ctx->dropUnread.fetch_add(1, std::memory_order_relaxed);
+        } else if (!signalLooksLive(handle)) {
+          ctx->dropped.fetch_add(1, std::memory_order_relaxed);
+          ctx->dropDead.fetch_add(1, std::memory_order_relaxed);
+        } else if (!dispatchTimeFromSignal(handle, ctx->agent, &rec.startNs, &rec.endNs)) {
+          ctx->dropped.fetch_add(1, std::memory_order_relaxed);
+          ctx->dropUntimed.fetch_add(1, std::memory_order_relaxed);
         } else {
-          ctx->phase = ncclKernelTimingCtx::kReady;
+          pushRecord(ctx, rec);
         }
-        pushRecord(ctx, rec);
-      } else {
-        pushRecord(ctx, rec);
       }
     }
-    ctx->inflightArmed[slot] = false;
-    ctx->inflightTail++;
+
+    ticket++;
+    slot.state.store(slotWord(ticket + ctx->inflight - 1, ncclKernelTimingCtx::kFree), std::memory_order_release);
+    ctx->inflightTail.store(ticket, std::memory_order_release);
   }
 }
 
 } // namespace
 
-cudaEvent_t ncclKernelTimingBeginLaunch(struct ncclComm* comm, struct ncclKernelPlan* plan, uint32_t nChannels,
-                                        uint32_t nThreads, uint64_t* slotOut) {
+namespace {
+
+/* Claims a ticket without querying the GPU. A full queue drops timing for this
+ * dispatch immediately; only the consumer is allowed to harvest. */
+cudaEvent_t reserve(ncclKernelTimingCtx* ctx, struct ncclComm* comm, uint64_t* ticketOut,
+                    ncclKernelTimingRecord** recOut) {
+  /* Every dispatch is counted whether or not it ends up timed, so a record's
+   * seq says which dispatch it was and a gap says one went unmeasured. */
+  uint64_t seq = ctx->seq.fetch_add(1, std::memory_order_relaxed);
+
+  uint64_t ticket = ctx->inflightHead.load(std::memory_order_relaxed);
+  for (;;) {
+    uint64_t tail = ctx->inflightTail.load(std::memory_order_acquire);
+    if (ticket - tail >= ctx->inflight) {
+      ctx->dropped.fetch_add(1, std::memory_order_relaxed);
+      ctx->dropBusy.fetch_add(1, std::memory_order_relaxed);
+      return nullptr;
+    }
+    if (ctx->inflightHead.compare_exchange_weak(ticket, ticket + 1, std::memory_order_acq_rel,
+                                                std::memory_order_relaxed))
+      break;
+  }
+
+  ncclKernelTimingCtx::Slot& slot = ctx->inflightSlot[ticket % ctx->inflight];
+  uint64_t expected = slotWord(ticket, ncclKernelTimingCtx::kFree);
+  while (!slot.state.compare_exchange_weak(expected, slotWord(ticket, ncclKernelTimingCtx::kReserved),
+                                           std::memory_order_acq_rel, std::memory_order_relaxed))
+    expected = slotWord(ticket, ncclKernelTimingCtx::kFree);
+
+  ncclKernelTimingRecord& rec = slot.rec;
+  rec.seq = seq;
+  rec.commHash = comm->commHash;
+  rec.rank = comm->rank;
+  *ticketOut = ticket;
+  *recOut = &rec;
+  return slot.event;
+}
+
+} // namespace
+
+cudaEvent_t ncclKernelTimingBeginDispatch(struct ncclComm* comm, cudaStream_t stream, uint64_t* slotOut) {
+  ncclKernelTimingCtx* ctx = comm->kernelTiming;
+  if (ctx == nullptr) return nullptr;
+
+  /* Captured ext launches accept an event, but replay never populates it. */
+  cudaStreamCaptureStatus captureStatus;
+  if (cudaStreamIsCapturing(stream, &captureStatus) != cudaSuccess || captureStatus != cudaStreamCaptureStatusNone)
+    return nullptr;
+
+  ncclKernelTimingRecord* rec = nullptr;
+  return reserve(ctx, comm, slotOut, &rec);
+}
+
+cudaEvent_t ncclKernelTimingBeginLaunch(struct ncclComm* comm, struct ncclKernelPlan* plan, uint64_t* slotOut) {
   ncclKernelTimingCtx* ctx = comm->kernelTiming;
   if (ctx == nullptr) return nullptr;
   /* Graph-captured launches accept the event but replay never populates it. */
   if (plan->persistent) return nullptr;
 
-  std::lock_guard<std::mutex> guard(ctx->lock);
-  /* Harvesting here would query an event on every launch, which makes the
-   * runtime flush the queue and costs far more than the timing is worth. The
-   * queue is drained instead, and a launch only gives up its timing if every
-   * slot is still held. */
-  if (rcclParamKernelTimingHarvestOnLaunch()) harvest(ctx, comm->cudaDev);
-  if (ctx->disabled) return nullptr;
-
-  /* Every dispatch is counted whether or not it ends up timed, so a record's
-   * seq says which dispatch it was and a gap says one went unmeasured. */
-  uint64_t seq = ctx->seq++;
-
-  uint64_t inflight = ctx->inflightEvent.size();
-  if (ctx->inflightHead - ctx->inflightTail == inflight) {
-    /* Every slot is held, which means the queue is not being drained. Harvest
-     * here to keep going: it costs an event query on this one launch and
-     * reclaims the whole run of completed dispatches. */
-    harvest(ctx, comm->cudaDev);
-    if (ctx->disabled) return nullptr;
-    if (ctx->inflightHead - ctx->inflightTail == inflight) {
-      /* Genuinely nothing has completed; skip timing rather than stall. */
-      ctx->dropped++, ctx->dropBusy++;
-      return nullptr;
-    }
-  }
-
-  uint64_t ticket = ctx->inflightHead++;
-  *slotOut = ticket;
-  uint64_t slot = ticket % inflight;
-  ctx->inflightArmed[slot] = false;
-  /* Taken before the dispatch is issued, so the kernel cannot legitimately
-   * report a start earlier than this; that is what makes a signal reused by a
-   * later packet detectable at harvest. */
-  {
-    struct timespec ts;
-    clock_gettime(CLOCK_BOOTTIME, &ts);
-    ctx->inflightArmNs[slot] = (uint64_t)ts.tv_sec * 1000000000ull + ts.tv_nsec;
-  }
-  ncclKernelTimingRecord& rec = ctx->inflightRec[slot];
-  memset(&rec, 0, sizeof(rec));
-  rec.seq = seq;
-  rec.commHash = comm->commHash;
-  rec.rank = comm->rank;
-  rec.nChannels = nChannels;
-  rec.nThreads = nThreads;
-  for (struct ncclTaskColl* ct = ncclIntruQueueHead(&plan->collTaskQueue); ct != nullptr; ct = ct->next) {
-    if (rec.nColls == 0) {
-      rec.func = (uint32_t)ct->func;
-      rec.datatype = (uint32_t)ct->datatype;
-      rec.count = (uint64_t)ct->count;
-    }
-    rec.nColls++;
-  }
-  return ctx->inflightEvent[slot];
+  ncclKernelTimingRecord* rec = nullptr;
+  return reserve(ctx, comm, slotOut, &rec);
 }
 
-void ncclKernelTimingCommitLaunch(struct ncclComm* comm, uint64_t slot) {
+/* Both Commit variants below write the describing fields on a still-kReserved
+ * slot, then CAS it to kArmed -- the same ordering reserve() used to write
+ * seq/commHash/rank, just deferred past the launch call. harvest() will not
+ * touch a kReserved slot (see its comment), so this is safe without any extra
+ * synchronization. */
+
+void ncclKernelTimingCommitLaunch(struct ncclComm* comm, uint64_t ticket, struct ncclKernelPlan* plan,
+                                  uint32_t nChannels, uint32_t nThreads) {
   ncclKernelTimingCtx* ctx = comm->kernelTiming;
   if (ctx == nullptr) return;
-  std::lock_guard<std::mutex> guard(ctx->lock);
-  ctx->inflightArmed[slot % ctx->inflightEvent.size()] = true;
+  ncclKernelTimingCtx::Slot& slot = ctx->inflightSlot[ticket % ctx->inflight];
+
+  ncclKernelTimingRecord& rec = slot.rec;
+  rec.nChannels = nChannels;
+  rec.nThreads = nThreads;
+  rec.nColls = plan->collOpCount;
+  struct ncclTaskColl* ct = ncclIntruQueueHead(&plan->collTaskQueue);
+  if (ct == nullptr) {
+    rec.func = 0;
+    rec.datatype = 0;
+    rec.count = 0;
+  } else {
+    rec.func = (uint32_t)ct->func;
+    rec.datatype = (uint32_t)ct->datatype;
+    rec.count = (uint64_t)ct->count;
+  }
+
+  uint64_t expected = slotWord(ticket, ncclKernelTimingCtx::kReserved);
+  (void)slot.state.compare_exchange_strong(expected, slotWord(ticket, ncclKernelTimingCtx::kArmed),
+                                           std::memory_order_release, std::memory_order_relaxed);
+}
+
+void ncclKernelTimingCommitDispatch(struct ncclComm* comm, uint64_t ticket, uint32_t func, uint32_t datatype,
+                                    uint64_t count, uint32_t nChannels, uint32_t nThreads) {
+  ncclKernelTimingCtx* ctx = comm->kernelTiming;
+  if (ctx == nullptr) return;
+  ncclKernelTimingCtx::Slot& slot = ctx->inflightSlot[ticket % ctx->inflight];
+
+  ncclKernelTimingRecord& rec = slot.rec;
+  rec.func = func;
+  rec.datatype = datatype;
+  rec.count = count;
+  rec.nChannels = nChannels;
+  rec.nThreads = nThreads;
+  rec.nColls = 1;
+
+  uint64_t expected = slotWord(ticket, ncclKernelTimingCtx::kReserved);
+  (void)slot.state.compare_exchange_strong(expected, slotWord(ticket, ncclKernelTimingCtx::kArmed),
+                                           std::memory_order_release, std::memory_order_relaxed);
+}
+
+void ncclKernelTimingCancelLaunch(struct ncclComm* comm, uint64_t ticket) {
+  ncclKernelTimingCtx* ctx = comm->kernelTiming;
+  if (ctx == nullptr) return;
+  ncclKernelTimingCtx::Slot& slot = ctx->inflightSlot[ticket % ctx->inflight];
+  uint64_t expected = slotWord(ticket, ncclKernelTimingCtx::kReserved);
+  (void)slot.state.compare_exchange_strong(expected, slotWord(ticket, ncclKernelTimingCtx::kCancelled),
+                                           std::memory_order_release, std::memory_order_relaxed);
 }
 
 NCCL_API(ncclResult_t, ncclKernelTimingDrain, ncclComm_t comm, ncclKernelTimingRecord* out, int max, int* got,
          uint64_t* dropped);
-ncclResult_t ncclKernelTimingDrain(ncclComm_t comm, ncclKernelTimingRecord* out, int max, int* got,
-                                   uint64_t* dropped) {
+ncclResult_t ncclKernelTimingDrain(ncclComm_t comm, ncclKernelTimingRecord* out, int max, int* got, uint64_t* dropped) {
   if (comm == nullptr || out == nullptr || got == nullptr || max < 0) return ncclInvalidArgument;
   ncclKernelTimingCtx* ctx = comm->kernelTiming;
   if (ctx == nullptr) return ncclInvalidUsage;
 
-  std::lock_guard<std::mutex> guard(ctx->lock);
-  harvest(ctx, comm->cudaDev);
+  std::lock_guard<std::mutex> guard(ctx->drainLock);
+  harvest(ctx);
 
   uint64_t capacity = ctx->ring.size();
   int n = 0;
@@ -590,6 +656,6 @@ ncclResult_t ncclKernelTimingDrain(ncclComm_t comm, ncclKernelTimingRecord* out,
     ctx->ringTail++;
   }
   *got = n;
-  if (dropped) *dropped = ctx->dropped;
+  if (dropped) *dropped = ctx->dropped.load(std::memory_order_relaxed);
   return ncclSuccess;
 }

@@ -764,8 +764,9 @@ extern void* const ncclDevKernelForFunc[/*funcIndex*/];
 extern bool const ncclDevKernelForFuncIsSpecialized[/*funcIndex*/];
 
 // Launch a one-rank reduction on stream.
-ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct ncclDevRedOpFull redOp,
-                               ncclDataType_t type, cudaStream_t stream, void const* acc = nullptr);
+ncclResult_t ncclLaunchOneRank(struct ncclComm* comm, ncclFunc_t coll, void* dst, void const* src, size_t nElts,
+                               struct ncclDevRedOpFull redOp, ncclDataType_t type, cudaStream_t stream,
+                               void const* acc = nullptr);
 
 // `ncclNvlsSupported()` needs to be in sync with "func_valid" in "src/device/generate.py"
 inline bool ncclNvlsSupported(int devRedOp, int type) {

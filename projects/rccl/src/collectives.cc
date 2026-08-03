@@ -17,6 +17,7 @@
 #include "dda_reduce_scatter.h"
 #include "dda_all_gather.h"
 #include "dda_alltoall.h"
+#include "kernel_timing.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
 
@@ -300,8 +301,9 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
   size_t totalAGBytes = (size_t)nNodes * localRanks * rankOffset;
   int numBlocks = hierarchicalShuffleNumBlocks(totalAGBytes);
   int threadsPerBlock = 1024;
-  hierarchicalAGShuffle<<<numBlocks, threadsPerBlock, 0, stream>>>((const char*)tempBuffer, (char*)recvbuff, rankOffset,
-                                                                   nNodes, localRanks);
+  NCCLCHECK(ncclKernelTimingLaunch(comm, ncclFuncAllGather, datatype, sendcount, hierarchicalAGShuffle, numBlocks,
+                                   threadsPerBlock, 0, stream, (const char*)tempBuffer, (char*)recvbuff, rankOffset,
+                                   nNodes, localRanks));
   CUDACHECK(hipGetLastError());
 
   return ncclSuccess;
@@ -311,7 +313,7 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
                                 ncclComm_t comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(AllGather, NcclNvtxParamsAllGather,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, sendcount * ncclTypeSize(datatype), datatype));
-    // RCCL update slice steps for AllGather if single node
+  // RCCL update slice steps for AllGather if single node
   const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
 
   int chunkSteps = (isGfx950 && comm->rcclUseOneSlice) ? 1 : ALLGATHER_CHUNKSTEPS;

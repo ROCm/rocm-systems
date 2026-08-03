@@ -13,6 +13,7 @@
 #include "debug.h"
 #include "dda_init_detail.h"
 #include "fabric_gpu_barrier.h"
+#include "kernel_timing.h"
 
 #include <cuda_runtime.h>
 
@@ -23,8 +24,12 @@ namespace {
 
 using nccl_dda_detail::DdaFabricBarrierState;
 
+/* `datatype` and `metaCount` describe the caller's collective for the timing
+ * record; they are not the kernel's own T and element count, which the byte-
+ * wise instantiation below restates in int8 terms. */
 template <typename T>
-static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
+static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvbuff, size_t count,
+                                               ncclDataType_t datatype, size_t metaCount, ncclComm* comm,
                                                cudaStream_t stream) {
   if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaFabricBarrierState == nullptr) {
@@ -56,18 +61,21 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
 
   CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
 
+  auto launch = [&](auto kernel) {
+    return ncclKernelTimingLaunch(comm, ncclFuncAlltoAll, datatype, metaCount, kernel, grid, block, 0, stream,
+                                  d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
+                                  comm->rank, nRanks, barrierHost);
+  };
+
   switch (nRanks) {
   case 4:
-    meta::comms::ddaAllToAllFabric<T, 4><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+    NCCLCHECK(launch(meta::comms::ddaAllToAllFabric<T, 4>));
     break;
   case 8:
-    meta::comms::ddaAllToAllFabric<T, 8><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+    NCCLCHECK(launch(meta::comms::ddaAllToAllFabric<T, 8>));
     break;
   default:
-    meta::comms::ddaAllToAllFabric<T, 0><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+    NCCLCHECK(launch(meta::comms::ddaAllToAllFabric<T, 0>));
     break;
   }
 
@@ -123,5 +131,5 @@ ncclResult_t ncclAllToAllDdaFabric(const void* sendbuff, void* recvbuff, size_t 
     return ncclInvalidArgument;
   }
   int typeSize = ncclTypeSize(datatype);
-  return ncclAllToAllDdaFabricTyped<int8_t>(sendbuff, recvbuff, count * typeSize, comm, stream);
+  return ncclAllToAllDdaFabricTyped<int8_t>(sendbuff, recvbuff, count * typeSize, datatype, count, comm, stream);
 }

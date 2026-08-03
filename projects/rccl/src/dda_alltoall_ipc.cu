@@ -12,6 +12,7 @@
 #include "comm.h"
 #include "debug.h"
 #include "ipc_gpu_barrier.h"
+#include "kernel_timing.h"
 #include "dda_init_detail.h"
 
 #include <cuda_runtime.h>
@@ -27,9 +28,12 @@ using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_detail::kDdaNranks;
 
+/* `datatype` and `metaCount` describe the caller's collective for the timing
+ * record; they are not the kernel's own T and element count, which the byte-
+ * wise instantiation below restates in int8 terms. */
 template <typename T>
-static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
-                                            cudaStream_t stream) {
+static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                            size_t metaCount, ncclComm* comm, cudaStream_t stream) {
   if (comm->ddaIpcMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaIpcBarrierState == nullptr) {
     return ncclInvalidUsage;
@@ -55,8 +59,9 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
   CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
-  meta::comms::ddaAllToAllIpc<T, kDdaNranks, false><<<grid, block, 0, stream>>>(
-    d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+  NCCLCHECK(ncclKernelTimingLaunch(
+    comm, ncclFuncAlltoAll, datatype, metaCount, meta::comms::ddaAllToAllIpc<T, kDdaNranks, false>, grid, block, 0,
+    stream, d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost));
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;
@@ -106,5 +111,5 @@ ncclResult_t ncclAllToAllDdaIpc(const void* sendbuff, void* recvbuff, size_t cou
     return ncclInvalidArgument;
   }
   int typeSize = ncclTypeSize(datatype);
-  return ncclAllToAllDdaIpcTyped<int8_t>(sendbuff, recvbuff, count * typeSize, comm, stream);
+  return ncclAllToAllDdaIpcTyped<int8_t>(sendbuff, recvbuff, count * typeSize, datatype, count, comm, stream);
 }

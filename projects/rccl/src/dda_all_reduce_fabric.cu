@@ -13,6 +13,7 @@
 #include "debug.h"
 #include "dda_init_detail.h"
 #include "fabric_gpu_barrier.h"
+#include "kernel_timing.h"
 
 #include <cuda_runtime.h>
 
@@ -28,8 +29,8 @@ using nccl_dda_detail::DdaFabricBarrierState;
 constexpr size_t kDdaFlatTreeThresholdBytes = 1ULL << 18;
 
 template <typename T>
-static ncclResult_t ncclAllReduceDdaFabricTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
-                                                cudaStream_t stream) {
+static ncclResult_t ncclAllReduceDdaFabricTyped(const void* sendbuff, void* recvbuff, size_t count,
+                                                ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream) {
   if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaFabricBarrierState == nullptr) {
     return ncclInvalidUsage;
@@ -69,48 +70,42 @@ static ncclResult_t ncclAllReduceDdaFabricTyped(const void* sendbuff, void* recv
        treeOk ? "tree (two-shot)" : "flat (one-shot)", nRanks, count, sizeBytes, grid.x, block.x,
        (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
+  auto launch = [&](auto kernel) {
+    return ncclKernelTimingLaunch(comm, ncclFuncAllReduce, datatype, count, kernel, grid, block, 0, stream, d_ipcbuffs,
+                                  static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks,
+                                  barrierHost, nullptr);
+  };
+
   if (treeOk) {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, count * sizeof(T), cudaMemcpyDeviceToDevice, stream));
     // NRANKS_CT 4/8: unrolled CollCommon reduce; 0: runtime fallback.
     switch (nRanks) {
     case 4:
       INFO(NCCL_COLL, "DDA fabric AllReduce: tree path, NRANKS_CT=4 (unrolled)");
-      meta::comms::ddaAllReduceTreeFabric<T, 4, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      NCCLCHECK(launch(meta::comms::ddaAllReduceTreeFabric<T, 4, false>));
       break;
     case 8:
       INFO(NCCL_COLL, "DDA fabric AllReduce: tree path, NRANKS_CT=8 (unrolled)");
-      meta::comms::ddaAllReduceTreeFabric<T, 8, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      NCCLCHECK(launch(meta::comms::ddaAllReduceTreeFabric<T, 8, false>));
       break;
     default:
       INFO(NCCL_COLL, "DDA fabric AllReduce: tree path, NRANKS_CT=0 (runtime, nRanks=%d)", nRanks);
-      meta::comms::ddaAllReduceTreeFabric<T, 0, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      NCCLCHECK(launch(meta::comms::ddaAllReduceTreeFabric<T, 0, false>));
       break;
     }
   } else {
     switch (nRanks) {
     case 4:
       INFO(NCCL_COLL, "DDA fabric AllReduce: flat path, NRANKS_CT=4 (unrolled)");
-      meta::comms::ddaAllReduceFlatFabric<T, 4, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      NCCLCHECK(launch(meta::comms::ddaAllReduceFlatFabric<T, 4, false>));
       break;
     case 8:
       INFO(NCCL_COLL, "DDA fabric AllReduce: flat path, NRANKS_CT=8 (unrolled)");
-      meta::comms::ddaAllReduceFlatFabric<T, 8, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      NCCLCHECK(launch(meta::comms::ddaAllReduceFlatFabric<T, 8, false>));
       break;
     default:
       INFO(NCCL_COLL, "DDA fabric AllReduce: flat path, NRANKS_CT=0 (runtime, nRanks=%d)", nRanks);
-      meta::comms::ddaAllReduceFlatFabric<T, 0, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      NCCLCHECK(launch(meta::comms::ddaAllReduceFlatFabric<T, 0, false>));
       break;
     }
   }
@@ -176,11 +171,11 @@ ncclResult_t ncclAllReduceDdaFabric(const void* sendbuff, void* recvbuff, size_t
   (void)op;
   switch (datatype) {
   case ncclFloat32:
-    return ncclAllReduceDdaFabricTyped<float>(sendbuff, recvbuff, count, comm, stream);
+    return ncclAllReduceDdaFabricTyped<float>(sendbuff, recvbuff, count, datatype, comm, stream);
   case ncclFloat16:
-    return ncclAllReduceDdaFabricTyped<half>(sendbuff, recvbuff, count, comm, stream);
+    return ncclAllReduceDdaFabricTyped<half>(sendbuff, recvbuff, count, datatype, comm, stream);
   case ncclBfloat16:
-    return ncclAllReduceDdaFabricTyped<bf16>(sendbuff, recvbuff, count, comm, stream);
+    return ncclAllReduceDdaFabricTyped<bf16>(sendbuff, recvbuff, count, datatype, comm, stream);
   default:
     return ncclInvalidArgument;
   }

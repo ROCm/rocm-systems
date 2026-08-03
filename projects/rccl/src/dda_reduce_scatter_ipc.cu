@@ -12,6 +12,7 @@
 #include "comm.h"
 #include "debug.h"
 #include "ipc_gpu_barrier.h"
+#include "kernel_timing.h"
 #include "dda_init_detail.h"
 
 #include <cuda_runtime.h>
@@ -28,8 +29,8 @@ using nccl_dda_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_detail::kDdaNranks;
 
 template <typename T>
-static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t recvcount, ncclComm* comm,
-                                                 cudaStream_t stream) {
+static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t recvcount,
+                                                 ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream) {
   if (comm->ddaIpcMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaIpcBarrierState == nullptr) {
     return ncclInvalidUsage;
@@ -55,8 +56,10 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* rec
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
   CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
-  meta::comms::ddaReduceScatterIpc<T, kDdaNranks, false><<<grid, block, 0, stream>>>(
-    d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+  NCCLCHECK(ncclKernelTimingLaunch(comm, ncclFuncReduceScatter, datatype, recvcount,
+                                   meta::comms::ddaReduceScatterIpc<T, kDdaNranks, false>, grid, block, 0, stream,
+                                   d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff),
+                                   comm->rank, barrierHost));
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;
@@ -113,11 +116,11 @@ ncclResult_t ncclReduceScatterDdaIpc(const void* sendbuff, void* recvbuff, size_
   (void)op;
   switch (datatype) {
   case ncclFloat32:
-    return ncclReduceScatterDdaIpcTyped<float>(sendbuff, recvbuff, recvcount, comm, stream);
+    return ncclReduceScatterDdaIpcTyped<float>(sendbuff, recvbuff, recvcount, datatype, comm, stream);
   case ncclFloat16:
-    return ncclReduceScatterDdaIpcTyped<half>(sendbuff, recvbuff, recvcount, comm, stream);
+    return ncclReduceScatterDdaIpcTyped<half>(sendbuff, recvbuff, recvcount, datatype, comm, stream);
   case ncclBfloat16:
-    return ncclReduceScatterDdaIpcTyped<bf16>(sendbuff, recvbuff, recvcount, comm, stream);
+    return ncclReduceScatterDdaIpcTyped<bf16>(sendbuff, recvbuff, recvcount, datatype, comm, stream);
   default:
     return ncclInvalidArgument;
   }

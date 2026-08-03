@@ -7,7 +7,9 @@
 
 #include "alloc.h"
 #include "collectives.h"
+#include "comm.h"
 #include "common_kernel.h"
+#include "kernel_timing.h"
 #include <cuda_runtime.h>
 
 #if defined(__gfx950__)
@@ -28,7 +30,7 @@ __global__ __launch_bounds__(512, 1) void oneRankReduce(void* dst, void* src, vo
   int bid = blockIdx.x;
   int bn = gridDim.x;
 
-    // each block/channel gets a roughly equal segment of 16 byte packs
+  // each block/channel gets a roughly equal segment of 16 byte packs
   constexpr int EltPerPack = 16 / sizeof(T);
   intptr_t i0 = (bid + 0) * alignUp(divUp(nElts, bn), EltPerPack);
   intptr_t i1 = (bid + 1) * alignUp(divUp(nElts, bn), EltPerPack);
@@ -64,8 +66,9 @@ __global__ __launch_bounds__(512, 1) void oneRankReduce(void* dst, void* src, vo
 }
 } // namespace
 
-ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct ncclDevRedOpFull redOp,
-                               ncclDataType_t eltType, cudaStream_t stream, void const* acc) {
+ncclResult_t ncclLaunchOneRank(struct ncclComm* comm, ncclFunc_t coll, void* dst, void const* src, size_t nElts,
+                               struct ncclDevRedOpFull redOp, ncclDataType_t eltType, cudaStream_t stream,
+                               void const* acc) {
   size_t eltSize = ncclTypeSize(eltType);
 
   // handles all_reduce for non-PreMulSum ops
@@ -141,6 +144,6 @@ ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct 
   void* mutableSrc = const_cast<void*>(src);
   void* mutableAcc = const_cast<void*>(acc);
   void* args[6] = {&dst, &mutableSrc, &mutableAcc, &nElts, &redOp.scalarArg, &redOp.scalarArgIsPtr};
-  CUDACHECK(cudaLaunchKernel(kernel, grid, block, args, 0, stream));
+  NCCLCHECK(ncclKernelTimingLaunchArgs(comm, coll, eltType, nElts, kernel, grid, block, args, 0, stream));
   return ncclSuccess;
 }

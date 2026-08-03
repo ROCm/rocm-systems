@@ -75,7 +75,7 @@ constexpr int rcclShmemScratchWarpSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSi
             /*LL    */ 0,
             /*LL128 */ (NCCL_LL128_SHMEM_ELEMS_PER_THREAD * WarpSize) * sizeof(uint64_t),
             /*SIMPLE*/ (ncclCollUnroll(cudaArch) * WarpSize + 1) * 16,
-      // NVLS needs an extra 16B to read unaligned data.
+            // NVLS needs an extra 16B to read unaligned data.
             /*NVLS  */ WarpSize * (cudaArch >= 900 ? ncclNvlsUnrollBytes(cudaArch) : 0) + 16) +
           15) &
          -16; // pad to 16 bytes
@@ -2093,16 +2093,17 @@ static ncclResult_t ncclLaunchKernelTimed(struct ncclComm* comm, struct ncclKern
                                           dim3 block, int smem, cudaStream_t stream, void** extra, bool* timed) {
   *timed = false;
   uint64_t slot = 0;
-  cudaEvent_t stopEvent = ncclKernelTimingBeginLaunch(comm, plan, grid.x, block.x, &slot);
+  cudaEvent_t stopEvent = ncclKernelTimingBeginLaunch(comm, plan, &slot);
   if (stopEvent == nullptr) return ncclSuccess;
 
   hipError_t err = hipExtModuleLaunchKernel(fn, grid.x * block.x, grid.y * block.y, grid.z * block.z, block.x, block.y,
                                             block.z, smem, stream, nullptr, extra, nullptr, stopEvent, 0);
   if (err != hipSuccess) {
+    ncclKernelTimingCancelLaunch(comm, slot);
     WARN("Cuda failure %d '%s'", err, hipGetErrorString(err));
     return ncclUnhandledCudaError;
   }
-  ncclKernelTimingCommitLaunch(comm, slot);
+  ncclKernelTimingCommitLaunch(comm, slot, plan, grid.x, block.x);
   *timed = true;
   return ncclSuccess;
 }
@@ -2140,8 +2141,10 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   if (planner->numStreams == 1 && !plan->persistent) {
     bool timed = false;
     latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
-    NCCLCHECKGOTO(ncclLaunchKernelTimed(comm, plan, fn, grid, block, smem, launchStream, extra, &timed), ret,
-                  do_return);
+    if (comm->kernelTiming != nullptr) {
+      NCCLCHECKGOTO(ncclLaunchKernelTimed(comm, plan, fn, grid, block, smem, launchStream, extra, &timed), ret,
+                    do_return);
+    }
     if (!timed) {
       CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr,
                                  extra),
@@ -2240,8 +2243,10 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
   {
     bool timed = false;
-    NCCLCHECKGOTO(ncclLaunchKernelTimed(comm, plan, fn, grid, block, smem, launchStream, extra, &timed), ret,
-                  do_return);
+    if (comm->kernelTiming != nullptr) {
+      NCCLCHECKGOTO(ncclLaunchKernelTimed(comm, plan, fn, grid, block, smem, launchStream, extra, &timed), ret,
+                    do_return);
+    }
     if (!timed) {
       CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr,
                                  extra),
@@ -3650,8 +3655,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
     NCCLCHECK(hostToDevRedOp(&opDev, info->op, info->datatype, comm));
 
     if (comm->nRanks == 1) {
-      NCCLCHECK(ncclLaunchOneRank(info->recvbuff, info->sendbuff, info->count, opDev, info->datatype, info->stream,
-                                  info->acc));
+      NCCLCHECK(ncclLaunchOneRank(comm, info->coll, info->recvbuff, info->sendbuff, info->count, opDev, info->datatype,
+                                  info->stream, info->acc));
       return ncclSuccess;
     } else {
       struct ncclDevrWindow* sendWin;
