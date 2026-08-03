@@ -145,24 +145,24 @@ ncclResult_t symTeamObtainUcLe(struct ncclComm* comm, struct ncclDevrTeam* t, st
   // Devr team stores the base LE for that specific team
   t->ucLeId = cftUc->baseId + flatTeam.rank - t->team.rank * t->team.stride;
 
-  if (false) {
-  fail:
-    for (int r = 0; r < flatTeam.nRanks && importedCount > 0; r++) {
-      if (r == flatTeam.rank) continue;
-      CUCHECKIGNORE(cuLogicalEndpointDestroy(cftUc->baseId + r));
-      importedCount--;
-    }
-    for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr && bindCount > 0; mem = mem->next) {
-      symUnbindTeamLe(comm, mem, leUcSelf);
-      bindCount--;
-    }
-    if (leUcSelf != NCCL_LE_ID_INVALID) CUCHECKIGNORE(cuLogicalEndpointDestroy(leUcSelf));
-    if (releaseCount > 0) CUCHECKIGNORE(cuLogicalEndpointIdRelease(cftUc->baseId, releaseCount));
-    cftUc->baseId = NCCL_LE_ID_INVALID;
-  }
+exit:
   free(cftRankList);
   free(leUcHandles);
   return ret;
+fail:
+  for (int r = 0; r < flatTeam.nRanks && importedCount > 0; r++) {
+    if (r == flatTeam.rank) continue;
+    CUCHECKIGNORE(cuLogicalEndpointDestroy(cftUc->baseId + r));
+    importedCount--;
+  }
+  for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr && bindCount > 0; mem = mem->next) {
+    symUnbindTeamLe(comm, mem, leUcSelf);
+    bindCount--;
+  }
+  if (leUcSelf != NCCL_LE_ID_INVALID) CUCHECKIGNORE(cuLogicalEndpointDestroy(leUcSelf));
+  if (releaseCount > 0) CUCHECKIGNORE(cuLogicalEndpointIdRelease(cftUc->baseId, releaseCount));
+  cftUc->baseId = NCCL_LE_ID_INVALID;
+  goto exit;
 }
 
 ncclResult_t symTeamObtainMcLe(struct ncclComm* comm, struct ncclDevrTeam* t, struct ncclDevrState* devr,
@@ -212,17 +212,17 @@ ncclResult_t symTeamObtainMcLe(struct ncclComm* comm, struct ncclDevrTeam* t, st
   // Barrier needed to guarantee that no peer will start using the MC LE before binding completes.
   if (needBarrier) *needBarrier = true;
 
-  if (false) {
-  fail:
-    for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr && bindCount > 0; mem = mem->next) {
-      symUnbindTeamLe(comm, mem, leMcId);
-      bindCount--;
-    }
-    if (t->mcLeId != NCCL_LE_ID_INVALID) CUCHECKIGNORE(cuLogicalEndpointDestroy(t->mcLeId));
-    if (releaseCount > 0) CUCHECKIGNORE(cuLogicalEndpointIdRelease(leMcId, releaseCount));
-    t->mcLeId = NCCL_LE_ID_INVALID;
-  }
+exit:
   return ret;
+fail:
+  for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr && bindCount > 0; mem = mem->next) {
+    symUnbindTeamLe(comm, mem, leMcId);
+    bindCount--;
+  }
+  if (t->mcLeId != NCCL_LE_ID_INVALID) CUCHECKIGNORE(cuLogicalEndpointDestroy(t->mcLeId));
+  if (releaseCount > 0) CUCHECKIGNORE(cuLogicalEndpointIdRelease(leMcId, releaseCount));
+  t->mcLeId = NCCL_LE_ID_INVALID;
+  goto exit;
 }
 
 NCCL_API(ncclResult_t, ncclGetMultimemDeviceLeInfo, ncclWindow_t window, size_t offset, ncclCftLeId* leId,
