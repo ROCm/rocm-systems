@@ -212,6 +212,8 @@ namespace RcclUnitTesting
 
     if (verbose) TEST_INFO("Child %d exiting execution loop", this->childId);
 
+    fflush(stdout);
+    fflush(stderr);
     // Close child ends of pipe
     close(this->childReadFd);
     close(this->childWriteFd);
@@ -1015,95 +1017,122 @@ namespace RcclUnitTesting
     if (this->verbose) TEST_INFO("Child %d begins DeallocateMem", this->childId);
 
     // Read values sent by parent [matches IPC pipe format]
-  int globalRank, groupId, collId;
-  PIPE_READ(globalRank);
-  PIPE_READ(groupId);
-  PIPE_READ(collId);
+    int globalRank, groupId, collId;
+    PIPE_READ(globalRank);
+    PIPE_READ(groupId);
+    PIPE_READ(collId);
 
-  if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
-  {
-    TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
-    return TEST_FAIL;
-  }
-
-  int const localRank = globalRank - rankOffset;
-  CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
-
-  // Enclose RCCL deregistration calls in a group for safety
-  CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart DeregisterMem");
-
-  for (int collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
-  {
-    CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
-    if (collId == -1 || collId == collIdx)
+    if (globalRank < this->rankOffset || (this->rankOffset + static_cast<int>(comms.size()) <= globalRank))
     {
-      if (this->verbose)
-      {
-        TEST_INFO("Child %d deregistering memory for collective %d in group %d",
-                  this->childId, collIdx, groupId);
-      }
-
-      // =====================================================================
-      // 1. Deregister Symmetric Windows (ncclCommWindowDeregister)
-      // =====================================================================
-      if (collArg.inputWin != nullptr)
-      {
-        CHILD_NCCL_CALL(ncclCommWindowDeregister(this->comms[localRank], collArg.inputWin),
-                        "ncclCommWindowDeregister (input)");
-        collArg.inputWin = nullptr;
-      }
-
-      if (!collArg.inPlace && collArg.outputWin != nullptr)
-      {
-        CHILD_NCCL_CALL(ncclCommWindowDeregister(this->comms[localRank], collArg.outputWin),
-                        "ncclCommWindowDeregister (output)");
-        collArg.outputWin = nullptr;
-      }
-
-      // =====================================================================
-      // 2. Deregister Standard Buffers (ncclCommDeregister)
-      // =====================================================================
-      if (collArg.commRegHandle != nullptr)
-      {
-        CHILD_NCCL_CALL(ncclCommDeregister(this->comms[localRank], collArg.commRegHandle),
-                        "ncclCommDeregister");
-        collArg.commRegHandle = nullptr;
-      }
-
-      if (collArg.biasRegHandle != nullptr)
-      {
-        CHILD_NCCL_CALL(ncclCommDeregister(this->comms[localRank], collArg.biasRegHandle),
-                        "ncclCommDeregister (bias)");
-        collArg.biasRegHandle = nullptr;
-      }
+      TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
+      return TEST_FAIL;
     }
-  }
-  CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd DeregisterMem");
-  for (int collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
-  {
-    CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
-    if (collId == -1 || collId == collIdx)
+
+    int const localRank = globalRank - rankOffset;
+    CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
+
+    ErrCode errCode = TEST_SUCCESS;
+
+    // Enclose RCCL deregistration calls in a group for safety
+    CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart DeregisterMem");
+
+    for (size_t collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
     {
-       CHECK_CALL(collArg.DeallocateMem());
-      // =====================================================================
-      // 3. Destroy Custom Reduction Operators
-      // =====================================================================
-      if (collArg.options.scalarMode >= 0)
+      CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
+      if (collId == -1 || collId == static_cast<int>(collIdx))
       {
-        CHILD_NCCL_CALL(ncclRedOpDestroy(collArg.options.redOp, this->comms[localRank]),
-                        "ncclRedOpDestroy");
         if (this->verbose)
         {
-          TEST_INFO("Child %d destroys custom redop %d for collective %d in group %d",
-                    this->childId, collArg.options.redOp, collIdx, groupId);
+           TEST_INFO("Child %d deregistering memory for collective %zu in group %d",
+                  this->childId, collIdx, groupId);
+        }
+        // =====================================================================
+        // 1. Deregister Symmetric Windows (ncclCommWindowDeregister)
+        // =====================================================================
+        if (this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN)
+        {
+          if (collArg.inputWin == collArg.outputWin)
+          {
+            // In-place mode: Both pointers share the same window handle
+            if (collArg.inputWin != nullptr)
+            {
+              CHILD_NCCL_CALL_RANK(errCode,
+                ncclCommWindowDeregister(this->comms[localRank], collArg.inputWin),
+                "ncclCommWindowDeregister (in-place)");
+              collArg.inputWin = nullptr;
+              collArg.outputWin = nullptr; // Explicitly clear outputWin to prevent dangling handle
+            }
+          }
+          else
+          {
+            // Out-of-place mode: Distinct window handles
+            if (collArg.inputWin != nullptr)
+            {
+              CHILD_NCCL_CALL_RANK(errCode,
+                ncclCommWindowDeregister(this->comms[localRank], collArg.inputWin),
+                "ncclCommWindowDeregister (input)");
+              collArg.inputWin = nullptr;
+            }
+
+            if (collArg.outputWin != nullptr)
+            {
+              CHILD_NCCL_CALL_RANK(errCode,
+               ncclCommWindowDeregister(this->comms[localRank], collArg.outputWin),
+               "ncclCommWindowDeregister (output)");
+              collArg.outputWin = nullptr;
+            }
+          }
+        }
+
+        // =====================================================================
+        // 2. Deregister Standard Buffers (ncclCommDeregister)
+        // =====================================================================
+        if (collArg.commRegHandle != nullptr)
+        {
+          CHILD_NCCL_CALL_RANK(errCode,
+            ncclCommDeregister(this->comms[localRank], collArg.commRegHandle),
+            "ncclCommDeregister");
+          collArg.commRegHandle = nullptr;
+        }
+
+        if (collArg.biasRegHandle != nullptr)
+        {
+          CHILD_NCCL_CALL_RANK(errCode,
+            ncclCommDeregister(this->comms[localRank], collArg.biasRegHandle),
+            "ncclCommDeregister (bias)");
+          collArg.biasRegHandle = nullptr;
         }
       }
     }
-  }
+    CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd DeregisterMem");
 
-  if (this->verbose) TEST_INFO("Child %d finishes DeregisterMem", this->childId);
-  return TEST_SUCCESS;
-}
+    // =========================================================================
+    // 3. Free GPU/CPU Allocations & Custom Operators
+    // =========================================================================
+    for (size_t collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
+    {
+      CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
+      if (collId == -1 || collId == static_cast<int>(collIdx))
+      {
+        CHECK_CALL(collArg.DeallocateMem());
+
+        if (collArg.options.scalarMode >= 0)
+        {
+          CHILD_NCCL_CALL_RANK(errCode,
+            ncclRedOpDestroy(collArg.options.redOp, this->comms[localRank]),
+            "ncclRedOpDestroy");
+          if (this->verbose)
+          {
+            TEST_INFO("Child %d destroys custom redop %d for collective %zu in group %d",
+                    this->childId, collArg.options.redOp, collIdx, groupId);
+          }
+        }
+      }
+    }
+
+    if (this->verbose) TEST_INFO("Child %d finishes DeregisterMem", this->childId);
+    return errCode;
+  }
 
   ErrCode TestBedChild::DestroyComms()
 {
@@ -1219,49 +1248,72 @@ namespace RcclUnitTesting
 
       for (size_t collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
       {
-        if (collId == -1 || collId == (int)collIdx)
+        if (collId == -1 || collId == static_cast<int>(collIdx))
         {
           CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
 
-          // CASE 1: Symmetric Memory Path
+          // CASE 1: Symmetric Window Path (ncclCommWindowRegister)
           if (this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN)
           {
-            CHILD_NCCL_CALL_RANK(errCode,
-              ncclCommWindowRegister(this->comms[localRank],
-                                     collArg.inputGpu.ptr,
-                                     collArg.numInputBytesAllocated,
-                                     &(collArg.inputWin),
-                                     NCCL_WIN_COLL_SYMMETRIC),
-              "ncclCommWindowRegister (input)");
-
             if (collArg.inPlace)
             {
-              collArg.outputWin = collArg.inputWin;
-            }
-            else
-            {
+              // For in-place collectives, register the FULL allocation (outputGpu) first
               CHILD_NCCL_CALL_RANK(errCode,
+              ncclCommWindowRegister(this->comms[localRank],
+                                     collArg.outputGpu.ptr,
+                                     collArg.numOutputBytesAllocated,
+                                     &(collArg.outputWin),
+                                     NCCL_WIN_COLL_SYMMETRIC),
+              "ncclCommWindowRegister (output in-place)");
+
+              collArg.inputWin = collArg.outputWin;
+           }
+           else
+           {
+             // Out-of-place: Register input and output buffers independently
+              if (collArg.inputGpu.ptr && collArg.numInputBytesAllocated > 0)
+              {
+                CHILD_NCCL_CALL_RANK(errCode,
+                ncclCommWindowRegister(this->comms[localRank],
+                                       collArg.inputGpu.ptr,
+                                       collArg.numInputBytesAllocated,
+                                       &(collArg.inputWin),
+                                       NCCL_WIN_COLL_SYMMETRIC),
+                "ncclCommWindowRegister (input)");
+              }
+
+              if (collArg.outputGpu.ptr && collArg.numOutputBytesAllocated > 0)
+              {
+                CHILD_NCCL_CALL_RANK(errCode,
                 ncclCommWindowRegister(this->comms[localRank],
                                        collArg.outputGpu.ptr,
                                        collArg.numOutputBytesAllocated,
                                        &(collArg.outputWin),
                                        NCCL_WIN_COLL_SYMMETRIC),
                 "ncclCommWindowRegister (output)");
+              }
             }
           }
-          // CASE 2: Legacy Buffer Path (Send/Recv)
-          else if (collArg.userRegistered && (collArg.funcType == ncclCollSend || collArg.funcType == ncclCollRecv))
+          // CASE 2: Legacy / Buffer Registration Path (ncclCommRegister)
+          else if (collArg.userRegistered)
           {
-            CHILD_NCCL_CALL_RANK(errCode,
+            // Register full buffer (outputGpu when in-place, inputGpu when out-of-place)
+            void* regPtr = collArg.inPlace ? collArg.outputGpu.ptr : collArg.inputGpu.ptr;
+            size_t regSize = collArg.inPlace ? collArg.numOutputBytesAllocated : collArg.numInputBytesAllocated;
+
+            if (regPtr && regSize > 0)
+            {
+              CHILD_NCCL_CALL_RANK(errCode,
               ncclCommRegister(this->comms[localRank],
-                               collArg.inputGpu.ptr,
-                               collArg.numInputBytesAllocated,
+                               regPtr,
+                               regSize,
                                &(collArg.commRegHandle)),
-             "ncclCommRegister");
-         }
-       }
-     }
-   }
+              "ncclCommRegister");
+            }
+          }
+        }
+      }
+    }
 
     // Completes handle exchange for all local ranks simultaneously
     CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd RegisterMem");

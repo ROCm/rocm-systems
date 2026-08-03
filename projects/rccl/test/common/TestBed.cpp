@@ -113,6 +113,17 @@ namespace RcclUnitTesting
   {
     InteractiveWait("Starting InitComms");
 
+    // If children/comms from a previous test mode (e.g. SP) are still active,
+    // ensure they are cleanly stopped before creating new ones for MP mode
+    if (this->numActiveChildren > 0)
+    {
+      this->DestroyComms();
+      for (int i = 0; i < this->numActiveChildren; ++i)
+      {
+        this->StopChild(i); // Gracefully stops and waits for child
+      }
+      this->numActiveChildren = 0;
+    }
     // Count up the total number of GPUs to use and track child/deviceId per rank
     this->numActiveChildren = deviceIdsPerProcess.size();
     this->numActiveRanks = 0;
@@ -480,10 +491,10 @@ namespace RcclUnitTesting
           }
         }
       }
-    }
+    // }
 
-    // Wait for child acknowledgement
-    for (auto currGroup : groupList) {
+    // // Wait for child acknowledgement
+    // for (auto currGroup : groupList) {
       for (int childId = 0; childId < this->numActiveChildren; ++childId)
       {
         if ((currentRanks.size() == 0) || (ranksPerChild[childId].size() > 0)) PIPE_CHECK(childId);
@@ -678,7 +689,7 @@ namespace RcclUnitTesting
 
       // Close pipes to child process
       close(childList[childId]->parentWriteFd);
-      close(childList[childId]->parentReadFd);
+      
     }
 
     // Wait for processes to stop
@@ -686,10 +697,17 @@ namespace RcclUnitTesting
     {
       int returnVal = 0;
       waitpid(childList[childId]->pid, &returnVal, 0);
-      if (returnVal != 0)
+      if (WIFSIGNALED(returnVal))
       {
-        TEST_ERROR("Child process %d exited with code %d", childId, returnVal);
+        TEST_ERROR("Child process %d killed by signal %d", childId, WTERMSIG(returnVal));
       }
+      else if (WEXITSTATUS(returnVal) != 0)
+      {
+        TEST_ERROR("Child process %d exited with code %d", childId, WEXITSTATUS(returnVal));
+      }
+
+      // Only close the read end AFTER the child process is dead
+      close(childList[childId]->parentReadFd);
       delete(childList[childId]);
     }
 
@@ -995,6 +1013,26 @@ namespace RcclUnitTesting
     static int numTestsRun = 0;
     return numTestsRun;
   }
+
+  void TestBed::StopChild(int const childId)
+  {
+    if (childId < 0 || childId >= this->childList.size()) return;
+    TestBedChild* child = this->childList[childId];
+    if (child != nullptr)
+     {
+      // 1. Send CHILD_STOP command to the child
+       int const cmd = TestBedChild::CHILD_STOP;
+       PIPE_WRITE(childId, cmd);
+       PIPE_CHECK(childId);
+       // 2. Wait for child process to exit cleanly before closing pipes
+       int status;
+       waitpid(child->pid, &status, 0); 
+       // 3. Close pipes and delete object
+       delete child;
+       this->childList[childId] = nullptr;
+     }
+  }
+
 }
 
 #undef PIPE_WRITE
