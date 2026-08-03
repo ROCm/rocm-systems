@@ -1304,9 +1304,8 @@ interposition_init(CoreApiTable* core_table, bool enabled)
     // mark that intercept has been activated
     s_intercept_active.store(enabled, std::memory_order_release);
 
-    // The inline intercept installed above is the only path that can produce a KFD
-    // correlation key, so the dispatch-log probe belongs here rather than in the
-    // generic queue_init(). Best-effort: a failure leaves dispatches on HSA times.
+    // Inline intercept is the only path that produces a KFD correlation key, so
+    // probe dispatch-log here (not in generic queue_init()). Best-effort.
     kfd::init_kfd_profiler();
 }
 

@@ -91,13 +91,9 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
                                    kfd::kfd_time_is_sane(
                                        kfd_start_sys, kfd_end_sys, session.enqueue_ts, _now);
 
-            // Emit the firmware timestamps as-is. They are already in the system
-            // clock domain and the guard above has bounds-checked them, so
-            // adjust_profiling_time() would only duplicate that work and, under
-            // ROCPROFILER_CI_FREQ_SCALE_TIMESTAMPS, rescale already-scaled values.
-            // The firmware interval is deliberately kept: it is measured at the
-            // true HW dispatch boundaries and is tighter than HSA's
-            // signal-machinery timing, so it must not be forced to the HSA one.
+            // Emit the bounds-checked firmware timestamps as-is: they are already
+            // system-domain, and adjust_profiling_time() would re-scale them under
+            // ROCPROFILER_CI_FREQ_SCALE_TIMESTAMPS and widen the tighter HW interval.
             if(_kfd_sane) return profiling_time{HSA_STATUS_SUCCESS, kfd_start_sys, kfd_end_sys};
             // convert failed or record failed the sanity guard: fall through to HSA.
         }
