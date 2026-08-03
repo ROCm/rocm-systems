@@ -129,14 +129,12 @@ inline uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
 // the .strtab size so the `.kd` name runs off the table end with no NUL;
 // `wrap_section_header_table` sets e_shoff so e_shoff + e_shnum*sizeof(Shdr) overflows;
 // `wrap_symtab_range` sets the .symtab sh_offset so sh_offset + sh_size overflows.
-inline std::vector<uint8_t> make_amdgpu_kernel_elf(const std::vector<uint32_t> &text_words,
-                                                   uint32_t private_bytes,
-                                                   uint32_t granulated_sgpr_count, uint32_t e_flags,
-                                                   uint32_t granulated_vgpr_count = 0,
-                                                   uint32_t accum_offset = 0,
-                                                   bool unterminated_kd_name = false,
-                                                   bool wrap_section_header_table = false,
-                                                   bool wrap_symtab_range = false) {
+inline std::vector<uint8_t>
+make_amdgpu_kernel_elf(const std::vector<uint32_t> &text_words, uint32_t private_bytes,
+                       uint32_t granulated_sgpr_count, uint32_t e_flags,
+                       uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0,
+                       bool unterminated_kd_name = false, bool wrap_section_header_table = false,
+                       bool wrap_symtab_range = false) {
   namespace kd = rocr::llvm::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
