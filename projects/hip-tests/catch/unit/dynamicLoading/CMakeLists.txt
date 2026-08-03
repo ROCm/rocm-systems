@@ -61,16 +61,6 @@ if(HIP_PLATFORM MATCHES "amd")
                         LINKER_LIBS ${CMAKE_DL_LIBS})
 endif()
 
-add_executable(lateManagedVariableMultiDevice_exe EXCLUDE_FROM_ALL
-               lateManagedVariableMultiDevice_exe.cc)
-set_source_files_properties(lateManagedVariableMultiDevice_exe.cc
-                            PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
-target_link_libraries(lateManagedVariableMultiDevice_exe
-                      ${GPGPU_LINKER_LIBRARIES} ${CMAKE_DL_LIBS})
-add_dependencies(lateManagedVariableMultiDevice_exe libLateManagedVariable.so)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
-             lateManagedVariableMultiDevice_exe)
-
-add_dependencies(build_tests bit_extract_kernel.code lateManagedVariableMultiDevice_exe
-                 libLateManagedVariable.so libLazyLoad.so vecadd.cc)
+add_dependencies(build_tests bit_extract_kernel.code libLateManagedVariable.so
+                 libLazyLoad.so vecadd.cc)
 endif()

@@ -3,11 +3,11 @@
  *
  * SPDX-License-Identifier: MIT
  */
-// <REVIEW> Temporary review marker: this file contains Fabio's changes above the StatCO branch.
 
 #include <hip_test_common.hh>
 #include <resource_guards.hh>
 #include <chrono>
+#include <thread>
 #include <vector>
 
 // Tests in this file each drive a HIP API against a __managed__ symbol to
@@ -37,8 +37,6 @@ __managed__ int g_managed_b[kN];
 __managed__ int g_managed_3d[k3dDim][k3dDim][k3dDim];
 __managed__ int g_managed_initialized[kStaticInitLen] = {1, 2, 3, 4, 5, 6, 7, 8};
 __managed__ int g_managed_launch[kN];
-// Used only by Unit_hipManagedKeyword_NonBlockingStreamOrdering so its starting
-// value is deterministic regardless of test ordering.
 __managed__ int g_managed_nonblocking[kN];
 
 static __global__ void AddConst(int* data, int n, int addend) {
@@ -312,9 +310,9 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy3D) {
   }
 }
 
-// Regression guard: deferred managed-variable initialization must not perform a
-// host-synchronous copy on the null stream, which would deadlock a
-// device-to-device hipMemcpy3D issued on a blocked null stream.
+// Verifies deferred managed-variable initialization preserves hipMemcpy3D's
+// host-asynchronous device-to-device behavior. A host-synchronous initialization
+// copy would deadlock on the blocked null stream.
 HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy3D_SyncBehavior) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
@@ -368,9 +366,12 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemset3D) {
   }
 }
 
-// Regression guard for the same deferred-initialization deadlock as
-// Unit_hipManagedKeyword_hipMemcpy3D_SyncBehavior, but exercised through a kernel
-// launch on a blocked null stream.
+// Deferred managed-variable initialization must not deadlock a kernel launch
+// on a blocked null stream.
+// This cannot run on NVIDIA because CUDA deadlocks when the first kernel launch
+// is issued in this blocked-stream configuration. CUDA does not document this
+// sequence as unsupported.
+#if HT_AMD
 HIP_TEST_CASE(Unit_hipManagedKeyword_hipLaunchKernel_SyncBehavior) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
@@ -394,6 +395,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipLaunchKernel_SyncBehavior) {
     REQUIRE(g_managed_launch[i] == kKernelAddValue);
   }
 }
+#endif  // HT_AMD
 
 // cudaMemcpyBatchAsync was introduced in CUDA 12.8.
 #if HT_AMD || (HT_NVIDIA && CUDA_VERSION >= 12080)
@@ -467,6 +469,8 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyPeer) {
   }
 }
 
+// hipMemcpyAsync must initialize managed symbols for the stream's device, not
+// the current device. A zero-byte copy isolates initialization from copy effects.
 HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyAsync_CrossCurrentDeviceStream) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -512,16 +516,6 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_NonBlockingStreamOrdering) {
   StreamGuard second_stream(Streams::withFlags, hipStreamNonBlocking);
   LinearAllocGuard<int> device_result(LinearAllocs::hipMalloc, sizeof(int));
 
-  // Warm callback dispatch so startup latency cannot look like stream blocking.
-  HipTest::StreamCallbackLatch first_warmup(first_stream.stream());
-  HipTest::StreamCallbackLatch second_warmup(second_stream.stream());
-  HIP_CHECK(first_warmup.enqueue());
-  HIP_CHECK(second_warmup.enqueue());
-  REQUIRE(first_warmup.wait_for(std::chrono::seconds(5)));
-  REQUIRE(second_warmup.wait_for(std::chrono::seconds(5)));
-
-  HipTest::StreamCallbackLatch first_completion(first_stream.stream());
-  HipTest::StreamCallbackLatch second_completion(second_stream.stream());
   HipTest::BlockingContext b_context{nullptr};
   HIP_CHECK(b_context.block_stream());
   REQUIRE(b_context.is_blocked());
@@ -533,21 +527,16 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_NonBlockingStreamOrdering) {
   ReadManagedInitialized<<<1, 1, 0, second_stream.stream()>>>(device_result.ptr());
   HIP_CHECK(hipGetLastError());
 
-  // Both first-touch callers must reuse the same blocked initialization marker.
-  HIP_CHECK(first_completion.enqueue());
-  HIP_CHECK(second_completion.enqueue());
-  const bool first_completed_while_blocked =
-      first_completion.wait_for(std::chrono::milliseconds(500));
-  const bool second_completed_while_blocked =
-      second_completion.wait_for(std::chrono::milliseconds(500));
+  // Give kernels missing the initialization dependency enough time to complete.
+  std::this_thread::sleep_for(std::chrono::seconds(1));
+  HIP_CHECK_ERROR(hipStreamQuery(first_stream.stream()), hipErrorNotReady);
+  HIP_CHECK_ERROR(hipStreamQuery(second_stream.stream()), hipErrorNotReady);
 
   b_context.unblock_stream();
   HIP_CHECK(hipStreamSynchronize(first_stream.stream()));
   HIP_CHECK(hipStreamSynchronize(second_stream.stream()));
-  REQUIRE_FALSE(first_completed_while_blocked);
-  REQUIRE_FALSE(second_completed_while_blocked);
-  REQUIRE(first_completion.complete());
-  REQUIRE(second_completion.complete());
+  REQUIRE(hipStreamQuery(first_stream.stream()) == hipSuccess);
+  REQUIRE(hipStreamQuery(second_stream.stream()) == hipSuccess);
 
   int initialized_value = 0;
   HIP_CHECK(hipMemcpy(&initialized_value, device_result.ptr(), sizeof(initialized_value),
