@@ -125,9 +125,9 @@ typedef struct {
 /* ------------------------------------------------------------------ */
 
 static const RcclHwCounterDesc rcclHwcAinic[] = {
-  /* Shared / cross-driver counters */
-  HWC("rx_cnp_pkts",                 HWC_IB_SYSFS, "rx_rdma_cnp_pkts"),
-  HWC("tx_cnp_pkts",                 HWC_IB_SYSFS, "tx_rdma_cnp_pkts"),
+  /* Shared / cross-driver counters (canonical json_name, ainic sysfs key) */
+  HWC("cnp_rcvd",                    HWC_IB_SYSFS, "rx_rdma_cnp_pkts"),
+  HWC("cnp_sent",                    HWC_IB_SYSFS, "tx_rdma_cnp_pkts"),
   HWC("rx_roce_discards",            HWC_IB_SYSFS, "rx_rdma_mtu_discard_pkts"),
   HWC("pfc_rx_frames_total",         HWC_ETHTOOL,  "frames_rx_pripause"),
   HWC("pfc_tx_frames_total",         HWC_ETHTOOL,  "frames_tx_pripause"),
@@ -143,12 +143,12 @@ static const RcclHwCounterDesc rcclHwcAinic[] = {
   HWC("tx_rdma_retx_pkts",           HWC_IB_SYSFS, "tx_rdma_retx_pkts"),
   HWC("tx_rdma_retx_bytes",          HWC_IB_SYSFS, "tx_rdma_retx_bytes"),
   HWC("tx_rdma_ack_timeout",         HWC_IB_SYSFS, "tx_rdma_ack_timeout"),
-  HWC("rx_rdma_ecn_pkts",            HWC_IB_SYSFS, "rx_rdma_ecn_pkts"),
+  HWC("ecn_marked_pkts",             HWC_IB_SYSFS, "rx_rdma_ecn_pkts"),
   HWC("rx_rdma_mtu_discard_pkts",    HWC_IB_SYSFS, "rx_rdma_mtu_discard_pkts"),
 
   /* Requester errors (RX path) */
   HWC("req_rx_pkt_seq_err",          HWC_IB_SYSFS, "req_rx_pkt_seq_err"),
-  HWC("req_rx_rnr_retry_err",        HWC_IB_SYSFS, "req_rx_rnr_retry_err"),
+  HWC("rnr_retry_err",               HWC_IB_SYSFS, "req_rx_rnr_retry_err"),
   HWC("req_rx_rmt_acc_err",          HWC_IB_SYSFS, "req_rx_rmt_acc_err"),
   HWC("req_rx_cqe_err",              HWC_IB_SYSFS, "req_rx_cqe_err"),
   HWC("req_rx_dup_response",         HWC_IB_SYSFS, "req_rx_dup_response"),
@@ -159,7 +159,7 @@ static const RcclHwCounterDesc rcclHwcAinic[] = {
 
   /* Responder errors (RX path) */
   HWC("resp_rx_dup_request",         HWC_IB_SYSFS, "resp_rx_dup_request"),
-  HWC("resp_rx_outof_buf",           HWC_IB_SYSFS, "resp_rx_outof_buf"),
+  HWC("out_of_buffer",               HWC_IB_SYSFS, "resp_rx_outof_buf"),
   HWC("resp_rx_outouf_seq",          HWC_IB_SYSFS, "resp_rx_outouf_seq"),
   HWC("resp_rx_cqe_err",             HWC_IB_SYSFS, "resp_rx_cqe_err"),
 
@@ -240,20 +240,23 @@ static_assert(sizeof(rcclHwcAinic) / sizeof(rcclHwcAinic[0]) <= RCCL_TELEMETRY_M
 /* PFC per-priority pause frames/duration come from `ethtool -S`.      */
 
 static const RcclHwCounterDesc rcclHwcMlx5[] = {
+  /* --- Canonical cross-driver counters (shared json_name, mlx5 sysfs key) --- */
   /* ECN / congestion notification (the primary congestion signals) */
-  HWC("np_ecn_marked_roce_packets", HWC_IB_SYSFS, "np_ecn_marked_roce_packets"),
-  HWC("np_cnp_sent",                HWC_IB_SYSFS, "np_cnp_sent"),
-  HWC("rp_cnp_handled",             HWC_IB_SYSFS, "rp_cnp_handled"),
-  HWC("rp_cnp_ignored",             HWC_IB_SYSFS, "rp_cnp_ignored"),
-  HWC("roce_slow_restart_cnps",     HWC_IB_SYSFS, "roce_slow_restart_cnps"),
-
+  HWC("ecn_marked_pkts",            HWC_IB_SYSFS, "np_ecn_marked_roce_packets"),
+  HWC("cnp_sent",                   HWC_IB_SYSFS, "np_cnp_sent"),
+  HWC("cnp_handled",                HWC_IB_SYSFS, "rp_cnp_handled"),
+  HWC("cnp_ignored",                HWC_IB_SYSFS, "rp_cnp_ignored"),
   /* Buffer exhaustion / drops / out-of-sequence / retransmits */
   HWC("out_of_buffer",              HWC_IB_SYSFS, "out_of_buffer"),
-  HWC("out_of_sequence",            HWC_IB_SYSFS, "out_of_sequence"),
-  HWC("packet_seq_err",             HWC_IB_SYSFS, "packet_seq_err"),
-  HWC("implied_nak_seq_err",        HWC_IB_SYSFS, "implied_nak_seq_err"),
+  HWC("oos_drop_count",             HWC_IB_SYSFS, "out_of_sequence"),
+  HWC("seq_err_naks_rcvd",          HWC_IB_SYSFS, "packet_seq_err"),
   HWC("local_ack_timeout_err",      HWC_IB_SYSFS, "local_ack_timeout_err"),
-  HWC("rnr_nak_retry_err",          HWC_IB_SYSFS, "rnr_nak_retry_err"),
+  HWC("rnr_retry_err",              HWC_IB_SYSFS, "rnr_nak_retry_err"),
+  HWC("max_retry_exceeded",         HWC_IB_SYSFS, "req_transport_retries_exceeded"),
+
+  /* --- mlx5-specific counters (canonical mlx5 json_name == sysfs key) --- */
+  HWC("roce_slow_restart_cnps",     HWC_IB_SYSFS, "roce_slow_restart_cnps"),
+  HWC("implied_nak_seq_err",        HWC_IB_SYSFS, "implied_nak_seq_err"),
   HWC("duplicate_request",          HWC_IB_SYSFS, "duplicate_request"),
   HWC("roce_adp_retrans",           HWC_IB_SYSFS, "roce_adp_retrans"),
   HWC("roce_adp_retrans_to",        HWC_IB_SYSFS, "roce_adp_retrans_to"),
@@ -266,7 +269,6 @@ static const RcclHwCounterDesc rcclHwcMlx5[] = {
   HWC("req_remote_access_errors",   HWC_IB_SYSFS, "req_remote_access_errors"),
   HWC("req_remote_invalid_request", HWC_IB_SYSFS, "req_remote_invalid_request"),
   HWC("req_rnr_retries_exceeded",   HWC_IB_SYSFS, "req_rnr_retries_exceeded"),
-  HWC("req_transport_retries_exceeded", HWC_IB_SYSFS, "req_transport_retries_exceeded"),
 
   /* Responder errors */
   HWC("resp_cqe_error",             HWC_IB_SYSFS, "resp_cqe_error"),
@@ -311,16 +313,17 @@ static_assert(sizeof(rcclHwcMlx5) / sizeof(rcclHwcMlx5[0]) <= RCCL_TELEMETRY_MAX
 /* which bnxt_re updates per WQE (ethtool L2 stats refresh too slowly).*/
 
 static const RcclHwCounterDesc rcclHwcThor2[] = {
+  /* --- Canonical cross-driver counters (shared json_name, bnxt_re sysfs key) --- */
   /* ECN / congestion notification (primary congestion signals) */
-  HWC_FB("rx_ecn_marked_pkts",      HWC_IB_SYSFS, "rx_ecn_marked_pkts", "np_ecn_marked_roce_packets"),
-  HWC("np_cnp_sent",                HWC_IB_SYSFS, "np_cnp_sent"),
-  HWC("rp_cnp_handled",             HWC_IB_SYSFS, "rp_cnp_handled"),
-  HWC("rp_cnp_ignored",             HWC_IB_SYSFS, "rp_cnp_ignored"),
+  HWC_FB("ecn_marked_pkts",         HWC_IB_SYSFS, "rx_ecn_marked_pkts", "np_ecn_marked_roce_packets"),
+  HWC("cnp_sent",                   HWC_IB_SYSFS, "np_cnp_sent"),
+  HWC("cnp_handled",                HWC_IB_SYSFS, "rp_cnp_handled"),
+  HWC("cnp_ignored",                HWC_IB_SYSFS, "rp_cnp_ignored"),
 
   /* Retransmits / timeouts / out-of-sequence (congestion under load) */
   HWC("to_retransmits",             HWC_IB_SYSFS, "to_retransmits"),
   HWC("seq_err_naks_rcvd",          HWC_IB_SYSFS, "seq_err_naks_rcvd"),
-  HWC("rnr_naks_rcvd",              HWC_IB_SYSFS, "rnr_naks_rcvd"),
+  HWC("rnr_retry_err",              HWC_IB_SYSFS, "rnr_naks_rcvd"),
   HWC("max_retry_exceeded",         HWC_IB_SYSFS, "max_retry_exceeded"),
   HWC("local_ack_timeout_err",      HWC_IB_SYSFS, "local_ack_timeout_err"),
   HWC_FB("oos_drop_count",          HWC_IB_SYSFS, "res_oos_drop_count", "oos_drop_count"),
