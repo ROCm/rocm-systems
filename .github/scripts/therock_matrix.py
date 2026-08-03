@@ -39,9 +39,13 @@ project_map = {
     },
     # amdsmi changes fan out to its downstream dependents across rocm-systems
     # and rocm-libraries, so build everything and test amdsmi plus those consumers.
+    # Note: rccl is a downstream consumer but is intentionally excluded here.
+    # The main Linux build forces -DTHEROCK_ENABLE_RCCL=OFF (see therock-ci-linux.yml)
+    # and RCCL is exercised by its own dedicated pipeline (run_linux_rccl_ci),
+    # so listing it here would be a no-op.
     "amdsmi": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
-        "projects_to_test": "amdsmi, rocblas, hipblas, hipblaslt, rccl, rocprofiler-systems, rocrtst",
+        "projects_to_test": "amdsmi, rocblas, hipblas, hipblaslt, rocprofiler-systems, rocrtst",
     },
     "emulation": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_EMULATION=ON"],

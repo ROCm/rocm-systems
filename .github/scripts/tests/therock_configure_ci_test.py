@@ -492,7 +492,7 @@ class ConfigureCITest(unittest.TestCase):
     @patch("therock_configure_ci.get_modified_paths")
     def test_amdsmi_pr_triggers_amdsmi_group(self, mock_get_modified):
         """PR with amdsmi changes should build everything and test amdsmi plus
-        its downstream dependents (blas, rccl, rocprofiler-systems, rocrtst)."""
+        its downstream dependents (blas, rocprofiler-systems, rocrtst)."""
         args = {
             "is_pull_request": True,
             "base_ref": "HEAD^",
@@ -514,18 +514,17 @@ class ConfigureCITest(unittest.TestCase):
                 "rocblas",
                 "hipblas",
                 "hipblaslt",
-                "rccl",
                 "rocprofiler-systems",
                 "rocrtst",
             },
         )
-        # "rdc" is not a TheRock test target, so it must not be listed.
-        self.assertNotIn("rdc", tests)
+        # rccl is intentionally excluded: the main Linux build forces
+        # THEROCK_ENABLE_RCCL=OFF and RCCL runs in its own dedicated pipeline.
+        self.assertNotIn("rccl", tests)
 
     def test_amdsmi_group_uses_valid_test_targets(self):
         """Every test target in the amdsmi group must be a real TheRock test
-        target. rccl is a valid target even though it is dispatched via a
-        separate RCCL CI job, so it is included in the allow-list here."""
+        target (a key in fetch_test_configurations.test_matrix)."""
         # Keys of TheRock's fetch_test_configurations.test_matrix. Kept in sync
         # manually since TheRock is not checked out during unit tests.
         valid_test_targets = {
