@@ -259,6 +259,9 @@ performance:
   Performance_Graph_CollapseCorrectness: *level_2
   Performance_Graph_AnyOrderOverlap_Chains: *level_2
   Performance_Graph_AnyOrderOverlap_Fork: *level_2
+  Performance_Graph_AnyOrderOverlap_Update: *level_2
   Performance_Graph_AnyOrderOverlap_DetectorSelfTest: *level_2
   Performance_Graph_AnyOrderOverlap_Perf: *level_2
+  Performance_Graph_AnyOrderOverlap_CrossRing: *level_2
+  Performance_Graph_AnyOrderOverlap_CrossRingPerf: *level_2
   Performance_Graph_DisabledBoundarySynchronization: *level_2

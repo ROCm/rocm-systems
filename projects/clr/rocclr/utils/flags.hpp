@@ -256,11 +256,12 @@ release(uint, DEBUG_HIP_GRAPH_MIN_OVERLAP, 2,                                 \
 release(bool, DEBUG_HIP_GRAPH_CLASSIC_PATH, false,                            \
         "Force GraphExecClassic (classic topological path) regardless of "    \
         "GPU_ENABLE_PAL, for testing on Linux")                                \
-release(bool, DEBUG_HIP_GRAPH_ANYORDER_OVERLAP, false,                        \
-        "Under round-robin segment scheduling, clear the AQL barrier bit "    \
-        "when parallel segments oversubscribe a queue, letting the CP overlap "\
-        "the colliding kernels on that queue where the HW supports it "       \
-        "(use with DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=1 to force round-robin)")\
+release(uint, DEBUG_HIP_GRAPH_ANYORDER_OVERLAP, 0,                            \
+        "Clear the AQL barrier bit under round-robin segment scheduling so the "\
+        "CP can overlap independent kernels on a shared queue. 0=off, "         \
+        "1=clear oversubscribed wrap heads, 2=also clear cross-ring-only "      \
+        "anchors in non-oversubscribed levels. "                               \
+        "Use with DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=1 to force round-robin.")  \
 release(uint, DEBUG_HIP_BLOCK_SYNC, 50,                                       \
         "Blocks synchronization on CPU until the callback processing is done")\
 release(uint, DEBUG_CLR_MAX_BATCH_SIZE, 1000,                                 \

@@ -526,9 +526,9 @@ void GraphExecSegmented::BuildSyncPlan() {
 
     auto& firstBatch = segBatch.packet_batches[0];
 
-    // Clear an oversubscribed head's barrier bit for overlap, before any prepend
-    // so it targets the first packet; skipped when collapsed to one stream.
-    if (segment.oversubscribed && !collapsed_to_single_stream_ &&
+    // Clear the head's barrier bit for overlap, before any prepend so it targets
+    // the first packet; skipped when collapsed to one stream.
+    if (segment.clear_head_barrier && !collapsed_to_single_stream_ &&
         !firstBatch.dispatchPackets.empty()) {
       device->ClearAqlDispatchBarrierBit(firstBatch.dispatchPackets[0]);
     }
@@ -1237,13 +1237,18 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
                ? static_cast<size_t>(it->second) : 1;
   };
 
+  // With ANYORDER_OVERLAP>=2, additionally clear anchors in non-oversubscribed levels
+  // whose producers are all cross-ring; computed inline (producers are always lower-level,
+  // so their stream_id is already assigned when we reach the consumer).
+  const bool dep_aware = (DEBUG_HIP_GRAPH_ANYORDER_OVERLAP >= 2);
+
   for (int level = 0; level <= max_dependency_level_; ++level) {
     auto it = segments_per_level_.find(level);
     if (it == segments_per_level_.end()) continue;
 
-    // Per-device round-robin counters, reset per level so parallel segments on
-    // the same device spread evenly across that device's stream pool.
+    // Round-robin counters reset per level so parallel segments spread across streams.
     std::unordered_map<int, size_t> dev_idx;
+    const size_t level_width = it->second.size();
 
     for (int seg_id : it->second) {
       if (seg_id < 0 || seg_id >= static_cast<int>(segments_.size())) continue;
@@ -1252,9 +1257,16 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
       const size_t idx = dev_idx[seg.dev_id]++;
       seg.stream_id = static_cast<int>(idx % pool);
 
-      // Mark later same-queue collisions; their head barrier bit is cleared
-      // later so capable hardware can overlap independent work.
-      seg.oversubscribed = (DEBUG_HIP_GRAPH_ANYORDER_OVERLAP && idx >= pool);
+      if (!DEBUG_HIP_GRAPH_ANYORDER_OVERLAP) {
+        seg.clear_head_barrier = false;
+        continue;
+      }
+
+      // Two orthogonal (mutually exclusive by level width) reasons to clear the head:
+      //   - oversubscribed wrap: a later same-queue collision (only in width > pool levels)
+      //   - anchor in a non-oversubscribed level with no same-ring producer to fence (dep_aware)
+      seg.clear_head_barrier = (idx >= pool) ||
+          (dep_aware && level_width <= pool && !HasSameRingProducer(seg));
     }
   }
 
@@ -2303,11 +2315,11 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
           }
         }
       }
-      // Re-capture resets the barrier bit, so re-clear it for an oversubscribed
-      // head to preserve overlap across updates.
+      // Re-capture resets the barrier bit, so re-clear it for a selected head
+      // to preserve overlap across updates.
       if (!collapsed_to_single_stream_ && segmentId >= 0 &&
           segmentId < static_cast<int>(segments_.size()) &&
-          segments_[segmentId].oversubscribed &&
+          segments_[segmentId].clear_head_barrier &&
           segments_[segmentId].first_node == node && !newPackets.empty()) {
         g_devices[segments_[segmentId].dev_id]->devices()[0]->ClearAqlDispatchBarrierBit(
             newPackets[0]);

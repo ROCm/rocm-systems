@@ -961,8 +961,9 @@ class Graph {
 
     bool needs_completion_signal = false;        // True if any downstream segment is on a different stream/device, or this is a leaf
 
-    // True for a later same-queue collision whose head barrier bit is cleared for overlap.
-    bool oversubscribed = false;
+    // Whether this segment's head AQL barrier bit is cleared for overlap.
+    // Computed in RoundRobinStreamAssignment() per DEBUG_HIP_GRAPH_ANYORDER_OVERLAP.
+    bool clear_head_barrier = false;
   };
 
   //! Segment information for batch scheduling
@@ -1175,6 +1176,17 @@ class GraphExecSegmented : public GraphExecBase {
   //! stream assignment. Called after the initial assignment and again if
   //! BuildSyncPlan's collapse pass reassigns segments to a single stream.
   void ComputeCompletionSignalFlags();
+  //! True if any of the segment's producers sits on its own (dev, stream), i.e. is
+  //! ordered only by the in-order queue + this head's barrier bit. Producers are at
+  //! lower levels, so their stream_id is already assigned when this is queried.
+  inline bool HasSameRingProducer(const Segment& s) const {
+    return std::any_of(s.segment_ids_dependencies.begin(),
+                       s.segment_ids_dependencies.end(), [&](int dep) {
+                         if (dep < 0 || dep >= static_cast<int>(segments_.size())) return false;
+                         const auto& d = segments_[dep];
+                         return d.dev_id == s.dev_id && d.stream_id == s.stream_id;
+                       });
+  }
   //! Barrier-ROI heuristic: decide whether the segment graph should be collapsed
   //! onto a single stream because the cross-stream barriers multi-stream would
   //! cost outweigh the work that could actually overlap. Returns true to collapse.
