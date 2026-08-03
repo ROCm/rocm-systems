@@ -7,6 +7,7 @@
 #include "NetIbMPITestBase.hpp"
 
 #include <chrono>
+#include <cstddef>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -76,6 +77,7 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceNegativeNdevs) {
     ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
 
     ncclNetVDeviceProps_t vProps;
+    memset(&vProps, 0, sizeof(vProps));
     vProps.ndevs = -1;
 
     int vdev = -1;
@@ -1918,13 +1920,13 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
     // Sub-test 1: below the limit
     // =========================================================================
     if (mergeCount >= 3) {
-        expectMergeSucceeds(mergeCount - 1);
+        ASSERT_NO_FATAL_FAILURE(expectMergeSucceeds(mergeCount - 1));
     }
 
     // =========================================================================
     // Sub-test 2: at the limit (or at the node's maximum, when it has fewer NICs)
     // =========================================================================
-    expectMergeSucceeds(mergeCount);
+    ASSERT_NO_FATAL_FAILURE(expectMergeSucceeds(mergeCount));
 
     if (mergeCount < kMaxDevsPerNic) {
         TEST_INFO("Only %d same-speed NICs available; the ndevs == %d boundary was not exercised",
@@ -1945,6 +1947,13 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
         ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
 
         constexpr int kOverLimit = kMaxDevsPerNic + 1;
+
+        // The spare slot below only extends devs[], and so only keeps a one-entry overrun inside
+        // this object, while devs[] is the trailing member of the struct.
+        static_assert(offsetof(ncclNetVDeviceProps_t, devs) + sizeof(ncclNetVDeviceProps_t::devs) ==
+                          sizeof(ncclNetVDeviceProps_t),
+                      "ncclNetVDeviceProps_t gained a member after devs[]");
+
         union {
             ncclNetVDeviceProps_t props;
             char padded[sizeof(ncclNetVDeviceProps_t) + sizeof(int)];

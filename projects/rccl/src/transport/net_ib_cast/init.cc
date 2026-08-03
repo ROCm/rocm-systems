@@ -207,6 +207,7 @@ ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
     return ncclInvalidUsage;
   }
 
+  // Mirrors the guard in ncclIbMakeVDeviceInternal(): bound the count before props->devs[] is indexed.
   if (props->ndevs < 1 || props->ndevs > NCCL_IB_MAX_DEVS_PER_NIC) {
     WARN("NET/IB : Can't make virtual NIC with %d devices, max %d", props->ndevs, NCCL_IB_MAX_DEVS_PER_NIC);
     return ncclInvalidUsage;
@@ -229,6 +230,7 @@ ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
     }
     if (used[props->devs[i]]) continue;
     const ncclIbDev* dev = IbCastDevs + props->devs[i];
+    if (tmp.vProps.ndevs == NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidUsage;
     tmp.vProps.devs[tmp.vProps.ndevs++] = props->devs[i];
     tmp.speed += dev->speed;
     // Each successive time, copy the name '+' new name
