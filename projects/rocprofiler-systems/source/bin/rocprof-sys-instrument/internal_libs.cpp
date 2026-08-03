@@ -462,7 +462,7 @@ get_internal_libs_data_impl()
                 continue;
 
             verbprintf(3, "[internal]     parsing module: '%s' (via '%s')...\n",
-                       _mname.c_str(), filepath::basename(itr.first));
+                       _mname.c_str(), rocprofsys::path::filename(itr.first).c_str());
 
             _data[itr.first].emplace(_mpath, func_set_t{});
             _data[itr.first].emplace(_mname, func_set_t{});
