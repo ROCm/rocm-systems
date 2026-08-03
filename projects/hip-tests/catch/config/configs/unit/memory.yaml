@@ -935,7 +935,6 @@ memory:
   Unit_hipExtMemcpyBatchAsync_entryFlags_swap: *level_2
   Unit_hipExtMemcpyBatchAsync_UnknownOpsBits_Negative: *level_2
   Unit_hipExtMemcpyBatchAsync_OpsDefault_OverridesAttrSwap: *level_2
-  Unit_hipExtMemcpyBatchAsync_FailIdx_SwapRejected: *level_2
   Unit_hipExtMemcpyBatchAsync_OpsOnly_NullAttrs_Swap: *level_2
   Unit_hipExtMemcpyBatchAsync_OpsDefault_IgnoresAttrIndirectGate: *level_2
   Unit_hipExtMemcpyBatchAsync_WaitsSignals_Reserved_Negative: *level_2
