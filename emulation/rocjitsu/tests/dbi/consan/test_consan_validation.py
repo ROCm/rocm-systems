@@ -4889,9 +4889,30 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(
             protocol["calibration_timing_median_ms"], {"softmax:device": 0.05}
         )
-        self.assertEqual(protocol["timed_inner_repetitions"], 5000)
-        self.assertEqual(protocol["command_inner_repetitions"], 5001)
+        self.assertEqual(
+            protocol["calibration_timing_floor_ms"], {"softmax:device": 0.05}
+        )
+        self.assertEqual(workload.device_timing_calibration_iterations, 100)
+        self.assertEqual(workload.device_timing_aggregate_headroom, 1.25)
+        self.assertEqual(protocol["timed_aggregate_headroom"], 1.25)
+        self.assertEqual(protocol["timed_inner_repetitions"], 6250)
+        self.assertEqual(protocol["command_inner_repetitions"], 6251)
         self.assertTrue(protocol["discard_first_timing_sample"])
+
+        floor_protocol = validation._empirical_timing_protocol(
+            "gfx1201",
+            workload,
+            {
+                "accepted": True,
+                "timing_median_ms": {"softmax:device": 0.05},
+                "timing_samples_ms": {"softmax:device": [0.05, 0.01, 0.02]},
+            },
+        )
+        self.assertEqual(
+            floor_protocol["calibration_timing_floor_ms"],
+            {"softmax:device": 0.01},
+        )
+        self.assertEqual(floor_protocol["timed_inner_repetitions"], 31250)
 
         gtest_device = validation._empirical_timing_protocol(
             "gfx1201",
