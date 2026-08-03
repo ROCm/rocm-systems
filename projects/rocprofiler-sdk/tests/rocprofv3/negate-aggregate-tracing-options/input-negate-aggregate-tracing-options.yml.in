@@ -31,4 +31,5 @@ jobs:
     kfd_page_mapping_trace: False
     kfd_queue_trace: False
     kfd_dropped_events_trace: False
+    gpu_event_trace: False
     kernel_rename: False

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -46,6 +46,7 @@
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/intercept_table.h>
 #include <rocprofiler-sdk/internal_threading.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -74,6 +75,16 @@
 #include <type_traits>
 #include <variant>
 #include <vector>
+
+extern "C" {
+ROCPROFILER_API void
+hip_gpu_event_registration_callback(rocprofiler_intercept_table_t type,
+                                    uint64_t                      lib_version,
+                                    uint64_t                      lib_instance,
+                                    void**                        tables,
+                                    uint64_t                      num_tables,
+                                    void*                         user_data);
+}
 
 namespace client
 {
@@ -497,6 +508,21 @@ struct kernel_dispatch_callback_record_t
     }
 };
 
+struct gpu_event_callback_record_t
+{
+    uint64_t                                      timestamp = 0;
+    rocprofiler_callback_tracing_record_t         record    = {};
+    rocprofiler_callback_tracing_gpu_event_data_t payload   = {};
+
+    template <typename ArchiveT>
+    void save(ArchiveT& ar) const
+    {
+        ar(cereal::make_nvp("timestamp", timestamp));
+        cereal::save(ar, record);
+        ar(cereal::make_nvp("payload", payload));
+    }
+};
+
 struct memory_copy_callback_record_t
 {
     uint64_t                                        timestamp = 0;
@@ -690,6 +716,7 @@ auto counter_collection_bf_records = std::deque<profile_counting_record>{};
 auto hip_api_cb_records            = std::deque<hip_api_callback_record_t>{};
 auto scratch_memory_cb_records     = std::deque<scratch_memory_callback_record_t>{};
 auto kernel_dispatch_cb_records    = std::deque<kernel_dispatch_callback_record_t>{};
+auto gpu_event_cb_records          = std::deque<gpu_event_callback_record_t>{};
 auto memory_copy_cb_records        = std::deque<memory_copy_callback_record_t>{};
 auto memory_allocation_cb_records  = std::deque<memory_allocation_callback_record_t>{};
 auto rccl_api_cb_records           = std::deque<rccl_api_callback_record_t>{};
@@ -1155,6 +1182,16 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         hipfile_api_cb_records.emplace_back(
             hipfile_api_callback_record_t{ts, record, *data, std::move(args)});
     }
+    else if(record.kind == ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS)
+    {
+        auto* data =
+            static_cast<rocprofiler_callback_tracing_gpu_event_data_t*>(record.payload);
+
+        static auto _mutex = std::mutex{};
+        auto        _lk    = std::unique_lock<std::mutex>{_mutex};
+        gpu_event_cb_records.emplace_back(
+            gpu_event_callback_record_t{ts, record, *data});
+    }
     else
     {
         throw std::runtime_error{"unsupported callback kind"};
@@ -1196,6 +1233,7 @@ auto kfd_dropped_events_event_records =
 auto kfd_page_migrate_records = std::deque<rocprofiler_buffer_tracing_kfd_page_migrate_record_t>{};
 auto kfd_page_fault_records   = std::deque<rocprofiler_buffer_tracing_kfd_page_fault_record_t>{};
 auto kfd_queue_records        = std::deque<rocprofiler_buffer_tracing_kfd_queue_record_t>{};
+auto gpu_event_bf_records     = std::deque<rocprofiler_buffer_tracing_gpu_event_record_t>{};
 
 void
 tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
@@ -1365,6 +1403,14 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     header->payload);
 
                 hipfile_api_ext_bf_records.emplace_back(*record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_GPU_EVENTS)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_gpu_event_record_t*>(
+                        header->payload);
+
+                gpu_event_bf_records.emplace_back(*record);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE)
             {
@@ -1600,6 +1646,8 @@ rocprofiler_context_id_t spm_buffer_dispatch_collection_ctx = {0};
 rocprofiler_context_id_t hipfile_api_callback_ctx           = {0};
 rocprofiler_context_id_t hipfile_api_buffered_ctx           = {0};
 rocprofiler_context_id_t hipfile_api_ext_buffered_ctx       = {0};
+rocprofiler_context_id_t gpu_event_callback_ctx             = {0};
+rocprofiler_context_id_t gpu_event_buffered_ctx             = {0};
 
 // buffers
 rocprofiler_buffer_id_t runtime_init_buffered_buffer    = {};
@@ -1630,6 +1678,7 @@ rocprofiler_buffer_id_t kfd_page_migrate_records_buffer = {};
 rocprofiler_buffer_id_t kfd_page_fault_records_buffer   = {};
 rocprofiler_buffer_id_t kfd_queue_records_buffer        = {};
 rocprofiler_buffer_id_t spm_counter_collection_buffer   = {};
+rocprofiler_buffer_id_t gpu_event_buffer                = {};
 
 auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"RUNTIME_INIT_CALLBACK", &runtime_init_callback_ctx},
@@ -1664,6 +1713,8 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"HIPFILE_API_CALLBACK", &hipfile_api_callback_ctx},
     {"HIPFILE_API_BUFFERED", &hipfile_api_buffered_ctx},
     {"HIPFILE_API_EXT_BUFFERED", &hipfile_api_ext_buffered_ctx},
+    {"GPU_EVENT_CALLBACK", &gpu_event_callback_ctx},
+    {"GPU_EVENT_BUFFERED", &gpu_event_buffered_ctx},
     {"OMPT_BUFFERED", &ompt_buffered_ctx},
     {"KFD_EVENT_PAGE_MIGRATE", &page_migrate_event_ctx},
     {"KFD_EVENT_PAGE_FAULT", &kfd_page_fault_event_ctx},
@@ -1676,7 +1727,7 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"SPM_DISPATCH_COLLECTION", &spm_dispatch_collection_ctx},
     {"SPM_BUFFER_DISPATCH_COLLECTION", &spm_buffer_dispatch_collection_ctx}};
 
-auto buffers = std::array<rocprofiler_buffer_id_t*, 27>{&runtime_init_buffered_buffer,
+auto buffers = std::array<rocprofiler_buffer_id_t*, 28>{&runtime_init_buffered_buffer,
                                                         &hsa_api_buffered_buffer,
                                                         &hip_api_buffered_buffer,
                                                         &marker_api_buffered_buffer,
@@ -1702,7 +1753,8 @@ auto buffers = std::array<rocprofiler_buffer_id_t*, 27>{&runtime_init_buffered_b
                                                         &kfd_page_migrate_records_buffer,
                                                         &kfd_page_fault_records_buffer,
                                                         &kfd_queue_records_buffer,
-                                                        &spm_counter_collection_buffer};
+                                                        &spm_counter_collection_buffer,
+                                                        &gpu_event_buffer};
 
 auto agents     = std::vector<rocprofiler_agent_t>{};
 auto agents_map = std::unordered_map<rocprofiler_agent_id_t, rocprofiler_agent_t>{};
@@ -1931,6 +1983,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                        nullptr),
         "ompt callback tracing service configure");
 
+    ROCPROFILER_CALL(
+        rocprofiler_configure_callback_tracing_service(gpu_event_callback_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS,
+                                                       nullptr,
+                                                       0,
+                                                       tool_tracing_callback,
+                                                       nullptr),
+        "gpu events callback tracing service configure");
+
     constexpr auto buffer_size = 8192;
     constexpr auto watermark   = 7936;
 
@@ -2112,6 +2173,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                tool_tracing_buffered,
                                                tool_data,
                                                &ompt_buffered_buffer),
+                     "buffer creation");
+
+    ROCPROFILER_CALL(rocprofiler_create_buffer(gpu_event_buffered_ctx,
+                                               buffer_size,
+                                               watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               tool_tracing_buffered,
+                                               tool_data,
+                                               &gpu_event_buffer),
                      "buffer creation");
 
     ROCPROFILER_CALL(rocprofiler_create_buffer(page_migrate_event_ctx,
@@ -2497,6 +2567,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             ompt_buffered_ctx, ROCPROFILER_BUFFER_TRACING_OMPT, nullptr, 0, ompt_buffered_buffer),
         "buffer tracing service for ompt configure");
 
+    ROCPROFILER_CALL(
+        rocprofiler_configure_buffer_tracing_service(gpu_event_buffered_ctx,
+                                                     ROCPROFILER_BUFFER_TRACING_GPU_EVENTS,
+                                                     nullptr,
+                                                     0,
+                                                     gpu_event_buffer),
+        "buffer tracing service for gpu events configure");
+
     if(getenv("ROCPROF_COUNTERS"))
     {
         ROCPROFILER_CALL(
@@ -2504,6 +2582,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                 counter_collection_ctx, counter_collection_buffer, dispatch_callback, nullptr),
             "setup buffered service");
     }
+
+    ROCPROFILER_CALL(
+        rocprofiler_at_intercept_table_registration(
+            hip_gpu_event_registration_callback, ROCPROFILER_HIP_RUNTIME_TABLE, nullptr),
+        "gpu events hip intercept table registration");
 
     for(auto* itr : buffers)
     {
@@ -2706,6 +2789,8 @@ tool_fini(void* tool_data)
               << ", rocshmem_api_callback_records=" << rocshmem_api_cb_records.size()
               << ", rocshmem_api_bf_records=" << rocshmem_api_bf_records.size()
               << ", rocshmem_api_ext_bf_records=" << rocshmem_api_ext_bf_records.size() << "...\n"
+              << ", gpu_event_cb_records=" << gpu_event_cb_records.size()
+              << ", gpu_event_bf_records=" << gpu_event_bf_records.size()
               << std::flush;
 
     auto* _call_stack = static_cast<call_stack_t*>(tool_data);
@@ -2806,6 +2891,7 @@ write_json(call_stack_t* _call_stack)
             json_ar(cereal::make_nvp("spm_records", spm_cb_records));
             json_ar(cereal::make_nvp("hipfile_api_traces", hipfile_api_cb_records));
             json_ar(cereal::make_nvp("rocshmem_api_traces", rocshmem_api_cb_records));
+            json_ar(cereal::make_nvp("gpu_events", gpu_event_cb_records));
         } catch(std::exception& e)
         {
             std::cerr << "[" << getpid() << "][" << __FUNCTION__
@@ -2848,6 +2934,7 @@ write_json(call_stack_t* _call_stack)
             json_ar(cereal::make_nvp("hipfile_api_ext_traces", hipfile_api_ext_bf_records));
             json_ar(cereal::make_nvp("rocshmem_api_traces", rocshmem_api_bf_records));
             json_ar(cereal::make_nvp("rocshmem_api_ext_traces", rocshmem_api_ext_bf_records));
+            json_ar(cereal::make_nvp("gpu_events", gpu_event_bf_records));
         } catch(std::exception& e)
         {
             std::cerr << "[" << getpid() << "][" << __FUNCTION__

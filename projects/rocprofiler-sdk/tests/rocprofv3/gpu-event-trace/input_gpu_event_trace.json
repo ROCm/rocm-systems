@@ -1,0 +1,12 @@
+{
+    "jobs": [
+        {
+            "gpu_event_trace": true,
+            "kernel_trace": true,
+            "output_file": "json-input/out",
+            "output_format": [
+                "json"
+            ]
+        }
+    ]
+}

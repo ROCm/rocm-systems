@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -107,6 +107,7 @@ TEST(enum_string, fwd_h)
     TEST_STR(ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API);
     TEST_STR(ROCPROFILER_CALLBACK_TRACING_RCCL_API);
     TEST_STR(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API);
+    TEST_STR(ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS);
 
     // rocprofiler_buffer_tracing_kind_t
     TEST_STR(ROCPROFILER_BUFFER_TRACING_HSA_CORE_API);
@@ -114,6 +115,7 @@ TEST(enum_string, fwd_h)
     TEST_STR(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
     TEST_STR(ROCPROFILER_BUFFER_TRACING_ROCDECODE_API);
     TEST_STR(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE);
+    TEST_STR(ROCPROFILER_BUFFER_TRACING_GPU_EVENTS);
 
     // rocprofiler_hip_stream_operation_t
     TEST_STR(ROCPROFILER_HIP_STREAM_NONE);
@@ -138,6 +140,13 @@ TEST(enum_string, fwd_h)
     TEST_STR(ROCPROFILER_KERNEL_DISPATCH_NONE);
     TEST_STR(ROCPROFILER_KERNEL_DISPATCH_ENQUEUE);
     TEST_STR(ROCPROFILER_KERNEL_DISPATCH_COMPLETE);
+
+    // rocprofiler_gpu_event_operation_t
+    TEST_STR(ROCPROFILER_GPU_EVENT_NONE);
+    TEST_STR(ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE);
+    TEST_STR(ROCPROFILER_GPU_EVENT_WAIT_COMPLETE);
+    TEST_STR(ROCPROFILER_GPU_EVENT_RECORD_ENQUEUE);
+    TEST_STR(ROCPROFILER_GPU_EVENT_RECORD_COMPLETE);
 
     // rocprofiler_pc_sampling_method_t
     TEST_STR(ROCPROFILER_PC_SAMPLING_METHOD_NONE);
@@ -179,6 +188,7 @@ TEST(enum_string, fwd_h)
     // rocprofiler_external_correlation_id_request_kind_t
     TEST_STR(ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HSA_CORE_API);
     TEST_STR(ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_ROCDECODE_API);
+    TEST_STR(ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_GPU_EVENTS);
 
     // rocprofiler_thread_trace_parameter_type_t
     TEST_STR(ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU);
