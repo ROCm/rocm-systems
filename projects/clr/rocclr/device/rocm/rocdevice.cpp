@@ -1787,8 +1787,8 @@ bool Device::populateOCLDeviceConstants() {
                     static_cast<hsa_system_info_t>(HSA_AMD_SYSTEM_INFO_DMABUF_SUPPORTED),
                     &info_.dmabufSupported_);
 
-  // Check Support for host-allocated dma_buf buffer sharing on the GPU's preferred CPU agent.
-  info_.hostAllocDmabufSupported_ = hostVmemSupported(static_cast<int>(preferred_numa_node_));
+  // Support for host-allocated dma_buf buffer sharing (system-wide capability).
+  info_.hostAllocDmabufSupported_ = hostVmemSupported_;
 
   // devices with no cluster support; max size is 0
   info_.clusterMaxSize_ = 0;
