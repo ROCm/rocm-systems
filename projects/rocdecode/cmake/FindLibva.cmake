@@ -26,12 +26,12 @@ if(DEFINED THEROCK_SUPERPROJECT_INCLUDE_DIRS)
   list(APPEND _libva_include_hints ${THEROCK_SUPERPROJECT_INCLUDE_DIRS})
 endif()
 
-find_library(LIBVA_LIBRARY NAMES va HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
-find_library(LIBVA_DRM_LIBRARY NAMES va-drm HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+find_library(LIBVA_LIBRARY NAMES va HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
+find_library(LIBVA_DRM_LIBRARY NAMES va-drm HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
 find_path(LIBVA_INCLUDE_DIR NAMES va/va.h PATHS ${_libva_include_hints} ${ROCM_PATH}/lib/rocm_sysdeps/include NO_DEFAULT_PATH)
 
 include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(Libva DEFAULT_MSG LIBVA_INCLUDE_DIR LIBVA_LIBRARY)
+find_package_handle_standard_args(Libva DEFAULT_MSG LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_DRM_LIBRARY)
 mark_as_advanced(LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_DRM_LIBRARY)
 
 if(Libva_FOUND)
