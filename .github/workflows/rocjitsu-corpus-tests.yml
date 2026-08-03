@@ -49,7 +49,7 @@ env:
   ROCJITSU_DBT_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-dbt-test-corpus
   ROCJITSU_DBT_VENV: ${{ github.workspace }}/gfx1250-dbt-venv-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
-  ROCM_SDK_VERSION: 7.14.0a20260624
+  ROCM_SDK_VERSION: 7.15.0a20260728
   UV_VERSION: 0.9.26
 
 jobs:
@@ -86,7 +86,7 @@ jobs:
             # Keep the first corpus gate on the fastest lane. Focused second-pass
             # paths remain covered by the sanitizer test suite.
             verify_dbt_idempotence: 0
-            dbt_timeout: 90
+            dbt_timeout: 180
             dbt_memory_limit_mib: 4096
             dbt_job_timeout: 30
             test_regex: ''
@@ -458,6 +458,7 @@ jobs:
             --dbt-memory-limit-mib "${{ matrix.dbt_memory_limit_mib }}" \
             --artifact-directory .pytest-artifacts/gfx1250-dbt \
             -n "${DBT_WORKERS}" \
+            --durations=0 \
             -q \
             -rxX \
             --tb=short

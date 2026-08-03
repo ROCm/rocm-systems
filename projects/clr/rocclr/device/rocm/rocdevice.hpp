@@ -476,10 +476,6 @@ class Device : public NullDevice {
   void deviceVmemRelease(uint64_t mem_handle) const;
   uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
 
-  //! Whether host-resident NUMA VMM allocation is supported for the given node.
-  //! Queries the CPU agent's HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED; returns
-  //! false against a ROCr that predates the query (graceful degrade).
-  bool hostVmemSupported(int numaNode) const;
   //! Allocate a host-resident VMM handle on a CPU NUMA pool. numaNode < 0 resolves
   //! to the calling thread's current node (HostNumaCurrent). Returns 0 on failure.
   uint64_t hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const;
@@ -731,6 +727,7 @@ class Device : public NullDevice {
 
   bool populateOCLDeviceConstants();
   static bool isHsaInitialized_;
+  static bool hostVmemSupported_;
   static std::vector<hsa_agent_t> gpu_agents_;
   static std::vector<AgentInfo> cpu_agents_;
   uint32_t preferred_numa_node_;

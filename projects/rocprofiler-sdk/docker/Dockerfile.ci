@@ -93,7 +93,17 @@ RUN set -euo pipefail; \
 # Nightly Tarball
 # The TheRock tarball ships the OpenMP runtime (libomp.so), LLVM, and bundled system deps under
 # lib/llvm/lib and lib/rocm_sysdeps/lib. These directories are not on the default dynamic-linker
-# search path. Register them via ldconfig
+# search path, so register them via ldconfig.
+#
+# TheRock nightly tarballs also ship some bundled rocm_sysdeps pkg-config (.pc) files with
+# non-relocatable, absolute build-stage prefixes (e.g. zlib.pc has
+# prefix=/__w/.../stage/lib/rocm_sysdeps). elfutils' libdw.pc/libelf.pc pull zlib in via
+# "Requires.private: zlib", so that dead path leaks through pkg_check_modules into the imported
+# rocprofiler-sdk target and breaks configure with "includes non-existent path
+# .../rocm_sysdeps/include in its INTERFACE_INCLUDE_DIRECTORIES". Rewrite those build-stage paths
+# to the relocatable ${pcfiledir} form so they resolve relative to the installed location.
+# Idempotent: only lines containing a build-stage rocm_sysdeps path are touched, so this is a
+# no-op once ROCm/TheRock#6906 is fixed.
 RUN set -euo pipefail; \
     if [ $(grep -i "sles" /etc/os-release | wc -l) -gt 0 ]; then \
         source rocprofiler-sdk/bin/activate; \
@@ -105,6 +115,8 @@ RUN set -euo pipefail; \
     mkdir -p /opt/rocm && \
     tar -xf /tmp/rocm-${GPU_TYPE}.tar.gz -C /opt/rocm && \
     rm -f /tmp/rocm-${GPU_TYPE}.tar.gz && \
+    find /opt/rocm -name '*.pc' -path '*rocm_sysdeps*' -print0 \
+        | xargs -0 --no-run-if-empty sed -i -E 's#/[^ =]*/stage/lib/rocm_sysdeps#${pcfiledir}/../..#g' && \
     printf '/opt/rocm/lib\n/opt/rocm/lib/llvm/lib\n/opt/rocm/lib/llvm/lib/%s\n/opt/rocm/lib/rocm_sysdeps/lib\n' \
        "$(/opt/rocm/lib/llvm/bin/amdclang --print-target-triple)" > /etc/ld.so.conf.d/rocm.conf && \
     ldconfig

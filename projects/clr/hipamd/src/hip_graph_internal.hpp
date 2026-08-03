@@ -1085,7 +1085,8 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   hipError_t CreateStreams(uint32_t num_streams, int devId);
   //! Compute per-device stream requirements from streams_dev_ids_ mappings
   void FindStreamsReqPerDev();
-  //! Update streams_[0] to the launch stream and resolve HW queue collisions
+  //! Update streams_ for a launch and resolve HW queue collisions.
+  //! If launch_stream is null, streams_ is built from captureDeviceId_ internal streams only.
   void UpdateStreams(hip::Stream* launch_stream);
 };
 

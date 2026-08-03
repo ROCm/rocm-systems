@@ -25,10 +25,12 @@ test_categories:
       - "DdaIpcEligibilityTest.*"
       - "DdaFabricEligibilityTest.*"
       - "NetSocketTests.*"
+      - "SocketPollTimeout.*"
       - "Ipcsocket.*"
       - "XmlTest.*"
       - "NetDevsPolicyP2pNetTests.*"
       - "TopoTest.*"
+      - "TopoNicFusionTests.*"
     exclude_windows:
       - "*"
     labels:
