@@ -26,6 +26,48 @@ namespace nccl_dda_detail {
 
 constexpr int kDdaNranks = meta::comms::NRANKS;
 
+// Maximum message accepted by the LL128 AllReduce path. Its per-call slot
+// stride is derived from the actual message, while eligibility is bounded by
+// both this cap and the communicator's runtime scratch capacity.
+constexpr size_t kDdaLL128ArMaxBytes = 1073741824ULL; // 1 GiB
+
+struct DdaFabricScratchSizing {
+  size_t bytes;
+  size_t effectiveLL128Threshold;
+};
+
+// Compute the fabric scratch allocation and the effective LL128 AllReduce
+// threshold from one configuration snapshot. An explicit buffer-size override
+// takes precedence over derived sizing, while protocol thresholds still report
+// their effective values.
+inline DdaFabricScratchSizing ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t ddaEnabled,
+                                                     int64_t ddaThreshold, int64_t ll128Enabled,
+                                                     int64_t ll128Threshold) {
+  const size_t simpleCap = ddaEnabled && ddaThreshold > 0 ? (size_t)ddaThreshold : 0;
+
+  size_t ll128Cap = simpleCap && ll128Enabled && ll128Threshold > 0 ? (size_t)ll128Threshold : 0;
+  if (ll128Cap > simpleCap) ll128Cap = simpleCap;
+  if (ll128Cap > kDdaLL128ArMaxBytes) ll128Cap = kDdaLL128ArMaxBytes;
+
+  if (overrideBytes >= 0) {
+    return {overrideBytes > 0 ? (size_t)overrideBytes : 0, ll128Cap};
+  }
+  if (simpleCap == 0) {
+    return {0, ll128Cap};
+  }
+
+  if (nRanks < 1) nRanks = 1;
+
+  // LL128 line geometry (see CollCommon_ll128.h): 128B lines, 15 payload words.
+  const size_t words = (ll128Cap + 7) / 8;
+  const size_t lines = (words + 14) / 15;
+  const size_t ll128Ar = (size_t)2 * (size_t)nRanks * lines * 128;
+
+  size_t bytes = simpleCap > ll128Ar ? simpleCap : ll128Ar;
+  bytes += bytes / 8; // ~12% margin for the fixed LL/AG/A2A/RS slot arrays
+  return {bytes, ll128Cap};
+}
+
 // Per-comm IPC barrier state stored in ncclComm::ddaIpcBarrierState.
 struct DdaIpcBarrierState {
   std::unique_ptr<meta::comms::IpcGpuBarrierResources> resources;
