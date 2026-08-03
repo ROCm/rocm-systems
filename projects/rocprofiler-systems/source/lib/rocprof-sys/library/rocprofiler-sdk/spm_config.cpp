@@ -25,9 +25,9 @@ namespace
 constexpr auto beta_env_name = "ROCPROFILER_SPM_BETA_ENABLED";
 
 bool
-has_non_space_value(std::string_view value)
+has_configured_event_string(std::string_view events)
 {
-    return std::any_of(value.begin(), value.end(),
+    return std::any_of(events.begin(), events.end(),
                        [](unsigned char itr) { return std::isspace(itr) == 0; });
 }
 
@@ -47,7 +47,7 @@ request::requested() const noexcept
 bool
 is_config_valid(const request&                  req,
                 const std::vector<std::string>& dispatch_counter_events,
-                const std::string&              device_counter_events)
+                const std::string&              gpu_perf_counter_events)
 {
     // Backstop for direct library load paths. Tool initialization must reject
     // SPM requests when the required interval or mutual-exclusion constraints
@@ -61,7 +61,9 @@ is_config_valid(const request&                  req,
         return false;
     }
 
-    if(has_non_space_value(device_counter_events))
+    // ROCPROFSYS_GPU_PERF_COUNTERS is kept as a raw setting string here. Treat
+    // any non-whitespace value as a requested device-counting collection.
+    if(has_configured_event_string(gpu_perf_counter_events))
     {
         LOG_WARNING("SPM counter collection is mutually exclusive with "
                     "ROCPROFSYS_GPU_PERF_COUNTERS");

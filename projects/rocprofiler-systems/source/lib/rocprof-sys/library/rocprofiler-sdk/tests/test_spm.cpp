@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -50,23 +51,43 @@ read_fake_env_bool(const char* name, bool fallback)
     return fake_environment::get_env(name, fallback);
 }
 
+void
+ensure_spm_settings_registered()
+{
+    auto settings = rocprofsys::settings::shared_instance();
+    if(settings->find(std::string{ rocprofsys::env_vars::ROCM_SPM_EVENTS }) ==
+           settings->end() ||
+       settings->find(std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL }) ==
+           settings->end())
+    {
+        rocprofsys::rocprofiler_sdk::config_settings(settings);
+    }
+}
+
 class spm_settings_test : public ::testing::Test
 {
 protected:
-    static void SetUpTestSuite()
+    void SetUp() override
     {
-        auto settings = rocprofsys::settings::shared_instance();
-        rocprofsys::rocprofiler_sdk::config_settings(settings);
+        ensure_spm_settings_registered();
+        previous_events = rocprofsys::config::get_setting_value<std::string>(
+            std::string{ rocprofsys::env_vars::ROCM_SPM_EVENTS });
+        previous_sample_interval = rocprofsys::config::get_setting_value<std::uint64_t>(
+            std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL });
     }
 
     void TearDown() override
     {
         rocprofsys::config::set_setting_value(
-            std::string{ rocprofsys::env_vars::ROCM_SPM_EVENTS }, std::string{});
+            std::string{ rocprofsys::env_vars::ROCM_SPM_EVENTS },
+            previous_events.value_or(std::string{}));
         rocprofsys::config::set_setting_value(
             std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL },
-            std::uint64_t{ 0 });
+            previous_sample_interval.value_or(std::uint64_t{ 0 }));
     }
+
+    std::optional<std::string>   previous_events          = std::nullopt;
+    std::optional<std::uint64_t> previous_sample_interval = std::nullopt;
 };
 
 class beta_opt_in_test : public ::testing::Test

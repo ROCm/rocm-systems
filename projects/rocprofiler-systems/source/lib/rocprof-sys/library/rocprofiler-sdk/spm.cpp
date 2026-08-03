@@ -6,6 +6,8 @@
 // here; configuration-only code and no-SDK fallbacks belong in spm_config.cpp.
 
 #include "library/rocprofiler-sdk/spm.hpp"
+#include "backends/rocprofiler_sdk/backend.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "core/utility.hpp"
@@ -23,6 +25,7 @@
 #include <atomic>
 #include <charconv>
 #include <cstdint>
+#include <functional>
 #include <iterator>
 #include <numeric>
 #include <optional>
@@ -43,6 +46,7 @@ namespace spm
 namespace
 {
 constexpr auto invalid_context_handle = 0UL;
+constexpr auto device_qualifier       = std::string_view{ ":device=" };
 
 struct requested_counter
 {
@@ -61,8 +65,10 @@ using spm_counter_id_vec_t       = std::vector<rocprofiler_counter_id_t>;
 using resolved_counter_vec_t     = std::vector<resolved_counter>;
 using requested_counter_vec_t    = std::vector<requested_counter>;
 namespace gpu_perf_counter       = pmc::collectors::gpu_perf_counter;
+using counter_detail_backend     = ::rocprofsys::backends::rocprofiler_sdk::backend<
+        ::rocprofsys::rocprofiler_sdk::backend>;
 
-enum class counter_query_status
+enum class spm_status
 {
     success,
     skipped,
@@ -71,20 +77,13 @@ enum class counter_query_status
 
 struct counter_query_result
 {
-    counter_query_status   status   = counter_query_status::failed;
+    spm_status             status   = spm_status::failed;
     resolved_counter_vec_t counters = {};
-};
-
-enum class agent_config_status
-{
-    configured,
-    skipped,
-    failed,
 };
 
 struct agent_config_result
 {
-    agent_config_status             status = agent_config_status::failed;
+    spm_status                      status = spm_status::failed;
     rocprofiler_counter_config_id_t config = {};
 };
 
@@ -140,8 +139,6 @@ parse_device_id(std::string_view value)
 std::string
 parse_counter_name(std::string_view event)
 {
-    constexpr auto device_qualifier = std::string_view{ ":device=" };
-
     auto name = std::string{ event.substr(0, event.find(device_qualifier)) };
     utility::trim_str(name);
     return name;
@@ -150,8 +147,6 @@ parse_counter_name(std::string_view event)
 requested_counter_vec_t
 parse_requested_counters(const request& req)
 {
-    constexpr auto device_qualifier = std::string_view{ ":device=" };
-
     auto counters = requested_counter_vec_t{};
     counters.reserve(req.events.size());
     for(const auto& event : req.events)
@@ -171,22 +166,16 @@ parse_requested_counters(const request& req)
         auto device = parse_device_id(
             std::string_view{ trimmed_event }.substr(pos + device_qualifier.size()));
 
-        if(name.empty() || !device)
+        if(name.empty() || !device.has_value())
         {
             LOG_WARNING("Invalid SPM device qualifier '{}'. Expected COUNTER:device=N",
                         event);
             continue;
         }
 
-        counters.push_back({ std::move(name), *device });
+        counters.push_back({ std::move(name), device.value() });
     }
     return counters;
-}
-
-bool
-requested_on_device(const requested_counter& counter, std::uint64_t device_id)
-{
-    return !counter.device_id.has_value() || *counter.device_id == device_id;
 }
 
 bool
@@ -217,9 +206,11 @@ requested_counters_for_device(const requested_counter_vec_t& all_requested,
 {
     auto requested = requested_counter_vec_t{};
     requested.reserve(all_requested.size());
-    std::copy_if(
-        all_requested.begin(), all_requested.end(), std::back_inserter(requested),
-        [device_id](const auto& itr) { return requested_on_device(itr, device_id); });
+    std::copy_if(all_requested.begin(), all_requested.end(),
+                 std::back_inserter(requested), [device_id](const auto& itr) {
+                     return !itr.device_id.has_value() ||
+                            itr.device_id.value() == device_id;
+                 });
     return requested;
 }
 
@@ -257,51 +248,23 @@ make_counter_config_data(resolved_counter_vec_t& counters)
     return config_data;
 }
 
-std::string
-safe_str(const char* value)
-{
-    return value != nullptr ? std::string{ value } : std::string{};
-}
-
-std::vector<gpu_perf_counter::dimension_position>
-counter_dimensions(const rocprofiler_counter_record_dimension_instance_info_t& instance)
-{
-    auto dims = std::vector<gpu_perf_counter::dimension_position>{};
-    if(instance.dimensions == nullptr) return dims;
-    dims.reserve(instance.dimensions_count);
-
-    for(std::uint64_t i = 0; i < instance.dimensions_count; ++i)
-    {
-        const auto* dim = instance.dimensions[i];
-        if(dim == nullptr) continue;
-        dims.push_back({ safe_str(dim->dimension_name), dim->index });
-    }
-    return dims;
-}
-
 std::vector<trace_cache::info::spm_counter_name_entry>
-spm_counter_name_entries(const rocprofiler_counter_info_v1_t& info)
+spm_counter_name_entries(
+    rocprofiler_counter_id_t                               counter_id,
+    const std::vector<gpu_perf_counter::counter_metadata>& counter_details,
+    std::uint64_t                                          device_id)
 {
     auto entries = std::vector<trace_cache::info::spm_counter_name_entry>{};
-    auto name    = safe_str(info.name);
+    entries.reserve(counter_details.size());
 
-    if(info.dimensions_instances == nullptr) return entries;
-    entries.reserve(info.dimensions_instances_count);
-
-    for(std::uint64_t i = 0; i < info.dimensions_instances_count; ++i)
+    for(const auto& metadata : counter_details)
     {
-        const auto* instance = info.dimensions_instances[i];
-        if(instance == nullptr) continue;
-
-        auto metadata = gpu_perf_counter::counter_metadata{
-            instance->instance_id,      name,
-            safe_str(info.description), safe_str(info.block),
-            safe_str(info.expression),  info.is_constant != 0,
-            info.is_derived != 0,       counter_dimensions(*instance),
-        };
-
-        entries.push_back({ info.id.handle, instance->instance_id,
-                            gpu_perf_counter::make_qualified_name(metadata) });
+        auto counter_name = gpu_perf_counter::make_qualified_name(metadata);
+        auto track_name   = fmt::format("GPU SPM {} [{}]", counter_name, device_id);
+        auto track_key =
+            std::hash<std::string>{}(track_name + std::to_string(metadata.counter_id));
+        entries.push_back(
+            { counter_id.handle, metadata.counter_id, track_key, std::move(track_name) });
     }
 
     return entries;
@@ -321,46 +284,34 @@ query_supported_spm_counters(rocprofiler_agent_id_t                 agent_id,
     {
         LOG_WARNING("SPM is not supported on the architecture of device {} (agent {})",
                     device_id, agent_id.handle);
-        return { counter_query_status::skipped, {} };
+        return { spm_status::skipped, {} };
     }
 
     if(status != ROCPROFILER_STATUS_SUCCESS)
     {
         LOG_WARNING("Failed to query SPM counters for agent {}: {} ({})", agent_id.handle,
                     static_cast<int>(status), rocprofiler_get_status_string(status));
-        return { counter_query_status::failed, {} };
+        return { spm_status::failed, {} };
     }
 
     auto counters = resolved_counter_vec_t{};
     auto matched  = std::unordered_set<std::string>{};
     for(const auto& counter : supported)
     {
-        auto info = rocprofiler_counter_info_v1_t{};
-        status    = rocprofiler_query_counter_info(
-            counter, ROCPROFILER_COUNTER_INFO_VERSION_1, &info);
-        if(status != ROCPROFILER_STATUS_SUCCESS || info.name == nullptr ||
-           info.spm_support == 0)
-            continue;
+        auto details = counter_detail_backend::query_counter_details(counter);
+        if(details.empty()) continue;
 
-        auto name = std::string{ info.name };
+        auto name = details.front().name;
         if(requested_names.count(name) > 0)
         {
-            auto name_entries = spm_counter_name_entries(info);
-            if(name_entries.empty())
-            {
-                LOG_WARNING("Requested SPM counter '{}' has no SDK dimension-instance "
-                            "metadata for device {} (agent {})",
-                            name, device_id, agent_id.handle);
-                return { counter_query_status::skipped, {} };
-            }
-
+            auto name_entries = spm_counter_name_entries(counter, details, device_id);
             counters.push_back({ counter, std::move(name_entries) });
             matched.emplace(std::move(name));
         }
     }
 
     if(matched.size() == requested_names.size())
-        return { counter_query_status::success, std::move(counters) };
+        return { spm_status::success, std::move(counters) };
 
     for(const auto& name : requested_names)
     {
@@ -372,7 +323,7 @@ query_supported_spm_counters(rocprofiler_agent_id_t                 agent_id,
         }
     }
 
-    return { counter_query_status::skipped, {} };
+    return { spm_status::skipped, {} };
 }
 
 std::optional<rocprofiler_counter_config_id_t>
@@ -411,17 +362,14 @@ create_agent_spm_config(rocprofiler_agent_id_t agent_id, std::uint64_t device_id
 {
     const auto requested_names = requested_counter_names(requested);
     auto counters = query_supported_spm_counters(agent_id, requested_names, device_id);
-    if(counters.status == counter_query_status::skipped)
-        return { agent_config_status::skipped, {} };
-    if(counters.status == counter_query_status::failed)
-        return { agent_config_status::failed, {} };
+    if(counters.status != spm_status::success) return { counters.status, {} };
 
     if(!sample_interval_supported(agent_id, req))
     {
         LOG_WARNING("SPM sample interval {} SCLK cycles is not supported for device {} "
                     "(agent {})",
                     req.sample_interval, device_id, agent_id.handle);
-        return { agent_config_status::failed, {} };
+        return { spm_status::failed, {} };
     }
 
     auto config_data = make_counter_config_data(counters.counters);
@@ -431,10 +379,10 @@ create_agent_spm_config(rocprofiler_agent_id_t agent_id, std::uint64_t device_id
     {
         trace_cache::get_metadata_registry().set_spm_counter_names(
             static_cast<std::uint32_t>(device_id), std::move(config_data.name_entries));
-        return { agent_config_status::configured, *config };
+        return { spm_status::success, *config };
     }
 
-    return { agent_config_status::failed, {} };
+    return { spm_status::failed, {} };
 }
 
 bool
@@ -466,12 +414,12 @@ configure_agent_spm_configs(client_data& data, const request& req)
 
             auto config = create_agent_spm_config(
                 rocprofiler_agent_id_t{ agent.agent->handle }, device_id, req, requested);
-            if(config.status == agent_config_status::skipped)
+            if(config.status == spm_status::skipped)
             {
                 ++skipped_agents;
                 continue;
             }
-            if(config.status == agent_config_status::failed) return false;
+            if(config.status == spm_status::failed) return false;
 
             configs.emplace(rocprofiler_agent_id_t{ agent.agent->handle }, config.config);
             matched_agent = true;
@@ -569,7 +517,10 @@ spm_record_callback(const rocprofiler_spm_dispatch_counting_service_data_t* disp
     auto samples              = std::vector<trace_cache::spm_timestamp_sample>{};
     auto counter_info_indices = std::unordered_map<std::uint64_t, std::uint32_t>{};
     auto sample_indices       = std::unordered_map<std::uint64_t, size_t>{};
+    counters.reserve(record_count);
     samples.reserve(record_count);
+    counter_info_indices.reserve(record_count);
+    sample_indices.reserve(record_count);
     for(size_t i = 0; i < record_count; ++i)
     {
         if(records[i] == nullptr) continue;

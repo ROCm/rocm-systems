@@ -492,6 +492,12 @@ preset_registry::describe(std::string_view preset_name)
                 lines.emplace_back("ROCm SPM:        ON");
                 lines.push_back("ROCm SPM Events: " + events);
             }
+            if(spm.contains("sample_interval"))
+            {
+                auto interval =
+                    json_config::json_value_to_string(spm["sample_interval"]["value"]);
+                lines.push_back("SPM Interval:    " + interval);
+            }
         }
     }
 

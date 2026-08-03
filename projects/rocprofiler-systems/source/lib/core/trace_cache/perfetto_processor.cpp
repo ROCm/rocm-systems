@@ -36,7 +36,6 @@
 #include <utility>
 #include <vector>
 
-#include "library/rocprofiler-sdk/fwd.hpp"
 #include <rocprofiler-sdk/context.h>
 
 namespace rocprofsys::trace_cache
@@ -1431,10 +1430,8 @@ perfetto_processor_t::handle([[maybe_unused]] const spm_sample& _spm)
             continue;
         }
 
-        const auto& counter_name = name_info->get().counter_name;
-        const auto  track_name = fmt::format("GPU SPM {} [{}]", counter_name, device_id);
-        const auto  track_key  = std::hash<std::string>{}(
-            track_name + std::to_string(counter.counter_instance_id));
+        const auto& track_name = name_info->get().track_name;
+        const auto  track_key  = name_info->get().track_key;
 
         if(!counter_collection_track::exists(track_key))
             counter_collection_track::emplace(track_key, track_name, ROCM_COUNTER_UNIT);

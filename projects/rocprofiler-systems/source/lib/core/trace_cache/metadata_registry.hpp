@@ -176,10 +176,50 @@ struct spm_counter_name_entry
 {
     std::uint64_t counter_id;  ///< SDK counter ID; reserved for RocPD pmc_id mapping
     std::uint64_t counter_instance_id;  ///< SDK counter instance ID
-    std::string   counter_name;  ///< Qualified counter name, e.g. "SQ_WAVES[XCC=0]"
+    std::size_t   track_key;            ///< Perfetto counter track key
+    std::string   track_name;           ///< Perfetto track name
 };
 
 }  // namespace info
+
+template <typename EntryT>
+class indexed_counter_name_registry
+{
+public:
+    using entry_vec_t = std::vector<EntryT>;
+
+    template <typename KeySelector>
+    void set(std::uint32_t device_id, entry_vec_t entries, KeySelector&& get_key)
+    {
+        auto& index = m_index[device_id];
+        index.clear();
+        index.reserve(entries.size());
+        for(std::size_t i = 0; i < entries.size(); ++i)
+        {
+            index.emplace(get_key(entries[i]), i);
+        }
+        m_entries[device_id] = std::move(entries);
+    }
+
+    std::optional<std::reference_wrapper<const EntryT>> find(std::uint32_t device_id,
+                                                             std::uint64_t entry_id) const
+    {
+        auto idx_it = m_index.find(device_id);
+        if(idx_it == m_index.end()) return std::nullopt;
+
+        auto entry_it = idx_it->second.find(entry_id);
+        if(entry_it == idx_it->second.end()) return std::nullopt;
+
+        auto entries_it = m_entries.find(device_id);
+        if(entries_it == m_entries.end()) return std::nullopt;
+
+        return std::cref(entries_it->second[entry_it->second]);
+    }
+
+private:
+    std::map<std::uint32_t, entry_vec_t>                                    m_entries{};
+    std::map<std::uint32_t, std::unordered_map<std::uint64_t, std::size_t>> m_index{};
+};
 
 struct metadata_registry
 {
@@ -267,19 +307,9 @@ private:
         rocprofiler::sdk::get_callback_tracing_names<const char*>()
     };
 
-    // SDK PMC counter name ordering: device_id -> ordered name entries
-    std::map<std::uint32_t, std::vector<info::gpu_perf_counter_name_entry>>
-        m_gpu_perf_counter_counter_names{};
-    // O(1) lookup index: device_id -> counter_id -> index into the vector above
-    std::map<std::uint32_t, std::unordered_map<std::uint64_t, std::size_t>>
-        m_gpu_perf_counter_index{};
-
-    // SPM counter names: device_id -> ordered name entries
-    std::map<std::uint32_t, std::vector<info::spm_counter_name_entry>>
-        m_spm_counter_names{};
-    // O(1) lookup index: device_id -> counter_instance_id -> index into the vector above
-    std::map<std::uint32_t, std::unordered_map<std::uint64_t, std::size_t>>
-        m_spm_counter_index{};
+    indexed_counter_name_registry<info::gpu_perf_counter_name_entry>
+        m_gpu_perf_counter_names{};
+    indexed_counter_name_registry<info::spm_counter_name_entry> m_spm_counter_names{};
 
     using callback_rename_map_t =
         std::map<rocprofiler_tracing_operation_t, std::string_view>;

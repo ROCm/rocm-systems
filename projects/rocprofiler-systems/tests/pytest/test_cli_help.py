@@ -101,6 +101,8 @@ HELP_CASES = [
             r"--gpus",
             r"--ai-nics",
             r"-G, --gpu-events",
+            r"--spm-events",
+            r"--spm-sample-interval",
             r"--gpu",
             r"See also",
         ],
@@ -156,7 +158,9 @@ HELP_CASES = [
         id="explain_runtime-trace",
     ),
     pytest.param(
-        ["--explain=sys-trace"], _explain("sys-trace", "tracing"), id="explain_sys-trace"
+        ["--explain=sys-trace"],
+        _explain("sys-trace", "tracing"),
+        id="explain_sys-trace",
     ),
     pytest.param(
         ["--explain=trace-gpu"], _explain("trace-gpu", "gpu"), id="explain_trace-gpu"

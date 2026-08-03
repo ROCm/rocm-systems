@@ -36,7 +36,7 @@ struct request
 bool
 is_config_valid(const request&                  req,
                 const std::vector<std::string>& dispatch_counter_events,
-                const std::string&              device_counter_events);
+                const std::string&              gpu_perf_counter_events);
 
 /// Returns true when the SDK beta SPM opt-in condition does not block runtime setup.
 [[nodiscard]] bool

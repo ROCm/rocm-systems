@@ -330,4 +330,5 @@ TEST_F(preset_registry_test, describe_reports_spm_events_without_hw_counter_gate
     EXPECT_NE(desc.find("SPM trace preset"), std::string::npos);
     EXPECT_NE(desc.find("ROCm SPM:        ON"), std::string::npos);
     EXPECT_NE(desc.find("ROCm SPM Events: SQ_WAVES:device=0"), std::string::npos);
+    EXPECT_NE(desc.find("SPM Interval:    8192"), std::string::npos);
 }
