@@ -40,7 +40,7 @@ using namespace rocshmem;
  * op_type selects the put method:
  *   0 — put_nbi_single (4B immediate inline), spin on data value
  *   1 — put_nbi_single from symmetric buffer (4B), spin on data value
- *   2 — put_nbi_single (variable size) + atomic_nofetch_single for signal
+ *   2 — put_nbi_single (variable size) + atomic_add_single for signal
  *
  * Only thread 0 is active (w1z1 pattern).
  *****************************************************************************/
@@ -105,12 +105,12 @@ __global__ void QpPingPongTest(int loop, int skip, long long int *start_time,
         uint64_t expected = static_cast<uint64_t>(i + 1);
         if (pe == 0) {
           qp.put_nbi_single(remote_data_r, my_data_s, size, false);
-          qp.atomic_nofetch_single(remote_sig, 1);
+          qp.atomic_add_single(remote_sig, 1);
           while (uncached_load(my_sig) < expected) {}
         } else {
           while (uncached_load(my_sig) < expected) {}
           qp.put_nbi_single(remote_data_r, my_data_s, size, false);
-          qp.atomic_nofetch_single(remote_sig, 1);
+          qp.atomic_add_single(remote_sig, 1);
         }
       }
     }
