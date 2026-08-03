@@ -1700,29 +1700,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   }();
   // Read the section headers straight from the image rather than through all_sections(), which
   // drops SHT_NOBITS. A zero-initialized device global lives in .bss, so that omission would hide
-  // the most ordinary target there is. This must also agree with replace_text(): it resolves a data
-  // relocation by the same "allocated, not executable, contains the address" test, and reporting a
-  // builder it cannot resolve would turn a stale literal into a refused code object.
-  const auto addresses_loadable_data = [image = patcher.image_bytes()](uint64_t vaddr) {
-    if (image.size() < sizeof(Elf64_Ehdr))
-      return false;
-    Elf64_Ehdr ehdr{};
-    std::memcpy(&ehdr, image.data(), sizeof(ehdr));
-    if (ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
-        ehdr.e_shoff > image.size() - sizeof(Elf64_Shdr) ||
-        static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr) > image.size() - ehdr.e_shoff) {
-      return false;
-    }
-    for (uint16_t i = 0; i < ehdr.e_shnum; ++i) {
-      Elf64_Shdr shdr{};
-      std::memcpy(&shdr, image.data() + ehdr.e_shoff + i * sizeof(Elf64_Shdr), sizeof(shdr));
-      if ((shdr.sh_flags & SHF_ALLOC) == 0 || (shdr.sh_flags & SHF_EXECINSTR) != 0)
-        continue;
-      if (vaddr >= shdr.sh_addr && vaddr - shdr.sh_addr < shdr.sh_size)
-        return true;
-    }
-    return false;
-  };
+  // the most ordinary target there is. Both classification and replacement consume the patcher's
+  // validated table and shared resolver, so a reported data builder is always actionable.
+  const auto source_section_headers = patcher.section_headers();
 
   // Callees reached through a relocation-table dispatch are explicit analysis
   // roots whose live-in SGPRs are caller-supplied, not architected: a dispatched
@@ -3452,7 +3432,12 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           add == target_offset_by_source_offset.end()) {
         continue;
       }
-      if (addresses_loadable_data(builder.target_vaddr)) {
+      const bool target_is_in_text =
+          builder.target_vaddr >= text_vaddr && builder.target_vaddr - text_vaddr < text.size();
+      // When a data section ends exactly where .text begins, preserve the pre-endpoint-widening
+      // classification: an address inside source text remains a code target.
+      if (resolve_pc_relative_data_section_address(source_section_headers, builder.target_vaddr,
+                                                   text_vaddr, text.size())) {
         data_relocations.push_back(
             {.target_getpc_offset = getpc->second + target_delta,
              .target_literal_offset = add->second + target_delta + sizeof(uint32_t),
@@ -3464,7 +3449,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       // it and it would otherwise be copied verbatim with a literal measuring the distance the body
       // used to be at. Record it and resolve after every scope has been placed: the target may be
       // emitted by a different scope, so this scope's placement map cannot answer for it yet.
-      if (builder.target_vaddr < text_vaddr || builder.target_vaddr - text_vaddr >= text.size())
+      if (!target_is_in_text)
         continue;
       if (owned_by_recovered_builder(builder.source_address_add_offset))
         continue;
