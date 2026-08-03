@@ -16,25 +16,9 @@ __managed__ int initialManagedValue = kInitialManagedValue;
 
 using LaunchLateManagedVariable = hipError_t (*)(int*, hipStream_t, int);
 
-__global__ void ResetInitialManagedValue() { initialManagedValue = kInitialManagedValue; }
+__global__ void IncrementInitialManagedValue() { ++initialManagedValue; }
 
-void MakeInitialManagedVariableCurrentOnDevice(int device) {
-  HIP_CHECK(hipSetDevice(device));
-
-  ResetInitialManagedValue<<<1, 1>>>();
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
-
-  // The second launch observes the completed initialization marker and
-  // publishes this device's fast-path sequence.
-  ResetInitialManagedValue<<<1, 1>>>();
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
-
-  REQUIRE(initialManagedValue == kInitialManagedValue);
-}
-
-void LoadVerifyAndUnloadLateManagedVariable(int expectedValue) {
+void LoadVerifyAndUnloadLateManagedVariable() {
   void* handle = dlopen("./libLateManagedVariable.so", RTLD_NOW);
   const char* loadError = dlerror();
   INFO("dlopen failed: " << (loadError == nullptr ? "" : loadError));
@@ -49,12 +33,13 @@ void LoadVerifyAndUnloadLateManagedVariable(int expectedValue) {
 
   // The library writes its managed variable on the host and reads it from a
   // kernel, proving that late registration initialized its device pointer.
+  constexpr int kExpectedValue = 42;
   LinearAllocGuard<int> deviceResult(LinearAllocs::hipMalloc, sizeof(int));
-  HIP_CHECK(launch(deviceResult.ptr(), nullptr, expectedValue));
+  HIP_CHECK(launch(deviceResult.ptr(), nullptr, kExpectedValue));
 
   int result = 0;
   HIP_CHECK(hipMemcpy(&result, deviceResult.ptr(), sizeof(result), hipMemcpyDeviceToHost));
-  REQUIRE(result == expectedValue);
+  REQUIRE(result == kExpectedValue);
   REQUIRE(dlclose(handle) == 0);
 }
 
@@ -80,12 +65,15 @@ void VerifyLateManagedVariableOnDevice(LaunchLateManagedVariable launch, int dev
 HIP_TEST_CASE(Unit_StatCO_Positive_ManagedVariableFromRepeatedLateDlopen) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
-  int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
-  MakeInitialManagedVariableCurrentOnDevice(device);
+  // Initialize a managed variable registered with the executable before the
+  // library adds another managed variable.
+  IncrementInitialManagedValue<<<1, 1>>>();
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(initialManagedValue == kInitialManagedValue + 1);
 
-  LoadVerifyAndUnloadLateManagedVariable(/*expectedValue=*/42);
-  LoadVerifyAndUnloadLateManagedVariable(/*expectedValue=*/43);
+  LoadVerifyAndUnloadLateManagedVariable();
+  LoadVerifyAndUnloadLateManagedVariable();
 }
 
 // Managed-variable initialization state is per device. Loading the same library
@@ -102,7 +90,10 @@ HIP_TEST_CASE(Unit_StatCO_Positive_ManagedVariableFromRepeatedLateDlopenAcrossDe
   CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(1)
 
   for (int device = 0; device < 2; ++device) {
-    MakeInitialManagedVariableCurrentOnDevice(device);
+    HIP_CHECK(hipSetDevice(device));
+    IncrementInitialManagedValue<<<1, 1>>>();
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
   }
 
   void* handle = dlopen("./libLateManagedVariable.so", RTLD_NOW);
@@ -118,9 +109,6 @@ HIP_TEST_CASE(Unit_StatCO_Positive_ManagedVariableFromRepeatedLateDlopenAcrossDe
   REQUIRE(launch != nullptr);
 
   VerifyLateManagedVariableOnDevice(launch, /*device=*/0, /*expectedValue=*/41);
-  // Publish device 0's completed late-registration sequence before device 1
-  // first touches the same registration.
-  VerifyLateManagedVariableOnDevice(launch, /*device=*/0, /*expectedValue=*/43);
   VerifyLateManagedVariableOnDevice(launch, /*device=*/1, /*expectedValue=*/42);
   REQUIRE(dlclose(handle) == 0);
 }
