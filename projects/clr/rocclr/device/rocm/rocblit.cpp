@@ -3268,7 +3268,13 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
 
   if (!result) {
     if (requireSDMA) {
-      LogError("SDMA copy failed and shader fallback is not permitted");
+      // Allow shader fallback when SDMA fails due to resource exhaustion (e.g., limited
+      // SDMA engines when GPU_ENABLE_PAL=0). This fixes hipMemcpyDeviceToDeviceNoCU failures.
+      LogWarning("SDMA copy failed, falling back to shader path");
+      result =
+          shaderCopyBuffer(reinterpret_cast<address>(dstMemory.virtualAddress()),
+                           reinterpret_cast<address>(srcMemory.virtualAddress()), dstOrigin,
+                           srcOrigin, sizeIn, entire, blitWg, copyMetadata, !copyMetadata.isAsync_);
     } else if (DEBUG_CLR_DISABLE_FALLBACK) {
       guarantee(false, "DMA copy failed and fallback path is disabled");
     } else {

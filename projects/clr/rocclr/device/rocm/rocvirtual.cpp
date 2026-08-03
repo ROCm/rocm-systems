@@ -3657,10 +3657,24 @@ void VirtualGPU::SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) {
   }
 
   if (!blitMgr().WriteBufferBatch(write_ops)) {
-    LogError("SubmitBatchWriteMemory: Batch write failed!");
-    cmd.setStatus(CL_OUT_OF_RESOURCES);
-    profilingEnd();
-    return;
+    // Fallback to individual copy operations when batch fails (e.g., SDMA resource exhaustion)
+    LogWarning("SubmitBatchWriteMemory: Batch write failed, falling back to individual copies");
+    bool all_success = true;
+    for (const amd::BatchWriteMemoryOp& op : write_ops) {
+      device::Memory* dst_mem = dev().getRocMemory(op.dst_memory);
+      amd::Coord3D dst_origin(op.dst_offset);
+      amd::Coord3D size(op.size);
+      if (!blitMgr().writeBuffer(op.src_host, *dst_mem, dst_origin, size, false, op.metadata)) {
+        LogError("SubmitBatchWriteMemory: Individual copy fallback failed for operation");
+        all_success = false;
+        break;
+      }
+    }
+    if (!all_success) {
+      cmd.setStatus(CL_OUT_OF_RESOURCES);
+      profilingEnd();
+      return;
+    }
   }
 
   if (!amd::IS_HIP) {
@@ -3689,10 +3703,24 @@ void VirtualGPU::SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) {
   }
 
   if (!blitMgr().ReadBufferBatch(read_ops)) {
-    LogError("SubmitBatchReadMemory: Batch read failed!");
-    cmd.setStatus(CL_OUT_OF_RESOURCES);
-    profilingEnd();
-    return;
+    // Fallback to individual copy operations when batch fails (e.g., SDMA resource exhaustion)
+    LogWarning("SubmitBatchReadMemory: Batch read failed, falling back to individual copies");
+    bool all_success = true;
+    for (const amd::BatchReadMemoryOp& op : read_ops) {
+      device::Memory* src_mem = dev().getRocMemory(op.src_memory);
+      amd::Coord3D src_origin(op.src_offset);
+      amd::Coord3D size(op.size);
+      if (!blitMgr().readBuffer(*src_mem, op.dst_host, src_origin, size, false, op.metadata)) {
+        LogError("SubmitBatchReadMemory: Individual copy fallback failed for operation");
+        all_success = false;
+        break;
+      }
+    }
+    if (!all_success) {
+      cmd.setStatus(CL_OUT_OF_RESOURCES);
+      profilingEnd();
+      return;
+    }
   }
 
   profilingEnd();
