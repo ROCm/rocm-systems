@@ -236,7 +236,7 @@ table TopologyDef {
 /// Top-level simulation configuration.
 table SimulationConfig {
   max_ticks: uint64;             // Maximum simulation ticks before halting.
-  num_threads: uint32;           // Number of simulation threads (partitions).
+  num_threads: uint32;           // Number of simulation engine partitions (one per XCD when partitioned).
   exec_mode: string;             // Execution mode: "functional" (default) or "clocked".
   vm: VirtualMachineConfig;      // Virtual machine hardware model. Omit for dbt_guest-only configs.
   topology: TopologyDef;         // Declarative topology. Omit for dbt_guest-only configs.
