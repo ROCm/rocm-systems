@@ -299,7 +299,7 @@ TEST_F(DdaFabricScratchTest, AllReduce_LL128_EffectiveCapShrinksWithRanks)
     // A message at the advertised cap (kDdaLL128ArMaxBytes = 1 GiB) is eligible
     // against the real buffer at a low rank count but not at kDdaMaxNranks,
     // because AR-LL128 scratch scales with nRanks * message.
-    const size_t oneGiB = static_cast<size_t>(1) << 30;
+    const size_t oneGiB = kLL128ArMaxBytes; // 1 GiB, pinned to kDdaLL128ArMaxBytes
     const size_t count  = oneGiB / sizeof(float);
     mockComm_.comm.ddaScratchBytes = kAmpleScratch;
 

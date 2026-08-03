@@ -36,7 +36,7 @@
 // symbols, so the producer-coverage assertion runs in Release CI too.
 
 #include "common/DdaFabricFootprints.hpp" // shared footprint mirrors
-#include "dda_init_detail.h" // ddaLLEpochCount, kDdaFabricLLArMaxBlocks, kDdaLLAgMaxBlocksPerPeer, DDA_FABRIC_MAXBLOCKS, DDA_FABRIC_BUFFER_SIZE
+#include "dda_init_detail.h" // epoch/sizing constants + DDA_FABRIC_MAXBLOCKS/BUFFER_SIZE
 #include "fabric_gpu_barrier.h" // meta::comms::kDdaMaxNranks
 
 // Real launcher constants, to pin every DdaFabricFootprints.hpp mirror at compile
@@ -51,9 +51,10 @@
 #include "algorithms/all_gather/all_gather_dda_fabric_ll.h"         // kDdaLLAgMaxPerRankBytes
 #include "algorithms/alltoall/alltoall_dda_fabric_ll.h"            // kDdaLLA2AMaxPerChunkBytes
 #include "algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll.h" // kDdaLLRsMaxBytes
-#include "algorithms/all_gather/all_gather_dda_fabric_ll128.h"      // kDdaLL128AgMaxPerRankBytes, kDdaLL128AgSlotStrideLines
-#include "algorithms/alltoall/alltoall_dda_fabric_ll128.h"          // kDdaLL128A2AMaxPerChunkBytes
-#include "algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll128.h" // kDdaLL128RsMaxBytes
+#include "algorithms/all_reduce/all_reduce_dda_fabric_ll128.h"      // kDdaLL128ArMaxBytes
+#include "algorithms/all_gather/all_gather_dda_fabric_ll128.h"      // kDdaLL128Ag{MaxPerRankBytes,SlotStrideLines}
+#include "algorithms/alltoall/alltoall_dda_fabric_ll128.h"          // kDdaLL128A2A{MaxPerChunkBytes,SlotStrideLines}
+#include "algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll128.h" // kDdaLL128Rs{MaxBytes,SlotStrideLines}
 
 #include "gtest/gtest.h"
 
@@ -66,12 +67,13 @@ namespace RcclUnitTesting
 {
 
 // Compile-time tie between every footprint mirror and the real launcher
-// constants. All independently-declared per-tier caps are asserted (not just one
-// per family), plus the two derived slot strides -- a correct cap with a
-// redefined stride would still yield a wrong footprint.
+// constants: all eight per-tier caps AND all seven slot strides are asserted
+// (not one per family) -- a correct cap with a redefined stride would still
+// yield a wrong footprint, so each independently-declared constant is pinned.
 static_assert(kLLPacketBytes == sizeof(meta::comms::LLPacket16), "LLPacket16 size mirror drift");
 static_assert(kLL128LineBytes == sizeof(meta::comms::LLLine128), "LLLine128 size mirror drift");
 static_assert(kLL128DataElems == static_cast<size_t>(meta::comms::kDdaLL128DataElems), "LL128 data-elems mirror drift");
+// Per-tier caps (4 LL + 3 fixed LL128 + AR-LL128).
 static_assert(kLLTierMaxBytes == meta::comms::kDdaLLArMaxBytes, "LL AR cap mirror drift");
 static_assert(kLLTierMaxBytes == meta::comms::kDdaLLAgMaxPerRankBytes, "LL AG cap mirror drift");
 static_assert(kLLTierMaxBytes == meta::comms::kDdaLLA2AMaxPerChunkBytes, "LL A2A cap mirror drift");
@@ -79,9 +81,18 @@ static_assert(kLLTierMaxBytes == meta::comms::kDdaLLRsMaxBytes, "LL RS cap mirro
 static_assert(kLL128TierMaxBytes == meta::comms::kDdaLL128AgMaxPerRankBytes, "LL128 AG cap mirror drift");
 static_assert(kLL128TierMaxBytes == meta::comms::kDdaLL128A2AMaxPerChunkBytes, "LL128 A2A cap mirror drift");
 static_assert(kLL128TierMaxBytes == meta::comms::kDdaLL128RsMaxBytes, "LL128 RS cap mirror drift");
-static_assert(kLLTierMaxBytes / 8 == meta::comms::kDdaLLArSlotStridePkts, "LL slot-stride mirror drift");
+static_assert(kLL128ArMaxBytes == meta::comms::kDdaLL128ArMaxBytes, "LL128 AR cap mirror drift");
+// Slot strides (4 LL packets + 3 LL128 lines).
+static_assert(kLLTierMaxBytes / 8 == meta::comms::kDdaLLArSlotStridePkts, "LL AR slot-stride mirror drift");
+static_assert(kLLTierMaxBytes / 8 == meta::comms::kDdaLLAgSlotStridePkts, "LL AG slot-stride mirror drift");
+static_assert(kLLTierMaxBytes / 8 == meta::comms::kDdaLLA2ASlotStridePkts, "LL A2A slot-stride mirror drift");
+static_assert(kLLTierMaxBytes / 8 == meta::comms::kDdaLLRsSlotStridePkts, "LL RS slot-stride mirror drift");
 static_assert(ddaLL128LinesForBytes(kLL128TierMaxBytes) == meta::comms::kDdaLL128AgSlotStrideLines,
-              "LL128 slot-stride mirror drift");
+              "LL128 AG slot-stride mirror drift");
+static_assert(ddaLL128LinesForBytes(kLL128TierMaxBytes) == meta::comms::kDdaLL128A2ASlotStrideLines,
+              "LL128 A2A slot-stride mirror drift");
+static_assert(ddaLL128LinesForBytes(kLL128TierMaxBytes) == meta::comms::kDdaLL128RsSlotStrideLines,
+              "LL128 RS slot-stride mirror drift");
 
 namespace
 {
@@ -93,10 +104,10 @@ using nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer;
 // Sentinel meaning "restamp the whole array" (the production epochLen).
 constexpr int kFullWriteBack = -1;
 
-// Number of shared epoch cells, from the real sizing function.
-size_t epochCells(int nRanks, int arMaxBlocks = DDA_FABRIC_MAXBLOCKS)
+// Number of shared epoch cells, from the real sizing function (fabric MAXBLOCKS).
+size_t epochCells(int nRanks)
 {
-    return ddaLLEpochCount(nRanks, arMaxBlocks);
+    return ddaLLEpochCount(nRanks, DDA_FABRIC_MAXBLOCKS);
 }
 
 // Per-block LL flag from its epoch cell:  f = cell + 1; if (f == 0) f = 2.
@@ -454,7 +465,9 @@ TEST_P(DdaFabricEpochTest, NegativeControl_PeerBeyondNRanksBreaksUniformity)
     }
     for (int b = 0; b < total; ++b)
     {
-        if (b / bpp < nRanks) { // peer = flatBlockId / bpp; peer >= nRanks returns early
+        // peer = flatBlockId / bpp; peer >= nRanks returns early (skips write-back)
+        if (b / bpp < nRanks)
+        {
             for (int e = b; e < static_cast<int>(bad.size()); e += total)
             {
                 bad[e] = flag[b];

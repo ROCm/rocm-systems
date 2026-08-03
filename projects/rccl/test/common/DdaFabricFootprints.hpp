@@ -8,13 +8,16 @@
 
 // DDA fabric scratch footprints, mirrored from the launcher headers so tests can
 // compute expected sizes without pulling the device kernel headers everywhere.
-// Every mirror below (all seven per-tier caps, both slot strides, the two sizeof
-// values and the data-elems count) is pinned to its real constant by a
+// Every mirror below (all eight per-tier caps, all seven slot strides, the two
+// sizeof values and the data-elems count) is pinned to its real constant by a
 // static_assert in DdaFabricEpochTests.cpp, which builds in the Release-capable
 // rccl-UnitTestsFixtures target -- so a production stride/cap change fails that
-// build rather than silently passing. The only piece not pinnable that way is the
-// literal 2 bank factor, since ddaLL*ScratchSize are static-inline in .cu TUs.
-// Kept lightweight (only <cstddef>) so most TUs need not pull the kernel headers.
+// build rather than silently passing. What is NOT pinnable that way: the literal
+// 2 bank factor, the footprint formula shape (2*nRanks*stride*elemSize), and the
+// ddaLL128ArSlotLines identity -- all eight ddaLL*ScratchSize functions are
+// static-inline in .cu TUs, so those are pinned only behaviorally by the
+// exact-boundary tests in DdaFabricScratchTests.cpp (Debug target). Kept
+// lightweight (only <cstddef>) so most TUs need not pull the kernel headers.
 // Mirror sources:
 //   kLLTierMaxBytes    : kDdaLLArMaxBytes / kDdaLLAgMaxPerRankBytes /
 //                        kDdaLLA2AMaxPerChunkBytes / kDdaLLRsMaxBytes  (all 128 KiB)
@@ -29,8 +32,9 @@
 namespace RcclUnitTesting
 {
 
-constexpr size_t kLLTierMaxBytes    = 131072; // 128 KiB LL per-tier cap
-constexpr size_t kLL128TierMaxBytes = 524288; // 512 KiB LL128 AG/A2A/RS per-tier cap
+constexpr size_t kLLTierMaxBytes    = 131072;     // 128 KiB LL per-tier cap
+constexpr size_t kLL128TierMaxBytes = 524288;     // 512 KiB LL128 AG/A2A/RS per-tier cap
+constexpr size_t kLL128ArMaxBytes   = 1073741824; // 1 GiB LL128 AllReduce cap (message-dependent tier)
 constexpr size_t kLL128DataElems    = 15;     // payload words per 128B line
 constexpr size_t kLLPacketBytes     = 16;     // sizeof(LLPacket16)
 constexpr size_t kLL128LineBytes    = 128;    // sizeof(LLLine128)
