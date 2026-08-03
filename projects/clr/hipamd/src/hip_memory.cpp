@@ -889,6 +889,9 @@ hipError_t hipMemcpy_common(void* dst, const void* src, size_t sizeBytes, hipMem
   if (hip_stream == nullptr) {
     return hipErrorInvalidValue;
   }
+
+  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
+
   return ihipMemcpy(dst, src, sizeBytes, kind, *hip_stream);
 }
 
@@ -920,6 +923,8 @@ hipError_t hipMemcpyWithStream(void* dst, const void* src, size_t sizeBytes, hip
   if (hip_stream == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
 
   HIP_RETURN_DURATION(ihipMemcpy(dst, src, sizeBytes, kind, *hip_stream, false));
 }
@@ -1533,6 +1538,9 @@ hipError_t hipMemcpyAsync_common(void* dst, const void* src, size_t sizeBytes, h
   if (hip_stream == nullptr) {
     return hipErrorInvalidValue;
   }
+
+  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
+
   return ihipMemcpy(dst, src, sizeBytes, kind, *hip_stream, true);
 }
 
@@ -1700,6 +1708,9 @@ hipError_t hipMemcpyHtoD(hipDeviceptr_t dstDevice, const void* srcHost, size_t B
   if (stream == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(stream);
+
   HIP_RETURN_DURATION(ihipMemcpy(dstDevice, srcHost, ByteCount, hipMemcpyHostToDevice, *stream));
 }
 
@@ -1710,6 +1721,9 @@ hipError_t hipMemcpyDtoH(void* dstHost, hipDeviceptr_t srcDevice, size_t ByteCou
   if (stream == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(stream);
+
   HIP_RETURN_DURATION(ihipMemcpy(dstHost, srcDevice, ByteCount, hipMemcpyDeviceToHost, *stream));
 }
 
@@ -1720,6 +1734,9 @@ hipError_t hipMemcpyDtoD(hipDeviceptr_t dstDevice, hipDeviceptr_t srcDevice, siz
   if (stream == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(stream);
+
   HIP_RETURN_DURATION(
       ihipMemcpy(dstDevice, srcDevice, ByteCount, hipMemcpyDeviceToDevice, *stream));
 }
@@ -1753,6 +1770,9 @@ hipError_t hipMemcpyHtoDAsync(hipDeviceptr_t dstDevice, const void* srcHost, siz
   if (hip_stream == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
+
   HIP_RETURN_DURATION(ihipMemcpy(dstDevice, srcHost, ByteCount, kind, *hip_stream, true));
 }
 
@@ -1772,6 +1792,9 @@ hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t dstDevice, hipDeviceptr_t srcDevice
   if (hip_stream == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
+
   HIP_RETURN_DURATION(ihipMemcpy(dstDevice, srcDevice, ByteCount, kind, *hip_stream, true));
 }
 
@@ -1791,6 +1814,9 @@ hipError_t hipMemcpyDtoHAsync(void* dstHost, hipDeviceptr_t srcDevice, size_t By
   if (hip_stream == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
+
   HIP_RETURN_DURATION(ihipMemcpy(dstHost, srcDevice, ByteCount, kind, *hip_stream, true));
 }
 
@@ -2427,23 +2453,15 @@ inline hipError_t ihipMemcpyCmdEnqueue(amd::Command* command, bool isAsync = fal
   return status;
 }
 
-hipError_t ihipMemcpyParam3D(const HIP_MEMCPY3D* pCopy, hipStream_t stream, bool isAsync = false) {
+hipError_t ihipMemcpyParam3D(const HIP_MEMCPY3D& pCopy, hip::Stream& hip_stream,
+                             bool isAsync = false) {
   hipError_t status;
-  if (pCopy == nullptr) {
-    return hipErrorInvalidValue;
-  }
-  getStreamPerThread(stream);
   hipMemoryType srcMemoryType;
   hipMemoryType dstMemoryType;
-  ihipCopyMemParamSet(pCopy, srcMemoryType, dstMemoryType);
-
-  hip::Stream* hip_stream = hip::getStream(stream);
-  if (hip_stream == nullptr) {
-    return hipErrorInvalidValue;
-  }
+  ihipCopyMemParamSet(&pCopy, srcMemoryType, dstMemoryType);
 
   amd::Command* command = nullptr;
-  status = ihipGetMemcpyParam3DCommand(command, pCopy, hip_stream);
+  status = ihipGetMemcpyParam3DCommand(command, &pCopy, &hip_stream);
   if (command != nullptr) {
     if (status != hipSuccess) {
       return status;
@@ -2451,24 +2469,35 @@ hipError_t ihipMemcpyParam3D(const HIP_MEMCPY3D* pCopy, hipStream_t stream, bool
     // Transfers from device memory to pageable host memory and transfers from any
     // host memory to any host memory are synchronous with respect to the host.
     // Device to Device copies do not need to host side synchronization.
-    if (dstMemoryType == hipMemoryTypeHost || ((pCopy->srcMemoryType == hipMemoryTypeHost) &&
-                                               (pCopy->dstMemoryType == hipMemoryTypeHost))) {
+    if (dstMemoryType == hipMemoryTypeHost || ((pCopy.srcMemoryType == hipMemoryTypeHost) &&
+                                               (pCopy.dstMemoryType == hipMemoryTypeHost))) {
       isAsync = false;
-    } else if ((pCopy->srcMemoryType == hipMemoryTypeDevice) &&
-               (pCopy->dstMemoryType == hipMemoryTypeDevice)) {
+    } else if ((pCopy.srcMemoryType == hipMemoryTypeDevice) &&
+               (pCopy.dstMemoryType == hipMemoryTypeDevice)) {
       // Device to Device copies dont need to wait for host synchronization
       isAsync = true;
     }
-    return ihipMemcpyCmdEnqueue(command, isAsync, hip_stream);
+    return ihipMemcpyCmdEnqueue(command, isAsync, &hip_stream);
   }
 
   return status;
 }
 
 hipError_t ihipMemcpyParam2D(const hip_Memcpy2D* pCopy, hipStream_t stream, bool isAsync = false) {
+  if (pCopy == nullptr) {
+    return hipErrorInvalidValue;
+  }
+  getStreamPerThread(stream);
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
+
   HIP_MEMCPY3D desc = hip::getDrvMemcpy3DDesc(*pCopy);
 
-  return ihipMemcpyParam3D(&desc, stream, isAsync);
+  return ihipMemcpyParam3D(desc, *hip_stream, isAsync);
 }
 
 hipError_t ihipMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width,
@@ -2778,6 +2807,14 @@ hipError_t ihipMemcpy3D_validate(const hipMemcpy3DParms* p) {
     return hipErrorInvalidValue;
   }
 
+  if (static_cast<uint32_t>(p->kind) > hipMemcpyDefault && p->kind != hipMemcpyDeviceToDeviceNoCU) {
+    return hipErrorInvalidMemcpyDirection;
+  }
+
+  return hipSuccess;
+}
+
+hipError_t ihipMemcpy3D_validate_memory(const hipMemcpy3DParms* p) {
   if (p->dstArray == nullptr && p->srcArray == nullptr) {
     if ((p->dstPtr.pitch != 0 && (p->extent.width + p->dstPos.x > p->dstPtr.pitch)) ||
         (p->srcPtr.pitch != 0 && (p->extent.width + p->srcPos.x > p->srcPtr.pitch))) {
@@ -2823,9 +2860,6 @@ hipError_t ihipMemcpy3D_validate(const hipMemcpy3DParms* p) {
     }
   }
 
-  if (static_cast<uint32_t>(p->kind) > hipMemcpyDefault && p->kind != hipMemcpyDeviceToDeviceNoCU) {
-    return hipErrorInvalidMemcpyDirection;
-  }
   // If src and dst ptr are null then kind must be either h2h or def.
   if (!IsHtoHMemcpyValid(p->dstPtr.ptr, p->srcPtr.ptr, p->kind)) {
     return hipErrorInvalidValue;
@@ -2844,9 +2878,22 @@ hipError_t ihipMemcpy3D(const hipMemcpy3DParms* p, hipStream_t stream, bool isAs
   if (status != hipSuccess) {
     return status;
   }
+
+  getStreamPerThread(stream);
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
+
+  status = ihipMemcpy3D_validate_memory(p);
+  if (status != hipSuccess) {
+    return status;
+  }
   const HIP_MEMCPY3D desc = hip::getDrvMemcpy3DDesc(*p);
 
-  return ihipMemcpyParam3D(&desc, stream, isAsync);
+  return ihipMemcpyParam3D(desc, *hip_stream, isAsync);
 }
 
 hipError_t hipMemcpy3D_common(const hipMemcpy3DParms* p, hipStream_t stream = nullptr) {
@@ -2884,13 +2931,30 @@ hipError_t hipMemcpy3DAsync_spt(const hipMemcpy3DParms* p, hipStream_t stream) {
 hipError_t hipDrvMemcpy3D(const HIP_MEMCPY3D* pCopy) {
   HIP_INIT_API(hipDrvMemcpy3D, pCopy);
   CHECK_STREAM_CAPTURING();
-  HIP_RETURN_DURATION(ihipMemcpyParam3D(pCopy, nullptr));
+  if (pCopy == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  hip::Stream* hip_stream = hip::getStream(nullptr);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
+  HIP_RETURN_DURATION(ihipMemcpyParam3D(*pCopy, *hip_stream));
 }
 
 hipError_t hipDrvMemcpy3DAsync(const HIP_MEMCPY3D* pCopy, hipStream_t stream) {
   HIP_INIT_API(hipDrvMemcpy3DAsync, pCopy, stream);
   CHECK_STREAM_DETACHED_API(stream);
-  HIP_RETURN_DURATION(ihipMemcpyParam3D(pCopy, stream, true));
+  if (pCopy == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  getStreamPerThread(stream);
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
+  HIP_RETURN_DURATION(ihipMemcpyParam3D(*pCopy, *hip_stream, true));
 }
 
 // ================================================================================================
@@ -3298,12 +3362,16 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
 
   if (failIdx != nullptr) *failIdx = SIZE_MAX;
 
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
+
   // Call internal batch implementation
-  hipError_t status = ihipMemcpyBatch(
-      dsts, srcs, sizes, count,
-      attrs, attrsIdxs, numAttrs,
-      *hip::getStream(stream),
-      true);
+  hipError_t status =
+      ihipMemcpyBatch(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs, *hip_stream, true);
 
   HIP_RETURN(status);
 }
@@ -3425,6 +3493,13 @@ hipError_t ihipMemset(void* dst, int64_t value, size_t valueSize, size_t sizeByt
     return hipErrorInvalidValue;
   }
 
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
+
   size_t offset = 0;
   amd::Memory* memObj = getMemoryObject(hip::getCurrentDevice(), dst, offset);
   if (memObj == nullptr) {
@@ -3447,10 +3522,7 @@ hipError_t ihipMemset(void* dst, int64_t value, size_t valueSize, size_t sizeByt
       isAsync = true;
     }
   }
-  hip::Stream* hip_stream = hip::getStream(stream);
-  if (hip_stream == nullptr) {
-    return hipErrorOutOfMemory;
-  }
+
   amd::Command* command = nullptr;
   hip_error = ihipMemsetCommand(command, memObj, value, valueSize, sizeBytes, hip_stream, offset);
   if (hip_error != hipSuccess) {
@@ -3609,6 +3681,13 @@ hipError_t ihipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent
     // sizeBytes is zero hence returning early as nothing to be set
     return hipSuccess;
   }
+
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    return hipErrorInvalidValue;
+  }
+  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
+
   size_t offset = 0;
   amd::Memory* memory = getMemoryObject(hip::getCurrentDevice(), pitchedDevPtr.ptr, offset, sizeBytes);
   if (memory == nullptr) {
@@ -3629,7 +3708,6 @@ hipError_t ihipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent
       isAsync = true;
     }
   }
-  hip::Stream* hip_stream = hip::getStream(stream);
   amd::Command* command = nullptr;
   status = ihipMemset3DCommand(command, pitchedDevPtr, memory, offset, value, extent, hip_stream,
                                elementSize);
@@ -4633,10 +4711,18 @@ hipError_t hipFreeHost(void* ptr) {
 
 hipError_t hipDrvMemcpy2DUnaligned(const hip_Memcpy2D* pCopy) {
   HIP_INIT_API(hipDrvMemcpy2DUnaligned, pCopy);
+  if (pCopy == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  hip::Stream* hip_stream = hip::getStream(nullptr);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  HIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
 
   HIP_MEMCPY3D desc = hip::getDrvMemcpy3DDesc(*pCopy);
 
-  HIP_RETURN(ihipMemcpyParam3D(&desc, nullptr));
+  HIP_RETURN(ihipMemcpyParam3D(desc, *hip_stream));
 }
 
 hipError_t ihipMipmapArrayCreate(hipMipmappedArray_t* mipmapped_array_pptr,
