@@ -41,7 +41,7 @@ namespace meta::comms {
 // tier that needs its own capacity has to also give the pair a bank stride that
 // still agrees.
 constexpr size_t kDdaLLArTwoShotMaxBytes = kDdaLLArMaxBytes;
-constexpr size_t kDdaLLArTwoShotSlotStridePkts = kDdaLLArSlotStridePkts;
+constexpr size_t kDdaLLArTwoShotSlotStridePkts = kDdaLLArSlotStridePkts / 2;
 
 // LL two-shot all-reduce kernel. 1D grid over packets (8B payload each).
 //
@@ -70,6 +70,7 @@ __launch_bounds__(512)
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
   const size_t nPk = bytes >> 3;           // 8 payload bytes per packet
+  const size_t nPk_rank = nPk / nRanks;
   const size_t slot = kDdaLLArTwoShotSlotStridePkts;
 
   // Flat block id + total launched blocks. tid 0 reads our own epoch cell (all
@@ -90,11 +91,11 @@ __launch_bounds__(512)
   const size_t gtid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
   const size_t stride = (size_t)gridDim.x * blockDim.x;
 
-  const uint32_t* in = reinterpret_cast<const uint32_t*>(sendbuff);
-  uint32_t* out = reinterpret_cast<uint32_t*>(recvbuff);
+  const uint32_t* in = reinterpret_cast<const uint32_t*>(sendbuff) + selfRank * nPk_rank * 2;
+  uint32_t* out = reinterpret_cast<uint32_t*>(recvbuff) + selfRank * nPk_rank * 2;
 
   // Phase 1: publish my payload into every peer's slot[selfRank].
-  for (size_t pk = gtid; pk < nPk; pk += stride) {
+  for (size_t pk = gtid; pk < nPk_rank; pk += stride) {
     const uint32_t d0 = in[2 * pk];
     const uint32_t d1 = in[2 * pk + 1];
 
@@ -108,7 +109,7 @@ __launch_bounds__(512)
 
   // Phase 2: poll my slots for the other ranks, reduce with my own data.
   LLPacket16* myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
-  for (size_t pk = gtid; pk < nPk; pk += stride) {
+  for (size_t pk = gtid; pk < nPk_rank; pk += stride) {
     uint32_t acc0 = in[2 * pk];
     uint32_t acc1 = in[2 * pk + 1];
     for (int r = 1; r < nRanks; ++r) {
