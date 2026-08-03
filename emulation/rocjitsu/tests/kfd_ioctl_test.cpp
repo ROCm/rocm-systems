@@ -1295,15 +1295,19 @@ TEST(RemoteDriverDbgSnapshotTest, NullSnapshotBufferIsNeverWrittenThrough) {
 
 // A zero entry_size reserves no inline tail whatever the device count is, so
 // the transmitted num_devices must survive the request clamp untouched.
-// num_devices(IN) is what the driver clamps its fill count against
-// (DbgTrapDeviceSnapshotZeroStrideReportsCountAndWritesNothing pins the local
-// verdict: report the total, write nothing), so rewriting it to zero here would
-// hand the daemon a different request than the caller made.
+// num_devices(IN) is what the driver clamps its fill count against, so
+// rewriting it to zero would hand the daemon a different request than the
+// caller made -- the count-only probe rather than a fill of zero-byte entries.
+//
+// The stand-in answers the way the driver does, which
+// DbgTrapDeviceSnapshotZeroStrideReportsCountAndWritesNothing pins locally:
+// success, the device total reported, entry_size(OUT) zero, nothing written.
 TEST(RemoteDriverDbgSnapshotTest, ZeroStrideSnapshotKeepsTheRequestedDeviceCount) {
   int sv[2];
   ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
 
   constexpr uint32_t kRequested = 1;
+  constexpr uint32_t kDeviceTotal = 1;
   constexpr uint8_t kSentinel = 0xAB;
   const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
 
@@ -1313,9 +1317,11 @@ TEST(RemoteDriverDbgSnapshotTest, ZeroStrideSnapshotKeepsTheRequestedDeviceCount
 
   std::jthread server([&, server_fd = sv[1]] {
     const CloseOnScopeExit closer{server_fd};
-    serve_one_ioctl_reply(server_fd, -EFAULT, arg_struct_size, 0, 0,
+    serve_one_ioctl_reply(server_fd, 0, arg_struct_size, 0, 0,
                           [&](const rocjitsu::RpcHeader &, kfd_ioctl_dbg_trap_args &echoed) {
                             observed_num_devices = echoed.device_snapshot.num_devices;
+                            echoed.device_snapshot.num_devices = kDeviceTotal;
+                            echoed.device_snapshot.entry_size = 0;
                           });
   });
 
@@ -1328,14 +1334,16 @@ TEST(RemoteDriverDbgSnapshotTest, ZeroStrideSnapshotKeepsTheRequestedDeviceCount
   snap.device_snapshot.entry_size = 0;
   snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
 
-  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), -EFAULT);
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
   server.join();
 
   EXPECT_EQ(observed_num_devices.load(), kRequested)
       << "a zero stride was clamped into the count-only probe";
+  EXPECT_EQ(snap.device_snapshot.num_devices, kDeviceTotal);
+  EXPECT_EQ(snap.device_snapshot.entry_size, 0u);
   EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(), [](uint8_t b) {
     return b == kSentinel;
-  })) << "rejected snapshot mutated caller memory";
+  })) << "a zero-stride snapshot wrote entry bytes";
 }
 
 // Reply patch modelling a daemon that enumerates fewer GPUs than the caller
@@ -1470,6 +1478,65 @@ TEST(RemoteDriverDbgSnapshotTest, OversizedSnapshotRequestIsClampedToPayloadLimi
   EXPECT_TRUE(std::all_of(caller_buf.begin() + kEntryBytes, caller_buf.end(), [](uint8_t b) {
     return b == kSentinel;
   })) << "copy-back wrote past the entries the daemon returned";
+}
+
+// num_devices and entry_size are inputs the request rewrites to the compact
+// wire values, and the daemon echoes back whatever it was sent. On a failed op
+// the caller must get its own values back, not those internals: the local path
+// validates before writing any output, so it leaves both untouched. Uses the
+// production shape -- UINT32_MAX devices at a stride wider than the struct --
+// because that is where the mutation is visible: the clamp rewrites the count
+// to 4096 and the stride down to the struct size.
+TEST(RemoteDriverDbgSnapshotTest, FailedOversizedSnapshotLeavesTheRequestFieldsUntouched) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  constexpr uint32_t kRequested = std::numeric_limits<uint32_t>::max();
+  constexpr uint32_t kStride = sizeof(kfd_dbg_device_info_entry) + 136;
+  constexpr uint8_t kSentinel = 0xAB;
+  const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
+
+  std::vector<uint8_t> caller_buf(kStride, kSentinel);
+  std::atomic<uint32_t> observed_num_devices{0};
+  std::atomic<uint32_t> observed_entry_size{0};
+
+  std::jthread server([&, server_fd = sv[1]] {
+    const CloseOnScopeExit closer{server_fd};
+    // A daemon that fails the op after the clamp has already rewritten the two
+    // fields, echoing the wire values back in the reply's arg struct.
+    serve_one_ioctl_reply(server_fd, -ENOSYS, arg_struct_size, 0, 0,
+                          [&](const rocjitsu::RpcHeader &, kfd_ioctl_dbg_trap_args &echoed) {
+                            observed_num_devices = echoed.device_snapshot.num_devices;
+                            observed_entry_size = echoed.device_snapshot.entry_size;
+                          });
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = 4242;
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.num_devices = kRequested;
+  snap.device_snapshot.entry_size = kStride;
+  snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
+
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), -ENOSYS);
+  server.join();
+
+  // The rewrite did happen on the wire -- otherwise this test would pass for
+  // the wrong reason, having never produced the values it guards against.
+  EXPECT_LT(observed_num_devices.load(), kRequested) << "the count was transmitted verbatim";
+  EXPECT_EQ(observed_entry_size.load(), sizeof(kfd_dbg_device_info_entry))
+      << "the caller's stride was transmitted verbatim";
+
+  EXPECT_EQ(snap.device_snapshot.num_devices, kRequested)
+      << "failed snapshot overwrote num_devices(IN) with the clamped wire count";
+  EXPECT_EQ(snap.device_snapshot.entry_size, kStride)
+      << "failed snapshot overwrote entry_size(IN) with the compact wire stride";
+  EXPECT_EQ(snap.device_snapshot.snapshot_buf_ptr, reinterpret_cast<uint64_t>(caller_buf.data()));
+  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(), [](uint8_t b) {
+    return b == kSentinel;
+  })) << "failed snapshot mutated caller memory";
 }
 
 // Daemon mode must reproduce the driver's strided write, not overwrite the

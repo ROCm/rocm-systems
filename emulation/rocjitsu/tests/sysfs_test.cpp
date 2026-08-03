@@ -238,37 +238,48 @@ TEST(SysfsTopologyDebugCapabilityTest, DefaultWatchPointCountMatchesHardware) {
 
 // KFD reports array_count per node, not per XCC: node_show() emits
 // node_props.array_count * NUM_XCC while simd_arrays_per_engine and
-// cu_per_simd_array stay per-XCC. gfx942_cdna3_kmd models MI300X, whose
+// cu_per_simd_array stay per-XCC. Both gfx942 configs model MI300X, whose
 // captured sysfs reads array_count 32 / simd_arrays_per_engine 1 /
 // cu_per_simd_array 10 at num_xcc 8, so the generated topology must match it
 // exactly — a debugger divides these back out to recover shader engines.
+//
+// Both are checked, not just the _kmd one. Several representations multiply out
+// to the same 40 CUs per XCD (4 engines of two 5-CU arrays reaches it just as
+// well as 4 engines of one 10-CU array), so a config can satisfy every product
+// this suite checks and still publish node properties no MI300X ever reports.
+// Two configs for one part have to describe it the same way, or the debugger's
+// view depends on which one the run happened to load.
 TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
   const std::string config_dir = CONFIG_DIR;
-  auto loaded =
-      config::load_config(config_dir + "/gfx942_cdna3_kmd.json", rocjitsu::kEmbeddedSchema);
-  ASSERT_TRUE(loaded.device.present);
-  const uint32_t num_xcc = loaded.soc()->num_xcds();
-  ASSERT_EQ(num_xcc, 8u);
+  constexpr const char *kMi300xConfigs[] = {"gfx942_cdna3_kmd.json", "gfx942_cdna3.json"};
 
-  Sysfs sysfs;
-  std::string topology_dir = sysfs.generate(gpu_info_from_config(loaded.device, num_xcc));
-  ASSERT_FALSE(topology_dir.empty());
+  for (const char *cfg : kMi300xConfigs) {
+    SCOPED_TRACE(cfg);
+    auto loaded = config::load_config(config_dir + "/" + cfg, rocjitsu::kEmbeddedSchema);
+    ASSERT_TRUE(loaded.device.present);
+    const uint32_t num_xcc = loaded.soc()->num_xcds();
+    ASSERT_EQ(num_xcc, 8u);
 
-  auto props = read_properties(topology_dir + "/nodes/1/properties");
-  ASSERT_TRUE(props.count("array_count"));
-  // Fatal: the derivation below divides by this, and operator[] would silently
-  // insert a zero for a renamed or dropped property.
-  ASSERT_TRUE(props.count("simd_arrays_per_engine"));
-  ASSERT_NE(props["simd_arrays_per_engine"], 0u);
-  EXPECT_EQ(props["array_count"], 32u);
-  EXPECT_EQ(props["simd_arrays_per_engine"], 1u);
-  EXPECT_EQ(props["cu_per_simd_array"], 10u);
-  EXPECT_EQ(props["num_xcc"], num_xcc);
+    Sysfs sysfs;
+    std::string topology_dir = sysfs.generate(gpu_info_from_config(loaded.device, num_xcc));
+    ASSERT_FALSE(topology_dir.empty());
 
-  // What libhsakmt derives from those: NumShaderBanks = array_count /
-  // simd_arrays_per_engine, i.e. the node's total shader engines.
-  EXPECT_EQ(props["array_count"] / props["simd_arrays_per_engine"],
-            num_xcc * loaded.soc()->xcd(0)->num_shader_engines());
+    auto props = read_properties(topology_dir + "/nodes/1/properties");
+    ASSERT_TRUE(props.count("array_count"));
+    // Fatal: the derivation below divides by this, and operator[] would silently
+    // insert a zero for a renamed or dropped property.
+    ASSERT_TRUE(props.count("simd_arrays_per_engine"));
+    ASSERT_NE(props["simd_arrays_per_engine"], 0u);
+    EXPECT_EQ(props["array_count"], 32u);
+    EXPECT_EQ(props["simd_arrays_per_engine"], 1u);
+    EXPECT_EQ(props["cu_per_simd_array"], 10u);
+    EXPECT_EQ(props["num_xcc"], num_xcc);
+
+    // What libhsakmt derives from those: NumShaderBanks = array_count /
+    // simd_arrays_per_engine, i.e. the node's total shader engines.
+    EXPECT_EQ(props["array_count"] / props["simd_arrays_per_engine"],
+              num_xcc * loaded.soc()->xcd(0)->num_shader_engines());
+  }
 }
 
 // Every shipped config must describe the machine it actually simulates.

@@ -128,9 +128,9 @@ inline constexpr uint32_t kMaxSnapshotDevices = 4096;
 /// are entitled to oversize it: the uapi contract is that KFD fills only the
 /// devices that exist and reports the true total back, so libhsakmt's
 /// hsaKmtDbgGetDeviceDataCtx() just passes UINT32_MAX. Taken literally that
-/// reserves UINT32_MAX * sizeof(kfd_dbg_device_info_entry) bytes (128 B/entry,
-/// so ~512 GiB); the resize throws std::bad_alloc
-/// out of an interposed ioctl() and takes the process down.
+/// reserves UINT32_MAX * sizeof(kfd_dbg_device_info_entry) bytes (120 B/entry,
+/// so ~480 GiB); the resize throws std::bad_alloc out of an interposed ioctl()
+/// and takes the process down.
 ///
 /// Clamping the transmitted count keeps the ioctl's semantics rather than
 /// failing a request the kernel would have served: the daemon still reports the
@@ -140,7 +140,7 @@ inline constexpr uint32_t kMaxSnapshotDevices = 4096;
 ///
 /// The ceiling is @ref kMaxSnapshotDevices rather than the transport's raw
 /// capacity. Filling the whole payload budget would be correct but ruinous: at
-/// 128 B/entry it reserves ~16 MiB of zeros in the request and makes the daemon
+/// 120 B/entry it reserves ~16 MiB of zeros in the request and makes the daemon
 /// echo ~16 MiB back (rj_daemon replies with the buffer it received), i.e. ~32
 /// MiB moved under rpc_mutex_ on every debugger attach to describe one GPU.
 ///
@@ -152,9 +152,13 @@ inline constexpr uint32_t kMaxSnapshotDevices = 4096;
 /// within @ref kMaxPayloadBytes alongside @p arg_size bytes of ioctl args.
 uint32_t clamp_snapshot_devices(uint32_t num_devices, uint32_t entry_size, size_t arg_size) {
   // A zero stride reserves nothing whatever the count is, so pass the caller's
-  // count through untouched. Clamping it to zero would rewrite a request the
-  // driver rejects with -EFAULT ("you asked for entries but gave no stride")
-  // into the count-only probe (num_devices(IN) == 0) it answers with success.
+  // count through untouched. The driver does not reject a zero stride: its
+  // per-entry copy_to_user() moves entry_size(OUT) == 0 bytes and succeeds, so
+  // the call reports the device total and writes nothing
+  // (DbgTrapDeviceSnapshotZeroStrideReportsCountAndWritesNothing pins that
+  // locally). num_devices(IN) is still what the driver clamps its fill count
+  // against, and it is echoed back as part of the request, so rewriting it to
+  // zero here would hand the daemon a different request than the caller made.
   if (entry_size == 0)
     return num_devices;
 
@@ -736,6 +740,19 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           break;
         case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
           dbg->device_snapshot.snapshot_buf_ptr = saved_dbg_snapshot_ptr;
+          // num_devices and entry_size are inputs the request rewrote to the
+          // compact wire values, and the daemon echoes back whatever it was
+          // sent. On success that echo is the answer (the device total and the
+          // bytes filled), but on failure it would hand the caller our internal
+          // values instead of leaving the inputs alone: libhsakmt's UINT32_MAX
+          // probe comes back as the 4096 clamp and its stride as the struct
+          // size. The local path validates before writing any output
+          // (SimulatedKfd::debug_device_snapshot), so a failed op leaves both
+          // fields exactly as the caller set them; match that.
+          if (resp->result != 0) {
+            dbg->device_snapshot.num_devices = saved_dbg_snapshot_devices;
+            dbg->device_snapshot.entry_size = saved_dbg_snapshot_stride;
+          }
           break;
         default:
           break;
