@@ -27,9 +27,9 @@ from pathlib import Path
 # Bash-style env-var expander (supports ${VAR:-default}); shared with the config
 # processor so binary/path resolution honors the same syntax used elsewhere.
 try:
-    from lib.test_config import expand_env_vars
+    from lib.test_config import DEBUG_ONLY_INSTALL_FLAGS, expand_env_vars
 except ImportError:
-    from test_config import expand_env_vars
+    from test_config import DEBUG_ONLY_INSTALL_FLAGS, expand_env_vars
 
 # Make stdout unbuffered to prevent output ordering issues with subprocesses
 sys.stdout.reconfigure(line_buffering=True)
@@ -272,6 +272,10 @@ class TestExecutor:
         self.build_config = config_processor.get_build_config()
         self.rccl_tests_build_config = config_processor.get_rccl_tests_build_config()
 
+        # RCCL build flavor ("debug"/"release"); the config processor has already
+        # applied the --rccl-build-type override.
+        self.rccl_build_type = config_processor.get_rccl_build_type()
+
         # Setup directories
         self.setup_directories()
 
@@ -325,6 +329,13 @@ class TestExecutor:
         # Determine build directory (priority: --build-dir > env var > default)
         custom_rccl_path = os.environ.get('RCCL_LIB_PATH') or os.environ.get('RCCL_BUILD_DIR')
 
+        # --build-dir / RCCL_LIB_PATH point at an already-built tree, so an explicit
+        # build-type selection cannot be honored: warn instead of silently ignoring it.
+        if getattr(self.args, "rccl_build_type", None) and (self.args.build_dir or custom_rccl_path):
+            print(f"NOTE: --rccl-build-type {self.args.rccl_build_type} ignored for the build "
+                  "directory; a custom RCCL library path takes precedence "
+                  "(--build-dir / RCCL_LIB_PATH / RCCL_BUILD_DIR)")
+
         if self.args.build_dir:
             # Use custom build directory from command line
             self.build_dir = os.path.abspath(os.path.expanduser(os.path.expandvars(self.args.build_dir)))
@@ -340,12 +351,7 @@ class TestExecutor:
         else:
             # Use default build directory matching install.sh convention
             self.using_custom_lib = False
-            install_flags = self.build_config.get("install_flags", [])
-            if "--debug" in install_flags or "--debug-fast" in install_flags:
-                build_type = "debug"
-            else:
-                build_type = "release"
-            self.build_dir = os.path.join(workdir, "build", build_type)
+            self.build_dir = os.path.join(workdir, "build", self.rccl_build_type)
 
         # Set log and report directories under workspace
         self.log_dir = os.path.join(self.workspace_dir, "logs")
@@ -361,6 +367,7 @@ class TestExecutor:
             print(f"Work directory:   {workdir}")
             print(f"Workspace directory: {self.workspace_dir}")
             print(f"Build directory:  {self.build_dir}")
+            print(f"RCCL build type:  {self.rccl_build_type}")
             if self.using_custom_lib:
                 print(f"  (Custom path via {'--build-dir' if self.args.build_dir else 'RCCL_LIB_PATH/RCCL_BUILD_DIR'})")
             print(f"Log directory:    {self.log_dir}")
@@ -597,11 +604,43 @@ class TestExecutor:
         print('        ./install.sh --cmake-options "-DENABLE_CODE_COVERAGE=ON" ...')
         print("=" * 80)
 
+    def _install_flags_for_build_type(self, install_flags):
+        """
+        Reconcile install.sh flags with the selected RCCL build flavor.
+
+        install.sh defaults to Release and switches to Debug only when --debug or
+        --debug-fast is passed, so the flags have to agree with self.rccl_build_type
+        or the library would land in the other build/<flavor> directory. For a
+        Release build the debug-only flags are dropped -- install.sh hard-errors on
+        --enable-mpi-tests without --debug.
+
+        Args:
+            install_flags: Flags from build_configuration.install_flags
+
+        Returns:
+            list: Flags consistent with the selected build type
+        """
+        flags = list(install_flags)
+
+        if self.rccl_build_type == "release":
+            dropped = [f for f in flags if f in DEBUG_ONLY_INSTALL_FLAGS]
+            if dropped:
+                flags = [f for f in flags if f not in DEBUG_ONLY_INSTALL_FLAGS]
+                print(f"NOTE: Release build requested; dropped debug-only install.sh "
+                      f"flag(s): {' '.join(dropped)}")
+        elif not any(f in ("--debug", "--debug-fast") for f in flags):
+            flags.insert(0, "--debug")
+            print("NOTE: Debug build requested; added --debug to install.sh flags")
+
+        return flags
+
     def build_rccl(self):
         """
         Build RCCL using install.sh with configurable build settings.
 
         The build_configuration in the JSON config specifies:
+        - build_type: "debug" or "release" (overridden by --rccl-build-type); selects
+          the build/<flavor> output directory and reconciles install_flags with it
         - install_flags: List of install.sh command-line flags
         - cmake_options: Optional CMake options, either a string (e.g. "-DFOO=BAR") or a
           dict (e.g. {"FOO": "BAR"}); dicts are converted to "-DKEY=VAL" form (passed via --cmake-options)
@@ -630,7 +669,9 @@ class TestExecutor:
         rocm_path = self._rocm_root()
         mpi_path = self.paths.get("mpi_path", "")
 
-        install_flags = list(self.build_config.get("install_flags", []))
+        install_flags = self._install_flags_for_build_type(
+            self.build_config.get("install_flags", [])
+        )
         cmake_options = self.build_config.get("cmake_options", "")
         if isinstance(cmake_options, dict):
             cmake_options = " ".join(f"-D{k}={v}" for k, v in cmake_options.items())
@@ -789,6 +830,19 @@ class TestExecutor:
 
         # RCCL to link against: explicit rccl_home, else the RCCL build_dir we built.
         rccl_home = _expand(cfg.get("rccl_home", self.build_dir))
+
+        # Configs written before build_type existed hardcode rccl_home to
+        # "${WORKDIR}/build/debug". Left alone, a release run would link rccl-tests
+        # against a stale debug librccl.so from the sibling directory, which is
+        # invisible in the results. Only the sibling flavor of the same workdir is
+        # redirected, so genuinely custom rccl_home values are still honored.
+        other_flavor = "debug" if self.rccl_build_type == "release" else "release"
+        sibling_build_dir = os.path.join(workdir, "build", other_flavor)
+        if not self.using_custom_lib and os.path.normpath(rccl_home) == os.path.normpath(sibling_build_dir):
+            print(f"NOTE: rccl_tests_build_configuration.rccl_home points at the {other_flavor} "
+                  f"build ({rccl_home}); linking against the {self.rccl_build_type} build at "
+                  f"{self.build_dir} instead")
+            rccl_home = self.build_dir
 
         # Expand env vars / ~ in each flag so values like
         # "--hip_compiler ${HIP_COMPILER:-$HOME/.local/llvm/bin/amdclang++}"

@@ -61,10 +61,15 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "build_type": {
+          "type": "string",
+          "enum": ["debug", "release"],
+          "description": "RCCL build flavor to build and test against, selecting build/debug or build/release. Overridden by --rccl-build-type. Default: inferred from install_flags (debug when --debug/--debug-fast is present, else release)."
+        },
         "install_flags": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "install.sh command-line flags, e.g. ['--debug', '-t', '-l', '--no_clean']"
+          "description": "install.sh command-line flags, e.g. ['--debug', '-t', '-l', '--no_clean']. Debug-only flags (--debug, --debug-fast, --enable-mpi-tests) are dropped automatically when build_type is release."
         },
         "cmake_options": {
           "description": "Additional CMake options. Either a string ('-DFOO=BAR -DBAZ=1') or an object whose keys become -DKEY=VAL entries.",

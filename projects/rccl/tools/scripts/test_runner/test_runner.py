@@ -44,9 +44,10 @@ def main():
         # Load and validate configuration
         if args.verbose:
             print("Loading configuration...")
-        config_processor = TestConfigProcessor(args.config)
+        config_processor = TestConfigProcessor(args.config, args.rccl_build_type)
         config_processor.validate_config()
         print("Configuration loaded and validated")
+        print(f"RCCL build type: {config_processor.get_rccl_build_type()}")
 
         # Create test executor
         executor = TestExecutor(config_processor, args)

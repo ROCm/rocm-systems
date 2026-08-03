@@ -35,6 +35,54 @@ if "WORKDIR" not in os.environ:
 if "RCCL_TESTS_DIR" not in os.environ:
     os.environ["RCCL_TESTS_DIR"] = str(_rccl_root.parent / "rccl-tests")
 
+# RCCL build flavors, matching install.sh's build/<flavor> output directories.
+RCCL_BUILD_TYPES = ("debug", "release")
+
+# install.sh flags that select or require a Debug build. install.sh exits with an
+# error when --enable-mpi-tests is passed without --debug, so all three have to be
+# dropped when a Release build is requested.
+DEBUG_ONLY_INSTALL_FLAGS = ("--debug", "--debug-fast", "--enable-mpi-tests")
+
+
+def resolve_rccl_build_type(build_config, override=None):
+    """
+    Resolve which RCCL build flavor ("debug" or "release") to build and test against.
+
+    Precedence, highest first:
+      1. override                            (the --rccl-build-type CLI flag)
+      2. build_configuration.build_type      (JSON config)
+      3. presence of --debug/--debug-fast in build_configuration.install_flags
+
+    Rule 3 is the historical behavior and remains the default so existing configs
+    keep resolving to the same flavor they always did.
+
+    Args:
+        build_config: The "build_configuration" section (may be empty/None)
+        override: Explicit build type, or None
+
+    Returns:
+        str: "debug" or "release"
+
+    Raises:
+        ValueError: If an unknown build type is requested
+    """
+    for value, source in ((override, "--rccl-build-type"),
+                          ((build_config or {}).get("build_type"),
+                           "build_configuration.build_type")):
+        if value:
+            build_type = str(value).strip().lower()
+            if build_type not in RCCL_BUILD_TYPES:
+                raise ValueError(
+                    f"Invalid {source} '{value}'. Expected one of: "
+                    f"{', '.join(RCCL_BUILD_TYPES)}"
+                )
+            return build_type
+
+    install_flags = (build_config or {}).get("install_flags", [])
+    if "--debug" in install_flags or "--debug-fast" in install_flags:
+        return "debug"
+    return "release"
+
 
 def expand_env_vars(value):
     """
@@ -105,12 +153,14 @@ class TestConfigProcessor:
     - Environment variable expansion in paths
     """
 
-    def __init__(self, config_file):
+    def __init__(self, config_file, build_type_override=None):
         """
         Initialize the TestConfigProcessor with the configuration file.
 
         Args:
             config_file: Path to JSON configuration file
+            build_type_override: Explicit RCCL build flavor ("debug"/"release"),
+                overriding the config. None keeps the config's own choice.
         """
         if not os.path.exists(config_file):
             raise FileNotFoundError(f"Configuration file not found: {config_file}")
@@ -121,6 +171,14 @@ class TestConfigProcessor:
 
         # Validate against the JSON schema
         self._validate_schema(config_data, config_file)
+
+        # Resolve the RCCL build flavor before any expansion below, and export it
+        # so configs can point paths at the selected build with
+        # "${WORKDIR}/build/${RCCL_BUILD_TYPE}" instead of hardcoding debug/release.
+        self.rccl_build_type = resolve_rccl_build_type(
+            config_data.get("build_configuration", {}), build_type_override
+        )
+        os.environ["RCCL_BUILD_TYPE"] = self.rccl_build_type
 
         # Expand environment variables in paths section
         if "paths" in config_data:
@@ -481,6 +539,15 @@ class TestConfigProcessor:
             dict: Build configuration with CMake options, environment variables, etc.
         """
         return self.config.get("build_configuration", {})
+
+    def get_rccl_build_type(self):
+        """
+        Get the resolved RCCL build flavor.
+
+        Returns:
+            str: "debug" or "release"
+        """
+        return self.rccl_build_type
 
     def get_rccl_tests_build_config(self):
         """

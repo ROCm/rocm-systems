@@ -97,6 +97,48 @@ python test_runner.py --config mi300x_mellanox_ib.json --skip-mpi-check
 python test_runner.py --config unit_tests_only.json --skip-mpi-check
 ```
 
+### Select the RCCL Build Flavor (Debug vs Release)
+
+`install.sh` builds into `build/debug` or `build/release`. Which one the test
+runner builds, links `rccl-tests` against, and puts first on `LD_LIBRARY_PATH` is
+selected by `--rccl-build-type`, or by `build_configuration.build_type` in the
+JSON config.
+
+```bash
+# Build and test against a Release build of RCCL
+python test_runner.py --config mi455_ainic_roce_perf_release.json
+
+# Force Release for a config that would otherwise build Debug
+python test_runner.py --config mi455_ainic_roce_perf.json --rccl-build-type release
+```
+
+Resolution order (highest first):
+
+1. `--rccl-build-type debug|release`
+2. `build_configuration.build_type` in the JSON config
+3. Inferred from `build_configuration.install_flags` — `debug` if it contains
+   `--debug` or `--debug-fast`, otherwise `release` (the historical behavior, so
+   configs without `build_type` keep building exactly what they always did)
+
+For a Release build the runner drops the debug-only `install.sh` flags
+(`--debug`, `--debug-fast`, `--enable-mpi-tests`) and prints a note for each;
+`install.sh` itself rejects `--enable-mpi-tests` unless `--debug` is given. Debug
+builds get `--debug` added if the flags don't already select a debug flavor.
+
+Perf sweeps are the main use case: they run `rccl-tests` binaries
+(`all_reduce_perf`, ...) rather than RCCL's own MPI gtests, so nothing in them
+needs a Debug build. `configs/mi455_ainic_roce_perf_release.json` is the Release
+counterpart of `configs/mi455_ainic_roce_perf.json`.
+
+If a config's `rccl_tests_build_configuration.rccl_home` still points at the other
+flavor's directory (e.g. a pre-existing `${WORKDIR}/build/debug`), the runner
+redirects it to the selected build and prints a note, so `rccl-tests` never links
+against a stale `librccl.so` from the other flavor. Configs can also refer to the
+selected flavor directly via `${RCCL_BUILD_TYPE}`.
+
+Note that `--build-dir`, `RCCL_LIB_PATH`, and `RCCL_BUILD_DIR` point at an
+already-built tree and therefore take precedence over `--rccl-build-type`.
+
 ## Environment Variables
 
 The test runner supports the following environment variables to customize behavior:
@@ -110,6 +152,7 @@ The test runner supports the following environment variables to customize behavi
 | `RCCL_TEST_MPI_HOSTFILE` | Path to MPI hostfile for multi-node tests. | `~/.mpi_hostfile` |
 | `RCCL_MPI_LOG_ALL_RANKS` | Set to `1` to capture stdout/stderr from every MPI rank into `rccl_test_rank_<N>.log` in the working directory (rank 0 is tee'd to console + file; ranks 1-N go to file only). Useful for debugging failures on non-zero ranks. | `RCCL_MPI_LOG_ALL_RANKS=1` |
 | `RCCL_TEST_GPUS_PER_NODE` | Override the detected number of GPUs per node (used for `"auto"` sizing and GPU-count skipping). See [GPU Count Detection](#gpu-count-detection-and-auto-sizing). | `4` |
+| `RCCL_BUILD_TYPE` | Exported by the test runner (not read from your shell) with the resolved build flavor, so configs can write `${WORKDIR}/build/${RCCL_BUILD_TYPE}` instead of hardcoding `debug`/`release`. | `release` |
 
 ### Configuration Path Variables
 
@@ -129,11 +172,12 @@ When determining which RCCL library to use, the test runner follows this priorit
    - Skips build automatically
    - Must contain `librccl.so` and `test/` subdirectory
 2. **`--no-build` flag with local build**
-   - Uses local `build/debug/` or `build/release/` directory (based on `install_flags`)
+   - Uses local `build/debug/` or `build/release/` directory (see
+     [Select the RCCL Build Flavor](#select-the-rccl-build-flavor-debug-vs-release))
    - Requires prior build
 3. **Default build process** (lowest priority)
    - Builds RCCL via `install.sh` into `build/debug/` or `build/release/`
-   - Uses `install_flags` and `cmake_options` from JSON config
+   - Uses `build_type`, `install_flags` and `cmake_options` from JSON config
 
 **Example Usage:**
 
@@ -456,6 +500,7 @@ Optional:
   --skip-tests              Skip test execution (useful with --coverage-report)
   --coverage-report         Generate code coverage report (HTML + text)
   --build-dir PATH          Custom build directory path (default: <workdir>/build/debug or build/release)
+  --rccl-build-type TYPE    RCCL build flavor to build and test against: 'debug' or 'release'. Overrides build_configuration.build_type; default is whatever the config selects
   --rerun-failed            Rerun failed tests with additional environment variables
   --skip-mpi-check          Skip MPI: removes --enable-mpi-tests from build, skips MPI check, skips tests with num_ranks > 1
   --stop-on-rerun-failure   Stop testing immediately if a rerun also fails (requires --rerun-failed)
@@ -1178,6 +1223,7 @@ The test runner invokes `install.sh` directly, so build options map to `install.
 ```json
 {
   "build_configuration": {
+    "build_type": "release",
     "install_flags": ["-t", "-l", "--no_clean"]
   }
 }
@@ -1194,6 +1240,9 @@ The test runner invokes `install.sh` directly, so build options map to `install.
 ```
 
 **All Options:**
+- `build_type` - `"debug"` or `"release"`; selects the `build/<flavor>` directory and
+  reconciles `install_flags` with it. Overridden by `--rccl-build-type`. See
+  [Select the RCCL Build Flavor](#select-the-rccl-build-flavor-debug-vs-release)
 - `install_flags` - List of `install.sh` command-line flags (e.g. `--debug`, `-t`, `-c`, `-l`)
 - `cmake_options` - Additional CMake options string passed via `install.sh --cmake-options` (e.g. `-DFOO=BAR`)
 - `env_variables` - Build environment variables
