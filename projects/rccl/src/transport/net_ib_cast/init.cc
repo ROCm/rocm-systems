@@ -207,44 +207,53 @@ ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
     return ncclInvalidUsage;
   }
 
+  // Mirrors the guard in ncclIbMakeVDeviceInternal(): bound the count before props->devs[] is indexed.
+  if (props->ndevs < 1 || props->ndevs > NCCL_IB_MAX_DEVS_PER_NIC) {
+    WARN("NET/IB : Can't make virtual NIC with %d devices, max %d", props->ndevs, NCCL_IB_MAX_DEVS_PER_NIC);
+    return ncclInvalidUsage;
+  }
+
   if (IbCastNMergedDevs == MAX_IB_VDEVS) {
     WARN("NET/IB : Cannot allocate any more virtual devices (%d)", MAX_IB_VDEVS);
     return ncclInvalidUsage;
   }
 
   // Always count up number of merged devices
-  ncclIbMergedDev* mDev = IbCastMergedDevs + IbCastNMergedDevs;
-  mDev->vProps.ndevs = 0;
-  mDev->speed = 0;
+  ncclIbMergedDev tmp;
+  memset(&tmp, 0, sizeof(tmp));
+  bool used[MAX_IB_DEVS] = {0};
 
   for (int i = 0; i < props->ndevs; i++) {
-    ncclIbDev* dev = IbCastDevs + props->devs[i];
-    if (mDev->vProps.ndevs == NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidUsage;
-    mDev->vProps.devs[mDev->vProps.ndevs++] = props->devs[i];
-    mDev->speed += dev->speed;
-    // Each successive time, copy the name '+' new name
-    if (mDev->vProps.ndevs > 1) {
-      snprintf(mDev->devName + strlen(mDev->devName), sizeof(mDev->devName) - strlen(mDev->devName), "+%s",
-               dev->devName);
-    // First time, copy the plain name
-    } else {
-      strncpy(mDev->devName, dev->devName, MAXNAMESIZE);
-    }
-  }
-
-  // Check link layers
-  ncclIbDev* dev0 = IbCastDevs + props->devs[0];
-  for (int i = 1; i < props->ndevs; i++) {
-    if (props->devs[i] >= IbCastNDevs) {
+    if (props->devs[i] < 0 || props->devs[i] >= IbCastNDevs) {
       WARN("NET/IB : Cannot use physical device %d, max %d", props->devs[i], IbCastNDevs);
       return ncclInvalidUsage;
     }
-    ncclIbDev* dev = IbCastDevs + props->devs[i];
+    if (used[props->devs[i]]) continue;
+    const ncclIbDev* dev = IbCastDevs + props->devs[i];
+    if (tmp.vProps.ndevs == NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidUsage;
+    tmp.vProps.devs[tmp.vProps.ndevs++] = props->devs[i];
+    tmp.speed += dev->speed;
+    // Each successive time, copy the name '+' new name
+    if (tmp.vProps.ndevs > 1) {
+      size_t off = strlen(tmp.devName);
+      snprintf(tmp.devName + off, sizeof(tmp.devName) - off, "+%s", dev->devName);
+    // First time, copy the plain name
+    } else {
+      strncpy(tmp.devName, dev->devName, MAXNAMESIZE - 1);
+      tmp.devName[MAXNAMESIZE - 1] = '\0';
+    }
+    used[props->devs[i]] = true;
+  }
+
+  // Check link layers
+  const ncclIbDev* dev0 = IbCastDevs + tmp.vProps.devs[0];
+  for (int i = 1; i < tmp.vProps.ndevs; i++) {
+    const ncclIbDev* dev = IbCastDevs + tmp.vProps.devs[i];
     if (dev->link != dev0->link) {
       WARN("NET/IB : Attempted to merge incompatible devices: [%d]%s:%d/%s and [%d]%s:%d/%s. Try selecting NICs of "
            "only one link type using NCCL_IB_HCA",
-           props->devs[0], dev0->devName, dev0->portNum, NCCL_IB_LLSTR(dev0->link), props->devs[i], dev->devName,
-           dev->portNum, NCCL_IB_LLSTR(dev->link));
+           tmp.vProps.devs[0], dev0->devName, dev0->portNum, NCCL_IB_LLSTR(dev0->link), tmp.vProps.devs[i],
+           dev->devName, dev->portNum, NCCL_IB_LLSTR(dev->link));
       return ncclInvalidUsage;
     }
   }
@@ -253,8 +262,8 @@ ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   // format -> 0000:00
   char root0[8];
   IbCastGetPciRootFromPath(dev0->pciPath, root0, sizeof(root0));
-  for (int i = 1; i < props->ndevs; i++) {
-    ncclIbDev* dev = IbCastDevs + props->devs[i];
+  for (int i = 1; i < tmp.vProps.ndevs; i++) {
+    const ncclIbDev* dev = IbCastDevs + tmp.vProps.devs[i];
     int numaI = IbCastGetNumaNodeFromPath(dev->pciPath);
     if (numa0 >= 0 && numaI >= 0 && numaI != numa0) {
       WARN("NET/IB : Merging NICs across NUMA nodes (%s numa=%d, %s numa=%d). "
@@ -276,17 +285,18 @@ ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
 
   // CTS Offload and CTS Inline are not yet compatible with NIC Fusion
   // (NCCL_IB_MERGE_NICS). Disable them when a multi-NIC vNIC is created.
-  if (props->ndevs > 1) {
+  if (tmp.vProps.ndevs > 1) {
     if (IbCastOffloadEnabled) {
       INFO(NCCL_INIT | NCCL_NET,
-           "NET/IB : NIC Fusion (ndevs=%d) - disabling CTS Offload (not yet supported with merge)", props->ndevs);
+           "NET/IB : NIC Fusion (ndevs=%d) - disabling CTS Offload (not yet supported with merge)", tmp.vProps.ndevs);
       IbCastOffloadEnabled = false;
     }
   }
 
+  IbCastMergedDevs[IbCastNMergedDevs] = tmp;
   *d = IbCastNMergedDevs++;
-  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, mDev->devName, mDev->speed,
-       mDev->vProps.ndevs);
+  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, tmp.devName, tmp.speed,
+       tmp.vProps.ndevs);
   return ncclSuccess;
 }
 

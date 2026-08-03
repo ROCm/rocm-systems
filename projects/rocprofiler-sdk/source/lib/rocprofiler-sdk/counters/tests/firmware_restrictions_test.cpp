@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -80,6 +80,103 @@ rocprofiler-sdk:
     EXPECT_EQ((*result)[1].reason, "SDMA firmware below 150 causes instability");
     ASSERT_EQ((*result)[1].affected_architectures.size(), 1);
     EXPECT_EQ((*result)[1].affected_architectures[0], "gfx1030");
+}
+
+TEST(FirmwareRestrictions, FeatureFieldParsing)
+{
+    std::string yaml_content = R"(
+rocprofiler-sdk:
+  counters-schema-version: 1
+  counters: []
+  fw-restriction-schema-version: 2
+  firmware_restrictions:
+    - firmware_type: CP
+      feature: pc_sampling_host_trap
+      min_version: 210
+      affected_architectures:
+        - "gfx942"
+    - firmware_type: SDMA
+      min_version: 150
+)";
+
+    auto result = parse_firmware_restrictions(yaml_content);
+
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result->size(), 2);
+
+    EXPECT_EQ((*result)[0].feature, "pc_sampling_host_trap");
+    EXPECT_EQ((*result)[0].min_version, 210);
+    EXPECT_EQ((*result)[1].feature, "");  // absent feature -> empty (hard floor)
+}
+
+TEST(FirmwareRestrictions, FeatureEntryExcludedFromStartupGate)
+{
+    // A feature entry with an impossibly high min_version and empty arch list
+    // (which would otherwise match every agent) must not fail the startup gate.
+    std::string yaml_content = R"(
+rocprofiler-sdk:
+  counters-schema-version: 1
+  counters: []
+  fw-restriction-schema-version: 2
+  firmware_restrictions:
+    - firmware_type: MEC
+      feature: some_optional_feature
+      min_version: 99999
+      affected_architectures: []
+)";
+
+    EXPECT_TRUE(check_agent_firmware_restrictions(yaml_content));
+}
+
+TEST(FirmwareRestrictions, SchemaVersionRange)
+{
+    auto with_version = [](int v) {
+        return "rocprofiler-sdk:\n  fw-restriction-schema-version: " + std::to_string(v) +
+               "\n  firmware_restrictions: []\n";
+    };
+    EXPECT_TRUE(parse_firmware_restrictions(with_version(1)).has_value());
+    EXPECT_TRUE(parse_firmware_restrictions(with_version(2)).has_value());
+    EXPECT_FALSE(parse_firmware_restrictions(with_version(0)).has_value());
+    EXPECT_FALSE(parse_firmware_restrictions(with_version(3)).has_value());
+}
+
+TEST(FirmwareRestrictions, AgentSupportsFeatureInvalidAgent)
+{
+    EXPECT_EQ(agent_supports_feature(nullptr, "pc_sampling_host_trap"), std::nullopt);
+}
+
+// Deterministic coverage of the evaluate_feature_support() tri-state logic.
+TEST(FirmwareRestrictions, EvaluateFeatureSupport)
+{
+    const std::vector<FirmwareRestriction> restrictions = {
+        FirmwareRestriction{"CP", 210, 0, "", {"gfx942"}, "pc_sampling_host_trap"},
+        FirmwareRestriction{"SDMA", 95, 0, "", {"gfx942"}, "pc_sampling_host_trap"},
+        FirmwareRestriction{"CP", 100, 0, "", {}, "global_feature"},
+        FirmwareRestriction{"BOGUS", 100, 0, "", {"gfx942"}, "weird_feature"},
+    };
+
+    struct
+    {
+        std::string_view    arch;
+        uint32_t            cp;
+        uint32_t            sdma;
+        std::string_view    feature;
+        std::optional<bool> expected;
+    } cases[] = {
+        {"gfx942", 999, 999, "nonexistent", std::nullopt},            // undeclared feature
+        {"gfx908", 999, 999, "pc_sampling_host_trap", std::nullopt},  // arch not affected
+        {"gfx942", 210, 95, "pc_sampling_host_trap", true},           // all floors met
+        {"gfx942", 200, 95, "pc_sampling_host_trap", false},          // CP below floor
+        {"gfx1200", 100, 0, "global_feature", true},                  // empty arch = all
+        {"gfx1200", 99, 0, "global_feature", false},                  // empty arch, below
+        {"gfx942", 999, 999, "weird_feature", std::nullopt},          // unknown firmware type
+        {"gfx942", 999, 999, "", std::nullopt},                       // empty feature query
+    };
+
+    for(const auto& c : cases)
+        EXPECT_EQ(evaluate_feature_support(restrictions, c.arch, c.cp, c.sdma, c.feature),
+                  c.expected)
+            << "feature=" << c.feature << " arch=" << c.arch;
 }
 
 TEST(FirmwareRestrictions, EmptyRestrictionsList)
