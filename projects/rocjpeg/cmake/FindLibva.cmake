@@ -24,10 +24,11 @@
 # Search super-project (e.g. amd-mesa) sysdeps first when building in TheRock
 if(DEFINED THEROCK_SUPERPROJECT_INCLUDE_DIRS)
   list(APPEND _libva_include_hints ${THEROCK_SUPERPROJECT_INCLUDE_DIRS})
+  list(APPEND _libva_library_hints ${CMAKE_LIBRARY_PATH})
 endif()
 
-find_library(LIBVA_LIBRARY NAMES va HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
-find_library(LIBVA_DRM_LIBRARY NAMES va-drm HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
+find_library(LIBVA_LIBRARY NAMES va HINTS ${_libva_library_hints} ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
+find_library(LIBVA_DRM_LIBRARY NAMES va-drm HINTS ${_libva_library_hints} ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
 find_path(LIBVA_INCLUDE_DIR NAMES va/va.h PATHS ${_libva_include_hints} ${ROCM_PATH}/lib/rocm_sysdeps/include NO_DEFAULT_PATH)
 
 include(FindPackageHandleStandardArgs)
