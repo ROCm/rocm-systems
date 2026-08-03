@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 
+#include "scoped_temp.h"
+
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 RJ_DIAGNOSTIC_PUSH
@@ -28,8 +30,10 @@ RJ_DIAGNOSTIC_POP
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -60,10 +64,11 @@ constexpr uint64_t kAllocSize = 4096;
 // tier has a handoff yet, return the highest-priority writable tier so
 // install_inline_dbt_config() writes where the reader looks first.
 // rpc_default_runtime_dir() already treats an unset OR empty $ROCJITSU_RUNTIME_DIR as
-// "use $XDG_RUNTIME_DIR/rocjitsu or /tmp/rocjitsu-<uid>", so this never returns
-// nullopt on that account — otherwise the test would write nowhere while the runtime
-// hook still reads the default location.
-std::optional<std::filesystem::path> config_handoff_dir() {
+// "use $XDG_RUNTIME_DIR/rocjitsu or /tmp/rocjitsu-<uid>", so the per-PID and base tiers
+// are always well-formed and a directory is always returned — otherwise the test would
+// write nowhere while the runtime hook still reads the default location. The return
+// type spells that out: callers cannot be asked to handle an absence that cannot occur.
+std::filesystem::path config_handoff_dir() {
   std::vector<std::filesystem::path> tiers;
   if (const char *inv = std::getenv("ROCJITSU_INVOCATION_DIR"); inv && *inv)
     tiers.emplace_back(inv);
@@ -81,11 +86,9 @@ std::optional<std::filesystem::path> config_handoff_dir() {
 }
 
 std::optional<std::string> read_active_config_json() {
-  const auto dir = config_handoff_dir();
-  if (!dir)
-    return std::nullopt;
+  const std::filesystem::path dir = config_handoff_dir();
 
-  std::ifstream active_config(*dir / "config_path");
+  std::ifstream active_config(dir / "config_path");
   std::string configured_path;
   if (!std::getline(active_config, configured_path) || configured_path.empty())
     return std::nullopt;
@@ -99,12 +102,8 @@ std::optional<std::string> read_active_config_json() {
 bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
                                uint32_t lds_size_kb, std::string_view external_host_config = {},
                                bool include_resolved_gpu_id = true) {
-  const auto dir = config_handoff_dir();
-  if (!dir)
-    return false;
-
   try {
-    const std::filesystem::path runtime(*dir);
+    const std::filesystem::path runtime = config_handoff_dir();
     std::filesystem::create_directories(runtime);
     const std::filesystem::path config_path = runtime / "inline_dbt_failure_config.json";
 
@@ -160,49 +159,123 @@ bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
   }
 }
 
-// Move the active config to a path longer than PATH_MAX so the handoff reader is
-// exercised against a path a fixed 4096-byte buffer cannot hold.
+/// @brief Verdict from building the oversized config handoff: ok, skip, or fail.
+/// @details Three states rather than testing::AssertionResult's two, because not every
+/// way of not producing the handoff is a defect. Some preconditions depend on the
+/// caller's runtime directory rather than on the handoff reader under test: a
+/// $ROCJITSU_INVOCATION_DIR already longer than the path being built says nothing about
+/// whether the reader copes with a handoff past 4095 bytes, so it must skip rather than
+/// go red. Every state carries a reason, so a skip is still reported and never silently
+/// swallowed. GTEST_SKIP expands to a bare `return` and cannot be issued from a function
+/// that returns a value, so the verdict travels back to the TEST body, which issues the
+/// skip or the failure itself.
+class LongPathHandoff {
+public:
+  enum class Status { kOk, kSkip, kFail };
+
+  /// @brief The oversized handoff was built and installed.
+  static LongPathHandoff ok() { return LongPathHandoff(Status::kOk, {}); }
+  /// @brief This environment cannot host the path, so the reader is untestable here.
+  static LongPathHandoff skip(std::string reason) {
+    return LongPathHandoff(Status::kSkip, std::move(reason));
+  }
+  /// @brief A genuine defect in the helper's arithmetic or in the run itself.
+  static LongPathHandoff fail(std::string reason) {
+    return LongPathHandoff(Status::kFail, std::move(reason));
+  }
+
+  [[nodiscard]] Status status() const { return status_; }
+  [[nodiscard]] const std::string &reason() const { return reason_; }
+
+private:
+  LongPathHandoff(Status status, std::string reason)
+      : status_(status), reason_(std::move(reason)) {}
+
+  Status status_;
+  std::string reason_;
+};
+
+constexpr std::string_view kLongConfigFileName = "config.json";
+constexpr size_t kMaxComponentLength = 200; // stays well under NAME_MAX
+constexpr size_t kTargetPathLength = 4093;
+constexpr size_t kTargetParentLength = kTargetPathLength - kLongConfigFileName.size() - 1;
+
+// The handoff directory as a path to build beneath, with any trailing separator
+// dropped: the padding arithmetic charges one separator per appended component, so a
+// directory that already ends in one would be charged twice. A bare root keeps its
+// separator, since dropping it would leave a relative path.
+std::string normalized_handoff_parent(const std::filesystem::path &dir) {
+  std::string parent = dir.string();
+  while (parent.size() > 1 && parent.back() == '/')
+    parent.pop_back();
+  return parent;
+}
+
+// Bytes a normalized parent contributes to a path built beneath it. A bare root is the
+// separator the first component would otherwise have to pay for, so it contributes none.
+size_t handoff_parent_length(const std::string &parent) {
+  return parent == "/" ? 0 : parent.size();
+}
+
+/// @brief kSkip when the runtime directory is too deep to host the oversized handoff.
+/// @details Split out of relocate_active_config_to_long_path() so the test can consult
+/// it before it installs anything. A directory too deep for the >4095-byte path is also
+/// too deep for the ordinary config the install writes, so a test that only checked at
+/// relocation time would already have gone red on the install for the very same
+/// environmental reason, and the skip would be unreachable.
+LongPathHandoff long_path_handoff_supported() {
+  const std::filesystem::path dir = config_handoff_dir();
+  const size_t parent_length = handoff_parent_length(normalized_handoff_parent(dir));
+
+  if (parent_length > kTargetParentLength) {
+    std::ostringstream reason;
+    reason << "handoff directory " << dir << " contributes " << parent_length
+           << " bytes, already past the " << kTargetParentLength << "-byte parent to build";
+    return LongPathHandoff::skip(reason.str());
+  }
+  if (kTargetParentLength - parent_length == 1) {
+    std::ostringstream reason;
+    reason << "handoff directory " << dir << " contributes " << parent_length
+           << " bytes, one short of " << kTargetParentLength
+           << ": no component fits in a separator plus one byte";
+    return LongPathHandoff::skip(reason.str());
+  }
+  return LongPathHandoff::ok();
+}
+
+// Move the active config to a path just under PATH_MAX so the handoff file the
+// reader parses -- the path, a newline, and the resolved gpu_id line -- exceeds
+// 4095 bytes and cannot be consumed by a single fixed 4096-byte read.
 //
 // The padding is planned up front rather than grown greedily. Each appended
 // component costs one separator plus at least one character, so a greedy loop can
 // land on a remainder it cannot spend: exactly on the target (where subtracting the
 // separator underflows size_t and asks std::string for a SIZE_MAX-long component)
 // or one byte short of it (where no legal component fits). Sizing the components
-// from the byte budget keeps every intermediate length in range, and the remaining
-// unspendable case -- a starting directory already at or past the budget -- is
-// reported rather than silently returned as false, since it depends on the
-// caller's runtime directory rather than on the behavior under test.
-testing::AssertionResult relocate_active_config_to_long_path() {
-  const auto dir = config_handoff_dir();
-  if (!dir)
-    return testing::AssertionFailure() << "no config handoff directory to relocate into";
-  const auto json = read_active_config_json();
-  if (!json)
-    return testing::AssertionFailure() << "no active config JSON to relocate";
+// from the byte budget keeps every intermediate length in range. The remaining
+// unspendable cases -- a starting directory at or past the budget, or one byte short
+// of it -- are the environmental ones long_path_handoff_supported() turns into kSkip.
+// The self-check on the built path length and every write failure stay kFail, because
+// those are defects in the helper or the run rather than in where it runs.
+LongPathHandoff relocate_active_config_to_long_path() {
+  // Re-checked here rather than trusted from the caller, so the helper stays correct
+  // standalone and the budget arithmetic below cannot underflow.
+  if (LongPathHandoff supported = long_path_handoff_supported();
+      supported.status() != LongPathHandoff::Status::kOk)
+    return supported;
+
+  const std::filesystem::path dir = config_handoff_dir();
 
   try {
-    constexpr std::string_view kConfigFileName = "config.json";
-    constexpr size_t kMaxComponentLength = 200; // stays well under NAME_MAX
-    constexpr size_t kTargetPathLength = 4093;
-    constexpr size_t kTargetParentLength = kTargetPathLength - kConfigFileName.size() - 1;
-
-    // Byte accounting below charges one separator per appended component, so drop
-    // any trailing separator the handoff directory already carries. A bare root
-    // supplies that separator itself, so it contributes no bytes of its own.
-    std::string parent = dir->string();
-    while (parent.size() > 1 && parent.back() == '/')
-      parent.pop_back();
-    const size_t parent_length = parent == "/" ? 0 : parent.size();
-
-    if (parent_length > kTargetParentLength)
-      return testing::AssertionFailure()
-             << "handoff directory " << *dir << " is " << parent.size()
-             << " bytes, already past the " << kTargetParentLength << "-byte parent to build";
+    const std::string parent = normalized_handoff_parent(dir);
+    const size_t parent_length = handoff_parent_length(parent);
     const size_t pad_budget = kTargetParentLength - parent_length;
-    if (pad_budget == 1)
-      return testing::AssertionFailure()
-             << "handoff directory " << *dir << " is " << parent.size() << " bytes, one short of "
-             << kTargetParentLength << ": no component fits in a separator plus one byte";
+
+    // The caller asserts the config is installed before calling, so an unreadable
+    // one here is a defect in the run rather than a property of the environment.
+    const auto json = read_active_config_json();
+    if (!json)
+      return LongPathHandoff::fail("no active config JSON to relocate");
 
     std::filesystem::path config_dir(parent);
     if (pad_budget > 0) {
@@ -214,26 +287,39 @@ testing::AssertionResult relocate_active_config_to_long_path() {
         config_dir /= std::string(chars / components + (i < chars % components ? 1 : 0), 'a');
     }
 
-    std::filesystem::create_directories(config_dir);
-    const std::filesystem::path config_path = config_dir / kConfigFileName;
-    if (config_path.string().size() != kTargetPathLength)
-      return testing::AssertionFailure()
-             << "built a " << config_path.string().size() << "-byte config path from a "
-             << parent.size() << "-byte handoff directory, expected " << kTargetPathLength;
+    // Self-check on the sizing arithmetic above, deliberately before anything touches
+    // the filesystem: a miscomputed length must surface here as kFail, not as the
+    // ENAMETOOLONG the catch below would forgive as an environment limit.
+    const std::filesystem::path config_path = config_dir / kLongConfigFileName;
+    if (config_path.string().size() != kTargetPathLength) {
+      std::ostringstream reason;
+      reason << "built a " << config_path.string().size() << "-byte config path from a "
+             << parent_length << "-byte handoff directory, expected " << kTargetPathLength;
+      return LongPathHandoff::fail(reason.str());
+    }
 
+    std::filesystem::create_directories(config_dir);
     std::ofstream config(config_path);
     config << *json;
     config.close();
     if (!config)
-      return testing::AssertionFailure() << "failed to write config to the long path";
+      return LongPathHandoff::fail("failed to write config to the long path");
 
-    std::ofstream handoff(*dir / "config_path", std::ios::trunc);
+    std::ofstream handoff(dir / "config_path", std::ios::trunc);
     handoff << config_path.string() << "\n50148\n";
     if (!handoff.good())
-      return testing::AssertionFailure() << "failed to rewrite the config_path handoff";
-    return testing::AssertionSuccess();
+      return LongPathHandoff::fail("failed to rewrite the config_path handoff");
+    return LongPathHandoff::ok();
   } catch (const std::filesystem::filesystem_error &e) {
-    return testing::AssertionFailure() << "filesystem error building the long path: " << e.what();
+    // The built path is already proven to be the intended length, so ENAMETOOLONG
+    // here means this filesystem refuses a path the kernel itself allows -- a shorter
+    // internal limit, or name-expanding encryption -- which is a property of where the
+    // test runs. Every other code (EACCES, ENOSPC) is a real failure.
+    std::ostringstream reason;
+    reason << "filesystem error building the " << kTargetPathLength << "-byte path: " << e.what();
+    if (e.code() == std::errc::filename_too_long)
+      return LongPathHandoff::skip(reason.str());
+    return LongPathHandoff::fail(reason.str());
   }
 }
 
@@ -471,9 +557,8 @@ TEST(GuestKfdMemoryTest, GuestAllocationMmapOffsetIsRejected) {
 }
 
 TEST(GuestKfdFailureTest, NonexistentSimulatorConfigFailsCleanly) {
-  const auto dir = config_handoff_dir();
-  ASSERT_TRUE(dir.has_value());
-  const std::string nonexistent = (*dir / "nonexistent_simulator_config.json").string();
+  const std::string nonexistent =
+      (config_handoff_dir() / "nonexistent_simulator_config.json").string();
   ASSERT_TRUE(install_inline_dbt_config(R"({"max_ticks": 1})", "gfx942", 64, nonexistent));
 
   errno = 0;
@@ -524,15 +609,51 @@ TEST(GuestKfdFailureTest, PathOnlyAutomaticDbtHandoffFailsClosed) {
 }
 
 TEST(GuestKfdConfigTest, ReadsRuntimeHandoffLargerThan4095Bytes) {
+  // Consulted before anything is installed: a runtime directory too deep to host the
+  // oversized handoff is also too deep to host the ordinary config the install below
+  // writes, so checking only at relocation time would surface that environmental limit
+  // as a red install and the skip would never be reached.
+  if (const LongPathHandoff supported = long_path_handoff_supported();
+      supported.status() == LongPathHandoff::Status::kSkip)
+    GTEST_SKIP() << "cannot build the oversized handoff here: " << supported.reason();
+
   const auto simulator_json = read_active_config_json();
   ASSERT_TRUE(simulator_json.has_value());
   ASSERT_TRUE(install_inline_dbt_config(*simulator_json, "gfx942", 64));
-  ASSERT_TRUE(relocate_active_config_to_long_path());
+
+  // A second skip site rather than a redundant one: the relocation can still find the
+  // filesystem itself unable to hold the path, which the gate above cannot predict.
+  const LongPathHandoff handoff = relocate_active_config_to_long_path();
+  if (handoff.status() == LongPathHandoff::Status::kSkip)
+    GTEST_SKIP() << "cannot build the oversized handoff here: " << handoff.reason();
+  ASSERT_TRUE(handoff.status() == LongPathHandoff::Status::kOk) << handoff.reason();
 
   const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
   ASSERT_GE(fd, 0) << std::strerror(errno);
   EXPECT_TRUE(guest_gpu_is_visible());
   close(fd);
+}
+
+// Pins the skip half of the classification above. A $ROCJITSU_INVOCATION_DIR deeper
+// than the path the helper builds is a limit of where the test runs, not a defect in
+// the handoff reader, so the helper must report kSkip with a reason rather than red.
+// Nothing is created on disk: config_handoff_dir() falls back to the highest-priority
+// tier when no tier holds a handoff, so a directory that does not exist is enough.
+TEST(GuestKfdConfigTest, LongPathHandoffSkipsWhenRuntimeDirIsTooDeep) {
+  // 4082 bytes: one past the 4081-byte parent the helper targets, and still short
+  // enough that the kernel would accept it as a path.
+  std::string too_deep;
+  for (int i = 0; i < 20; ++i)
+    too_deep += "/" + std::string(200, 'd');
+  too_deep += "/" + std::string(61, 'd');
+  ASSERT_EQ(too_deep.size(), 4082u);
+
+  const rocjitsu::test::ScopedEnvironmentVariable invocation_dir("ROCJITSU_INVOCATION_DIR",
+                                                                 too_deep);
+  const LongPathHandoff handoff = relocate_active_config_to_long_path();
+
+  EXPECT_TRUE(handoff.status() == LongPathHandoff::Status::kSkip) << handoff.reason();
+  EXPECT_FALSE(handoff.reason().empty());
 }
 
 // Overwriting the interposer's hidden real /dev/kfd fd number via dup2 must not

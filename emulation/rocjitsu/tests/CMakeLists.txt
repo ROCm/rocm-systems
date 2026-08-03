@@ -1008,6 +1008,10 @@ rj_add_test(
         --gtest_filter=GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     TIMEOUT 60
+    # The test skips when the runtime directory it is handed is already deeper than
+    # the >4095-byte path it needs to build. Without this the skip would be reported
+    # as a pass and the lost coverage would be invisible.
+    SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
     INSTALL_COMMAND
         "\${RJ_INSTALLED_BINDIR}/rocjitsu"
         "--config"
@@ -1015,6 +1019,18 @@ rj_add_test(
         "--"
         "bin/guest_kfd_test"
         "--gtest_filter=GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes"
+)
+# Pure harness logic: no guest device, so no launcher wrapper.
+rj_add_test(
+    NAME "GuestKfdConfigTest.LongPathHandoffSkipsWhenRuntimeDirIsTooDeep"
+    COMMAND
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdConfigTest.LongPathHandoffSkipsWhenRuntimeDirIsTooDeep
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdConfigTest.LongPathHandoffSkipsWhenRuntimeDirIsTooDeep"
 )
 if(RJ_HAS_GFX1201_GPU)
     add_test(

@@ -28,7 +28,6 @@ RJ_DIAGNOSTIC_POP
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -49,26 +48,6 @@ test::ScopedTempFile write_temp_config(std::string_view json) {
   file.write(json);
   return file;
 }
-
-class ScopedEnvironmentVariable {
-public:
-  ScopedEnvironmentVariable(const char *name, const std::string &value) : name_(name) {
-    if (const char *original = std::getenv(name))
-      original_ = original;
-    setenv(name_.c_str(), value.c_str(), 1);
-  }
-
-  ~ScopedEnvironmentVariable() {
-    if (original_)
-      setenv(name_.c_str(), original_->c_str(), 1);
-    else
-      unsetenv(name_.c_str());
-  }
-
-private:
-  std::string name_;
-  std::optional<std::string> original_;
-};
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
   std::string json = CONFIG_DIR_PATH + "/gfx950_cdna4.json";
@@ -399,6 +378,11 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
 TEST(ConfigLoaderTest, LoadsDbtGuestSiliconRevisions) {
   // gfx1250 A0 and B0 share an ELF machine ID, so the configured revisions
   // select the B0-to-A0 translation profile.
+  //
+  // This also pins guest_isa == host_isa as a legal configuration. The hook
+  // layer resolves the resulting agent-role overlap by matching the host first
+  // (only the host carries the node-id constraint) rather than by rejecting the
+  // config here, which would foreclose this profile.
   const auto file = write_temp_config(R"({
       "dbt_guest": {
         "enabled": true,
@@ -620,7 +604,7 @@ TEST(ConfigLoaderTest, ParsesRuntimeConfigHandoff) {
 
 TEST(ConfigLoaderTest, RoundTripsRuntimeConfigHandoff) {
   const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-round-trip-");
-  ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
   config::DbtGuestConfig dbt;
   dbt.enabled = true;
   dbt.host.gpu_id = 28851;
@@ -639,7 +623,7 @@ TEST(ConfigLoaderTest, RoundTripsRuntimeConfigHandoff) {
 
 TEST(ConfigLoaderTest, RejectsUnresolvedAutomaticDbtHandoffWrite) {
   const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-unresolved-");
-  ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
   config::DbtGuestConfig dbt;
   dbt.enabled = true;
 
@@ -651,7 +635,7 @@ TEST(ConfigLoaderTest, RuntimeConfigHandoffReportsDirectoryCreationFailure) {
   const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-write-failure-");
   const std::filesystem::path blocked_root = std::filesystem::path(runtime.path()) / "blocked";
   std::ofstream(blocked_root) << "not a directory";
-  ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", blocked_root.string());
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", blocked_root.string());
   config::DbtGuestConfig dbt;
   dbt.enabled = true;
   dbt.host.gpu_id = 28851;
@@ -683,7 +667,7 @@ TEST(ConfigLoaderTest, LoadsDbtRuntimeConfigHandoffFromInvocationDirectory) {
     std::ofstream handoff(std::filesystem::path(runtime.path()) / "config_path");
     handoff << config_file.path() << "\n28851\n";
   }
-  ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
+  test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
 
   const std::optional<config::DbtGuestConfig> loaded =
       config::load_dbt_guest_config_from_runtime_config();
@@ -706,14 +690,14 @@ TEST(ConfigLoaderTest, RejectsPathOnlyHandoffForAutomaticDbtHost) {
     std::ofstream handoff(std::filesystem::path(runtime.path()) / "config_path");
     handoff << config_file.path() << '\n';
   }
-  ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
+  test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
 
   EXPECT_THROW(config::load_dbt_guest_config_from_runtime_config(), std::runtime_error);
 }
 
 TEST(ConfigLoaderTest, AllowsPathOnlyHandoffWithoutAutomaticDbtHost) {
   const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-path-only-");
-  ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
+  test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
 
   for (const std::string_view dbt_guest : {
            R"("dbt_guest": {"enabled": true, "host_gpu_id": 28851})",
