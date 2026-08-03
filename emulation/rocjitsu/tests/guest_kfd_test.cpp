@@ -160,36 +160,80 @@ bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
   }
 }
 
-bool relocate_active_config_to_long_path() {
+// Move the active config to a path longer than PATH_MAX so the handoff reader is
+// exercised against a path a fixed 4096-byte buffer cannot hold.
+//
+// The padding is planned up front rather than grown greedily. Each appended
+// component costs one separator plus at least one character, so a greedy loop can
+// land on a remainder it cannot spend: exactly on the target (where subtracting the
+// separator underflows size_t and asks std::string for a SIZE_MAX-long component)
+// or one byte short of it (where no legal component fits). Sizing the components
+// from the byte budget keeps every intermediate length in range, and the remaining
+// unspendable case -- a starting directory already at or past the budget -- is
+// reported rather than silently returned as false, since it depends on the
+// caller's runtime directory rather than on the behavior under test.
+testing::AssertionResult relocate_active_config_to_long_path() {
   const auto dir = config_handoff_dir();
+  if (!dir)
+    return testing::AssertionFailure() << "no config handoff directory to relocate into";
   const auto json = read_active_config_json();
-  if (!dir || !json)
-    return false;
+  if (!json)
+    return testing::AssertionFailure() << "no active config JSON to relocate";
 
   try {
-    std::filesystem::path config_dir = *dir;
-    constexpr size_t kTargetParentLength = 4081;
-    while (config_dir.string().size() + 201 <= kTargetParentLength)
-      config_dir /= std::string(200, 'a');
-    const size_t final_component_length = kTargetParentLength - config_dir.string().size() - 1;
-    if (final_component_length > 0)
-      config_dir /= std::string(final_component_length, 'a');
+    constexpr std::string_view kConfigFileName = "config.json";
+    constexpr size_t kMaxComponentLength = 200; // stays well under NAME_MAX
+    constexpr size_t kTargetPathLength = 4093;
+    constexpr size_t kTargetParentLength = kTargetPathLength - kConfigFileName.size() - 1;
+
+    // Byte accounting below charges one separator per appended component, so drop
+    // any trailing separator the handoff directory already carries. A bare root
+    // supplies that separator itself, so it contributes no bytes of its own.
+    std::string parent = dir->string();
+    while (parent.size() > 1 && parent.back() == '/')
+      parent.pop_back();
+    const size_t parent_length = parent == "/" ? 0 : parent.size();
+
+    if (parent_length > kTargetParentLength)
+      return testing::AssertionFailure()
+             << "handoff directory " << *dir << " is " << parent.size()
+             << " bytes, already past the " << kTargetParentLength << "-byte parent to build";
+    const size_t pad_budget = kTargetParentLength - parent_length;
+    if (pad_budget == 1)
+      return testing::AssertionFailure()
+             << "handoff directory " << *dir << " is " << parent.size() << " bytes, one short of "
+             << kTargetParentLength << ": no component fits in a separator plus one byte";
+
+    std::filesystem::path config_dir(parent);
+    if (pad_budget > 0) {
+      // Fewest components that keep each within kMaxComponentLength, with the
+      // characters left after the separators spread as evenly as possible.
+      const size_t components = (pad_budget + kMaxComponentLength) / (kMaxComponentLength + 1);
+      const size_t chars = pad_budget - components;
+      for (size_t i = 0; i < components; ++i)
+        config_dir /= std::string(chars / components + (i < chars % components ? 1 : 0), 'a');
+    }
+
     std::filesystem::create_directories(config_dir);
-    const std::filesystem::path config_path = config_dir / "config.json";
-    if (config_path.string().size() != 4093)
-      return false;
+    const std::filesystem::path config_path = config_dir / kConfigFileName;
+    if (config_path.string().size() != kTargetPathLength)
+      return testing::AssertionFailure()
+             << "built a " << config_path.string().size() << "-byte config path from a "
+             << parent.size() << "-byte handoff directory, expected " << kTargetPathLength;
 
     std::ofstream config(config_path);
     config << *json;
     config.close();
     if (!config)
-      return false;
+      return testing::AssertionFailure() << "failed to write config to the long path";
 
     std::ofstream handoff(*dir / "config_path", std::ios::trunc);
     handoff << config_path.string() << "\n50148\n";
-    return handoff.good();
-  } catch (const std::filesystem::filesystem_error &) {
-    return false;
+    if (!handoff.good())
+      return testing::AssertionFailure() << "failed to rewrite the config_path handoff";
+    return testing::AssertionSuccess();
+  } catch (const std::filesystem::filesystem_error &e) {
+    return testing::AssertionFailure() << "filesystem error building the long path: " << e.what();
   }
 }
 
