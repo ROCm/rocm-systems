@@ -1,5 +1,4 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-#
+# Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
 set(TEST_SRC test_hip_peer_query_contract.cc)

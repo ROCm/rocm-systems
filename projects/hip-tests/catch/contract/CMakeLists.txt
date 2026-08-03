@@ -1,5 +1,4 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-#
+# Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
 # ALL so the contract executables build with the default target the same way the

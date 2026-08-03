@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-#
+# Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 """Generate the contract-tier test plan (TEST_PLAN.md) from the test sources.
 

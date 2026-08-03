@@ -1,5 +1,4 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-#
+# Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.20)
