@@ -1,15 +1,19 @@
 /*************************************************************************
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
- * LL-protocol all-reduce device kernel for the DDA path. Each 16-byte line
- * holds 8 bytes of payload and two 4-byte flags; the flags carry cross-rank
- * sync, so no GPU barrier is needed. Staging uses the DDA scratch
- * (comm->ddaScratch, reachable via comm->ddaPeerPtrsDev).
+ * Two-shot tier of the LL-protocol all-reduce for the DDA path.
  *
- * This is the all-reduce analogue of all_gather_dda_fabric_ll.h. The kernel is
- * codepath-agnostic (it only needs the peer scratch table), so the same kernel
- * backs the fabric launcher (dda_all_reduce_fabric_ll.cu) and can equally back
- * an IPC launcher.
+ * The kernel below is currently a verbatim copy of ddaAllReduceFlatLL from
+ * all_reduce_dda_ll.h -- same phases, same staging layout, same epoch. Only the
+ * name and the dispatch tier differ, so any measured gap between the two tiers
+ * comes from the launcher or the dispatch, never from the device code. The
+ * reduce-scatter/all-gather decomposition that gives this tier its name is meant
+ * to replace the body later; keeping the copy exact is what makes that a
+ * one-variable change.
+ *
+ * Because it is a copy, it shares the one-shot tier's scratch layout and epoch
+ * counter (see the constants below), so the two tiers are interchangeable on the
+ * same comm and neither can strand the other's scratch.
  *
  * See LICENSE.txt for license information.
  ************************************************************************/
@@ -26,19 +30,20 @@
 #endif
 
 #include "algorithms/CollCommon.h"
+// Staging layout is shared with the one-shot tier, not redefined here.
+#include "algorithms/all_reduce/all_reduce_dda_ll.h"
 
 namespace meta::comms {
 
-// Per-rank staging slot capacity and hard per-message cap (enforced in the
-// eligibility check). Fixes the slot stride at compile time so the
-// double-buffered layout is identical on every rank and call. LL is a
-// small-message fast lane, so the full-message payload is well under this cap.
-// Footprint = 2 banks * nRanks * (kDdaLLArMaxBytes * 2) for the 8B->16B
-// expansion; 4 MiB at 128 KiB / 8 ranks, within the 64 MiB DDA scratch.
-constexpr size_t kDdaLLArMaxBytes = 4194304;                 // 4MB KiB
-constexpr size_t kDdaLLArSlotStridePkts = kDdaLLArMaxBytes / 8;   // 512KB
+// Both tiers stage through comm->ddaScratch under one epoch counter, so bank =
+// flag & 1 only lands where the other tier expects it while the cap and the slot
+// stride stay identical. Aliased rather than copied so the two cannot drift: a
+// tier that needs its own capacity has to also give the pair a bank stride that
+// still agrees.
+constexpr size_t kDdaLLArTwoShotMaxBytes = kDdaLLArMaxBytes;
+constexpr size_t kDdaLLArTwoShotSlotStridePkts = kDdaLLArSlotStridePkts;
 
-// LL flat all-reduce kernel. 1D grid over packets (8B payload each).
+// LL two-shot all-reduce kernel. 1D grid over packets (8B payload each).
 //
 // Phase 1 (publish): rank selfRank writes its full sendbuff into every peer's
 // scratch at slot selfRank, as LL lines carrying the epoch flag.
@@ -54,18 +59,18 @@ template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-  __global__ void ddaAllReduceFlatLL(T* const* __restrict__ peerScratch,    // ddaPeerPtrsDev: nRanks scratch bases
-                                     T* __restrict__ recvbuff,              // local user output
-                                     const T* __restrict__ sendbuff,        // local user input
-                                     size_t count,                          // full-message element count
-                                     int selfRank, int nRanksRt,
-                                     uint32_t* __restrict__ epochDev,       // per-block LL epoch cells (shared AG+AR)
-                                     int epochLen) {                        // number of cells in epochDev
+  __global__ void ddaAllReduceTwoShotLL(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
+                                        T* __restrict__ recvbuff,           // local user output
+                                        const T* __restrict__ sendbuff,     // local user input
+                                        size_t count,                       // full-message element count
+                                        int selfRank, int nRanksRt,
+                                        uint32_t* __restrict__ epochDev,    // per-block LL epoch cells (shared AG+AR)
+                                        int epochLen) {                     // number of cells in epochDev
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
   const size_t nPk = bytes >> 3;           // 8 payload bytes per packet
-  const size_t slot = kDdaLLArSlotStridePkts;
+  const size_t slot = kDdaLLArTwoShotSlotStridePkts;
 
   // Flat block id + total launched blocks. tid 0 reads our own epoch cell (all
   // cells hold the same value) and derives this launch's flag on the device, so

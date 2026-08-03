@@ -4,12 +4,18 @@
  * Host launcher + eligibility for the LL-protocol DDA fabric all-reduce.
  * All-reduce analogue of dda_all_gather_fabric_ll.cu; reuses the codepath-
  * agnostic ddaAllReduceFlatLL kernel from all_reduce_dda_ll.h.
+ *
+ * Carries both LL tiers. The two-shot tier's kernel is still a verbatim copy of
+ * the one-shot's, so hosting the two launchers in one translation unit keeps
+ * them on identical compile flags and leaves the dispatch tier as the only
+ * difference between them.
  * See LICENSE.txt for license information.
  ************************************************************************/
 
 #include "dda_all_reduce.h"
 
 #include "algorithms/all_reduce/all_reduce_dda_ll.h"
+#include "algorithms/all_reduce/all_reduce_dda_ll_twoshot.h"
 #include "checks.h"
 #include "comm.h"
 #include "dda_init_detail.h" // nccl_dda_detail::kDdaFabricLLArMaxBlocks
@@ -27,12 +33,26 @@ namespace {
 
 using meta::comms::kDdaLLArMaxBytes;
 using meta::comms::kDdaLLArSlotStridePkts;
+using meta::comms::kDdaLLArTwoShotMaxBytes;
+using meta::comms::kDdaLLArTwoShotSlotStridePkts;
 using meta::comms::LLPacket16;
 
 // LL scratch footprint: 2 banks * nRanks slots * slotStride packets * 16B.
 static inline size_t ddaLLArScratchSize(int nRanks) {
   return (size_t)2 * (size_t)nRanks * kDdaLLArSlotStridePkts * sizeof(LLPacket16);
 }
+
+// Same shape, off the two-shot tier's own constant, so a tier that later grows
+// its slot is sized against the scratch it actually uses.
+static inline size_t ddaLLArTwoShotScratchSize(int nRanks) {
+  return (size_t)2 * (size_t)nRanks * kDdaLLArTwoShotSlotStridePkts * sizeof(LLPacket16);
+}
+
+// The two tiers stage through one scratch under one epoch, so bank 1 has to
+// start at the same offset for both; otherwise a launch of one could write over
+// lines the other is still polling an epoch later.
+static_assert(kDdaLLArTwoShotSlotStridePkts == kDdaLLArSlotStridePkts,
+              "LL all-reduce tiers share one scratch and epoch; keep their slot strides equal");
 
 // Single source of the launch geometry: 1-D grid over 8-byte LL packets, capped
 // low (LL serves tiny messages where latency, not occupancy, dominates).
@@ -57,9 +77,17 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   const size_t bytes = count * sizeof(T);
   const size_t nPk = bytes >> 3; // 8 payload bytes per packet (for logging)
 
-  auto gridBlock = ddaAllReduceFabricLLGeom(comm, count, sizeof(T));
-  const dim3 grid = gridBlock.first;
-  const dim3 block = gridBlock.second;
+  const unsigned threads = 256;
+  int nBlocksMax = std::min(comm->ddaFabricMaxBlocks, nccl_dda_detail::kDdaFabricLLArMaxBlocks);
+  if (nBlocksMax < 1) {
+    nBlocksMax = 1;
+  }
+  unsigned blocks = (unsigned)std::min<size_t>((nPk + threads - 1) / threads, (size_t)nBlocksMax);
+  if (blocks == 0) {
+    blocks = 1;
+  }
+  dim3 block(threads);
+  dim3 grid(blocks);
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   // Shared epoch counter (same as AG/RS) so bank = flag & 1 is consistent
@@ -83,6 +111,60 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
     break;
   default:
     meta::comms::ddaAllReduceFlatLL<T, 0><<<grid, block, 0, stream>>>(
+      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen);
+    break;
+  }
+
+  CUDACHECK(cudaGetLastError());
+
+  return ncclSuccess;
+}
+
+// Mirrors ncclAllReduceDdaFabricLLTyped: the kernel it launches is a copy, so the
+// grid sizing and arguments are deliberately the same. Keep them that way while
+// the kernels match, so a measured difference between the tiers can only come
+// from the dispatch.
+template <typename T>
+static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, void* recvbuff, size_t count,
+                                                         ncclComm* comm, cudaStream_t stream) {
+  const int nRanks = comm->nRanks;
+  const size_t bytes = count * sizeof(T);
+  const size_t nPk = bytes >> 3; // 8 payload bytes per packet
+
+  const unsigned threads = 256;
+  int nBlocksMax = std::min(comm->ddaFabricMaxBlocks, nccl_dda_detail::kDdaFabricLLArMaxBlocks);
+  if (nBlocksMax < 1) {
+    nBlocksMax = 1;
+  }
+  unsigned blocks = (unsigned)std::min<size_t>((nPk + threads - 1) / threads, (size_t)nBlocksMax);
+  if (blocks == 0) {
+    blocks = 1;
+  }
+  dim3 block(threads);
+  dim3 grid(blocks);
+
+  T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
+  // Same epoch counter the one-shot tier uses: the two share a scratch layout, so
+  // one monotonic flag is what keeps either from accepting a line the other left.
+  uint32_t* epochDev = comm->ddaLLEpochDev;
+  const int epochLen = comm->ddaLLEpochLen;
+
+  INFO(NCCL_COLL, "DDA fabric AllReduce LL two-shot: nRanks=%d bytes=%zu nPk=%zu grid=%u block=%u", nRanks, bytes, nPk,
+       grid.x, block.x);
+
+  // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback (up to
+  // kDdaMaxNranks).
+  switch (nRanks) {
+  case 4:
+    meta::comms::ddaAllReduceTwoShotLL<T, 4><<<grid, block, 0, stream>>>(
+      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen);
+    break;
+  case 8:
+    meta::comms::ddaAllReduceTwoShotLL<T, 8><<<grid, block, 0, stream>>>(
+      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen);
+    break;
+  default:
+    meta::comms::ddaAllReduceTwoShotLL<T, 0><<<grid, block, 0, stream>>>(
       peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen);
     break;
   }
@@ -134,11 +216,6 @@ bool ncclAllReduceDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
   return true;
 }
 
-uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
-  const auto grid = ddaAllReduceFabricLLGeom(comm, count, ncclTypeSize(datatype)).first;
-  return grid.x * grid.y;
-}
-
 ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                       ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   (void)op;
@@ -152,4 +229,65 @@ ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size
   default:
     return ncclInvalidArgument;
   }
+}
+
+bool ncclAllReduceDdaFabricLLTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                             ncclDataType_t datatype, ncclRedOp_t op) {
+  (void)sendbuff;
+  (void)recvbuff;
+  if (comm == nullptr || comm->bootstrap == nullptr) {
+    return false;
+  }
+  // Fabric path: requires the fabric handler + scratch + peer table.
+  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+    return false;
+  }
+  if (comm->nRanks < 2 || comm->nRanks > meta::comms::kDdaMaxNranks) {
+    return false;
+  }
+  if (count == 0) {
+    return false;
+  }
+  if (op != ncclSum) {
+    return false;
+  }
+  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+    return false;
+  }
+
+  const size_t bytes = count * ncclTypeSize(datatype);
+  // Payload is staged as 8-byte LL packets, so it must be a whole number of
+  // packets.
+  if (bytes % 8 != 0) {
+    return false;
+  }
+  if (bytes > kDdaLLArTwoShotMaxBytes) {
+    return false;
+  }
+  if (ddaLLArTwoShotScratchSize(comm->nRanks) > comm->ddaScratchBytes) {
+    return false;
+  }
+
+  return true;
+}
+
+ncclResult_t ncclAllReduceDdaFabricLLTwoShot(const void* sendbuff, void* recvbuff, size_t count,
+                                             ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
+                                             cudaStream_t stream) {
+  (void)op;
+  switch (datatype) {
+  case ncclFloat32:
+    return ncclAllReduceDdaFabricLLTwoShotTyped<float>(sendbuff, recvbuff, count, comm, stream);
+  case ncclFloat16:
+    return ncclAllReduceDdaFabricLLTwoShotTyped<half>(sendbuff, recvbuff, count, comm, stream);
+  case ncclBfloat16:
+    return ncclAllReduceDdaFabricLLTwoShotTyped<bf16>(sendbuff, recvbuff, count, comm, stream);
+  default:
+    return ncclInvalidArgument;
+  }
+}
+
+uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  const auto grid = ddaAllReduceFabricLLGeom(comm, count, ncclTypeSize(datatype)).first;
+  return grid.x * grid.y;
 }
