@@ -287,7 +287,6 @@ def test_occupancy_event_tracing_fields(att_occupancy_event_trace_out_dir_path):
 
         validate_occupancy_rows(occupancy_data, occupancy_file)
 
-        # kernel id -> name map, not decoder records: non-empty even with zero dispatches
         dispatches = occupancy_data.get("dispatches", {})
         assert isinstance(
             dispatches, dict
@@ -296,7 +295,7 @@ def test_occupancy_event_tracing_fields(att_occupancy_event_trace_out_dir_path):
 
         events = occupancy_data.get("events", {})
         assert isinstance(events, dict), f"events must be an object in {occupancy_file}"
-        assert events, f"events is empty in {occupancy_file} (decoder older than 0.2?)"
+        assert events, f"events is empty in {occupancy_file}"
 
         for se, records in events.items():
             assert isinstance(records, list), f"events[{se}] must be a list"
