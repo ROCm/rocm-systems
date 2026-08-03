@@ -970,6 +970,16 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
   if (rc != 0) {
     if (memfd >= 0)
       syscall(SYS_close, memfd);
+    // send_mmap() reports a negative errno, but only its transport failures
+    // leave errno set as a side effect; the poison paths and the daemon's own
+    // result do not, so without this the caller would read whatever errno this
+    // thread last happened to set. The call that TRIPS the poison comes through
+    // here, not through the fail-fast check above, so this is the one that has
+    // to make -EPROTO visible. -1 is the transport's "no usable errno" sentinel
+    // (see the `err > 0 ? -err : -1` returns): there errno is already the real
+    // one, and rewriting it would report EPERM.
+    if (rc < 0 && rc != -1)
+      errno = -rc;
     return MAP_FAILED;
   }
 

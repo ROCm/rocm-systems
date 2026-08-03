@@ -1878,8 +1878,14 @@ TEST(RemoteDriverStreamPoisonTest, ShortMmapReplyIsRejectedRatherThanReadOffTheS
 
   rocjitsu::RemoteDriver rd(sv[0]);
 
+  // This is the call that TRIPS the poison, not one that finds the connection
+  // already dead, so it is the one whose errno the documented contract is
+  // easiest to break: nothing on the path to MAP_FAILED sets errno as a side
+  // effect (the receive succeeded -- it just came back short -- and the
+  // shutdown that poisons the stream succeeds too).
   errno = 0;
   EXPECT_EQ(rd.mmap(nullptr, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, 0), MAP_FAILED);
+  EXPECT_EQ(errno, EPROTO) << "a failed mmap left errno for the caller to guess at";
 
   // The mmap and ioctl paths share one stream, so a desync noticed by one is
   // terminal for the other.
