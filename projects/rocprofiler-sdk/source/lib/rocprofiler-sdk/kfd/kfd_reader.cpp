@@ -65,24 +65,26 @@ namespace
 constexpr int kEventfdFlags = EFD_CLOEXEC | EFD_NONBLOCK;
 
 // Dispatch-log ring size in bytes. Validated before any sizing math uses it:
-// dlog_ring_bytes_from_mb_str() accepts only [1, kDlogMaxRingMb] MB, so the value
-// always fits the uint32 buffer_size ioctl field.
+// dlog_ring_bytes_from_kb_str() accepts only [1, kDlogMaxRingKb] KiB, so the value
+// always fits the uint32 buffer_size ioctl field. A parseable size the DRIVER
+// rejects is not our call to make here -- REGISTER_BUFFER fails and the existing
+// setup-failed path warns and falls back to HSA timestamps.
 uint64_t
 ring_bytes()
 {
-    auto _v = common::get_env_optional("ROCPROFILER_KFD_DISPATCH_LOG_SIZE_MB");
-    if(!_v) return kDlogDefaultRingMb * 1024 * 1024;
+    auto _v = common::get_env_optional("ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB");
+    if(!_v) return kDlogDefaultRingKb * 1024;
 
-    uint64_t _bytes = dlog_ring_bytes_from_mb_str(*_v);
+    uint64_t _bytes = dlog_ring_bytes_from_kb_str(*_v);
     if(_bytes == 0)
     {
         ROCP_WARNING << fmt::format(
-            "KFD dispatch-log: ignoring invalid ROCPROFILER_KFD_DISPATCH_LOG_SIZE_MB='{}' "
-            "(expected an integer 1-{}); using {} MB",
+            "KFD dispatch-log: ignoring invalid ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB='{}' "
+            "(expected an integer 1-{}); using {} KB",
             *_v,
-            kDlogMaxRingMb,
-            kDlogDefaultRingMb);
-        return kDlogDefaultRingMb * 1024 * 1024;
+            kDlogMaxRingKb,
+            kDlogDefaultRingKb);
+        return kDlogDefaultRingKb * 1024;
     }
     return _bytes;
 }
@@ -272,7 +274,7 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
     }
 
     // buffer_size below is a uint32 field; ring_bytes() is bounded to fit it.
-    static_assert(kDlogMaxRingMb * 1024 * 1024 <= 0xFFFFFFFFull,
+    static_assert(kDlogMaxRingKb * 1024 <= 0xFFFFFFFFull,
                   "dlog ring size must fit the uint32 buffer_size ioctl field");
     auto reg                       = kfd_ioctl_profiler_args{};
     reg.op                         = KFD_IOC_PROFILER_DLOG;
@@ -452,10 +454,10 @@ warn_on_overrun(const drain_state& d)
     ROCP_WARNING << fmt::format(
         "KFD dispatch-log: ring OVERRUN ({} occurrence(s), at least {} record(s) dropped) -- the "
         "firmware lapped the reader, so those dispatches have no dispatch-log timestamps. Raise "
-        "the ring with ROCPROFILER_KFD_DISPATCH_LOG_SIZE_MB (currently {} MB max).",
+        "the ring with ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB (currently {} KB max).",
         d.overruns,
         d.lost_records,
-        kDlogMaxRingMb);
+        kDlogMaxRingKb);
 }
 
 // KFD_DLOG_STREAM_OP_STATUS is DIAGNOSTICS ONLY: the kernel's counters are logged

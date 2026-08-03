@@ -151,13 +151,17 @@ Kernel dispatch timestamp source
         path supports (counter collection, advanced thread trace, or PC sampling)
         puts every dispatch on the HSA timestamps regardless of this variable.
         Set to ``false`` to force the HSA source for every dispatch.
-    * - ``ROCPROFILER_KFD_DISPATCH_LOG_SIZE_MB``
-      - ``8``
-      - Size in MiB of the firmware dispatch-log ring, as an integer from ``1``
-        to ``4095``. Any other value is ignored with a warning and the default is
+    * - ``ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB``
+      - ``80``
+      - Size in KiB of the firmware dispatch-log ring, as an integer from ``1`` to
+        ``4194303``. Any other value is ignored with a warning and the default is
         used. If the firmware laps the reader the SDK logs an overrun warning and
-        the affected dispatches fall back to the HSA timestamps; raise this value
-        to give the reader more headroom.
+        the affected dispatches fall back to the HSA timestamps; raising this
+        value gives the reader more headroom. The driver enforces its own maximum,
+        which is smaller than the range above and varies by kernel: a size the
+        driver rejects disables the dispatch log for the process (logged) and
+        every dispatch uses the HSA timestamps, so increase it incrementally and
+        check for the ``REGISTER_BUFFER failed`` warning.
 
 Beta-feature opt-in
 -------------------

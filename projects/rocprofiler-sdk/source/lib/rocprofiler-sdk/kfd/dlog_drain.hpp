@@ -49,30 +49,36 @@ constexpr uint32_t kFwRecBytes = 20;
 // more regions than this is rejected rather than partially drained.
 constexpr uint32_t kMaxRegions = 8;
 
-// Dispatch-log ring size, overridable via ROCPROFILER_KFD_DISPATCH_LOG_SIZE_MB.
-// The KFD REGISTER_BUFFER `buffer_size` field is a uint32, which bounds the
-// accepted range; every downstream size (arr_bytes, signal_off, alloc_size,
-// stride, aperture candidates) is computed in uint64 from a value this small and
+// Dispatch-log ring size, overridable via ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB.
+// The unit is KiB because the kernel accepts sub-MiB rings and rejects large ones
+// (REGISTER_BUFFER returns EINVAL at >=1 MiB on the ABI-5 kernel), so MiB
+// granularity could not express a working size. The default is the size the
+// driver is known to accept; a larger opt-in value that the kernel refuses fails
+// REGISTER_BUFFER and degrades through the existing setup-failed path.
+//
+// The upper bound exists only because the KFD REGISTER_BUFFER `buffer_size` field
+// is a uint32. Every downstream size (arr_bytes, signal_off, alloc_size, stride,
+// aperture candidates) is computed in uint64 from a value below that bound and
 // therefore cannot overflow.
-constexpr uint64_t kDlogDefaultRingMb = 8;
-constexpr uint64_t kDlogMaxRingMb     = 0xFFFFFFFFull / (1024 * 1024);
+constexpr uint64_t kDlogDefaultRingKb = 80;
+constexpr uint64_t kDlogMaxRingKb     = 0xFFFFFFFFull / 1024;
 
-// Parse a ROCPROFILER_KFD_DISPATCH_LOG_SIZE_MB value. Returns the ring size in
+// Parse a ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB value. Returns the ring size in
 // bytes, or 0 for anything that is not a plain decimal integer in
-// [1, kDlogMaxRingMb] -- empty, zero, negative, trailing junk, or too large. The
-// caller warns and falls back to kDlogDefaultRingMb.
+// [1, kDlogMaxRingKb] -- empty, zero, negative, trailing junk, or too large. The
+// caller warns and falls back to kDlogDefaultRingKb.
 inline uint64_t
-dlog_ring_bytes_from_mb_str(std::string_view v)
+dlog_ring_bytes_from_kb_str(std::string_view v)
 {
     if(v.empty()) return 0;
-    uint64_t mb = 0;
+    uint64_t kb = 0;
     for(char c : v)
     {
         if(c < '0' || c > '9') return 0;
-        mb = mb * 10 + static_cast<uint64_t>(c - '0');
-        if(mb > kDlogMaxRingMb) return 0;
+        kb = kb * 10 + static_cast<uint64_t>(c - '0');
+        if(kb > kDlogMaxRingKb) return 0;
     }
-    return mb * 1024 * 1024;
+    return kb * 1024;
 }
 
 constexpr uint32_t kRecPadding = 0;

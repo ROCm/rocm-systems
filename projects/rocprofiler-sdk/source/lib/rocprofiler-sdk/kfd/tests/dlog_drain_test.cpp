@@ -448,38 +448,49 @@ TEST(dlog_drain, overrun_counted_once_per_drain)
 }
 
 // --- Phase 0: ring-size env-var parsing (U16). Only a plain decimal integer in
-// [1, kDlogMaxRingMb] is accepted; everything else returns 0 so the caller warns
-// and uses the default. ---
+// [1, kDlogMaxRingKb] is accepted; everything else returns 0 so the caller warns
+// and uses the default. The unit is KiB: the driver accepts sub-MiB rings (the
+// 80 KiB default) and rejects >=1 MiB ones, so MiB granularity could not express
+// a working size. ---
 TEST(dlog_ring_size, env_value_parsing)
 {
-    constexpr uint64_t mb = 1024 * 1024;
+    constexpr uint64_t kb = 1024;
 
     // Rejected: empty, zero, negative, non-numeric, whitespace, trailing junk.
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str(""), 0u);
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str("0"), 0u);
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str("00"), 0u);
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str("-1"), 0u);
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str("-8"), 0u);
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str("abc"), 0u);
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str(" 8"), 0u);
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str("8 "), 0u);
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str("8M"), 0u);
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str("+8"), 0u);
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str("0x8"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str(""), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("0"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("00"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("-1"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("-80"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("abc"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str(" 80"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("80 "), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("80K"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("+80"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("0x80"), 0u);
 
-    // Accepted: the default and the largest value that fits the uint32 field.
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str("1"), 1u * mb);
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str("8"), 8u * mb);
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str("4095"), kDlogMaxRingMb * mb);
-    EXPECT_EQ(kDlogMaxRingMb, 4095u);
+    // Accepted: the smallest value, the 80 KiB default the driver is known to
+    // take, and the largest value that fits the uint32 field.
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("1"), 1u * kb);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("80"), 80u * kb);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("80"), kDlogDefaultRingKb * kb);
+    EXPECT_EQ(kDlogDefaultRingKb * kb, 81920u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("4194303"), kDlogMaxRingKb * kb);
+    EXPECT_EQ(kDlogMaxRingKb, 4194303u);
+
+    // A size the DRIVER may reject still parses: the kernel's maximum is not
+    // documented, so REGISTER_BUFFER (not the parser) is what refuses it, and the
+    // existing setup-failed path falls back to HSA timestamps.
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("1024"), 1024u * kb);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("8192"), 8192u * kb);
 
     // Over the uint32 buffer_size field, and overflow-adjacent inputs: rejected
     // without ever wrapping (the bound is checked per digit).
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str("4096"), 0u);
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str("4294967296"), 0u);
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str("18446744073709551615"), 0u);  // UINT64_MAX
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str("18446744073709551616"), 0u);  // UINT64_MAX + 1
-    EXPECT_EQ(dlog_ring_bytes_from_mb_str(std::string(64, '9')), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("4194304"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("4294967296"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("18446744073709551615"), 0u);  // UINT64_MAX
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("18446744073709551616"), 0u);  // UINT64_MAX + 1
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str(std::string(64, '9')), 0u);
 }
 
 // The sizing math the session performs on the parsed value is validated BEFORE
@@ -488,10 +499,10 @@ TEST(dlog_ring_size, env_value_parsing)
 // cannot overflow uint64.
 TEST(dlog_ring_size, accepted_sizes_keep_the_session_math_in_range)
 {
-    for(uint64_t m : {uint64_t{1}, uint64_t{8}, kDlogDefaultRingMb, kDlogMaxRingMb})
+    for(uint64_t k : {uint64_t{1}, kDlogDefaultRingKb, uint64_t{8192}, kDlogMaxRingKb})
     {
-        uint64_t buf_bytes = dlog_ring_bytes_from_mb_str(std::to_string(m));
-        ASSERT_EQ(buf_bytes, m * 1024 * 1024);
+        uint64_t buf_bytes = dlog_ring_bytes_from_kb_str(std::to_string(k));
+        ASSERT_EQ(buf_bytes, k * 1024);
         ASSERT_LE(buf_bytes, 0xFFFFFFFFull);  // uint32 buffer_size field
 
         // Mirrors setup_session(): arr_bytes/signal_off/alloc_size, then the
