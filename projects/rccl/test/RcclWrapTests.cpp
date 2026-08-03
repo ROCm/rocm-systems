@@ -1472,19 +1472,31 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
     };
 
     const size_t HALF = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
+    const size_t QUARTER = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 4;
     const size_t FULL = HIERARCHICAL_AG_TEMP_BUFFER_SIZE;
 
     std::vector<HierAGCase> testCases = {
         // nNodes < 8 --> disabled
-        {"LessThan8Nodes",            4,  true,  1ULL << 20, false, {}},
+        {"LessThan8Nodes",               4,  true,  1ULL << 20,  false, {}},
         // sub-comms not initialized --> disabled
-        {"CommsNotInitialized",       16, false, 1ULL << 20, false, {}},
-        // 8 node size > 64MB --> disabled
-        {"Disabled_8Nodes_AboveHalf", 8,  true,  HALF + 1,   false, {}},
-        // 16 node size > 128MB --> disabled
-        {"Disabled_16N_AboveFull",    16, true,  FULL + 1,   false, {}},
+        {"CommsNotInitialized",          16, false, 1ULL << 20,  false, {}},
+        // 8-15 nodes --> limit is 32MB
+        {"Enabled_8Nodes_AtQuarter",     8,  true,  QUARTER,     true,  {}},
+        {"Disabled_8Nodes_AboveQuarter", 8,  true,  QUARTER + 1, false, {}},
+        {"Enabled_15Nodes_AtQuarter",    15, true,  QUARTER,     true,  {}},
+        {"Disabled_15Nodes_AtHalf",      15, true,  HALF,        false, {}},
+        // 16-31 nodes --> limit is 64MB
+        {"Enabled_16Nodes_AtHalf",       16, true,  HALF,        true,  {}},
+        {"Disabled_16Nodes_AboveHalf",   16, true,  HALF + 1,    false, {}},
+        {"Enabled_31Nodes_AtHalf",       31, true,  HALF,        true,  {}},
+        {"Disabled_31Nodes_AtFull",      31, true,  FULL,        false, {}},
+        // 32+ nodes --> limit is 128MB
+        {"Enabled_32Nodes_AtHalf",       32, true,  HALF,        true,  {}},
+        {"Enabled_32Nodes_AtFull",       32, true,  FULL,        true,  {}},
+        {"Disabled_32Nodes_AboveFull",   32, true,  FULL + 1,    false, {}},
+        {"Enabled_64Nodes_AtFull",       64, true,  FULL,        true,  {}},
         // env var forces off --> disabled
-        {"DisabledByEnvVar",          16, true,  1ULL << 20, false, {{"RCCL_HIERARCHICAL_ALLGATHER", "0"}}},
+        {"DisabledByEnvVar",             16, true,  1ULL << 20,  false, {{"RCCL_HIERARCHICAL_ALLGATHER", "0"}}},
     };
 
     // Base environment shared by every case
