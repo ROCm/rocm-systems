@@ -2205,6 +2205,81 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesMultipleAgentsWithCallerStri
   multi_gpu_driver.close();
 }
 
+// Only devices the snapshot can actually describe are enumerable, so the device
+// total is clamped to the per-GPU metadata captured by setup_topology, not to
+// the number of SoCs the driver was built over. An embedder is free to skip
+// setup_topology entirely, or to call the single-device overload on a driver
+// holding several SoCs, and both leave fewer descriptions than GPUs.
+//
+// Reporting the GPU count regardless would look like the obvious
+// simplification, and every other test in this file keeps passing when you make
+// it -- the fill loop then indexes gpu_infos_ past its end and the process dies
+// on the first snapshot with no metadata (verified: substituting gpus_.size()
+// here turns this test into a SIGSEGV). Short of the crash, a partially
+// described set would hand rocdbgapi entries with simd_count or array_count
+// zero, which its agent_snapshot treats as fatal rather than as a bad ioctl.
+TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesOnlyDescribableDevices) {
+  constexpr uint32_t kSecondGpuId = kGpuId + 1;
+  constexpr uint32_t kEntryBytes = sizeof(kfd_dbg_device_info_entry);
+  constexpr uint8_t kSentinel = 0xAB;
+
+  // Two GPUs, and a snapshot request with room for both, in every case below.
+  auto snapshot_two = [&](rocjitsu::SimulatedKfd &driver, std::array<uint8_t, kEntryBytes * 2> &buf,
+                          kfd_ioctl_dbg_trap_args &snapshot) {
+    ASSERT_GE(driver.open(), 0);
+    kfd_ioctl_dbg_trap_args enable{};
+    enable.pid = static_cast<uint32_t>(getpid());
+    enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+    enable.enable.dbg_fd = make_debug_fd();
+    ASSERT_EQ(driver.ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+    buf.fill(kSentinel);
+    snapshot = {};
+    snapshot.pid = static_cast<uint32_t>(getpid());
+    snapshot.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+    snapshot.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(buf.data());
+    snapshot.device_snapshot.num_devices = 2;
+    snapshot.device_snapshot.entry_size = kEntryBytes;
+    ASSERT_EQ(driver.ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+  };
+
+  // No metadata at all: the request succeeds and reports nothing to describe,
+  // rather than handing back two zero-filled entries.
+  {
+    SCOPED_TRACE("setup_topology never called");
+    rocjitsu::SimulatedKfd driver({soc_, soc_}, {kGpuId, kSecondGpuId});
+    std::array<uint8_t, kEntryBytes * 2> buf{};
+    kfd_ioctl_dbg_trap_args snapshot{};
+    snapshot_two(driver, buf, snapshot);
+    EXPECT_EQ(snapshot.device_snapshot.num_devices, 0u);
+    EXPECT_EQ(snapshot.device_snapshot.entry_size, kEntryBytes);
+    EXPECT_TRUE(std::all_of(buf.begin(), buf.end(), [](uint8_t byte) { return byte == kSentinel; }))
+        << "an undescribable device was written out anyway";
+    driver.close();
+  }
+
+  // Metadata for one of the two: the described GPU is enumerated, the other is
+  // not, and its slot is left as the caller had it.
+  {
+    SCOPED_TRACE("single-device setup_topology on a two-GPU driver");
+    rocjitsu::SimulatedKfd driver({soc_, soc_}, {kGpuId, kSecondGpuId});
+    driver.setup_topology(loaded_.device, soc_->num_xcds());
+    std::array<uint8_t, kEntryBytes * 2> buf{};
+    kfd_ioctl_dbg_trap_args snapshot{};
+    snapshot_two(driver, buf, snapshot);
+    EXPECT_EQ(snapshot.device_snapshot.num_devices, 1u);
+    kfd_dbg_device_info_entry first{};
+    std::memcpy(&first, buf.data(), sizeof(first));
+    EXPECT_EQ(first.gpu_id, kGpuId);
+    EXPECT_NE(first.simd_count, 0u);
+    EXPECT_NE(first.array_count, 0u);
+    EXPECT_TRUE(std::all_of(buf.begin() + kEntryBytes, buf.end(), [](uint8_t byte) {
+      return byte == kSentinel;
+    })) << "the undescribed second GPU was enumerated";
+    driver.close();
+  }
+}
+
 TEST(KfdTopologyTest, EffectiveTopologyDerivesGfx121Capability2) {
   const rocjitsu::kmd::DebugTopology topology =
       rocjitsu::kmd::effective_topology_for(120100u, 0, 0, 0, 0);
