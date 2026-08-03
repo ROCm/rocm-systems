@@ -1610,6 +1610,139 @@ TEST(RemoteDriverDbgEnableTest, FailedEnableLeavesCallerRuntimeInfoUntouched) {
   server.join();
 }
 
+// --- RemoteDriver RPC stream poisoning ---
+//
+// Every exchange on the socket is length-framed, so a request that stops
+// mid-write, or a reply that is not consumed whole, leaves the two ends
+// disagreeing about where the next frame starts. From then on any call would
+// decode its result -- and the bytes it copies into caller memory -- out of some
+// other exchange's remains. The client marks the connection terminal instead,
+// and every entry point has to honour that mark, not just the one that tripped
+// over it: ioctl, mmap and munmap all share the one stream.
+
+// Framed size of an RPC_IOCTL request carrying `arg_bytes` of ioctl args and no
+// inline tail.
+constexpr size_t framed_ioctl_request_bytes(size_t arg_bytes) {
+  return sizeof(rocjitsu::RpcHeader) + sizeof(rocjitsu::RpcIoctlRequest) + arg_bytes;
+}
+
+// A reply header cut in half, then EOF on the daemon's write half. The client's
+// receive asks for MSG_WAITALL but comes back short — the same desync a
+// signal-interrupted wait produces, without having to time a signal. Queued
+// before the client sends anything: the two directions are independent, so the
+// reply can already be waiting when the request goes out.
+TEST(RemoteDriverStreamPoisonTest, TruncatedIoctlReplyMakesEveryLaterCallFailFast) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+  const CloseOnScopeExit server_closer{sv[1]};
+
+  const std::vector<uint8_t> half_header(sizeof(rocjitsu::RpcHeader) / 2, 0xA5);
+  ASSERT_TRUE(rocjitsu::rpc_send_exact(sv[1], half_header.data(), half_header.size()));
+  ASSERT_EQ(::shutdown(sv[1], SHUT_WR), 0) << ::strerror(errno);
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  kfd_ioctl_get_version_args version{};
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_GET_VERSION, &version), -EPROTO);
+
+  // Drain the one request that did go out, so anything still readable afterwards
+  // is a write the poisoned client should never have made.
+  std::vector<uint8_t> request_seen(framed_ioctl_request_bytes(sizeof(version)));
+  ASSERT_TRUE(rocjitsu::rpc_recv_exact(sv[1], request_seen.data(), request_seen.size()));
+
+  kfd_ioctl_get_version_args after{};
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_GET_VERSION, &after), -EPROTO);
+  EXPECT_EQ(rd.munmap(reinterpret_cast<void *>(0x1000), 0x1000), -EPROTO);
+  errno = 0;
+  EXPECT_EQ(rd.mmap(nullptr, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, 0), MAP_FAILED);
+  EXPECT_EQ(errno, EPROTO);
+
+  // Nothing more on the wire, and the socket is shut down rather than merely
+  // idle: recv() reports EOF instead of blocking or handing back another frame.
+  uint8_t unexpected = 0;
+  EXPECT_EQ(::recv(sv[1], &unexpected, sizeof(unexpected), MSG_DONTWAIT), 0)
+      << "a poisoned client kept talking to the daemon";
+}
+
+// The daemon frames every mmap reply as header + RpcMmapResponse. A reply that
+// stops after the header must be refused: reading result out of it takes the
+// value from whatever the client's receive buffer happened to hold, so the
+// caller could be handed a mapping — or a failure — decided by stack garbage.
+TEST(RemoteDriverStreamPoisonTest, ShortMmapReplyIsRejectedRatherThanReadOffTheStack) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+  const CloseOnScopeExit server_closer{sv[1]};
+
+  rocjitsu::RpcHeader reply{};
+  reply.opcode = rocjitsu::RPC_MMAP;
+  reply.payload_bytes = sizeof(rocjitsu::RpcMmapResponse);
+  ASSERT_TRUE(rocjitsu::rpc_send_exact(sv[1], &reply, sizeof(reply)));
+  ASSERT_EQ(::shutdown(sv[1], SHUT_WR), 0) << ::strerror(errno);
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  errno = 0;
+  EXPECT_EQ(rd.mmap(nullptr, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, 0), MAP_FAILED);
+
+  // The mmap and ioctl paths share one stream, so a desync noticed by one is
+  // terminal for the other.
+  kfd_ioctl_get_version_args version{};
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_GET_VERSION, &version), -EPROTO);
+}
+
+// A munmap whose reply never arrives has already put its request on the wire, so
+// the client cannot know where the next frame begins either. It must not unmap
+// on the strength of a reply it never read, and must not leave the connection
+// looking usable.
+TEST(RemoteDriverStreamPoisonTest, UnansweredMunmapPoisonsTheConnection) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+  const CloseOnScopeExit server_closer{sv[1]};
+
+  ASSERT_EQ(::shutdown(sv[1], SHUT_WR), 0) << ::strerror(errno);
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+  EXPECT_EQ(rd.munmap(reinterpret_cast<void *>(0x1000), 0x1000), -EPROTO);
+
+  kfd_ioctl_get_version_args version{};
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_GET_VERSION, &version), -EPROTO);
+}
+
+// The other half of the framing contract: a request that stops part way through
+// leaves the daemon holding the front of a frame whose tail never comes, and it
+// will read the next request as that tail. A send buffer far smaller than the
+// request, on a socket that returns instead of blocking once the buffer fills,
+// produces exactly that without any timing dependence.
+TEST(RemoteDriverStreamPoisonTest, PartiallyWrittenRequestPoisonsTheConnection) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+  const CloseOnScopeExit server_closer{sv[1]};
+
+  int send_buffer_bytes = 4096;
+  ASSERT_EQ(
+      ::setsockopt(sv[0], SOL_SOCKET, SO_SNDBUF, &send_buffer_bytes, sizeof(send_buffer_bytes)), 0)
+      << ::strerror(errno);
+  int socket_flags = ::fcntl(sv[0], F_GETFL, 0);
+  ASSERT_NE(socket_flags, -1) << ::strerror(errno);
+  ASSERT_EQ(::fcntl(sv[0], F_SETFL, socket_flags | O_NONBLOCK), 0) << ::strerror(errno);
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  // Device ids are serialized inline after the arg struct, so this is a request
+  // two orders of magnitude larger than the send buffer. Nothing on the daemon
+  // side reads, so the buffer cannot drain mid-write.
+  std::vector<uint32_t> device_ids(64 * 1024, kGpuId);
+  kfd_ioctl_map_memory_to_gpu_args map_args{};
+  map_args.handle = 1;
+  map_args.n_devices = static_cast<uint32_t>(device_ids.size());
+  map_args.device_ids_array_ptr = reinterpret_cast<uint64_t>(device_ids.data());
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map_args), -EPROTO);
+
+  kfd_ioctl_get_version_args version{};
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_GET_VERSION, &version), -EPROTO);
+  EXPECT_EQ(rd.munmap(reinterpret_cast<void *>(0x1000), 0x1000), -EPROTO);
+}
+
 // Deterministic regression for the close()-vs-in-flight-ioctl teardown ordering.
 // After close() fully tears a process down, a subsequent ioctl on that process id
 // must FAIL cleanly (-ESRCH) rather than operate on dismantled per-process state

@@ -95,8 +95,10 @@ public:
   /// @param request The AMDKFD_IOC_* ioctl number.
   /// @param arg Pointer to the ioctl args struct (read and possibly modified).
   /// @retval 0 Success.
-  /// @retval negative Negative errno from the daemon's ioctl dispatch, or -1 on
-  /// socket error.
+  /// @retval -EPROTO The RPC stream is unusable — this call or an earlier one
+  /// failed to frame a request or reply, so the connection is terminal.
+  /// @retval negative Negative errno from the daemon's ioctl dispatch, or from
+  /// the transport when the request never reached the wire.
   int ioctl(unsigned long request, void *arg) override;
 
   /// @brief Forward an mmap request to the daemon via RPC_MMAP.
@@ -106,7 +108,8 @@ public:
   /// @param flags Mapping flags.
   /// @param offset KFD mmap offset encoding.
   /// @retval non-MAP_FAILED Pointer to the locally mapped memory.
-  /// @retval MAP_FAILED Mapping failed; errno is set.
+  /// @retval MAP_FAILED Mapping failed; errno is set, and is EPROTO when the RPC
+  /// stream has been made terminal by a framing failure.
   void *mmap(void *addr, size_t length, int prot, int flags, off_t offset) override;
 
   /// @brief Forward a munmap request to the daemon via RPC_MUNMAP.
@@ -114,12 +117,28 @@ public:
   /// @param length Length in bytes to unmap.
   /// @retval 0 Success.
   /// @retval -ENOENT Address not found in daemon's mappings.
-  /// @retval -1 Socket error.
+  /// @retval -EPROTO The RPC stream is unusable — this call or an earlier one
+  /// failed to frame a request or reply, so the connection is terminal.
+  /// @retval negative Negative transport errno when the request never reached
+  /// the wire.
   int munmap(void *addr, size_t length) override;
 
 private:
   int send_ioctl(unsigned long request, void *arg);
   int send_mmap(void *addr, size_t length, int prot, int flags, off_t offset, int *memfd_out);
+
+  /// @brief Mark the RPC stream unusable and make the connection terminal.
+  /// @details Called from every framing failure — a half-written request, a
+  /// reply we could not claim, a reply we only partly consumed — because all of
+  /// them leave the two ends disagreeing about where the next frame starts.
+  /// Sets protocol_failed_ so the ioctl/mmap/munmap entry points fail fast, then
+  /// shuts the socket down so an in-flight peer write cannot keep feeding a
+  /// stream nobody can parse. shutdown() rather than close(): the fd number
+  /// stays reserved, so the concurrent readers of sock_ that rpc_mutex_ does not
+  /// cover cannot land on a reused fd.
+  /// @returns -EPROTO, so callers can `return poison_stream();`.
+  /// @note Must be called with rpc_mutex_ held.
+  int poison_stream();
 
   int sock_ = -1;                    ///< Unix socket connection to the daemon.
   uint32_t next_id_ = 0;             ///< Monotonic request ID counter (for debugging).
@@ -129,9 +148,11 @@ private:
   bool has_gpu_info_ = false;        ///< True when gpu_info_ is valid.
   std::atomic<bool> closing_{false}; ///< Set by close() to break WAIT_EVENTS loops.
   /// @brief Set when the RPC stream is known to be unusable.
-  /// @details A reply header we refuse to read the body of leaves the stream
-  /// misaligned, so every later call would parse its header out of the stale
-  /// body. Once this is set the connection is terminal and further ioctls fail
+  /// @details Any frame that is not written or read in full leaves the stream
+  /// misaligned — a reply header we refuse to read the body of, a request that
+  /// stopped mid-write, a reply left queued because we could not receive it — so
+  /// every later call would parse its header out of the stale bytes. Once this
+  /// is set the connection is terminal and further ioctl/mmap/munmap calls fail
   /// with -EPROTO rather than returning bogus results from a poisoned stream.
   std::atomic<bool> protocol_failed_{false};
   int shutdown_efd_ = -1; ///< eventfd written by close() to wake WAIT_EVENTS pollers.

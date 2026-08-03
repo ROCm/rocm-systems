@@ -220,6 +220,13 @@ RemoteDriver::~RemoteDriver() {
     syscall(SYS_close, shutdown_efd_);
 }
 
+int RemoteDriver::poison_stream() {
+  protocol_failed_.store(true, std::memory_order_release);
+  if (sock_ >= 0)
+    syscall(SYS_shutdown, sock_, SHUT_RDWR);
+  return -EPROTO;
+}
+
 int RemoteDriver::open() {
   assert(sock_ >= 0 && "open called on disconnected RemoteDriver");
   closing_.store(false, std::memory_order_release);
@@ -239,42 +246,68 @@ int RemoteDriver::open() {
   hdr.request_id = next_id_++;
   hdr.payload_bytes = 0;
 
-  if (!rpc_send_exact(sock_, &hdr, sizeof(hdr)))
+  // The handshake is framed like every other exchange, so it fails the same way:
+  // a request that stopped mid-write, or a reply we abandon part-read or leave
+  // undrained, desyncs the stream for whatever the caller does next. Poison
+  // before returning so a failed handshake cannot be followed by ioctls that
+  // decode their replies out of leftover handshake bytes. The failure code stays
+  // -1 because open() returns an fd, not an errno.
+  size_t handshake_bytes = 0;
+  if (!rpc_send_exact(sock_, &hdr, sizeof(hdr), &handshake_bytes)) {
+    if (handshake_bytes > 0)
+      poison_stream();
     return -1;
+  }
 
   RpcHeader resp = {};
-  if (!rpc_recv_exact(sock_, &resp, sizeof(resp)))
+  if (!rpc_recv_exact(sock_, &resp, sizeof(resp))) {
+    poison_stream();
     return -1;
+  }
 
   if (resp.result != 0)
     return resp.result;
 
   RpcHandshakeResponse hs = {};
-  if (!rpc_recv_exact(sock_, &hs, sizeof(hs)))
+  if (!rpc_recv_exact(sock_, &hs, sizeof(hs))) {
+    poison_stream();
     return -1;
+  }
 
-  if (hs.version != kRpcProtocolVersion)
+  // Every rejection from here on abandons path bytes the reply header already
+  // declared, which is the same misalignment as a short read.
+  if (hs.version != kRpcProtocolVersion) {
+    poison_stream();
     return -1;
+  }
 
   has_gpu_info_ = hs.gpu_info.present != 0;
   if (has_gpu_info_)
     gpu_info_ = gpu_info_from_rpc(hs.gpu_info);
 
   constexpr uint32_t kMaxPathLen = 4096;
-  if (hs.topology_path_len > kMaxPathLen)
+  if (hs.topology_path_len > kMaxPathLen) {
+    poison_stream();
     return -1;
+  }
   if (hs.topology_path_len > 0) {
     topology_path_.resize(hs.topology_path_len);
-    if (!rpc_recv_exact(sock_, topology_path_.data(), hs.topology_path_len))
+    if (!rpc_recv_exact(sock_, topology_path_.data(), hs.topology_path_len)) {
+      poison_stream();
       return -1;
+    }
   }
 
-  if (hs.drm_path_len > kMaxPathLen)
+  if (hs.drm_path_len > kMaxPathLen) {
+    poison_stream();
     return -1;
+  }
   if (hs.drm_path_len > 0) {
     drm_path_.resize(hs.drm_path_len);
-    if (!rpc_recv_exact(sock_, drm_path_.data(), hs.drm_path_len))
+    if (!rpc_recv_exact(sock_, drm_path_.data(), hs.drm_path_len)) {
+      poison_stream();
       return -1;
+    }
   }
 
   return reissue_synthetic_kfd_fd();
@@ -599,17 +632,34 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE && static_cast<int>(dbg->enable.dbg_fd) >= 0)
       send_fd = static_cast<int>(dbg->enable.dbg_fd);
   }
+  // A send that fails without putting a byte on the wire is recoverable: the
+  // daemon never saw a frame, so the stream is still aligned and the caller just
+  // gets the transport errno. A send that stops part way through is not — the
+  // daemon is left waiting on the rest of a frame that will never arrive, and
+  // will parse our next request as its tail. Those two have to be told apart,
+  // hence the byte counts.
   if (send_fd >= 0) {
-    if (rpc_send_msg(sock_, buf.data(), buf.size(), &send_fd, 1) <= 0) {
+    // sendmsg() on a stream socket may accept only part of the buffer; the
+    // ancillary fd rides on the first byte, so a short send is a truncated frame
+    // with the descriptor already handed over.
+    const auto sent = rpc_send_msg(sock_, buf.data(), buf.size(), &send_fd, 1);
+    if (sent > 0 && static_cast<size_t>(sent) != buf.size())
+      return poison_stream();
+    if (sent <= 0) {
       // Preserve the transport errno — e.g. EBADF when the client handed us a
       // closed notifier fd for SCM_RIGHTS — instead of a bare -1, which the
       // interposer would surface as EPERM (-EPERM == -1).
       int err = errno;
       return err > 0 ? -err : -1;
     }
-  } else if (!rpc_send_exact(sock_, buf.data(), buf.size())) {
-    int err = errno;
-    return err > 0 ? -err : -1;
+  } else {
+    size_t sent = 0;
+    if (!rpc_send_exact(sock_, buf.data(), buf.size(), &sent)) {
+      if (sent > 0)
+        return poison_stream();
+      int err = errno;
+      return err > 0 ? -err : -1;
+    }
   }
 
   // Receive response — may include a memfd via SCM_RIGHTS for ALLOC_MEMORY.
@@ -621,27 +671,27 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
 
   // Every reply byte we decline to read leaves the stream misaligned: the next
   // call would parse its header out of this one's remains, silently returning a
-  // bogus result and copying stale bytes into caller memory. Kill the
-  // connection instead of returning a recoverable-looking error. shutdown()
-  // (rather than close()) keeps the fd number reserved, so the concurrent
-  // readers of sock_ that rpc_mutex_ does not cover cannot land on a reused fd.
-  // Any descriptor that rode in on the doomed reply is dropped here — nothing
-  // downstream runs to adopt it.
-  auto poison_stream = [&] {
+  // bogus result and copying stale bytes into caller memory. Kill the connection
+  // instead of returning a recoverable-looking error. Any descriptor that rode
+  // in on the doomed reply is dropped here — nothing downstream runs to adopt
+  // it.
+  auto poison_reply = [&] {
     if (num_fds > 0 && received_fds[0] >= 0)
       syscall(SYS_close, received_fds[0]);
-    protocol_failed_.store(true, std::memory_order_release);
-    syscall(SYS_shutdown, sock_, SHUT_RDWR);
-    return -EPROTO;
+    return poison_stream();
   };
 
+  // The request is already on the wire, so a reply we cannot take delivery of is
+  // not a clean failure: EINTR aborts the receive with the daemon's answer still
+  // queued, and the next call would read that answer as its own. Terminal, even
+  // though the socket itself may still be healthy.
   if (bytes <= 0)
-    return -1;
+    return poison_reply();
   // rpc_recv_msg asks for MSG_WAITALL but can still come back short (a signal
   // interrupts the wait), which would leave the rest of the header in the
   // socket and decode result/payload_bytes out of uninitialized stack.
   if (static_cast<size_t>(bytes) != sizeof(RpcHeader))
-    return poison_stream();
+    return poison_reply();
 
   auto *resp = reinterpret_cast<RpcHeader *>(resp_header_buf);
 
@@ -650,14 +700,14 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // reply header cannot make an interposed ioctl() attempt a multi-GiB
   // allocation and throw std::bad_alloc out of a C entry point.
   if (resp->payload_bytes > kMaxPayloadBytes)
-    return poison_stream();
+    return poison_reply();
 
   if (resp->payload_bytes > 0) {
     std::vector<uint8_t> payload(resp->payload_bytes);
     // A partial read consumes part of the declared payload and abandons the
     // rest, which is the same misalignment as refusing it outright.
     if (!rpc_recv_exact(sock_, payload.data(), resp->payload_bytes))
-      return poison_stream();
+      return poison_reply();
 
     size_t copy_size = std::min(arg_size, static_cast<size_t>(resp->payload_bytes));
     std::memcpy(arg, payload.data(), copy_size);
@@ -886,6 +936,16 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
 
 void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t offset) {
   std::lock_guard<std::mutex> lock(rpc_mutex_);
+  // Same fail-closed contract as send_ioctl(), and for the same reason: a
+  // poisoned stream would hand back some other exchange's result. Answering with
+  // a local anonymous mapping instead would be worse than failing — the daemon
+  // has no matching mapping, so the GPU would fault on memory the client
+  // believes is shared. Tested under rpc_mutex_ so a thread that blocked on the
+  // lock cannot proceed against a connection poisoned while it waited.
+  if (protocol_failed_.load(std::memory_order_acquire)) {
+    errno = EPROTO;
+    return MAP_FAILED;
+  }
 
   // Send the mmap RPC so the daemon creates its own mapping for GPU simulation.
   int memfd = -1;
@@ -963,6 +1023,10 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
 
 int RemoteDriver::munmap(void *addr, size_t length) {
   std::lock_guard<std::mutex> lock(rpc_mutex_);
+  // Fail closed on a poisoned stream rather than unmapping on the strength of a
+  // reply that belongs to some other exchange.
+  if (protocol_failed_.load(std::memory_order_acquire))
+    return -EPROTO;
 
   RpcMunmapRequest req = {};
   req.addr = reinterpret_cast<uint64_t>(addr);
@@ -977,12 +1041,22 @@ int RemoteDriver::munmap(void *addr, size_t length) {
   std::memcpy(send_buffer, &hdr, sizeof(hdr));
   std::memcpy(send_buffer + sizeof(hdr), &req, sizeof(req));
 
-  if (!rpc_send_exact(sock_, send_buffer, sizeof(send_buffer)))
-    return -1;
+  size_t sent = 0;
+  if (!rpc_send_exact(sock_, send_buffer, sizeof(send_buffer), &sent)) {
+    // A frame the daemon only half received is terminal; a frame that never
+    // started is just a failed call on a still-aligned stream.
+    if (sent > 0)
+      return poison_stream();
+    int err = errno;
+    return err > 0 ? -err : -1;
+  }
 
   RpcHeader resp = {};
+  // The request is on the wire, so any reply we do not consume whole — abandoned
+  // outright or read part way — leaves the daemon's answer, or the tail of it,
+  // waiting to be misparsed as the next call's header.
   if (!rpc_recv_exact(sock_, &resp, sizeof(resp)))
-    return -1;
+    return poison_stream();
 
   if (resp.result == 0)
     syscall(SYS_munmap, addr, length);
@@ -992,7 +1066,9 @@ int RemoteDriver::munmap(void *addr, size_t length) {
 
 int RemoteDriver::send_mmap(void *addr, size_t length, int prot, int flags, off_t offset,
                             int *memfd_out) {
-  // rpc_mutex_ is already held by the caller (mmap()).
+  // rpc_mutex_ is already held by the caller (mmap()), which has also already
+  // rejected a poisoned stream.
+  *memfd_out = -1;
   RpcMmapRequest req = {};
   req.addr = reinterpret_cast<uint64_t>(addr);
   req.length = length;
@@ -1009,16 +1085,35 @@ int RemoteDriver::send_mmap(void *addr, size_t length, int prot, int flags, off_
   std::memcpy(send_buffer, &hdr, sizeof(hdr));
   std::memcpy(send_buffer + sizeof(hdr), &req, sizeof(req));
 
-  if (!rpc_send_exact(sock_, send_buffer, sizeof(send_buffer)))
-    return -1;
+  size_t sent = 0;
+  if (!rpc_send_exact(sock_, send_buffer, sizeof(send_buffer), &sent)) {
+    if (sent > 0)
+      return poison_stream();
+    int err = errno;
+    return err > 0 ? -err : -1;
+  }
 
   uint8_t response_buffer[sizeof(RpcHeader) + sizeof(RpcMmapResponse)];
   int received_fds[1] = {-1};
   size_t num_fds = 1;
   auto bytes_received =
       rpc_recv_msg(sock_, response_buffer, sizeof(response_buffer), received_fds, &num_fds);
+
+  // The daemon frames every mmap reply as header + RpcMmapResponse, so anything
+  // shorter is a desynced stream — and reading result out of it would take the
+  // value from whatever was on the stack, then hand the caller a mapping (or a
+  // failure) decided by uninitialized memory. Any memfd that arrived on the
+  // truncated reply is dropped: the caller sees rc != 0 with *memfd_out still
+  // -1, so nothing downstream would ever close it.
+  auto poison_reply = [&] {
+    if (num_fds > 0 && received_fds[0] >= 0)
+      syscall(SYS_close, received_fds[0]);
+    return poison_stream();
+  };
   if (bytes_received <= 0)
-    return -1;
+    return poison_reply();
+  if (static_cast<size_t>(bytes_received) != sizeof(response_buffer))
+    return poison_reply();
 
   auto *resp = reinterpret_cast<RpcHeader *>(response_buffer);
   *memfd_out = (num_fds > 0) ? received_fds[0] : -1;
