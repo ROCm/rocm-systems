@@ -600,6 +600,9 @@ reader_loop()
             // destroy still retires doorbell-map entries.
             st.session_ready.store(false, std::memory_order_release);
             st.setup_failed.store(true, std::memory_order_release);
+            // No record can be deposited again: release anyone waiting on one
+            // rather than make them burn their rendezvous deadline.
+            results_map().abandon_waiters();
             ROCP_WARNING << fmt::format(
                 "KFD dispatch-log reader: poll failed (errno={}), reader exiting; dispatch-log is "
                 "now disabled for this process, all dispatches use HSA timestamps",
@@ -638,15 +641,20 @@ reader_loop()
         log_stream_status(st.session);
     }
 
-    // Misses are dispatches whose completion callback ran before the reader had
-    // deposited their firmware record; they silently used HSA timestamps.
+    // The reader is done: nothing else will be deposited.
+    results_map().abandon_waiters();
+
+    // Misses are dispatches whose completion path found no firmware record.
+    // Fallbacks are eligible dispatches that reported HSA timestamps anyway --
+    // in Phase 1 that is every one of them, because KFD selection is gated off.
     const auto _stats = results_map().stats();
     ROCP_INFO << fmt::format(
         "KFD dispatch-log reader: loop exited, total pairs seen = {}, completion-path "
-        "lookups: {} hit / {} miss",
+        "lookups: {} hit / {} miss, {} HSA fallback(s)",
         total_seen,
         _stats.hits,
-        _stats.misses);
+        _stats.misses,
+        _stats.fallbacks);
 }
 }  // namespace
 

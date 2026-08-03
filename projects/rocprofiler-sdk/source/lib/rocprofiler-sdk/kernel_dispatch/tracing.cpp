@@ -56,18 +56,25 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
     // both the GPU<->system rate ratio and epoch, via the runtime's own clock-sync
     // machinery). If anything is missing (no record, no agent, convert error) we
     // fall through to the unconditional HSA path below.
-    if(packet_data.kfd_correlation_key_valid)
+    //
+    // PHASE 1 = option (b): kfd_selection_enabled() is false, so this block is
+    // skipped entirely and every eligible dispatch deterministically reports HSA
+    // timestamps -- the per-dispatch "KFD if the record happened to arrive in time,
+    // HSA otherwise" race is gone. The fallback is counted either way so the
+    // substitution is visible. Phase 2 flips the gate.
+    if(packet_data.kfd_correlation_key_valid && kfd::kfd_selection_enabled())
     {
         auto corr_key = kfd::correlation_key{packet_data.kfd_doorbell_off,
                                              packet_data.kfd_dispatch_idx_low32,
                                              packet_data.kfd_generation};
 
-        // Take the firmware result for this dispatch. A miss (no record yet, or
-        // never deposited) falls through to the unconditional HSA path below. The
-        // reader thread's evict_stale reclaims any result never taken here (e.g.
-        // dispatch completed via HSA fallback before its record arrived), so the
-        // results map stays bounded without an erase on this path.
-        auto kfd_result = kfd::results_map().take(corr_key);
+        // Rendezvous rather than a one-shot take(): wait for the reader to deposit
+        // this dispatch's record instead of silently using HSA because the record
+        // was merely late. The wait ends at the batch's single absolute deadline,
+        // when the reader is declared dead, or on deposit. No lock is held across
+        // it. The reader thread's evict_stale reclaims any result never taken here,
+        // so the results map stays bounded without an erase on this path.
+        auto kfd_result = kfd::results_map().wait_take(corr_key, session.kfd_deadline_ns);
 
         // Converting firmware ticks needs the agent; without it we cannot emit KFD
         // timestamps, so fall through to the HSA path (which also handles null agent).
@@ -98,6 +105,9 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
             // convert failed or record failed the sanity guard: fall through to HSA.
         }
     }
+
+    // This dispatch was eligible for a firmware timestamp but reports an HSA one.
+    if(packet_data.kfd_correlation_key_valid) kfd::results_map().note_hsa_fallback();
 
     // --- HSA fallback (unchanged; unconditional) ---
     auto _signal  = packet_data.kernel_packet.kernel_dispatch.completion_signal;

@@ -88,6 +88,11 @@ struct queue_info_session_t
     rocprofiler_timestamp_t  enqueue_ts     = 0;
     context::correlation_id* correlation_id = nullptr;
     packet_data_array_t      packet_data    = {};
+
+    // ONE absolute kfd::steady_now_ns() deadline for the whole batch's firmware
+    // rendezvous, set by the completion handler before it walks packet_data: a
+    // batch waits a bounded total, not once per packet. 0 = do not wait.
+    uint64_t kfd_deadline_ns = 0;
 };
 }  // namespace hsa
 }  // namespace rocprofiler

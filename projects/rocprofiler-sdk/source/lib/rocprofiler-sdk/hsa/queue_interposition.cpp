@@ -46,6 +46,7 @@
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
+#include "lib/rocprofiler-sdk/kfd/results_map.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -394,6 +395,10 @@ async_signal_handler(hsa_signal_t                            completion_signal,
 
     auto signal_value = starting_value;
     auto niterations  = uint64_t{0};
+    bool completed    = false;
+    // Set when finalization is first observed; until it passes, a kernel that is
+    // already running still gets to finish so its record is not lost.
+    auto fini_deadline = std::chrono::steady_clock::time_point{};
 
     // Stop only on completion or finalization; never run cleanup while the kernel is live.
     while(true)
@@ -404,8 +409,22 @@ async_signal_handler(hsa_signal_t                            completion_signal,
                                                                     timeout_hint.count(),
                                                                     HSA_WAIT_STATE_ACTIVE);
 
-        if(signal_value < starting_value) break;         // kernel completed
-        if(registration::get_fini_status() != 0) break;  // tearing down: run cleanup path
+        if(signal_value < starting_value)
+        {
+            completed = true;
+            break;
+        }
+        if(registration::get_fini_status() != 0)
+        {
+            // Tearing down, but the kernel is still live. Wait a bounded grace period
+            // for it rather than either abandoning a dispatch that was about to
+            // finish or blocking teardown indefinitely on one that will not.
+            constexpr auto fini_grace = std::chrono::seconds{1};
+            const auto     _now       = std::chrono::steady_clock::now();
+            if(fini_deadline == std::chrono::steady_clock::time_point{})
+                fini_deadline = _now + fini_grace;
+            if(_now >= fini_deadline) break;  // still live: abandoned below
+        }
         ++niterations;
 
         // Surface long-running waits for diagnostics without giving up the wait.
@@ -431,6 +450,30 @@ async_signal_handler(hsa_signal_t                            completion_signal,
     {
         std::this_thread::sleep_for(std::chrono::microseconds{delay_us});
     }
+
+    // Finalization can end the wait above while the kernel is still live. Everything
+    // below assumes it finished: hsa_amd_profiling_get_dispatch_time would report a
+    // half-written interval, releasing a pooled signal would hand it to a later
+    // dispatch while the GPU can still decrement it, and subtracting an app signal
+    // would let the app observe completion before its kernel ended. So abandon the
+    // batch instead -- emit nothing and leave every signal untouched. The signals
+    // and the correlation-id references are deliberately not reclaimed here;
+    // process teardown owns them at this point.
+    if(!completed)
+    {
+        ROCP_WARNING << fmt::format(
+            "Async signal handler abandoned {} dispatch(es) on signal {{.handle={}}}: "
+            "finalization ended the wait while the kernel was still live",
+            session->packet_data.size(),
+            completion_signal.handle);
+        return;
+    }
+
+    // ONE absolute deadline for the whole batch's firmware rendezvous, so a batch
+    // cannot spend the full wait once per packet. Only consumed when KFD selection
+    // is enabled (Phase 2); in Phase 1 get_dispatch_time() never waits.
+    constexpr uint64_t kKfdRendezvousNs = 5'000'000;  // 5 ms
+    session->kfd_deadline_ns            = kfd::steady_now_ns() + kKfdRendezvousNs;
 
     for(auto& packet : session->packet_data)
     {
