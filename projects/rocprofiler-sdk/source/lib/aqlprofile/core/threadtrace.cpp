@@ -112,12 +112,6 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
         size_t sample_size =
             (control_ptr[se_index].wptr & wptr_mask) * sqttbuilder->GetWritePtrBlk();
 
-        if(pm4_factory->GetGpuId() == aql_profile::GFX11_GPU_ID)
-        {
-            sample_size = sample_size - reinterpret_cast<uint64_t>(sample_ptr);
-            sample_size &= (1ull << 29) - 1;
-        }
-
         if(sample_size >= sample_capacity)
         {
             ERR_LOGGING("SQTT data out of bounds, sample_id({}) size({}/{})",
@@ -427,6 +421,9 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
     // Either per-buffer full bit requests a swap; the swap counter selects the buffer to drain.
     out->needs_swap = (status & sqttbuilder->GetBufferFullMask()) != 0;
 
+    const size_t owner_mask = sqttbuilder->GetTraceOwnerMask();
+    out->trace_stopped      = owner_mask != 0 && (control.status & owner_mask) == 0;
+
     auto it = manager->config.buffer_data.find(shader_engine_id);
     if(it == manager->config.buffer_data.end()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
@@ -442,24 +439,22 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
         const size_t drained = (out->num_swaps + buffer_data.size() - 1) % buffer_data.size();
         out->data            = buffer_data.at(drained);
 
-        if(pm4_factory->GetGpuId() == aql_profile::GFX11_GPU_ID)
+        if(pm4_factory->IsGFX11())
         {
-            // gfx11 SQ_THREAD_TRACE_WPTR holds OFFSET in bits 28:0 and BUFFER_ID in bit 31.
+            // gfx11 erratum: the final write granule of a buffer may not be committed before the
+            // hardware raises the full bit. SQ_THREAD_TRACE_WPTR holds OFFSET (bits 28:0, in write
+            // granules relative to the active buffer's base) and BUFFER_ID (bit 31, the buffer the
+            // hardware is currently filling). Swap n drains the buffer that was living in
+            // BUF(n % 2), so a matching BUFFER_ID means the hardware has not switched away yet and
+            // OFFSET still describes how far it got in the buffer we are about to hand out.
             constexpr uint32_t WPTR_BUF_ID = 1u << 31;
 
             const uint32_t wptr = control.wptr_doublebuffer;
             const size_t   blk  = sqttbuilder->GetWritePtrBlk();
-            // buffer_data[i] is programmed into BUF(i % 2), so a buffer id that no longer
-            // matches means the hardware has moved on and filled the drained buffer entirely.
-            const bool wptr_is_drained = ((wptr & WPTR_BUF_ID) != 0) == ((drained % 2) != 0);
 
-            if(wptr_is_drained)
+            if(((wptr & WPTR_BUF_ID) != 0) == ((out->num_swaps % 2) != 0))
             {
-                // OFFSET counts write granules of an absolute address; rebase onto the buffer.
-                const size_t buffer_base = reinterpret_cast<uint64_t>(out->data);
-                const size_t wptr_addr   = (wptr & sqttbuilder->GetWritePtrMask()) * blk;
-                const size_t written     = (wptr_addr - buffer_base) & ((1ull << 29) - 1);
-
+                const size_t written = (wptr & sqttbuilder->GetWritePtrMask()) * blk;
                 // Exclude the final granule only when the hardware never reached it.
                 if(written + blk <= out->read_size) out->read_size -= blk;
             }

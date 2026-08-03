@@ -147,6 +147,9 @@ public:
     virtual size_t GetWritePtrMask() const = 0;
     // Returns size of block in bytes per increment in WPTR
     virtual size_t GetWritePtrBlk() const = 0;
+    // Returns the STATUS bits that are set while an active trace owns the hardware, or 0 when
+    // the architecture provides no such indication.
+    virtual size_t GetTraceOwnerMask() const = 0;
     // Returns number of bits used for TTrace buffer alignment (e.g. 12 for 4KB alignment)
     virtual size_t BufferAlignment() const = 0;
 };
@@ -183,6 +186,7 @@ public:
     virtual size_t GetWritePtrMask() const override { return Primitives::TT_WRITE_PTR_MASK; };
     // Returns size of block in bytes per increment in WPTR
     virtual size_t GetWritePtrBlk() const override { return 32; };
+    virtual size_t GetTraceOwnerMask() const override { return Primitives::TT_OWNER_MASK; };
     // Returns number of bits used for TTrace buffer alignment (e.g. 12 for 4KB alignment)
     virtual size_t BufferAlignment() const override { return Primitives::TT_BUFF_ALIGN_SHIFT; }
 
@@ -396,6 +400,24 @@ public:
         else
         {
             SetGRBMToBroadcast(cmd_buffer);
+
+            // gfx11 latches the buffer registers while SQTT is armed, so re-programming them
+            // under a live trace leaves it running against a stale configuration. Disable the
+            // trace and wait for the engine to go idle before touching BASE/SIZE below.
+            if(Primitives::GFXIP_LEVEL == 11)
+            {
+                builder.BuildWriteShRegPacket(
+                    cmd_buffer, Primitives::COMPUTE_THREAD_TRACE_ENABLE_ADDR, 0);
+                WriteConfigPacket(cmd_buffer,
+                                  Primitives::SQ_THREAD_TRACE_CTRL_ADDR,
+                                  Primitives::sqtt_ctrl_value(false, false));
+                builder.BuildWriteWaitIdlePacket(cmd_buffer);
+
+                const uint32_t mask_val      = Primitives::sqtt_busy_mask();
+                auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
+                builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, true, mask_val, 0);
+            }
+
             builder.BuildWritePConfigRegPacket(
                 cmd_buffer, Primitives::SQ_THREAD_TRACE_STATUS_ADDR, 0);
 
@@ -828,6 +850,14 @@ public:
             builder.BuildCopyRegDataPacket(cmd_buffer,
                                            Primitives::SQ_THREAD_TRACE_WPTR_ADDR,
                                            &control.wptr_doublebuffer,
+                                           Primitives::COPY_DATA_SEL_COUNT_1DW_PRM,
+                                           false);
+
+        // gfx11 can drop out of trace mode on its own, which only shows up in STATUS.
+        if(Primitives::GFXIP_LEVEL == 11)
+            builder.BuildCopyRegDataPacket(cmd_buffer,
+                                           Primitives::SQ_THREAD_TRACE_STATUS_ADDR,
+                                           &control.status,
                                            Primitives::COPY_DATA_SEL_COUNT_1DW_PRM,
                                            false);
 

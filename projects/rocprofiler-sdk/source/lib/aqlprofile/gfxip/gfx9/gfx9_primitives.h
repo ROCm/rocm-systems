@@ -818,7 +818,8 @@ public:
         // Mask to check if SQTT buffer is wrapped
         TT_CONTROL_FULL_MASK = 0x80000000,
         TT_WRITE_PTR_MASK    = 0x3FFFFFFF,
-        TT_LOCKDOWN_FAIL     = 0
+        TT_LOCKDOWN_FAIL     = 0,
+        TT_OWNER_MASK        = 0
     };
 
     static uint32_t sqtt_busy_mask()

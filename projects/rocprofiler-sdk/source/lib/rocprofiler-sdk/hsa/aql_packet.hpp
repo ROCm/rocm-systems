@@ -284,6 +284,10 @@ public:
     hsa_ext_amd_aql_pm4_packet_t                query_status{};
     virtual std::optional<sqtt_buffer_status_t> query_buffer_status();
 
+    // Refreshed by every query_buffer_status(): set when the hardware left trace mode without
+    // software asking it to, in which case the trace has to be restarted to collect anything more.
+    bool trace_stopped{false};
+
     void reset_current_buffer() { current_buffer = 0; };
 
     const aqlprofile_handle_t handle;

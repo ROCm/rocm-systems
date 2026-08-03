@@ -258,6 +258,10 @@ SQTTBufferingPackets::query_buffer_status()
     auto status = aqlprofile_dl->update_buffer_status_fn(&ret, handle, shader_engine_id, 0);
     CHECK_HSA(status, "failed to query ATT status");
 
+    constexpr auto trace_stopped_size =
+        offsetof(aqlprofile_att_buffer_status_t, trace_stopped) + sizeof(ret.trace_stopped);
+    trace_stopped = ret._size >= trace_stopped_size && ret.trace_stopped;
+
     if(!ret.needs_swap) return {};
 
     // Ensure aqlprofile and SDK agrees on which is the current buffer

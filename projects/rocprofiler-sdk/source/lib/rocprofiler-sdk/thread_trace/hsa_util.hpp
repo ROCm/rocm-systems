@@ -112,6 +112,15 @@ att_queue_submit_signal_last(const att_queue_t& q, VecType& vec)
     return nullptr;
 }
 
+/// Enqueues a sequence and attaches an existing completion signal to its last packet.
+template <typename VecType>
+void
+att_queue_submit_signal_last(const att_queue_t& q, VecType& vec, hsa_signal_t& completion)
+{
+    for(size_t i = 0; i < vec.size(); i++)
+        att_queue_submit(q, &vec.at(i), (i == vec.size() - 1) ? &completion : nullptr);
+}
+
 /// Enqueues a sequence of packets, waits for the last packet to complete, and
 /// returns its completion signal. AQL packets execute in submission order, so
 /// waiting on the last signal guarantees the entire batch has drained.

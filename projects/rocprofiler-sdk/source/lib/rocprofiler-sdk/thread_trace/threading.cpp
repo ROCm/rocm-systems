@@ -187,6 +187,7 @@ producer_loop(
 
     auto     start_t0 = std::chrono::system_clock::now();
     bool     do_sleep{false};
+    bool     startup_poll_completed{false};
     uint64_t next_chunk_index = 0;
     int64_t  shader_engine_id = parameters.shader_engine_id;
 
@@ -290,6 +291,7 @@ producer_loop(
     send_header();
 
     // Wait until ATT start packets have been executed
+    parameters.shared->producer_waiting.store(true, std::memory_order_release);
     signal_wait(*parameters.start_pkt_signal);
 
     while(worker_flag.load() == WORKER_FLAG_RUNNING)
@@ -299,7 +301,13 @@ producer_loop(
 
         // PHASE 1: Poll SQTT buffer status
         att_queue_submit(queue, &buffer_packet.query_status, &submit_signal.sig);
-        if(!submit_wait_timeout()) break;
+        const bool query_completed = submit_wait_timeout();
+        if(!startup_poll_completed)
+        {
+            parameters.shared->producer_ready.store(true, std::memory_order_release);
+            startup_poll_completed = true;
+        }
+        if(!query_completed) break;
 
         if(auto status = buffer_packet.query_buffer_status())
         {
@@ -337,6 +345,17 @@ producer_loop(
             // buffer, so skip the backoff when a flip just occurred.
             do_sleep = false;
             submit_wait_timeout();
+        }
+        else if(buffer_packet.trace_stopped)
+        {
+            // The hardware left trace mode on its own. Collect whatever it managed to write, then
+            // re-arm so the rest of the dispatch is still captured.
+            ROCP_INFO << "Thread trace stopped unexpectedly, restarting";
+            if(!stop_trace()) break;
+            iterate_trace();
+            send_header();
+            att_queue_submit_and_wait_last(queue, parameters.control_packet->before_krn_pkt);
+            do_sleep = false;
         }
     }
 
