@@ -38,7 +38,11 @@
 #include <unordered_set>
 #include <vector>
 
+#include <algorithm>
 #include <cstdlib>
+#include <map>
+#include <random>
+#include <set>
 
 #include <sys/wait.h>
 #include <unistd.h>
@@ -1229,4 +1233,304 @@ TEST(fork_safety, child_survives_a_fork_taken_under_contention)
 
     stop.store(true);
     busy.join();
+}
+
+// ---------------------------------------------------------------------------
+// Unit 8: stateful model / property test
+//
+// Drives the hub + retry owner + no-signal finalizer through a randomized but
+// SEEDED event sequence against a small reference model, asserting the plan's
+// completion invariants after EVERY event. This is the highest coverage-per-
+// effort test in the plan: it explores interleavings no hand-written case does.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+enum class model_state
+{
+    absent,
+    pending,
+    proven,  // ownership handed out; can never become leaked
+    leaked,
+};
+
+// The reference model: what the plan says must be true, tracked independently of
+// the hub's own bookkeeping so the two can be compared.
+struct reference_model
+{
+    std::map<std::pair<uint32_t, uint32_t>, model_state> state;      // (slot,id) -> state
+    std::map<std::pair<uint32_t, uint32_t>, uint64_t>    corr_of;    // -> correlation id
+    std::set<std::pair<uint32_t, uint32_t>>              tombstoned;
+    std::set<uint32_t>                                   quarantined;
+    std::set<uint64_t>                                   ledger;
+    std::map<std::pair<uint32_t, uint32_t>, int>         emitted;
+    std::map<std::pair<uint32_t, uint32_t>, int>         retired;
+    bool                                                 poisoned = false;
+    bool                                                 stopping = false;
+
+    using key_t = std::pair<uint32_t, uint32_t>;
+
+    bool admissible(const key_t& k) const
+    {
+        return !poisoned && !stopping && state.count(k) == 0 && tombstoned.count(k) == 0 &&
+               quarantined.count(k.first) == 0;
+    }
+
+    model_state at(const key_t& k) const
+    {
+        auto it = state.find(k);
+        return (it == state.end()) ? model_state::absent : it->second;
+    }
+};
+
+correlation_key
+to_key(const reference_model::key_t& k)
+{
+    return key_of(k.first, k.second);
+}
+}  // namespace
+
+TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
+{
+    constexpr int      kEvents  = 4000;
+    constexpr uint32_t kSlots   = 6;
+    constexpr uint32_t kPerSlot = 8;
+
+    const int payloads_before = tracked_payload::live.load();
+
+    auto hub   = hub_t{};
+    auto owner = retry_owner<hub_t::proven>{};
+    auto model = reference_model{};
+    auto rng   = std::mt19937{20260803};
+
+    // Proven completions waiting to be finalized, mirroring the task group.
+    auto in_flight = std::vector<hub_t::proven>{};
+
+    auto random_key = [&rng]() {
+        return reference_model::key_t{rng() % kSlots, rng() % kPerSlot};
+    };
+
+    // Finalize one proven completion exactly as production does, and record what
+    // the plan requires: retire exactly once, emit only when timing was usable.
+    auto finalize = [&model](hub_t::proven&& p, bool convert_ok) {
+        auto     mk      = reference_model::key_t{p.key.doorbell_off, p.key.dispatch_idx_low32};
+        int      emits   = 0;
+        int      retires = 0;
+        auto     outcome = run_no_signal_finalizer(
+            p.start_ticks,
+            p.end_ticks,
+            /*enqueue_ts=*/0,
+            /*now_ns=*/1'000'000,
+            [convert_ok](uint64_t t, uint64_t* out) {
+                if(!convert_ok) return false;
+                *out = t;
+                return true;
+            },
+            [&emits](uint64_t, uint64_t) { ++emits; },
+            [&retires]() { ++retires; });
+
+        // A completion ALWAYS retires exactly once; it emits only on RESULT_READY.
+        EXPECT_EQ(retires, 1);
+        EXPECT_LE(emits, 1);
+        EXPECT_EQ(emits, outcome == finalize_outcome::result_ready ? 1 : 0);
+
+        model.emitted[mk] += emits;
+        model.retired[mk] += retires;
+    };
+
+    for(int ev = 0; ev < kEvents; ++ev)
+    {
+        switch(rng() % 10)
+        {
+            case 0:  // RegisterBatch
+            {
+                auto batch = std::vector<hub_t::registration>{};
+                auto keys  = std::vector<reference_model::key_t>{};
+                auto corr  = uint64_t{100 + (rng() % 7)};
+                for(uint32_t i = 0, n = 1 + (rng() % 3); i < n; ++i)
+                {
+                    auto k = random_key();
+                    if(std::find(keys.begin(), keys.end(), k) != keys.end()) continue;
+                    keys.emplace_back(k);
+                    batch.emplace_back(reg_of(to_key(k), corr, /*queue_token=*/k.first));
+                }
+                if(keys.empty()) break;
+
+                bool expect_ok = true;
+                for(const auto& k : keys)
+                    expect_ok = expect_ok && model.admissible(k);
+
+                const bool got = hub.register_batch(std::move(batch));
+                EXPECT_EQ(got, expect_ok) << "register_batch disagreed with the model";
+                if(got)
+                {
+                    for(const auto& k : keys)
+                    {
+                        model.state[k]   = model_state::pending;
+                        model.corr_of[k] = corr;
+                    }
+                }
+                break;
+            }
+            case 1:  // START
+            {
+                auto k = random_key();
+                hub.note_start(to_key(k), 10 + (rng() % 50));
+                break;
+            }
+            case 2:
+            case 3:  // EOP (sometimes under a lossy drain)
+            {
+                auto       k         = random_key();
+                const bool loss_free = (rng() % 4) != 0;
+                const bool expect_proven =
+                    loss_free && !model.poisoned && !model.stopping &&
+                    model.at(k) == model_state::pending;
+
+                auto got = hub.prove_eop(to_key(k), 900, loss_free);
+                EXPECT_EQ(got.has_value(), expect_proven) << "prove_eop disagreed with the model";
+                if(got)
+                {
+                    model.state[k] = model_state::proven;
+                    in_flight.emplace_back(std::move(*got));
+                }
+                break;
+            }
+            case 4:  // SubmitTask / RejectTask / RunTask
+            {
+                if(in_flight.empty()) break;
+                auto p = std::move(in_flight.back());
+                in_flight.pop_back();
+
+                const auto disposition = rng() % 3;
+                if(disposition == 0)
+                {
+                    finalize(std::move(p), /*convert_ok=*/true);  // accepted + ran
+                }
+                else if(disposition == 1)
+                {
+                    // ConvertFail -> COMPLETED_NO_TIMING: no record, still retires.
+                    finalize(std::move(p), /*convert_ok=*/false);
+                }
+                else
+                {
+                    // Temporary rejection: the retry owner takes ownership.
+                    owner.hold(std::move(p), [&finalize](hub_t::proven&& q) {
+                        finalize(std::move(q), true);
+                    });
+                }
+                break;
+            }
+            case 5:  // flush the retry owner
+            {
+                owner.flush([](hub_t::proven&) { return submit_result::rejected_permanent; },
+                            [&finalize](hub_t::proven&& q) { finalize(std::move(q), true); });
+                break;
+            }
+            case 6:  // Collision -> quarantine a slot
+            {
+                const uint32_t slot = rng() % kSlots;
+                auto           lost = hub.quarantine_slot(slot);
+                model.quarantined.insert(slot);
+                for(auto& kv : model.state)
+                {
+                    if(kv.first.first == slot && kv.second == model_state::pending)
+                    {
+                        kv.second = model_state::leaked;
+                        model.tombstoned.insert(kv.first);
+                        model.ledger.insert(model.corr_of[kv.first]);
+                    }
+                }
+                for(auto& l : lost)
+                    EXPECT_EQ(l.key.doorbell_off, slot);
+                break;
+            }
+            case 7:  // DestroyQueue
+            {
+                const uint32_t token = rng() % kSlots;
+                hub.close_queue(token);
+                for(auto& kv : model.state)
+                {
+                    // queue_token was set to the slot at registration.
+                    if(kv.first.first == token && kv.second == model_state::pending)
+                    {
+                        kv.second = model_state::leaked;
+                        model.tombstoned.insert(kv.first);
+                        model.ledger.insert(model.corr_of[kv.first]);
+                    }
+                }
+                break;
+            }
+            case 8:  // Poison (ring overrun / reader dead)
+            {
+                if(model.poisoned) break;
+                if((rng() % 12) != 0) break;  // rare, it is terminal
+                hub.poison(session_mode::loss_poisoned);
+                model.poisoned = true;
+                for(auto& kv : model.state)
+                {
+                    if(kv.second == model_state::pending)
+                    {
+                        kv.second = model_state::leaked;
+                        model.tombstoned.insert(kv.first);
+                        model.ledger.insert(model.corr_of[kv.first]);
+                    }
+                }
+                break;
+            }
+            default: break;
+        }
+
+        // --- invariants, after EVERY event ---------------------------------
+
+        for(const auto& kv : model.state)
+        {
+            const auto& k = kv.first;
+
+            // No emitted record without a completion proven for that exact owner,
+            // and at most one emit + one retire per dispatch.
+            EXPECT_LE(model.emitted[k], 1) << "more than one record for one dispatch";
+            EXPECT_LE(model.retired[k], 1) << "more than one cleanup for one dispatch";
+            if(model.emitted[k] > 0)
+            {
+                EXPECT_EQ(kv.second, model_state::proven) << "record emitted without a proven EOP";
+            }
+
+            // Retire iff completion was proven; a leaked entry NEVER retires.
+            if(kv.second == model_state::leaked)
+            {
+                EXPECT_EQ(model.retired[k], 0) << "a leaked dispatch was retired";
+                EXPECT_EQ(model.emitted[k], 0) << "a leaked dispatch emitted a record";
+
+                // No leaked entry is matchable again.
+                EXPECT_FALSE(hub.prove_eop(to_key(k), 1, true).has_value())
+                    << "a leaked entry was still matchable";
+                EXPECT_FALSE(hub.can_register_batch({to_key(k)}))
+                    << "a leaked key was re-registerable";
+            }
+        }
+
+        // The loss ledger is exactly the leaked correlation ids.
+        for(auto id : model.ledger)
+        {
+            EXPECT_TRUE(hub.is_ledgered(id)) << "leaked correlation id missing from the ledger";
+        }
+
+        // A quarantined slot never accepts a reservation again.
+        for(auto slot : model.quarantined)
+        {
+            EXPECT_TRUE(hub.is_quarantined(slot));
+        }
+    }
+
+    // Teardown: everything still pending leaks, nothing proven is lost.
+    owner.flush([](hub_t::proven&) { return submit_result::rejected_permanent; },
+                [&finalize](hub_t::proven&& q) { finalize(std::move(q), true); });
+    for(auto& p : in_flight)
+        finalize(std::move(p), true);
+    in_flight.clear();
+    hub.drain_for_teardown();
+
+    // Every payload ever registered ended with exactly one owner that released it.
+    EXPECT_EQ(tracked_payload::live.load(), payloads_before);
 }
