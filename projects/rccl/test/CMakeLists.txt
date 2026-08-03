@@ -364,6 +364,7 @@ if(BUILD_TESTS)
       PluginCompatV11_test.cpp
       ProxyTests.cpp
       RcclWrapTests.cpp
+      SocketPollTests.cpp
       TransportTests.cpp
       TimeoutTests.cpp
       mem_manager/MemManagerTests.cpp
