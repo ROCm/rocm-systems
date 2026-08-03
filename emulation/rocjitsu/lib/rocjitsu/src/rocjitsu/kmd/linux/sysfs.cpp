@@ -12,7 +12,6 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_sysfs.h"
 RJ_DIAGNOSTIC_POP
 
-#include <algorithm>
 #include <cerrno>
 #include <charconv>
 #include <csignal>

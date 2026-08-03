@@ -2,10 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 /// @file kfd_topology.h
-/// @brief Per-GFXIP KFD topology @c debug_prop values the synthetic topology
-/// generator mirrors from the amdkfd driver.
+/// @brief Derivation of the debugger-visible KFD node properties -- @c capability,
+/// @c capability2 and @c debug_prop -- from a GPU's GFXIP version, mirrored from
+/// the amdkfd driver.
 ///
-/// @details These are the address-watch-mask low/high bit positions that
+/// @details Shared by the synthetic sysfs topology generator and by DBG_TRAP
+/// GET_DEVICE_SNAPSHOT, so both advertise the same values to libhsakmt and
+/// rocdbgapi. Anything a debugger reads off a node belongs here rather than in
+/// one of the two consumers, or the two views drift.
+///
+/// The address-watch-mask constants below are the low/high bit positions that
 /// @c kfd_topology_set_capabilities() (drivers/gpu/drm/amd/amdkfd/kfd_topology.c)
 /// writes into each node's @c debug_prop property and that libhsakmt and
 /// rocdbgapi read back. They are driver-internal -- NOT part of the KFD UAPI --
