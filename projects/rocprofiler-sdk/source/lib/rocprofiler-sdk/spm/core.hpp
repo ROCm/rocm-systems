@@ -30,6 +30,7 @@
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <unordered_map>
@@ -61,6 +62,7 @@ struct spm_counter_config
     // A packet cache of AQL packets. This allows reuse of AQL packets (preventing costly
     // allocation of new packets/destruction).
     common::Synchronized<std::vector<std::unique_ptr<rocprofiler::hsa::AQLPacket>>> packets;
+    std::atomic<bool> performance_level_checked{false};
 };
 
 /**

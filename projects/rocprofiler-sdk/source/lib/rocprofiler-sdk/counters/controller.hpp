@@ -34,6 +34,8 @@
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <atomic>
+
 namespace rocprofiler
 {
 namespace counters
@@ -61,6 +63,8 @@ struct counter_config
     // A packet cache of AQL packets. This allows reuse of AQL packets (preventing costly
     // allocation of new packets/destruction).
     common::Synchronized<std::vector<std::unique_ptr<rocprofiler::hsa::AQLPacket>>> packets{};
+    // The performance level is expected to remain fixed for the lifetime of a counter profile.
+    std::atomic<bool> performance_level_checked{false};
 };
 
 class CounterController

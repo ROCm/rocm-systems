@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/counters/ioctl.hpp"
+#include "lib/rocprofiler-sdk/counters/performance_level.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
@@ -543,6 +544,11 @@ start_agent_ctx(const context::context* ctx)
         {
             continue;
         }
+
+        if(!callback_data.profile->performance_level_checked.load(std::memory_order_relaxed) &&
+           !callback_data.profile->performance_level_checked.exchange(true,
+                                                                      std::memory_order_relaxed))
+            check_agent_counter_performance_level(*agent->get_rocp_agent());
 
         callback_data.packet->packets.start_packet.completion_signal = callback_data.start_signal;
         hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.start_signal, 1);

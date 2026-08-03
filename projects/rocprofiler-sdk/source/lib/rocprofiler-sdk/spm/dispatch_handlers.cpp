@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/spm/dispatch_handlers.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/counters/performance_level.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -155,8 +156,9 @@ pre_kernel_call(const context::context*                                  ctx,
         }
     }
 
-    auto req_profile = rocprofiler_counter_config_id_t{.handle = 0};
-    auto dispatch_data =
+    const auto* queue_agent = CHECK_NOTNULL(queue.get_agent().get_rocp_agent());
+    auto        req_profile = rocprofiler_counter_config_id_t{.handle = 0};
+    auto        dispatch_data =
         common::init_public_api_struct(rocprofiler_spm_dispatch_counting_service_data_t{});
 
     dispatch_data.correlation_id = _corr_id_v;
@@ -164,7 +166,7 @@ pre_kernel_call(const context::context*                                  ctx,
     auto dispatch_info      = common::init_public_api_struct(rocprofiler_kernel_dispatch_info_t{});
     dispatch_info.kernel_id = kernel_id;
     dispatch_info.dispatch_id          = dispatch_id;
-    dispatch_info.agent_id             = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
+    dispatch_info.agent_id             = queue_agent->id;
     dispatch_info.queue_id             = queue.get_id();
     dispatch_info.private_segment_size = pkt.kernel_dispatch.private_segment_size;
     dispatch_info.group_segment_size   = pkt.kernel_dispatch.group_segment_size;
@@ -182,6 +184,9 @@ pre_kernel_call(const context::context*                                  ctx,
 
     auto prof_config = get_spm_counter_config(req_profile);
     CHECK(prof_config);
+    if(!prof_config->performance_level_checked.load(std::memory_order_relaxed) &&
+       !prof_config->performance_level_checked.exchange(true, std::memory_order_relaxed))
+        counters::check_agent_counter_performance_level(*queue_agent);
 
     std::unique_ptr<rocprofiler::hsa::AQLPacket> ret_pkt    = nullptr;
     auto                                         ret_status = get_spm_packet(ret_pkt, prof_config);
