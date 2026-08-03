@@ -1022,7 +1022,7 @@ TEST(Instrumentor, KernargPreloadFirmwareEntryEnumeratedAndPinnedUnknown) {
   std::vector<uint32_t> text{kSMovExecAllOnes};      // .text[0]: descriptor entry
   while (text.size() < 64)                           // pad the ordinary path to +256
     text.push_back(build_s_nop(0, kArch));
-  text.push_back(kVMovV0S0);           // .text[256]: firmware entry def
+  text.push_back(kVMovV0S0); // .text[256]: firmware entry def
   text.push_back(build_s_endpgm(kArch));
 
   auto image = make_gfx950_elf_with_kd(text, /*entry_byte_offset=*/0, /*kernarg_preload=*/1);

@@ -8450,12 +8450,14 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3KernargPreloadFirmwareEntryKeepsMaskedDefL
   ASSERT_NE(rodata, nullptr);
   ASSERT_FALSE(layout.text_sections().empty());
 
-  auto source_kd = rocjitsu::read_kernel_descriptor_for_test(image.data() + rodata->sectionOffset());
+  auto source_kd =
+      rocjitsu::read_kernel_descriptor_for_test(image.data() + rodata->sectionOffset());
   AMDHSA_BITS_SET(source_kd.kernarg_preload, KERNARG_PRELOAD_SPEC_LENGTH, 1);
   // Declare a small VGPR file so the globally-unused search is exhausted at the
   // scratch floor, forcing the allocator onto the per-point find_free_run path
   // (the only path the firmware EXEC pin can influence).
-  AMDHSA_BITS_SET(source_kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 15);
+  AMDHSA_BITS_SET(source_kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  15);
   rocjitsu::write_kernel_descriptor_for_test(image.data() + rodata->sectionOffset(), source_kd);
 
   auto *words =
@@ -8468,8 +8470,8 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3KernargPreloadFirmwareEntryKeepsMaskedDefL
   // entry's pinned-Unknown EXEC this def is not a whole-register kill, so v120 is
   // live across the cvt and find_free_run must not reuse it.
   words[66] = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 0, .vdst = kScratchFloor})[0];
-  words[67] = cdna4::build_vop1(cdna4::kVMovB32Vop1,
-                                {.src0 = static_cast<uint16_t>(256 + kScratchFloor), .vdst = 20})[0];
+  words[67] = cdna4::build_vop1(
+      cdna4::kVMovB32Vop1, {.src0 = static_cast<uint16_t>(256 + kScratchFloor), .vdst = 20})[0];
   words[68] = cdna4::build_sopp(cdna4::kSEndpgmSopp)[0];
 
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());

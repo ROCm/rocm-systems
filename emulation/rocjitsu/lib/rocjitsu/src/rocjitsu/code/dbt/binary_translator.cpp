@@ -2164,9 +2164,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           }
         }
       }
-      ExecMaskAnalysis exec(KernelBlockScope(scope.blocks),
-                            scope.translation->guest_wavefront_size, scope_analysis_edges,
-                            entry_blocks);
+      ExecMaskAnalysis exec(KernelBlockScope(scope.blocks), scope.translation->guest_wavefront_size,
+                            scope_analysis_edges, entry_blocks);
       liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), std::move(exec), liveness_options,
                                   scope_analysis_edges);
     }

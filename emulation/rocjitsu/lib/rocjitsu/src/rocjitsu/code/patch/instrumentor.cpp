@@ -563,8 +563,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   }
   ExecMaskAnalysis exec{KernelBlockScope(liveness_scope), obj_.kernel_wavefront_size(arch_),
                         liveness_edges, entry_blocks};
-  const LivenessAnalysis liveness{KernelBlockScope(liveness_scope), std::move(exec), {},
-                                  liveness_edges};
+  const LivenessAnalysis liveness{
+      KernelBlockScope(liveness_scope), std::move(exec), {}, liveness_edges};
 
   // Lay out the appended region as [probe bodies][trampolines]. Each distinct
   // probe body is copied once, ahead of the trampolines that call into it, so a
