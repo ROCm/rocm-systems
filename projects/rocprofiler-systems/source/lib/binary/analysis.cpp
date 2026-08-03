@@ -206,12 +206,11 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
             auto _exclude_range_v      = std::set<address_range>{};
             auto _insert_exclude_range = [&_maps,
                                           &_exclude_range_v](const std::string& _v) {
-                auto _base_v = std::string_view{ filepath::basename(_v) };
+                auto _base_v = path::filename(_v);
                 auto _real_v = path::realpath(_v);
                 for(const auto& mitr : _maps)
                 {
-                    if(std::string_view{ filepath::basename(mitr.pathname) } == _base_v ||
-                       _real_v == _v)
+                    if(path::filename(mitr.pathname) == _base_v || _real_v == _v)
                     {
                         _exclude_range_v.emplace(
                             address_range{ mitr.load_address, mitr.last_address });

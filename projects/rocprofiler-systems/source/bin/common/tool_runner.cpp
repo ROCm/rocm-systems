@@ -79,13 +79,6 @@ reset_color()
                                                              : ANSI_RESET;
 }
 
-std::string_view
-basename_of(std::string_view path)
-{
-    const auto slash = path.rfind('/');
-    return (slash == std::string_view::npos) ? path : path.substr(slash + 1);
-}
-
 int
 terminal_columns()
 {
@@ -361,8 +354,7 @@ tool_runner::prepare_command(const char* exe)
     new_argv.reserve(data.out.command.size() + LAUNCHER_INJECT_SLOTS);
     for(const auto& arg : data.out.command)
     {
-        if(!injected &&
-           basename_of(arg).find(data.out.launcher) != std::string_view::npos)
+        if(!injected && path::filename(arg).find(data.out.launcher) != std::string::npos)
         {
             new_argv.emplace_back(exe);
             new_argv.emplace_back("--");
@@ -492,7 +484,7 @@ tool_runner::do_full_parse()
     rocprofsys::argparse::init_parser(data);
     signals::disable_signal_detection(signals::signal_settings::get_enabled());
 
-    auto parser = parser_t{ std::string{ basename_of(argv[0]) }, build_description() };
+    auto parser = parser_t{ path::filename(argv[0]), build_description() };
 
     configure_parser(parser);
 
