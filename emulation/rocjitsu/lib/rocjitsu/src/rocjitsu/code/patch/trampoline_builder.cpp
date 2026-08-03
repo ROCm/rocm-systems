@@ -146,7 +146,7 @@ struct SpillBracket {
   // s_wait_loadcnt misses a scalar s_load (KMCNT), so that load could retire after
   // the readlane and clobber the restored value. Emitted after the call, before the
   // first fill; mirrors the prologue drain.
-  if (has_vgpr || has_sgpr) {
+  if (has_vgpr || has_sgpr || has_acc) {
     const std::vector<uint32_t> drain = build_wait_all_loads_complete(arch);
     bracket.epilogue.insert(bracket.epilogue.end(), drain.begin(), drain.end());
   }
