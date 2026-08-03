@@ -178,11 +178,7 @@ release(uint, HIP_HIDDEN_FREE_MEM, 0,                                         \
         "0 = Disable")                                                        \
 release(size_t, GPU_FORCE_BLIT_COPY_SIZE, 16,                                 \
         "Use Blit until this size(in KB) for copies")                         \
-/* GPU_FORCE_BLIT_SWAP_SIZE: default 16 is a placeholder mirroring           \
- * GPU_FORCE_BLIT_COPY_SIZE. TODO: tune from perf -- swap moves 2x the bytes \
- * of a copy (read+write both endpoints) so the tuned value is expected to be \
- * LOWER. Only consulted when sdma_swap_supported_ is true.                 */ \
-release(size_t, GPU_FORCE_BLIT_SWAP_SIZE, 16,                                 \
+release(size_t, GPU_FORCE_BLIT_SWAP_SIZE, 128,                                \
         "Use shader blit for batch swaps until this size (in KB)")            \
 release(uint, ROC_ACTIVE_WAIT_TIMEOUT, 0,                                     \
         "Forces active wait of GPU interrup for the timeout(us)")             \
