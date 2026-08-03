@@ -3436,18 +3436,20 @@ hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
                                   hipExtMemcpyOp* ops,
                                   size_t count,
                                   hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
-                                  size_t* failIdx, hipStream_t stream) {
+                                  hipStream_t stream) {
   HIP_INIT_API(hipExtMemcpyBatchAsync, dsts, srcs, sizesA, sizesB, waits, signals, ops,
-               count, attrs, attrsIdxs, numAttrs, failIdx, stream);
+               count, attrs, attrsIdxs, numAttrs, stream);
   if (!hip::isValid(stream)) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
   CHECK_STREAM_DETACHED_API(stream);
 
+  // The Ext API does not expose failIdx; the shared implementation still
+  // supports it for the legacy hipMemcpyBatchAsync path, so pass nullptr here.
   HIP_RETURN(ihipMemcpyBatch(dsts, srcs, sizesA, sizesB,
                              waits, signals, ops, count,
                              attrs, attrsIdxs, numAttrs,
-                             *hip::getStream(stream), true, failIdx));
+                             *hip::getStream(stream), true, /*failIdx=*/nullptr));
 }
 
 hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx,
