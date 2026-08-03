@@ -893,20 +893,10 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_MultiOp) {
 /**
  * Test Description
  * ------------------------
- * - Parameterized H<->D swap correctness over mismatched src/dst
- *   byte offsets and two transfer sizes.  For each (src_off, dst_off) pair the
- *   difference d = (dst_addr - src_addr) selects the largest shareable op width
- *   per the design doc's per-copy op-size algorithm, exercising op widths
- *   1/2/4/8/16 plus head/tail handling:
- *
- *     (0,0)   -> 16-byte body, no head/tail
- *     (4,4)   -> 4-byte-aligned, aligned fallback
- *     (0,15)  -> d=15 (odd) -> 1-byte body
- *     (1,15)  -> d=14 -> 2-byte body, head=1
- *     (3,11)  -> d=8  -> 8-byte body, head=5
- *     (3,9)   -> d=6  -> 2-byte body, head=1
- *     (1,0)   -> d=-1 (odd) -> 1-byte body
- *     (8,8)   -> 8-byte-aligned mismatch-free
+ * - Parameterized H<->D swap correctness over mismatched src/dst byte offsets and two
+ *   transfer sizes. For each (src_off, dst_off) pair, the implementation selects the
+ *   largest power-of-two element width (<= 16) that divides both endpoint addresses;
+ *   any remainder is handled as a trailing byte tail.
  *
  *   Sizes: 4096 and 131072 above and below SDMA threshold
  *
@@ -930,7 +920,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_UnalignedMatrix) {
       GENERATE(std::make_pair(size_t{0}, size_t{0}), std::make_pair(size_t{4}, size_t{4}),
                std::make_pair(size_t{0}, size_t{15}), std::make_pair(size_t{1}, size_t{15}),
                std::make_pair(size_t{3}, size_t{11}), std::make_pair(size_t{3}, size_t{9}),
-               std::make_pair(size_t{1}, size_t{0}), std::make_pair(size_t{8}, size_t{8}));
+               std::make_pair(size_t{1}, size_t{0}), std::make_pair(size_t{8}, size_t{8}),
+               std::make_pair(size_t{2}, size_t{2}));
   const size_t size = GENERATE(size_t{4096}, size_t{131072});
   const size_t src_off = off.first;
   const size_t dst_off = off.second;
