@@ -3,6 +3,7 @@
 
 #include "library/rocprofiler-sdk.hpp"
 #include "api.hpp"
+#include "backends/rocprofiler_sdk/backend.hpp"
 #include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "binary/analysis.hpp"
 #include "common/delimit.hpp"
@@ -2480,13 +2481,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         _domains_ss << "- " << itr << "\n";
     LOG_DEBUG("Available ROCm Domains: \n {}", _domains_ss.str());
 
-    auto _callback_domains =
-        sdk_tracing_config<wrapper, default_sdk_externals>::get_callback_domains();
-    auto _buffered_domain =
-        sdk_tracing_config<wrapper, default_sdk_externals>::get_buffered_domains();
-    auto _counter_events =
-        sdk_tracing_config<wrapper, default_sdk_externals>::get_rocm_events();
-    auto _version = sdk_tracing_config<wrapper, default_sdk_externals>::get_version();
+    using sdk_tracing_config_t =
+        sdk_tracing_config<backends::rocprofiler_sdk::backend<wrapper>,
+                           default_sdk_externals>;
+
+    auto _callback_domains = sdk_tracing_config_t::get_callback_domains();
+    auto _buffered_domain  = sdk_tracing_config_t::get_buffered_domains();
+    auto _counter_events   = sdk_tracing_config_t::get_rocm_events();
+    auto _version          = sdk_tracing_config_t::get_version();
     if(_version.formatted() == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
@@ -2551,12 +2553,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     {
         if(_callback_domains.count(itr) > 0)
         {
-            auto _ops =
-                sdk_tracing_config<wrapper, default_sdk_externals>::get_operations(itr);
+            auto _ops = sdk_tracing_config_t::get_operations(itr);
             _data->backtrace_operations.emplace(
-                itr,
-                sdk_tracing_config<wrapper,
-                                   default_sdk_externals>::get_backtrace_operations(itr));
+                itr, sdk_tracing_config_t::get_backtrace_operations(itr));
             ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                 _data->primary_ctx, itr, _ops.data(), _ops.size(), tool_tracing_callback,
                 _data));
@@ -2635,7 +2634,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
             ::std::abort();
         }
-        auto _ops = sdk_tracing_config<wrapper, default_sdk_externals>::get_operations(
+        auto _ops = sdk_tracing_config_t::get_operations(
             ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);
 
         ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(

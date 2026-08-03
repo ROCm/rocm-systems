@@ -3,6 +3,7 @@
 
 #include "config.hpp"
 #include "amd_smi.hpp"
+#include "backends/rocprofiler_sdk/backend.hpp"
 #include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/defines.h"
 #include "common/delimit.hpp"
@@ -472,9 +473,9 @@ json_has_project_name_root(const std::string& json_path)
 void
 configure_rocm_tracing_settings(const std::shared_ptr<settings>& _config)
 {
-    using sdk_tracing_config_t =
-        rocprofiler_sdk::sdk_tracing_config<rocprofiler_sdk::wrapper,
-                                            rocprofiler_sdk::default_sdk_externals>;
+    using sdk_tracing_config_t = rocprofiler_sdk::sdk_tracing_config<
+        backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>,
+        rocprofiler_sdk::default_sdk_externals>;
 
     const auto domains = sdk_tracing_config_t::domain_settings();
 

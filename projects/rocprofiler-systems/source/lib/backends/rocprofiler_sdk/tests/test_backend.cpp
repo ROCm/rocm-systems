@@ -655,4 +655,79 @@ TEST_F(backend_test, iterate_counter_dimensions_throws_on_sdk_error)
                  std::runtime_error);
 }
 
+// ─── Cached SDK-query methods (get_version / tracing names) ──────────────────
+//
+// Each cached method needs its own Sdk type per test — sharing mock_sdk (and
+// therefore `sut`) would let one test's cached result leak into another.
+
+template <int Tag>
+struct tagged_mock_sdk : mock_sdk
+{};
+
+using version_cache_tag        = tagged_mock_sdk<1>;
+using callback_names_cache_tag = tagged_mock_sdk<2>;
+using buffer_names_cache_tag   = tagged_mock_sdk<3>;
+
+TEST_F(backend_test, get_version_caches_after_first_call)
+{
+    EXPECT_CALL(*g_mock_sdk, get_version(gm::_, gm::_, gm::_))
+        .Times(1)
+        .WillOnce(gm::DoAll(gm::SetArgPointee<0>(1), gm::SetArgPointee<1>(2),
+                            gm::SetArgPointee<2>(3),
+                            gm::Return(mock_sdk::STATUS_SUCCESS)));
+
+    using sut_v = backend<version_cache_tag>;
+
+    std::uint32_t major = 0;
+    std::uint32_t minor = 0;
+    std::uint32_t patch = 0;
+    EXPECT_EQ(sut_v::get_version(&major, &minor, &patch), mock_sdk::STATUS_SUCCESS);
+    EXPECT_EQ(major, 1u);
+    EXPECT_EQ(minor, 2u);
+    EXPECT_EQ(patch, 3u);
+
+    // Second call must not hit the SDK again — the EXPECT_CALL above is Times(1).
+    major = 0;
+    minor = 0;
+    patch = 0;
+    EXPECT_EQ(sut_v::get_version(&major, &minor, &patch), mock_sdk::STATUS_SUCCESS);
+    EXPECT_EQ(major, 1u);
+    EXPECT_EQ(minor, 2u);
+    EXPECT_EQ(patch, 3u);
+}
+
+TEST_F(backend_test, get_callback_tracing_names_caches_after_first_call)
+{
+    auto table = name_info<>{};
+    table.emplace(1, "HIP_RUNTIME_API");
+    EXPECT_CALL(*g_mock_sdk, get_callback_tracing_names())
+        .Times(1)
+        .WillOnce(gm::Return(table));
+
+    using sut_cb = backend<callback_names_cache_tag>;
+
+    const auto& first  = sut_cb::get_callback_tracing_names();
+    const auto& second = sut_cb::get_callback_tracing_names();
+
+    EXPECT_EQ(&first, &second);
+    EXPECT_EQ(first[1].name, "HIP_RUNTIME_API");
+}
+
+TEST_F(backend_test, get_buffer_tracing_names_caches_after_first_call)
+{
+    auto table = name_info<>{};
+    table.emplace(2, "MEMORY_COPY");
+    EXPECT_CALL(*g_mock_sdk, get_buffer_tracing_names())
+        .Times(1)
+        .WillOnce(gm::Return(table));
+
+    using sut_buf = backend<buffer_names_cache_tag>;
+
+    const auto& first  = sut_buf::get_buffer_tracing_names();
+    const auto& second = sut_buf::get_buffer_tracing_names();
+
+    EXPECT_EQ(&first, &second);
+    EXPECT_EQ(first[2].name, "MEMORY_COPY");
+}
+
 }  // namespace rocprofsys::backends::rocprofiler_sdk::testing
