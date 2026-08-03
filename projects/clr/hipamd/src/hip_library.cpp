@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <cstddef>
-#include <cstring>
 #include <filesystem>
 #include <mutex>
 #include <string>
@@ -16,111 +14,7 @@
 #include "hip_platform.hpp"
 #include "utils/debug.hpp"
 
-#include "amd_hsa_elf.hpp"
-#include <elf/elf.hpp>
-
 namespace hip {
-namespace {
-// Upper bound on the number of descriptor records this function will walk in an
-// uncompressed clang offload bundle. hipLibraryLoadData receives only a bare
-// image pointer with no accompanying length, so the descriptor walk cannot be
-// validated against the true buffer bounds. A malformed or truncated header can
-// therefore claim an arbitrarily large numOfCodeObjects (or per-record
-// bundleEntryIdSize) and drive the walk far past the caller's allocation. We
-// cap the record count against a value that comfortably exceeds any real fat
-// binary (one native code object per supported GPU target, plus generic/SPIR-V
-// variants) so a hostile count is rejected before it can over-read.
-constexpr uint64_t kMaxBundleCodeObjects = 256;
-
-// Upper bound on a single descriptor's trailing bundleEntryId length. A record
-// advances the walk cursor by offsetof(info, bundleEntryId) + bundleEntryIdSize;
-// an untrusted oversized bundleEntryIdSize would step the cursor past the
-// buffer. Bundle entry ids are short target-triple strings, so a few KiB is an
-// ample ceiling that still rejects hostile values.
-constexpr uint64_t kMaxBundleEntryIdSize = 4096;
-
-// Computes the total byte length of an in-memory code-object image so that
-// hipLibraryLoadData can copy it and release the caller's buffer. The three
-// shapes the runtime accepts mirror what ExtractFatBinaryUsingCOMGR parses:
-//   - compressed clang offload bundle ("CCOB"): length is in the header,
-//   - uncompressed clang offload bundle ("__CLANG_OFFLOAD_BUNDLE__"): length is
-//     the end of the farthest bundle entry,
-//   - a bare AMDGPU ELF: length comes from the ELF header.
-// Returns 0 when the header cannot be recognized OR when an uncompressed bundle
-// header carries descriptor fields that would drive the walk past a sane bound;
-// the caller treats 0 as an invalid image rather than copying an unbounded or
-// out-of-range amount of memory.
-size_t ComputeImageSize(const void* image) {
-  if (image == nullptr) {
-    return 0;
-  }
-
-  // Compressed offload bundle: the total size is recorded in the header.
-  if (std::memcmp(image, symbols::kOffloadBundleCompressedMagicStr,
-                  symbols::kOffloadBundleCompressedMagicStrSize - 1) == 0) {
-    const auto* header =
-        reinterpret_cast<const symbols::ClangOffloadBundleCompressedHeader*>(image);
-    return static_cast<size_t>(header->totalSize);
-  }
-
-  // Uncompressed offload bundle: the image spans from its start to the end of
-  // the farthest (offset + size) entry in the bundle descriptor table.
-  if (std::memcmp(image, symbols::kOffloadBundleUncompressedMagicStr,
-                  symbols::kOffloadBundleUncompressedMagicStrSize - 1) == 0) {
-    const auto* header =
-        reinterpret_cast<const symbols::ClangOffloadBundleUncompressedHeader*>(image);
-    // Reject counts that are zero (nothing to size) or larger than any real fat
-    // binary. Because we cannot see the caller's buffer length, an unbounded
-    // count is the primary lever a truncated/hostile header uses to over-read.
-    const uint64_t num_code_objects = header->numOfCodeObjects;
-    if (num_code_objects == 0 || num_code_objects > kMaxBundleCodeObjects) {
-      return 0;
-    }
-
-    // Walk the variable-length descriptor list; each entry's bundleEntryId is a
-    // trailing flexible field of length bundleEntryIdSize. The descriptor table
-    // precedes the code objects, so the farthest (offset + size) bounds the whole
-    // image.
-    const auto* info = &header->desc[0];
-    size_t end = 0;
-    for (uint64_t i = 0; i < num_code_objects; ++i) {
-      // A record must not claim a bundleEntryId longer than any real target
-      // triple; an oversized value would step the cursor past the buffer.
-      if (info->bundleEntryIdSize > kMaxBundleEntryIdSize) {
-        return 0;
-      }
-      const size_t entry_end = static_cast<size_t>(info->offset) + static_cast<size_t>(info->size);
-      if (entry_end > end) {
-        end = entry_end;
-      }
-      // Advance by the serialized record stride: the three fixed uint64 fields
-      // (offset, size, bundleEntryIdSize) followed by the variable-length
-      // bundleEntryId. offsetof gives the on-disk offset of that trailing field,
-      // avoiding the struct's tail padding that sizeof would incorrectly add.
-      // This matches the walk in hip_comgr_helper.cpp.
-      const char* next = reinterpret_cast<const char*>(info) +
-                         offsetof(symbols::ClangOffloadBundleInfo, bundleEntryId) +
-                         static_cast<size_t>(info->bundleEntryIdSize);
-      info = reinterpret_cast<const symbols::ClangOffloadBundleInfo*>(next);
-    }
-    return end;
-  }
-
-  // Bare AMDGPU ELF: use the ELF header to size the image. Guard on the 4-byte
-  // ELF magic first so short non-ELF junk buffers (e.g. the invalid-image
-  // contract) are rejected without reading e_machine/EI_OSABI, which live deeper
-  // in the header and would over-read a small buffer.
-  if (amd::Elf::isElfMagic(static_cast<const char*>(image))) {
-    const auto* ehdr = reinterpret_cast<const amd::Elf64_Ehdr*>(image);
-    if (ehdr->e_machine == EM_AMDGPU && ehdr->e_ident[EI_OSABI] == ELFOSABI_AMDGPU_HSA) {
-      return static_cast<size_t>(amd::Elf::getElfSize(image));
-    }
-  }
-
-  return 0;
-}
-}  // namespace
-
 void LibraryContainer::Register(const std::string &name, int device, hipKernel_t k) {
   std::scoped_lock<std::mutex> lock(lib_mutex_);
   auto key = std::make_pair(name, device);
@@ -205,12 +99,7 @@ hipError_t LibraryContainer::GetManaged(const std::string& name, void** dptr, si
   return dynco_->GetManaged(name, dptr, bytes);
 }
 
-LibraryContainer::LibraryContainer(const char* code_object, size_t image_size)
-    : image_bytes_(code_object, code_object + image_size) {
-  // Point image_ at our owned copy so BuildIt() no longer depends on the
-  // caller's buffer, which may be freed once hipLibraryLoadData returns.
-  image_ = image_bytes_.data();
-}
+LibraryContainer::LibraryContainer(const char* code_object) : image_(code_object) {}
 
 LibraryContainer::LibraryContainer(const std::string &file_name) : filename_(file_name) {}
 
@@ -263,15 +152,7 @@ hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* image, hipJitOp
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  // Own the image: copy it so the caller's buffer can be freed once we return,
-  // matching cuLibraryLoadData's default copy semantics. A zero size means the
-  // header was not a recognized code object, which is an invalid image.
-  const size_t image_size = ComputeImageSize(image);
-  if (image_size == 0) {
-    HIP_RETURN(hipErrorInvalidImage);
-  }
-
-  auto* l = new hip::LibraryContainer(static_cast<const char*>(image), image_size);
+  auto* l = new hip::LibraryContainer((const char*)image);
   *library = reinterpret_cast<hipLibrary_t>(l);
   HIP_RETURN(hipSuccess);
 }

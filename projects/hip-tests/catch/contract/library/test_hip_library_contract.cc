@@ -94,11 +94,9 @@ bool CompileLibrarySource(std::vector<char>& code) {
 
 // Compiles the library source into the caller-owned `code` buffer or skips the
 // test when HIPRTC is unavailable. On a successful return the library is loaded
-// and ready for the per-test contract. hipLibraryLoadData owns a copy of the
-// image once it returns, so `code` does not need to outlive the returned
-// `hipLibrary_t` (see Contract_Library_LoadData_CopiesImageForLaterAccess).
-// Callers keep `code` alive for simplicity, but that is not required for
-// correctness.
+// and ready for the per-test contract. Callers keep `code` alive for the lifetime
+// of the loaded library handle so these tests do not rely on image-copy ownership
+// semantics from hipLibraryLoadData.
 void LoadContractLibrary(std::vector<char>& code, hipLibrary_t& library) {
   // Establish a device context before the driver-style hipLibrary* entry points
   // run. On NVIDIA these map to the CUDA driver API (cuLibrary*), which requires a
