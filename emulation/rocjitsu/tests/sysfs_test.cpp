@@ -322,13 +322,29 @@ TEST(SysfsTopologyGeometryTest, ShippedConfigsMatchTheSimulatedSoC) {
     const uint64_t cus = static_cast<uint64_t>(loaded.device.num_shader_engines) *
                          arrays_per_engine * loaded.device.num_cu_per_sh * num_xcc;
 
+    // Against the SoC, not against the device block. Deriving the CU total from
+    // the config and then checking the config's own simd_count against it only
+    // catches a config that contradicts itself -- both sides come from the same
+    // declaration, so it passes for any config whose numbers multiply out,
+    // however unlike the machine underneath. The whole point of this test is
+    // the comparison with what the simulator instantiates.
+    uint64_t soc_cus = 0;
+    for (uint32_t xcd_index = 0; xcd_index < num_xcc; ++xcd_index) {
+      const auto *xcd = loaded.soc()->xcd(xcd_index);
+      ASSERT_NE(xcd, nullptr);
+      for (uint32_t se_index = 0; se_index < xcd->num_shader_engines(); ++se_index)
+        soc_cus += xcd->shader_engine(se_index)->num_compute_units();
+    }
+    EXPECT_EQ(cus, soc_cus) << "the advertised CU geometry is not the machine the simulator runs: "
+                            << cus << " advertised vs " << soc_cus << " instantiated";
+
     // Harvested parts ship with fewer active CUs than the array geometry holds
     // (MI300X reports 304 of 320), so the advertised simd_count may be lower --
     // never higher, which would mean SIMDs with nowhere to live.
-    const uint64_t simds = cus * loaded.device.simd_per_cu;
+    const uint64_t simds = soc_cus * loaded.device.simd_per_cu;
     EXPECT_LE(loaded.device.simd_count, simds)
-        << "simd_count exceeds the CU geometry: " << cus << " CUs * " << loaded.device.simd_per_cu
-        << " SIMDs";
+        << "simd_count exceeds the simulated CU geometry: " << soc_cus << " CUs * "
+        << loaded.device.simd_per_cu << " SIMDs";
   }
 
   EXPECT_GE(checked, 5u) << "expected the shipped device configs to be discovered";

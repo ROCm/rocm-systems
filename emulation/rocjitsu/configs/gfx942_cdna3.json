@@ -52,7 +52,7 @@
             {
               "name": "se[0:4]", "type": "shader_engine",
               "children": [{
-                "name": "cu[0:8]", "type": "compute_unit",
+                "name": "cu[0:10]", "type": "compute_unit",
                 "config": [
                   { "key": "num_wf_slots", "value": "32" },
                   { "key": "sgprs_per_wf", "value": "104" },
@@ -67,20 +67,20 @@
     },
     "links": [
       {
-        "pattern": "xcd[i].cp.req_[j*8+k] -> xcd[i].se[j].cu[k].cpl",
+        "pattern": "xcd[i].cp.req_[j*10+k] -> xcd[i].se[j].cu[k].cpl",
         "for_ranges": [
           { "var_name": "i", "start": 0, "end": 8 },
           { "var_name": "j", "start": 0, "end": 4 },
-          { "var_name": "k", "start": 0, "end": 8 }
+          { "var_name": "k", "start": 0, "end": 10 }
         ],
         "latency": 1, "weight": 2
       },
       {
-        "pattern": "xcd[i].se[j].cu[k].req -> xcd[i].l2.cpl_[j*8+k]",
+        "pattern": "xcd[i].se[j].cu[k].req -> xcd[i].l2.cpl_[j*10+k]",
         "for_ranges": [
           { "var_name": "i", "start": 0, "end": 8 },
           { "var_name": "j", "start": 0, "end": 4 },
-          { "var_name": "k", "start": 0, "end": 8 }
+          { "var_name": "k", "start": 0, "end": 10 }
         ],
         "latency": 1, "weight": 10
       },
@@ -103,7 +103,7 @@
         "for_ranges": [
           { "var_name": "i", "start": 0, "end": 8 },
           { "var_name": "j", "start": 0, "end": 4 },
-          { "var_name": "k", "start": 0, "end": 7 }
+          { "var_name": "k", "start": 0, "end": 9 }
         ],
         "latency": 1, "weight": 2
       },
@@ -112,7 +112,7 @@
         "for_ranges": [
           { "var_name": "i", "start": 0, "end": 8 },
           { "var_name": "j", "start": 0, "end": 4 },
-          { "var_name": "k", "start": 0, "end": 7 }
+          { "var_name": "k", "start": 0, "end": 9 }
         ],
         "latency": 1, "weight": 2
       }
