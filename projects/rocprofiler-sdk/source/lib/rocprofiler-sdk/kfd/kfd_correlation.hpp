@@ -46,22 +46,18 @@ doorbell_map();
 ResultsMap&
 results_map();
 
-// PHASE 1 OPTION (b) SWITCH -- the single gate for emitting KFD timestamps.
+// THE single gate for emitting KFD timestamps.
 //
 // Selecting a firmware record as a dispatch's timestamp is only sound once that
 // record is provably from the current, uniquely-owning queue generation (design
 // requirements 3 and 4: all-live-queue owner injectivity plus generation-reuse
-// closure). Neither exists yet, and the CPU-window sanity guard is too broad to
-// separate two colliding queues, so Phase 1 ships with selection OFF: every
-// dispatch deterministically reports HSA timestamps and a late or misattributed
-// record can no longer flip a dispatch onto a different clock source. The
-// rendezvous is skipped entirely while this is false, so it costs nothing.
+// closure). Until the whole signal-less path exists this returns false and every
+// dispatch keeps the Phase 1 behavior -- HSA timestamps, signals retained, the
+// rendezvous skipped entirely so it costs nothing.
 //
-// Phase 2 flips this to true once the owner/generation tracking lands.
-constexpr bool
-kfd_selection_enabled()
-{
-    return false;
-}
+// Defined in signal_less.cpp as the env feature flag AND the fully-wired master
+// switch; the latter is what keeps it false while the feature is being landed.
+bool
+kfd_selection_enabled();
 }  // namespace kfd
 }  // namespace rocprofiler

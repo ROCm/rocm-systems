@@ -26,6 +26,7 @@
 // the HSA runtime, or the reader thread (test seam S2).
 
 #include "lib/rocprofiler-sdk/kfd/dispatch_hub.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 
 #include <gtest/gtest.h>
 
@@ -506,4 +507,148 @@ TEST(DispatchHub, payload_has_exactly_one_owner_across_every_terminal)
     }
     // The hub's own destruction releases whatever was still pending, exactly once.
     EXPECT_EQ(tracked_payload::live.load(), before);
+}
+
+// ---------------------------------------------------------------------------
+// Enqueue-side batch admission: the hub pre-check the eligibility decision uses
+// ---------------------------------------------------------------------------
+
+// Eligibility must be final BEFORE any packet is modified, so it asks the hub up
+// front whether the batch's keys are admissible. The answer must match what
+// register_batch() would actually do.
+TEST(DispatchHub, can_register_batch_agrees_with_register_batch)
+{
+    auto hub  = hub_t{};
+    auto keys = std::vector<correlation_key>{key_of(4, 1), key_of(4, 2)};
+    EXPECT_TRUE(hub.can_register_batch(keys));
+
+    auto batch = std::vector<hub_t::registration>{};
+    for(const auto& k : keys)
+        batch.emplace_back(reg_of(k));
+    EXPECT_TRUE(hub.register_batch(std::move(batch)));
+
+    // Now the same keys are live, so a second batch must be refused by both.
+    EXPECT_FALSE(hub.can_register_batch(keys));
+    auto again = std::vector<hub_t::registration>{};
+    for(const auto& k : keys)
+        again.emplace_back(reg_of(k));
+    EXPECT_FALSE(hub.register_batch(std::move(again)));
+}
+
+TEST(DispatchHub, can_register_batch_refuses_quarantine_tombstone_and_duplicates)
+{
+    auto hub = hub_t{};
+
+    // Duplicate within the batch.
+    EXPECT_FALSE(hub.can_register_batch({key_of(4, 1), key_of(4, 1)}));
+
+    // Tombstoned key.
+    ASSERT_TRUE(register_one(hub, key_of(4, 2)));
+    ASSERT_TRUE(hub.leak(key_of(4, 2)).has_value());
+    EXPECT_FALSE(hub.can_register_batch({key_of(4, 2)}));
+
+    // Quarantined slot.
+    hub.quarantine_slot(6);
+    EXPECT_FALSE(hub.can_register_batch({key_of(6, 1)}));
+
+    // Poisoned session.
+    EXPECT_TRUE(hub.can_register_batch({key_of(7, 1)}));
+    hub.poison(session_mode::loss_poisoned);
+    EXPECT_FALSE(hub.can_register_batch({key_of(7, 1)}));
+}
+
+// ---------------------------------------------------------------------------
+// Feature flag + eligibility decision table
+// ---------------------------------------------------------------------------
+
+// Default OFF: only an explicit, recognised enable turns the feature on, so a
+// typo, an empty value, or an unrelated string can never activate it.
+TEST(signal_less_flag, only_explicit_enable_turns_it_on)
+{
+    EXPECT_TRUE(parse_signal_less_env("1"));
+    EXPECT_TRUE(parse_signal_less_env("on"));
+    EXPECT_TRUE(parse_signal_less_env("ON"));
+    EXPECT_TRUE(parse_signal_less_env("true"));
+    EXPECT_TRUE(parse_signal_less_env("TRUE"));
+    EXPECT_TRUE(parse_signal_less_env("yes"));
+
+    EXPECT_FALSE(parse_signal_less_env(""));
+    EXPECT_FALSE(parse_signal_less_env("0"));
+    EXPECT_FALSE(parse_signal_less_env("off"));
+    EXPECT_FALSE(parse_signal_less_env("false"));
+    EXPECT_FALSE(parse_signal_less_env("2"));
+    EXPECT_FALSE(parse_signal_less_env("enable"));
+    EXPECT_FALSE(parse_signal_less_env(" 1"));
+    EXPECT_FALSE(parse_signal_less_env("1 "));
+}
+
+// The master switch is what keeps signal-less inert while it is being landed:
+// even with the env flag on, no batch can be eligible until it flips.
+TEST(signal_less_flag, master_switch_holds_the_feature_off)
+{
+    static_assert(!signal_less_fully_wired(),
+                  "signal-less must stay inert until every stage is present");
+
+    // Everything else set to what a batch could possibly satisfy today.
+    auto in                  = eligibility_inputs{};
+    in.feature_enabled       = true;
+    in.session_live_for_gpu  = true;
+    in.reader_alive          = true;
+    in.doorbells_injective   = true;
+    in.hub_accepts_batch     = true;
+    in.payload_constructible = true;
+    in.fully_wired           = signal_less_fully_wired();
+
+    EXPECT_FALSE(batch_is_signal_less_eligible(in));
+}
+
+// The owner-injectivity input is a placeholder that reports "not trackable" until
+// the all-live-queue reverse owner registry lands, so it alone also holds every
+// batch on the signal path.
+TEST(signal_less_flag, placeholder_owner_check_is_not_yet_trackable)
+{
+    EXPECT_FALSE(doorbell_owner_is_injective(0));
+    EXPECT_FALSE(doorbell_owner_is_injective(4100));
+
+    // fully_wired is set true here to isolate the owner check as the sole failure.
+    auto in                  = eligibility_inputs{};
+    in.feature_enabled       = true;
+    in.fully_wired           = true;
+    in.session_live_for_gpu  = true;
+    in.reader_alive          = true;
+    in.hub_accepts_batch     = true;
+    in.payload_constructible = true;
+    in.doorbells_injective   = doorbell_owner_is_injective(4100);
+
+    EXPECT_FALSE(batch_is_signal_less_eligible(in));
+}
+
+// Every input is necessary: dropping any one of them keeps the whole batch on the
+// signal path (no mixed-mode batches, no "minimal/where-known" gating).
+TEST(signal_less_flag, eligibility_requires_every_condition)
+{
+    auto all_true                  = eligibility_inputs{};
+    all_true.feature_enabled       = true;
+    all_true.fully_wired           = true;
+    all_true.session_live_for_gpu  = true;
+    all_true.reader_alive          = true;
+    all_true.doorbells_injective   = true;
+    all_true.hub_accepts_batch     = true;
+    all_true.payload_constructible = true;
+    ASSERT_TRUE(batch_is_signal_less_eligible(all_true));
+
+    bool eligibility_inputs::*fields[] = {&eligibility_inputs::feature_enabled,
+                                          &eligibility_inputs::fully_wired,
+                                          &eligibility_inputs::session_live_for_gpu,
+                                          &eligibility_inputs::reader_alive,
+                                          &eligibility_inputs::doorbells_injective,
+                                          &eligibility_inputs::hub_accepts_batch,
+                                          &eligibility_inputs::payload_constructible};
+
+    for(auto field : fields)
+    {
+        auto one_false   = all_true;
+        one_false.*field = false;
+        EXPECT_FALSE(batch_is_signal_less_eligible(one_false));
+    }
 }

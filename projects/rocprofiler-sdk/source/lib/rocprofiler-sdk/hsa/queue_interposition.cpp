@@ -47,6 +47,7 @@
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
 #include "lib/rocprofiler-sdk/kfd/results_map.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -506,6 +507,85 @@ async_signal_handler(hsa_signal_t                            completion_signal,
     }
 }
 
+bool
+is_dispatch_packet(const rocprofiler_packet& pkt)
+{
+    auto _type = bit_extract(pkt.kernel_dispatch.header,
+                             HSA_PACKET_HEADER_TYPE,
+                             HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+    if(_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) return true;
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+    if(_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+        return pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH;
+#endif
+    return false;
+}
+
+// Per-BATCH signal-less eligibility (design plan "Eligibility"), decided ONCE
+// before any packet is touched. It has to be final up front: a batch that has
+// skipped its completion signals cannot be moved back onto the signal path after
+// its packets are staged, so even "will the hub accept these keys" is answered
+// here. If ANY packet fails, the WHOLE batch keeps the signal path -- there are no
+// mixed-mode batches. App-signal presence is deliberately not an input (P3).
+//
+// On success keys_out is indexed BY PACKET INDEX and holds the key for each
+// dispatch packet (nullopt for the others), so the registration below uses the
+// exact keys the hub validated here rather than re-deriving them from a second
+// doorbell lookup that could observe a different generation.
+bool
+signal_less_batch_eligible(Queue*                                            queue,
+                           const rocprofiler_packet*                         packets,
+                           uint64_t                                          num_packets,
+                           uint64_t                                          base_pkt_index,
+                           std::vector<std::optional<kfd::correlation_key>>* keys_out)
+{
+    keys_out->clear();
+
+    // Cheapest gate first: with the feature off (the default) this is one
+    // predictable branch and NO extra session or doorbell work, so the signal
+    // path is bit-for-bit what it was before signal-less existed.
+    if(!kfd::signal_less_feature_enabled() || !kfd::signal_less_fully_wired()) return false;
+
+    const auto _gpu_id = queue->get_agent().get_rocp_agent()->gpu_id;
+    if(!kfd::ensure_reader_session(static_cast<uint32_t>(_gpu_id))) return false;
+
+    auto _db = capture_doorbell_key(queue->get_id(), queue->intercept_queue());
+    if(!_db) return false;
+
+    keys_out->assign(num_packets, std::nullopt);
+    auto _flat = std::vector<kfd::correlation_key>{};
+    for(uint64_t i = 0; i < num_packets; ++i)
+    {
+        if(!is_dispatch_packet(packets[i])) continue;
+        auto _key =
+            kfd::correlation_key{_db->doorbell_off,
+                                 static_cast<uint32_t>((base_pkt_index + i) & 0xFFFFFFFFULL),
+                                 _db->generation};
+        (*keys_out)[i] = _key;
+        _flat.emplace_back(_key);
+    }
+    if(_flat.empty())
+    {
+        keys_out->clear();
+        return false;
+    }
+
+    auto _inputs                  = kfd::eligibility_inputs{};
+    _inputs.feature_enabled       = true;
+    _inputs.fully_wired           = kfd::signal_less_fully_wired();
+    _inputs.session_live_for_gpu  = true;
+    _inputs.reader_alive          = kfd::signal_less_hub().mode() == kfd::session_mode::running;
+    _inputs.doorbells_injective   = kfd::doorbell_owner_is_injective(_db->doorbell_off);
+    _inputs.hub_accepts_batch     = kfd::signal_less_hub().can_register_batch(_flat);
+    // The payload is value-only (see kfd::pending_payload), so construction cannot
+    // fail once the key resolved.
+    _inputs.payload_constructible = true;
+
+    if(kfd::batch_is_signal_less_eligible(_inputs)) return true;
+    keys_out->clear();
+    return false;
+}
+
 // Local kernel-dispatch tracing path: swaps in pooled completion signals,
 // runs KERNEL_DISPATCH_ENQUEUE tracer hooks, and prepares a completion-signal
 // waiter for the async signal handler pool. Strict 1:1 packet forwarding; does
@@ -631,6 +711,12 @@ write_interceptor(Queue*                                queue,
                                                   .enqueue_ts     = common::timestamp_ns(),
                                                   .correlation_id = corr_id,
                                                   .packet_data    = packet_data_array_t{}};
+
+        // Decided once for the whole batch, before any packet is modified.
+        auto       _signal_less_keys = std::vector<std::optional<kfd::correlation_key>>{};
+        const bool _signal_less_batch = signal_less_batch_eligible(
+            queue, _packets, _num_packets, _base_pkt_index, &_signal_less_keys);
+        auto _signal_less_regs = std::vector<kfd::signal_less_hub_t::registration>{};
 
         // Searching across all the packets given during this write
         for(size_t i = 0; i < _num_packets; ++i)
@@ -768,14 +854,22 @@ write_interceptor(Queue*                                queue,
                 return nullptr;
             };
 
-            // No barrier packet: borrow a pooled signal if needed, then bump value by 1.
-            if(!existing_completion_signal)
-                _packet_data.pooled_signal = create_signal(&completion_signal);
+            // P3: a signal-less batch does not touch the packet's completion signal
+            // at all -- no pooled borrow, no copy-modify, no +1. The packet the GPU
+            // sees is byte-identical to what the app submitted (app signal present
+            // or null), and the SDK learns completion from the firmware EOP record
+            // instead. packet_data.completion_signal stays null for such a batch.
+            if(!_signal_less_batch)
+            {
+                // No barrier packet: borrow a pooled signal if needed, then bump value by 1.
+                if(!existing_completion_signal)
+                    _packet_data.pooled_signal = create_signal(&completion_signal);
 
-            get_core_table()->hsa_signal_add_scacq_screl_fn(completion_signal, 1);
+                get_core_table()->hsa_signal_add_scacq_screl_fn(completion_signal, 1);
 
-            // set the completion signal to the kernel packet
-            _packet_data.completion_signal = completion_signal;
+                // set the completion signal to the kernel packet
+                _packet_data.completion_signal = completion_signal;
+            }
 
             // computes the "size" based on the offset of reserved_padding field
             constexpr auto kernel_dispatch_info_rt_size =
@@ -826,6 +920,34 @@ write_interceptor(Queue*                                queue,
                 }
             }
 
+            // Signal-less: stage this dispatch's owned pending entry. The whole
+            // batch is registered below, before the packets publish, so a firmware
+            // record can never arrive for a dispatch the hub has not heard of.
+            // The payload holds value data and stable ids only -- no Queue&, no
+            // context pointers beyond the validated tracing_data, no signal handle.
+            if(_signal_less_batch && _signal_less_keys[i].has_value())
+            {
+                auto _reg           = kfd::signal_less_hub_t::registration{};
+                _reg.key            = *_signal_less_keys[i];
+                _reg.correlation_id = internal_corr_id;
+                _reg.queue_token    = queue->get_id().handle;
+                _reg.submit_index   = _base_pkt_index + i;
+
+                auto& _pl           = _reg.payload;
+                _pl.callback_record = _packet_data.callback_record;
+                _pl.tracing_data    = _packet_data.tracing_data;
+                // The reference this payload inherits was taken by the
+                // add_ref_count()/add_kern_count() above; the finalizer releases it.
+                _pl.correlation_id = corr_id;
+                _pl.tid            = thr_id;
+                _pl.agent_id       = queue->get_agent().get_rocp_agent()->id;
+                _pl.enqueue_ts     = _info_session.enqueue_ts;
+                _pl.queue_token    = _reg.queue_token;
+                _pl.submit_index   = _reg.submit_index;
+
+                _signal_less_regs.emplace_back(std::move(_reg));
+            }
+
             {
                 auto tracer_data = _packet_data.callback_record;
                 tracing::execute_phase_enter_callbacks(
@@ -873,7 +995,27 @@ write_interceptor(Queue*                                queue,
         auto current_signal_value   = hsa_signal_value_t{0};
         auto _shared_info_session   = std::shared_ptr<queue_info_session_t>{};
 
-        if(!_info_session.packet_data.empty())
+        // Register the whole batch BEFORE the writer publishes any packet, so the
+        // reader can never drain a firmware record for a dispatch the hub does not
+        // know about. Eligibility already asked the hub to accept these keys while
+        // holding the queue's gate_lock, and the keys carry this queue's own submit
+        // indices, so no other thread can have claimed them since.
+        if(_signal_less_batch &&
+           !kfd::signal_less_hub().register_batch(std::move(_signal_less_regs)))
+        {
+            // Unreachable by the argument above. The packets have already skipped
+            // their completion signals and cannot be put back on the signal path,
+            // so the only safe outcome is the leak-and-shout policy: these
+            // dispatches emit no record and their correlation ids are not retired.
+            ROCP_WARNING << "KFD dispatch-log: signal-less batch registration was refused after "
+                            "eligibility accepted it; these dispatches will not complete";
+        }
+
+        // A signal-less batch has no completion signal to wait on -- the firmware
+        // EOP record is its completion event -- so no async waiter is armed for it
+        // and the hub entry owns the correlation-id references until the reader
+        // hands it to the finalizer.
+        if(!_info_session.packet_data.empty() && !_signal_less_batch)
         {
             last_completion_signal = _info_session.packet_data.back().completion_signal;
 

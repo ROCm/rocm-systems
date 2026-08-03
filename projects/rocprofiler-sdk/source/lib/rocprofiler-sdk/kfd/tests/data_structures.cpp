@@ -24,6 +24,7 @@
 #include "lib/rocprofiler-sdk/kfd/doorbell_map.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/results_map.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 
 #include <gtest/gtest.h>
 
@@ -459,14 +460,18 @@ TEST(ResultsMap, hsa_fallback_is_counted)
 // Phase 1 option (b) feature gate
 // ---------------------------------------------------------------------------
 
-// KFD result SELECTION must stay OFF for all of Phase 1: emitting a firmware
-// timestamp is only sound once owner-injectivity and generation-reuse closure
-// exist (Phase 2). This is the single switch, so guard it against an accidental
-// flip -- get_dispatch_time() skips the whole KFD block while it is false, which
-// is what makes every dispatch deterministically report HSA timestamps.
-TEST(kfd_selection_gate, disabled_in_phase_1)
+// KFD result SELECTION must stay OFF until the whole signal-less path exists:
+// emitting a firmware timestamp is only sound once owner-injectivity and
+// generation-reuse closure are in place. get_dispatch_time() skips the entire KFD
+// block while this is false, which is what makes every dispatch deterministically
+// report HSA timestamps.
+//
+// kfd_selection_enabled() is now the env feature flag AND the fully-wired master
+// switch, so this stays false even when a user sets the env var -- see
+// signal_less_test's coverage of the flag itself.
+TEST(kfd_selection_gate, disabled_until_signal_less_is_fully_wired)
 {
-    static_assert(!kfd_selection_enabled(),
-                  "Phase 1 ships option (b): KFD timestamp selection stays disabled");
+    static_assert(!signal_less_fully_wired(),
+                  "flipping the master switch requires every signal-less stage to be present");
     EXPECT_FALSE(kfd_selection_enabled());
 }

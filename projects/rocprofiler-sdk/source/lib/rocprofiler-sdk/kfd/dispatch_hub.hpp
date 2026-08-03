@@ -158,11 +158,9 @@ public:
 
         for(size_t i = 0; i < batch.size(); ++i)
         {
-            const auto& key = batch[i].key;
-            if(m_entries.count(key) != 0 || m_tombstones.count(key) != 0) return false;
-            if(m_quarantined.count(key.doorbell_off) != 0) return false;
+            if(!key_admissible_locked(batch[i].key)) return false;
             for(size_t j = 0; j < i; ++j)
-                if(batch[j].key == key) return false;
+                if(batch[j].key == batch[i].key) return false;
         }
 
         for(auto& reg : batch)
@@ -174,6 +172,26 @@ public:
             e.queue_token    = reg.queue_token;
             e.submit_index   = reg.submit_index;
             e.payload        = std::move(reg.payload);
+        }
+        return true;
+    }
+
+    // Would register_batch() accept these keys right now? Used by the enqueue-side
+    // eligibility decision, which must be final BEFORE any packet is modified: a
+    // batch that skipped its completion signals cannot be un-skipped once the
+    // packets are staged. The inline path holds the queue's gate_lock, and keys
+    // carry the queue's own submit index, so no other thread can claim these keys
+    // between this check and the registration.
+    bool can_register_batch(const std::vector<correlation_key>& keys) const
+    {
+        if(m_abandoned.load(std::memory_order_acquire)) return false;
+
+        auto lk = std::lock_guard<std::mutex>{m_mu};
+        for(size_t i = 0; i < keys.size(); ++i)
+        {
+            if(!key_admissible_locked(keys[i])) return false;
+            for(size_t j = 0; j < i; ++j)
+                if(keys[j] == keys[i]) return false;
         }
         return true;
     }
@@ -391,6 +409,14 @@ private:
     };
 
     using map_t = std::unordered_map<correlation_key, entry, correlation_key_hash>;
+
+    // Caller holds m_mu. A key may be registered only into a running session, only
+    // once, never onto a tombstone (U11), and never onto a quarantined slot.
+    bool key_admissible_locked(const correlation_key& key) const
+    {
+        return m_mode == session_mode::running && m_entries.count(key) == 0 &&
+               m_tombstones.count(key) == 0 && m_quarantined.count(key.doorbell_off) == 0;
+    }
 
     // Caller holds m_mu. Does NOT erase; callers that iterate erase themselves.
     leaked leak_locked(typename map_t::iterator it)
