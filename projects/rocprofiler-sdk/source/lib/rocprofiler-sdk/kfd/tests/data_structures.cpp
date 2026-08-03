@@ -22,9 +22,14 @@
 
 #include "lib/rocprofiler-sdk/kfd/correlation_types.hpp"
 #include "lib/rocprofiler-sdk/kfd/doorbell_map.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/results_map.hpp"
 
 #include <gtest/gtest.h>
+
+#include <atomic>
+#include <chrono>
+#include <thread>
 
 namespace
 {
@@ -34,6 +39,21 @@ rocprofiler_queue_id_t
 qid(uint64_t h)
 {
     return rocprofiler_queue_id_t{h};
+}
+
+// Rendezvous helpers. Deadlines are absolute steady_now_ns() values, so a test
+// can hand wait_take() a deadline that is already in the past (no wait), far in
+// the future (blocks until notified), or a specific budget.
+uint64_t
+deadline_in_ms(uint64_t ms)
+{
+    return steady_now_ns() + ms * 1'000'000ull;
+}
+
+uint64_t
+elapsed_ms_since(uint64_t start_ns)
+{
+    return (steady_now_ns() - start_ns) / 1'000'000ull;
 }
 }  // namespace
 
@@ -260,4 +280,193 @@ TEST(ResultsMap, evict_stale_tolerates_future_timestamp)
     auto evicted = m.evict_stale(/*now_ns=*/10'000, /*max_age_ns=*/5'000);
     EXPECT_EQ(evicted, 0u);
     EXPECT_TRUE(m.take(correlation_key{7, 1, 0}).has_value());  // still retained
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1 rendezvous (wait_take). Replaces the one-shot take() that silently
+// used HSA timestamps whenever a firmware record was merely late.
+// ---------------------------------------------------------------------------
+
+// U3a, deposit-before-waiter: the result is already there, so the wait resolves
+// immediately (no deadline consumed) and resolves exactly ONCE.
+TEST(ResultsMap, rendezvous_deposit_before_waiter)
+{
+    auto m   = ResultsMap{};
+    auto key = correlation_key{7, 100, 0};
+    m.deposit(key, kfd_timing_result{1000, 2000, 500});
+
+    auto start = steady_now_ns();
+    auto r     = m.wait_take(key, deadline_in_ms(10'000));
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->start_gpu_ticks, 1000u);
+    EXPECT_LT(elapsed_ms_since(start), 1000u);  // did not block
+
+    // Exactly once: the entry is gone, and a second wait only burns its deadline.
+    EXPECT_FALSE(m.wait_take(key, deadline_in_ms(10)).has_value());
+    EXPECT_EQ(m.stats().hits, 1u);
+}
+
+// U3a, waiter-before-deposit: the waiter blocks first and the deposit wakes it.
+// Resolves exactly once, with the deposited value.
+TEST(ResultsMap, rendezvous_waiter_before_deposit)
+{
+    auto m   = ResultsMap{};
+    auto key = correlation_key{7, 101, 0};
+
+    auto producer = std::thread{[&m, key]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+        m.deposit(key, kfd_timing_result{4242, 5252, 1});
+    }};
+
+    // Deadline far beyond the deposit, so resolving proves the CV woke the waiter
+    // rather than the deadline expiring.
+    auto r = m.wait_take(key, deadline_in_ms(60'000));
+    producer.join();
+
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->start_gpu_ticks, 4242u);
+    EXPECT_EQ(r->end_gpu_ticks, 5252u);
+    EXPECT_EQ(m.stats().hits, 1u);
+    EXPECT_FALSE(m.wait_take(key, 0).has_value());  // not delivered twice
+}
+
+// U4, result-vs-deadline: with no deposit the wait ends at the deadline, reports
+// a miss (the caller then uses HSA timestamps), and really did wait.
+TEST(ResultsMap, rendezvous_deadline_expires)
+{
+    auto m     = ResultsMap{};
+    auto start = steady_now_ns();
+    auto r     = m.wait_take(correlation_key{7, 102, 0}, deadline_in_ms(30));
+
+    EXPECT_FALSE(r.has_value());
+    EXPECT_GE(elapsed_ms_since(start), 20u);  // waited rather than returning at once
+    EXPECT_EQ(m.stats().misses, 1u);
+}
+
+// A deadline of 0 means "do not wait": the plain-take behavior, used by any path
+// that must not block.
+TEST(ResultsMap, rendezvous_zero_deadline_does_not_block)
+{
+    auto m     = ResultsMap{};
+    auto start = steady_now_ns();
+    EXPECT_FALSE(m.wait_take(correlation_key{7, 103, 0}, 0).has_value());
+    EXPECT_LT(elapsed_ms_since(start), 1000u);
+}
+
+// U4, result-vs-reader-dead: a dead reader can never deposit, so abandoning the
+// waiters releases them immediately instead of making them burn the deadline.
+TEST(ResultsMap, rendezvous_reader_death_wakes_waiter)
+{
+    auto m   = ResultsMap{};
+    auto key = correlation_key{7, 104, 0};
+
+    auto reaper = std::thread{[&m]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+        m.abandon_waiters();
+    }};
+
+    auto start = steady_now_ns();
+    auto r     = m.wait_take(key, deadline_in_ms(60'000));
+    reaper.join();
+
+    EXPECT_FALSE(r.has_value());
+    EXPECT_LT(elapsed_ms_since(start), 30'000u);  // woken, not timed out
+}
+
+// Phase 1 loss policy: an overrun / dead reader means the SIGNAL fallback, not
+// the Phase 2 LEAKED policy. Once abandoned, every wait returns "no result"
+// immediately so the dispatch reports HSA timestamps and completes normally.
+TEST(ResultsMap, rendezvous_after_abandon_never_waits)
+{
+    auto m = ResultsMap{};
+    m.abandon_waiters();
+
+    auto start = steady_now_ns();
+    EXPECT_FALSE(m.wait_take(correlation_key{7, 105, 0}, deadline_in_ms(60'000)).has_value());
+    EXPECT_LT(elapsed_ms_since(start), 30'000u);
+
+    // A result deposited after the abandon is still takeable; abandoning only ends
+    // waiting, it does not poison the map.
+    auto key = correlation_key{7, 106, 0};
+    m.deposit(key, kfd_timing_result{11, 22, 0});
+    EXPECT_TRUE(m.wait_take(key, deadline_in_ms(60'000)).has_value());
+}
+
+// Unrelated deposits notify every waiter; the predicate must send them back to
+// sleep rather than let a wakeup end the wait with no result of their own.
+TEST(ResultsMap, rendezvous_ignores_unrelated_wakeups)
+{
+    auto m          = ResultsMap{};
+    auto key        = correlation_key{7, 107, 0};
+    auto stop       = std::atomic<bool>{false};
+    auto noisemaker = std::thread{[&m, &stop]() {
+        for(uint32_t i = 0; !stop.load(); ++i)
+        {
+            m.deposit(correlation_key{9, i, 0}, kfd_timing_result{1, 2, 0});
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        }
+    }};
+
+    auto start = steady_now_ns();
+    auto r     = m.wait_take(key, deadline_in_ms(40));
+    stop.store(true);
+    noisemaker.join();
+
+    EXPECT_FALSE(r.has_value());              // never resolved on someone else's record
+    EXPECT_GE(elapsed_ms_since(start), 30u);  // and the wakeups did not cut the wait short
+}
+
+// ONE absolute deadline for the whole batch: the first packet may consume it, but
+// a later packet whose record is already present is still served immediately, and
+// a later packet with no record does not wait a second full deadline.
+TEST(ResultsMap, rendezvous_one_deadline_per_batch)
+{
+    auto m       = ResultsMap{};
+    auto present = correlation_key{7, 201, 0};
+    m.deposit(present, kfd_timing_result{31, 41, 0});
+
+    const uint64_t batch_deadline = deadline_in_ms(30);
+
+    // Packet 1: never deposited, consumes the batch deadline.
+    auto start = steady_now_ns();
+    EXPECT_FALSE(m.wait_take(correlation_key{7, 200, 0}, batch_deadline).has_value());
+    EXPECT_GE(elapsed_ms_since(start), 20u);
+
+    // Packet 2: already deposited -> served at once even though the deadline is spent.
+    start  = steady_now_ns();
+    auto r = m.wait_take(present, batch_deadline);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->start_gpu_ticks, 31u);
+    EXPECT_LT(elapsed_ms_since(start), 1000u);
+
+    // Packet 3: no record, and the shared deadline has passed -> no second timeout.
+    start = steady_now_ns();
+    EXPECT_FALSE(m.wait_take(correlation_key{7, 202, 0}, batch_deadline).has_value());
+    EXPECT_LT(elapsed_ms_since(start), 1000u);
+}
+
+// The HSA-fallback counter makes source substitution visible instead of silent.
+TEST(ResultsMap, hsa_fallback_is_counted)
+{
+    auto m = ResultsMap{};
+    EXPECT_EQ(m.stats().fallbacks, 0u);
+    m.note_hsa_fallback();
+    m.note_hsa_fallback();
+    EXPECT_EQ(m.stats().fallbacks, 2u);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1 option (b) feature gate
+// ---------------------------------------------------------------------------
+
+// KFD result SELECTION must stay OFF for all of Phase 1: emitting a firmware
+// timestamp is only sound once owner-injectivity and generation-reuse closure
+// exist (Phase 2). This is the single switch, so guard it against an accidental
+// flip -- get_dispatch_time() skips the whole KFD block while it is false, which
+// is what makes every dispatch deterministically report HSA timestamps.
+TEST(kfd_selection_gate, disabled_in_phase_1)
+{
+    static_assert(!kfd_selection_enabled(),
+                  "Phase 1 ships option (b): KFD timestamp selection stays disabled");
+    EXPECT_FALSE(kfd_selection_enabled());
 }
