@@ -27,6 +27,21 @@ class TestMIGPUSpecs:
             models_from_dict.update(gpu_models)
         assert models_from_dict == all_models
 
+    def test_supported_archs_matches_soc_files(self):
+        soc_dir = Path(common.SRC) / "rocprof_compute_soc"
+        soc_archs = {f.stem.removeprefix("soc_") for f in soc_dir.glob("soc_gfx*.py")}
+
+        supported = set(common.SUPPORTED_ARCHS)
+        missing_from_supported = soc_archs - supported
+        missing_soc_file = supported - soc_archs
+        assert not missing_from_supported, (
+            f"SoC files exist but missing from SUPPORTED_ARCHS:"
+            f" {missing_from_supported}"
+        )
+        assert not missing_soc_file, (
+            f"SUPPORTED_ARCHS entries have no SoC file: {missing_soc_file}"
+        )
+
     # -- get_gpu_series ------------------------------------------------------
 
     def test_get_gpu_series_all_archs(self):
@@ -62,6 +77,13 @@ class TestMIGPUSpecs:
             result = MIGPUSpecs.get_perfmon_config(arch)
             assert isinstance(result, dict)
 
+    def test_every_supported_arch_has_nonempty_perfmon_config(self):
+        for arch in common.SUPPORTED_ARCHS:
+            config = MIGPUSpecs.get_perfmon_config(arch)
+            assert config, (
+                f"perfmon_config for {arch} is missing or empty in mi_gpu_spec.yaml"
+            )
+
     # -- is_partition_supported ----------------------------------------------
 
     def test_is_partition_supported_true(self):
@@ -85,6 +107,7 @@ class TestMIGPUSpecs:
             "gfx1150",
             "gfx1151",
             "gfx1152",
+            "gfx1153",
             "gfx908",
             None,
             "",
@@ -152,40 +175,54 @@ class TestMIGPUSpecs:
                 )
 
     def test_get_num_dies_cdna_no_design(self):
-        with (
-            patch.object(MIGPUSpecs, "_gpu_design", {"mi100": {}}),
-            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx908": "mi100"}),
+        with patch.object(MIGPUSpecs, "_gpu_design", {"mi100": {}}), patch.object(
+            MIGPUSpecs, "_gpu_series_dict", {"gfx908": "mi100"}
         ):
             assert MIGPUSpecs.get_num_dies("gfx908", "mi100") == 1
 
     def test_get_num_dies_cdna_with_design(self):
         design = {"testmodel": {"physical_aid": 4, "logical_partitions_per_die": 2}}
-        with (
-            patch.object(MIGPUSpecs, "_gpu_design", design),
-            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx942": "mi300"}),
+        with patch.object(MIGPUSpecs, "_gpu_design", design), patch.object(
+            MIGPUSpecs, "_gpu_series_dict", {"gfx942": "mi300"}
         ):
             assert MIGPUSpecs.get_num_dies("gfx942", "testmodel") == 8
 
     def test_get_num_dies_cdna_partial_design(self):
         design = {"testmodel": {"physical_aid": 4}}
-        with (
-            patch.object(MIGPUSpecs, "_gpu_design", design),
-            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx942": "mi300"}),
+        with patch.object(MIGPUSpecs, "_gpu_design", design), patch.object(
+            MIGPUSpecs, "_gpu_series_dict", {"gfx942": "mi300"}
         ):
             assert MIGPUSpecs.get_num_dies("gfx942", "testmodel") == 4
 
-    def test_get_num_dies_rdna_with_memory_die(self):
-        design = {"rdna_model": {"memory_die": 3}}
-        with (
-            patch.object(MIGPUSpecs, "_gpu_design", design),
-            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx1151": "navi3"}),
-        ):
-            assert MIGPUSpecs.get_num_dies("gfx1151", "rdna_model") == 3
-
-    def test_get_num_dies_rdna_no_memory_die(self):
+    def test_get_num_dies_rdna_single_die(self):
         design = {"rdna_model": {}}
-        with (
-            patch.object(MIGPUSpecs, "_gpu_design", design),
-            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx1151": "navi3"}),
-        ):
-            assert MIGPUSpecs.get_num_dies("gfx1151", "rdna_model") == 1
+        for arch in ("gfx1151", "gfx1153"):
+            with patch.object(MIGPUSpecs, "_gpu_design", design), patch.object(
+                MIGPUSpecs, "_gpu_series_dict", {arch: "rdna3.5"}
+            ):
+                assert MIGPUSpecs.get_num_dies(arch, "rdna_model") == 1
+
+    # -- get_memory_levels ---------------------------------------------------
+
+    def test_get_memory_levels(self):
+        """Test get_memory_levels getting different gpu_model from the same gpu_arch,
+        should result in different list of memory levels returned.
+        """
+        # rdna35_halo (dGPU) includes MALL in its memory levels
+        result = MIGPUSpecs.get_memory_levels("rdna35_halo")
+        assert result == ["LDS", "L0", "L1", "L2", "MALL"]
+
+        # rdna35_point_1 (APU) does not include MALL
+        result = MIGPUSpecs.get_memory_levels("rdna35_point_1")
+        assert result == ["LDS", "L0", "L1", "L2"]
+
+    def test_get_memory_levels_missing_returns_empty(self):
+        design = {"testmodel": {"physical_aid": 4}}
+        with patch.object(MIGPUSpecs, "_gpu_design", design):
+            result = MIGPUSpecs.get_memory_levels("testmodel")
+            assert result == []
+
+    def test_get_memory_levels_case_insensitive(self):
+        result_lower = MIGPUSpecs.get_memory_levels("mi300x_a1")
+        result_upper = MIGPUSpecs.get_memory_levels("MI300X_A1")
+        assert result_lower == result_upper

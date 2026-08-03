@@ -25,6 +25,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/data_types.h"
 #include "util/except.h"
 #include "util/meta_programming.h"
@@ -35,6 +36,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <vector>
 
 namespace rocjitsu {
@@ -120,7 +122,8 @@ inline float apply_wmma_c_modifier(float acc, uint32_t c_modifier) {
 /// @tparam Mode AccMode for the current ISA generation.
 /// @param const_acc Output: the constant value, or ACC_FROM_VGPR if src2 is a register.
 /// @param get_const Lazy callback returning the 32-bit constant value; only
-///        called when src2 is not a VGPR. Typically: [&]{ return src2.read_scalar(wf); }
+///        called when src2 is not a VGPR. Typically: [&]{ return
+///        amdgpu::RegisterAccess(wf).read_scalar(src2); }
 template <AccMode Mode = AccMode::Unified, typename F>
 uint32_t resolve_acc(uint32_t vb, uint32_t dst, int src2_ev, uint32_t &const_acc, F &&get_const) {
   if constexpr (Mode == AccMode::Unified || Mode == AccMode::Separate) {
@@ -221,7 +224,7 @@ inline OutputLoc output_loc_64(uint32_t M, uint32_t N, uint32_t i, uint32_t j, u
   return {local * 2, lane};
 }
 
-inline void require_wmma_wave32(const amdgpu::ComputeUnitCore &cu) {
+inline void require_wmma_wave32(const auto &cu) {
   if (cu.wf_size() != WMMA_WAVE32)
     throw util::ConfigError("gfx1250 WMMA requires wave32");
 }
@@ -422,23 +425,23 @@ constexpr PackedOutputLoc gfx11_wmma_output_loc_16(uint32_t wave_size, uint32_t 
   return {reg, lane, opsel & 0x1u};
 }
 
-inline uint64_t read_swmmac_index_set(amdgpu::ComputeUnitCore &cu, uint32_t index_base,
-                                      uint32_t lane, uint32_t index_entries, uint32_t index_key) {
+inline uint64_t read_swmmac_index_set(auto &cu, uint32_t index_base, uint32_t lane,
+                                      uint32_t index_entries, uint32_t index_key) {
   // gfx1250 FMT_WMMA_INDEX_SET and FMT_WMMA_INDEX_SET2 contain 16 and 32
   // packed 2-bit entries respectively. LLVM names the matching SWMMAC index
   // selector by entry count, not by total bit count.
   switch (index_entries) {
   case 8:
-    return (cu.read_vgpr(index_base, lane) >> (8 * (index_key & 0x3u))) & 0xFFu;
+    return (RegisterAccess(cu).read_vgpr(index_base, lane) >> (8 * (index_key & 0x3u))) & 0xFFu;
   case 16:
     if (index_key & 0x1u)
-      return (cu.read_vgpr(index_base, lane) >> 16) & 0xFFFFu;
-    return cu.read_vgpr(index_base, lane);
+      return (RegisterAccess(cu).read_vgpr(index_base, lane) >> 16) & 0xFFFFu;
+    return RegisterAccess(cu).read_vgpr(index_base, lane);
   case 32: {
     if (index_key & 0x1u)
-      return cu.read_vgpr(index_base + 1, lane);
-    uint64_t lo = cu.read_vgpr(index_base, lane);
-    uint64_t hi = cu.read_vgpr(index_base + 1, lane);
+      return RegisterAccess(cu).read_vgpr(index_base + 1, lane);
+    uint64_t lo = RegisterAccess(cu).read_vgpr(index_base, lane);
+    uint64_t hi = RegisterAccess(cu).read_vgpr(index_base + 1, lane);
     return lo | (hi << 32);
   }
   default:
@@ -614,79 +617,148 @@ inline uint32_t permute_b_lane(uint32_t lane, uint32_t blgp) {
 
 inline uint32_t packed_mask(uint32_t bits) { return bits >= 32 ? UINT32_MAX : ((1u << bits) - 1u); }
 
-inline uint32_t read_packed(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane) >> loc.bit_offset;
+inline uint32_t read_packed(auto &cu, uint32_t base, const InputLoc &loc) {
+  uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane) >> loc.bit_offset;
   if (loc.bit_offset + loc.data_bits > 32) {
-    uint32_t next = cu.read_vgpr(base + loc.vgpr_offset + 1, loc.lane);
+    uint32_t next = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset + 1, loc.lane);
     raw |= next << (32 - loc.bit_offset);
   }
   return raw & packed_mask(loc.data_bits);
 }
 
-inline float extract_f32(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  return std::bit_cast<float>(cu.read_vgpr(base + loc.vgpr_offset, loc.lane));
-}
+struct ExtractF32 {
+  float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    return std::bit_cast<float>(RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane));
+  }
+};
+inline constexpr ExtractF32 extract_f32{};
 
-inline float extract_f16(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
-  return util::f16_to_f32(static_cast<uint16_t>((raw >> (loc.sub_element * 16)) & 0xFFFF));
-}
+struct ExtractF16 {
+  float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    return util::f16_to_f32(static_cast<uint16_t>((raw >> (loc.sub_element * 16)) & 0xFFFF));
+  }
+};
+inline constexpr ExtractF16 extract_f16{};
 
-inline float extract_bf16(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
-  return util::bf16_to_f32(static_cast<uint16_t>((raw >> (loc.sub_element * 16)) & 0xFFFF));
-}
+struct ExtractBf16 {
+  float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    return util::bf16_to_f32(static_cast<uint16_t>((raw >> (loc.sub_element * 16)) & 0xFFFF));
+  }
+};
+inline constexpr ExtractBf16 extract_bf16{};
 
-inline int32_t extract_i8(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
-  return static_cast<int32_t>(static_cast<int8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
-}
+struct ExtractI8 {
+  int32_t operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    return static_cast<int32_t>(static_cast<int8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
+  }
+};
+inline constexpr ExtractI8 extract_i8{};
 
-inline int32_t extract_u8(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
-  return static_cast<int32_t>((raw >> (loc.sub_element * 8)) & 0xFF);
-}
+struct ExtractU8 {
+  int32_t operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    return static_cast<int32_t>((raw >> (loc.sub_element * 8)) & 0xFF);
+  }
+};
+inline constexpr ExtractU8 extract_u8{};
 
 inline int32_t sign_extend_packed(uint32_t value, uint32_t bits) {
   uint32_t sign = 1u << (bits - 1);
   return static_cast<int32_t>((value ^ sign) - sign);
 }
 
-inline int32_t extract_i4(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  return sign_extend_packed(read_packed(cu, base, loc), 4);
-}
+struct ExtractI4 {
+  int32_t operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    return sign_extend_packed(read_packed(cu, base, loc), 4);
+  }
+};
+inline constexpr ExtractI4 extract_i4{};
 
-inline int32_t extract_u4(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  return static_cast<int32_t>(read_packed(cu, base, loc));
-}
+struct ExtractU4 {
+  int32_t operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    return static_cast<int32_t>(read_packed(cu, base, loc));
+  }
+};
+inline constexpr ExtractU4 extract_u4{};
 
-inline float extract_fp8(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
-  return util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
-}
+struct ExtractFp8Ocp {
+  float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    return util::fp8_e4m3_ocp_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
+  }
+};
+inline constexpr ExtractFp8Ocp extract_fp8_ocp{};
 
-inline float extract_bf8(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
-  return util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
-}
+struct ExtractBf8Ocp {
+  float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    return util::bf8_e5m2_ocp_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
+  }
+};
+inline constexpr ExtractBf8Ocp extract_bf8_ocp{};
 
-inline float extract_fp4(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  return util::fp4_e2m1_to_f32(static_cast<uint8_t>(read_packed(cu, base, loc)));
-}
+struct ExtractFp8Fnuz {
+  float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    return util::fp8_e4m3_fnuz_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
+  }
+};
+inline constexpr ExtractFp8Fnuz extract_fp8_fnuz{};
 
-inline float extract_fp6(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  return util::fp6_e2m3_to_f32(static_cast<uint8_t>(read_packed(cu, base, loc)));
-}
+struct ExtractBf8Fnuz {
+  float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    return util::bf8_e5m2_fnuz_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
+  }
+};
+inline constexpr ExtractBf8Fnuz extract_bf8_fnuz{};
 
-inline float extract_bf6(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  return util::bf6_e3m2_to_f32(static_cast<uint8_t>(read_packed(cu, base, loc)));
-}
+struct ExtractFp8 {
+  float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    return extract_fp8_ocp(cu, base, loc);
+  }
+};
+inline constexpr ExtractFp8 extract_fp8{};
 
-inline double extract_f64(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t lo = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
-  uint32_t hi = cu.read_vgpr(base + loc.vgpr_offset + 1, loc.lane);
-  return std::bit_cast<double>(static_cast<uint64_t>(hi) << 32 | lo);
-}
+struct ExtractBf8 {
+  float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    return extract_bf8_ocp(cu, base, loc);
+  }
+};
+inline constexpr ExtractBf8 extract_bf8{};
+
+struct ExtractFp4 {
+  float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    return util::fp4_e2m1_to_f32(static_cast<uint8_t>(read_packed(cu, base, loc)));
+  }
+};
+inline constexpr ExtractFp4 extract_fp4{};
+
+struct ExtractFp6 {
+  float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    return util::fp6_e2m3_to_f32(static_cast<uint8_t>(read_packed(cu, base, loc)));
+  }
+};
+inline constexpr ExtractFp6 extract_fp6{};
+
+struct ExtractBf6 {
+  float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    return util::bf6_e3m2_to_f32(static_cast<uint8_t>(read_packed(cu, base, loc)));
+  }
+};
+inline constexpr ExtractBf6 extract_bf6{};
+
+struct ExtractF64 {
+  double operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
+    uint32_t lo = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    uint32_t hi = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset + 1, loc.lane);
+    return std::bit_cast<double>(static_cast<uint64_t>(hi) << 32 | lo);
+  }
+};
+inline constexpr ExtractF64 extract_f64{};
 
 inline float decode_e8m0_scale(uint8_t raw) { return util::e8m0_to_f32(raw); }
 
@@ -938,6 +1010,130 @@ inline PackedOutputLoc physicalize_packed_out(const PackedOutputLoc &loc, uint32
   return {loc.reg * stride + loc.lane / wf_size, loc.lane % wf_size, loc.sub_element};
 }
 
+inline uint64_t mfma_full_lane_mask(uint32_t wf_size) {
+  return wf_size >= 64 ? ~uint64_t{0} : ((uint64_t{1} << wf_size) - 1);
+}
+
+inline uint32_t mfma_dense_reg_count(uint64_t element_count, uint32_t element_bits,
+                                     uint32_t wf_size) {
+  uint64_t bits_per_reg = static_cast<uint64_t>(wf_size) * 32u;
+  return static_cast<uint32_t>((element_count * element_bits + bits_per_reg - 1) / bits_per_reg);
+}
+
+// Matrix fast-path register access helpers.
+//
+// MFMA/WMMA specializations below read dense source regions through
+// RegisterAccess views. Acquiring a read view observes the whole physical VGPR
+// region, then the fast path can use zero-copy lane spans/pointers for the math.
+// Keep the matrix-specific size calculations here so individual specializations
+// do not open-code plugin notification or raw region sizing.
+//
+// This is still only the physical-register-region layer. The broader cleanup is
+// to move operand-based SIMD paths onto the same facade and then make direct raw
+// VGPR storage unavailable to instruction emulators.
+
+inline void observe_contiguous_vgpr_reads(auto &cu, uint32_t base, uint32_t reg_count,
+                                          uint32_t wf_size, uint8_t byte_mask = 0xF) {
+  if (reg_count == 0)
+    return;
+  (void)RegisterAccess(cu).read_vgpr_region(base, reg_count, mfma_full_lane_mask(wf_size),
+                                            byte_mask);
+}
+
+inline void observe_mfma_input_reads(auto &cu, uint32_t base, uint32_t dim, uint32_t K, uint32_t B,
+                                     uint32_t data_bits, uint32_t wf_size) {
+  uint64_t element_count = static_cast<uint64_t>(dim) * K * B;
+  observe_contiguous_vgpr_reads(cu, base, mfma_dense_reg_count(element_count, data_bits, wf_size),
+                                wf_size);
+}
+
+inline void observe_mfma_acc32_reads(auto &cu, uint32_t base, uint32_t M, uint32_t N, uint32_t B,
+                                     uint32_t wf_size) {
+  uint64_t element_count = static_cast<uint64_t>(M) * N * B;
+  observe_contiguous_vgpr_reads(cu, base, mfma_dense_reg_count(element_count, 32, wf_size),
+                                wf_size);
+}
+
+inline RegisterAccess::VgprWriteRegion write_mfma_acc32_region(auto &cu, uint32_t base, uint32_t M,
+                                                               uint32_t N, uint32_t B,
+                                                               uint32_t wf_size) {
+  RegisterAccess regs(cu);
+  uint64_t element_count = static_cast<uint64_t>(M) * N * B;
+  uint32_t reg_count = mfma_dense_reg_count(element_count, 32, wf_size);
+  return regs.write_vgpr_region(base, reg_count, mfma_full_lane_mask(wf_size));
+}
+
+struct MatrixReadRegions {
+  RegisterAccess::VgprReadRegion a;
+  RegisterAccess::VgprReadRegion b;
+  std::optional<RegisterAccess::VgprReadRegion> acc;
+};
+
+inline MatrixReadRegions read_mfma_fast_path_regions(auto &cu, uint32_t s0, uint32_t s1,
+                                                     uint32_t s2, uint32_t M, uint32_t N,
+                                                     uint32_t K, uint32_t B, uint32_t data_bits,
+                                                     uint32_t const_acc, uint32_t wf_size) {
+  RegisterAccess regs(cu);
+  uint64_t lane_mask = mfma_full_lane_mask(wf_size);
+  uint32_t a_regs = mfma_dense_reg_count(static_cast<uint64_t>(M) * K * B, data_bits, wf_size);
+  uint32_t b_regs = mfma_dense_reg_count(static_cast<uint64_t>(N) * K * B, data_bits, wf_size);
+  std::optional<RegisterAccess::VgprReadRegion> acc_region;
+  if (const_acc == ACC_FROM_VGPR) {
+    uint32_t acc_regs = mfma_dense_reg_count(static_cast<uint64_t>(M) * N * B, 32, wf_size);
+    acc_region.emplace(regs.read_vgpr_region(s2, acc_regs, lane_mask));
+  }
+  return {regs.read_vgpr_region(s0, a_regs, lane_mask),
+          regs.read_vgpr_region(s1, b_regs, lane_mask), acc_region};
+}
+
+inline void observe_mfma_fast_path_reads(auto &cu, uint32_t s0, uint32_t s1, uint32_t s2,
+                                         uint32_t M, uint32_t N, uint32_t K, uint32_t B,
+                                         uint32_t data_bits, uint32_t const_acc, uint32_t wf_size) {
+  (void)read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, data_bits, const_acc, wf_size);
+}
+
+inline MatrixReadRegions read_wmma_fast_path_regions(auto &cu, uint32_t s0, uint32_t s1,
+                                                     uint32_t s2, uint32_t M, uint32_t N,
+                                                     uint32_t K, uint32_t data_bits,
+                                                     uint32_t acc_bits, uint32_t const_acc,
+                                                     uint32_t wf_size) {
+  RegisterAccess regs(cu);
+  uint64_t lane_mask = mfma_full_lane_mask(wf_size);
+  uint32_t a_regs = mfma_dense_reg_count(static_cast<uint64_t>(M) * K, data_bits, wf_size);
+  uint32_t b_regs = mfma_dense_reg_count(static_cast<uint64_t>(N) * K, data_bits, wf_size);
+  std::optional<RegisterAccess::VgprReadRegion> acc_region;
+  if (const_acc == ACC_FROM_VGPR) {
+    uint32_t acc_regs = mfma_dense_reg_count(static_cast<uint64_t>(M) * N, acc_bits, wf_size);
+    acc_region.emplace(regs.read_vgpr_region(s2, acc_regs, lane_mask));
+  }
+  return {regs.read_vgpr_region(s0, a_regs, lane_mask),
+          regs.read_vgpr_region(s1, b_regs, lane_mask), acc_region};
+}
+
+inline void observe_wmma_fast_path_reads(auto &cu, uint32_t s0, uint32_t s1, uint32_t s2,
+                                         uint32_t M, uint32_t N, uint32_t K, uint32_t data_bits,
+                                         uint32_t acc_bits, uint32_t const_acc, uint32_t wf_size) {
+  (void)read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, data_bits, acc_bits, const_acc,
+                                    wf_size);
+}
+
+inline RegisterAccess::VgprWriteRegion write_wmma_output_region(auto &cu, uint32_t base, uint32_t M,
+                                                                uint32_t N, uint32_t output_bits,
+                                                                uint32_t wf_size) {
+  RegisterAccess regs(cu);
+  uint32_t reg_count = mfma_dense_reg_count(static_cast<uint64_t>(M) * N, output_bits, wf_size);
+  return regs.write_vgpr_region(base, reg_count, mfma_full_lane_mask(wf_size));
+}
+
+inline RegisterAccess::VgprReadWriteRegion readwrite_wmma_output_region(auto &cu, uint32_t base,
+                                                                        uint32_t M, uint32_t N,
+                                                                        uint32_t output_bits,
+                                                                        uint32_t wf_size) {
+  RegisterAccess regs(cu);
+  uint32_t reg_count = mfma_dense_reg_count(static_cast<uint64_t>(M) * N, output_bits, wf_size);
+  return regs.readwrite_vgpr_region(base, reg_count, mfma_full_lane_mask(wf_size));
+}
+
 /// Map f32 output position to packed 16-bit output position using GFX9 layout.
 /// Two consecutive f32 register positions pack into one 32-bit VGPR as two
 /// 16-bit sub-elements: reg/2 holds the VGPR offset, reg%2 the sub-element.
@@ -955,10 +1151,10 @@ inline PackedOutputLoc output_loc_16(uint32_t M, uint32_t N, uint32_t i, uint32_
 /// @param abid  A-matrix broadcast source block ID.
 /// @param blgp  B-matrix lane group permutation pattern.
 template <typename ExtractA, typename ExtractB>
-void exec_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
-                    uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1,
-                    uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR,
-                    uint32_t cbsz = 0, uint32_t abid = 0, uint32_t blgp = 0) {
+void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t a_bits,
+                    uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                    ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR, uint32_t cbsz = 0,
+                    uint32_t abid = 0, uint32_t blgp = 0) {
   const uint32_t wf = cu.wf_size();
   struct Result {
     uint32_t reg;
@@ -976,9 +1172,10 @@ void exec_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
         for (uint32_t col = 0; col < N; ++col) {
           // AMD convention: i=row (register dimension), j=col (lane dimension).
           auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
-          float acc = (const_acc != ACC_FROM_VGPR)
-                          ? std::bit_cast<float>(const_acc)
-                          : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+          float acc =
+              (const_acc != ACC_FROM_VGPR)
+                  ? std::bit_cast<float>(const_acc)
+                  : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
           for (uint32_t k = 0; k < K; ++k) {
             auto al = input_loc(M, K, B, row, k, b, a_bits);
             auto bl = input_loc(N, K, B, col, k, b, b_bits);
@@ -1038,7 +1235,7 @@ void exec_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
             Cbuf[row * stride + col] =
                 (const_acc != ACC_FROM_VGPR)
                     ? std::bit_cast<float>(const_acc)
-                    : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+                    : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
           }
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t k = 0; k < K; ++k) {
@@ -1069,7 +1266,7 @@ void exec_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
 
   bool has_nan = false;
   for (const auto &r : results) {
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
     float fval = std::bit_cast<float>(r.val);
     if (std::isnan(fval) || std::isinf(fval))
       has_nan = true;
@@ -1083,9 +1280,10 @@ void exec_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
         if (std::isnan(fval) || std::isinf(fval))
           os << std::format("\n[rj log VM]   reg={} lane={} val={:#x}({}) "
                             "a=[{:#x},{:#x}] b=[{:#x},{:#x}]",
-                            r.reg, r.lane, r.val, fval, cu.read_vgpr(s0, r.lane),
-                            cu.read_vgpr(s0 + 1, r.lane), cu.read_vgpr(s1, r.lane),
-                            cu.read_vgpr(s1 + 1, r.lane));
+                            r.reg, r.lane, r.val, fval, RegisterAccess(cu).read_vgpr(s0, r.lane),
+                            RegisterAccess(cu).read_vgpr(s0 + 1, r.lane),
+                            RegisterAccess(cu).read_vgpr(s1, r.lane),
+                            RegisterAccess(cu).read_vgpr(s1 + 1, r.lane));
       }
     });
   }
@@ -1096,22 +1294,24 @@ void exec_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
     os << std::format("MFMA_F32 #{} M={} N={} K={} B={} dst=v{} s0=v{} s1=v{} s2=v{}", mfma_count,
                       M, N, K, B, dst, s0, s1, s2);
     for (uint32_t ln : {0u, 1u, 4u, 8u, 16u, 31u, 32u, 48u, 63u}) {
-      os << std::format("\n[rj log VM]   L{}: s0=[{:#x},{:#x},{:#x},{:#x}]"
-                        " s1=[{:#x},{:#x},{:#x},{:#x}]"
-                        " out=[{:#x},{:#x},{:#x},{:#x}]",
-                        ln, cu.read_vgpr(s0, ln), cu.read_vgpr(s0 + 1, ln),
-                        cu.read_vgpr(s0 + 2, ln), cu.read_vgpr(s0 + 3, ln), cu.read_vgpr(s1, ln),
-                        cu.read_vgpr(s1 + 1, ln), cu.read_vgpr(s1 + 2, ln),
-                        cu.read_vgpr(s1 + 3, ln), cu.read_vgpr(dst, ln), cu.read_vgpr(dst + 1, ln),
-                        cu.read_vgpr(dst + 2, ln), cu.read_vgpr(dst + 3, ln));
+      os << std::format(
+          "\n[rj log VM]   L{}: s0=[{:#x},{:#x},{:#x},{:#x}]"
+          " s1=[{:#x},{:#x},{:#x},{:#x}]"
+          " out=[{:#x},{:#x},{:#x},{:#x}]",
+          ln, RegisterAccess(cu).read_vgpr(s0, ln), RegisterAccess(cu).read_vgpr(s0 + 1, ln),
+          RegisterAccess(cu).read_vgpr(s0 + 2, ln), RegisterAccess(cu).read_vgpr(s0 + 3, ln),
+          RegisterAccess(cu).read_vgpr(s1, ln), RegisterAccess(cu).read_vgpr(s1 + 1, ln),
+          RegisterAccess(cu).read_vgpr(s1 + 2, ln), RegisterAccess(cu).read_vgpr(s1 + 3, ln),
+          RegisterAccess(cu).read_vgpr(dst, ln), RegisterAccess(cu).read_vgpr(dst + 1, ln),
+          RegisterAccess(cu).read_vgpr(dst + 2, ln), RegisterAccess(cu).read_vgpr(dst + 3, ln));
     }
   });
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
-              uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea,
-              ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR, uint32_t cbsz = 0, uint32_t abid = 0,
+void exec_f32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t in_bits,
+              uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
+              uint32_t const_acc = ACC_FROM_VGPR, uint32_t cbsz = 0, uint32_t abid = 0,
               uint32_t blgp = 0) {
   exec_f32_mixed(cu, M, N, K, B, in_bits, in_bits, dst, s0, s1, s2, ea, eb, const_acc, cbsz, abid,
                  blgp);
@@ -1133,9 +1333,9 @@ static_assert((WMMA_SIMD_MAX_AB + WMMA_SIMD_MAX_BSTRIDE + WMMA_SIMD_MAX_C) * siz
 /// Uses GFX9 input_loc for inputs and output_loc_16 (derived from output_loc_32)
 /// for outputs. The accumulator is read/written in packed 16-bit format.
 template <typename ExtractA, typename ExtractB, typename ReadAcc, typename PackResult>
-void exec_packed16_gfx9(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
-                        uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                        ExtractA ea, ExtractB eb, ReadAcc read_acc, PackResult pack_result,
+void exec_packed16_gfx9(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t in_bits,
+                        uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea,
+                        ExtractB eb, ReadAcc read_acc, PackResult pack_result,
                         uint32_t const_acc = ACC_FROM_VGPR) {
   const uint32_t wf = cu.wf_size();
   struct Result {
@@ -1183,39 +1383,39 @@ void exec_packed16_gfx9(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
       uint32_t idx = reg * wf + lane;
       uint32_t word = words[idx];
       if (masks[idx] != 0x3u) {
-        uint32_t old = cu.read_vgpr(dst + reg, lane);
+        uint32_t old = RegisterAccess(cu).read_vgpr(dst + reg, lane);
         if ((masks[idx] & 0x1u) == 0)
           word = (word & 0xFFFF0000u) | (old & 0x0000FFFFu);
         if ((masks[idx] & 0x2u) == 0)
           word = (word & 0x0000FFFFu) | (old & 0xFFFF0000u);
       }
-      cu.write_vgpr(dst + reg, lane, word);
+      RegisterAccess(cu).write_vgpr(dst + reg, lane, word);
     }
   }
 }
 
 /// Convenience wrappers for GFX9 packed f16/bf16 output.
 template <typename ExtractA, typename ExtractB>
-void exec_f16_gfx9(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
-                   uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                   ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR) {
+void exec_f16_gfx9(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t in_bits,
+                   uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
+                   uint32_t const_acc = ACC_FROM_VGPR) {
   exec_packed16_gfx9(
       cu, M, N, K, B, in_bits, dst, s0, s1, s2, ea, eb,
-      [](amdgpu::ComputeUnitCore &c, uint32_t base, uint32_t lane, uint32_t sub) -> float {
-        uint32_t raw = c.read_vgpr(base, lane);
+      [](auto &c, uint32_t base, uint32_t lane, uint32_t sub) -> float {
+        uint32_t raw = RegisterAccess(c).read_vgpr(base, lane);
         return util::f16_to_f32(static_cast<uint16_t>((raw >> (sub * 16)) & 0xFFFF));
       },
       [](float v) -> uint16_t { return util::f32_to_f16(v); }, const_acc);
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_bf16_gfx9(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
-                    uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                    ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR) {
+void exec_bf16_gfx9(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t in_bits,
+                    uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
+                    uint32_t const_acc = ACC_FROM_VGPR) {
   exec_packed16_gfx9(
       cu, M, N, K, B, in_bits, dst, s0, s1, s2, ea, eb,
-      [](amdgpu::ComputeUnitCore &c, uint32_t base, uint32_t lane, uint32_t sub) -> float {
-        uint32_t raw = c.read_vgpr(base, lane);
+      [](auto &c, uint32_t base, uint32_t lane, uint32_t sub) -> float {
+        uint32_t raw = RegisterAccess(c).read_vgpr(base, lane);
         return util::bf16_to_f32(static_cast<uint16_t>((raw >> (sub * 16)) & 0xFFFF));
       },
       [](float v) -> uint16_t { return util::f32_to_bf16(v); }, const_acc);
@@ -1234,10 +1434,10 @@ inline uint32_t pack_i32_acc(int64_t acc, bool clamp) {
 /// hardware). When clamp=true, accumulates in int64_t and saturates to
 /// int32_t range via pack_i32_acc.
 template <typename ExtractA, typename ExtractB>
-void exec_i32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
-                    uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                    ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR,
-                    bool clamp = false, uint32_t cbsz = 0, uint32_t abid = 0, uint32_t blgp = 0) {
+void exec_i32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t in_bits,
+                    uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
+                    uint32_t const_acc = ACC_FROM_VGPR, bool clamp = false, uint32_t cbsz = 0,
+                    uint32_t abid = 0, uint32_t blgp = 0) {
   const uint32_t wf = cu.wf_size();
   struct Result {
     uint32_t reg;
@@ -1264,16 +1464,17 @@ void exec_i32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
         if (clamp) {
           int64_t acc = (const_acc != ACC_FROM_VGPR)
                             ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
-                            : static_cast<int64_t>(
-                                  static_cast<int32_t>(cu.read_vgpr(s2 + out.reg, out.lane)));
+                            : static_cast<int64_t>(static_cast<int32_t>(
+                                  RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane)));
           for (uint32_t k = 0; k < K; ++k) {
             auto [a, b_val] = products(k);
             acc += static_cast<int64_t>(a) * static_cast<int64_t>(b_val);
           }
           val = pack_i32_acc(acc, true);
         } else {
-          uint32_t acc =
-              (const_acc != ACC_FROM_VGPR) ? const_acc : cu.read_vgpr(s2 + out.reg, out.lane);
+          uint32_t acc = (const_acc != ACC_FROM_VGPR)
+                             ? const_acc
+                             : RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane);
           for (uint32_t k = 0; k < K; ++k) {
             auto [a, b_val] = products(k);
             acc += static_cast<uint32_t>(a * b_val);
@@ -1285,13 +1486,13 @@ void exec_i32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
     }
   }
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_wmma_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                         uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1,
-                         uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR,
+void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t a_bits,
+                         uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                         ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR,
                          uint32_t c_modifier = 0, uint32_t wave_size = WMMA_WAVE32) {
   require_gfx12_wmma_wave_size(wave_size);
   struct Result {
@@ -1306,9 +1507,10 @@ void exec_wmma_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, ui
     for (uint32_t row = 0; row < M; ++row) {
       for (uint32_t col = 0; col < N; ++col) {
         auto out = gfx12_wmma_output_loc_32(wave_size, M, N, row, col);
-        float acc = (const_acc != ACC_FROM_VGPR)
-                        ? std::bit_cast<float>(const_acc)
-                        : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+        float acc =
+            (const_acc != ACC_FROM_VGPR)
+                ? std::bit_cast<float>(const_acc)
+                : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
         acc = apply_wmma_c_modifier(acc, c_modifier);
         for (uint32_t k = 0; k < K; ++k) {
           auto al = gfx12_wmma_a_input_loc(wave_size, M, K, row, k, a_bits, b_bits);
@@ -1339,7 +1541,7 @@ void exec_wmma_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, ui
           Cbuf[row * stride + col] = apply_wmma_c_modifier(
               (const_acc != ACC_FROM_VGPR)
                   ? std::bit_cast<float>(const_acc)
-                  : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane)),
+                  : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane)),
               c_modifier);
         }
       for (uint32_t row = 0; row < M; ++row)
@@ -1362,15 +1564,14 @@ void exec_wmma_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, ui
   }
 
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_gfx11_wmma_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t wave_size, uint32_t M,
-                               uint32_t N, uint32_t K, uint32_t a_bits, uint32_t b_bits,
-                               uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea,
-                               ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR,
-                               uint32_t c_modifier = 0) {
+void exec_gfx11_wmma_f32_mixed(auto &cu, uint32_t wave_size, uint32_t M, uint32_t N, uint32_t K,
+                               uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0,
+                               uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
+                               uint32_t const_acc = ACC_FROM_VGPR, uint32_t c_modifier = 0) {
   require_gfx11_wmma_wave_size(wave_size);
   struct Result {
     uint32_t reg;
@@ -1386,7 +1587,7 @@ void exec_gfx11_wmma_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t wave_size, 
       uint32_t lane_group = out.lane / N;
       float acc = (const_acc != ACC_FROM_VGPR)
                       ? std::bit_cast<float>(const_acc)
-                      : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+                      : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
       acc = apply_wmma_c_modifier(acc, c_modifier);
       for (uint32_t k = 0; k < K; ++k) {
         auto al = gfx11_wmma_input_loc(M, K, row, k, a_bits, lane_group);
@@ -1398,24 +1599,23 @@ void exec_gfx11_wmma_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t wave_size, 
   }
 
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_gfx11_wmma_f32(amdgpu::ComputeUnitCore &cu, uint32_t wave_size, uint32_t M, uint32_t N,
-                         uint32_t K, uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1,
-                         uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR,
+void exec_gfx11_wmma_f32(auto &cu, uint32_t wave_size, uint32_t M, uint32_t N, uint32_t K,
+                         uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                         ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR,
                          uint32_t c_modifier = 0) {
   exec_gfx11_wmma_f32_mixed(cu, wave_size, M, N, K, in_bits, in_bits, dst, s0, s1, s2, ea, eb,
                             const_acc, c_modifier);
 }
 
 template <typename ExtractA, typename ExtractB, typename ReadAcc, typename PackResult>
-void exec_gfx11_wmma_packed16(amdgpu::ComputeUnitCore &cu, uint32_t wave_size, uint32_t M,
-                              uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst, uint32_t s0,
-                              uint32_t s1, uint32_t s2, uint32_t opsel, ExtractA ea, ExtractB eb,
-                              ReadAcc read_acc, PackResult pack_result,
-                              uint32_t const_acc = ACC_FROM_VGPR) {
+void exec_gfx11_wmma_packed16(auto &cu, uint32_t wave_size, uint32_t M, uint32_t N, uint32_t K,
+                              uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                              uint32_t opsel, ExtractA ea, ExtractB eb, ReadAcc read_acc,
+                              PackResult pack_result, uint32_t const_acc = ACC_FROM_VGPR) {
   require_gfx11_wmma_wave_size(wave_size);
   struct Result {
     uint32_t reg;
@@ -1460,54 +1660,53 @@ void exec_gfx11_wmma_packed16(amdgpu::ComputeUnitCore &cu, uint32_t wave_size, u
       uint32_t idx = reg * wave_size + lane;
       uint32_t word = words[idx];
       if (masks[idx] != 0x3u) {
-        uint32_t old = cu.read_vgpr(dst + reg, lane);
+        uint32_t old = RegisterAccess(cu).read_vgpr(dst + reg, lane);
         if ((masks[idx] & 0x1u) == 0)
           word = (word & 0xFFFF0000u) | (old & 0x0000FFFFu);
         if ((masks[idx] & 0x2u) == 0)
           word = (word & 0x0000FFFFu) | (old & 0xFFFF0000u);
       }
-      cu.write_vgpr(dst + reg, lane, word);
+      RegisterAccess(cu).write_vgpr(dst + reg, lane, word);
     }
   }
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_gfx11_wmma_f16(amdgpu::ComputeUnitCore &cu, uint32_t wave_size, uint32_t M, uint32_t N,
-                         uint32_t K, uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1,
-                         uint32_t s2, uint32_t opsel, ExtractA ea, ExtractB eb,
+void exec_gfx11_wmma_f16(auto &cu, uint32_t wave_size, uint32_t M, uint32_t N, uint32_t K,
+                         uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                         uint32_t opsel, ExtractA ea, ExtractB eb,
                          uint32_t const_acc = ACC_FROM_VGPR) {
   exec_gfx11_wmma_packed16(
       cu, wave_size, M, N, K, in_bits, dst, s0, s1, s2, opsel, ea, eb,
-      [](amdgpu::ComputeUnitCore &cu, uint32_t reg, uint32_t lane, uint32_t sub) {
-        uint32_t raw = cu.read_vgpr(reg, lane);
+      [](auto &cu, uint32_t reg, uint32_t lane, uint32_t sub) {
+        uint32_t raw = RegisterAccess(cu).read_vgpr(reg, lane);
         return util::f16_to_f32(static_cast<uint16_t>((raw >> (sub * 16)) & 0xFFFF));
       },
       [](float val) { return util::f32_to_f16(val); }, const_acc);
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_gfx11_wmma_bf16(amdgpu::ComputeUnitCore &cu, uint32_t wave_size, uint32_t M, uint32_t N,
-                          uint32_t K, uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1,
-                          uint32_t s2, uint32_t opsel, ExtractA ea, ExtractB eb,
+void exec_gfx11_wmma_bf16(auto &cu, uint32_t wave_size, uint32_t M, uint32_t N, uint32_t K,
+                          uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                          uint32_t opsel, ExtractA ea, ExtractB eb,
                           uint32_t const_acc = ACC_FROM_VGPR) {
   exec_gfx11_wmma_packed16(
       cu, wave_size, M, N, K, in_bits, dst, s0, s1, s2, opsel, ea, eb,
-      [](amdgpu::ComputeUnitCore &cu, uint32_t reg, uint32_t lane, uint32_t sub) {
-        uint32_t raw = cu.read_vgpr(reg, lane);
+      [](auto &cu, uint32_t reg, uint32_t lane, uint32_t sub) {
+        uint32_t raw = RegisterAccess(cu).read_vgpr(reg, lane);
         return util::bf16_to_f32(static_cast<uint16_t>((raw >> (sub * 16)) & 0xFFFF));
       },
       [](float val) { return util::f32_to_bf16(val); }, const_acc);
 }
 
 template <typename ExtractA, typename ExtractB, typename ScaleAWord, typename ScaleBWord>
-void exec_wmma_f32_scaled_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                                uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0,
-                                uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
-                                uint32_t const_acc, ScaleAWord scale_a_word,
-                                ScaleBWord scale_b_word, uint32_t matrix_a_scale,
-                                uint32_t matrix_b_scale, uint32_t matrix_a_scale_fmt,
-                                uint32_t matrix_b_scale_fmt, bool scale16 = false,
-                                uint32_t c_modifier = 0) {
+void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t a_bits,
+                                uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1,
+                                uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc,
+                                ScaleAWord scale_a_word, ScaleBWord scale_b_word,
+                                uint32_t matrix_a_scale, uint32_t matrix_b_scale,
+                                uint32_t matrix_a_scale_fmt, uint32_t matrix_b_scale_fmt,
+                                bool scale16 = false, uint32_t c_modifier = 0) {
   require_wmma_wave32(cu);
   struct Result {
     uint32_t reg;
@@ -1529,9 +1728,10 @@ void exec_wmma_f32_scaled_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_
     for (uint32_t row = 0; row < M; ++row) {
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
-        float acc = (const_acc != ACC_FROM_VGPR)
-                        ? std::bit_cast<float>(const_acc)
-                        : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+        float acc =
+            (const_acc != ACC_FROM_VGPR)
+                ? std::bit_cast<float>(const_acc)
+                : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
         acc = apply_wmma_c_modifier(acc, c_modifier);
         const uint64_t a_scale_word =
             scale_a_word(wmma_a_scale_lane(M, K, row, matrix_a_scale, a_bits, b_bits));
@@ -1567,7 +1767,7 @@ void exec_wmma_f32_scaled_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_
           Cbuf[row * stride + col] = apply_wmma_c_modifier(
               (const_acc != ACC_FROM_VGPR)
                   ? std::bit_cast<float>(const_acc)
-                  : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane)),
+                  : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane)),
               c_modifier);
         }
       for (uint32_t row = 0; row < M; ++row) {
@@ -1601,14 +1801,14 @@ void exec_wmma_f32_scaled_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_
   }
 
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_wmma_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                   uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                   ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR,
-                   uint32_t c_modifier = 0, uint32_t wave_size = WMMA_WAVE32) {
+void exec_wmma_f32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
+                   uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
+                   uint32_t const_acc = ACC_FROM_VGPR, uint32_t c_modifier = 0,
+                   uint32_t wave_size = WMMA_WAVE32) {
   exec_wmma_f32_mixed(cu, M, N, K, in_bits, in_bits, dst, s0, s1, s2, ea, eb, const_acc, c_modifier,
                       wave_size);
 }
@@ -1617,12 +1817,12 @@ void exec_wmma_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t
 /// of exec_f32_mfma_16x16x32_f16. Compile-time M/N/K let the compiler fully
 /// unroll the 16-row x 32-K matmul into straight-line AVX-512 FMAs; the f16
 /// inputs are bulk-converted once with F16C (one vector op per 16 halves)
-/// instead of branchy per-element extract_f16; VGPRs are accessed through one
-/// vgpr_data base pointer per operand and the result scatters directly (no
+/// instead of branchy per-element extract_f16; VGPRs are accessed through
+/// observed register-access regions and the result scatters directly (no
 /// Result staging vector). Falls back to the generic exec_wmma_f32 without
 /// AVX-512 / under force-scalar.
-inline void exec_wmma_f32_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
-                                       uint32_t s1, uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
+inline void exec_wmma_f32_16x16x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                                       uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
                                        uint32_t c_modifier = 0) {
   constexpr uint32_t M = 16, N = 16, K = 32, in_bits = 16;
   if constexpr (!util::has_stdx_simd) {
@@ -1637,9 +1837,12 @@ inline void exec_wmma_f32_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
     }
     require_wmma_wave32(cu);
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
+                                             const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
+    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
@@ -1683,11 +1886,11 @@ inline void exec_wmma_f32_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
       c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);
     }
     // Scatter directly back to VGPRs (no Result staging vector).
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
-        d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(C_buf[row * N + col]);
+        writes.set_linear_word(out.reg * wf + out.lane,
+                               std::bit_cast<uint32_t>(C_buf[row * N + col]));
       }
   }
 }
@@ -1696,9 +1899,8 @@ inline void exec_wmma_f32_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
 /// (gfx1250, wave32). Identical to exec_wmma_f32_16x16x32_f16 except the bulk
 /// input convert is the bf16 zero-extend (no F16C needed). Falls back to the
 /// generic exec_wmma_f32 without AVX-512 / under force-scalar.
-inline void exec_wmma_f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
-                                        uint32_t s1, uint32_t s2,
-                                        uint32_t const_acc = ACC_FROM_VGPR,
+inline void exec_wmma_f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                                        uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
                                         uint32_t c_modifier = 0) {
   constexpr uint32_t M = 16, N = 16, K = 32, in_bits = 16;
   if constexpr (!util::has_stdx_simd) {
@@ -1713,9 +1915,12 @@ inline void exec_wmma_f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_t ds
     }
     require_wmma_wave32(cu);
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
+                                             const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
+    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
@@ -1759,23 +1964,43 @@ inline void exec_wmma_f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_t ds
       c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);
     }
     // Scatter directly back to VGPRs (no Result staging vector).
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
-        d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(C_buf[row * N + col]);
+        writes.set_linear_word(out.reg * wf + out.lane,
+                               std::bit_cast<uint32_t>(C_buf[row * N + col]));
       }
   }
 }
 
-/// Compile-time fp8 (e4m3) vs bf8 (e5m2) bulk-convert selector for the f8 spec
-/// kernels: converts `n` packed bytes starting at `words` to f32 through the
-/// 256-entry LUTs (bit-exact with extract_fp8/extract_bf8 by construction).
-template <bool FP8> void f8_to_f32_block(const uint32_t *words, float *dst, size_t n) {
-  if constexpr (FP8)
-    util::fp8_e4m3_to_f32_block(reinterpret_cast<const uint8_t *>(words), dst, n);
+// CDNA3 uses the AMD FNUZ format for fp8/bf8
+template <bool FP8, bool FNUZ> constexpr auto f8_extract_fn() {
+  if constexpr (FP8) {
+    if constexpr (FNUZ)
+      return extract_fp8_fnuz;
+    else
+      return extract_fp8_ocp;
+  } else {
+    if constexpr (FNUZ)
+      return extract_bf8_fnuz;
+    else
+      return extract_bf8_ocp;
+  }
+}
+
+/// Compile-time fp8 (e4m3) vs bf8 (e5m2), OCP vs FNUZ bulk-convert selector for
+/// the f8 spec kernels: converts `n` packed bytes starting at `words` to f32
+/// through 256-entry LUTs matching the selected extractor.
+template <bool FP8, bool FNUZ = false>
+void f8_to_f32_block(const uint32_t *words, float *dst, size_t n) {
+  if constexpr (FP8 && FNUZ)
+    util::fp8_e4m3_fnuz_to_f32_block(reinterpret_cast<const uint8_t *>(words), dst, n);
+  else if constexpr (FP8)
+    util::fp8_e4m3_ocp_to_f32_block(reinterpret_cast<const uint8_t *>(words), dst, n);
+  else if constexpr (FNUZ)
+    util::bf8_e5m2_fnuz_to_f32_block(reinterpret_cast<const uint8_t *>(words), dst, n);
   else
-    util::bf8_e5m2_to_f32_block(reinterpret_cast<const uint8_t *>(words), dst, n);
+    util::bf8_e5m2_ocp_to_f32_block(reinterpret_cast<const uint8_t *>(words), dst, n);
 }
 
 /// Fast path for the dense f32-out fp8/bf8-input WMMA shapes
@@ -1784,14 +2009,13 @@ template <bool FP8> void f8_to_f32_block(const uint32_t *words, float *dst, size
 /// gather; A/B formats are compile-time selected. Sparse SWMMAC stays generic.
 /// Falls back to the generic exec_wmma_f32_mixed without AVX-512 / under
 /// force-scalar.
-template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8>
-void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
-                           uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
-                           uint32_t c_modifier = 0) {
+template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8, bool FNUZ = false>
+void exec_wmma_f32_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                           uint32_t const_acc = ACC_FROM_VGPR, uint32_t c_modifier = 0) {
   constexpr uint32_t in_bits = 8;
   static_assert(N % 16 == 0, "specialized f8 WMMA assumes N is a multiple of the zmm width");
-  constexpr auto ea = A_FP8 ? &extract_fp8 : &extract_bf8;
-  constexpr auto eb = B_FP8 ? &extract_fp8 : &extract_bf8;
+  constexpr auto ea = f8_extract_fn<A_FP8, FNUZ>();
+  constexpr auto eb = f8_extract_fn<B_FP8, FNUZ>();
   auto fallback = [&]() {
     exec_wmma_f32_mixed(cu, M, N, K, in_bits, in_bits, dst, s0, s1, s2, ea, eb, const_acc,
                         c_modifier);
@@ -1807,10 +2031,12 @@ void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
+                                             const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
+    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
@@ -1818,8 +2044,8 @@ void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     // pure f32 index-shuffle (byte of word w lane l sub s -> (w*wf+l)*4+s).
     alignas(64) float A_f32[M * K];
     alignas(64) float B_f32[N * K];
-    f8_to_f32_block<A_FP8>(a_words, A_f32, M * K);
-    f8_to_f32_block<B_FP8>(b_words, B_f32, N * K);
+    f8_to_f32_block<A_FP8, FNUZ>(a_words, A_f32, M * K);
+    f8_to_f32_block<B_FP8, FNUZ>(b_words, B_f32, N * K);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
@@ -1855,20 +2081,21 @@ void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
-        d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(C_buf[row * N + col]);
+        writes.set_linear_word(out.reg * wf + out.lane,
+                               std::bit_cast<uint32_t>(C_buf[row * N + col]));
       }
   }
 }
 
 /// Fast path for the f32-input WMMA shapes (v_wmma_f32_*_f32). f32 inputs, so no
-/// F16C convert — the hoist reads each operand word straight through vgpr_data.
+/// F16C convert — the hoist reads each operand word straight through observed
+/// register-access regions.
 /// Compile-time M/N/K fully unroll the matmul, looped over N in zmm-width chunks
 /// (N a multiple of 16). Falls back to generic exec_wmma_f32 without AVX-512 /
 /// under force-scalar.
 template <uint32_t M, uint32_t N, uint32_t K>
-void exec_wmma_f32_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
-                            uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
-                            uint32_t c_modifier = 0) {
+void exec_wmma_f32_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                            uint32_t const_acc = ACC_FROM_VGPR, uint32_t c_modifier = 0) {
   constexpr uint32_t in_bits = 32;
   static_assert(N % 16 == 0, "specialized f32 WMMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
@@ -1884,10 +2111,12 @@ void exec_wmma_f32_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
+                                             const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
+    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -1924,14 +2153,15 @@ void exec_wmma_f32_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
-        d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(C_buf[row * N + col]);
+        writes.set_linear_word(out.reg * wf + out.lane,
+                               std::bit_cast<uint32_t>(C_buf[row * N + col]));
       }
   }
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_swmmac_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                           uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1,
+void exec_swmmac_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t a_bits,
+                           uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1,
                            uint32_t acc_base, uint32_t index_base, uint32_t index_entries,
                            uint32_t index_key, ExtractA ea, ExtractB eb,
                            uint32_t const_acc = ACC_FROM_VGPR, uint32_t wave_size = WMMA_WAVE32) {
@@ -1959,9 +2189,10 @@ void exec_swmmac_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, 
     for (uint32_t row = 0; row < M; ++row) {
       for (uint32_t col = 0; col < N; ++col) {
         auto out = gfx12_wmma_output_loc_32(wave_size, M, N, row, col);
-        float acc = (const_acc != ACC_FROM_VGPR)
-                        ? std::bit_cast<float>(const_acc)
-                        : std::bit_cast<float>(cu.read_vgpr(acc_base + out.reg, out.lane));
+        float acc =
+            (const_acc != ACC_FROM_VGPR)
+                ? std::bit_cast<float>(const_acc)
+                : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(acc_base + out.reg, out.lane));
         for (uint32_t ck = 0; ck < compressed_k; ++ck) {
           auto al = swmmac_a_input_loc(wave_size, M, K, row, ck, a_bits);
           auto bl = swmmac_b_input_loc(wave_size, N, K, col, dense_k_for(row, ck), b_bits);
@@ -1991,7 +2222,8 @@ void exec_swmmac_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, 
           auto out = gfx12_wmma_output_loc_32(wave_size, M, N, row, col);
           Cbuf[col] = (const_acc != ACC_FROM_VGPR)
                           ? std::bit_cast<float>(const_acc)
-                          : std::bit_cast<float>(cu.read_vgpr(acc_base + out.reg, out.lane));
+                          : std::bit_cast<float>(
+                                RegisterAccess(cu).read_vgpr(acc_base + out.reg, out.lane));
         }
         for (uint32_t ck = 0; ck < compressed_k; ++ck) {
           Abuf[ck] = ea(cu, s0, swmmac_a_input_loc(wave_size, M, K, row, ck, a_bits));
@@ -2012,23 +2244,22 @@ void exec_swmmac_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, 
   }
 
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_swmmac_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                     uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t acc_base,
-                     uint32_t index_base, uint32_t index_entries, uint32_t index_key, ExtractA ea,
-                     ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR,
-                     uint32_t wave_size = WMMA_WAVE32) {
+void exec_swmmac_f32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
+                     uint32_t s0, uint32_t s1, uint32_t acc_base, uint32_t index_base,
+                     uint32_t index_entries, uint32_t index_key, ExtractA ea, ExtractB eb,
+                     uint32_t const_acc = ACC_FROM_VGPR, uint32_t wave_size = WMMA_WAVE32) {
   exec_swmmac_f32_mixed(cu, M, N, K, in_bits, in_bits, dst, s0, s1, acc_base, index_base,
                         index_entries, index_key, ea, eb, const_acc, wave_size);
 }
 
 template <typename ExtractA, typename ExtractB, typename ReadAcc, typename PackResult>
-void exec_wmma_packed16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                        uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                        ExtractA ea, ExtractB eb, ReadAcc read_acc, PackResult pack_result,
+void exec_wmma_packed16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits,
+                        uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea,
+                        ExtractB eb, ReadAcc read_acc, PackResult pack_result,
                         uint32_t const_acc = ACC_FROM_VGPR, uint32_t wave_size = WMMA_WAVE32) {
   require_gfx12_wmma_wave_size(wave_size);
   struct Result {
@@ -2111,20 +2342,19 @@ void exec_wmma_packed16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
       uint32_t idx = reg * wave_size + lane;
       uint32_t word = words[idx];
       if (masks[idx] != 0x3u) {
-        uint32_t old = cu.read_vgpr(dst + reg, lane);
+        uint32_t old = RegisterAccess(cu).read_vgpr(dst + reg, lane);
         if ((masks[idx] & 0x1u) == 0)
           word = (word & 0xFFFF0000u) | (old & 0x0000FFFFu);
         if ((masks[idx] & 0x2u) == 0)
           word = (word & 0x0000FFFFu) | (old & 0xFFFF0000u);
       }
-      cu.write_vgpr(dst + reg, lane, word);
+      RegisterAccess(cu).write_vgpr(dst + reg, lane, word);
     }
   }
 }
 
-inline void exec_wmma_bf16f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
-                                            uint32_t s1, uint32_t s2,
-                                            uint32_t const_acc = ACC_FROM_VGPR,
+inline void exec_wmma_bf16f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                                            uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
                                             uint32_t c_modifier = 0) {
   constexpr uint32_t M = 16, N = 16, K = 32, in_bits = 16;
   require_wmma_wave32(cu);
@@ -2140,9 +2370,10 @@ inline void exec_wmma_bf16f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_
   for (uint32_t row = 0; row < M; ++row) {
     for (uint32_t col = 0; col < N; ++col) {
       auto cout = wmma_output_loc_32(M, N, row, col);
-      float acc = (const_acc != ACC_FROM_VGPR)
-                      ? std::bit_cast<float>(const_acc)
-                      : std::bit_cast<float>(cu.read_vgpr(s2 + cout.reg, cout.lane));
+      float acc =
+          (const_acc != ACC_FROM_VGPR)
+              ? std::bit_cast<float>(const_acc)
+              : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + cout.reg, cout.lane));
       acc = apply_wmma_c_modifier(acc, c_modifier);
       for (uint32_t k = 0; k < K; ++k) {
         auto al = wmma_input_loc(M, K, row, k, in_bits);
@@ -2168,24 +2399,23 @@ inline void exec_wmma_bf16f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_
       uint32_t idx = reg * WMMA_WAVE32 + lane;
       uint32_t word = words[idx];
       if (masks[idx] != 0x3u) {
-        uint32_t old = cu.read_vgpr(dst + reg, lane);
+        uint32_t old = RegisterAccess(cu).read_vgpr(dst + reg, lane);
         if ((masks[idx] & 0x1u) == 0)
           word = (word & 0xFFFF0000u) | (old & 0x0000FFFFu);
         if ((masks[idx] & 0x2u) == 0)
           word = (word & 0x0000FFFFu) | (old & 0xFFFF0000u);
       }
-      cu.write_vgpr(dst + reg, lane, word);
+      RegisterAccess(cu).write_vgpr(dst + reg, lane, word);
     }
   }
 }
 
 template <typename ExtractA, typename ExtractB, typename ReadAcc, typename PackResult>
-void exec_swmmac_packed16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                          uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1,
-                          uint32_t acc_base, uint32_t index_base, uint32_t index_entries,
-                          uint32_t index_key, ExtractA ea, ExtractB eb, ReadAcc read_acc,
-                          PackResult pack_result, uint32_t const_acc = ACC_FROM_VGPR,
-                          uint32_t wave_size = WMMA_WAVE32) {
+void exec_swmmac_packed16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits,
+                          uint32_t dst, uint32_t s0, uint32_t s1, uint32_t acc_base,
+                          uint32_t index_base, uint32_t index_entries, uint32_t index_key,
+                          ExtractA ea, ExtractB eb, ReadAcc read_acc, PackResult pack_result,
+                          uint32_t const_acc = ACC_FROM_VGPR, uint32_t wave_size = WMMA_WAVE32) {
   require_gfx12_wmma_wave_size(wave_size);
   struct Result {
     uint32_t reg;
@@ -2274,26 +2504,25 @@ void exec_swmmac_packed16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, u
       uint32_t idx = reg * wave_size + lane;
       uint32_t word = words[idx];
       if (masks[idx] != 0x3u) {
-        uint32_t old = cu.read_vgpr(dst + reg, lane);
+        uint32_t old = RegisterAccess(cu).read_vgpr(dst + reg, lane);
         if ((masks[idx] & 0x1u) == 0)
           word = (word & 0xFFFF0000u) | (old & 0x0000FFFFu);
         if ((masks[idx] & 0x2u) == 0)
           word = (word & 0x0000FFFFu) | (old & 0xFFFF0000u);
       }
-      cu.write_vgpr(dst + reg, lane, word);
+      RegisterAccess(cu).write_vgpr(dst + reg, lane, word);
     }
   }
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_wmma_f16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                   uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                   ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR,
-                   uint32_t wave_size = WMMA_WAVE32) {
+void exec_wmma_f16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
+                   uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
+                   uint32_t const_acc = ACC_FROM_VGPR, uint32_t wave_size = WMMA_WAVE32) {
   exec_wmma_packed16(
       cu, M, N, K, in_bits, dst, s0, s1, s2, ea, eb,
-      [](amdgpu::ComputeUnitCore &cu, uint32_t reg, uint32_t lane, uint32_t sub) {
-        uint32_t raw = cu.read_vgpr(reg, lane);
+      [](auto &cu, uint32_t reg, uint32_t lane, uint32_t sub) {
+        uint32_t raw = RegisterAccess(cu).read_vgpr(reg, lane);
         return util::f16_to_f32(static_cast<uint16_t>((raw >> (sub * 16)) & 0xFFFF));
       },
       [](float val) { return util::f32_to_f16(val); }, const_acc, wave_size);
@@ -2304,8 +2533,8 @@ void exec_wmma_f16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t
 /// to 16 bits (2 per dst word) and written through the WMMA 16-bit output map.
 /// Falls back to generic exec_wmma_f16 without AVX-512 / under force-scalar.
 template <uint32_t M, uint32_t N, uint32_t K>
-void exec_wmma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
-                        uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR) {
+void exec_wmma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                        uint32_t const_acc = ACC_FROM_VGPR) {
   constexpr uint32_t in_bits = 16;
   static_assert(N % 16 == 0, "specialized f16 WMMA assumes N is a multiple of the zmm width");
   auto fallback = [&]() {
@@ -2323,10 +2552,12 @@ void exec_wmma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, 
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16,
+                                             const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
+    auto writes = readwrite_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -2337,11 +2568,13 @@ void exec_wmma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, 
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_16(M, N, row, col);
-        uint32_t raw = c_words[out.reg * wf + out.lane];
-        C_buf[row * N + col] =
-            (const_acc != ACC_FROM_VGPR)
-                ? std::bit_cast<float>(const_acc)
-                : util::f16_to_f32(static_cast<uint16_t>((raw >> (out.sub_element * 16)) & 0xFFFF));
+        if (const_acc != ACC_FROM_VGPR) {
+          C_buf[row * N + col] = std::bit_cast<float>(const_acc);
+        } else {
+          uint32_t raw = c_words[out.reg * wf + out.lane];
+          C_buf[row * N + col] =
+              util::f16_to_f32(static_cast<uint16_t>((raw >> (out.sub_element * 16)) & 0xFFFF));
+        }
       }
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t k = 0; k < K; ++k) {
@@ -2383,41 +2616,39 @@ void exec_wmma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, 
         uint32_t idx = reg * WMMA_WAVE32 + lane;
         uint32_t word = words[idx];
         if (masks[idx] != 0x3u) {
-          uint32_t old = d_words[reg * wf + lane];
+          uint32_t old = writes.linear_word(reg * wf + lane);
           if ((masks[idx] & 0x1u) == 0)
             word = (word & 0xFFFF0000u) | (old & 0x0000FFFFu);
           if ((masks[idx] & 0x2u) == 0)
             word = (word & 0x0000FFFFu) | (old & 0xFFFF0000u);
         }
-        d_words[reg * wf + lane] = word;
+        writes.set_linear_word(reg * wf + lane, word);
       }
   }
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_swmmac_f16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                     uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t acc_base,
-                     uint32_t index_base, uint32_t index_entries, uint32_t index_key, ExtractA ea,
-                     ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR,
-                     uint32_t wave_size = WMMA_WAVE32) {
+void exec_swmmac_f16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
+                     uint32_t s0, uint32_t s1, uint32_t acc_base, uint32_t index_base,
+                     uint32_t index_entries, uint32_t index_key, ExtractA ea, ExtractB eb,
+                     uint32_t const_acc = ACC_FROM_VGPR, uint32_t wave_size = WMMA_WAVE32) {
   exec_swmmac_packed16(
       cu, M, N, K, in_bits, dst, s0, s1, acc_base, index_base, index_entries, index_key, ea, eb,
-      [](amdgpu::ComputeUnitCore &cu, uint32_t reg, uint32_t lane, uint32_t sub) {
-        uint32_t raw = cu.read_vgpr(reg, lane);
+      [](auto &cu, uint32_t reg, uint32_t lane, uint32_t sub) {
+        uint32_t raw = RegisterAccess(cu).read_vgpr(reg, lane);
         return util::f16_to_f32(static_cast<uint16_t>((raw >> (sub * 16)) & 0xFFFF));
       },
       [](float val) { return util::f32_to_f16(val); }, const_acc, wave_size);
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_wmma_bf16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                    uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                    ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR,
-                    uint32_t wave_size = WMMA_WAVE32) {
+void exec_wmma_bf16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
+                    uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
+                    uint32_t const_acc = ACC_FROM_VGPR, uint32_t wave_size = WMMA_WAVE32) {
   exec_wmma_packed16(
       cu, M, N, K, in_bits, dst, s0, s1, s2, ea, eb,
-      [](amdgpu::ComputeUnitCore &cu, uint32_t reg, uint32_t lane, uint32_t sub) {
-        uint32_t raw = cu.read_vgpr(reg, lane);
+      [](auto &cu, uint32_t reg, uint32_t lane, uint32_t sub) {
+        uint32_t raw = RegisterAccess(cu).read_vgpr(reg, lane);
         return util::bf16_to_f32(static_cast<uint16_t>((raw >> (sub * 16)) & 0xFFFF));
       },
       [](float val) { return util::f32_to_bf16(val); }, const_acc, wave_size);
@@ -2428,8 +2659,8 @@ void exec_wmma_bf16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
 /// and bf16 truncation on output. Falls back to generic exec_wmma_bf16 without
 /// AVX-512 / under force-scalar.
 template <uint32_t M, uint32_t N, uint32_t K>
-void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
-                         uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR) {
+void exec_wmma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                         uint32_t const_acc = ACC_FROM_VGPR) {
   constexpr uint32_t in_bits = 16;
   static_assert(N % 16 == 0, "specialized bf16 WMMA assumes N is a multiple of the zmm width");
   auto fallback = [&]() {
@@ -2447,10 +2678,12 @@ void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16,
+                                             const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
+    auto writes = readwrite_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -2461,11 +2694,13 @@ void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_16(M, N, row, col);
-        uint32_t raw = c_words[out.reg * wf + out.lane];
-        C_buf[row * N + col] = (const_acc != ACC_FROM_VGPR)
-                                   ? std::bit_cast<float>(const_acc)
-                                   : util::bf16_to_f32(static_cast<uint16_t>(
-                                         (raw >> (out.sub_element * 16)) & 0xFFFF));
+        if (const_acc != ACC_FROM_VGPR) {
+          C_buf[row * N + col] = std::bit_cast<float>(const_acc);
+        } else {
+          uint32_t raw = c_words[out.reg * wf + out.lane];
+          C_buf[row * N + col] =
+              util::bf16_to_f32(static_cast<uint16_t>((raw >> (out.sub_element * 16)) & 0xFFFF));
+        }
       }
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t k = 0; k < K; ++k) {
@@ -2507,13 +2742,13 @@ void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
         uint32_t idx = reg * WMMA_WAVE32 + lane;
         uint32_t word = words[idx];
         if (masks[idx] != 0x3u) {
-          uint32_t old = d_words[reg * wf + lane];
+          uint32_t old = writes.linear_word(reg * wf + lane);
           if ((masks[idx] & 0x1u) == 0)
             word = (word & 0xFFFF0000u) | (old & 0x0000FFFFu);
           if ((masks[idx] & 0x2u) == 0)
             word = (word & 0x0000FFFFu) | (old & 0xFFFF0000u);
         }
-        d_words[reg * wf + lane] = word;
+        writes.set_linear_word(reg * wf + lane, word);
       }
   }
 }
@@ -2524,13 +2759,13 @@ void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
 /// input convert is the f8 LUT gather; A/B formats are compile-time selected.
 /// Falls back to the generic exec_wmma_f16 without AVX-512 / under
 /// force-scalar.
-template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8>
-void exec_wmma_f16_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
-                           uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR) {
+template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8, bool FNUZ = false>
+void exec_wmma_f16_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                           uint32_t const_acc = ACC_FROM_VGPR) {
   constexpr uint32_t in_bits = 8;
   static_assert(N % 16 == 0, "specialized f8 WMMA assumes N is a multiple of the zmm width");
-  constexpr auto ea = A_FP8 ? &extract_fp8 : &extract_bf8;
-  constexpr auto eb = B_FP8 ? &extract_fp8 : &extract_bf8;
+  constexpr auto ea = f8_extract_fn<A_FP8, FNUZ>();
+  constexpr auto eb = f8_extract_fn<B_FP8, FNUZ>();
   auto fallback = [&]() {
     exec_wmma_f16(cu, M, N, K, in_bits, dst, s0, s1, s2, ea, eb, const_acc);
   };
@@ -2545,25 +2780,29 @@ void exec_wmma_f16_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     require_wmma_wave32(cu);
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16,
+                                             const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
+    auto writes = readwrite_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
     alignas(64) float A_f32[M * K];
     alignas(64) float B_f32[N * K];
-    f8_to_f32_block<A_FP8>(a_words, A_f32, M * K);
-    f8_to_f32_block<B_FP8>(b_words, B_f32, N * K);
+    f8_to_f32_block<A_FP8, FNUZ>(a_words, A_f32, M * K);
+    f8_to_f32_block<B_FP8, FNUZ>(b_words, B_f32, N * K);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_16(M, N, row, col);
-        uint32_t raw = c_words[out.reg * wf + out.lane];
-        C_buf[row * N + col] =
-            (const_acc != ACC_FROM_VGPR)
-                ? std::bit_cast<float>(const_acc)
-                : util::f16_to_f32(static_cast<uint16_t>((raw >> (out.sub_element * 16)) & 0xFFFF));
+        if (const_acc != ACC_FROM_VGPR) {
+          C_buf[row * N + col] = std::bit_cast<float>(const_acc);
+        } else {
+          uint32_t raw = c_words[out.reg * wf + out.lane];
+          C_buf[row * N + col] =
+              util::f16_to_f32(static_cast<uint16_t>((raw >> (out.sub_element * 16)) & 0xFFFF));
+        }
       }
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t k = 0; k < K; ++k) {
@@ -2605,27 +2844,26 @@ void exec_wmma_f16_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
         uint32_t idx = reg * WMMA_WAVE32 + lane;
         uint32_t word = words[idx];
         if (masks[idx] != 0x3u) {
-          uint32_t old = d_words[reg * wf + lane];
+          uint32_t old = writes.linear_word(reg * wf + lane);
           if ((masks[idx] & 0x1u) == 0)
             word = (word & 0xFFFF0000u) | (old & 0x0000FFFFu);
           if ((masks[idx] & 0x2u) == 0)
             word = (word & 0x0000FFFFu) | (old & 0xFFFF0000u);
         }
-        d_words[reg * wf + lane] = word;
+        writes.set_linear_word(reg * wf + lane, word);
       }
   }
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_swmmac_bf16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                      uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t acc_base,
-                      uint32_t index_base, uint32_t index_entries, uint32_t index_key, ExtractA ea,
-                      ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR,
-                      uint32_t wave_size = WMMA_WAVE32) {
+void exec_swmmac_bf16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
+                      uint32_t s0, uint32_t s1, uint32_t acc_base, uint32_t index_base,
+                      uint32_t index_entries, uint32_t index_key, ExtractA ea, ExtractB eb,
+                      uint32_t const_acc = ACC_FROM_VGPR, uint32_t wave_size = WMMA_WAVE32) {
   exec_swmmac_packed16(
       cu, M, N, K, in_bits, dst, s0, s1, acc_base, index_base, index_entries, index_key, ea, eb,
-      [](amdgpu::ComputeUnitCore &cu, uint32_t reg, uint32_t lane, uint32_t sub) {
-        uint32_t raw = cu.read_vgpr(reg, lane);
+      [](auto &cu, uint32_t reg, uint32_t lane, uint32_t sub) {
+        uint32_t raw = RegisterAccess(cu).read_vgpr(reg, lane);
         return util::bf16_to_f32(static_cast<uint16_t>((raw >> (sub * 16)) & 0xFFFF));
       },
       [](float val) { return util::f32_to_bf16(val); }, const_acc, wave_size);
@@ -2640,10 +2878,10 @@ void exec_swmmac_bf16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint3
 /// @param scale_a_base  VGPR base for A-matrix scale values.
 /// @param scale_b_base  VGPR base for B-matrix scale values.
 template <typename ExtractA, typename ExtractB>
-void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
-                     uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                     ExtractA ea, ExtractB eb, uint32_t const_acc, uint32_t cbsz, uint32_t abid,
-                     uint32_t blgp, uint32_t scale_a_base, uint32_t scale_b_base) {
+void exec_f32_scaled(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t in_bits,
+                     uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
+                     uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp,
+                     uint32_t scale_a_base, uint32_t scale_b_base) {
   constexpr uint32_t BLOCK_K = 32;
   const uint32_t wf = cu.wf_size();
   struct Result {
@@ -2658,8 +2896,8 @@ void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
   // Per-block E8M0 scale factor for output (row,col,b) in K-block blk.
   auto scale_exp_for = [&](uint32_t row, uint32_t col, uint32_t b, uint32_t blk) -> int {
     auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
-    uint32_t sa_raw = cu.read_vgpr(scale_a_base, out.lane);
-    uint32_t sb_raw = cu.read_vgpr(scale_b_base, out.lane);
+    uint32_t sa_raw = RegisterAccess(cu).read_vgpr(scale_a_base, out.lane);
+    uint32_t sb_raw = RegisterAccess(cu).read_vgpr(scale_b_base, out.lane);
     uint8_t sa_e8m0 = static_cast<uint8_t>((sa_raw >> (blk * 8)) & 0xFF);
     uint8_t sb_e8m0 = static_cast<uint8_t>((sb_raw >> (blk * 8)) & 0xFF);
     return static_cast<int>(sa_e8m0) + static_cast<int>(sb_e8m0) - 254;
@@ -2670,9 +2908,10 @@ void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
       for (uint32_t row = 0; row < M; ++row) {
         for (uint32_t col = 0; col < N; ++col) {
           auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
-          float acc = (const_acc != ACC_FROM_VGPR)
-                          ? std::bit_cast<float>(const_acc)
-                          : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+          float acc =
+              (const_acc != ACC_FROM_VGPR)
+                  ? std::bit_cast<float>(const_acc)
+                  : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
           for (uint32_t blk = 0; blk < num_blocks; ++blk) {
             float block_sum = 0.0f;
             uint32_t k_start = blk * BLOCK_K;
@@ -2737,9 +2976,10 @@ void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t col = 0; col < N; ++col) {
             auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
-            Cacc[row * N + col] = (const_acc != ACC_FROM_VGPR)
-                                      ? std::bit_cast<float>(const_acc)
-                                      : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+            Cacc[row * N + col] =
+                (const_acc != ACC_FROM_VGPR)
+                    ? std::bit_cast<float>(const_acc)
+                    : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
           }
         for (uint32_t row = 0; row < M; ++row) {
           for (uint32_t blk = 0; blk < num_blocks; ++blk) {
@@ -2779,15 +3019,15 @@ void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
   }
 
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 /// Scaled MFMA for mixed-format f8f6f4: A and B may have different bit widths.
 /// cbsz/blgp are used as format selectors (not lane permutations).
 template <typename ExtractA, typename ExtractB>
-void exec_f32_scaled_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                           uint32_t B, uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0,
-                           uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc,
+void exec_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
+                           uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1,
+                           uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc,
                            uint32_t scale_a_base, uint32_t scale_b_base) {
   constexpr uint32_t BLOCK_K = 32;
   const uint32_t wf = cu.wf_size();
@@ -2803,9 +3043,10 @@ void exec_f32_scaled_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, 
     for (uint32_t row = 0; row < M; ++row) {
       for (uint32_t col = 0; col < N; ++col) {
         auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
-        float acc = (const_acc != ACC_FROM_VGPR)
-                        ? std::bit_cast<float>(const_acc)
-                        : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+        float acc =
+            (const_acc != ACC_FROM_VGPR)
+                ? std::bit_cast<float>(const_acc)
+                : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
         for (uint32_t blk = 0; blk < num_blocks; ++blk) {
           float block_sum = 0.0f;
           uint32_t k_start = blk * BLOCK_K;
@@ -2815,8 +3056,8 @@ void exec_f32_scaled_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, 
             auto bl = input_loc(N, K, B, col, k, b, b_bits);
             block_sum += ea(cu, s0, physicalize_loc(al, wf)) * eb(cu, s1, physicalize_loc(bl, wf));
           }
-          uint32_t sa_raw = cu.read_vgpr(scale_a_base, M * blk + row);
-          uint32_t sb_raw = cu.read_vgpr(scale_b_base, N * blk + col);
+          uint32_t sa_raw = RegisterAccess(cu).read_vgpr(scale_a_base, M * blk + row);
+          uint32_t sb_raw = RegisterAccess(cu).read_vgpr(scale_b_base, N * blk + col);
           uint8_t sa_e8m0 = static_cast<uint8_t>(sa_raw & 0xFFu);
           uint8_t sb_e8m0 = static_cast<uint8_t>(sb_raw & 0xFFu);
           int scale_exp = static_cast<int>(sa_e8m0) + static_cast<int>(sb_e8m0) - 254;
@@ -2827,14 +3068,13 @@ void exec_f32_scaled_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, 
     }
   }
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 /// MFMA execute for i32 output with i8 input: D = C + A x B.
-inline void exec_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
-                        uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                        uint32_t const_acc = ACC_FROM_VGPR, uint32_t cbsz = 0, uint32_t abid = 0,
-                        uint32_t blgp = 0) {
+inline void exec_i32_i8(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t dst,
+                        uint32_t s0, uint32_t s1, uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
+                        uint32_t cbsz = 0, uint32_t abid = 0, uint32_t blgp = 0) {
   const uint32_t wf = cu.wf_size();
   struct Result {
     uint32_t reg;
@@ -2849,8 +3089,9 @@ inline void exec_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
       for (uint32_t row = 0; row < M; ++row) {
         for (uint32_t col = 0; col < N; ++col) {
           auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
-          uint32_t acc =
-              (const_acc != ACC_FROM_VGPR) ? const_acc : cu.read_vgpr(s2 + out.reg, out.lane);
+          uint32_t acc = (const_acc != ACC_FROM_VGPR)
+                             ? const_acc
+                             : RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane);
           for (uint32_t k = 0; k < K; ++k) {
             auto al = input_loc(M, K, B, row, k, b, 8);
             auto bl = input_loc(N, K, B, col, k, b, 8);
@@ -2896,7 +3137,7 @@ inline void exec_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
             Cbuf[row * stride + col] =
                 (const_acc != ACC_FROM_VGPR)
                     ? static_cast<int32_t>(const_acc)
-                    : static_cast<int32_t>(cu.read_vgpr(s2 + out.reg, out.lane));
+                    : static_cast<int32_t>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
           }
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t k = 0; k < K; ++k) {
@@ -2944,14 +3185,13 @@ inline void exec_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
   }
 
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_wmma_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                   uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                   ExtractA ea, ExtractB eb, bool clamp, uint32_t const_acc = ACC_FROM_VGPR,
-                   uint32_t wave_size = WMMA_WAVE32) {
+void exec_wmma_i32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
+                   uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb, bool clamp,
+                   uint32_t const_acc = ACC_FROM_VGPR, uint32_t wave_size = WMMA_WAVE32) {
   require_gfx12_wmma_wave_size(wave_size);
   struct Result {
     uint32_t reg;
@@ -2965,10 +3205,10 @@ void exec_wmma_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t
     for (uint32_t row = 0; row < M; ++row) {
       for (uint32_t col = 0; col < N; ++col) {
         auto out = gfx12_wmma_output_loc_32(wave_size, M, N, row, col);
-        int64_t acc =
-            (const_acc != ACC_FROM_VGPR)
-                ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
-                : static_cast<int64_t>(static_cast<int32_t>(cu.read_vgpr(s2 + out.reg, out.lane)));
+        int64_t acc = (const_acc != ACC_FROM_VGPR)
+                          ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
+                          : static_cast<int64_t>(static_cast<int32_t>(
+                                RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane)));
         for (uint32_t k = 0; k < K; ++k) {
           auto al = gfx12_wmma_input_loc(wave_size, M, K, row, k, in_bits);
           auto bl = gfx12_wmma_input_loc(wave_size, N, K, col, k, in_bits);
@@ -3007,8 +3247,8 @@ void exec_wmma_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t
           auto out = gfx12_wmma_output_loc_32(wave_size, M, N, row, col);
           int64_t acc = (const_acc != ACC_FROM_VGPR)
                             ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
-                            : static_cast<int64_t>(
-                                  static_cast<int32_t>(cu.read_vgpr(s2 + out.reg, out.lane)));
+                            : static_cast<int64_t>(static_cast<int32_t>(
+                                  RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane)));
           acc += static_cast<int64_t>(Cbuf[row * stride + col]);
           results.push_back({out.reg, out.lane, pack_i32_acc(acc, clamp)});
         }
@@ -3018,14 +3258,13 @@ void exec_wmma_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t
   }
 
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_gfx11_wmma_i32(amdgpu::ComputeUnitCore &cu, uint32_t wave_size, uint32_t M, uint32_t N,
-                         uint32_t K, uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1,
-                         uint32_t s2, ExtractA ea, ExtractB eb, bool clamp,
-                         uint32_t const_acc = ACC_FROM_VGPR) {
+void exec_gfx11_wmma_i32(auto &cu, uint32_t wave_size, uint32_t M, uint32_t N, uint32_t K,
+                         uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                         ExtractA ea, ExtractB eb, bool clamp, uint32_t const_acc = ACC_FROM_VGPR) {
   require_gfx11_wmma_wave_size(wave_size);
   struct Result {
     uint32_t reg;
@@ -3039,10 +3278,10 @@ void exec_gfx11_wmma_i32(amdgpu::ComputeUnitCore &cu, uint32_t wave_size, uint32
     for (uint32_t col = 0; col < N; ++col) {
       auto out = gfx11_wmma_output_loc_32(wave_size, M, N, row, col);
       uint32_t lane_group = out.lane / N;
-      int64_t acc =
-          (const_acc != ACC_FROM_VGPR)
-              ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
-              : static_cast<int64_t>(static_cast<int32_t>(cu.read_vgpr(s2 + out.reg, out.lane)));
+      int64_t acc = (const_acc != ACC_FROM_VGPR)
+                        ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
+                        : static_cast<int64_t>(static_cast<int32_t>(
+                              RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane)));
       for (uint32_t k = 0; k < K; ++k) {
         auto al = gfx11_wmma_input_loc(M, K, row, k, in_bits, lane_group);
         auto bl = gfx11_wmma_input_loc(N, K, col, k, in_bits, lane_group);
@@ -3053,11 +3292,11 @@ void exec_gfx11_wmma_i32(amdgpu::ComputeUnitCore &cu, uint32_t wave_size, uint32
   }
 
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
-inline void exec_wmma_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                             uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+inline void exec_wmma_i32_i8(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t dst,
+                             uint32_t s0, uint32_t s1, uint32_t s2,
                              uint32_t const_acc = ACC_FROM_VGPR) {
   exec_wmma_i32(cu, M, N, K, 8, dst, s0, s1, s2, extract_i8, extract_i8, false, const_acc);
 }
@@ -3065,19 +3304,24 @@ inline void exec_wmma_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N
 /// Fast path for v_wmma_i32_16x16x64_iu8 (gfx1250, wave32, dense). Same recipe
 /// as the f16/bf16 specializations: bulk sign-/zero-extend the packed i8
 /// inputs (per the A/B sign selects from the neg bits) to int32 once, then run
-/// a constexpr-unrolled int32 matmul with direct vgpr_data access. The K-sum
+/// a constexpr-unrolled int32 matmul over observed register-access regions. The K-sum
 /// of products is exact in int32 (|sum| <= 64 * 16384) and is added to the
 /// int32 accumulator in 64-bit at pack time, so clamp saturation matches the
 /// scalar int64 reference bit for bit; with clamp off both wrap mod 2^32.
 /// Falls back to the generic exec_wmma_i32 without AVX-512 / under
 /// force-scalar.
-inline void exec_wmma_i32_16x16x64_iu8(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
-                                       uint32_t s1, uint32_t s2, bool a_signed, bool b_signed,
-                                       bool clamp, uint32_t const_acc = ACC_FROM_VGPR) {
+inline void exec_wmma_i32_16x16x64_iu8(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                                       uint32_t s2, bool a_signed, bool b_signed, bool clamp,
+                                       uint32_t const_acc = ACC_FROM_VGPR) {
   constexpr uint32_t M = 16, N = 16, K = 64, in_bits = 8;
   auto fallback = [&]() {
-    exec_wmma_i32(cu, M, N, K, in_bits, dst, s0, s1, s2, a_signed ? extract_i8 : extract_u8,
-                  b_signed ? extract_i8 : extract_u8, clamp, const_acc);
+    auto extract_a = [a_signed](auto &cu, uint32_t base, const InputLoc &loc) {
+      return a_signed ? extract_i8(cu, base, loc) : extract_u8(cu, base, loc);
+    };
+    auto extract_b = [b_signed](auto &cu, uint32_t base, const InputLoc &loc) {
+      return b_signed ? extract_i8(cu, base, loc) : extract_u8(cu, base, loc);
+    };
+    exec_wmma_i32(cu, M, N, K, in_bits, dst, s0, s1, s2, extract_a, extract_b, clamp, const_acc);
   };
   if constexpr (!util::has_stdx_simd) {
     fallback();
@@ -3089,9 +3333,11 @@ inline void exec_wmma_i32_16x16x64_iu8(amdgpu::ComputeUnitCore &cu, uint32_t dst
     }
     require_wmma_wave32(cu);
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
+                                             const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     // Accumulate in unsigned 32-bit (wrap is well-defined; identical mod 2^32
     // to the intended signed wrap), sign-restore via int32 cast at pack time.
     alignas(64) uint32_t A_buf[M * K]; // A[row][k] (sign-/zero-extended bits)
@@ -3133,7 +3379,7 @@ inline void exec_wmma_i32_16x16x64_iu8(amdgpu::ComputeUnitCore &cu, uint32_t dst
     }
     // Add the accumulator in 64-bit and pack (saturating when clamp is set),
     // scattering directly back to VGPRs.
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
@@ -3142,16 +3388,16 @@ inline void exec_wmma_i32_16x16x64_iu8(amdgpu::ComputeUnitCore &cu, uint32_t dst
                 ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
                 : static_cast<int64_t>(static_cast<int32_t>(c_words[out.reg * wf + out.lane]));
         acc += static_cast<int64_t>(static_cast<int32_t>(S_buf[row * N + col]));
-        d_words[out.reg * wf + out.lane] = pack_i32_acc(acc, clamp);
+        writes.set_linear_word(out.reg * wf + out.lane, pack_i32_acc(acc, clamp));
       }
   }
 }
 
 template <typename ExtractA, typename ExtractB>
-void exec_swmmac_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                     uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t acc_base,
-                     uint32_t index_base, uint32_t index_entries, uint32_t index_key, ExtractA ea,
-                     ExtractB eb, bool clamp, uint32_t const_acc = ACC_FROM_VGPR,
+void exec_swmmac_i32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
+                     uint32_t s0, uint32_t s1, uint32_t acc_base, uint32_t index_base,
+                     uint32_t index_entries, uint32_t index_key, ExtractA ea, ExtractB eb,
+                     bool clamp, uint32_t const_acc = ACC_FROM_VGPR,
                      uint32_t wave_size = WMMA_WAVE32) {
   require_gfx12_wmma_wave_size(wave_size);
   struct Result {
@@ -3177,8 +3423,8 @@ void exec_swmmac_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
         auto out = gfx12_wmma_output_loc_32(wave_size, M, N, row, col);
         int64_t acc = (const_acc != ACC_FROM_VGPR)
                           ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
-                          : static_cast<int64_t>(
-                                static_cast<int32_t>(cu.read_vgpr(acc_base + out.reg, out.lane)));
+                          : static_cast<int64_t>(static_cast<int32_t>(
+                                RegisterAccess(cu).read_vgpr(acc_base + out.reg, out.lane)));
         for (uint32_t ck = 0; ck < compressed_k; ++ck) {
           auto al = swmmac_a_input_loc(wave_size, M, K, row, ck, in_bits);
           auto bl = swmmac_b_input_loc(wave_size, N, K, col, dense_k_for(row, ck), in_bits);
@@ -3220,8 +3466,8 @@ void exec_swmmac_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
           auto out = gfx12_wmma_output_loc_32(wave_size, M, N, row, col);
           int64_t acc = (const_acc != ACC_FROM_VGPR)
                             ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
-                            : static_cast<int64_t>(
-                                  static_cast<int32_t>(cu.read_vgpr(acc_base + out.reg, out.lane)));
+                            : static_cast<int64_t>(static_cast<int32_t>(
+                                  RegisterAccess(cu).read_vgpr(acc_base + out.reg, out.lane)));
           acc += static_cast<int64_t>(Cbuf[col]);
           results.push_back({out.reg, out.lane, pack_i32_acc(acc, clamp)});
         }
@@ -3232,21 +3478,21 @@ void exec_swmmac_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
   }
 
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
-inline void exec_swmmac_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                               uint32_t dst, uint32_t s0, uint32_t s1, uint32_t acc_base,
-                               uint32_t index_base, uint32_t index_entries, uint32_t index_key,
+inline void exec_swmmac_i32_i8(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t dst,
+                               uint32_t s0, uint32_t s1, uint32_t acc_base, uint32_t index_base,
+                               uint32_t index_entries, uint32_t index_key,
                                uint32_t const_acc = ACC_FROM_VGPR) {
   exec_swmmac_i32(cu, M, N, K, 8, dst, s0, s1, acc_base, index_base, index_entries, index_key,
                   extract_i8, extract_i8, false, const_acc);
 }
 
 /// MFMA execute for f64 output with f64 input: D = C + A x B.
-inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
-                     uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                     uint32_t const_acc = ACC_FROM_VGPR) {
+inline void exec_f64(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t dst,
+                     uint32_t s0, uint32_t s1, uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
+                     uint32_t neg = 0) {
   struct Result {
     uint32_t reg;
     uint32_t lane;
@@ -3255,6 +3501,10 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
   };
   std::vector<Result> results;
   results.reserve(M * N * B);
+  auto apply_neg = [neg](double value, uint32_t bit) {
+    return (neg & bit) ? std::bit_cast<double>(std::bit_cast<uint64_t>(value) ^ (uint64_t{1} << 63))
+                       : value;
+  };
 
   auto run_scalar = [&]() {
     for (uint32_t b = 0; b < B; ++b) {
@@ -3266,14 +3516,16 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
           if (const_acc != ACC_FROM_VGPR) {
             acc = static_cast<double>(std::bit_cast<float>(const_acc));
           } else {
-            uint32_t lo = cu.read_vgpr(s2 + out.reg, out.lane);
-            uint32_t hi = cu.read_vgpr(s2 + out.reg + 1, out.lane);
+            uint32_t lo = RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane);
+            uint32_t hi = RegisterAccess(cu).read_vgpr(s2 + out.reg + 1, out.lane);
             acc = std::bit_cast<double>(static_cast<uint64_t>(hi) << 32 | lo);
           }
+          acc = apply_neg(acc, 0x4u);
           for (uint32_t k = 0; k < K; ++k) {
             auto al = input_loc(M, K, B, row, k, b, 64);
             auto bl = input_loc(N, K, B, col, k, b, 64);
-            acc += extract_f64(cu, s0, al) * extract_f64(cu, s1, bl);
+            acc +=
+                apply_neg(extract_f64(cu, s0, al), 0x1u) * apply_neg(extract_f64(cu, s1, bl), 0x2u);
           }
           uint64_t bits = std::bit_cast<uint64_t>(acc);
           results.push_back(
@@ -3312,21 +3564,22 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
             if (const_acc != ACC_FROM_VGPR) {
               Cbuf[row * stride + col] = static_cast<double>(std::bit_cast<float>(const_acc));
             } else {
-              uint32_t lo = cu.read_vgpr(s2 + out.reg, out.lane);
-              uint32_t hi = cu.read_vgpr(s2 + out.reg + 1, out.lane);
+              uint32_t lo = RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane);
+              uint32_t hi = RegisterAccess(cu).read_vgpr(s2 + out.reg + 1, out.lane);
               Cbuf[row * stride + col] =
                   std::bit_cast<double>(static_cast<uint64_t>(hi) << 32 | lo);
             }
+            Cbuf[row * stride + col] = apply_neg(Cbuf[row * stride + col], 0x4u);
           }
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t k = 0; k < K; ++k) {
             auto al = input_loc(M, K, B, row, k, b, 64);
-            Abuf[row * K + k] = extract_f64(cu, s0, al);
+            Abuf[row * K + k] = apply_neg(extract_f64(cu, s0, al), 0x1u);
           }
         for (uint32_t k = 0; k < K; ++k)
           for (uint32_t col = 0; col < N; ++col) {
             auto bl = input_loc(N, K, B, col, k, b, 64);
-            Bbuf[k * stride + col] = extract_f64(cu, s1, bl);
+            Bbuf[k * stride + col] = apply_neg(extract_f64(cu, s1, bl), 0x2u);
           }
         for (uint32_t row = 0; row < M; ++row) {
           uint32_t col = 0;
@@ -3362,8 +3615,8 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
   }
 
   for (const auto &r : results) {
-    cu.write_vgpr(dst + r.reg, r.lane, r.lo);
-    cu.write_vgpr(dst + r.reg + 1, r.lane, r.hi);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.lo);
+    RegisterAccess(cu).write_vgpr(dst + r.reg + 1, r.lane, r.hi);
   }
 }
 
@@ -3375,30 +3628,72 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
 // Each 4-bit nibble in the index encodes two 2-bit position selectors (p0, p1).
 // ---------------------------------------------------------------------------
 
-inline float smfmac_read_fp8(ComputeUnitCore &cu, uint32_t base, uint32_t byte_idx, uint32_t lane) {
-  uint32_t raw = cu.read_vgpr(base + byte_idx / 4, lane);
-  return util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> ((byte_idx % 4) * 8)) & 0xFF));
-}
+struct SmfmacReadFp8Ocp {
+  float operator()(auto &cu, uint32_t base, uint32_t byte_idx, uint32_t lane) const {
+    uint32_t raw = RegisterAccess(cu).read_vgpr(base + byte_idx / 4, lane);
+    return util::fp8_e4m3_ocp_to_f32(static_cast<uint8_t>((raw >> ((byte_idx % 4) * 8)) & 0xFF));
+  }
+};
+inline constexpr SmfmacReadFp8Ocp smfmac_read_fp8_ocp{};
 
-inline float smfmac_read_bf8(ComputeUnitCore &cu, uint32_t base, uint32_t byte_idx, uint32_t lane) {
-  uint32_t raw = cu.read_vgpr(base + byte_idx / 4, lane);
-  return util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> ((byte_idx % 4) * 8)) & 0xFF));
-}
+struct SmfmacReadBf8Ocp {
+  float operator()(auto &cu, uint32_t base, uint32_t byte_idx, uint32_t lane) const {
+    uint32_t raw = RegisterAccess(cu).read_vgpr(base + byte_idx / 4, lane);
+    return util::bf8_e5m2_ocp_to_f32(static_cast<uint8_t>((raw >> ((byte_idx % 4) * 8)) & 0xFF));
+  }
+};
+inline constexpr SmfmacReadBf8Ocp smfmac_read_bf8_ocp{};
 
-inline float smfmac_read_f16(ComputeUnitCore &cu, uint32_t base, uint32_t elem, uint32_t lane) {
-  uint32_t raw = cu.read_vgpr(base + elem / 2, lane);
-  return util::f16_to_f32(static_cast<uint16_t>((raw >> ((elem % 2) * 16)) & 0xFFFF));
-}
+struct SmfmacReadFp8Fnuz {
+  float operator()(auto &cu, uint32_t base, uint32_t byte_idx, uint32_t lane) const {
+    uint32_t raw = RegisterAccess(cu).read_vgpr(base + byte_idx / 4, lane);
+    return util::fp8_e4m3_fnuz_to_f32(static_cast<uint8_t>((raw >> ((byte_idx % 4) * 8)) & 0xFF));
+  }
+};
+inline constexpr SmfmacReadFp8Fnuz smfmac_read_fp8_fnuz{};
 
-inline float smfmac_read_bf16(ComputeUnitCore &cu, uint32_t base, uint32_t elem, uint32_t lane) {
-  uint32_t raw = cu.read_vgpr(base + elem / 2, lane);
-  return util::bf16_to_f32(static_cast<uint16_t>((raw >> ((elem % 2) * 16)) & 0xFFFF));
-}
+struct SmfmacReadBf8Fnuz {
+  float operator()(auto &cu, uint32_t base, uint32_t byte_idx, uint32_t lane) const {
+    uint32_t raw = RegisterAccess(cu).read_vgpr(base + byte_idx / 4, lane);
+    return util::bf8_e5m2_fnuz_to_f32(static_cast<uint8_t>((raw >> ((byte_idx % 4) * 8)) & 0xFF));
+  }
+};
+inline constexpr SmfmacReadBf8Fnuz smfmac_read_bf8_fnuz{};
+
+struct SmfmacReadFp8 {
+  float operator()(auto &cu, uint32_t base, uint32_t byte_idx, uint32_t lane) const {
+    return smfmac_read_fp8_ocp(cu, base, byte_idx, lane);
+  }
+};
+inline constexpr SmfmacReadFp8 smfmac_read_fp8{};
+
+struct SmfmacReadBf8 {
+  float operator()(auto &cu, uint32_t base, uint32_t byte_idx, uint32_t lane) const {
+    return smfmac_read_bf8_ocp(cu, base, byte_idx, lane);
+  }
+};
+inline constexpr SmfmacReadBf8 smfmac_read_bf8{};
+
+struct SmfmacReadF16 {
+  float operator()(auto &cu, uint32_t base, uint32_t elem, uint32_t lane) const {
+    uint32_t raw = RegisterAccess(cu).read_vgpr(base + elem / 2, lane);
+    return util::f16_to_f32(static_cast<uint16_t>((raw >> ((elem % 2) * 16)) & 0xFFFF));
+  }
+};
+inline constexpr SmfmacReadF16 smfmac_read_f16{};
+
+struct SmfmacReadBf16 {
+  float operator()(auto &cu, uint32_t base, uint32_t elem, uint32_t lane) const {
+    uint32_t raw = RegisterAccess(cu).read_vgpr(base + elem / 2, lane);
+    return util::bf16_to_f32(static_cast<uint16_t>((raw >> ((elem % 2) * 16)) & 0xFFFF));
+  }
+};
+inline constexpr SmfmacReadBf16 smfmac_read_bf16{};
 
 /// SMFMAC 16x16x32 f16/bf16 (CDNA3 mai-insts). K=32, 8 sparse groups.
 /// A = v2 (4 halves/lane), B = v4 (8 halves/lane), D = v4 f32.
 template <typename Extract>
-void exec_smfmac_f32_16x16x32_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+void exec_smfmac_f32_16x16x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
                                   uint32_t idx_base, Extract ex) {
   struct Result {
     uint32_t reg, lane, val;
@@ -3408,14 +3703,14 @@ void exec_smfmac_f32_16x16x32_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
       auto out = output_loc_32(16, 16, row, col, 0);
-      float acc = std::bit_cast<float>(cu.read_vgpr(dst + out.reg, out.lane));
+      float acc = std::bit_cast<float>(RegisterAccess(cu).read_vgpr(dst + out.reg, out.lane));
       float Bcol[32];
       for (int g = 0; g < 4; ++g)
         for (int e = 0; e < 8; ++e)
           Bcol[8 * g + e] = ex(cu, s1, e, g * 16 + col);
       for (int q = 0; q < 8; ++q) {
         int laneA = (q / 2) * 16 + row;
-        uint32_t idxval = cu.read_vgpr(idx_base, laneA);
+        uint32_t idxval = RegisterAccess(cu).read_vgpr(idx_base, laneA);
         int field = (idxval >> (4 * (q % 2))) & 0xF;
         int p0 = field & 3, p1 = (field >> 2) & 3;
         for (int s = 0; s < 2; ++s) {
@@ -3427,13 +3722,13 @@ void exec_smfmac_f32_16x16x32_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
     }
   }
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 /// SMFMAC 32x32x16 f16/bf16 (CDNA3 mai-insts). K=16, 4 sparse groups.
 /// A = v2 (4 halves/lane), B = v4 (8 halves/lane), D = v16 f32.
 template <typename Extract>
-void exec_smfmac_f32_32x32x16_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+void exec_smfmac_f32_32x32x16_f16(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
                                   uint32_t idx_base, Extract ex) {
   struct Result {
     uint32_t reg, lane, val;
@@ -3443,7 +3738,7 @@ void exec_smfmac_f32_32x32x16_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
   for (uint32_t row = 0; row < 32; ++row) {
     for (uint32_t col = 0; col < 32; ++col) {
       auto out = output_loc_32(32, 32, row, col, 0);
-      float acc = std::bit_cast<float>(cu.read_vgpr(dst + out.reg, out.lane));
+      float acc = std::bit_cast<float>(RegisterAccess(cu).read_vgpr(dst + out.reg, out.lane));
       uint32_t jlow = col % 16, jhi = col / 16;
       float Bcol[16];
       for (int kgrp = 0; kgrp < 2; ++kgrp) {
@@ -3453,7 +3748,7 @@ void exec_smfmac_f32_32x32x16_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
       }
       for (int q = 0; q < 4; ++q) {
         int laneA = (q / 2) * 32 + row;
-        uint32_t idxval = cu.read_vgpr(idx_base, laneA);
+        uint32_t idxval = RegisterAccess(cu).read_vgpr(idx_base, laneA);
         int field = (idxval >> (4 * (q % 2))) & 0xF;
         int p0 = field & 3, p1 = (field >> 2) & 3;
         for (int s = 0; s < 2; ++s) {
@@ -3465,13 +3760,13 @@ void exec_smfmac_f32_32x32x16_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
     }
   }
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 /// SMFMAC 16x16x64 f16/bf16 (gfx950-insts). K=64, 16 sparse groups.
 /// A = v4 (8 halves/lane), B = v8 (16 halves/lane), D = v4 f32.
 template <typename Extract>
-void exec_smfmac_f32_16x16x64_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+void exec_smfmac_f32_16x16x64_f16(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
                                   uint32_t idx_base, Extract ex) {
   struct Result {
     uint32_t reg, lane, val;
@@ -3481,7 +3776,7 @@ void exec_smfmac_f32_16x16x64_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
       auto out = output_loc_32(16, 16, row, col, 0);
-      float acc = std::bit_cast<float>(cu.read_vgpr(dst + out.reg, out.lane));
+      float acc = std::bit_cast<float>(RegisterAccess(cu).read_vgpr(dst + out.reg, out.lane));
       float Bcol[64];
       for (int g = 0; g < 4; ++g)
         for (int e = 0; e < 16; ++e) {
@@ -3490,7 +3785,7 @@ void exec_smfmac_f32_16x16x64_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
         }
       for (int q = 0; q < 16; ++q) {
         int laneA = (q / 4) * 16 + row;
-        uint32_t idxval = cu.read_vgpr(idx_base, laneA);
+        uint32_t idxval = RegisterAccess(cu).read_vgpr(idx_base, laneA);
         int field = (idxval >> (4 * (q % 4))) & 0xF;
         int p0 = field & 3, p1 = (field >> 2) & 3;
         for (int s = 0; s < 2; ++s) {
@@ -3502,13 +3797,13 @@ void exec_smfmac_f32_16x16x64_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
     }
   }
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 /// SMFMAC 32x32x32 f16/bf16 (gfx950-insts). K=32, 8 sparse groups.
 /// A = v4 (8 halves/lane), B = v8 (16 halves/lane), D = v16 f32.
 template <typename Extract>
-void exec_smfmac_f32_32x32x32_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+void exec_smfmac_f32_32x32x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
                                   uint32_t idx_base, Extract ex) {
   struct Result {
     uint32_t reg, lane, val;
@@ -3518,7 +3813,7 @@ void exec_smfmac_f32_32x32x32_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
   for (uint32_t row = 0; row < 32; ++row) {
     for (uint32_t col = 0; col < 32; ++col) {
       auto out = output_loc_32(32, 32, row, col, 0);
-      float acc = std::bit_cast<float>(cu.read_vgpr(dst + out.reg, out.lane));
+      float acc = std::bit_cast<float>(RegisterAccess(cu).read_vgpr(dst + out.reg, out.lane));
       float Bcol[32];
       for (int sl = 0; sl < 2; ++sl) {
         uint32_t src = col + 32 * sl;
@@ -3530,7 +3825,7 @@ void exec_smfmac_f32_32x32x32_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
       }
       for (int q = 0; q < 8; ++q) {
         int laneA = (q / 4) * 32 + row;
-        uint32_t idxval = cu.read_vgpr(idx_base, laneA);
+        uint32_t idxval = RegisterAccess(cu).read_vgpr(idx_base, laneA);
         int field = (idxval >> (4 * (q % 4))) & 0xF;
         int p0 = field & 3, p1 = (field >> 2) & 3;
         for (int s = 0; s < 2; ++s) {
@@ -3542,13 +3837,13 @@ void exec_smfmac_f32_32x32x32_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
     }
   }
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 /// SMFMAC 16x16x64 fp8 (CDNA3 fp8-insts). K=64, 16 sparse groups.
 /// A = v2 (8 bytes/lane), B = v4 (16 bytes/lane), D = v4 f32.
 template <typename ExtractA, typename ExtractB>
-void exec_smfmac_f32_16x16x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+void exec_smfmac_f32_16x16x64_fp8(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
                                   uint32_t idx_base, ExtractA ea, ExtractB eb) {
   struct Result {
     uint32_t reg, lane, val;
@@ -3558,7 +3853,7 @@ void exec_smfmac_f32_16x16x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
       auto out = output_loc_32(16, 16, row, col, 0);
-      float acc = std::bit_cast<float>(cu.read_vgpr(dst + out.reg, out.lane));
+      float acc = std::bit_cast<float>(RegisterAccess(cu).read_vgpr(dst + out.reg, out.lane));
       float Bcol[64];
       for (int g = 0; g < 4; ++g)
         for (int e = 0; e < 16; ++e) {
@@ -3570,7 +3865,7 @@ void exec_smfmac_f32_16x16x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
         int laneA = ga * 16 + row;
         int idxlane = ((q % 8) / 2) * 16 + row;
         int nb = 2 * (q / 8) + (q % 2);
-        uint32_t idxval = cu.read_vgpr(idx_base, idxlane);
+        uint32_t idxval = RegisterAccess(cu).read_vgpr(idx_base, idxlane);
         int field = (idxval >> (4 * nb)) & 0xF;
         int p0 = field & 3, p1 = (field >> 2) & 3;
         for (int s = 0; s < 2; ++s) {
@@ -3584,13 +3879,13 @@ void exec_smfmac_f32_16x16x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
     }
   }
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 /// SMFMAC 32x32x32 fp8 (CDNA3 fp8-insts). K=32, 8 sparse groups.
 /// A = v2 (8 bytes/lane), B = v4 (16 bytes/lane), D = v16 f32.
 template <typename ExtractA, typename ExtractB>
-void exec_smfmac_f32_32x32x32_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+void exec_smfmac_f32_32x32x32_fp8(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
                                   uint32_t idx_base, ExtractA ea, ExtractB eb) {
   struct Result {
     uint32_t reg, lane, val;
@@ -3600,7 +3895,7 @@ void exec_smfmac_f32_32x32x32_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
   for (uint32_t row = 0; row < 32; ++row) {
     for (uint32_t col = 0; col < 32; ++col) {
       auto out = output_loc_32(32, 32, row, col, 0);
-      float acc = std::bit_cast<float>(cu.read_vgpr(dst + out.reg, out.lane));
+      float acc = std::bit_cast<float>(RegisterAccess(cu).read_vgpr(dst + out.reg, out.lane));
       float Bcol[32];
       for (int kgrp = 0; kgrp < 2; ++kgrp) {
         uint32_t b_lane = col + 32 * kgrp;
@@ -3614,7 +3909,7 @@ void exec_smfmac_f32_32x32x32_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
         int laneA = ga * 32 + row;
         int idxlane = ((q % 4) / 2) * 32 + row;
         int nb = 2 * (q / 4) + (q % 2);
-        uint32_t idxval = cu.read_vgpr(idx_base, idxlane);
+        uint32_t idxval = RegisterAccess(cu).read_vgpr(idx_base, idxlane);
         int field = (idxval >> (4 * nb)) & 0xF;
         int p0 = field & 3, p1 = (field >> 2) & 3;
         for (int s = 0; s < 2; ++s) {
@@ -3628,13 +3923,13 @@ void exec_smfmac_f32_32x32x32_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
     }
   }
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 /// SMFMAC 16x16x128 fp8 (gfx950-insts). K=128, 32 sparse groups.
 /// A = v4 (16 bytes/lane), B = v8 (32 bytes/lane), D = v4 f32.
 template <typename ExtractA, typename ExtractB>
-void exec_smfmac_f32_16x16x128_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+void exec_smfmac_f32_16x16x128_fp8(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
                                    uint32_t idx_base, ExtractA ea, ExtractB eb) {
   struct Result {
     uint32_t reg, lane, val;
@@ -3644,7 +3939,7 @@ void exec_smfmac_f32_16x16x128_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
       auto out = output_loc_32(16, 16, row, col, 0);
-      float acc = std::bit_cast<float>(cu.read_vgpr(dst + out.reg, out.lane));
+      float acc = std::bit_cast<float>(RegisterAccess(cu).read_vgpr(dst + out.reg, out.lane));
       float Bcol[128];
       for (int g = 0; g < 4; ++g)
         for (int e = 0; e < 32; ++e) {
@@ -3654,7 +3949,7 @@ void exec_smfmac_f32_16x16x128_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s
       for (int q = 0; q < 32; ++q) {
         int idxlane = 16 * (2 * (q / 16) + ((q / 4) % 2)) + row;
         int nb = 2 * ((q / 8) % 2) + 4 * ((q % 4) / 2) + ((q % 4) % 2);
-        uint32_t idxval = cu.read_vgpr(idx_base, idxlane);
+        uint32_t idxval = RegisterAccess(cu).read_vgpr(idx_base, idxlane);
         int field = (idxval >> (4 * nb)) & 0xF;
         int p0 = field & 3, p1 = (field >> 2) & 3;
         for (int s = 0; s < 2; ++s) {
@@ -3670,13 +3965,13 @@ void exec_smfmac_f32_16x16x128_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s
     }
   }
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 /// SMFMAC 32x32x64 fp8 (gfx950-insts). K=64, 16 sparse groups.
 /// A = v4 (16 bytes/lane), B = v8 (32 bytes/lane), D = v16 f32.
 template <typename ExtractA, typename ExtractB>
-void exec_smfmac_f32_32x32x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+void exec_smfmac_f32_32x32x64_fp8(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
                                   uint32_t idx_base, ExtractA ea, ExtractB eb) {
   struct Result {
     uint32_t reg, lane, val;
@@ -3686,7 +3981,7 @@ void exec_smfmac_f32_32x32x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
   for (uint32_t row = 0; row < 32; ++row) {
     for (uint32_t col = 0; col < 32; ++col) {
       auto out = output_loc_32(32, 32, row, col, 0);
-      float acc = std::bit_cast<float>(cu.read_vgpr(dst + out.reg, out.lane));
+      float acc = std::bit_cast<float>(RegisterAccess(cu).read_vgpr(dst + out.reg, out.lane));
       float Bcol[64];
       for (int kgrp = 0; kgrp < 2; ++kgrp) {
         uint32_t b_lane = kgrp * 32 + col;
@@ -3698,7 +3993,7 @@ void exec_smfmac_f32_32x32x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
       for (int q = 0; q < 16; ++q) {
         int idxlane = 32 * (q / 8) + row;
         int nb = (q % 2) + 2 * ((q / 4) % 2) + 4 * ((q / 2) % 2);
-        uint32_t idxval = cu.read_vgpr(idx_base, idxlane);
+        uint32_t idxval = RegisterAccess(cu).read_vgpr(idx_base, idxlane);
         int field = (idxval >> (4 * nb)) & 0xF;
         int p0 = field & 3, p1 = (field >> 2) & 3;
         for (int s = 0; s < 2; ++s) {
@@ -3714,7 +4009,7 @@ void exec_smfmac_f32_32x32x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
     }
   }
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 /// Fast path for v_mfma_f32_16x16x32_f16. This single MFMA shape is the only
@@ -3726,23 +4021,22 @@ void exec_smfmac_f32_32x32x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
 /// path. Hoists A and B into dense f32 buffers via extract_f16, runs the
 /// matmul as 16 zmm-wide f32 FMA rows (512 zmm FMAs per MFMA), and scatters
 /// directly back to VGPRs (no Result staging vector). VGPR access is batched
-/// through vgpr_data (one base pointer per operand, no per-element virtual
-/// read_vgpr/write_vgpr). Falls back to the generic exec_f32 when:
+/// through observed register-access regions (one view per operand, no
+/// per-element virtual read_vgpr/write_vgpr). Falls back to the generic exec_f32 when:
 ///   - <experimental/simd> is unavailable
 ///   - host native_simd<float> is not 16 lanes (i.e. no AVX-512)
 ///   - cbsz/blgp lane permutation is non-default
 ///   - RJ_FORCE_SCALAR is set
 /// Fast path for the f32-input MFMA shapes (v_mfma_f32_*_f32). Like the f16
 /// specialization but the inputs are already f32, so there is no F16C convert —
-/// the hoist reads each operand word straight through vgpr_data. BATCH covers
-/// the batched shapes (e.g. 32x32x1x2). Compile-time M/N/K/BATCH fully unroll
+/// the hoist reads each operand word straight through observed register-access
+/// regions. BATCH covers the batched shapes (e.g. 32x32x1x2). Compile-time M/N/K/BATCH fully unroll
 /// the matmul; it loops over N in zmm-width chunks (N must be a multiple of 16,
 /// so the 4x4 shape stays on the generic path). Falls back to the generic
 /// exec_f32 without AVX-512 / under force-scalar / with cbsz|blgp.
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH>
-void exec_f32_mfma_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
-                            uint32_t s2, uint32_t const_acc, uint32_t cbsz, uint32_t abid,
-                            uint32_t blgp) {
+void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                            uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t in_bits = 32;
   static_assert(N % 16 == 0, "specialized f32 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
@@ -3758,10 +4052,12 @@ void exec_f32_mfma_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
     }
     constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    auto reads =
+        read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, BATCH, in_bits, const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
+    auto writes = write_mfma_acc32_region(cu, dst, M, N, BATCH, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
@@ -3800,7 +4096,7 @@ void exec_f32_mfma_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
         for (uint32_t col = 0; col < N; ++col) {
           auto out = output_loc_32(M, N, row, col, b);
           float fv = C_buf[row * N + col];
-          d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(fv);
+          writes.set_linear_word(out.reg * wf + out.lane, std::bit_cast<uint32_t>(fv));
           if (std::isnan(fv) || std::isinf(fv))
             has_nan_or_inf = true;
         }
@@ -3815,9 +4111,8 @@ void exec_f32_mfma_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
 }
 
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
-void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
-                            uint32_t s2, uint32_t const_acc, uint32_t cbsz, uint32_t abid,
-                            uint32_t blgp) {
+void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                            uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t B = BATCH, in_bits = 16;
   static_assert(N % 16 == 0, "specialized f16 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
@@ -3833,10 +4128,11 @@ void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
     }
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
+    auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
     alignas(64) float A_buf[M * K]; // A[row][k] (one batch block)
     alignas(64) float B_buf[K * N]; // B[k][col] (one batch block)
     alignas(64) float C_buf[M * N]; // C[row][col] (one batch block)
@@ -3885,7 +4181,7 @@ void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
         for (uint32_t col = 0; col < N; ++col) {
           auto out = output_loc_32(M, N, row, col, b);
           float fv = C_buf[row * N + col];
-          d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(fv);
+          writes.set_linear_word(out.reg * wf + out.lane, std::bit_cast<uint32_t>(fv));
           if (std::isnan(fv) || std::isinf(fv))
             has_nan_or_inf = true;
         }
@@ -3904,9 +4200,8 @@ void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
 /// (no F16C needed). Falls back to the generic exec_f32 without AVX-512 / under
 /// force-scalar / with cbsz|blgp.
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
-void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
-                             uint32_t s2, uint32_t const_acc, uint32_t cbsz, uint32_t abid,
-                             uint32_t blgp) {
+void exec_f32_mfma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                             uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t B = BATCH, in_bits = 16;
   static_assert(N % 16 == 0, "specialized bf16 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
@@ -3922,10 +4217,11 @@ void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t
     }
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
+    auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
     alignas(64) float A_buf[M * K]; // A[row][k] (one batch block)
     alignas(64) float B_buf[K * N]; // B[k][col] (one batch block)
     alignas(64) float C_buf[M * N]; // C[row][col] (one batch block)
@@ -3972,7 +4268,7 @@ void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t
         for (uint32_t col = 0; col < N; ++col) {
           auto out = output_loc_32(M, N, row, col, b);
           float fv = C_buf[row * N + col];
-          d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(fv);
+          writes.set_linear_word(out.reg * wf + out.lane, std::bit_cast<uint32_t>(fv));
           if (std::isnan(fv) || std::isinf(fv))
             has_nan_or_inf = true;
         }
@@ -3992,14 +4288,13 @@ void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t
 /// (bit-exact with extract_fp8/extract_bf8 by construction); A/B formats are
 /// compile-time selected. Falls back to the generic exec_f32 without AVX-512 /
 /// under force-scalar / with cbsz|blgp.
-template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8>
-void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
-                           uint32_t s2, uint32_t const_acc, uint32_t cbsz, uint32_t abid,
-                           uint32_t blgp) {
+template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8, bool FNUZ = false>
+void exec_f32_mfma_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                           uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t B = 1, in_bits = 8;
   static_assert(N % 16 == 0, "specialized f8 MFMA assumes N is a multiple of the zmm width");
-  constexpr auto ea = A_FP8 ? &extract_fp8 : &extract_bf8;
-  constexpr auto eb = B_FP8 ? &extract_fp8 : &extract_bf8;
+  constexpr auto ea = f8_extract_fn<A_FP8, FNUZ>();
+  constexpr auto eb = f8_extract_fn<B_FP8, FNUZ>();
   if constexpr (!util::has_stdx_simd) {
     exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, ea, eb, const_acc, cbsz, abid, blgp);
     return;
@@ -4011,9 +4306,11 @@ void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     }
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
+    auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
+    auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
@@ -4022,8 +4319,8 @@ void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     // (w*wf+l)*4+s).
     alignas(64) float A_f32[M * K];
     alignas(64) float B_f32[N * K];
-    f8_to_f32_block<A_FP8>(a_words, A_f32, M * K);
-    f8_to_f32_block<B_FP8>(b_words, B_f32, N * K);
+    f8_to_f32_block<A_FP8, FNUZ>(a_words, A_f32, M * K);
+    f8_to_f32_block<B_FP8, FNUZ>(b_words, B_f32, N * K);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = output_loc_32(M, N, row, col, 0);
@@ -4055,13 +4352,12 @@ void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
         c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
       }
     // Scatter directly back to VGPRs (no Result staging vector).
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
     bool has_nan_or_inf = false;
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = output_loc_32(M, N, row, col, 0);
         float fv = C_buf[row * N + col];
-        d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(fv);
+        writes.set_linear_word(out.reg * wf + out.lane, std::bit_cast<uint32_t>(fv));
         if (std::isnan(fv) || std::isinf(fv))
           has_nan_or_inf = true;
       }
@@ -4084,8 +4380,8 @@ void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
 /// well-defined). Falls back to the generic exec_i32_i8 without AVX-512 /
 /// under force-scalar.
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
-void exec_i32_mfma_i8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
-                           uint32_t s2, uint32_t const_acc) {
+void exec_i32_mfma_i8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                           uint32_t const_acc) {
   constexpr uint32_t B = BATCH, in_bits = 8;
   static_assert(N % 16 == 0, "specialized i8 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
@@ -4098,13 +4394,14 @@ void exec_i32_mfma_i8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     }
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
-    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
-    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
-    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
+    auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
+    const uint32_t *a_words = reads.a.reg_data();
+    const uint32_t *b_words = reads.b.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
+    auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
     // Accumulate in unsigned 32-bit (wrap is well-defined and identical mod
     // 2^32 to the intended signed wrap), so the SIMD path has no signed-
     // overflow UB.
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
     alignas(64) uint32_t A_buf[M * K]; // A[row][k] (sign-extended bits, one batch block)
     alignas(64) uint32_t B_buf[K * N]; // B[k][col] (sign-extended bits, one batch block)
     alignas(64) uint32_t C_buf[M * N]; // C[row][col] (one batch block)
@@ -4149,7 +4446,7 @@ void exec_i32_mfma_i8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = output_loc_32(M, N, row, col, b);
-          d_words[out.reg * wf + out.lane] = C_buf[row * N + col];
+          writes.set_linear_word(out.reg * wf + out.lane, C_buf[row * N + col]);
         }
     }
   }

@@ -110,7 +110,6 @@ typedef struct AMD_QUEUE_ALIGN amd_queue_s {
  * (sizeof(amd_queue_t)) unless the AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM bit is set.
  */
 
-#define AMD_QUEUE_HAS_V2 1
 #define MAX_NUM_XCC 128
 typedef struct scratch_last_used_index_xcc_s {
   volatile uint64_t main;

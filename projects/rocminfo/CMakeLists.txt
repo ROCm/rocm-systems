@@ -34,7 +34,7 @@
 #
 # Minimum version of cmake required
 #
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.6.3)
 
 set(ROCMINFO_EXE "rocminfo")
 set(PROJECT_NAME ${ROCMINFO_EXE})
@@ -42,7 +42,8 @@ project (${PROJECT_NAME} LANGUAGES CXX)
 
 include ( GNUInstallDirs )
 if(WIN32)
-  message(STATUS "Building rocminfo on Windows")
+  message("This sample is not supported on Windows platform")
+  return()
 endif()
 
 # Debug by default
@@ -146,23 +147,19 @@ add_definitions(-DLITTLEENDIAN_CPU=1)
 # Linux Compiler options
 #
 set(CMAKE_CXX_STANDARD 11)
-if(MSVC)
-  set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} /EHsc /W3)
-else()
-  set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -fexceptions)
-  set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -fno-rtti)
-  set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -fno-math-errno)
-  set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -fno-threadsafe-statics)
-  set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -fmerge-all-constants)
-  set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -fms-extensions)
-  set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -Werror)
-  set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -Wall)
-endif()
+set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -fexceptions)
+set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -fno-rtti)
+set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -fno-math-errno)
+set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -fno-threadsafe-statics)
+set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -fmerge-all-constants)
+set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -fms-extensions)
+set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -Werror)
+set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -Wall)
 
 #
 # Extend the compiler flags for 64-bit builds
 #
-if(NOT WIN32 AND ((${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "x86_64") OR (${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "AMD64")))
+if((${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "x86_64") OR (${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "AMD64"))
   set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -m64 -msse -msse2)
 endif()
 
@@ -170,11 +167,7 @@ endif()
 # Add compiler flags to include symbol information for debug builds
 #
 if(ISDEBUG)
-  if(MSVC)
-    set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} /Zi /Od)
-  else()
-    set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -ggdb -O0)
-  endif()
+  set(ROCMINFO_CXX_FLAGS ${ROCMINFO_CXX_FLAGS} -ggdb -O0)
 endif()
 
 ###########################
@@ -190,9 +183,6 @@ configure_file(rocm_agent_enumerator rocm_agent_enumerator COPYONLY)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} ROCMINFO_SOURCES)
 add_executable(${ROCMINFO_EXE} ${ROCMINFO_SOURCES})
 target_link_libraries(${ROCMINFO_EXE} hsa-runtime64::hsa-runtime64)
-if(WIN32)
-  target_compile_definitions(${ROCMINFO_EXE} PRIVATE NOMINMAX)
-endif()
 
 target_compile_options(${ROCMINFO_EXE} PRIVATE ${ROCMINFO_CXX_FLAGS})
 
@@ -209,7 +199,6 @@ install (
 ###########################
 # Packaging directives
 ###########################
-if(NOT WIN32)
 if(BUILD_SHARED_LIBS)
   set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
 else()
@@ -325,4 +314,3 @@ if(BUILD_ENABLE_LINTIAN_OVERRIDES AND BUILD_DEBIAN_PKGING_FLAG)
 endif()
 
 include ( CPack )
-endif()

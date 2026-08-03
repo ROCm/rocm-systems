@@ -433,7 +433,14 @@ public:
   bool Freeze();
 
   bool IsAddressInSegment(uint64_t addr);
-  void Copy(uint64_t addr, const void* src, size_t size);
+  // Range-checked variant: returns true only if the whole [addr, addr + size)
+  // region lies within this segment (overflow-safe).
+  bool IsAddressInSegment(uint64_t addr, size_t size);
+  // Returns false (and performs no copy) when [addr, addr + size) is not fully
+  // contained in the segment, so a crafted code object cannot drive an
+  // out-of-bounds write. Callers that source addr/size from the code object
+  // (e.g. relocations) must check the result.
+  bool Copy(uint64_t addr, const void* src, size_t size);
   void Print(std::ostream& out) override;
   void Destroy() override;
 };
@@ -645,7 +652,13 @@ private:
   // Kernel-entry trampolines (gfx125x).
   // kd_fixups_ is collected per-LoadCodeObject; trampoline_segments_ persists for
   // the lifetime of the executable so it can be frozen and destroyed normally.
-  struct KdFixup { Segment* code_seg; uint64_t kd_vaddr; int64_t entry_off; uint32_t inst_pref; };
+  struct KdFixup {
+    Segment* code_seg;
+    uint64_t kd_vaddr;
+    int64_t entry_off;
+    uint32_t inst_pref;
+    std::string name;  // kernel/shader symbol name (for logging)
+  };
   bool trampoline_enabled_gfx125x_ = false;
   std::vector<KdFixup> kd_fixups_;
   std::vector<std::shared_ptr<Segment>> trampoline_segments_;

@@ -78,7 +78,8 @@ set(TTD_PUBLIC_CXX_HEADERS
     ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/common.hpp
     ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/disassembly.hpp
     ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/funcmap.hpp
-    ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/segment.hpp)
+    ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/segment.hpp
+    ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/markers.hpp)
 
 # --- Disassembly backend selection -----------------------------------------
 #
@@ -204,11 +205,6 @@ endif()
 target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ROCPROF_TRACE_DECODER_BUILDING_LIBRARY)
 set_target_properties(rocprof-trace-decoder-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-option(SQTT_LOGGING "Enable SQTT logging" OFF)
-if(SQTT_LOGGING)
-    target_compile_definitions(rocprof-trace-decoder-objects PRIVATE SQTT_LOGGING)
-endif()
-
 option(ARCH_MODEL "Enable ARCH_MODEL stitcher path" OFF)
 if(ARCH_MODEL)
     target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ARCH_MODEL)
@@ -309,11 +305,17 @@ install(
 #                PATHS /path/to/decoder/build/source)
 #   target_link_libraries(myapp PRIVATE rocprof-trace-decoder::rocprof-trace-decoder-static)
 #
-# Both shared and static targets are exported so the consumer picks. The
-# static target carries the PUBLIC LLVM dependency, so the consumer inherits
-# the right LLVM transitively without re-running find_package(LLVM).
+# Both shared and static decoder targets are exported so the consumer picks.
+# The static target carries the PUBLIC LLVM dependency, so the consumer
+# inherits the right LLVM transitively without re-running find_package(LLVM).
+# The SQTT marker pass plugin is exported when it is part of this build.
+set(TTD_BUILD_TREE_EXPORT_TARGETS rocprof-trace-decoder rocprof-trace-decoder-static)
+if(TARGET SQTTInstrumentPass)
+    list(APPEND TTD_BUILD_TREE_EXPORT_TARGETS SQTTInstrumentPass)
+endif()
+
 export(
-    TARGETS rocprof-trace-decoder rocprof-trace-decoder-static
+    TARGETS ${TTD_BUILD_TREE_EXPORT_TARGETS}
     NAMESPACE rocprof-trace-decoder::
     FILE "${CMAKE_CURRENT_BINARY_DIR}/rocprof-trace-decoder-targets.cmake")
 

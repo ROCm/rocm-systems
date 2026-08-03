@@ -2,9 +2,14 @@
 # SPDX-License-Identifier:  MIT
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import common
+import pandas as pd
 import pytest
+
+from pc_sampling.pc_sampling_analysis import load_pc_sample_records
+from utils.parser import load_pc_sampling_data
 
 config = {}
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
@@ -25,6 +30,19 @@ PC_SAMPLING_STOCHASTIC_FILES = sorted([
     "ps_file_results.json",
     "sysinfo.csv",
 ])
+
+
+def _assert_pc_sampling_files(file_dict, expected):
+    """Assert the PC sampling output file-set, matching the native collector's
+    ``<pid>_code_obj_info.json``.
+    """
+    keys = list(file_dict.keys())
+    code_obj = [k for k in keys if k.endswith("_code_obj_info.json")]
+    assert len(code_obj) == 1, (
+        f"expected exactly one *_code_obj_info.json, got {code_obj}"
+    )
+    remaining = sorted(k for k in keys if k not in code_obj)
+    assert remaining == sorted(expected)
 
 
 def is_pc_sampling_not_supported(output):
@@ -65,6 +83,7 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute, monkeypat
         options,
         check_success=False,
         capture_output=True,
+        stream=True,
         roof=False,
         app_name="app_mat_mul_max",
     )
@@ -73,7 +92,7 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute, monkeypat
 
     assert code == 0
     file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
+    _assert_pc_sampling_files(file_dict, PC_SAMPLING_HOST_TRAP_FILES)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -102,6 +121,7 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute, monkeypa
         options,
         check_success=False,
         capture_output=True,
+        stream=True,
         roof=False,
         app_name="app_mat_mul_max",
     )
@@ -110,7 +130,7 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute, monkeypa
 
     assert code == 0
     file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_STOCHASTIC_FILES)
+    _assert_pc_sampling_files(file_dict, PC_SAMPLING_STOCHASTIC_FILES)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -145,6 +165,7 @@ def test_multi_rank_pc_sampling_only(
         options,
         app_name="app_1",
         capture_output=True,
+        stream=True,
         check_success=False,
     )
 
@@ -188,6 +209,7 @@ def test_multi_rank_warning_pc_sampling_with_counters(
         options,
         app_name="app_1",
         capture_output=True,
+        stream=True,
         check_success=False,
     )
 
@@ -233,6 +255,7 @@ def test_pc_sampling_profile_then_analyze(
         options,
         check_success=False,
         capture_output=True,
+        stream=True,
         roof=False,
         app_name="app_mat_mul_max",
     )
@@ -241,7 +264,7 @@ def test_pc_sampling_profile_then_analyze(
 
     assert code == 0
     file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
+    _assert_pc_sampling_files(file_dict, PC_SAMPLING_HOST_TRAP_FILES)
 
     code = binary_handler_analyze_rocprof_compute(
         [
@@ -326,6 +349,7 @@ def test_pc_sampling_with_sol_block(
         options,
         check_success=False,
         capture_output=True,
+        stream=True,
         roof=False,
         app_name="app_mat_mul_max",
     )
@@ -334,7 +358,7 @@ def test_pc_sampling_with_sol_block(
 
     assert code == 0
     file_dict = common.check_csv_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
+    _assert_pc_sampling_files(file_dict, PC_SAMPLING_HOST_TRAP_FILES)
 
     assert common.check_file_pattern("- '21'", f"{workload_dir}/profiling_config.yaml")
     assert common.check_file_pattern("- '2'", f"{workload_dir}/profiling_config.yaml")
@@ -358,3 +382,79 @@ def test_pc_sampling_with_sol_block(
     assert "instruction" in captured.out
 
     common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+def _kernel_top_workload() -> SimpleNamespace:
+    """Workload stub with dfs[1] populated for load_pc_sampling_data tests."""
+    return SimpleNamespace(
+        filter_kernel_ids=[],
+        dfs={
+            1: pd.DataFrame({
+                "Kernel_Name": ["kernel_a", "kernel_b", "kernel_c"],
+                "Count": [2, 1, 1],
+                "Sum(ns)": [900, 800, 200],
+            }),
+        },
+    )
+
+
+def test_load_pc_sampling_data_missing_or_empty_sources_return_empty() -> None:
+    """Absent tool data and empty buffer records both yield empty frames."""
+    workload = SimpleNamespace(filter_kernel_ids=[])
+
+    assert load_pc_sampling_data(workload, "none", "count", None).empty
+    assert load_pc_sampling_data(workload, "missing", "count", None).empty
+
+    workload.filter_kernel_ids = [0, 1, 2]
+    assert load_pc_sampling_data(workload, "test", "count", None).empty
+
+    empty_records = load_pc_sample_records({
+        "buffer_records": {
+            "pc_sample_stochastic": [],
+            "pc_sample_host_trap": [],
+            "kernel_dispatch": [],
+        },
+    })
+    assert empty_records.empty
+
+
+def test_load_pc_sampling_data_out_of_bounds_kernel_warns(monkeypatch) -> None:
+    """An out-of-bounds kernel index warns and returns empty."""
+    mock_warning = common.patch_console(monkeypatch, "utils.parser", "warning")[
+        "warning"
+    ]
+    workload = _kernel_top_workload()
+    tool_data = {
+        "buffer_records": {"pc_sample_stochastic": [{}], "pc_sample_host_trap": []}
+    }
+
+    workload.filter_kernel_ids = [99]
+    result = load_pc_sampling_data(workload, "test", "count", tool_data)
+
+    mock_warning.assert_called()
+    call_args_str = str(mock_warning.call_args)
+    assert "out of bounds" in call_args_str or "99" in call_args_str
+    assert result.empty
+
+
+def test_load_pc_sampling_data_single_kernel_uses_workload_dfs(monkeypatch) -> None:
+    """A single-kernel filter reads the kernel name from workload.dfs[1]."""
+    per_kernel_calls = []
+
+    def record_per_kernel(*args, **kwargs):
+        per_kernel_calls.append((args, kwargs))
+        return pd.DataFrame()
+
+    monkeypatch.setattr(
+        "utils.parser.load_pc_sampling_data_per_kernel", record_per_kernel
+    )
+    workload = _kernel_top_workload()
+    tool_data = {
+        "buffer_records": {"pc_sample_stochastic": [{}], "pc_sample_host_trap": []}
+    }
+
+    workload.filter_kernel_ids = [1]
+    load_pc_sampling_data(workload, "test", "count", tool_data)
+
+    if per_kernel_calls:
+        assert "kernel_b" in str(per_kernel_calls[0])

@@ -298,6 +298,10 @@ static HipCopyKindExt ToCopyKindExt(uint32_t cl_kind) {
     case CL_COMMAND_COPY_IMAGE_TO_BUFFER:   return HIP_COPY_KIND_IMAGE_TO_BUFFER_EXT;
     case CL_COMMAND_FILL_BUFFER:            return HIP_COPY_KIND_FILL_EXT;
     case ROCCLR_COMMAND_BATCH_COPY_BUFFER:  return HIP_COPY_KIND_BATCH_EXT;
+    case ROCCLR_COMMAND_BATCH_WRITE_BUFFER:
+      return HIP_COPY_KIND_BATCH_EXT;
+    case ROCCLR_COMMAND_BATCH_READ_BUFFER:
+      return HIP_COPY_KIND_BATCH_EXT;
     default:                                return HIP_COPY_KIND_UNKNOWN_EXT;
   }
 }
@@ -573,16 +577,21 @@ void WriteJsonTraceImpl(const char* filepath) {
   // Track only the (device_id, gpu_tid) pairs that actually received events.
   // Key = device_id, Value = set of gpu tids (lane*2+sdma) with events.
   std::unordered_map<int, std::unordered_set<uint64_t>> device_gpu_tids;
-  // Map (device_id, gpu_tid) -> last seen hipStream_t for lane labeling.
-  std::map<std::pair<int,uint64_t>, hipStream_t> gpu_tid_stream;
+  // Map (device_id, gpu_tid) -> (stream, queue_id) for lane labeling.
+  struct StreamLaneInfo { hipStream_t stream; uint64_t queue_id; };
+  std::map<std::pair<int,uint64_t>, StreamLaneInfo> gpu_tid_stream;
   std::unordered_set<uint64_t> tid_set;  // unique CPU thread ids seen
   uint64_t flow_id  = 0;  // unique id for each CPU→GPU flow arrow pair
   bool first = true;
-  // Compact lane index per unique stream (same scheme as pftrace writer).
-  std::unordered_map<uintptr_t, uint64_t> stream_lane_idx;
-  uint64_t next_stream_lane = 0;
+  // Compact lane index per unique (stream, queue_id) pair. Graph kernels share
+  // the launch stream pointer but run on different internal queues; keying on
+  // queue_id as well gives each queue its own visual lane in the trace.
+  // Start at 1 so the first lane produces tid=2 (tid=0 is treated as "main
+  // thread" by Chrome trace viewer and merges with the process header row).
+  std::map<std::pair<uintptr_t, uint64_t>, uint64_t> stream_lane_idx;
+  uint64_t next_stream_lane = 1;
   auto compact_stream_lane = [&](hipStream_t stream, uint64_t queue_id) -> uint64_t {
-    uintptr_t key = stream ? reinterpret_cast<uintptr_t>(stream) : (0x8000ULL | queue_id);
+    auto key = std::make_pair(reinterpret_cast<uintptr_t>(stream), queue_id);
     auto [it, ins] = stream_lane_idx.emplace(key, next_stream_lane);
     if (ins) ++next_stream_lane;
     return it->second;
@@ -739,7 +748,7 @@ void WriteJsonTraceImpl(const char* filepath) {
         }
 
         // Track stream→lane mapping for metadata labels.
-        if (stream) gpu_tid_stream[{static_cast<int>(gop.device_id), gpu_tid}] = stream;
+        if (stream) gpu_tid_stream[{static_cast<int>(gop.device_id), gpu_tid}] = {stream, gop.queue_id};
 
         // Only draw flow arrow when GPU timestamps are valid (begin_ns == 0
         // means ReportActivity never populated the record — no arrow to draw).
@@ -1003,13 +1012,14 @@ void WriteJsonTraceImpl(const char* filepath) {
       uint64_t q   = gpu_tid / 2;
       std::string lane_name;
       auto sit = gpu_tid_stream.find({dev_id, gpu_tid});
-      if (sit != gpu_tid_stream.end() && sit->second) {
+      if (sit != gpu_tid_stream.end() && sit->second.stream) {
         char buf[32];
         snprintf(buf, sizeof(buf), "0x%llx",
                  static_cast<unsigned long long>(
-                   reinterpret_cast<uintptr_t>(sit->second)));
-        // SDMA lane shares the stream prefix so it sorts next to its compute lane.
-        lane_name = std::string("Stream ") + buf + (is_sdma ? " [DMA]" : "");
+                   reinterpret_cast<uintptr_t>(sit->second.stream)));
+        lane_name = std::string("Stream ") + buf;
+        lane_name += " [" + std::to_string(sit->second.queue_id) + "]";
+        if (is_sdma) lane_name += " [DMA]";
       } else if (!is_sdma && q == 0) {
         lane_name = "Default Stream";
       } else if (is_sdma && q == 0) {
@@ -1359,7 +1369,7 @@ static uint64_t                                   g_pf_next_iid{1};
 static std::unordered_set<uint64_t> g_pf_emitted_tracks;
 
 // Compact stream-lane index (same scheme as batch writer).
-static std::unordered_map<uintptr_t, uint64_t> g_pf_stream_lane;
+static std::unordered_map<uint64_t, uint64_t> g_pf_stream_lane;
 static uint64_t                                 g_pf_next_lane{0};
 
 // Compact CPU thread index.
@@ -1411,7 +1421,8 @@ static void PfEnsureTrack(uint64_t uuid, uint64_t parent, const std::string& nam
 
 // ── Lane helpers (same logic as batch writer) ─────────────────────────────────
 static uint64_t PfCompactLane(hipStream_t stream, uint64_t queue_id) {
-  uintptr_t key = stream ? reinterpret_cast<uintptr_t>(stream) : (0x8000ULL | queue_id);
+  uint64_t key = stream ? (reinterpret_cast<uintptr_t>(stream) ^ (queue_id * 0x9E3779B97F4A7C15ULL))
+                        : (0x8000ULL | queue_id);
   auto [it, ins] = g_pf_stream_lane.emplace(key, g_pf_next_lane);
   if (ins) ++g_pf_next_lane;
   return it->second;
@@ -1452,7 +1463,8 @@ static void PfEnsureCpuThread(uint32_t ctid) {
   PfEnsureTrack(uuid, CpuProcessUuid(), "HIP Thread " + std::to_string(ctid),
                 1024, int(ctid), false);
 }
-static void PfEnsureGpuThread(int dev_id, uint64_t gtid, hipStream_t stream) {
+static void PfEnsureGpuThread(int dev_id, uint64_t gtid, hipStream_t stream,
+                              uint64_t queue_id = 0) {
   uint64_t proc_uuid = GpuProcessUuid(dev_id);
   if (!g_pf_emitted_tracks.count(proc_uuid)) {
     auto [gfxip, hip_idx] = PfGetGfxip(dev_id);
@@ -1467,7 +1479,9 @@ static void PfEnsureGpuThread(int dev_id, uint64_t gtid, hipStream_t stream) {
     if (stream) {
       char buf[32]; snprintf(buf, sizeof(buf), "0x%llx",
         static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(stream)));
-      lane = std::string("Stream ") + buf + (is_sdma ? " [DMA]" : "");
+      lane = std::string("Stream ") + buf;
+      lane += " [" + std::to_string(queue_id) + "]";
+      if (is_sdma) lane += " [DMA]";
     } else {
       lane = std::string(is_sdma ? "SDMA " : "Compute ") + std::to_string(gtid / 2);
     }
@@ -1658,7 +1672,7 @@ static void PfChunkCallback(const hipApiRecordExt* records, uint32_t count, uint
       uint64_t lane     = PfCompactLane(rec.stream, gop.queue_id);
       uint64_t gtid     = lane * 2 + sdma;
       uint64_t gpu_uuid = GpuThreadUuid(static_cast<int>(gop.device_id), gtid);
-      PfEnsureGpuThread(static_cast<int>(gop.device_id), gtid, rec.stream);
+      PfEnsureGpuThread(static_cast<int>(gop.device_id), gtid, rec.stream, gop.queue_id);
 
       uint64_t g_ts  = gop.begin_ns;
       uint64_t g_dur = (gop.end_ns > gop.begin_ns) ? (gop.end_ns - gop.begin_ns) : 1;
@@ -1879,11 +1893,12 @@ void WriteProtoTraceImpl(const char* filepath) {
     return it->second;
   };
   std::unordered_map<int, std::unordered_set<uint64_t>> device_gpu_tids;
-  std::map<std::pair<int,uint64_t>, hipStream_t> gpu_tid_stream;
-  std::unordered_map<uintptr_t, uint64_t> stream_lane_idx;
-  uint64_t next_stream_lane = 0;
+  struct StreamLaneInfo { hipStream_t stream; uint64_t queue_id; };
+  std::map<std::pair<int,uint64_t>, StreamLaneInfo> gpu_tid_stream;
+  std::map<std::pair<uintptr_t, uint64_t>, uint64_t> stream_lane_idx;
+  uint64_t next_stream_lane = 1;
   auto compact_stream_lane = [&](hipStream_t stream, uint64_t queue_id) -> uint64_t {
-    uintptr_t key = stream ? reinterpret_cast<uintptr_t>(stream) : (0x8000ULL | queue_id);
+    auto key = std::make_pair(reinterpret_cast<uintptr_t>(stream), queue_id);
     auto [it, ins] = stream_lane_idx.emplace(key, next_stream_lane);
     if (ins) ++next_stream_lane;
     return it->second;
@@ -1921,7 +1936,7 @@ void WriteProtoTraceImpl(const char* filepath) {
         uint64_t lane = compact_stream_lane(rec.stream, gop.queue_id);
         uint64_t gtid = lane * 2 + sdma;
         device_gpu_tids[static_cast<int>(gop.device_id)].insert(gtid);
-        if (rec.stream) gpu_tid_stream[{static_cast<int>(gop.device_id), gtid}] = rec.stream;
+        if (rec.stream) gpu_tid_stream[{static_cast<int>(gop.device_id), gtid}] = {rec.stream, gop.queue_id};
       };
       scan(rec.gpu);
       for (const hipGpuActivityExt* n = rec.gpu.next; n; n = n->next) scan(*n);
@@ -2085,10 +2100,12 @@ void WriteProtoTraceImpl(const char* filepath) {
       bool is_sdma = (gtid & 1) != 0;
       std::string lane;
       auto sit = gpu_tid_stream.find({dev_id, gtid});
-      if (sit != gpu_tid_stream.end() && sit->second) {
+      if (sit != gpu_tid_stream.end() && sit->second.stream) {
         char buf[32]; snprintf(buf, sizeof(buf), "0x%llx",
-          static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(sit->second)));
-        lane = std::string("Stream ") + buf + (is_sdma ? " [DMA]" : "");
+          static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(sit->second.stream)));
+        lane = std::string("Stream ") + buf;
+        lane += " [" + std::to_string(sit->second.queue_id) + "]";
+        if (is_sdma) lane += " [DMA]";
       } else {
         lane = std::string(is_sdma ? "SDMA " : "Compute ") + std::to_string(gtid / 2);
       }
@@ -2384,10 +2401,10 @@ static std::string AddPidToPath(const std::string& path) {
 // Drains all queues when profiling was active; writes trace if GPU_CLR_PROFILE_OUTPUT is set.
 static void ProfilerAtExit() {
 #if !defined(_WIN32)
-  // Drain in-flight GPU work whenever profiling was active (env var or API),
-  // so all ReportActivity callbacks arrive before we serialise records.
+  // Drain all in-flight GPU work and async handlers unconditionally so that
+  // all ReportActivity callbacks complete before we serialise records.
   // Skipped on Windows where KFD streams may already be partially torn down.
-  if (IsProfilingActive()) DrainAllDevices();
+  DrainAllDevices();
 #endif
 
   // Stop the chunk delivery thread (if running) and flush all remaining records.

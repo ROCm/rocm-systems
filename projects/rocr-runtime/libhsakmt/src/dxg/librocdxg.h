@@ -114,6 +114,7 @@ struct hsakmtRuntime {
 
   size_t max_single_alloc_size;
   uint32_t default_node;
+  D3DKMT_DRIVERVERSION wddm_version = static_cast<D3DKMT_DRIVERVERSION>(0);
 
   /* local heap means bo's backend is vram of all GPUs */
   uint64_t local_heap_space_start_;
@@ -300,7 +301,8 @@ uint32_t get_vgpr_size_per_cu(HSA_ENGINE_ID id);
 bool is_ipc_sysmemfd(uint64_t fd);
 
 HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va, bool is_ipc_memfd,
-                               wsl::thunk::GpuMemoryHandle* GpuMemHandle, bool is_kmt_handle);
+                               wsl::thunk::GpuMemoryHandle* GpuMemHandle, bool is_kmt_handle,
+                               uint64_t size_hint = 0);
 
 bool hsakmt_hsa_loader_init();
 

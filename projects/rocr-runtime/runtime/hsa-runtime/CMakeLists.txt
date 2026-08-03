@@ -198,13 +198,19 @@ if ( CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   endif()
 endif()
 
+## UndefinedBehaviorSanitizer flags
+if ( UNDEFINED_SANITIZER OR THEROCK_SANITIZER STREQUAL "UBSAN" OR DEFINED ENV{UNDEFINED_SANITIZER} OR "$ENV{THEROCK_SANITIZER}" STREQUAL "UBSAN" )
+  set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -fsanitize=undefined -fsanitize-recover=undefined -g )
+  set ( HSA_SHARED_LINK_FLAGS "${HSA_SHARED_LINK_FLAGS} -fsanitize=undefined" )
+  message(STATUS "hsa-runtime64: UndefinedBehaviorSanitizer (UBSAN) enabled")
+endif()
+
 if (UNIX)
   set ( LNKSCR "hsacore.so.link" )
   set ( DRVDEF "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.so.def" )
-  set(HSA_SHARED_LINK_FLAGS "-Wl,-Bdynamic -Wl,-z,noexecstack -Wl,${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR} -Wl,--version-script=${DRVDEF} -Wl,--enable-new-dtags")
+  set(HSA_SHARED_LINK_FLAGS "-Wl,-Bdynamic -Wl,-z,noexecstack -Wl,${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR} -Wl,--version-script=${DRVDEF} -Wl,--enable-new-dtags ${HSA_SHARED_LINK_FLAGS}")
 else()
   target_sources(${CORE_RUNTIME_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.dll.def")
-  set(HSA_SHARED_LINK_FLAGS "")
 endif()
 
 target_compile_options(${CORE_RUNTIME_TARGET} PRIVATE ${HSA_CXX_FLAGS})
@@ -232,6 +238,8 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/amd_topology.cpp
            core/runtime/default_signal.cpp
            core/runtime/host_queue.cpp
+           core/runtime/hotswap.cpp
+           core/runtime/hotswap_gfx_query.cpp
            core/runtime/hsa.cpp
            core/runtime/hsa_api_trace.cpp
            core/runtime/hsa_ext_amd.cpp
@@ -449,11 +457,7 @@ endif()
 
 ## Set install information
 # Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
-if (WIN32)
-  install ( TARGETS ${CORE_RUNTIME_TARGET} EXPORT ${CORE_RUNTIME_NAME}Targets
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT binary )
-else()
+if (NOT WIN32)
   install ( TARGETS ${CORE_RUNTIME_TARGET} EXPORT ${CORE_RUNTIME_NAME}Targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
@@ -466,18 +470,22 @@ endif()
 if(ENABLE_ASAN_PACKAGING)
   install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan )
 endif()
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary )
+if (NOT WIN32)
+  install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary )
+endif()
 
 # Install public headers
 install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/inc/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hsa COMPONENT dev )
 
 ## Configure and install package config file
 # Record our usage data for clients find_package calls.
-install ( EXPORT ${CORE_RUNTIME_NAME}Targets
-  FILE ${CORE_RUNTIME_NAME}Targets.cmake
-  NAMESPACE ${CORE_RUNTIME_NAME}::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
-  COMPONENT dev)
+if (NOT WIN32)
+  install ( EXPORT ${CORE_RUNTIME_NAME}Targets
+    FILE ${CORE_RUNTIME_NAME}Targets.cmake
+    NAMESPACE ${CORE_RUNTIME_NAME}::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
+    COMPONENT dev)
+endif()
 
 # Adds the target alias hsa-runtime64::hsa-runtime64 to the local cmake cache.
 # This isn't necessary today.  It's harmless preparation for some
@@ -497,9 +505,11 @@ configure_package_config_file(${CORE_RUNTIME_NAME}-config.cmake.in
 write_basic_package_version_file(${CORE_RUNTIME_NAME}-config-version.cmake
   VERSION ${SO_VERSION_STRING} COMPATIBILITY AnyNewerVersion )
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config-version.cmake
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
-  COMPONENT dev)
+if (NOT WIN32)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config-version.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
+    COMPONENT dev)
+endif()
 
 # Install build files needed only when using a static build.
 if( NOT ${BUILD_SHARED_LIBS} )

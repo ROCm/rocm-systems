@@ -70,10 +70,10 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   NTSTATUS ret = ParseDeviceInfo();
   pr_rocr_info("kmd_version:%" PRIu32 "\n", device_info_.kmd_version);
   device_info_.hwsInfo.hwsMask.aql_queue &= !dxg_runtime->use_pm4_;
-  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d use_pm4_override=%d\n",
+  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d use_pm4_override=%" PRIu64 "\n",
            device_info_.hwsInfo.hwsMask.aql_queue,
            device_info_.hwsInfo.hwsMask.computeHwsEnabled,
-           dxg_runtime->use_pm4_);
+           (uint64_t)dxg_runtime->use_pm4_);
 
   if (ret == STATUS_OBJECT_NAME_NOT_FOUND || ret == STATUS_REVISION_MISMATCH) {
     // Skip adapter
@@ -86,6 +86,12 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
     init_status_ = kDeviceFailed;
     return;
   }
+
+  unsigned ver = static_cast<unsigned>(dxg_runtime->wddm_version);
+  if (ver)
+    pr_rocr_info("WDDM version %u.%u\n", ver / 1000, (ver % 1000) / 100);
+  else
+    pr_rocr_info("WDDM version: unknown\n");
 
   CreateDevice();
   SetPowerOptimization(false);
@@ -181,16 +187,145 @@ bool WDDMDevice::FindSegmentId(SegmentKind segment_kind, uint32_t* segment_id)
   return false;
 }
 
+hsa_status_t WDDMDevice::QuerySegmentBytesResident(
+    uint32_t segment_id, uint64_t* bytes_resident) const {
+  D3DKMT_QUERYSTATISTICS stats = {};
+  stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+  stats.AdapterLuid = adapter_luid_;
+  stats.QuerySegment.SegmentId = segment_id;
+
+  NTSTATUS ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
+  if (ret != STATUS_SUCCESS) {
+    *bytes_resident = 0;
+    return HSA_STATUS_ERROR;
+  }
+
+  *bytes_resident = stats.QueryResult.SegmentInformation.BytesResident;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t WDDMDevice::QuerySegmentGroupUsage(
+    uint32_t segment_group, uint64_t* bytes_allocated) const {
+  *bytes_allocated = 0;
+
+  if (dxg_runtime->wddm_version < KMT_DRIVERVERSION_WDDM_3_1)
+    return HSA_STATUS_ERROR;
+
+  D3DKMT_QUERYSTATISTICS stats = {};
+  stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT_GROUP_USAGE;
+  stats.AdapterLuid = adapter_luid_;
+  stats.QuerySegmentGroupUsage.PhysicalAdapterIndex = 0;
+  stats.QuerySegmentGroupUsage.SegmentGroup =
+      static_cast<UINT16>(segment_group);
+
+  NTSTATUS ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
+  if (ret != STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  *bytes_allocated =
+      stats.QueryResult.SegmentGroupUsageInformation.AllocatedBytes;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t WDDMDevice::QueryLocalVramUsage(uint64_t* usage_bytes) {
+  *usage_bytes = 0;
+
+  if (dxg_runtime->wddm_version >= KMT_DRIVERVERSION_WDDM_3_1 &&
+      QuerySegmentGroupUsage(D3DKMT_MEMORY_SEGMENT_GROUP_LOCAL,
+                             usage_bytes) == HSA_STATUS_SUCCESS)
+    return HSA_STATUS_SUCCESS;
+
+  uint32_t visible_segment_id = 0;
+  if (!FindSegmentId(SegmentKind::kLocalMemory, &visible_segment_id))
+    return HSA_STATUS_ERROR;
+
+  hsa_status_t ret =
+      QuerySegmentBytesResident(visible_segment_id, usage_bytes);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
+
+  if (!LocalInvisibleHeapSize())
+    return HSA_STATUS_SUCCESS;
+
+  uint32_t invisible_segment_id = 0;
+  bool found_invisible = false;
+  for (const auto& seg_info : segment_infos_) {
+    if (seg_info.kind == SegmentKind::kLocalMemory &&
+        seg_info.segment_id > visible_segment_id) {
+      invisible_segment_id = seg_info.segment_id;
+      found_invisible = true;
+      break;
+    }
+  }
+
+  if (!found_invisible)
+    return HSA_STATUS_ERROR;
+
+  uint64_t invisible_usage = 0;
+  ret = QuerySegmentBytesResident(invisible_segment_id, &invisible_usage);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
+
+  *usage_bytes += invisible_usage;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t WDDMDevice::QueryNonLocalVramUsage(
+    uint64_t* usage_bytes) const {
+  *usage_bytes = 0;
+
+  if (dxg_runtime->wddm_version >= KMT_DRIVERVERSION_WDDM_3_1 &&
+      QuerySegmentGroupUsage(D3DKMT_MEMORY_SEGMENT_GROUP_NON_LOCAL,
+                             usage_bytes) == HSA_STATUS_SUCCESS)
+    return HSA_STATUS_SUCCESS;
+
+  bool found_segment = false;
+  for (const auto& seg_info : segment_infos_) {
+    if (!seg_info.is_aperture || !seg_info.is_system_memory)
+      continue;
+
+    found_segment = true;
+    uint64_t segment_usage = 0;
+    hsa_status_t ret =
+        QuerySegmentBytesResident(seg_info.segment_id, &segment_usage);
+    if (ret != HSA_STATUS_SUCCESS)
+      return ret;
+    *usage_bytes += segment_usage;
+  }
+
+  return found_segment ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+}
+
+uint64_t WDDMDevice::VramTotal() {
+  uint64_t total = LocalHeapSize();
+  if (!IsDgpu())
+    total += NonLocalHeapSize();
+  return total;
+}
+
+hsa_status_t WDDMDevice::QueryVramUsage(uint64_t* usage_bytes) {
+  hsa_status_t ret = QueryLocalVramUsage(usage_bytes);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
+
+  if (IsDgpu())
+    return HSA_STATUS_SUCCESS;
+
+  uint64_t used_non_local = 0;
+  ret = QueryNonLocalVramUsage(&used_non_local);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
+
+  *usage_bytes += used_non_local;
+  return HSA_STATUS_SUCCESS;
+}
+
 /*Local heap(dedicated GPU memory) includes visible heap and invisible heap.
  *Non local heap refers to shared GPU memory and it is system memory.
  */
 hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
-  D3DKMT_QUERYSTATISTICS stats;
-  NTSTATUS ret;
-  uint64_t usedVis = 0;
-  uint64_t usedInv = 0;
-  uint64_t usedNonLocal = 0;
-  uint32_t segmentId = 0;
+  if (!available_bytes)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   *available_bytes = 0;
 
@@ -199,87 +334,13 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
   if (!CpuWait(&page_syncobj_, &value, 1, false))
     return HSA_STATUS_ERROR;
 
-  if (IsDgpu()) {
-    // local cpu-visible memory
-    if (!FindSegmentId(SegmentKind::kLocalMemory, &segmentId))
-      return HSA_STATUS_ERROR;
+  uint64_t used = 0;
+  hsa_status_t ret = QueryVramUsage(&used);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
 
-    memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-    stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-    stats.AdapterLuid = adapter_luid_;
-    stats.QuerySegment.SegmentId = segmentId;
-    ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-    if (ret == 0)
-      usedVis = stats.QueryResult.SegmentInformation.BytesResident;
-
-    // local invisible memory
-    if (device_info_.local_invisible_heap_size) {
-      uint32_t invisibleSegmentId = 0;
-      bool foundInvisible = false;
-      // Use the next local-memory segment after visible FB as invisible FB.
-      for (const auto& seg_info : segment_infos_) {
-        if (seg_info.kind == SegmentKind::kLocalMemory &&
-            seg_info.segment_id > segmentId) {
-          invisibleSegmentId = seg_info.segment_id;
-          foundInvisible = true;
-          break;
-        }
-      }
-
-      if (!foundInvisible) {
-        return HSA_STATUS_ERROR;
-      }
-      memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-      stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-      stats.AdapterLuid = adapter_luid_;
-      stats.QuerySegment.SegmentId = invisibleSegmentId;
-
-      ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-      if (ret == 0)
-        usedInv = stats.QueryResult.SegmentInformation.BytesResident;
-    }
-
-    *available_bytes = LocalHeapSize() - usedVis - usedInv;
-  } else {
-    // APU: the shared-system-memory budget is exposed as aperture segments
-    // with the SystemMemory bit set (collapsed to kAperture above), so
-    // FindSegmentId(kSystemMemory) always missed. Sum BytesResident across
-    // every aperture+system_memory segment for the residency footprint.
-    const uint64_t budget = NonLocalHeapSize();
-    if (budget == 0) {
-      // No budget from WKMI — bail rather than underflow VramAvail.
-      return HSA_STATUS_ERROR;
-    }
-
-    bool found_any = false;
-    bool queried_any = false;
-    for (const auto& seg_info : segment_infos_) {
-      if (!seg_info.is_aperture || !seg_info.is_system_memory) {
-        continue;
-      }
-      found_any = true;
-
-      memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-      stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-      stats.AdapterLuid = adapter_luid_;
-      stats.QuerySegment.SegmentId = seg_info.segment_id;
-      ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-      if (ret != 0) {
-        continue;
-      }
-      queried_any = true;
-      usedNonLocal += stats.QueryResult.SegmentInformation.BytesResident;
-    }
-
-    if (!found_any || !queried_any) {
-      return HSA_STATUS_ERROR;
-    }
-
-    // Virtual apertures can double-count residency — saturate at zero
-    // instead of underflowing.
-    *available_bytes = (usedNonLocal >= budget) ? 0 : (budget - usedNonLocal);
-  }
-
+  const uint64_t total = VramTotal();
+  *available_bytes = used >= total ? 0 : total - used;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -616,6 +677,14 @@ uint32_t WDDMDevice::LdsBlocks(const hsa_kernel_dispatch_packet_t *pkt) {
   return blk_num;
 }
 
+static void QueryWddmVersion(D3DKMT_HANDLE adapter) {
+  D3DKMT_DRIVERVERSION version = static_cast<D3DKMT_DRIVERVERSION>(0);
+
+  if (WDDMQueryAdapter(adapter, KMTQAITYPE_DRIVERVERSION, &version,
+                       sizeof(version)) == STATUS_SUCCESS)
+    dxg_runtime->wddm_version = version;
+}
+
 NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
 {
   bool supported = false;
@@ -638,6 +707,9 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
   ret = DXCORE_CALL(D3DKMTEnumAdapters3(&args));
   if (ret != STATUS_SUCCESS)
     goto err_out0;
+
+  if (args.NumAdapters > 0)
+    QueryWddmVersion(info[0].hAdapter);
 
   for (int i = 0; i < args.NumAdapters; i++) {
     D3DKMT_QUERY_DEVICE_IDS query = {0};

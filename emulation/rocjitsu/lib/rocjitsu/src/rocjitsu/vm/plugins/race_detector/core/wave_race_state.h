@@ -21,7 +21,7 @@ class RaceDetector;
 /// event allocation and lifecycle transitions.
 class WaveRaceState {
 public:
-  WaveRaceState(int vgprCount, int sgprCount, WaveId waveId, RaceDetector *detector);
+  WaveRaceState(int vgprCount, int sgprCount, WaveId, RaceDetector *);
 
   /// Register an in-flight memory event that does not involve LDS.
   /// \param pc The PC of the instruction that produced the event.
@@ -58,16 +58,26 @@ public:
   void sWaitCntLgkmcnt(int lgkmcnt);
 
   /// Dispatch a pending memory event produced by an instruction executor.
-  void dispatch(PendingMemoryEvent event);
+  void dispatch(PendingMemoryEvent);
 
   /// Dispatch a pending wait count produced by an s_waitcnt executor.
-  void dispatch(PendingWaitCount waitCount);
+  void dispatch(PendingWaitCount);
 
-  /// Discard all wave-complete events (called when all waves reach barrier).
-  void flushWaveCompleteMemoryEvents();
+  /// Retire non-trimmable events whose owning wave completed them before a workgroup barrier.
+  void flushBarrierPendingEvents();
 
   /// Check a full VGPR read for races. Calls the RaceHandler on violation.
   void checkVgprRead(int reg, int lane, uint8_t byteMask) const;
+
+  /// Check a VGPR read by a set of lanes for races. Calls the RaceHandler on violation.
+  void checkVgprReadLanes(int reg, uint64_t laneMask, uint8_t byteMask) const;
+
+  /// Check a VGPR instruction write for conflicts with pending asynchronous
+  /// loads targeting the same register bytes and lanes.
+  void checkVgprWrite(int reg, int lane, uint8_t byteMask) const;
+
+  /// Mask-based counterpart of checkVgprWrite().
+  void checkVgprWriteLanes(int reg, uint64_t laneMask, uint8_t byteMask) const;
 
   /// Check all lanes of a VGPR for races (used by bulk register reads).
   void checkVgprReadAllLanes(int reg) const;
@@ -88,9 +98,7 @@ public:
 
   const std::vector<EventId> &getWaveMemoryEvents() const { return waveMemoryEvents; }
 
-  const std::vector<EventId> &getWaveCompleteMemoryEvents() const {
-    return waveCompleteMemoryEvents;
-  }
+  const std::vector<EventId> &getBarrierPendingEvents() const { return barrierPendingEvents; }
 
   RaceDetector *getDetector() { return detector; }
   const RaceDetector *getDetector() const { return detector; }
@@ -100,9 +108,8 @@ public:
   WaveId getWaveId() const { return waveId; }
 
 private:
-  void registerEventWithIntervals(uint64_t pc, MemoryEventType type,
-                                  std::vector<uint32_t> registers, uint64_t execMask,
-                                  uint8_t byteMask, IntervalSet ldsIntervals);
+  void registerEventWithIntervals(uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
+                                  uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals);
   void retireEventRegisters(EventId);
 
   template <typename Pred> void resolveWaitCnt(int limit, Pred isTargetType);
@@ -122,7 +129,7 @@ private:
   std::array<std::vector<int>, kNumEventTypes> regEventCount;
 
   std::vector<EventId> waveMemoryEvents;
-  std::vector<EventId> waveCompleteMemoryEvents;
+  std::vector<EventId> barrierPendingEvents;
 
   WaveId waveId;
   RaceDetector *detector;
