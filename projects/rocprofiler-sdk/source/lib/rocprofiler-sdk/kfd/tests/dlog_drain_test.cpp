@@ -516,7 +516,10 @@ TEST(dlog_ring_size, snap_yields_a_driver_legal_size)
         EXPECT_GE(sz, kDlogMinRingBytes);
         EXPECT_LE(sz, kDlogMaxRingBytes);
         EXPECT_LE(sz, 0xFFFFFFFFull);                       // uint32 buffer_size field
-        if(want >= kDlogMinRingBytes) EXPECT_LE(sz, want);  // never rounds up
+        if(want >= kDlogMinRingBytes)
+        {
+            EXPECT_LE(sz, want);  // never rounds up
+        }
         EXPECT_EQ(sz % 80u, 0u);
 
         // region_record_count is a power of two and within 2^24 under both counts.
