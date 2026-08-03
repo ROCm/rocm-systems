@@ -3654,7 +3654,6 @@ typedef union rocprofiler_hip_api_args_t
         hipMemcpyAttributes* attrs;
         size_t*              attrsIdxs;
         size_t               numAttrs;
-        size_t*              failIdx;
         hipStream_t          stream;
     } hipExtMemcpyBatchAsync;
 #endif

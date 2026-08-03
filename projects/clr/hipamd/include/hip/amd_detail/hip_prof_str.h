@@ -2079,8 +2079,6 @@ typedef struct hip_api_data_s {
       size_t* attrsIdxs;
       size_t attrsIdxs__val;
       size_t numAttrs;
-      size_t* failIdx;
-      size_t failIdx__val;
       hipStream_t stream;
     } hipExtMemcpyBatchAsync;
     struct {
@@ -5011,7 +5009,7 @@ typedef struct hip_api_data_s {
   cb_data.args.hipExtMallocWithFlags.sizeBytes = (size_t)sizeBytes; \
   cb_data.args.hipExtMallocWithFlags.flags = (unsigned int)flags; \
 };
-// hipExtMemcpyBatchAsync[('void**', 'dsts'), ('void**', 'srcs'), ('size_t*', 'sizesA'), ('size_t*', 'sizesB'), ('hipExtMemcpyWait*', 'waits'), ('hipExtMemcpySignal*', 'signals'), ('hipExtMemcpyOp*', 'ops'), ('size_t', 'count'), ('hipMemcpyAttributes*', 'attrs'), ('size_t*', 'attrsIdxs'), ('size_t', 'numAttrs'), ('size_t*', 'failIdx'), ('hipStream_t', 'stream')]
+// hipExtMemcpyBatchAsync[('void**', 'dsts'), ('void**', 'srcs'), ('size_t*', 'sizesA'), ('size_t*', 'sizesB'), ('hipExtMemcpyWait*', 'waits'), ('hipExtMemcpySignal*', 'signals'), ('hipExtMemcpyOp*', 'ops'), ('size_t', 'count'), ('hipMemcpyAttributes*', 'attrs'), ('size_t*', 'attrsIdxs'), ('size_t', 'numAttrs'), ('hipStream_t', 'stream')]
 #define INIT_hipExtMemcpyBatchAsync_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipExtMemcpyBatchAsync.dsts = (void**)dsts; \
   cb_data.args.hipExtMemcpyBatchAsync.srcs = (void**)srcs; \
@@ -5024,7 +5022,6 @@ typedef struct hip_api_data_s {
   cb_data.args.hipExtMemcpyBatchAsync.attrs = (hipMemcpyAttributes*)attrs; \
   cb_data.args.hipExtMemcpyBatchAsync.attrsIdxs = (size_t*)attrsIdxs; \
   cb_data.args.hipExtMemcpyBatchAsync.numAttrs = (size_t)numAttrs; \
-  cb_data.args.hipExtMemcpyBatchAsync.failIdx = (size_t*)failIdx; \
   cb_data.args.hipExtMemcpyBatchAsync.stream = (hipStream_t)stream; \
 };
 // hipExtModuleLaunchKernel[('hipFunction_t', 'f'), ('unsigned int', 'globalWorkSizeX'), ('unsigned int', 'globalWorkSizeY'), ('unsigned int', 'globalWorkSizeZ'), ('unsigned int', 'localWorkSizeX'), ('unsigned int', 'localWorkSizeY'), ('unsigned int', 'localWorkSizeZ'), ('size_t', 'sharedMemBytes'), ('hipStream_t', 'hStream'), ('void**', 'kernelParams'), ('void**', 'extra'), ('hipEvent_t', 'startEvent'), ('hipEvent_t', 'stopEvent'), ('unsigned int', 'flags')]
@@ -7856,7 +7853,7 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipExtMallocWithFlags:
       if (data->args.hipExtMallocWithFlags.ptr) data->args.hipExtMallocWithFlags.ptr__val = *(data->args.hipExtMallocWithFlags.ptr);
       break;
-// hipExtMemcpyBatchAsync[('void**', 'dsts'), ('void**', 'srcs'), ('size_t*', 'sizesA'), ('size_t*', 'sizesB'), ('hipExtMemcpyWait*', 'waits'), ('hipExtMemcpySignal*', 'signals'), ('hipExtMemcpyOp*', 'ops'), ('size_t', 'count'), ('hipMemcpyAttributes*', 'attrs'), ('size_t*', 'attrsIdxs'), ('size_t', 'numAttrs'), ('size_t*', 'failIdx'), ('hipStream_t', 'stream')]
+// hipExtMemcpyBatchAsync[('void**', 'dsts'), ('void**', 'srcs'), ('size_t*', 'sizesA'), ('size_t*', 'sizesB'), ('hipExtMemcpyWait*', 'waits'), ('hipExtMemcpySignal*', 'signals'), ('hipExtMemcpyOp*', 'ops'), ('size_t', 'count'), ('hipMemcpyAttributes*', 'attrs'), ('size_t*', 'attrsIdxs'), ('size_t', 'numAttrs'), ('hipStream_t', 'stream')]
     case HIP_API_ID_hipExtMemcpyBatchAsync:
       if (data->args.hipExtMemcpyBatchAsync.dsts) data->args.hipExtMemcpyBatchAsync.dsts__val = *(data->args.hipExtMemcpyBatchAsync.dsts);
       if (data->args.hipExtMemcpyBatchAsync.srcs) data->args.hipExtMemcpyBatchAsync.srcs__val = *(data->args.hipExtMemcpyBatchAsync.srcs);
@@ -7867,7 +7864,6 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipExtMemcpyBatchAsync.ops) data->args.hipExtMemcpyBatchAsync.ops__val = *(data->args.hipExtMemcpyBatchAsync.ops);
       if (data->args.hipExtMemcpyBatchAsync.attrs) data->args.hipExtMemcpyBatchAsync.attrs__val = *(data->args.hipExtMemcpyBatchAsync.attrs);
       if (data->args.hipExtMemcpyBatchAsync.attrsIdxs) data->args.hipExtMemcpyBatchAsync.attrsIdxs__val = *(data->args.hipExtMemcpyBatchAsync.attrsIdxs);
-      if (data->args.hipExtMemcpyBatchAsync.failIdx) data->args.hipExtMemcpyBatchAsync.failIdx__val = *(data->args.hipExtMemcpyBatchAsync.failIdx);
       break;
 // hipExtModuleLaunchKernel[('hipFunction_t', 'f'), ('unsigned int', 'globalWorkSizeX'), ('unsigned int', 'globalWorkSizeY'), ('unsigned int', 'globalWorkSizeZ'), ('unsigned int', 'localWorkSizeX'), ('unsigned int', 'localWorkSizeY'), ('unsigned int', 'localWorkSizeZ'), ('size_t', 'sharedMemBytes'), ('hipStream_t', 'hStream'), ('void**', 'kernelParams'), ('void**', 'extra'), ('hipEvent_t', 'startEvent'), ('hipEvent_t', 'stopEvent'), ('unsigned int', 'flags')]
     case HIP_API_ID_hipExtModuleLaunchKernel:
@@ -10147,8 +10143,6 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipExtMemcpyBatchAsync.attrsIdxs == NULL) oss << ", attrsIdxs=NULL";
       else { oss << ", attrsIdxs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtMemcpyBatchAsync.attrsIdxs__val); }
       oss << ", numAttrs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtMemcpyBatchAsync.numAttrs);
-      if (data->args.hipExtMemcpyBatchAsync.failIdx == NULL) oss << ", failIdx=NULL";
-      else { oss << ", failIdx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtMemcpyBatchAsync.failIdx__val); }
       oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtMemcpyBatchAsync.stream);
       oss << ")";
     break;

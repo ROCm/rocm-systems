@@ -6203,7 +6203,7 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
  * @param [in] sizesB      - Array of B-side sizes for swap (NULL = symmetric).
  *                            For each swap entry, sizesB[i] must be non-zero and
  *                            <= sizesA[i], otherwise hipErrorInvalidValue is
- *                            returned and failIdx is set to that entry.
+ *                            returned.
  * @param [in] waits       - Reserved for future use. Must be NULL.
  * @param [in] signals     - Reserved for future use. Must be NULL.
  * @param [in] ops         - Per-entry operation type. When non-NULL, ops[] is
@@ -6215,10 +6215,6 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
  * @param [in] attrs       - Array of hipMemcpyAttributes (CUDA-compatible fields).
  * @param [in] attrsIdxs   - Array mapping attributes to copy index ranges.
  * @param [in] numAttrs    - Number of entries in attrs/attrsIdxs.
- * @param [out] failIdx    - Set to the index of the first entry that fails
- *                            per-entry validation; set to SIZE_MAX when the
- *                            failure is not tied to a specific entry. Only
- *                            meaningful when the call returns an error.
  * @param [in] stream      - Stream to execute on.
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported,
@@ -6231,7 +6227,7 @@ hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
                                   hipExtMemcpyOp* ops,
                                   size_t count,
                                   hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
-                                  size_t* failIdx, hipStream_t stream __dparm(0));
+                                  hipStream_t stream __dparm(0));
 
 /**
  * @brief Perform Batch of 3D copies
