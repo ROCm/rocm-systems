@@ -124,9 +124,9 @@ enum DbtExecutionBackend: byte {
 }
 
 /// Silicon revision for a DBT translation side. gfx1250 A0 and B0 share an ELF
-/// machine ID but require different translation workarounds, so the revision is
-/// carried out of band. `unspecified` is the default for architectures whose
-/// machine ID already identifies the silicon.
+/// machine ID, so the revision is carried out of band and selects the
+/// corresponding translation profile. `unspecified` is the default for
+/// architectures whose machine ID identifies the silicon.
 enum DbtSiliconRevision: byte {
   unspecified,
   gfx1250_a0,
@@ -234,7 +234,7 @@ table TopologyDef {
 /// Top-level simulation configuration.
 table SimulationConfig {
   max_ticks: uint64;             // Maximum simulation ticks before halting.
-  num_threads: uint32;           // Number of simulation threads (partitions).
+  num_threads: uint32;           // Number of simulation engine partitions (one per XCD when partitioned).
   exec_mode: string;             // Execution mode: "functional" (default) or "clocked".
   vm: VirtualMachineConfig;      // Virtual machine hardware model. Omit for dbt_guest-only configs.
   topology: TopologyDef;         // Declarative topology. Omit for dbt_guest-only configs.

@@ -481,11 +481,14 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
     end = std::max(sig_end, end);
   }
 
-  // Handle AccumulateCommand timestamps (convert ticks to system time)
+  // Handle AccumulateCommand timestamps (convert ticks to system time).
+  // Pass signal->queue_index_ so ReportActivity can assign each kernel to
+  // the internal parallel stream it actually ran on, not the launch stream.
   if ((command().type() == CL_COMMAND_TASK) && (signal->flags_.isPacketDispatch_ == true)) {
     static_cast<amd::AccumulateCommand&>(command()).addTimestamps(
         static_cast<uint64_t>(sig_start * ticksToTime_),
-        static_cast<uint64_t>(sig_end * ticksToTime_));
+        static_cast<uint64_t>(sig_end * ticksToTime_),
+        signal->queue_index_);
   }
 
   signal->flags_.done_ = true;
@@ -3414,7 +3417,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
 
       if (p2pAllowed) {
         result = blitMgr().copyBuffer(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size,
-                                      cmd.isEntireMemory());
+                                      cmd.isEntireMemory(), cmd.copyMetadata());
       } else {
         // Sync the current queue, since P2P staging uses the device queues for transfer
         releaseGpuMemoryFence();
@@ -3438,10 +3441,12 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
 
           // Perform 2 step transfer with staging buffer
           result &= srcDevMem->dev().xferMgr().copyBuffer(*srcDevMem, *dstStgMem, srcOrigin,
-                                                          stageOffset, cpSize);
+                                                          stageOffset, cpSize, false,
+                                                          cmd.copyMetadata());
           srcOrigin.c[0] += copy_size;
           result &= dstDevMem->dev().xferMgr().copyBuffer(*srcStgMem, *dstDevMem, stageOffset,
-                                                          dstOrigin, cpSize);
+                                                          dstOrigin, cpSize, false,
+                                                          cmd.copyMetadata());
           dstOrigin.c[0] += copy_size;
         } while (left_size > 0);
       }
@@ -3570,11 +3575,17 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
     result = false;
   }
 
-  // Synchronize the launch (compute) stream with SDMA engines.
-  // WaitingSignal(Compute) inside dispatchBarrierPacket detects the engine switch
-  // from SDMA→Compute, collects the SDMA completion signal as a barrier dependency,
-  // and updates engine_ to Compute before ActiveSignal tags the profiling signal.
-  if (result) {
+  // copyBufferBatch records every completion signal it produced. The last one sits at
+  // current_id_ and is attached to this command; any signals that are not implicitly
+  // ordered behind it (mixed shader + SDMA paths, or multiple SDMA engine groups running
+  // in parallel) are queued as external signals. Only then is a barrier needed, to join
+  // them into a single completion signal for this command -- otherwise the next command's
+  // profilingBegin() clears those external signals and the dependency is lost.
+  //
+  // When there are no extra signals (e.g. a pure P2P/D2D batch that collapses to one
+  // engine-group op), the sole completion signal already represents the whole batch and
+  // the next op waits on it through the engine switch, so the barrier is pure overhead.
+  if (result && !Barriers().IsExternalSignalListEmpty()) {
     dispatchBarrierPacket(kNopPacketHeader);
   }
 
@@ -4189,6 +4200,11 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
       constexpr bool kImportVmmForInterprocess = true;
       dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj, const_cast<void*>(vcmd.ptr()),
                                          kImportVmmForInterprocess);
+      // The VA is now backed, so the true owning agent (a peer device for imported memory)
+      // can finally be resolved. create() ran before the mapping existed, so cache it now.
+      if (auto* devMem = static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(dev()))) {
+        devMem->refreshOwningAgentFromPointerInfo();
+      }
     } else {
       LogError("HSA Command: hsa_amd_vmem_map failed!");
     }
@@ -5343,12 +5359,66 @@ void *VirtualGPU::getOrCreateHostcallBuffer() {
   }
   hostcallBufferSize_ = size;
 
+#ifdef USE_NEW_HOSTCALL_IMPL
+  uint32_t occupiedWords = (numPackets + 31) / 32;
+  size_t occupiedSize = occupiedWords * sizeof(uint32_t);
+  amd::Buffer* occupiedBuf =
+      new (dev().context()) amd::Buffer(dev().context(), CL_MEM_READ_WRITE, occupiedSize, nullptr);
+  if (occupiedBuf == nullptr || !occupiedBuf->create()) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to allocate occupied bitfield for hostcall buffer");
+    if (occupiedBuf != nullptr) {
+      occupiedBuf->release();
+    }
+    dev().hostFree(hostcallBuffer_, hostcallBufferSize_);
+    hostcallBuffer_ = nullptr;
+    hostcallBufferSize_ = 0;
+    return nullptr;
+  }
+
+  device::Memory* occupiedMem = occupiedBuf->getDeviceMemory(dev());
+  if (occupiedMem == nullptr || occupiedMem->virtualAddress() == 0) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to get device memory for hostcall occupied bitfield");
+    occupiedBuf->release();
+    dev().hostFree(hostcallBuffer_, hostcallBufferSize_);
+    hostcallBuffer_ = nullptr;
+    hostcallBufferSize_ = 0;
+    return nullptr;
+  }
+
+  uint32_t zero = 0;
+  // xferMgr() is synchronous, so the fill completes before any kernel reads it.
+  if (!dev().xferMgr().fillBuffer(*occupiedMem, &zero, sizeof(zero), amd::Coord3D(occupiedSize, 1, 1),
+                                  amd::Coord3D(0, 0, 0), amd::Coord3D(occupiedSize, 1, 1), true)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to zero-initialize hostcall occupied bitfield");
+    occupiedBuf->release();
+    dev().hostFree(hostcallBuffer_, hostcallBufferSize_);
+    hostcallBuffer_ = nullptr;
+    hostcallBufferSize_ = 0;
+    return nullptr;
+  }
+
+#endif  // USE_NEW_HOSTCALL_IMPL
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
           "Created hostcall buffer %p (numPackets == %d, size == %d, align == "
           "%d) for virtual "
           "queue %p\n",
           hostcallBuffer_, numPackets, size, align, this);
 
+#ifdef USE_NEW_HOSTCALL_IMPL
+  if (!amd::enableHostcalls(dev(), hostcallBuffer_, numPackets, occupiedBuf)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to register hostcall buffer %p with listener",
+            hostcallBuffer_);
+    occupiedBuf->release();
+    dev().hostFree(hostcallBuffer_, hostcallBufferSize_);
+    hostcallBuffer_ = nullptr;
+    hostcallBufferSize_ = 0;
+    return nullptr;
+  }
+#else  // !USE_NEW_HOSTCALL_IMPL
   if (!amd::enableHostcalls(dev(), hostcallBuffer_, numPackets)) {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
             "Failed to register hostcall buffer %p with listener",
@@ -5358,6 +5428,7 @@ void *VirtualGPU::getOrCreateHostcallBuffer() {
     hostcallBufferSize_ = 0;
     return nullptr;
   }
+#endif  // USE_NEW_HOSTCALL_IMPL
   return hostcallBuffer_;
 }
 

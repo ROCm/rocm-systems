@@ -7,6 +7,7 @@
 #include "binary/symbol.hpp"
 #include "common/defines.h"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "common/units.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
@@ -354,7 +355,7 @@ experiment::as_string() const
     if(selection.symbol_address > 0 && selection.address != selection.symbol_address)
         _ss << "(symbol@" << fmt::format("0x{:X}", selection.symbol_address) << ") ";
     if(!selection.symbol.file.empty() && selection.symbol.line > 0)
-        _ss << "[" << filepath::basename(selection.symbol.file) << ":"
+        _ss << "[" << path::filename(selection.symbol.file) << ":"
             << selection.symbol.line << "]";
 
     auto _patch = [](std::string _v) {
