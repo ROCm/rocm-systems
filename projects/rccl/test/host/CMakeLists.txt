@@ -160,6 +160,7 @@ add_executable(rccl-HostUnitTests
   ${RCCL_TEST_DIR}/RomeTopoConsensusTests.cpp
   ${RCCL_TEST_DIR}/MiscTests.cpp
   ${RCCL_TEST_DIR}/VersionGateTests.cpp
+  ${RCCL_TEST_DIR}/ParamTests.cpp
   ${RCCL_TEST_DIR}/TimeoutTests.cpp
   ${RCCL_TEST_DIR}/EnqueueCountTests.cpp
   ${RCCL_TEST_DIR}/BootstrapBidirTests.cpp
@@ -168,6 +169,10 @@ add_executable(rccl-HostUnitTests
   ${RCCL_HIPIFY_DIR}/src/misc/kernel_config.cc
   ${RCCL_HIPIFY_DIR}/src/misc/alt_rsmi.cc
   ${RCCL_HIPIFY_DIR}/src/graph/rome_topo_consensus.cc
+  ${RCCL_HIPIFY_DIR}/src/misc/param.cc
+  ${RCCL_HIPIFY_DIR}/src/param/param_tmp.cc
+  ${RCCL_HIPIFY_DIR}/src/param/param_registry.cc
+  param_getters.cc
 )
 
 target_include_directories(rccl-HostUnitTests PRIVATE ${RCCL_INCLUDE_DIRS})

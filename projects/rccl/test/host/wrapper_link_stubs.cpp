@@ -43,18 +43,7 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags,
 }
 
 // --- param.cc ---
-const char* ncclGetEnv(const char* name) { return getenv(name); }
-int64_t ncclLoadParam(const char* env, int64_t deftVal, int64_t, int64_t* cache, signed char*) {
-  const char* str = ncclGetEnv(env);
-  int64_t value = deftVal;
-  if (str && strlen(str) > 0) {
-    errno = 0;
-    value = strtoll(str, nullptr, 0);
-    if (errno) value = deftVal;
-  }
-  if (cache) *cache = value;
-  return value;
-}
+// ncclGetEnv / ncclLoadParam now come from real src/misc/param.cc
 
 thread_local signed char ncclDebugNoWarn = 0;
 
