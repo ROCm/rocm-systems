@@ -396,21 +396,6 @@ public:
         else
         {
             SetGRBMToBroadcast(cmd_buffer);
-
-            if(Primitives::GFXIP_LEVEL == 11)
-            {
-                builder.BuildWriteShRegPacket(
-                    cmd_buffer, Primitives::COMPUTE_THREAD_TRACE_ENABLE_ADDR, 0);
-                WriteConfigPacket(cmd_buffer,
-                                  Primitives::SQ_THREAD_TRACE_CTRL_ADDR,
-                                  Primitives::sqtt_ctrl_value(false, false));
-                builder.BuildWriteWaitIdlePacket(cmd_buffer);
-
-                const uint32_t mask_val      = Primitives::sqtt_busy_mask();
-                auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
-                builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, true, mask_val, 0);
-            }
-
             builder.BuildWritePConfigRegPacket(
                 cmd_buffer, Primitives::SQ_THREAD_TRACE_STATUS_ADDR, 0);
 
