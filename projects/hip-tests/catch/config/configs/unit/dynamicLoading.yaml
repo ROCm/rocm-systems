@@ -3,6 +3,12 @@ dynamicLoading:
   Unit_StatCO_ConcurrentDlopenDlcloseWhileLaunching:
     <<: *level_2
     tags: [module]
+  Unit_StatCO_Positive_ManagedVariableFromRepeatedLateDlopen:
+    <<: *level_2
+    tags: [module]
+  Unit_StatCO_Positive_ManagedVariableFromRepeatedLateDlopenAcrossDevices:
+    <<: *level_2
+    tags: [module]
   Unit_dynamic_loading_device_kernels_from_library:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X

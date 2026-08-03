@@ -500,7 +500,6 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
   if (deviceId != targetDevice) {
     return hipErrorInvalidResourceHandle;
   }
-  HIP_RETURN_ONFAIL(PlatformState::Instance().StatCO().InitManagedVarDevicePtr(deviceId));
 
   if (f == nullptr) {
     LogPrintfError("%s", "Function passed is null");
@@ -536,6 +535,10 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
   }
   amd::Command* command = nullptr;
   hip::Stream* hip_stream = hip::getStream(hStream);
+  if (hip_stream == nullptr) {
+    return hipErrorInvalidResourceHandle;
+  }
+  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
   status = ihipLaunchKernelCommand(command, f, launch_params, hip_stream, kernelParams, extra,
                                    startEvent, stopEvent, flags, params, gridId, numGrids,
                                    prevGridSum, allGridSum, firstDevice);

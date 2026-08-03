@@ -8,7 +8,8 @@ if(UNIX AND BUILD_SHARED_LIBS)
       concurrentDynamicLoad.cc
       hipApiDynamicLoad.cc
       hipGetProcAddress.cc
-      hipGetProcAddressCompilerOption.cc)
+      hipGetProcAddressCompilerOption.cc
+      lateManagedVariable.cc)
 
   hip_add_exe_to_target(NAME dynamicLoading
                       TEST_SRC ${TEST_SRC}
@@ -20,6 +21,9 @@ if(UNIX AND BUILD_SHARED_LIBS)
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
     -I${Catch2_SOURCE_DIR}/src -I${Catch2_BINARY_DIR}/generated-includes
     -o libLazyLoad.so)
+    add_custom_target(libLateManagedVariable.so COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} -fPIC -shared
+    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/lateManagedVariableLibrary.cc ${HIP_PATH_OPT}
+    -o libLateManagedVariable.so)
     add_custom_target(bit_extract_kernel.code COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp ${HIP_PATH_OPT}
     -o ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/bit_extract_kernel.code
@@ -28,6 +32,9 @@ if(UNIX AND BUILD_SHARED_LIBS)
     add_custom_target(libLazyLoad.so COMMAND ${CMAKE_CUDA_COMPILER} -Xcompiler -fPIC -lpthread -shared
     -x cu ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
     -I${Catch2_SOURCE_DIR}/src -I${Catch2_BINARY_DIR}/generated-includes -I${HIP_PATH}/include/ -o libLazyLoad.so)
+    add_custom_target(libLateManagedVariable.so COMMAND ${CMAKE_CUDA_COMPILER} -Xcompiler -fPIC -shared
+    -x cu ${CMAKE_CURRENT_SOURCE_DIR}/lateManagedVariableLibrary.cc -I${HIP_PATH}/include/
+    -o libLateManagedVariable.so)
     add_custom_target(bit_extract_kernel.code COMMAND ${CMAKE_HIP_COMPILER} --fatbin
       -x cu ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp -I${HIP_PATH}/include/
       ${OFFLOAD_ARCH_LIST} -o ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/bit_extract_kernel.code
@@ -39,6 +46,7 @@ if(UNIX AND BUILD_SHARED_LIBS)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/vecadd.cc
   ${CMAKE_CURRENT_BINARY_DIR}/libLazyLoad.so
+  ${CMAKE_CURRENT_BINARY_DIR}/libLateManagedVariable.so
   ${CMAKE_CURRENT_BINARY_DIR}/bit_extract_kernel.code
 )
 
@@ -52,5 +60,7 @@ if(HIP_PLATFORM MATCHES "amd")
                         TEST_TARGET_NAME build_tests
                         LINKER_LIBS ${CMAKE_DL_LIBS})
 endif()
-add_dependencies(build_tests bit_extract_kernel.code libLazyLoad.so vecadd.cc)
+
+add_dependencies(build_tests bit_extract_kernel.code libLateManagedVariable.so
+                 libLazyLoad.so vecadd.cc)
 endif()

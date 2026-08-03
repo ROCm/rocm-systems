@@ -10,6 +10,8 @@
 #include "hip_global.hpp"
 
 #include <atomic>
+#include <cassert>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <shared_mutex>
@@ -180,9 +182,9 @@ class StatCO : public CodeObject {
   hipError_t GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_t* dev_ptr,
                           size_t* size_ptr);
 
-  // Managed variable is a defined symbol in code object
-  // pointer to the alocated managed memory has to be copied to the address of symbol
-  hipError_t InitManagedVarDevicePtr(int deviceId);
+  // Writes each managed allocation's device pointer into its code-object symbol.
+  // When non-null, orderStream receives a dependency on these deferred writes.
+  hipError_t InitManagedVarDevicePtr(int deviceId, hip::Stream* orderStream);
 
   // Find a deferred managed var whose mmap address equals ptr
   Var* FindDeferredManagedVar(const void* ptr);
@@ -213,9 +215,65 @@ class StatCO : public CodeObject {
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostFunctions_;
   //! Reverse mapping of vars
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;
-  //! Tracks managed var initialization per device
-  std::unique_ptr<std::atomic<bool>[]> managedVarsDevicePtrInitialized_;
-  size_t managedVarsDevicePtrInitializedSize_ = 0;
+
+  // Managed variables can be added when a HIP fat binary is loaded, including after the first
+  // kernel launch. Each receives a monotonically increasing sequence number that is not reused
+  // when a fat binary is unloaded. A device is current when initializedUpToSequenceNumberByDevice
+  // equals lastAssignedManagedVarSequenceNumber; otherwise only variables above its queued number
+  // need initializing.
+  struct DeferredInitManagedVarState {
+    enum class Phase { NotStarted, InProgress, Completed, Failed };
+
+    struct CommandDeleter {
+      void operator()(amd::Command* command) const {
+        if (command != nullptr) {
+          command->release();
+        }
+      }
+    };
+
+    Phase phase = Phase::NotStarted;
+    std::unique_ptr<amd::Command, CommandDeleter> completion;
+    hipError_t terminalError = hipSuccess;
+    // Highest managed-variable sequence number queued for initialization on this device.
+    uint64_t queuedUpToSequenceNumber = 0;
+
+    void MarkCompleted() {
+      completion.reset();
+      phase = Phase::Completed;
+    }
+
+    void MarkFailed(hipError_t error) {
+      assert(error != hipSuccess);
+      assert(phase != Phase::Failed);
+      completion.reset();
+      terminalError = error;
+      phase = Phase::Failed;
+    }
+  };
+
+  struct ManagedVarInitializationTracker {
+    void InitializeDevices(size_t deviceCount) {
+      // Construct at the final size because std::atomic cannot be moved during vector growth.
+      std::vector<std::atomic<uint64_t>> initialized(deviceCount);
+      for (auto& sequenceNumber : initialized) {
+        sequenceNumber.store(0, std::memory_order_relaxed);
+      }
+      initializedUpToSequenceNumberByDevice.swap(initialized);
+    }
+
+    // Highest sequence number assigned; atomic to support the lock-free launch-path check.
+    std::atomic<uint64_t> lastAssignedSequenceNumber{0};
+    // Identifies variables added after a device last queued initialization.
+    std::unordered_map<const Var*, uint64_t> sequenceNumberByVariable;
+    // Tracks initialization work and failures separately for each device.
+    std::unordered_map<int, DeferredInitManagedVarState> deviceStates;
+    // Highest sequence number fully initialized on each device.
+    std::vector<std::atomic<uint64_t>> initializedUpToSequenceNumberByDevice;
+  } managedVarInitialization_;
+
+  void OrderStreamAfterManagedVarInitialization(int deviceId, hip::Stream* orderStream,
+                                                const DeferredInitManagedVarState& state);
 };
 
 };  // namespace hip
