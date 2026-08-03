@@ -129,8 +129,8 @@ static const RcclHwCounterDesc rcclHwcAinic[] = {
   HWC("cnp_rcvd",                    HWC_IB_SYSFS, "rx_rdma_cnp_pkts"),
   HWC("cnp_sent",                    HWC_IB_SYSFS, "tx_rdma_cnp_pkts"),
   HWC("rx_roce_discards",            HWC_IB_SYSFS, "rx_rdma_mtu_discard_pkts"),
-  HWC("pfc_rx_frames_total",         HWC_ETHTOOL,  "frames_rx_pripause"),
-  HWC("pfc_tx_frames_total",         HWC_ETHTOOL,  "frames_tx_pripause"),
+  HWC("pfc_rx_pause_frames",         HWC_ETHTOOL,  "frames_rx_pripause"),
+  HWC("pfc_tx_pause_frames",         HWC_ETHTOOL,  "frames_tx_pripause"),
   HWC("hw_rx_dropped",               HWC_ETHTOOL,  "hw_rx_dropped"),
   HWC("hw_tx_dropped",               HWC_ETHTOOL,  "hw_tx_dropped"),
   HWC("rx_errors",                   HWC_ETHTOOL,  "hw_rx_over_errors"),
@@ -281,6 +281,14 @@ static const RcclHwCounterDesc rcclHwcMlx5[] = {
   HWC("rx_write_requests",          HWC_IB_SYSFS, "rx_write_requests"),
   HWC("rx_read_requests",           HWC_IB_SYSFS, "rx_read_requests"),
   HWC("rx_atomic_requests",         HWC_IB_SYSFS, "rx_atomic_requests"),
+
+  /* Global PFC pause frames (PHY-level, ethtool). Always exposed, unlike the
+   * per-priority "rx_prio%d_pause" names which are firmware-dependent and are
+   * absent on some ConnectX FW (there only rx_pause_ctrl_phy exists). This is
+   * the primary PFC-backpressure congestion signal; the per-priority
+   * breakdown, when available, is in the pfc_* arrays. */
+  HWC_FB("pfc_rx_pause_frames",     HWC_ETHTOOL, "rx_pause_ctrl_phy", "rx_pause"),
+  HWC_FB("pfc_tx_pause_frames",     HWC_ETHTOOL, "tx_pause_ctrl_phy", "tx_pause"),
 };
 
 static const RcclHwConfig rcclHwConfigMlx5 = {
@@ -352,6 +360,10 @@ static const RcclHwCounterDesc rcclHwcThor2[] = {
   HWC("rx_write_req",               HWC_IB_SYSFS, "rx_write_req"),
   HWC("rx_read_req",                HWC_IB_SYSFS, "rx_read_req"),
   HWC("rx_atomic_req",              HWC_IB_SYSFS, "rx_atomic_req"),
+
+  /* Global PFC pause frames (ethtool, best-effort bnxt_en names). */
+  HWC_FB("pfc_rx_pause_frames",     HWC_ETHTOOL, "rx_pause_frames", "rx_pause_ctrl_phy"),
+  HWC_FB("pfc_tx_pause_frames",     HWC_ETHTOOL, "tx_pause_frames", "tx_pause_ctrl_phy"),
 };
 
 static const RcclHwConfig rcclHwConfigThor2 = {
