@@ -1081,6 +1081,22 @@
         }
       ]
     },
+    "socket_poll_bootstrap": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "description": "Bootstrap socket busy-loop regression. Validates that NCCL_SOCKET_POLL_TIMEOUT_MSEC makes a blocked bootstrap socket recv wait in poll() instead of pinning a CPU core at 100%. Single node, no NIC/GPU required.",
+      "tests": [
+        {
+          "name": "Socket_BootstrapPollNoBusyLoop",
+          "description": "With NCCL_SOCKET_POLL_TIMEOUT_MSEC set, a receiver blocked on a slow peer sleeps in poll() (low CPU); the control case with the param at 0 reproduces the pre-fix busy loop (high CPU).",
+          "test_filter": "SocketPollTimeout.*"
+        }
+      ]
+    },
     "unit_tests_fixtures_debug": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsFixturesDebug",
@@ -2907,6 +2923,12 @@
       "name": "Unit Tests - Fixtures (Release)",
       "description": "Non-MPI unit tests using header-only fixtures (Release and Debug)",
       "config": "unit_tests_fixtures",
+      "enabled": true
+    },
+    {
+      "name": "Bootstrap socket poll - no busy loop",
+      "description": "AICOMRCCL-1322: NCCL_SOCKET_POLL_TIMEOUT_MSEC makes a blocked bootstrap socket recv wait in poll() instead of busy-spinning a CPU core (Debug only, no NIC/GPU required)",
+      "config": "socket_poll_bootstrap",
       "enabled": true
     },
     {

@@ -87,6 +87,34 @@ struct RelocationTableDispatch {
   uint64_t source_table_address_vaddr = 0;
 };
 
+/// @brief One `s_get_pc_i64` plus literal add that materializes an address.
+///
+/// @details The pair is the only way AMDGPU names a non-`.text` address from code, and it is
+/// position-dependent: the literal is the distance from the instruction after the getpc to the
+/// target. DBT relocates bodies, so the getpc observes a different PC and the same literal reaches
+/// a different address. Recording both halves lets the patcher recompute the literal from the
+/// getpc's final placement, which is what keeps the target fixed.
+struct PcRelativeAddressBuilder {
+  /// `.text`-relative offset of the `s_get_pc_i64`.
+  uint64_t source_getpc_offset = 0;
+
+  /// `.text`-relative offset of the in-place literal64 address add.
+  uint64_t source_address_add_offset = 0;
+
+  /// Virtual address the pair produces in the source object.
+  uint64_t target_vaddr = 0;
+};
+
+/// @brief Discover every proven `s_get_pc_i64` + literal-add address materialization.
+///
+/// @details Shares the dataflow that resolves table dispatches, so the same guarantees apply: a
+/// chained second add, a write to either half, or a CFG join whose predecessors disagree all leave
+/// the pair untracked rather than reported. Callers decide what a target means; this reports the
+/// address arithmetic only.
+[[nodiscard]] std::vector<PcRelativeAddressBuilder>
+discover_pc_relative_address_builders(std::span<const std::unique_ptr<BasicBlock>> blocks,
+                                      uint64_t text_vaddr);
+
 /// @brief Discover finite device-call tables from ELF symbols and relocations.
 ///
 /// @details A candidate must be a non-empty `STT_OBJECT` whose size is a
