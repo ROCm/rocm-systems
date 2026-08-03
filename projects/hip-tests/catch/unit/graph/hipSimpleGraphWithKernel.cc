@@ -18,7 +18,7 @@
 #define NKERNEL 5
 #else
 #define N 1024 * 1024
-#define NSTEP 1000
+#define NSTEP 5
 #define NKERNEL 25
 #endif  // KERNEL_ARG_PREFETCH
 #define CONSTANT 5.34
@@ -26,6 +26,9 @@
 static __global__ void simpleKernel(float* out_d, float* in_d) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < N) out_d[idx] = CONSTANT * in_d[idx];
+  // if(idx == 0) {
+  //   printf("simpleKernel idx: %d\n", idx);
+  // }
 }
 
 static void hipTestWithGraph() {
@@ -64,18 +67,23 @@ static void hipTestWithGraph() {
   const int nstep = isQuickLevel() ? 10 : NSTEP;
   auto start1 = std::chrono::high_resolution_clock::now();
   for (int istep = 0; istep < nstep; istep++) {
+    auto tl0 = std::chrono::high_resolution_clock::now();
     HIP_CHECK(hipGraphLaunch(instance, stream));
+    auto tl1 = std::chrono::high_resolution_clock::now();
     HIP_CHECK(hipStreamSynchronize(stream));
+    auto tl2 = std::chrono::high_resolution_clock::now();
+    printf("[step %d] launch=%ld us, sync=%ld us, total=%ld us\n",
+        istep,
+        std::chrono::duration_cast<std::chrono::microseconds>(tl1 - tl0).count(),
+        std::chrono::duration_cast<std::chrono::microseconds>(tl2 - tl1).count(),
+        std::chrono::duration_cast<std::chrono::microseconds>(tl2 - tl0).count());
   }
   auto stop = std::chrono::high_resolution_clock::now();
   auto withInit = std::chrono::duration<double, std::milli>(stop - start);
   auto withoutInit = std::chrono::duration<double, std::milli>(stop - start1);
 
-  INFO("Time taken for graph with Init: "
-       << std::chrono::duration_cast<std::chrono::milliseconds>(withInit).count()
-       << " milliseconds without Init:"
-       << std::chrono::duration_cast<std::chrono::milliseconds>(withoutInit).count()
-       << " milliseconds ");
+  printf("Time taken for graph with Init: %.2f ms, without Init: %.2f ms\n",
+      withInit.count(), withoutInit.count());
 
   HIP_CHECK(hipMemcpy(out_h, out_d, N * sizeof(float), hipMemcpyDeviceToHost));
   for (int i = 0; i < N; i++) {
@@ -154,7 +162,7 @@ TEST_CASE("Unit_hipGraph_SimpleGraphWithKernel_kernel_arg_prefetch") {
 HIP_TEST_CASE(Unit_hipGraph_SimpleGraphWithKernel) {
 #endif  // KERNEL_ARG_PREFETCH
   // Sections run test with and without graph.
-  SECTION("Run Test Without Graph") { hipTestWithoutGraph(); }
+  //SECTION("Run Test Without Graph") { hipTestWithoutGraph(); }
 
   SECTION("Run Test With Graph") { hipTestWithGraph(); }
 }

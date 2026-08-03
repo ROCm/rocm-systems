@@ -482,6 +482,7 @@ class Device : public NullDevice {
 
   void* deviceLocalAlloc(size_t size,
                         const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const override;
+  void deviceLocalFree(void* ptr) const override;
   void* reserveMemory(size_t size, size_t alignment) const;
   void releaseMemory(void* ptr, size_t size) const;
   void memFree(void* ptr, size_t size) const;
@@ -568,6 +569,49 @@ class Device : public NullDevice {
   //! Create internal blit program
   bool createBlitProgram();
 
+  //! Load pre-compiled graph scheduler HSACO kernels
+  bool loadGraphSchedulerHSACO();
+
+  // Flat scheduler (backward compatible)
+  uint64_t graphSchedulerKernelObject() const { return graph_scheduler_kernel_object_; }
+  uint32_t graphSchedulerPrivateSize() const { return graph_scheduler_private_size_; }
+  uint32_t graphSchedulerGroupSize() const { return graph_scheduler_group_size_; }
+  uint32_t graphSchedulerKernargSize() const { return graph_scheduler_kernarg_size_; }
+  bool hasGraphSchedulerHSACO() const { return graph_scheduler_kernel_object_ != 0; }
+
+  // Graph signal management
+  uint64_t createGraphSignal(int64_t initial_value) override;
+  void destroyGraphSignal(uint64_t handle) override;
+  void storeGraphSignal(uint64_t handle, int64_t value) override;
+  uint64_t createGraphCompletionEvent(void** hw_event_out) override;
+
+  // Block-based kernels (override base class virtuals)
+  uint64_t graphBlockIssueKernelObject() const { return graph_block_issue_kernel_object_; }
+  uint32_t graphBlockIssuePrivateSize() const { return graph_block_issue_private_size_; }
+  uint32_t graphBlockIssueGroupSize() const { return graph_block_issue_group_size_; }
+  bool hasGraphBlockIssueHSACO() const override { return graph_block_issue_kernel_object_ != 0; }
+
+  uint64_t graphBranchKernelObject() const override { return graph_branch_kernel_object_; }
+  uint32_t graphBranchPrivateSize() const override { return graph_branch_private_size_; }
+  uint32_t graphBranchGroupSize() const override { return graph_branch_group_size_; }
+
+  uint64_t graphCondBranchKernelObject() const override { return graph_cond_branch_kernel_object_; }
+  uint32_t graphCondBranchPrivateSize() const override { return graph_cond_branch_private_size_; }
+  uint32_t graphCondBranchGroupSize() const override { return graph_cond_branch_group_size_; }
+
+  uint64_t graphCondBranchWhileKernelObject() const override { return graph_cond_branch_while_kernel_object_; }
+  uint32_t graphCondBranchWhilePrivateSize() const override { return graph_cond_branch_while_private_size_; }
+  uint32_t graphCondBranchWhileGroupSize() const override { return graph_cond_branch_while_group_size_; }
+
+  uint64_t graphReturnKernelObject() const override { return graph_return_kernel_object_; }
+  uint32_t graphReturnPrivateSize() const override { return graph_return_private_size_; }
+  uint32_t graphReturnGroupSize() const override { return graph_return_group_size_; }
+
+  uint64_t graphWhileLoopKernelObject() const override { return graph_while_loop_kernel_object_; }
+  uint32_t graphWhileLoopPrivateSize() const override { return graph_while_loop_private_size_; }
+  uint32_t graphWhileLoopGroupSize() const override { return graph_while_loop_group_size_; }
+  bool hasGraphWhileLoopHSACO() const override { return graph_while_loop_kernel_object_ != 0; }
+
   // P2P agents avaialble for this device
   const std::vector<hsa_agent_t>& p2pAgents() const { return p2p_agents_; }
 
@@ -610,7 +654,7 @@ class Device : public NullDevice {
       bool managed = false, bool dedicated_queue = false,
       hsa_queue_t* preferred = nullptr,
       const std::unordered_set<uint64_t>* excluded_ids = nullptr,
-      void** metadata_ring_buffer = nullptr);
+      void** metadata_ring_buffer = nullptr, bool device_mem = false);
 
   //! Release HSA queue
   void releaseQueue(hsa_queue_t*, const std::vector<uint32_t>& cuMask = {}, bool coop_queue = false,
@@ -746,6 +790,45 @@ class Device : public NullDevice {
   hsa_amd_memory_pool_t gpu_ext_fine_grained_segment_;
   hsa_signal_t prefetch_signal_;  //!< Prefetch signal, used to explicitly prefetch SVM on device
   std::atomic<int> cache_state_;  //!< State of cache, kUnknown/kFlushedToDevice/kFlushedToSystem
+
+  // Pre-compiled graph scheduler kernels (HSACO)
+  hsa_executable_t graph_scheduler_executable_ = {};
+
+  // Flat scheduler
+  uint64_t graph_scheduler_kernel_object_ = 0;
+  uint32_t graph_scheduler_kernarg_size_ = 0;
+  uint32_t graph_scheduler_private_size_ = 0;
+  uint32_t graph_scheduler_group_size_ = 0;
+
+  // Block issue (initial entry from host)
+  uint64_t graph_block_issue_kernel_object_ = 0;
+  uint32_t graph_block_issue_private_size_ = 0;
+  uint32_t graph_block_issue_group_size_ = 0;
+
+  // Branch (unconditional)
+  uint64_t graph_branch_kernel_object_ = 0;
+  uint32_t graph_branch_private_size_ = 0;
+  uint32_t graph_branch_group_size_ = 0;
+
+  // Conditional branch
+  uint64_t graph_cond_branch_kernel_object_ = 0;
+  uint32_t graph_cond_branch_private_size_ = 0;
+  uint32_t graph_cond_branch_group_size_ = 0;
+
+  // Conditional branch (WHILE fast-path)
+  uint64_t graph_cond_branch_while_kernel_object_ = 0;
+  uint32_t graph_cond_branch_while_private_size_ = 0;
+  uint32_t graph_cond_branch_while_group_size_ = 0;
+
+  // Return
+  uint64_t graph_return_kernel_object_ = 0;
+  uint32_t graph_return_private_size_ = 0;
+  uint32_t graph_return_group_size_ = 0;
+
+  // Fused while loop (persistent kernel)
+  uint64_t graph_while_loop_kernel_object_ = 0;
+  uint32_t graph_while_loop_private_size_ = 0;
+  uint32_t graph_while_loop_group_size_ = 0;
 
   size_t gpuvm_segment_max_alloc_;
   size_t alloc_granularity_;
