@@ -1000,8 +1000,13 @@ Runtime::AddressHandle* Runtime::VMemoryFindReservedAddressHandle(const void* va
   auto reservedAddressIt = reserved_address_map_.upper_bound(va);
   if (reservedAddressIt != reserved_address_map_.begin()) {
     reservedAddressIt--;
+    /* Half-open range [first, first+size): `first+size` is one-past-the-end and does
+     * NOT belong to the reservation. The previous inclusive `<=` false-matched a pointer
+     * allocated immediately after a reserved range (base == reserved_end), which made
+     * PtrInfo mis-report a pool allocation as RESERVED_ADDR -> degenerate owning block ->
+     * spurious kernarg map failure / hipStreamCreate OOM. */
     if ((reservedAddressIt->first <= va) &&
-        ((reinterpret_cast<const uint8_t*>(va)) <=
+        ((reinterpret_cast<const uint8_t*>(va)) <
          (reinterpret_cast<const uint8_t*>(reservedAddressIt->first) +
           reservedAddressIt->second.size))) {
       return &(reservedAddressIt->second);
