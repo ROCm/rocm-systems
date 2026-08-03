@@ -3,10 +3,16 @@
 #   https://github.com/ROCm/TheRock/blob/main/comm-libs/CMakeLists.txt
 #   https://github.com/ROCm/TheRock/blob/main/comm-libs/artifact-rocshmem.toml
 requires = [
-    "setuptools>=40.8.0",
+    # >=61 is required to read the PEP 621 [project] table (incl. name) and the
+    # dynamic version from setup.py; older setuptools silently produces an
+    # "UNKNOWN" distribution name.
+    "setuptools>=61.0",
     "wheel",
-    "cmake>=3.20,<4.0",
-    "nanobind>=2.12.0",
+    "cmake>=3.20",
+    # Cap the major version: the CMake glue re-enables RTTI/exceptions by poking
+    # nanobind's internal `nanobind-static` target (see CMakeLists.txt), which is
+    # not a stable public contract and could change across a major bump.
+    "nanobind>=2.12.0,<3.0",
 ]
 build-backend = "setuptools.build_meta"
 

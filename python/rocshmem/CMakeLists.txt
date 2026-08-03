@@ -75,6 +75,11 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 # Find Dependencies
 ###############################################################################
 
+# APPEND, never PREPEND: a caller-supplied CMAKE_PREFIX_PATH (the rocSHMEM
+# install, forwarded by setup.py as a -D cache var) must stay *ahead* of
+# ROCM_PATH so find_package(rocshmem) resolves the intended install and not one
+# that may also ship under /opt/rocm. ROCM_PATH is appended only so
+# find_package(hip) can locate HIP.
 list(APPEND CMAKE_PREFIX_PATH
      ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/lib/cmake/hip)
 if(THEROCK_TOOLCHAIN_ROOT)

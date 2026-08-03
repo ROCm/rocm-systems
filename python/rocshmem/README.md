@@ -91,19 +91,71 @@ export LD_LIBRARY_PATH=$CMAKE_PREFIX_PATH/lib:$ROCM_PATH/lib:$LD_LIBRARY_PATH
 
 > Note: this package is not published to PyPI yet; install from source only.
 
-### One command: build + test
+### Building against different rocSHMEM backend configurations
 
-`build_and_test.sh` wires the whole flow together — point it at a rocSHMEM
-install, build the extension, and (optionally) run the suite:
+The binding statically links `librocshmem.a`, so its build and runtime
+requirements follow whatever backends/allocators the rocSHMEM install was
+configured with:
+
+- **MPI (every config, not just RO)** — rocSHMEM defaults `USE_EXTERNAL_MPI=AUTO`,
+  so if MPI was present when the library was built it is linked into *every*
+  configuration, IPC-only included, and the extension records `libmpi` as
+  `NEEDED`. The binding locates MPI itself (`find_package(MPI)`), so an MPI
+  development install must be present at build time and `libmpi` loadable at
+  runtime. This base-MPI link/bootstrap dependency is separate from the
+  ROCm-aware Open MPI + UCX that the **RO backend** needs at runtime for
+  transport / `init_with_mpi()` (see the RO sections below).
+- **`USE_GDA=ON` / `USE_SDMA=ON`** — the install exports `find_dependency(NUMA)`.
+  rocSHMEM's exported config resolves this itself: on ROCm ≥ 7.13 it adds its
+  `rocm_sysdeps` prefix around the `find_dependency(NUMA)` call, and on older
+  ROCm it bakes a resolved `numa::numa` target into the package. The binding
+  needs no `rocm_sysdeps` / NUMA handling of its own. (Requires a rocSHMEM that
+  includes the exported-dependency fix, ROCm-systems PR #9583.)
+- **`USE_SDMA=ON`** / **`rocprofiler-register`** — also exported by rocSHMEM's
+  config (`find_dependency(hsakmt)` / `find_dependency(rocprofiler-register)`),
+  so both resolve automatically during `find_package(rocshmem)`.
+- **`hip`, `hsa-runtime64`, `Threads`** — resolved via the binding's own
+  `find_package(hip)`, which runs before `find_package(rocshmem)`.
+- **Heap allocator (runtime, not a build flag)** — as of ROCm-systems PR #9432
+  the allocator is selected at runtime via `ROCSHMEM_HEAP_ALLOCATOR_TYPE`; the
+  old `USE_HEAP_DEVICE_*` CMake options are gone. It does not affect the binding
+  build (same wheel, chosen per run):
+
+  | `ROCSHMEM_HEAP_ALLOCATOR_TYPE` | Use case | Requirements |
+  |---|---|---|
+  | `finegrained` *(default)* | General use | — |
+  | `coarsegrained` | Coarse-grained device memory | — |
+  | `uncached` | Uncached fine-grained; falls back to `finegrained` if unavailable in the build | — |
+  | `vmm_posix` | Single-node VMM over POSIX IPC | ROCm ≥ 7.2; **not** compatible with MPI-based init (`init_with_mpi()`) |
+  | `vmm_fabric` | Multi-node / multi-pod over fabric | fabric-capable interconnect; `libamd_smi` reachable at runtime (it is `dlopen`ed for pod detection, not linked) |
+
+  Unset defaults to `finegrained`. See rocSHMEM's `rocshmem_info` output and its
+  docs for the authoritative list and performance guidance.
+
+Device code objects are embedded in the extension's `.hip_fatbin`; there are no
+separate `_rocshmem4py*.so.0.*` offload files to install or clean up.
+
+### Running the tests
+
+The tests are plain `pytest` — `tests/conftest.py` handles rocSHMEM
+init/finalize and PE detection, so all that's needed is to launch `pytest`
+across the desired number of PEs with the ROCm runtime on the loader path (the
+`LD_LIBRARY_PATH` export above):
 
 ```bash
-./build_and_test.sh --prefix /opt/rocshmem -l torchrun -n 2   # build + test (IPC/GDA)
-./build_and_test.sh --prefix /opt/rocshmem --build-only       # build only
-./build_and_test.sh --prefix /opt/rocshmem --wheel            # produce a wheel in dist/
+# IPC / GDA backends (torch present): torchrun spawns the PEs
+torchrun --standalone --nnodes=1 --nproc_per_node=2 -m pytest tests/ -v
+
+# RO backend: a ROCm-aware, UCX-enabled Open MPI (see the RO section below)
+mpirun -n 2 -mca pml ucx -mca osc ucx \
+    -x LD_LIBRARY_PATH -x WORLD_SIZE=2 \
+    python -m pytest tests/ -v
 ```
 
-It exports `CMAKE_PREFIX_PATH`, `ROCM_PATH`, and `LD_LIBRARY_PATH` for you and
-runs `pytest` through `launch_test.sh`. See `--help` for all options.
+To validate the binding across *every* rocSHMEM backend configuration in one
+shot — rebuilding the C++ library per config in isolated venvs and asserting the
+wheel imports, records the linked library version, embeds all GPU arches, and
+resolves its transitive deps — use `validate_configs.py` (see `tests/README.md`).
 
 ### Binding backend
 
@@ -329,16 +381,9 @@ Examples:
 | `ROCSHMEM_SIGNAL_ADD` | impl-defined | Signal add op enum |
 | `ROCSHMEM_CMP_EQ/NE/GT/GE/LT/LE` | impl-defined | Signal wait compare enums |
 
-## Running the tests
+## Test suite layout
 
-```bash
-# IPC / GDA backend (any AMD multi-GPU node)
-torchrun --standalone --nproc_per_node=2 -m pytest tests/ -v
-
-# RO backend (must use mpirun)
-./launch_test.sh -n 2 -c "pytest tests/ -v"
-```
-
+For how to launch the tests see [*Running the tests*](#running-the-tests) above.
 Test source layout, the full launcher &times; backend &times; init-tier
 matrix used by `conftest.py`, and CI-author guidance live in the test
 suite's own README:
@@ -355,6 +400,22 @@ suite's own README:
 | RO backend hangs in `mca_btl_vader.so` (`Wrote -1, errno = 14`), aborts with `MPI_ERR_WIN: invalid window`, or hangs at exit in `__run_exit_handlers` &rarr; `libamdhip64` | Non-ROCm-aware Open MPI / UCX cannot handle GPU buffers in the data plane | Use ROCm-aware Open MPI 5.0.x + UCX 1.17+ &mdash; see [below](#rocm-aware-open-mpi-required-for-ro) |
 | `Unsupported configuration to initialize rocSHMEM. Please initialize the MPI library using MPI_Init first` | RO backend launched under `torchrun` &mdash; see *"RO backend requires `mpirun`"* below | Launch with `mpirun` (you can keep `init_with_torch()`), or build an IPC/GDA-only rocSHMEM if you don't need inter-node RDMA |
 | Rendezvous / port conflict under `torchrun` | Default `MASTER_PORT=29500` already taken | Set `MASTER_PORT` (or `ROCSHMEM_MASTER_PORT`) to a free port |
+
+### Why `LD_LIBRARY_PATH` is needed
+
+The wheel *statically* links `librocshmem.a`, but still *dynamically* links the
+ROCm runtime (`libamdhip64`, `libhsa-runtime64`) and whatever shared libraries
+rocSHMEM itself pulls in (e.g. `libmpi`, `libnuma`). Those are not bundled into
+the wheel, so at import time the dynamic loader has to be able to find them:
+
+```bash
+export LD_LIBRARY_PATH=$CMAKE_PREFIX_PATH/lib:$ROCM_PATH/lib:$LD_LIBRARY_PATH
+```
+
+On HPC systems ROCm is usually provided by a module (`module load rocm`), which
+sets this for you; on a workstation, point it at your ROCm `lib` (or add that
+directory under `/etc/ld.so.conf.d/`). The tell-tale symptom when it is missing
+is an `ImportError` naming `libamdhip64.so` (or another ROCm lib) as unfindable.
 
 ### RO backend requires `mpirun`
 

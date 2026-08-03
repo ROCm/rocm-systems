@@ -17,20 +17,19 @@ README:
 
 ## Running the tests
 
-The repo ships a backend-aware launcher wrapper:
+The tests are plain `pytest` — `conftest.py` handles rocSHMEM init/finalize and
+PE detection, so all that's needed is to launch `pytest` across the desired
+number of PEs. Build + install the binding first (see the top-level README),
+run from the environment whose `python` / `torchrun` you intend to use, and put
+the ROCm runtime on the loader path
+(`export LD_LIBRARY_PATH=$CMAKE_PREFIX_PATH/lib:$ROCM_PATH/lib:$LD_LIBRARY_PATH`):
 
 ```bash
-# RO backend (must use mpirun)
-./launch_test.sh -n 2 -c "pytest tests/ -v"
+# IPC / GDA backend via torchrun (torch present)
+torchrun --standalone --nnodes=1 --nproc_per_node=2 \
+  -m pytest tests/ -v
 
-# IPC / GDA backend (torchrun is fine)
-./launch_test.sh -l torchrun -n 2 -c "pytest tests/ -v"
-```
-
-Equivalent direct invocations:
-
-```bash
-# RO via mpirun
+# RO backend via a UCX-enabled Open MPI (must use mpirun)
 mpirun --allow-run-as-root -n 2 \
   -mca pml ucx -mca osc ucx \
   -x ROCSHMEM_HEAP_SIZE=536870912 \
@@ -38,10 +37,14 @@ mpirun --allow-run-as-root -n 2 \
   -x WORLD_SIZE=2 \
   python3 -m pytest tests/ -v
 
-# IPC / GDA via torchrun
-torchrun --standalone --nnodes=1 --nproc_per_node=2 \
-  -m pytest tests/ -v
+# A specific test file: just name it
+torchrun --standalone --nnodes=1 --nproc_per_node=2 -m pytest tests/test_teams.py -v
 ```
+
+To build + validate the wheel across *all* rocSHMEM backend configurations in
+isolated venvs, use `validate_configs.py` in the package root (it rebuilds the
+C++ library per config and checks the wheel's import, version tag, GPU arches,
+and transitive deps; pass `--run-tests` to also run `test_api_compat.py`).
 
 ## Three-tier init ladder
 
