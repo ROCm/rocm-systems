@@ -571,10 +571,58 @@ no_signal_finalize(kfd::signal_less_hub_t::proven&& proven)
         _corr_id->sub_ref_count();
     };
 
+    const uint64_t _now = common::timestamp_ns();
+
+    // One-shot diagnostic for the first few signal-less finalizations, so a
+    // sanity-guard rejection can be attributed without a rebuild. Off unless
+    // ROCPROFILER_KFD_DISPATCH_LOG_TRACE=1; otherwise this is one relaxed atomic
+    // load. Deliberately reports the SIGNED deltas and the dispatch identity: a
+    // small negative start delta means clock skew against a validly correlated
+    // record, while a large one that tracks the dispatch interval means the record
+    // belongs to a DIFFERENT dispatch and the guard is doing its job.
+    {
+        static const bool _trace =
+            common::get_env("ROCPROFILER_KFD_DISPATCH_LOG_TRACE", false);
+        static auto _traced = std::atomic<int>{0};
+        if(_trace && _traced.fetch_add(1, std::memory_order_relaxed) < 5)
+        {
+            uint64_t   _s     = 0;
+            uint64_t   _e     = 0;
+            const bool _has_s = proven.start_ticks.has_value();
+            const bool _ok_s  = _has_s && _convert(*proven.start_ticks, &_s);
+            const bool _ok_e  = _convert(proven.end_ticks, &_e);
+
+            ROCP_WARNING << fmt::format(
+                "KFD signal-less finalize trace: key(slot={} idx={} gen={}) submit_index={} "
+                "dispatch_id={} start_ticks={} end_ticks={} convert(start={} end={}) "
+                "start_ns={} end_ns={} enqueue_ts={} now={} "
+                "delta_start_minus_enqueue={} delta_now_minus_end={} "
+                "clause(start<end={} start>=enqueue={} end<=now={})",
+                proven.key.doorbell_off,
+                proven.key.dispatch_idx_low32,
+                proven.key.generation,
+                _payload.submit_index,
+                _payload.callback_record.dispatch_info.dispatch_id,
+                _has_s ? static_cast<int64_t>(*proven.start_ticks) : int64_t{-1},
+                proven.end_ticks,
+                _ok_s,
+                _ok_e,
+                _s,
+                _e,
+                _payload.enqueue_ts,
+                _now,
+                static_cast<int64_t>(_s) - static_cast<int64_t>(_payload.enqueue_ts),
+                static_cast<int64_t>(_now) - static_cast<int64_t>(_e),
+                _s < _e,
+                _s >= _payload.enqueue_ts,
+                _e <= _now);
+        }
+    }
+
     const auto _outcome = kfd::run_no_signal_finalizer(proven.start_ticks,
                                                        proven.end_ticks,
                                                        _payload.enqueue_ts,
-                                                       common::timestamp_ns(),
+                                                       _now,
                                                        _convert,
                                                        _emit,
                                                        _retire);
