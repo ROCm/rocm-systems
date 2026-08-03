@@ -26,6 +26,7 @@ enum class ScalarSop2Op {
 /// architecture-specific opcode mapping lives with the instruction packers
 /// instead of the static recovery matcher.
 [[nodiscard]] std::optional<uint8_t> scalar_sop2_opcode(rj_code_arch_t arch, ScalarSop2Op op) {
+  // \NPI new ISA family: classify its scalar SOP2 opcode mapping here.
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
   case ROCJITSU_CODE_ARCH_CDNA2:

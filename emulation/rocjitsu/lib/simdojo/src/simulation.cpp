@@ -5,8 +5,18 @@
 
 #include <algorithm>
 #include <cassert>
+#include <stdexcept>
+#include <string>
 
 namespace simdojo {
+
+namespace {
+
+std::string link_endpoints(const Link &link) {
+  return link.src()->full_path() + " -> " + link.dst()->full_path();
+}
+
+} // namespace
 
 void PartitionContext::drain_incoming() {
   for (auto &queue : incoming)
@@ -23,8 +33,16 @@ SimulationEngine::~SimulationEngine() {
 
 void SimulationEngine::create() {
   assert(!created_ && "create() called twice without shutdown()");
-  if (topology_.partitions().empty())
-    topology_.partition(config_.num_threads);
+  if (config_.num_threads == 0)
+    throw std::invalid_argument("SimulationEngine requires at least one worker thread");
+
+  if (topology_.partitions().empty()) {
+    if (config_.num_threads > 1) {
+      throw std::invalid_argument(
+          "multi-threaded SimulationEngine requires an explicit topology partition policy");
+    }
+    topology_.partition_balanced(1);
+  }
   setup_partitions();
 
   done_.store(false, std::memory_order_release);
@@ -66,8 +84,24 @@ void SimulationEngine::shutdown() {
 
 void SimulationEngine::setup_partitions() {
   const uint32_t num_threads = config_.num_threads;
-  assert(num_threads > 0);
-  assert(topology_.partitions().size() == num_threads);
+  if (topology_.partitions().size() != num_threads) {
+    throw std::invalid_argument(
+        "SimulationEngine topology partition count must match the worker thread count");
+  }
+
+  // Validate cross-partition link constraints.
+  for (auto &link : topology_.links()) {
+    if (link->is_cross_partition()) {
+      if (link->latency() == 0) {
+        throw std::invalid_argument("SimulationEngine cross-partition link " +
+                                    link_endpoints(*link) + " requires positive latency");
+      }
+      if (dynamic_cast<QueuedLink *>(link.get()) != nullptr) {
+        throw std::invalid_argument("SimulationEngine QueuedLink " + link_endpoints(*link) +
+                                    " must not cross partition boundaries");
+      }
+    }
+  }
 
   contexts_.reserve(num_threads);
   for (uint32_t i = 0; i < num_threads; ++i)
@@ -76,15 +110,6 @@ void SimulationEngine::setup_partitions() {
   async_queues_.reserve(num_threads);
   for (uint32_t i = 0; i < num_threads; ++i)
     async_queues_.push_back(std::make_unique<AsyncQueue>());
-
-  // Validate cross-partition link constraints.
-  for (auto &link : topology_.links()) {
-    if (link->is_cross_partition()) {
-      assert(link->latency() > 0 && "cross-partition links require positive latency for LBTS");
-      assert(dynamic_cast<QueuedLink *>(link.get()) == nullptr &&
-             "QueuedLinks must not cross partition boundaries (they bypass the LBTS protocol)");
-    }
-  }
 
   // Set engine pointer on all components.
   for (auto &part : topology_.partitions()) {
@@ -298,8 +323,11 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       // Phase 4: Barrier (completion function computes new global_lbts).
       barrier_->arrive_and_wait();
       if (done_.load(std::memory_order_acquire)) {
-        // After arrive_and_wait, if done_ was set by the completion function,
-        // ALL threads see it simultaneously and ALL exit.
+        // request_exit() can set done_ while peers released from the same phase
+        // are already entering the next one. Contribute this worker's arrival
+        // instead of abandoning that phase and stranding those peers.
+        ctx.local_next.store(TICK_MAX, std::memory_order_relaxed);
+        barrier_->arrive_and_drop();
         return;
       }
     }

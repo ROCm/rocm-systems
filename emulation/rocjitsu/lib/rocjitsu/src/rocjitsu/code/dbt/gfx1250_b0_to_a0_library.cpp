@@ -4,38 +4,28 @@
 #include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/code_object_identity.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
-#include "rocjitsu/isa/decoder.h"
-#include "rocjitsu/isa/instruction.h"
 
 #include <cstdlib>
 #include <cstring>
-#include <memory>
 #include <new>
 
-namespace rocjitsu {
-
-// This fixed-profile frontend deliberately supplies its own decoder factory.
-// Keeping the all-ISA registry out of this shared object lets the static linker
-// select only the gfx1250 model objects required by the B0-to-A0 translator.
-std::unique_ptr<Decoder> Decoder::create(rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250)
-    return nullptr;
-  return std::make_unique<IsaDecoder<gfx1250::Isa>>();
-}
-
-} // namespace rocjitsu
-
-rj_status_t rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size,
-                                          uint8_t **translated_elf, size_t *translated_size) {
+rj_status_t rj_gfx1250_b0_to_a0_translate_with_info(const void *source_elf, size_t source_size,
+                                                    uint8_t **translated_elf,
+                                                    size_t *translated_size,
+                                                    rj_gfx1250_b0_to_a0_translation_info_t *info) {
   if (translated_elf)
     *translated_elf = nullptr;
   if (translated_size)
     *translated_size = 0;
+  if (info)
+    *info = {};
 
-  if (!source_elf || source_size == 0 || !translated_elf || !translated_size)
+  if (!source_elf || source_size == 0 || !translated_elf || !translated_size || !info)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+
+  info->source_code_object_id = rocjitsu::stable_code_object_id(source_elf, source_size);
 
   try {
     const auto *source_bytes = static_cast<const uint8_t *>(source_elf);
@@ -48,6 +38,10 @@ rj_status_t rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_
     options.output_revision = rocjitsu::ProcessorRevision::Gfx1250A0;
     rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
                                           options);
+    translator.set_trace_callback([&](const rocjitsu::TranslationTraceEvent &trace) {
+      if (trace.changed)
+        ++info->changed_instruction_count;
+    });
     auto result = translator.translate(source);
     if (result.elf_bytes.empty() || !result.dispatchable())
       return ROCJITSU_STATUS_ERROR;
@@ -65,6 +59,13 @@ rj_status_t rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_
   } catch (...) {
     return ROCJITSU_STATUS_ERROR;
   }
+}
+
+rj_status_t rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size,
+                                          uint8_t **translated_elf, size_t *translated_size) {
+  rj_gfx1250_b0_to_a0_translation_info_t info{};
+  return rj_gfx1250_b0_to_a0_translate_with_info(source_elf, source_size, translated_elf,
+                                                 translated_size, &info);
 }
 
 void rj_gfx1250_b0_to_a0_free(void *translated_elf) { std::free(translated_elf); }

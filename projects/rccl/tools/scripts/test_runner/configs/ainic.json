@@ -192,6 +192,52 @@
       ]
     },
 
+    "a_gin_enable_gate": {
+      "extends": "a_base",
+      "timeout": 600,
+      "description": "A14: ROCM-27070 regression. On AINIC autodetect, NCCL_GIN_ENABLE=0 must gate GIN init early (comm init succeeds, no GIN assigned, no enumeration segfault).",
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "A14_Gin_EnableZeroSkipsInit",
+          "description": "NCCL_GIN_ENABLE=0 skips GIN plugin init; comm init succeeds with no GIN backend assigned.",
+          "test_filter": "GinInitMPITest.GinEnableZeroSkipsInit"
+        }
+      ]
+    },
+
+    "a_gin_ainic_backend": {
+      "extends": "a_base",
+      "timeout": 600,
+      "description": "A15: ROCM-27070 regression. On AINIC autodetect (NCCL_NET unset), GIN must select the ib-cast backend, never the generic IB proxy that triggers a second device enumeration.",
+      "tests": [
+        {
+          "name": "A15_Gin_AinicSelectsCastBackend",
+          "description": "GIN on AINIC uses IbCastGinIb, not the generic ncclGinIbProxy (no dual enumeration).",
+          "test_filter": "GinInitMPITest.AinicSelectsCastBackend"
+        }
+      ]
+    },
+
+    "a_socket_poll_bootstrap": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "description": "A16: bootstrap socket busy-loop regression. Validates that NCCL_SOCKET_POLL_TIMEOUT_MSEC makes a blocked bootstrap socket recv wait in poll() instead of pinning a CPU core at 100%. Single node, no NIC/GPU required.",
+      "tests": [
+        {
+          "name": "A16_Socket_BootstrapPollNoBusyLoop",
+          "description": "With NCCL_SOCKET_POLL_TIMEOUT_MSEC set, a receiver blocked on a slow peer sleeps in poll() (low CPU); the control case with the param at 0 reproduces the pre-fix busy loop (high CPU).",
+          "test_filter": "SocketPollTimeout.*"
+        }
+      ]
+    },
+
     "b_base": {
       "description": "Sweep base: derived suites run the full 1024-16G range for both allreduce and alltoall. Sets NO shared env_variables so each sweep runs against stock defaults plus its own per-suite knobs, and NO group-level command_args by design - every test sets its own explicit, complete command_args so nothing is silently concatenated/duplicated.",
       "is_gtest": false,
@@ -399,6 +445,9 @@
     { "name": "A6-A7. Component - CAST WRR",          "config": "a_cast_wrr",        "enabled": true },
     { "name": "A8. Component - Fault injection",      "config": "a_fault_inject",    "enabled": true },
     { "name": "A9-A13. Component - GIN proxy",        "config": "a_gin",             "enabled": true },
+    { "name": "A14. GIN enable gate (ROCM-27070)",    "config": "a_gin_enable_gate", "enabled": true },
+    { "name": "A15. GIN AINIC backend (ROCM-27070)",  "config": "a_gin_ainic_backend", "enabled": true },
+    { "name": "A16. Component - Bootstrap socket poll", "config": "a_socket_poll_bootstrap", "enabled": true },
 
     { "name": "B1. IB baseline",                     "config": "b1_ib",             "enabled": true },
     { "name": "B2. CAST alltoall full (1K-16G)",     "config": "b_alltoall_cast_full", "enabled": true },

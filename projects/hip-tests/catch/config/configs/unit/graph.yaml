@@ -112,8 +112,7 @@ graph:
   Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg:
     <<: *level_2
     tags: [lifecycle, multigpu]
-    # Enable the below test when multi-device graph launches are fully supported
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_wsl]
   Unit_hipGraphInstantiateWithFlags_StreamCapture:
     <<: *level_2
     tags: [lifecycle, multigpu]
@@ -1391,9 +1390,8 @@ graph:
   Unit_hipGraphUpload_Functional_multidevice_test:
     <<: *level_2
     tags: [exec]
-    # (amd_linux) SWDEV-553920 disabled until multi device graph issues are resolved
     # (amd_windows) SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipGraphUpload_Functional_With_Priority_Stream:
     <<: *level_2
     tags: [exec]
@@ -1402,6 +1400,14 @@ graph:
     # SWDEV-434878: Below tests failed in stress test on 24/11/23
     disabled: [amd_windows, amd_wsl]
     tags: [exec]
+  Unit_hipGraphCrossDeviceLaunch_CrossStreamDependencyOrdering:
+    <<: *level_2
+    tags: [exec]
+    disabled: [amd_windows]
+  Unit_hipGraphCrossDeviceLaunch_ExplicitNodes:
+    <<: *level_2
+    tags: [exec]
+    disabled: [amd_windows]
   Unit_hipGraphKernelNodeCopyAttributes_Functional:
     <<: *level_2
     tags: [node]
@@ -1438,6 +1444,9 @@ graph:
     <<: *level_2
     tags: [lifecycle]
   Unit_hipGraph_BasicCyclic5:
+    <<: *level_2
+    tags: [lifecycle]
+  Unit_hipGraph_CyclicChildInstantiation:
     <<: *level_2
     tags: [lifecycle]
   Unit_hipGraph_PerfCheck_MemcpyKernelMixCall:

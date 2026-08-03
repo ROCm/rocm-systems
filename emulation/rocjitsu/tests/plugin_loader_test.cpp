@@ -3,16 +3,15 @@
 
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
+#include "scoped_temp.h"
 
 #include <gtest/gtest.h>
 
 #include <cstdlib>
-#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
 #include <string>
-#include <unistd.h>
 
 #ifndef PLUGIN_LOADER_FIXTURE_DIR
 #error "PLUGIN_LOADER_FIXTURE_DIR must be defined"
@@ -23,19 +22,13 @@ namespace {
 class PluginLoaderTest : public ::testing::Test {
 protected:
   void SetUp() override {
-    trace_ = std::filesystem::temp_directory_path() /
-             ("rocjitsu_plugin_loader_" + std::to_string(getpid()) + ".trace");
-    std::filesystem::remove(trace_);
-    ASSERT_EQ(setenv("ROCJITSU_PLUGIN_TEST_TRACE", trace_.c_str(), 1), 0);
+    ASSERT_EQ(setenv("ROCJITSU_PLUGIN_TEST_TRACE", trace_.path().c_str(), 1), 0);
   }
 
-  void TearDown() override {
-    unsetenv("ROCJITSU_PLUGIN_TEST_TRACE");
-    std::filesystem::remove(trace_);
-  }
+  void TearDown() override { unsetenv("ROCJITSU_PLUGIN_TEST_TRACE"); }
 
   std::string trace() const {
-    std::ifstream input(trace_);
+    std::ifstream input(trace_.path());
     return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
   }
 
@@ -44,7 +37,7 @@ protected:
     return rocjitsu::PluginLoader::load_from_config(config, group, PLUGIN_LOADER_FIXTURE_DIR);
   }
 
-  std::filesystem::path trace_;
+  rocjitsu::test::ScopedTempFile trace_{"rocjitsu-plugin-loader-"};
 };
 
 TEST_F(PluginLoaderTest, LoadsMatchingAbi) {

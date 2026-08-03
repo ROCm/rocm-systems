@@ -142,7 +142,7 @@ jobs:
       run: |
         cd projects/rocprofiler-sdk
         python3 -m pip install -U --user -r requirements.txt
-        cmake -B /tmp/build -DCMAKE_PREFIX_PATH=/opt/rocm -DPython3_EXECUTABLE=$(which python3) .
+        cmake -B /tmp/build -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/lib/rocm_sysdeps" -DPython3_EXECUTABLE=$(which python3) .
         cmake --build /tmp/build --target all --parallel 16
         rm -rf ${EXCLUDED_PATHS}
 
