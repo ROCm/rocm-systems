@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -1268,6 +1269,12 @@ shutdown(hsa_executable_t executable)
     // Code-object unload callbacks often invalidate tool-side kernel symbol metadata. Drain inline
     // queue-interposition completion records first so pending dispatch records are delivered while
     // that metadata is still valid.
+    // Hub-aware sync: joining already-enqueued tasks is not enough once a
+    // firmware record can still be sitting in the ring or parked in the retry
+    // owner. This additionally fences registration/publication, the reader's
+    // drain, and the ready-task handoff, so no completion can run against symbol
+    // metadata this unload is about to invalidate. No-op with signal-less off.
+    ::rocprofiler::kfd::signal_less_quiesce();
     ::rocprofiler::hsa::queue_interposition::interposition_sync();
 
     constexpr auto CODE_OBJECT_KIND = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;

@@ -220,6 +220,11 @@ destroy_queue_state(const hsa_queue_t* queue);
 void
 fence_queue_gate(const hsa_queue_t* queue);
 
+// The same fence across EVERY live queue: teardown step 2 and the (a) fence of a
+// hub-aware sync. Same rule -- the caller must hold no hub, registry or gate lock.
+void
+fence_all_queue_gates();
+
 /**
  * @brief Check if queue interposition has been installed
  *

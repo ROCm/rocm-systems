@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/kfd/no_signal_finalizer.hpp"
 #include "lib/rocprofiler-sdk/kfd/owner_registry.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
+#include "lib/rocprofiler-sdk/kfd/teardown.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -129,6 +130,15 @@ struct signal_less_ops
     // by the retry-owner flush, which runs on the teardown thread -- never on the
     // reader thread.
     std::function<void(signal_less_hub_t::proven&&)> finalize_in_place = {};
+
+    // Fence in-flight interceptor registration/publication on every live queue by
+    // taking and releasing each queue's gate_lock. Must be called holding no other
+    // lock (teardown step 2, and the (a) fence of a hub-aware sync).
+    std::function<void()> quiesce_interceptor = {};
+
+    // Join the async task group, i.e. wait for every already-submitted completion
+    // to finish executing (teardown step 6, and the (d) fence of a hub-aware sync).
+    std::function<void()> join_task_group = {};
 };
 
 void
@@ -145,11 +155,12 @@ hand_off_proven(signal_less_hub_t::proven&& p);
 // takes, finalize the rest in place. Teardown step 4 calls this; it is defined
 // here so no EOP-proven completion can be dropped in the meantime.
 size_t
-flush_retry_owner();
+flush_retry_owner_now();
 
 // Diagnostics / tests.
 size_t
 retry_owner_size();
+
 
 }  // namespace kfd
 }  // namespace rocprofiler

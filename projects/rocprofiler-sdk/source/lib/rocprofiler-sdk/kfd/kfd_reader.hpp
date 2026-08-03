@@ -71,5 +71,15 @@ ensure_reader_session(uint32_t gpu_id);
 // dropped immediately here.
 void
 request_reader_slot_purge(uint32_t doorbell_slot);
+
+// Block until the reader has completed a full drain cycle that began after this
+// call, so every firmware record it already held has been turned into a handoff.
+// This is the (b) fence of a hub-aware sync.
+//
+// Bounded: returns false if the reader does not advance within the timeout rather
+// than hanging finalization. Returns true immediately when no reader/session is
+// live, since there is then nothing to drain.
+bool
+wait_for_reader_drain_barrier(uint64_t timeout_ns = 100'000'000);
 }  // namespace kfd
 }  // namespace rocprofiler

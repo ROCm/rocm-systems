@@ -41,6 +41,7 @@
 
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <new>
@@ -164,6 +165,9 @@ struct reader_state
     // latched reader never makes a dispatch block on that mutex. Cleared only by
     // stop_reader().
     std::atomic<bool> setup_failed = {false};
+    // Bumped once per completed drain pass. A sync point waits for it to advance
+    // twice, which proves a whole pass ran after the request.
+    std::atomic<uint64_t> drain_epoch = {0};
 
     reader_state() = default;
     ~reader_state();
@@ -709,6 +713,8 @@ reader_loop()
                     st.session.drain.erase_slot(_slot, kDoorbellSlotsPerPage);
             }
 
+            st.drain_epoch.fetch_add(1, std::memory_order_release);
+
             if(now_ns - last_evict_ns >= kEvictIntervalNs)
             {
                 st.session.drain.evict_stale(now_ns, kStartMaxAgeNs);
@@ -814,6 +820,30 @@ void
 stop_kfd_reader()
 {
     stop_reader();
+}
+
+bool
+wait_for_reader_drain_barrier(uint64_t timeout_ns)
+{
+    auto& st = state();
+    if(!st.running || !st.session_ready.load(std::memory_order_acquire)) return true;
+
+    const uint64_t _start    = st.drain_epoch.load(std::memory_order_acquire);
+    const uint64_t _deadline = common::timestamp_ns() + timeout_ns;
+
+    // Two advances: the pass in flight when we asked may have already read past
+    // our records, so the second one is the first that is provably complete.
+    while(st.drain_epoch.load(std::memory_order_acquire) < _start + 2)
+    {
+        if(common::timestamp_ns() >= _deadline)
+        {
+            ROCP_WARNING << "KFD dispatch-log: timed out waiting for a reader drain barrier; "
+                            "continuing without it";
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds{200});
+    }
+    return true;
 }
 
 void

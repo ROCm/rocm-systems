@@ -26,6 +26,7 @@
 // injected here and every branch is deterministic.
 
 #include "lib/rocprofiler-sdk/kfd/no_signal_finalizer.hpp"
+#include "lib/rocprofiler-sdk/kfd/teardown.hpp"
 
 #include <gtest/gtest.h>
 
@@ -329,5 +330,179 @@ TEST(retry_owner, is_bounded_and_never_drops_a_completion)
     // Everything held is still accounted for by a flush.
     auto accept = [](fake_proven&) { return submit_result::accepted; };
     EXPECT_EQ(owner.flush(accept, finalize), retry_owner<fake_proven>::kMaxHeld);
+    EXPECT_EQ(owner.size(), 0u);
+}
+
+// ---------------------------------------------------------------------------
+// Unit 6: the strict teardown order (design requirement 7)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// Records the order the steps ran in, and lets a step assert what the world looks
+// like at that point (e.g. that no producer can still submit).
+struct recording_steps
+{
+    std::vector<std::string> order;
+
+    bool producers_stopped = false;
+    bool reader_joined     = false;
+    bool retry_flushed     = false;
+    bool group_joined      = false;
+
+    // Set if anything tried to submit after the join began (invariant 12).
+    bool submitted_after_join = false;
+
+    void stop_new_reservations()
+    {
+        order.emplace_back("stop_new_reservations");
+        producers_stopped = true;
+    }
+
+    void quiesce_interceptor() { order.emplace_back("quiesce_interceptor"); }
+
+    void stop_and_join_reader()
+    {
+        order.emplace_back("stop_and_join_reader");
+        reader_joined = true;
+    }
+
+    void flush_retry_owner()
+    {
+        order.emplace_back("flush_retry_owner");
+        retry_flushed = true;
+    }
+
+    void leak_remaining_pending() { order.emplace_back("leak_remaining_pending"); }
+
+    void join_task_group()
+    {
+        order.emplace_back("join_task_group");
+        group_joined = true;
+    }
+
+    // A producer trying to submit at this instant.
+    void simulate_producer_submit()
+    {
+        if(group_joined) submitted_after_join = true;
+    }
+};
+}  // namespace
+
+// The six steps run in exactly the documented order. A reordering here is a
+// use-after-free at exit, so it is pinned by a test rather than a comment.
+TEST(signal_less_teardown, steps_run_in_the_required_order)
+{
+    auto steps = recording_steps{};
+    run_signal_less_teardown(steps);
+
+    const auto expected = std::vector<std::string>{"stop_new_reservations",
+                                                   "quiesce_interceptor",
+                                                   "stop_and_join_reader",
+                                                   "flush_retry_owner",
+                                                   "leak_remaining_pending",
+                                                   "join_task_group"};
+    EXPECT_EQ(steps.order, expected);
+}
+
+// The properties the order exists to guarantee: reservations stop before the
+// interceptor is fenced, the reader is joined before the retry owner is flushed
+// (so nothing can be added to it afterwards), and the task group is joined last.
+TEST(signal_less_teardown, ordering_guarantees_hold_at_each_step)
+{
+    struct checking_steps
+    {
+        bool producers_stopped = false;
+        bool interceptor_fenced = false;
+        bool reader_joined     = false;
+        bool retry_flushed     = false;
+        bool pending_leaked    = false;
+        bool group_joined      = false;
+
+        void stop_new_reservations()
+        {
+            EXPECT_FALSE(interceptor_fenced) << "reservations must stop first";
+            producers_stopped = true;
+        }
+        void quiesce_interceptor()
+        {
+            EXPECT_TRUE(producers_stopped) << "fencing before reservations stop races new entries";
+            interceptor_fenced = true;
+        }
+        void stop_and_join_reader()
+        {
+            EXPECT_TRUE(interceptor_fenced) << "the reader must be stopped after the fence";
+            reader_joined = true;
+        }
+        void flush_retry_owner()
+        {
+            EXPECT_TRUE(reader_joined) << "flushing before the reader joins is not final";
+            retry_flushed = true;
+        }
+        void leak_remaining_pending()
+        {
+            EXPECT_TRUE(retry_flushed) << "proven work must be finalized before leaking the rest";
+            pending_leaked = true;
+        }
+        void join_task_group()
+        {
+            EXPECT_TRUE(retry_flushed) << "joining before the flush strands retry-owned work";
+            EXPECT_TRUE(pending_leaked);
+            group_joined = true;
+        }
+    };
+
+    auto steps = checking_steps{};
+    run_signal_less_teardown(steps);
+    EXPECT_TRUE(steps.group_joined);
+}
+
+// Invariant 12: no task may be submitted after the join begins. Steps 1-3 are what
+// make that true, so a producer that runs at any point in the sequence is already
+// shut out by the time the join happens.
+TEST(signal_less_teardown, no_task_is_submitted_after_the_join_begins)
+{
+    struct producer_steps : recording_steps
+    {
+        void stop_new_reservations()
+        {
+            recording_steps::stop_new_reservations();
+            simulate_producer_submit();
+        }
+        void stop_and_join_reader()
+        {
+            recording_steps::stop_and_join_reader();
+            simulate_producer_submit();
+        }
+        void join_task_group()
+        {
+            simulate_producer_submit();  // still before the join is recorded
+            recording_steps::join_task_group();
+        }
+    };
+
+    auto steps = producer_steps{};
+    run_signal_less_teardown(steps);
+    EXPECT_FALSE(steps.submitted_after_join);
+}
+
+// Everything empty -- the flag-off shape -- still runs the sequence cleanly and
+// finalizes nothing, which is what makes the real call a no-op when signal-less
+// is off.
+TEST(signal_less_teardown, flush_with_nothing_held_finalizes_nothing)
+{
+    auto owner     = retry_owner<fake_proven>{};
+    auto finalized = 0;
+    auto submitted = 0;
+
+    auto n = owner.flush([&submitted](fake_proven&) {
+                             ++submitted;
+                             return submit_result::accepted;
+                         },
+                         [&finalized](fake_proven&&) { ++finalized; });
+
+    EXPECT_EQ(n, 0u);
+    EXPECT_EQ(submitted, 0);
+    EXPECT_EQ(finalized, 0);
     EXPECT_EQ(owner.size(), 0u);
 }

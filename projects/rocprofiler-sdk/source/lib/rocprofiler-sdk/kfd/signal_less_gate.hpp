@@ -100,6 +100,29 @@ batch_is_signal_less_eligible(const eligibility_inputs& in)
            in.doorbells_injective && in.hub_accepts_batch && in.payload_constructible;
 }
 
+// Signal-less teardown, steps 1-6 of design requirement 7, in the one order that
+// leaves nothing stranded. Called at the very start of finalization, BEFORE the
+// existing queue_controller_fini / kfd::finalize / correlation_id_finalize
+// sequence (which is step 7).
+//
+// No-op unless signal-less is actually active: with the feature off there are no
+// hub entries, no retry-owner work and no reader->task handoff, so the ordering
+// constraint does not apply and the finalize path is left exactly as it was.
+void
+signal_less_teardown();
+
+// Hub-aware synchronization point for code-object unload, queue-controller sync
+// and client detach. Fences (a) interceptor registration/publication, (b) reader
+// drain/result production, (c) ready-task handoff and (d) task execution -- so a
+// completion cannot run against a queue, context or code object that the caller
+// is about to tear down. Unlike the teardown above, this does NOT stop the reader
+// or the hub: the process keeps running afterwards.
+//
+// Must be called holding NO lock -- in particular not a queue gate_lock, which it
+// acquires, and not the hub lock.
+void
+signal_less_quiesce();
+
 // Whether HW profiling should be enabled lazily (only on a queue's first
 // SIGNAL-path batch) instead of at queue creation.
 //

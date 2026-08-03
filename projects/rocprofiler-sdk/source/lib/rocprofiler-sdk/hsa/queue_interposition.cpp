@@ -1169,6 +1169,25 @@ fence_queue_gate(const hsa_queue_t* queue)
 }
 
 void
+fence_all_queue_gates()
+{
+    // Copy the states out from under the registry lock FIRST: taking a gate_lock
+    // while holding the registry lock would nest two locks the enqueue path also
+    // touches. Each gate is then fenced holding nothing else.
+    auto _states = std::vector<queue_state_ptr_t>{};
+    get_queue_registry().rlock([&_states](const auto& map) {
+        _states.reserve(map.size());
+        for(const auto& itr : map)
+            if(itr.second) _states.emplace_back(itr.second);
+    });
+
+    for(const auto& _state : _states)
+    {
+        auto lk = std::lock_guard<std::mutex>{_state->gate_lock};
+    }
+}
+
+void
 process_doorbell_impl(const queue_state_ptr_t& state,
                       hsa_signal_value_t       value,
                       const doorbell_fn_t&     ring_doorbell)
@@ -1578,10 +1597,16 @@ interposition_init(CoreApiTable* core_table, bool enabled)
     // Install the signal-less completion hooks before any queue -- and therefore
     // any eligible batch or firmware record -- can exist, so the reader thread
     // never observes a half-installed set.
-    kfd::install_signal_less_ops(kfd::signal_less_ops{submit_no_signal_finalize,
-                                                      [](kfd::signal_less_hub_t::proven&& p) {
-                                                          no_signal_finalize(std::move(p));
-                                                      }});
+    {
+        auto _ops                = kfd::signal_less_ops{};
+        _ops.submit              = submit_no_signal_finalize;
+        _ops.finalize_in_place   = [](kfd::signal_less_hub_t::proven&& p) {
+            no_signal_finalize(std::move(p));
+        };
+        _ops.quiesce_interceptor = []() { fence_all_queue_gates(); };
+        _ops.join_task_group     = []() { interposition_sync(); };
+        kfd::install_signal_less_ops(std::move(_ops));
+    }
 
     // mark that intercept has been installed
     s_intercept_installed.store(true, std::memory_order_release);

@@ -140,7 +140,7 @@ hand_off_proven(signal_less_hub_t::proven&& p)
 }
 
 size_t
-flush_retry_owner()
+flush_retry_owner_now()
 {
     if(!ops_ready().load(std::memory_order_acquire)) return 0;
     auto& _ops = ops_storage();
@@ -248,6 +248,103 @@ signal_less_id_is_leaked(uint64_t correlation_id)
 {
     if(!any_leaked().load(std::memory_order_acquire)) return false;
     return signal_less_hub().is_ledgered(correlation_id);
+}
+
+namespace
+{
+// Binds the teardown template to the real subsystems. Each member is exactly one
+// step of design requirement 7; the ORDER lives in run_signal_less_teardown().
+struct real_teardown_steps
+{
+    void stop_new_reservations()
+    {
+        // Eligibility consults the hub mode, so STOPPING is what makes every later
+        // batch fail and take the signal path. No new PENDING after this.
+        signal_less_hub().set_mode(session_mode::stopping);
+    }
+
+    void quiesce_interceptor()
+    {
+        if(ops_ready().load(std::memory_order_acquire) && ops_storage().quiesce_interceptor)
+            ops_storage().quiesce_interceptor();
+    }
+
+    void stop_and_join_reader()
+    {
+        // Performs the final status query + final drain and then joins, so no new
+        // PENDING -> EOP_PROVEN transition and no new retry-owner insertion can
+        // originate from the reader after it returns.
+        stop_kfd_reader();
+    }
+
+    void flush_retry_owner()
+    {
+        // Steps 1-3 guarantee no producer remains, so this flush is final. Anything
+        // the executor still refuses is finalized IN PLACE on this thread -- a
+        // normal SDK thread, never the reader, with no lock held.
+        flushed = flush_retry_owner_now();
+    }
+
+    void leak_remaining_pending()
+    {
+        auto _loss = signal_less_hub().drain_for_teardown();
+        leaked     = _loss.second.dispatches;
+        if(leaked == 0) return;
+
+        note_signal_less_losses();
+        ROCP_WARNING << fmt::format(
+            "KFD dispatch-log: {} signal-less dispatch(es) across {} correlation id(s) were still "
+            "in flight at finalization; they emit no record and their correlation ids are not "
+            "retired.",
+            _loss.second.dispatches,
+            _loss.second.correlation_ids);
+    }
+
+    void join_task_group()
+    {
+        if(ops_ready().load(std::memory_order_acquire) && ops_storage().join_task_group)
+            ops_storage().join_task_group();
+    }
+
+    size_t flushed = 0;
+    size_t leaked  = 0;
+};
+}  // namespace
+
+void
+signal_less_teardown()
+{
+    // With the feature off there is no hub work, no retry-owner work and no
+    // reader->task handoff, so the ordering constraint does not apply and the
+    // existing finalize path is left byte-for-byte as it was.
+    if(!signal_less_feature_enabled() || !signal_less_fully_wired()) return;
+
+    auto _steps = real_teardown_steps{};
+    run_signal_less_teardown(_steps);
+
+    ROCP_INFO << fmt::format(
+        "KFD dispatch-log: signal-less teardown complete ({} retry-owned completion(s) finalized, "
+        "{} still-pending dispatch(es) stranded)",
+        _steps.flushed,
+        _steps.leaked);
+}
+
+void
+signal_less_quiesce()
+{
+    if(!signal_less_feature_enabled() || !signal_less_fully_wired()) return;
+    if(!ops_ready().load(std::memory_order_acquire)) return;
+    auto& _ops = ops_storage();
+
+    // (a) no registration/publication is mid-flight...
+    if(_ops.quiesce_interceptor) _ops.quiesce_interceptor();
+    // (b) ...the reader has completed a full drain, so every record it already had
+    // has been turned into a handoff...
+    wait_for_reader_drain_barrier();
+    // (c) ...nothing is parked waiting to be submitted...
+    flush_retry_owner_now();
+    // (d) ...and every submitted completion has finished executing.
+    if(_ops.join_task_group) _ops.join_task_group();
 }
 
 bool

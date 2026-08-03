@@ -49,6 +49,7 @@
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/ompt.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
@@ -1012,6 +1013,16 @@ finalize()
     std::call_once(_once, []() {
         auto num_clients = get_num_clients();
         set_fini_status(-1);
+
+        // Signal-less teardown, steps 1-6 of the design plan's requirement 7, in
+        // the one order that leaves no EOP-proven completion stranded and lets no
+        // task be enqueued after the task group is joined. It must precede the
+        // sequence below: queue_controller_fini joins the async task group, and
+        // correlation_id_finalize consults the loss ledger this populates.
+        //
+        // A no-op unless signal-less is active, so the ordering below is unchanged.
+        kfd::signal_less_teardown();
+
         hsa::async_copy_fini();
         counters::device_counting_service_finalize();
         hsa::queue_controller_fini();
