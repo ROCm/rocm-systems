@@ -481,7 +481,7 @@ if (NOT BUILD_TESTS_ONLY)
       $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
       $<$<BOOL:${USE_SDMA}>:hsakmt::hsakmt>
     PRIVATE
-      $<$<BOOL:${USE_GDA} OR ${USE_SDMA}>:numa::numa>
+      $<$<OR:$<BOOL:${USE_GDA}>,$<BOOL:${USE_SDMA}>>:numa::numa>
   )
 
   target_link_options(
