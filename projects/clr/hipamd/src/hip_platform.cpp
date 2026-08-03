@@ -82,16 +82,16 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   // above. In WGP mode a workgroup allocates out of the LDS pool of the whole
   // WGP (2 CUs), so the per-CU pool has to be doubled to match. Kernels
   // compiled with -mcumode report isWGPMode_ == false and keep the per-CU pool.
-  const uint64_t lds_pool_size = wrkGrpInfo->isWGPMode_
-      ? static_cast<uint64_t>(device.info().localMemSize_) * 2
-      : static_cast<uint64_t>(device.info().localMemSize_);
+  const uint64_t lds_pool_size = static_cast<uint64_t>(device.info().localMemSizePerCU_) *
+      (wrkGrpInfo->isWGPMode_ ? 2 : 1);
 
   // HW allocates LDS in fixed size alignment, so a workgroup is accounted for
-  // aligned size rather than for the exact number of bytes requested.
-  const uint32_t lds_granularity = device.isa().ldsAlignment();
+  // the aligned size rather than for the exact number of bytes requested.
+  const size_t lds_granularity = device.isa().ldsAlignment();
   const size_t requested_lds = wrkGrpInfo->usedLDSSize_ + dynamicSMemSize;
   const size_t total_used_lds = lds_granularity != 0
-      ? amd::alignUp(requested_lds, lds_granularity) : requested_lds;
+      ? ((requested_lds + lds_granularity - 1) / lds_granularity) * lds_granularity
+      : requested_lds;
 
   const int lds_occupancy_wgs = total_used_lds != 0
       ? static_cast<int>(lds_pool_size / total_used_lds) : INT_MAX;
@@ -103,6 +103,13 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   *maxBlocksPerCU = alu_limited_threads / aligned_input_size;
   // Unless those blocks are further constrained by LDS size.
   *maxBlocksPerCU = std::min(*maxBlocksPerCU, lds_occupancy_wgs);
+
+  // The count above is per scheduling unit of the kernel: a WGP for a WGP mode
+  // kernel, a single CU for a kernel compiled with -mcumode.
+  if (wrkGrpInfo->isWGPMode_ != device.settings().enableWgpMode_) {
+    *maxBlocksPerCU = wrkGrpInfo->isWGPMode_
+        ? (*maxBlocksPerCU / 2) : (*maxBlocksPerCU * 2);
+  }
 
   // Return optimal block size: min of ALU limit and requested size
   *bestBlockSize = std::min(alu_limited_threads, aligned_input_size);
