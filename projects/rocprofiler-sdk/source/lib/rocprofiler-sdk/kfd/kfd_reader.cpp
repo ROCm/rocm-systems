@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
 
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
@@ -61,8 +62,30 @@ namespace kfd
 {
 namespace
 {
-constexpr int      kEventfdFlags = EFD_CLOEXEC | EFD_NONBLOCK;
-constexpr uint32_t kBufferKb     = 80;  // dlog ring size
+constexpr int kEventfdFlags = EFD_CLOEXEC | EFD_NONBLOCK;
+
+// Dispatch-log ring size in bytes. Validated before any sizing math uses it:
+// dlog_ring_bytes_from_mb_str() accepts only [1, kDlogMaxRingMb] MB, so the value
+// always fits the uint32 buffer_size ioctl field.
+uint64_t
+ring_bytes()
+{
+    auto _v = common::get_env_optional("ROCPROFILER_KFD_DISPATCH_LOG_SIZE_MB");
+    if(!_v) return kDlogDefaultRingMb * 1024 * 1024;
+
+    uint64_t _bytes = dlog_ring_bytes_from_mb_str(*_v);
+    if(_bytes == 0)
+    {
+        ROCP_WARNING << fmt::format(
+            "KFD dispatch-log: ignoring invalid ROCPROFILER_KFD_DISPATCH_LOG_SIZE_MB='{}' "
+            "(expected an integer 1-{}); using {} MB",
+            *_v,
+            kDlogMaxRingMb,
+            kDlogDefaultRingMb);
+        return kDlogDefaultRingMb * 1024 * 1024;
+    }
+    return _bytes;
+}
 
 // fw_record, the 20-byte record layout, the kRec* type constants, kFwRecBytes, the
 // drain_state cursor bookkeeping, and the drain_pipes() logic all live in the
@@ -193,7 +216,7 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
 {
     s->gpu_id = gpu_id;
 
-    const uint64_t buf_bytes  = static_cast<uint64_t>(kBufferKb) * 1024u;
+    const uint64_t buf_bytes  = ring_bytes();
     const uint64_t arr_bytes  = ((8ull * sizeof(uint64_t)) + 7) & ~7ull;  // upper bound
     const uint64_t signal_off = buf_bytes + arr_bytes * 2;
     s->alloc_size             = round_up_page(static_cast<size_t>(signal_off + arr_bytes));
@@ -248,6 +271,9 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
         return false;
     }
 
+    // buffer_size below is a uint32 field; ring_bytes() is bounded to fit it.
+    static_assert(kDlogMaxRingMb * 1024 * 1024 <= 0xFFFFFFFFull,
+                  "dlog ring size must fit the uint32 buffer_size ioctl field");
     auto reg                       = kfd_ioctl_profiler_args{};
     reg.op                         = KFD_IOC_PROFILER_DLOG;
     reg.dlog.dlog_op               = KFD_IOC_PROFILER_DLOG_REGISTER_BUFFER;
@@ -337,8 +363,10 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
     }
 
     ROCP_INFO << fmt::format(
-        "KFD dispatch-log: session ready gpu_id={} num_regions={} region_records={} rec_bytes={}",
+        "KFD dispatch-log: session ready gpu_id={} ring_bytes={} num_regions={} region_records={} "
+        "rec_bytes={}",
         gpu_id,
+        buf_bytes,
         s->info.num_regions,
         s->info.region_record_count,
         s->info.fw_record_size);
