@@ -438,52 +438,6 @@ void ncclCommPushCudaGdrFree(struct ncclComm* comm, void* handle) {
   comm->destructorHead = dtor;
 }
 
-// #include <mutex>
-// #include <atomic>
-
-// Encapsulate the global shared state
-static uint64_t* globalCrossGpuBarrierPool = nullptr;
-static std::atomic<int> activeRankCount{0};
-static std::mutex barrierAllocationMutex;
-
-ncclResult_t initCrossGpuBarrier(uint64_t** globalCrossGpuBarrierPoolPtr) {
-  // 1. Thread-safe allocation check
-  {
-    std::lock_guard<std::mutex> lock(barrierAllocationMutex);
-    if (globalCrossGpuBarrierPool == nullptr) {
-      size_t poolSize = NCCL_MAX_GROUPS * sizeof(uint64_t);
-      
-      // Allocate the single process-wide coherent pool
-      hipHostMalloc((void**)&globalCrossGpuBarrierPool, poolSize, hipHostMallocCoherent);
-      hipMemset(globalCrossGpuBarrierPool, 0, poolSize);
-    }
-  }
-
-  // 2. Monotonically track how many active ranks are bound to this pool
-  activeRankCount.fetch_add(1, std::memory_order_relaxed);
-
-  // 3. Assign the exact same pointer to this rank's device arguments
-  *globalCrossGpuBarrierPoolPtr = globalCrossGpuBarrierPool;
-
-  return ncclSuccess;
-}
-
-ncclResult_t freeCrossGpuBarrier() {
-  // 1. Safe decrement checking if we are the absolute last rank alive
-  int remainingRanks = activeRankCount.fetch_sub(1, std::memory_order_acq_rel) - 1;
-
-  if (remainingRanks == 0) {
-    // 2. Double-check lock to protect against back-to-back test initializations
-    std::lock_guard<std::mutex> lock(barrierAllocationMutex);
-    if (globalCrossGpuBarrierPool != nullptr) {
-      hipHostFree(globalCrossGpuBarrierPool);
-      globalCrossGpuBarrierPool = nullptr; // Reset to null for the next GTest loop
-    }
-  }
-  
-  return ncclSuccess;
-}
-
 static ncclResult_t commFree(ncclComm_t comm) {
   int abort = 0;
   /* commFree() should not involve any sync among ranks. */
@@ -917,7 +871,6 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   
   if (comm->p2pSingleProcMemRegActive) {
     tmpCommAndChans.comm.p2pSingleProcMemRegActive = true;
-    // NCCLCHECK(initCrossGpuBarrier(&tmpCommAndChans.comm.crossGpuBarrierPool)); 
   }
   
 
