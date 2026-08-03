@@ -467,6 +467,25 @@ TEST(RegisterAccessTest, Sgpr64ReadObservesBothRegisters) {
   EXPECT_EQ(fx.cu->read_sgpr(base + 20), 0xABCDEF01u);
 }
 
+TEST(RegisterAccessTest, SgprOrTrapSelectorRoutesPerWaveStorage) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+
+  fx.cu->write_sgpr(fx.sgpr_base() + 5, 0xA5A50005u);
+  constexpr uint32_t kTtmp0Selector = Wavefront::kTrapRegisterSelectorBase;
+  fx.wf->write_trap_register(kTtmp0Selector, 0x01020304u);
+  fx.wf->write_trap_register(kTtmp0Selector + 1, 0x05060708u);
+
+  RegisterAccess registers(*fx.wf);
+  EXPECT_EQ(registers.read_sgpr_or_trap_register(5), 0xA5A50005u);
+  ASSERT_EQ(fx.plugin->sgpr_reads.size(), 1u);
+  EXPECT_EQ(fx.plugin->sgpr_reads[0], fx.sgpr_base() + 5);
+
+  fx.plugin->sgpr_reads.clear();
+  EXPECT_EQ(registers.read_sgpr_or_trap_register64(kTtmp0Selector), 0x0506070801020304ULL);
+  EXPECT_TRUE(fx.plugin->sgpr_reads.empty());
+}
+
 TEST(RegisterAccessTest, TtmpAccessDoesNotAliasAdjacentWaveSgprs) {
   for (uint32_t sgprs_per_wf : {104u, 106u, 128u}) {
     SCOPED_TRACE(sgprs_per_wf);
@@ -481,7 +500,7 @@ TEST(RegisterAccessTest, TtmpAccessDoesNotAliasAdjacentWaveSgprs) {
 
     auto cu = ComputeUnitCore::create("ttmp_storage_cu", cfg, &gpu_mem, &l2);
     ASSERT_NE(cu, nullptr);
-    auto plugin_group = std::make_shared<ExecutionPluginGroup>();
+    auto plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto recorder = std::make_unique<RecordingPlugin>();
     auto *plugin = recorder.get();
     plugin_group->add(std::move(recorder));

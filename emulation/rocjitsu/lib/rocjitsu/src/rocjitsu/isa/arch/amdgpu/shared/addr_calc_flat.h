@@ -64,10 +64,8 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     // mirror it to the flat_scratch_init user SGPRs for legacy compatibility.
     uint64_t scratch_base = wf.scratch_base();
     uint32_t saddr_val = 0;
-    if (inst.saddr != 0x7F) {
-      uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
-      saddr_val = amdgpu::RegisterAccess(cu).read_sgpr(sb);
-    }
+    if (inst.saddr != 0x7F)
+      saddr_val = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(inst.saddr);
     uint32_t lane_stride = wf.scratch_lane_size();
     bool has_vaddr = true;
     if constexpr (requires { inst.sve; })
@@ -91,11 +89,8 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     // GLOBAL: saddr (64-bit SGPR pair) + VGPR (32-bit) + offset,
     //         or VGPR pair (64-bit) + offset when saddr==0x7F.
     uint64_t saddr_val = 0;
-    if (inst.saddr != 0x7F) {
-      uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
-      saddr_val = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sb + 1)) << 32) |
-                  amdgpu::RegisterAccess(cu).read_sgpr(sb);
-    }
+    if (inst.saddr != 0x7F)
+      saddr_val = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register64(inst.saddr);
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     auto vaddr_region = regs.read_vgpr_region(vbase, inst.saddr != 0x7F ? 1 : 2, exec);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {

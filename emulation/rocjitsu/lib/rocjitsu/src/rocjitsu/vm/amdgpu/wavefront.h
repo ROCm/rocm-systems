@@ -299,21 +299,25 @@ public:
   static constexpr uint32_t kTrapRegisterSelectorBase = 108;
   static constexpr uint32_t kTrapRegisterCount = 16;
 
+  /// @brief Return whether a scalar selector uses per-wave trap storage.
+  static constexpr bool is_trap_register_selector(uint32_t selector) {
+    return selector >= kTrapRegisterSelectorBase &&
+           selector < kTrapRegisterSelectorBase + kTrapRegisterCount;
+  }
+
   /// @brief Read a per-wave trap register by scalar selector value.
   /// @details Selectors 108..123 are architectural per-wave state, not slots
   /// in the ordinary SGPR allocation. The exact names vary by architecture:
   /// CDNA and newer RDNA targets expose TTMP0..15, while RDNA1/2 reserve the
   /// first four selectors for TBA/TMA and expose TTMP0..11 at 112..123.
   uint32_t read_trap_register(uint32_t selector) const {
-    assert(selector >= kTrapRegisterSelectorBase);
-    assert(selector < kTrapRegisterSelectorBase + kTrapRegisterCount);
+    assert(is_trap_register_selector(selector));
     return trap_registers_[selector - kTrapRegisterSelectorBase];
   }
 
   /// @brief Write a per-wave trap register by scalar selector value.
   void write_trap_register(uint32_t selector, uint32_t value) {
-    assert(selector >= kTrapRegisterSelectorBase);
-    assert(selector < kTrapRegisterSelectorBase + kTrapRegisterCount);
+    assert(is_trap_register_selector(selector));
     trap_registers_[selector - kTrapRegisterSelectorBase] = value;
   }
 

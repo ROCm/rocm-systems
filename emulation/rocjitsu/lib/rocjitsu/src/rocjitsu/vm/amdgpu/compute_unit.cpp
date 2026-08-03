@@ -17,6 +17,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/except.h"
 #include "util/log.h"
 
@@ -181,6 +182,7 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   wf->exec_ = wf_size_ == 64 ? ~0ULL : (1ULL << wf_size_) - 1;
   wf->vcc_ = 0;
   wf->m0_ = 0;
+  wf->trap_registers_.fill(0);
   wf->set_apertures(shared_aperture_base_, shared_aperture_limit_, private_aperture_base_,
                     private_aperture_limit_);
   wf->state_ = WfState::RUNNING;
@@ -647,10 +649,9 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     auto mn = std::string_view(inst->mnemonic());
     if (mn.find("s_setpc") != std::string_view::npos ||
         mn.find("s_swappc") != std::string_view::npos) {
-      uint32_t ssrc0_idx = words[0] & 0x7F;
-      uint32_t sb = active->sgpr_alloc().base;
-      uint64_t target = static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx)) |
-                        (static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx + 1)) << 32);
+      const Operand *target_operand = inst->src_operand(0);
+      assert(target_operand && "indirect PC instruction must have a target operand");
+      uint64_t target = RegisterAccess(*active).read_scalar64(*target_operand);
       if (target == 0) {
         active->halt();
         delete inst;

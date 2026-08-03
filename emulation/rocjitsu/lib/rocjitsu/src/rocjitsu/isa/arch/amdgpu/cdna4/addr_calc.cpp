@@ -36,7 +36,7 @@ uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &
     inst_offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
   uint64_t sgpr_off = 0;
   if (inst.soffset_en)
-    sgpr_off = amdgpu::RegisterAccess(cu).read_sgpr(wf.sgpr_alloc().base + inst.soffset);
+    sgpr_off = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(inst.soffset);
   uint64_t addr = base + inst_offset + sgpr_off * 64;
   util::Logger::cp([&](auto &os) {
     static thread_local uint64_t scratch_smem_count = 0;

@@ -67,6 +67,8 @@ namespace rocjitsu::amdgpu {
 /// - Use read_operand() for SIMD logical source operand views.
 /// - Use write_operand() for SIMD destination views whose old value is not read.
 /// - Use readwrite_operand() when a SIMD destination is also an input.
+/// - Use read_sgpr_or_trap_register() for decoded fields whose SGPR selectors
+///   may enter the per-wave trap-register window.
 /// - Use read_vgpr_region() when a helper already has physical VGPR indices.
 /// - Use write_vgpr_region() for physical writes that do not read old values.
 /// - Use readwrite_vgpr_region() for physical read-modify-write operations.
@@ -958,6 +960,21 @@ public:
       op.simd_notify_write64_mut(wf, lane_mask, rocjitsu::ExecutionPlugin::kFullByteMask);
     }
     return OperandReadWrite64View(op, wf, storage, lane_mask, byte_mask);
+  }
+
+  // SGPR-or-trap selector access. Selectors 108..123 are per-wave state;
+  // every other value accepted by the caller remains an ordinary SGPR index.
+  [[nodiscard]] uint32_t read_sgpr_or_trap_register(uint32_t selector) const {
+    const Wavefront &wf = wavefront();
+    if (Wavefront::is_trap_register_selector(selector))
+      return wf.read_trap_register(selector);
+    return read_sgpr(wf.sgpr_alloc().base + selector);
+  }
+
+  [[nodiscard]] uint64_t read_sgpr_or_trap_register64(uint32_t selector) const {
+    uint64_t lo = read_sgpr_or_trap_register(selector);
+    uint64_t hi = read_sgpr_or_trap_register(selector + 1);
+    return lo | (hi << 32);
   }
 
   // Physical SGPR access. These APIs are for helpers that already know the

@@ -20,6 +20,9 @@
 
 #include "simdojo/sim/simulation.h"
 
+#include "checkpoint_generated.h"
+#include "flatbuffers/flatbuffers.h"
+
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
@@ -38,6 +41,7 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 namespace {
 
 const std::string CONFIG_DIR_PATH = CONFIG_DIR;
@@ -48,6 +52,40 @@ using namespace rocjitsu;
 test::ScopedTempFile write_temp_config(std::string_view json) {
   test::ScopedTempFile file("rocjitsu-config-");
   file.write(json);
+  return file;
+}
+
+test::ScopedTempFile write_checkpoint_without_trap_registers() {
+  flatbuffers::FlatBufferBuilder builder;
+
+  auto compute_unit_config = fb::CreateComputeUnitConfig(builder, /*num_wf_slots=*/1,
+                                                         /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256,
+                                                         /*lds_size_kb=*/64);
+  auto shader_engine_config =
+      fb::CreateShaderEngineConfig(builder, /*num_compute_units=*/1, compute_unit_config);
+  auto xcd_config = fb::CreateXcdConfig(builder, /*num_shader_engines=*/1, shader_engine_config);
+  auto gpu_config = fb::CreateAmdgpuConfig(builder, /*num_xcds=*/1, /*num_iods=*/0, xcd_config);
+  auto vm_config =
+      fb::CreateVirtualMachineConfig(builder, builder.CreateString("gfx1250"), gpu_config);
+  auto simulation_config =
+      fb::CreateSimulationConfig(builder, /*max_ticks=*/1000, /*num_threads=*/1, 0, vm_config);
+
+  std::vector<uint32_t> sgprs(104);
+  auto sgpr_data = builder.CreateVector(sgprs);
+  auto wavefront = fb::CreateWavefrontState(builder, /*wf_id=*/0, /*wg_id=*/0, /*pc=*/0x1000,
+                                            /*exec=*/1, /*vcc=*/0,
+                                            /*m0=*/0, /*halted=*/false, /*status=*/0, sgpr_data);
+  auto wavefronts = builder.CreateVector(&wavefront, 1);
+  auto compute_unit =
+      fb::CreateComputeUnitState(builder, builder.CreateString("cu0"), wavefronts, /*next_wf=*/0);
+  auto compute_units = builder.CreateVector(&compute_unit, 1);
+  auto checkpoint =
+      fb::CreateSimulationCheckpoint(builder, /*tick=*/42, simulation_config, compute_units);
+  builder.Finish(checkpoint);
+
+  test::ScopedTempFile file("rocjitsu-old-checkpoint-");
+  file.write(std::string_view(reinterpret_cast<const char *>(builder.GetBufferPointer()),
+                              builder.GetSize()));
   return file;
 }
 
@@ -1201,11 +1239,13 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   ASSERT_NE(wf, nullptr);
   constexpr uint32_t kStatus = 0xA5A55A5Au;
   constexpr uint32_t kWaveSchedMode = 0x5A5AA5A5u;
+  constexpr uint32_t kTtmp0Selector = amdgpu::Wavefront::kTrapRegisterSelectorBase;
+  constexpr uint32_t kTtmp15Selector = kTtmp0Selector + amdgpu::Wavefront::kTrapRegisterCount - 1;
   wf->set_status_raw(kStatus);
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   wf->set_wave_sched_mode_raw(kWaveSchedMode);
-  wf->write_trap_register(/*TTMP0 selector=*/108, 0x11223344u);
-  wf->write_trap_register(/*TTMP15 selector=*/123, 0xAABBCCDDu);
+  wf->write_trap_register(kTtmp0Selector, 0x11223344u);
+  wf->write_trap_register(kTtmp15Selector, 0xAABBCCDDu);
   ASSERT_TRUE(wf->fp16_ovfl());
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
@@ -1220,9 +1260,21 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   EXPECT_EQ(restored_wf->status_raw(), kStatus);
   EXPECT_EQ(restored_wf->mode_raw(), amdgpu::Wavefront::FP16_OVFL_BIT);
   EXPECT_EQ(restored_wf->wave_sched_mode_raw(), kWaveSchedMode);
-  EXPECT_EQ(restored_wf->read_trap_register(/*TTMP0 selector=*/108), 0x11223344u);
-  EXPECT_EQ(restored_wf->read_trap_register(/*TTMP15 selector=*/123), 0xAABBCCDDu);
+  EXPECT_EQ(restored_wf->read_trap_register(kTtmp0Selector), 0x11223344u);
+  EXPECT_EQ(restored_wf->read_trap_register(kTtmp15Selector), 0xAABBCCDDu);
   EXPECT_TRUE(restored_wf->fp16_ovfl());
+}
+
+TEST(CheckpointTest, RejectsCheckpointWithoutTrapRegisterState) {
+  auto checkpoint = write_checkpoint_without_trap_registers();
+
+  try {
+    (void)config::restore_checkpoint(checkpoint.path());
+    FAIL() << "Expected old checkpoint to be rejected";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string_view(error.what()).find("missing complete per-wave trap-register state"),
+              std::string_view::npos);
+  }
 }
 
 TEST(CApiTest, CreateAndDestroyFromString) {

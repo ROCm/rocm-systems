@@ -35,7 +35,7 @@ uint32_t read_smem_offset(uint32_t soffset, amdgpu::Wavefront &wf) {
     return 0;
   if (soffset == OPR_SMEM_OFFSET_M0)
     return wf.m0();
-  return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + soffset);
+  return amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(soffset);
 }
 
 } // namespace
@@ -61,10 +61,8 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
 
   if (inst.seg == 1) {
     uint32_t saddr_val = 0;
-    if (has_saddr(inst.saddr)) {
-      uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
-      saddr_val = amdgpu::RegisterAccess(cu).read_sgpr(sb);
-    }
+    if (has_saddr(inst.saddr))
+      saddr_val = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(inst.saddr);
     uint64_t scratch_base = wf.scratch_base();
     uint32_t lane_stride = wf.scratch_lane_size();
     amdgpu::RegisterAccess regs(cu);
@@ -87,11 +85,8 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
   }
 
   uint64_t saddr_val = 0;
-  if (has_saddr(inst.saddr)) {
-    uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
-    saddr_val = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sb + 1)) << 32) |
-                amdgpu::RegisterAccess(cu).read_sgpr(sb);
-  }
+  if (has_saddr(inst.saddr))
+    saddr_val = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register64(inst.saddr);
   uint32_t priv_hi = static_cast<uint32_t>(wf.private_aperture_base() >> 32);
   uint64_t scratch_base = wf.scratch_base();
   uint32_t lane_stride = wf.scratch_lane_size();

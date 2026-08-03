@@ -4338,18 +4338,40 @@ def test_generated_operand_validation_switch_is_shared_by_constructors(
 def test_generated_trap_register_operands_use_per_wave_storage(
     amdgpu_generated_root: Path,
 ):
-    for arch in ('cdna4', 'rdna1', 'rdna4'):
-        operand = (amdgpu_generated_root / arch / 'operand.cpp').read_text()
-        assert 'return wf.read_trap_register(static_cast<uint32_t>(ev));' in operand
-        assert 'wf.write_trap_register(static_cast<uint32_t>(ev), val);' in operand
-        assert (
-            'uint32_t hi = wf.read_trap_register(static_cast<uint32_t>(ev + 1));'
-            in operand
+    shared_resolve = (
+        amdgpu_generated_root.parent / 'shared' / 'scalar_operand_resolve.h'
+    ).read_text()
+    assert 'return wf.read_trap_register(static_cast<uint32_t>(ev));' in shared_resolve
+    assert 'wf.write_trap_register(static_cast<uint32_t>(ev), val);' in shared_resolve
+    assert (
+        'uint32_t hi = wf.read_trap_register(static_cast<uint32_t>(ev + 1));'
+        in shared_resolve
+    )
+    assert (
+        'wf.write_trap_register(static_cast<uint32_t>(ev + 1), '
+        'static_cast<uint32_t>(val >> 32));'
+    ) in shared_resolve
+
+    operand_paths = [
+        amdgpu_generated_root / arch / 'operand.cpp'
+        for arch in (
+            'cdna1',
+            'cdna2',
+            'cdna3',
+            'cdna4',
+            'rdna1',
+            'rdna2',
+            'rdna3',
+            'rdna3_5',
+            'rdna4',
         )
-        assert (
-            'wf.write_trap_register(static_cast<uint32_t>(ev + 1), '
-            'static_cast<uint32_t>(val >> 32));'
-        ) in operand
+    ]
+    operand_paths.append(amdgpu_generated_root / 'gfx1250' / 'operand_exec.cpp')
+
+    for operand_path in operand_paths:
+        operand = operand_path.read_text()
+        assert 'amdgpu::resolve_src_scalar(' in operand
+        assert 'amdgpu::resolve_dst_write(' in operand
 
 
 def test_cdna4_mfma_f8f6f4_accepts_standalone_and_prefixed_encodings(

@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <fstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace rocjitsu {
@@ -126,6 +127,27 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
   return vm_config;
 }
 
+void validate_trap_register_state(const fb::SimulationCheckpoint *checkpoint,
+                                  const std::string &path) {
+  const auto *compute_units = checkpoint->compute_units();
+  if (!compute_units)
+    return;
+
+  for (const auto *compute_unit : *compute_units) {
+    if (!compute_unit || !compute_unit->wavefronts())
+      continue;
+    for (const auto *wavefront : *compute_unit->wavefronts()) {
+      if (!wavefront)
+        continue;
+      const auto *trap_registers = wavefront->trap_registers();
+      if (!trap_registers || trap_registers->size() < amdgpu::Wavefront::kTrapRegisterCount) {
+        throw std::runtime_error("Checkpoint is missing complete per-wave trap-register state: " +
+                                 path);
+      }
+    }
+  }
+}
+
 } // namespace
 
 void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
@@ -222,6 +244,7 @@ LoadedConfig restore_checkpoint(const std::string &path) {
   if (!checkpoint->config())
     throw std::runtime_error("Checkpoint missing config section: " + path);
   auto *fb_config = checkpoint->config();
+  validate_trap_register_state(checkpoint, path);
   VirtualMachine::Config vm_config = config_from_checkpoint(fb_config);
   simdojo::SimulationEngine::Config engine_config{};
   engine_config.max_ticks = fb_config->max_ticks();
@@ -287,14 +310,11 @@ LoadedConfig restore_checkpoint(const std::string &path) {
             }
           }
 
-          if (auto *trap_registers = wf_state->trap_registers()) {
-            const size_t count =
-                std::min<size_t>(trap_registers->size(), amdgpu::Wavefront::kTrapRegisterCount);
-            for (size_t r = 0; r < count; ++r) {
-              wf->write_trap_register(amdgpu::Wavefront::kTrapRegisterSelectorBase +
-                                          static_cast<uint32_t>(r),
-                                      trap_registers->Get(static_cast<unsigned>(r)));
-            }
+          const auto *trap_registers = wf_state->trap_registers();
+          for (size_t r = 0; r < amdgpu::Wavefront::kTrapRegisterCount; ++r) {
+            wf->write_trap_register(amdgpu::Wavefront::kTrapRegisterSelectorBase +
+                                        static_cast<uint32_t>(r),
+                                    trap_registers->Get(static_cast<unsigned>(r)));
           }
 
           // dispatch_wf_at() has just allocated this block, so RegisterFile::allocate()'s

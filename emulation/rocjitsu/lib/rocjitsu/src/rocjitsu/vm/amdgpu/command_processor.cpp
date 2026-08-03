@@ -69,10 +69,10 @@ static_assert(kMaxClusterWorkgroups <= 16,
 
 // GFX12 launch-state scalar selectors used by compiler-generated workgroup
 // and cluster identity sequences.
-constexpr uint32_t kGfx12Ttmp6Selector = 114;
-constexpr uint32_t kGfx12Ttmp7Selector = 115;
-constexpr uint32_t kGfx12Ttmp8Selector = 116;
-constexpr uint32_t kGfx12Ttmp9Selector = 117;
+constexpr uint32_t kGfx12Ttmp6Selector = Wavefront::kTrapRegisterSelectorBase + 6;
+constexpr uint32_t kGfx12Ttmp7Selector = Wavefront::kTrapRegisterSelectorBase + 7;
+constexpr uint32_t kGfx12Ttmp8Selector = Wavefront::kTrapRegisterSelectorBase + 8;
+constexpr uint32_t kGfx12Ttmp9Selector = Wavefront::kTrapRegisterSelectorBase + 9;
 
 // LLVM's gfx1250 architected-SGPR ABI maps TTMP6 as seven 4-bit fields:
 // cluster-local XYZ, cluster-max XYZ, and max-flat-ID from low to high bits.

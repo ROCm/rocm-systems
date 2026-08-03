@@ -30,7 +30,7 @@ uint32_t read_optional_sreg_m0(uint32_t reg, amdgpu::Wavefront &wf) {
     return 0;
   if (reg == OPR_SREG_M0_M0)
     return wf.m0();
-  return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + reg);
+  return amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(reg);
 }
 
 uint32_t read_smem_offset(uint32_t soffset, amdgpu::Wavefront &wf) {
@@ -38,7 +38,7 @@ uint32_t read_smem_offset(uint32_t soffset, amdgpu::Wavefront &wf) {
     return 0;
   if (soffset == OPR_SMEM_OFFSET_M0)
     return wf.m0();
-  return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + soffset);
+  return amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(soffset);
 }
 
 void init_vector_mem_state(amdgpu::Wavefront &wf, amdgpu::VectorMemState &d) {
@@ -73,11 +73,8 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   uint64_t saddr_val = 0;
-  if (has_saddr(inst.saddr)) {
-    uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
-    saddr_val = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sb + 1)) << 32) |
-                amdgpu::RegisterAccess(cu).read_sgpr(sb);
-  }
+  if (has_saddr(inst.saddr))
+    saddr_val = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register64(inst.saddr);
   uint32_t priv_hi = static_cast<uint32_t>(wf.private_aperture_base() >> 32);
   uint64_t scratch_base = wf.scratch_base();
   uint32_t lane_stride = wf.scratch_lane_size();
@@ -108,11 +105,8 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   uint64_t saddr_val = 0;
-  if (has_saddr(inst.saddr)) {
-    uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
-    saddr_val = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sb + 1)) << 32) |
-                amdgpu::RegisterAccess(cu).read_sgpr(sb);
-  }
+  if (has_saddr(inst.saddr))
+    saddr_val = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register64(inst.saddr);
   uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
   amdgpu::RegisterAccess regs(cu);
   auto vaddr_region = regs.read_vgpr_region(vbase, has_saddr(inst.saddr) ? 1 : 2, exec);
@@ -140,10 +134,8 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   uint64_t scratch_base = wf.scratch_base();
   uint32_t lane_stride = wf.scratch_lane_size();
   uint32_t saddr_val = 0;
-  if (has_saddr(inst.saddr)) {
-    uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
-    saddr_val = amdgpu::RegisterAccess(cu).read_sgpr(sb);
-  }
+  if (has_saddr(inst.saddr))
+    saddr_val = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(inst.saddr);
   uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
   amdgpu::RegisterAccess regs(cu);
   std::optional<amdgpu::RegisterAccess::VgprReadRegion> vaddr_region;

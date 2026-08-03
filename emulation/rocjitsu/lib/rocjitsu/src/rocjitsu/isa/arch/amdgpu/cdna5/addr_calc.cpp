@@ -33,16 +33,14 @@ bool has_saddr(uint32_t saddr) { return saddr != OPR_SREG_NULL; }
 bool has_smem_offset(uint32_t soffset) { return soffset != OPR_SMEM_OFFSET_NULL; }
 
 uint32_t read_sreg_m0_operand(amdgpu::Wavefront &wf, uint32_t operand) {
-  auto &cu = wf.cu();
-  uint32_t base = wf.sgpr_alloc().base;
   if (operand <= 105)
-    return amdgpu::RegisterAccess(cu).read_sgpr(base + operand);
+    return amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(operand);
   if (operand == 106)
     return static_cast<uint32_t>(wf.vcc());
   if (operand == 107)
     return static_cast<uint32_t>(wf.vcc() >> 32);
-  if (operand >= 108 && operand <= 123)
-    return wf.read_trap_register(operand);
+  if (amdgpu::Wavefront::is_trap_register_selector(operand))
+    return amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(operand);
   if (operand == 124)
     return 0;
   if (operand == 125)

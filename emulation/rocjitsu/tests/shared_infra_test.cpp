@@ -5,9 +5,13 @@
 /// @brief Phase B unit tests: addr_calc, MMA execution, wavefront context, CU factory.
 
 #include "decode_test_util.h"
+#include "halt_snapshot_plugin.h"
+
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
@@ -148,6 +152,10 @@ static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).descriptor_vgpr_count_gra
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).descriptor_vgpr_count_granule_wave32 ==
               16);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).descriptor_vgpr_count_granule_wave64 == 0);
+static_assert(!amdgpu::Wavefront::is_trap_register_selector(107));
+static_assert(amdgpu::Wavefront::is_trap_register_selector(108));
+static_assert(amdgpu::Wavefront::is_trap_register_selector(123));
+static_assert(!amdgpu::Wavefront::is_trap_register_selector(124));
 
 // RDNA3/3.5 retain monolithic S_WAITCNT (GFX11 layout).
 static_assert(HasMonolithicWaitcnt<rdna3::Isa>);
@@ -4125,6 +4133,137 @@ TEST(Gfx1250AddrCalcTest, SmemTtmpOffsetUsesPerWaveTrapStorage) {
   inst.ioffset = 0x20;
   EXPECT_EQ(cdna5::smem_calculate_address(inst, *first, /*access_size_bytes=*/4), kBase + 0x60);
   EXPECT_EQ(cu->read_sgpr(former_alias), 0x80u);
+}
+
+TEST(RdnaAddrCalcTest, Rdna4AddressSelectorsUsePerWaveTrapStorage) {
+  amdgpu::GpuMemory mem("rdna4_addr_ttmp_mem");
+  amdgpu::L2Cache l2("rdna4_addr_ttmp_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_addr_ttmp_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *first = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  auto *second = cu->dispatch_wf(1, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+
+  constexpr uint32_t kTtmp0Selector = amdgpu::Wavefront::kTrapRegisterSelectorBase;
+  const uint32_t former_alias = first->sgpr_alloc().base + kTtmp0Selector;
+  ASSERT_EQ(former_alias, second->sgpr_alloc().base + 4);
+  cu->write_sgpr(former_alias, 0xDEAD0080u);
+  cu->write_sgpr(former_alias + 1, 0xDEAD0081u);
+
+  constexpr uint64_t kSmemBase = 0x2'0000'1000ULL;
+  cu->write_sgpr(first->sgpr_alloc().base, static_cast<uint32_t>(kSmemBase));
+  cu->write_sgpr(first->sgpr_alloc().base + 1, static_cast<uint32_t>(kSmemBase >> 32));
+  first->write_trap_register(kTtmp0Selector, 0x40);
+
+  rdna4::SmemMachineInst smem{};
+  smem.sbase = 0;
+  smem.soffset = kTtmp0Selector;
+  smem.ioffset = 0x20;
+  EXPECT_EQ(rdna4::smem_calculate_address(smem, *first), kSmemBase + 0x60);
+
+  constexpr uint64_t kFlatBase = 0x3'0000'2000ULL;
+  first->write_trap_register(kTtmp0Selector, static_cast<uint32_t>(kFlatBase));
+  first->write_trap_register(kTtmp0Selector + 1, static_cast<uint32_t>(kFlatBase >> 32));
+  first->set_exec(1);
+  cu->write_vgpr(first->vgpr_alloc().base, 0, 0x80);
+
+  rdna4::VglobalMachineInst global{};
+  global.saddr = kTtmp0Selector;
+  global.vaddr = 0;
+  global.ioffset = 0x10;
+  amdgpu::VectorMemState addresses(amdgpu::GLOBAL_MEM);
+  rdna4::flat_calculate_addresses(global, *first, addresses);
+  EXPECT_EQ(addresses.per_lane_addr[0], kFlatBase + 0x90);
+  EXPECT_EQ(cu->read_sgpr(former_alias), 0xDEAD0080u);
+  EXPECT_EQ(cu->read_sgpr(former_alias + 1), 0xDEAD0081u);
+}
+
+TEST(CdnaAddrCalcTest, Cdna4SmemOffsetsUsePerWaveTrapStorage) {
+  amdgpu::GpuMemory mem("cdna4_scratch_ttmp_mem");
+  amdgpu::L2Cache l2("cdna4_scratch_ttmp_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4_scratch_ttmp_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *first = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  auto *second = cu->dispatch_wf(1, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+
+  constexpr uint32_t kTtmp0Selector = amdgpu::Wavefront::kTrapRegisterSelectorBase;
+  const uint32_t former_alias = first->sgpr_alloc().base + kTtmp0Selector;
+  ASSERT_EQ(former_alias, second->sgpr_alloc().base + 4);
+  cu->write_sgpr(former_alias, 0x80);
+  first->write_trap_register(kTtmp0Selector, 0x40);
+
+  constexpr uint64_t kBase = 0x4'0000'1000ULL;
+  cu->write_sgpr(first->sgpr_alloc().base, static_cast<uint32_t>(kBase));
+  cu->write_sgpr(first->sgpr_alloc().base + 1, static_cast<uint32_t>(kBase >> 32));
+
+  cdna4::SmemMachineInst ordinary{};
+  ordinary.op = cdna4::kSLoadDwordSmem;
+  ordinary.sbase = 0;
+  ordinary.soffset_en = 1;
+  ordinary.soffset = kTtmp0Selector;
+  EXPECT_EQ(cdna4::smem_calculate_address(ordinary, *first), kBase + 0x40);
+
+  cdna4::SmemMachineInst scratch = ordinary;
+  scratch.op = cdna4::kSScratchLoadDwordSmem;
+  EXPECT_EQ(cdna4::smem_calculate_address(scratch, *first), kBase + 0x40 * 64);
+  EXPECT_EQ(cu->read_sgpr(former_alias), 0x80u);
+}
+
+TEST(TrapRegisterPcTest, SetpcPrecheckReadsDecodedTtmpPair) {
+  amdgpu::GpuMemory mem("cdna4_setpc_ttmp_mem");
+  amdgpu::L2Cache l2("cdna4_setpc_ttmp_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4_setpc_ttmp_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  test::HaltSnapshotPlugin *snapshot = nullptr;
+  cu->set_plugin_group(test::make_halt_snapshot_group(&snapshot));
+  ASSERT_NE(snapshot, nullptr);
+
+  constexpr uint64_t kStartPc = 0x1000;
+  constexpr uint64_t kTargetPc = kStartPc + 2 * sizeof(uint32_t);
+  constexpr uint32_t kTtmp0Selector = amdgpu::Wavefront::kTrapRegisterSelectorBase;
+  const std::array<uint32_t, 4> code = {
+      build_s_setpc_b64(kTtmp0Selector, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_mov_b32(/*sdst=*/0, scalar_positive_inline_u32(1), ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  mem.load_image(reinterpret_cast<const uint8_t *>(code.data()), sizeof(code), kStartPc);
+
+  auto *wavefront = cu->dispatch_wf(/*wg_id=*/0, kStartPc, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wavefront, nullptr);
+  wavefront->write_trap_register(kTtmp0Selector, static_cast<uint32_t>(kTargetPc));
+  wavefront->write_trap_register(kTtmp0Selector + 1, static_cast<uint32_t>(kTargetPc >> 32));
+
+  for (uint32_t step = 0; step < code.size() && cu->has_active_wfs(); ++step)
+    static_cast<void>(cu->step());
+
+  ASSERT_FALSE(cu->has_active_wfs());
+  ASSERT_EQ(snapshot->snapshots().size(), 1u);
+  EXPECT_EQ(snapshot->snapshots()[0].sgpr(0), 1u);
 }
 
 TEST(RdnaAddrCalcTest, Rdna4SmemSoffsetHandlesNullM0AndSgprSelectors) {
