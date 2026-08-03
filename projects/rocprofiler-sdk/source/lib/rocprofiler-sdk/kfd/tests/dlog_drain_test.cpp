@@ -33,6 +33,7 @@
 #include <cstdint>
 #include <cstring>
 #include <map>
+#include <string>
 #include <vector>
 
 namespace
@@ -332,6 +333,180 @@ TEST(dlog_drain, overrun_recovery)
     EXPECT_EQ(pairs, 1u);
     ASSERT_EQ(rec.pairs.count(std::make_pair(db, 42u)), 1u);
     EXPECT_EQ(rec.pairs[std::make_pair(db, 42u)].first, 111u);
+}
+
+// --- Phase 0: wptr overrun DETECTION (U5/U6/U7). The producer has lapped the
+// reader once w - rptr reaches region_slots (>=, not >): its next write target is
+// then the slot at rptr. Detection only -- pairing behavior is unchanged. ---
+
+// U7 (safe side): w - rptr == region_slots - 1 drains fully and is NOT an overrun.
+TEST(dlog_drain, boundary_one_below_full_is_safe)
+{
+    fake_ring   ring(1, 8);
+    drain_state st;
+    recorder    rec0;
+    run_drain(ring, st, rec0);
+
+    const uint32_t db = 4100;
+    ring.put(0, 0, kRecStart, 1, db, 10);
+    ring.put(0, 1, kRecEop, 1, db, 20);
+    ring.wptr[0] = 7;  // region_slots - 1
+
+    recorder rec;
+    EXPECT_EQ(run_drain(ring, st, rec), 1u);
+    EXPECT_EQ(st.overruns, 0u);
+    EXPECT_EQ(st.lost_records, 0u);
+    EXPECT_EQ(ring.rptr[0], 7u);
+}
+
+// U7 (overrun side) + U5: w - rptr == region_slots exactly is an OVERRUN, because
+// the producer's next write target is the slot at rptr. Phase 0 detects it without
+// changing what the drain publishes.
+TEST(dlog_drain, boundary_exactly_full_is_overrun)
+{
+    fake_ring   ring(1, 8);
+    drain_state st;
+    recorder    rec0;
+    run_drain(ring, st, rec0);
+
+    const uint32_t db = 4100;
+    ring.put(0, 0, kRecStart, 1, db, 10);
+    ring.put(0, 1, kRecEop, 1, db, 20);
+    ring.wptr[0] = 8;  // == region_slots
+
+    recorder rec;
+    EXPECT_EQ(run_drain(ring, st, rec), 1u);  // behavior unchanged
+    EXPECT_EQ(st.overruns, 1u);
+    EXPECT_EQ(st.lost_records, 1u);  // the frontier==rptr collision slot
+}
+
+// U5: a deep lap before the scan is detected, and the loss count reports every
+// record past the safe window.
+TEST(dlog_drain, deep_lap_before_scan_detected)
+{
+    fake_ring   ring(2, 2048);
+    drain_state st;
+    recorder    rec0;
+    run_drain(ring, st, rec0);
+
+    ring.wptr[0] = 10000;
+
+    recorder rec;
+    run_drain(ring, st, rec);
+
+    EXPECT_EQ(st.overruns, 1u);
+    EXPECT_EQ(st.lost_records, 10000u - 2048u + 1u);
+}
+
+// U6: the producer laps DURING the scan. The pre-scan wptr looked safe, so only
+// the after-scan re-read can catch it. The pair callback advances wptr here,
+// which is exactly the "producer moved while we were reading" schedule.
+TEST(dlog_drain, mid_scan_lap_detected_by_after_scan_reread)
+{
+    fake_ring   ring(1, 8);
+    drain_state st;
+    recorder    rec0;
+    run_drain(ring, st, rec0);
+
+    const uint32_t db = 4100;
+    ring.put(0, 0, kRecStart, 1, db, 10);
+    ring.put(0, 1, kRecEop, 1, db, 20);
+    ring.wptr[0] = 4;  // safe at the pre-scan read
+
+    uint64_t pairs = drain_pipes(ring.records.data(),
+                                 ring.num_regions,
+                                 ring.rrc,
+                                 ring.wptr.data(),
+                                 ring.rptr.data(),
+                                 st,
+                                 1000,
+                                 [&ring](uint32_t, uint32_t, uint64_t, uint64_t) {
+                                     ring.wptr[0] = 9;  // lapped mid-scan
+                                 });
+
+    EXPECT_EQ(pairs, 1u);
+    EXPECT_EQ(st.overruns, 1u);
+    EXPECT_EQ(st.lost_records, 9u - 8u + 1u);
+}
+
+// One lap is counted once, not twice: a pre-scan overrun must not also be counted
+// by the after-scan re-read.
+TEST(dlog_drain, overrun_counted_once_per_drain)
+{
+    fake_ring   ring(1, 8);
+    drain_state st;
+    recorder    rec0;
+    run_drain(ring, st, rec0);
+
+    ring.wptr[0] = 12;
+
+    recorder rec;
+    run_drain(ring, st, rec);
+
+    EXPECT_EQ(st.overruns, 1u);
+    EXPECT_EQ(st.lost_records, 12u - 8u + 1u);
+}
+
+// --- Phase 0: ring-size env-var parsing (U16). Only a plain decimal integer in
+// [1, kDlogMaxRingMb] is accepted; everything else returns 0 so the caller warns
+// and uses the default. ---
+TEST(dlog_ring_size, env_value_parsing)
+{
+    constexpr uint64_t mb = 1024 * 1024;
+
+    // Rejected: empty, zero, negative, non-numeric, whitespace, trailing junk.
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str(""), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str("0"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str("00"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str("-1"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str("-8"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str("abc"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str(" 8"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str("8 "), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str("8M"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str("+8"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str("0x8"), 0u);
+
+    // Accepted: the default and the largest value that fits the uint32 field.
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str("1"), 1u * mb);
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str("8"), 8u * mb);
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str("4095"), kDlogMaxRingMb * mb);
+    EXPECT_EQ(kDlogMaxRingMb, 4095u);
+
+    // Over the uint32 buffer_size field, and overflow-adjacent inputs: rejected
+    // without ever wrapping (the bound is checked per digit).
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str("4096"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str("4294967296"), 0u);
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str("18446744073709551615"), 0u);  // UINT64_MAX
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str("18446744073709551616"), 0u);  // UINT64_MAX + 1
+    EXPECT_EQ(dlog_ring_bytes_from_mb_str(std::string(64, '9')), 0u);
+}
+
+// The sizing math the session performs on the parsed value is validated BEFORE
+// use: any accepted value fits the uint32 buffer_size ioctl field, and the
+// derived sizes (arr_bytes, signal_off, alloc_size, stride, aperture candidate)
+// cannot overflow uint64.
+TEST(dlog_ring_size, accepted_sizes_keep_the_session_math_in_range)
+{
+    for(uint64_t m : {uint64_t{1}, uint64_t{8}, kDlogDefaultRingMb, kDlogMaxRingMb})
+    {
+        uint64_t buf_bytes = dlog_ring_bytes_from_mb_str(std::to_string(m));
+        ASSERT_EQ(buf_bytes, m * 1024 * 1024);
+        ASSERT_LE(buf_bytes, 0xFFFFFFFFull);  // uint32 buffer_size field
+
+        // Mirrors setup_session(): arr_bytes/signal_off/alloc_size, then the
+        // aperture walk's stride and its farthest (i == 127) candidate.
+        const uint64_t arr_bytes  = 64;
+        const uint64_t signal_off = buf_bytes + arr_bytes * 2;
+        const uint64_t alloc_size = signal_off + arr_bytes + 4095;  // page round-up bound
+        const uint64_t stride     = alloc_size + (8ull << 20) + 4095;
+        const uint64_t cand       = (64ull << 30) + stride * 127;
+
+        EXPECT_GT(signal_off, buf_bytes);
+        EXPECT_GT(alloc_size, signal_off);
+        EXPECT_GT(stride, alloc_size);
+        EXPECT_GT(cand + alloc_size, cand);  // no wrap at the far end of the walk
+    }
 }
 
 // Ring wrap: a pair whose indices straddle the power-of-two wrap boundary (start at
