@@ -1893,6 +1893,36 @@ TEST(RemoteDriverStreamPoisonTest, ShortMmapReplyIsRejectedRatherThanReadOffTheS
   EXPECT_EQ(rd.ioctl(AMDKFD_IOC_GET_VERSION, &version), -EPROTO);
 }
 
+// The daemon's own failure has to reach the caller as its errno too, and EPERM
+// is the value that tests the encoding rather than the plumbing: EPERM is 1, so
+// a daemon result of -EPERM is the bit pattern -1, which the transport used to
+// hand back as its "no usable errno" sentinel. Anything that special-cases -1
+// on the way out swallows exactly this reply and leaves the caller reading a
+// stale errno, which is why the sentinel was removed rather than exempted.
+TEST(RemoteDriverStreamPoisonTest, DaemonReportedEpermReachesTheCallerAsEperm) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+  const CloseOnScopeExit server_closer{sv[1]};
+
+  // A complete, well-formed mmap reply -- header plus RpcMmapResponse -- that
+  // simply reports failure. Nothing here is a framing error.
+  rocjitsu::RpcHeader reply{};
+  reply.opcode = rocjitsu::RPC_MMAP;
+  reply.payload_bytes = sizeof(rocjitsu::RpcMmapResponse);
+  reply.result = -EPERM;
+  rocjitsu::RpcMmapResponse body{};
+  ASSERT_TRUE(rocjitsu::rpc_send_exact(sv[1], &reply, sizeof(reply)));
+  ASSERT_TRUE(rocjitsu::rpc_send_exact(sv[1], &body, sizeof(body)));
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  // A sentinel no errno takes, so "left untouched" is distinguishable from
+  // "reported as 0".
+  errno = 12345;
+  EXPECT_EQ(rd.mmap(nullptr, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, 0), MAP_FAILED);
+  EXPECT_EQ(errno, EPERM) << "the daemon's EPERM was mistaken for an absent errno";
+}
+
 // A munmap whose reply never arrives has already put its request on the wire, so
 // the client cannot know where the next frame begins either. It must not unmap
 // on the strength of a reply it never read, and must not leave the connection

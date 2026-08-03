@@ -51,6 +51,21 @@ constexpr bool has_embedded_pointers(unsigned long request) {
   }
 }
 
+/// @brief Negative errno for a transport call that failed without putting a
+/// frame on the wire.
+///
+/// @details Every such site used to fall back to a bare -1 when errno was
+/// unset. That collides with -EPERM: EPERM is 1, so the daemon's own -EPERM --
+/// which arrives by exactly the same return path -- became indistinguishable
+/// from "no errno available", and any consumer trying to tell them apart got
+/// one of the two wrong. Substituting EIO keeps every negative return a real
+/// errno, so callers can translate unconditionally and -1 means EPERM and
+/// nothing else.
+int transport_errno() {
+  const int err = errno;
+  return err > 0 ? -err : -EIO;
+}
+
 /// @brief Safe wrapper around syscall(SYS_mmap, ...) that avoids UB from
 /// casting negative return values through uintptr_t/pointer types.
 void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
@@ -653,16 +668,14 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       // Preserve the transport errno — e.g. EBADF when the client handed us a
       // closed notifier fd for SCM_RIGHTS — instead of a bare -1, which the
       // interposer would surface as EPERM (-EPERM == -1).
-      int err = errno;
-      return err > 0 ? -err : -1;
+      return transport_errno();
     }
   } else {
     size_t sent = 0;
     if (!rpc_send_exact(sock_, buf.data(), buf.size(), &sent)) {
       if (sent > 0)
         return poison_stream();
-      int err = errno;
-      return err > 0 ? -err : -1;
+      return transport_errno();
     }
   }
 
@@ -975,11 +988,13 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
     // result do not, so without this the caller would read whatever errno this
     // thread last happened to set. The call that TRIPS the poison comes through
     // here, not through the fail-fast check above, so this is the one that has
-    // to make -EPROTO visible. -1 is the transport's "no usable errno" sentinel
-    // (see the `err > 0 ? -err : -1` returns): there errno is already the real
-    // one, and rewriting it would report EPERM.
-    if (rc < 0 && rc != -1)
-      errno = -rc;
+    // to make -EPROTO visible.
+    //
+    // Unconditional, with no sentinel to exempt: transport_errno() guarantees
+    // every negative return is a real errno, so -1 means EPERM and is
+    // translated like any other. A positive rc cannot come from the daemon's
+    // reply (its result is 0 or negative), so treat it as the desync it is.
+    errno = rc < 0 ? -rc : EPROTO;
     return MAP_FAILED;
   }
 
@@ -1074,8 +1089,7 @@ int RemoteDriver::munmap(void *addr, size_t length) {
     // started is just a failed call on a still-aligned stream.
     if (sent > 0)
       return poison_stream();
-    int err = errno;
-    return err > 0 ? -err : -1;
+    return transport_errno();
   }
 
   RpcHeader resp = {};
@@ -1116,8 +1130,7 @@ int RemoteDriver::send_mmap(void *addr, size_t length, int prot, int flags, off_
   if (!rpc_send_exact(sock_, send_buffer, sizeof(send_buffer), &sent)) {
     if (sent > 0)
       return poison_stream();
-    int err = errno;
-    return err > 0 ? -err : -1;
+    return transport_errno();
   }
 
   uint8_t response_buffer[sizeof(RpcHeader) + sizeof(RpcMmapResponse)];
