@@ -3707,15 +3707,9 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
   // Initialize per-XCC structures
   pcs_data->num_xcc = properties_.NumXcc;
 
-  // Always drain the trap buffers with PM4 rather than a CPU memcpy over the large-BAR
-  // aperture. The CPU path spins on buf_written_val and then reads the samples directly,
-  // but that handshake only orders the CPU's own accesses: the trap handler writes the
-  // sample payload through GL2, and nothing guarantees those bytes are visible across the
-  // aperture at the point the counter increment is. The memcpy can therefore observe a
-  // partially written record. PM4 issues the WAIT_REG_MEM and the DMA_DATA on the command
-  // processor, inside the same coherent domain, so the copy cannot outrun the payload.
-  // Restoring the CPU fast path requires the trap handler to make the payload visible
-  // before it advances buf_written_val.
+  // Always drain with PM4, never a CPU memcpy: the buf_written_val handshake does not order
+  // the trap handler's GL2 payload writes across the large-BAR aperture, so the CPU can read a
+  // torn record. The CPU path can return once the handler publishes the payload before the count.
   pcs_data->use_pm4_fallback = true;
 
   // Allocate cache-line aligned per-XCC data array
@@ -4053,10 +4047,8 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
   // Allocate contiguous device memory for all XCCs, each XCC gets deviceAllocSize bytes
   size_t deviceAllocSize = AlignUp(sizeof(pcs_sampling_data_t) + (2 * trap_buffer_size), 256);
 
-  // TMA2 carries a single per-XCC stride that the trap handler applies to both the hosttrap and
-  // the stochastic buffer array. If a session of the other method is already active with a
-  // different stride, one of the two arrays would be indexed outside its allocation, so refuse
-  // the session rather than corrupt memory.
+  // TMA2 holds one per-XCC stride shared by the hosttrap and stochastic buffer arrays, so an
+  // active session of the other method with a different stride would index past its allocation.
   const pcs_data_t& other_pcs_data = (sampling_method == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1)
       ? pcs_stochastic_data_
       : pcs_hosttrap_data_;
@@ -4270,10 +4262,8 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
   // done signals as an exit sentinel to wake worker threads, so restore the
   // expected initial values before creating new monitoring threads.
   //
-  // which_buffer is deliberately left alone: it shadows bit 63 of the device's buf_write_val,
-  // which survives a stop/start pair. Forcing it back to 0 here would make the host drain
-  // buf_written_val0 while the trap handler keeps filling buffer 1, and the WAIT_REG_MEM in
-  // the PM4 flush path would then poll for a count that never arrives.
+  // which_buffer is deliberately not reset: it shadows bit 63 of buf_write_val, which survives
+  // stop/start, so forcing it to 0 would desync the drain and hang the PM4 WAIT_REG_MEM poll.
   for (uint32_t xcc_id = 0; xcc_id < pcs_data->num_xcc; xcc_id++) {
     pcs_data->xcc_data[xcc_id].host_write_offset = 0;
     pcs_data->xcc_data[xcc_id].host_read_offset = 0;
@@ -4611,9 +4601,8 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
     return HSA_STATUS_SUCCESS;
   }
 
-  // ExecutePM4 stages the command stream in the queue's single indirect buffer and returns as
-  // soon as the doorbell is rung, so a concurrent submission would overwrite commands the
-  // command processor has not fetched yet. Hold the lock across both submit-and-wait pairs.
+  // ExecutePM4 returns once the doorbell rings but reuses one indirect buffer per queue, so
+  // hold the lock across both PM4 pairs or a concurrent submission overwrites unfetched commands.
   std::lock_guard<std::mutex> pm4_lock(pcs_pm4_mutex_);
 
   uint32_t next_buffer;
