@@ -43,9 +43,11 @@
 #include "fabric_gpu_barrier.h"
 #include "gtest/gtest.h"
 
-namespace RcclUnitTesting {
+namespace RcclUnitTesting
+{
 
-namespace {
+namespace
+{
 
 // Footprint constants/helpers (kLLPacketBytes, kLL128LineBytes, ddaLLFixedFootprint,
 // ddaLL128FixedFootprint, ddaLL128ArFootprintForBytes) come from
@@ -62,7 +64,8 @@ constexpr size_t kAmpleScratch    = DDA_FABRIC_BUFFER_SIZE;  // the shipped scra
 } // namespace
 
 // Fixture (mock comm + dummy buffers) is shared via DdaFabricTestHelpers.hpp.
-class DdaFabricScratchTest : public DdaFabricFixture {
+class DdaFabricScratchTest : public DdaFabricFixture
+{
 };
 
 // ---------------------------------------------------------------------------
@@ -71,7 +74,8 @@ class DdaFabricScratchTest : public DdaFabricFixture {
 // buffer, so the eligible arm asserts a reachable configuration.
 // ---------------------------------------------------------------------------
 
-TEST_F(DdaFabricScratchTest, AllReduce_LL_GatesOnScratchCapacity) {
+TEST_F(DdaFabricScratchTest, AllReduce_LL_GatesOnScratchCapacity)
+{
     mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(
         ncclAllReduceDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32, ncclSum));
@@ -80,7 +84,8 @@ TEST_F(DdaFabricScratchTest, AllReduce_LL_GatesOnScratchCapacity) {
         ncclAllReduceDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32, ncclSum));
 }
 
-TEST_F(DdaFabricScratchTest, AllReduce_LL128_GatesOnScratchCapacity) {
+TEST_F(DdaFabricScratchTest, AllReduce_LL128_GatesOnScratchCapacity)
+{
     mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(ncclAllReduceDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32, ncclSum));
@@ -89,14 +94,16 @@ TEST_F(DdaFabricScratchTest, AllReduce_LL128_GatesOnScratchCapacity) {
         mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32, ncclSum));
 }
 
-TEST_F(DdaFabricScratchTest, AllGather_LL_GatesOnScratchCapacity) {
+TEST_F(DdaFabricScratchTest, AllGather_LL_GatesOnScratchCapacity)
+{
     mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(ncclAllGatherDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
     mockComm_.comm.ddaScratchBytes = kTooSmallScratch;
     EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
 }
 
-TEST_F(DdaFabricScratchTest, AllGather_LL128_GatesOnScratchCapacity) {
+TEST_F(DdaFabricScratchTest, AllGather_LL128_GatesOnScratchCapacity)
+{
     mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(
         ncclAllGatherDdaFabricLL128Eligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
@@ -105,14 +112,16 @@ TEST_F(DdaFabricScratchTest, AllGather_LL128_GatesOnScratchCapacity) {
         ncclAllGatherDdaFabricLL128Eligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
 }
 
-TEST_F(DdaFabricScratchTest, AllToAll_LL_GatesOnScratchCapacity) {
+TEST_F(DdaFabricScratchTest, AllToAll_LL_GatesOnScratchCapacity)
+{
     mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(ncclAllToAllDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
     mockComm_.comm.ddaScratchBytes = kTooSmallScratch;
     EXPECT_FALSE(ncclAllToAllDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
 }
 
-TEST_F(DdaFabricScratchTest, AllToAll_LL128_GatesOnScratchCapacity) {
+TEST_F(DdaFabricScratchTest, AllToAll_LL128_GatesOnScratchCapacity)
+{
     mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(
         ncclAllToAllDdaFabricLL128Eligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
@@ -121,7 +130,8 @@ TEST_F(DdaFabricScratchTest, AllToAll_LL128_GatesOnScratchCapacity) {
         ncclAllToAllDdaFabricLL128Eligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
 }
 
-TEST_F(DdaFabricScratchTest, ReduceScatter_LL_GatesOnScratchCapacity) {
+TEST_F(DdaFabricScratchTest, ReduceScatter_LL_GatesOnScratchCapacity)
+{
     mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(ncclReduceScatterDdaFabricLLEligible(
         mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32, ncclSum));
@@ -130,7 +140,8 @@ TEST_F(DdaFabricScratchTest, ReduceScatter_LL_GatesOnScratchCapacity) {
         mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32, ncclSum));
 }
 
-TEST_F(DdaFabricScratchTest, ReduceScatter_LL128_GatesOnScratchCapacity) {
+TEST_F(DdaFabricScratchTest, ReduceScatter_LL128_GatesOnScratchCapacity)
+{
     mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(ncclReduceScatterDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32, ncclSum));
@@ -146,7 +157,8 @@ TEST_F(DdaFabricScratchTest, ReduceScatter_LL128_GatesOnScratchCapacity) {
 // these go red.
 // ---------------------------------------------------------------------------
 
-TEST_F(DdaFabricScratchTest, AllReduce_LL_ScratchBoundaryIsExact) {
+TEST_F(DdaFabricScratchTest, AllReduce_LL_ScratchBoundaryIsExact)
+{
     const int nRanks               = mockComm_.comm.nRanks;
     mockComm_.comm.ddaScratchBytes = ddaLLFixedFootprint(nRanks);
     EXPECT_TRUE(
@@ -156,7 +168,8 @@ TEST_F(DdaFabricScratchTest, AllReduce_LL_ScratchBoundaryIsExact) {
         ncclAllReduceDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32, ncclSum));
 }
 
-TEST_F(DdaFabricScratchTest, AllGather_LL_ScratchBoundaryIsExact) {
+TEST_F(DdaFabricScratchTest, AllGather_LL_ScratchBoundaryIsExact)
+{
     const int nRanks               = mockComm_.comm.nRanks;
     mockComm_.comm.ddaScratchBytes = ddaLLFixedFootprint(nRanks);
     EXPECT_TRUE(ncclAllGatherDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
@@ -164,7 +177,8 @@ TEST_F(DdaFabricScratchTest, AllGather_LL_ScratchBoundaryIsExact) {
     EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
 }
 
-TEST_F(DdaFabricScratchTest, AllToAll_LL_ScratchBoundaryIsExact) {
+TEST_F(DdaFabricScratchTest, AllToAll_LL_ScratchBoundaryIsExact)
+{
     const int nRanks               = mockComm_.comm.nRanks;
     mockComm_.comm.ddaScratchBytes = ddaLLFixedFootprint(nRanks);
     EXPECT_TRUE(ncclAllToAllDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
@@ -172,7 +186,8 @@ TEST_F(DdaFabricScratchTest, AllToAll_LL_ScratchBoundaryIsExact) {
     EXPECT_FALSE(ncclAllToAllDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
 }
 
-TEST_F(DdaFabricScratchTest, ReduceScatter_LL_ScratchBoundaryIsExact) {
+TEST_F(DdaFabricScratchTest, ReduceScatter_LL_ScratchBoundaryIsExact)
+{
     const int nRanks               = mockComm_.comm.nRanks;
     mockComm_.comm.ddaScratchBytes = ddaLLFixedFootprint(nRanks);
     EXPECT_TRUE(ncclReduceScatterDdaFabricLLEligible(
@@ -182,7 +197,8 @@ TEST_F(DdaFabricScratchTest, ReduceScatter_LL_ScratchBoundaryIsExact) {
         mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32, ncclSum));
 }
 
-TEST_F(DdaFabricScratchTest, AllGather_LL128_ScratchBoundaryIsExact) {
+TEST_F(DdaFabricScratchTest, AllGather_LL128_ScratchBoundaryIsExact)
+{
     const int nRanks               = mockComm_.comm.nRanks;
     mockComm_.comm.ddaScratchBytes = ddaLL128FixedFootprint(nRanks);
     EXPECT_TRUE(
@@ -192,7 +208,8 @@ TEST_F(DdaFabricScratchTest, AllGather_LL128_ScratchBoundaryIsExact) {
         ncclAllGatherDdaFabricLL128Eligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
 }
 
-TEST_F(DdaFabricScratchTest, AllToAll_LL128_ScratchBoundaryIsExact) {
+TEST_F(DdaFabricScratchTest, AllToAll_LL128_ScratchBoundaryIsExact)
+{
     const int nRanks               = mockComm_.comm.nRanks;
     mockComm_.comm.ddaScratchBytes = ddaLL128FixedFootprint(nRanks);
     EXPECT_TRUE(
@@ -202,7 +219,8 @@ TEST_F(DdaFabricScratchTest, AllToAll_LL128_ScratchBoundaryIsExact) {
         ncclAllToAllDdaFabricLL128Eligible(mockComm_.get(), sendbuff_, recvbuff_, kValidElemCount, ncclFloat32));
 }
 
-TEST_F(DdaFabricScratchTest, ReduceScatter_LL128_ScratchBoundaryIsExact) {
+TEST_F(DdaFabricScratchTest, ReduceScatter_LL128_ScratchBoundaryIsExact)
+{
     const int nRanks               = mockComm_.comm.nRanks;
     mockComm_.comm.ddaScratchBytes = ddaLL128FixedFootprint(nRanks);
     EXPECT_TRUE(ncclReduceScatterDdaFabricLL128Eligible(
@@ -219,7 +237,8 @@ TEST_F(DdaFabricScratchTest, ReduceScatter_LL128_ScratchBoundaryIsExact) {
 // the tier at scale.
 // ---------------------------------------------------------------------------
 
-TEST_F(DdaFabricScratchTest, AllReduce_LL_FootprintScalesWithRanks) {
+TEST_F(DdaFabricScratchTest, AllReduce_LL_FootprintScalesWithRanks)
+{
     mockComm_.comm.ddaScratchBytes = ddaLLFixedFootprint(2); // enough for 2 ranks only
 
     mockComm_.comm.nRanks = 2;
@@ -232,7 +251,8 @@ TEST_F(DdaFabricScratchTest, AllReduce_LL_FootprintScalesWithRanks) {
         << "a scratch sized for 2 ranks must not satisfy " << meta::comms::kDdaMaxNranks << " ranks";
 }
 
-TEST_F(DdaFabricScratchTest, AllGather_LL128_FootprintScalesWithRanks) {
+TEST_F(DdaFabricScratchTest, AllGather_LL128_FootprintScalesWithRanks)
+{
     mockComm_.comm.ddaScratchBytes = ddaLL128FixedFootprint(2); // enough for 2 ranks only
 
     mockComm_.comm.nRanks = 2;
@@ -251,7 +271,8 @@ TEST_F(DdaFabricScratchTest, AllGather_LL128_FootprintScalesWithRanks) {
 // therefore shrinks as nRanks grows.
 // ---------------------------------------------------------------------------
 
-TEST_F(DdaFabricScratchTest, AllReduce_LL128_FootprintGrowsWithMessage) {
+TEST_F(DdaFabricScratchTest, AllReduce_LL128_FootprintGrowsWithMessage)
+{
     const int    nRanks     = mockComm_.comm.nRanks;
     const size_t smallBytes = static_cast<size_t>(kValidElemCount) * sizeof(float); // 16 B
     const size_t bigCount   = 65536 / sizeof(float);                   // 64 KiB message
@@ -273,7 +294,8 @@ TEST_F(DdaFabricScratchTest, AllReduce_LL128_FootprintGrowsWithMessage) {
         ncclAllReduceDdaFabricLL128Eligible(mockComm_.get(), sendbuff_, recvbuff_, bigCount, ncclFloat32, ncclSum));
 }
 
-TEST_F(DdaFabricScratchTest, AllReduce_LL128_EffectiveCapShrinksWithRanks) {
+TEST_F(DdaFabricScratchTest, AllReduce_LL128_EffectiveCapShrinksWithRanks)
+{
     // A message at the advertised cap (kDdaLL128ArMaxBytes = 1 GiB) is eligible
     // against the real buffer at a low rank count but not at kDdaMaxNranks,
     // because AR-LL128 scratch scales with nRanks * message.
@@ -298,14 +320,16 @@ TEST_F(DdaFabricScratchTest, AllReduce_LL128_EffectiveCapShrinksWithRanks) {
 
 // The per-message alignment gate differs across siblings: AR/RS require %8, AG/A2A
 // require %16. count=2 float32 (8 B) is aligned for AR-LL but not AG-LL.
-TEST_F(DdaFabricScratchTest, AlignmentGateDiffersAcrossCollectives) {
+TEST_F(DdaFabricScratchTest, AlignmentGateDiffersAcrossCollectives)
+{
     mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, 2, ncclFloat32, ncclSum));
     EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, 2, ncclFloat32));
 }
 
 // A zero count is rejected before the scratch check, even with ample scratch.
-TEST_F(DdaFabricScratchTest, ZeroCountIneligibleRegardlessOfScratch) {
+TEST_F(DdaFabricScratchTest, ZeroCountIneligibleRegardlessOfScratch)
+{
     mockComm_.comm.ddaScratchBytes = kAmpleScratch;
     EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, 0, ncclFloat32, ncclSum));
     EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(mockComm_.get(), sendbuff_, recvbuff_, 0, ncclFloat32));

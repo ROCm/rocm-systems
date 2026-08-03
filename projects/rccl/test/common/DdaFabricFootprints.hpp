@@ -26,7 +26,8 @@
 
 #include <cstddef>
 
-namespace RcclUnitTesting {
+namespace RcclUnitTesting
+{
 
 constexpr size_t kLLTierMaxBytes    = 131072; // 128 KiB LL per-tier cap
 constexpr size_t kLL128TierMaxBytes = 524288; // 512 KiB LL128 AG/A2A/RS per-tier cap
@@ -37,7 +38,8 @@ constexpr size_t kLL128LineBytes    = 128;    // sizeof(LLLine128)
 // Payload words -> 128B lines. Production uses `bytes >> 3` (truncating); every
 // caller here passes a multiple of 8 (the predicates reject bytes % 8 != 0), so
 // truncation and ceil agree. bytes/8 matches production literally.
-constexpr size_t ddaLL128LinesForBytes(size_t bytes) {
+constexpr size_t ddaLL128LinesForBytes(size_t bytes)
+{
     // precondition: bytes % 8 == 0 (predicates reject otherwise), so bytes/8
     // matches production's `bytes >> 3`. constexpr so it can pin the slot stride.
     return (bytes / 8 + kLL128DataElems - 1) / kLL128DataElems;
@@ -45,18 +47,21 @@ constexpr size_t ddaLL128LinesForBytes(size_t bytes) {
 
 // Fixed LL footprint (all four LL tiers): 2 banks * nRanks slots *
 // (kLLTierMaxBytes/8) pkts * 16B = 512 KiB * nRanks, independent of message size.
-inline size_t ddaLLFixedFootprint(int nRanks) {
+inline size_t ddaLLFixedFootprint(int nRanks)
+{
     return static_cast<size_t>(2) * static_cast<size_t>(nRanks) * (kLLTierMaxBytes / 8) * kLLPacketBytes;
 }
 
 // Fixed LL128 AG/A2A/RS footprint: 2 banks * nRanks slots * ceil(cap/8/15) lines * 128B.
-inline size_t ddaLL128FixedFootprint(int nRanks) {
+inline size_t ddaLL128FixedFootprint(int nRanks)
+{
     return static_cast<size_t>(2) * static_cast<size_t>(nRanks) * ddaLL128LinesForBytes(kLL128TierMaxBytes)
          * kLL128LineBytes;
 }
 
 // LL128 AllReduce footprint tracks the actual message size (compact slot stride).
-inline size_t ddaLL128ArFootprintForBytes(int nRanks, size_t bytes) {
+inline size_t ddaLL128ArFootprintForBytes(int nRanks, size_t bytes)
+{
     return static_cast<size_t>(2) * static_cast<size_t>(nRanks) * ddaLL128LinesForBytes(bytes) * kLL128LineBytes;
 }
 
