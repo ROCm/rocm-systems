@@ -42,7 +42,7 @@ from consan_validation_support import (
 )
 
 SCHEMA_VERSION = 2
-EMPIRICAL_CAMPAIGN_SCHEMA_VERSION = 2
+EMPIRICAL_CAMPAIGN_SCHEMA_VERSION = 3
 PROVENANCE_SCHEMA_VERSION = 3
 WORKSPACE_ENV = "CONSAN_VALIDATION_WORKSPACE_DIR"
 TARGET_ENV = "CONSAN_VALIDATION_TARGET"
@@ -52,6 +52,10 @@ TENSILE_PYTHON_ENV = "CONSAN_VALIDATION_TENSILE_PYTHON"
 RDNA4_MATMUL_DIR_ENV = "CONSAN_VALIDATION_RDNA4_MATMUL_DIR"
 LLAMA_BUILD_DIR_ENV = "CONSAN_VALIDATION_LLAMA_BUILD_DIR"
 LLVM_READELF_ENV = "CONSAN_VALIDATION_LLVM_READELF"
+HIP_MOI_GPU_BENCHMARK_ITERATIONS_ENV = "HIP_MOI_TEST_GPU_BENCHMARK_ITERATIONS"
+HIP_MOI_GPU_BENCHMARK_WARMUP_ITERATIONS_ENV = (
+    "HIP_MOI_TEST_GPU_BENCHMARK_WARMUP_ITERATIONS"
+)
 TIMEOUT_SECONDS = 30
 EMPIRICAL_DEFAULT_ROUNDS = 10
 EMPIRICAL_DEFAULT_BOOTSTRAP_RESAMPLES = 10_000
@@ -221,6 +225,9 @@ class Workload:
     tensile_streamk_mode: int | None = None
     self_timed_device_minimum_ms: float | None = None
     warm_timing_mode: str | None = None
+    empirical_device_timed_minimum_ms: float | None = None
+    device_timing_max_iterations: int | None = None
+    device_timing_warmup_iterations: int = 5
 
 
 @dataclass(frozen=True)
@@ -713,7 +720,7 @@ WORKLOADS = (
         priority="P2",
         corpus="pytorch",
         kind="pytorch",
-        warm_timing_mode="host-json",
+        warm_timing_mode="device-json",
         relative_path="consan_pytorch_validation.py",
         clean_filter=None,
         overhead_filter=None,
@@ -812,6 +819,8 @@ WORKLOADS = (
         overhead_processes=5,
         fault_families=("barrier-drop",),
         targets=("gfx1201",),
+        self_timed_device_minimum_ms=EMPIRICAL_MINIMUM_TIMED_MS,
+        warm_timing_mode="device-fixed",
     ),
     Workload(
         id="llama-rdna4-rms-norm",
@@ -922,6 +931,7 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=3,
         fault_families=("barrier-drop",),
+        warm_timing_mode="device-gtest",
     ),
     Workload(
         id="d128-pressure",
@@ -977,6 +987,10 @@ WORKLOADS = (
         tracks_atomics=True,
         overhead_processes=3,
         fault_families=STREAMK_FAULT_FAMILIES,
+        warm_timing_mode="device-gtest",
+        empirical_device_timed_minimum_ms=0.5,
+        device_timing_max_iterations=1,
+        device_timing_warmup_iterations=0,
     ),
     Workload(
         id="tree-atomic-or",
@@ -1953,11 +1967,16 @@ def _clean_environment(
 ) -> dict[str, str]:
     if target is not None:
         workload = _resolved_workload(target, workload)
+    ignored_environment = HSA_TOOL_ENVIRONMENT | {
+        "HIP_TARGET",
+        HIP_MOI_GPU_BENCHMARK_ITERATIONS_ENV,
+        HIP_MOI_GPU_BENCHMARK_WARMUP_ITERATIONS_ENV,
+    }
     environment = {
         key: value
         for key, value in os.environ.items()
         if not key.startswith(CONTROLLED_ENV_PREFIX)
-        and key not in HSA_TOOL_ENVIRONMENT | {"HIP_TARGET"}
+        and key not in ignored_environment
         and not (target in NATIVE_CDNA_TARGETS and key in SOFTWARE_MODEL_ENVIRONMENT)
     }
     if target is not None:
@@ -2027,6 +2046,8 @@ def _controlled_environment(environment: dict[str, str]) -> dict[str, str]:
         "CUDA_VISIBLE_DEVICES",
         "GPU_DEVICE_ORDINAL",
         "HSA_OVERRIDE_GFX_VERSION",
+        HIP_MOI_GPU_BENCHMARK_ITERATIONS_ENV,
+        HIP_MOI_GPU_BENCHMARK_WARMUP_ITERATIONS_ENV,
     }
     names = {
         key
@@ -2308,7 +2329,7 @@ def _workload_command(
             if workload.id == "llama-rdna4-mul-mat-vec-q"
             else "rms-norm"
         )
-        return [
+        command = [
             sys.executable,
             str(Path(__file__).with_name("consan_llama_validation.py")),
             "--executable",
@@ -2318,6 +2339,20 @@ def _workload_command(
             "--output-dir",
             str(output.parent / f"{output.stem}-llama-work"),
         ]
+        if overhead and workload.id == "llama-rdna4-mul-mat-vec-q":
+            command.extend(
+                [
+                    "--n-embd",
+                    "1024",
+                    "--benchmark-iterations",
+                    str(inner_repetitions_override or 40_000),
+                    "--benchmark-warmup-iterations",
+                    "5",
+                    "--minimum-timed-ms",
+                    str(workload.self_timed_device_minimum_ms),
+                ]
+            )
+        return command
     if workload.kind == "rdna4-matmul":
         command = [
             sys.executable,
@@ -3877,6 +3912,44 @@ def _gtest_median(log_texts: list[str]) -> dict[str, float]:
     }
 
 
+def _gtest_device_measurement(
+    log_text: str, benchmark: str, expected_iterations: int
+) -> tuple[float, dict[str, object]]:
+    number = r"[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?"
+    matches = re.findall(
+        rf"^hip_moi_gpu_timing benchmark={re.escape(benchmark)} timer=hip-event "
+        rf"aggregate_ms=({number}) iterations=([0-9]+) "
+        rf"per_iteration_ms=({number})$",
+        log_text,
+        re.MULTILINE,
+    )
+    if len(matches) != 1:
+        raise ValidationError(
+            f"expected one {benchmark} GPU timing row, found {len(matches)}"
+        )
+    aggregate_ms = float(matches[0][0])
+    iterations = int(matches[0][1])
+    per_iteration_ms = float(matches[0][2])
+    if iterations != expected_iterations:
+        raise ValidationError(
+            f"{benchmark} GPU timing iteration mismatch: "
+            f"{iterations} != {expected_iterations}"
+        )
+    if (
+        not math.isfinite(aggregate_ms)
+        or not math.isfinite(per_iteration_ms)
+        or aggregate_ms <= 0.0
+        or per_iteration_ms <= 0.0
+        or not math.isclose(aggregate_ms / iterations, per_iteration_ms, rel_tol=2.0e-6)
+    ):
+        raise ValidationError(f"{benchmark} GPU timing row is inconsistent")
+    return per_iteration_ms, {
+        "benchmark_iterations": iterations,
+        "timed_aggregate_ms": aggregate_ms,
+        "timing_source": "hip-event",
+    }
+
+
 def _discard_first_sample_per_process(
     per_run: list[dict[str, list[float]]],
 ) -> list[dict[str, list[float]]]:
@@ -5058,6 +5131,8 @@ def _run_profile(
     discard_first_timing_sample: bool = False,
     retain_code_objects: bool = False,
     collect_structural_metrics: bool = False,
+    collect_gtest_device_timing: bool = False,
+    minimum_device_timed_aggregate_ms: float | None = None,
 ) -> dict:
     profile_id = profile or "baseline"
     result_phase = _result_phase(phase, profile, workload)
@@ -5075,6 +5150,19 @@ def _run_profile(
         raise ValidationError("profile repetitions must be positive")
     if inner_repetitions_override is not None and inner_repetitions_override <= 0:
         raise ValidationError("inner repetitions must be positive")
+    if collect_gtest_device_timing and (
+        phase != "overhead" or workload.warm_timing_mode != "device-gtest"
+    ):
+        raise ValidationError(
+            "GTest device timing requires an overhead row with native event support"
+        )
+    if collect_gtest_device_timing and workload.device_timing_warmup_iterations < 0:
+        raise ValidationError("GTest device timing warmup count must be nonnegative")
+    if minimum_device_timed_aggregate_ms is not None and (
+        not math.isfinite(minimum_device_timed_aggregate_ms)
+        or minimum_device_timed_aggregate_ms <= 0.0
+    ):
+        raise ValidationError("minimum device timed aggregate must be positive")
     coverage_contract = _coverage_contract_for_profile(workload, profile)
     logs = []
     commands = []
@@ -5097,6 +5185,13 @@ def _run_profile(
         environment = _run_environment(
             profile, workload, hook, target, phase, workspace
         )
+        if collect_gtest_device_timing:
+            environment[HIP_MOI_GPU_BENCHMARK_ITERATIONS_ENV] = str(
+                inner_repetitions_override or 1
+            )
+            environment[HIP_MOI_GPU_BENCHMARK_WARMUP_ITERATIONS_ENV] = str(
+                workload.device_timing_warmup_iterations
+            )
         if profile is not None and (
             result_phase == "coverage-output" or retain_code_objects
         ):
@@ -5122,7 +5217,17 @@ def _run_profile(
     timing_samples = None
     measurement_runs = None
     if phase == "overhead" and all(code == 0 for code in returncodes):
-        if workload.kind == "qwen":
+        if collect_gtest_device_timing:
+            expected_dispatches = inner_repetitions_override or 1
+            parsed = [
+                _gtest_device_measurement(log, workload.id, expected_dispatches)
+                for log in logs
+            ]
+            timing_samples = {"target-dispatch:device": [value for value, _ in parsed]}
+            measurement_runs = [
+                {"target-dispatch": measurement} for _, measurement in parsed
+            ]
+        elif workload.kind == "qwen":
             per_run_samples = [
                 {"dispatch": _benchmark_samples(path)} for path in qwen_json_paths
             ]
@@ -5155,15 +5260,51 @@ def _run_profile(
                 key: [value for item in per_run for value in item[key]]
                 for key in sorted(keys)
             }
-            if workload.kind == "rdna4-matmul":
+            if workload.self_timed_device_minimum_ms is not None:
                 measurement_runs = [
-                    _json_measurements(log, "Rdna4-matmul") for log in logs
+                    _json_measurements(log, workload.kind.capitalize()) for log in logs
                 ]
         else:
             timing_samples = _gtest_timing_samples(logs)
         timing = {
             key: statistics.median(values) for key, values in timing_samples.items()
         }
+
+    device_timed_aggregates_ms = None
+    timing_acceptance_reasons = []
+    if minimum_device_timed_aggregate_ms is not None:
+        if repetitions != 1:
+            raise ValidationError(
+                "device timed aggregate validation requires one outer process"
+            )
+        if workload.warm_timing_mode in {"device-fixed", "device-gtest"}:
+            aggregates = {}
+            if isinstance(measurement_runs, list) and len(measurement_runs) == 1:
+                for name, measurement in measurement_runs[0].items():
+                    if isinstance(measurement, dict):
+                        value = measurement.get("timed_aggregate_ms")
+                        if (
+                            isinstance(value, (int, float))
+                            and not isinstance(value, bool)
+                            and math.isfinite(float(value))
+                            and value > 0.0
+                        ):
+                            aggregates[f"{name}:device"] = float(value)
+        else:
+            aggregates = {
+                mode: sum(values)
+                for mode, values in (timing_samples or {}).items()
+                if mode.endswith(":device")
+            }
+        device_timed_aggregates_ms = aggregates
+        if not aggregates:
+            timing_acceptance_reasons.append("no GPU timed aggregate was recorded")
+        for mode, aggregate_ms in aggregates.items():
+            if aggregate_ms < minimum_device_timed_aggregate_ms:
+                timing_acceptance_reasons.append(
+                    f"{mode} timed aggregate {aggregate_ms} ms is below "
+                    f"{minimum_device_timed_aggregate_ms} ms"
+                )
 
     coverage = None
     coverage_runs = None
@@ -5205,13 +5346,15 @@ def _run_profile(
         "elapsed_seconds": elapsed_seconds,
         "timeout_seconds": timeout,
         "repetition_policy": {
-            "empirical_row_schema_version": 1,
+            "empirical_row_schema_version": 2,
             "outer_processes": repetitions,
             "inner_repetitions_override": inner_repetitions_override,
             "discarded_first_timing_sample": discard_first_timing_sample,
             "discarded_timing_samples_per_process": int(discard_first_timing_sample),
             "retained_code_objects": retain_code_objects,
             "collected_structural_metrics": collect_structural_metrics,
+            "collected_gtest_device_timing": collect_gtest_device_timing,
+            "minimum_device_timed_aggregate_ms": minimum_device_timed_aggregate_ms,
         },
         "timing_median_ms": timing,
         "timing_samples_ms": timing_samples,
@@ -5223,11 +5366,17 @@ def _run_profile(
             )
         ),
         "measurement_runs": measurement_runs,
+        "device_timed_aggregates_ms": device_timed_aggregates_ms,
+        "timing_acceptance_reasons": timing_acceptance_reasons,
         "structural_metrics_runs": structural_metrics_runs,
         "coverage": coverage,
         "coverage_runs": coverage_runs,
         "gtest_test_counts": gtest_test_counts,
-        "accepted": runtime_accepted if result_phase != "coverage-output" else False,
+        "accepted": (
+            runtime_accepted and not timing_acceptance_reasons
+            if result_phase != "coverage-output"
+            else False
+        ),
         "files": {
             "hook": {
                 "path": str(hook),
@@ -5367,6 +5516,7 @@ def _empirical_row_metrics(
     *,
     include_process: bool = True,
     include_workload: bool = True,
+    device_workload_only: bool = False,
     prefix: str = "",
 ) -> dict[str, float]:
     elapsed = result.get("elapsed_seconds")
@@ -5383,6 +5533,7 @@ def _empirical_row_metrics(
                 f"{prefix + ':' if prefix else ''}workload:{mode}": float(value)
                 for mode, value in timing.items()
                 if isinstance(mode, str)
+                and (not device_workload_only or mode.endswith(":device"))
                 and isinstance(value, (int, float))
                 and math.isfinite(float(value))
                 and value > 0.0
@@ -5401,6 +5552,8 @@ def _empirical_round_summary(
     baseline_drift_limit: float,
     include_process_metric: bool = True,
     include_workload_metrics: bool = True,
+    device_workload_only: bool = False,
+    qualifying: bool = True,
     metric_prefix: str = "",
 ) -> dict[str, object]:
     rows = [
@@ -5432,22 +5585,26 @@ def _empirical_round_summary(
             result,
             include_process=include_process_metric,
             include_workload=include_workload_metrics,
+            device_workload_only=device_workload_only,
             prefix=metric_prefix,
         )
         for result in rows
     ]
     metric_schemas = [set(row) for row in row_metrics]
     expected_metrics = metric_schemas[0]
-    if not expected_metrics:
+    if qualifying and not expected_metrics:
         reasons.append("rows have no timing metrics")
     if any(schema != expected_metrics for schema in metric_schemas[1:]):
-        reasons.append(
-            "row timing metric schemas differ: "
-            + "; ".join(
-                f"row-{index}={sorted(schema)}"
-                for index, schema in enumerate(metric_schemas)
+        if qualifying:
+            reasons.append(
+                "row timing metric schemas differ: "
+                + "; ".join(
+                    f"row-{index}={sorted(schema)}"
+                    for index, schema in enumerate(metric_schemas)
+                )
             )
-        )
+        else:
+            expected_metrics = set.intersection(*metric_schemas)
     metrics = {}
     denominator = len(order) + 1
     rows_accepted = not reasons
@@ -5456,8 +5613,10 @@ def _empirical_round_summary(
         after = row_metrics[-1][metric]
         mean_baseline = statistics.mean((before, after))
         drift = abs(after - before) / mean_baseline if mean_baseline > 0.0 else math.inf
-        metric_accepted = rows_accepted and drift <= baseline_drift_limit
-        if drift > baseline_drift_limit:
+        metric_accepted = rows_accepted and (
+            not qualifying or drift <= baseline_drift_limit
+        )
+        if qualifying and drift > baseline_drift_limit:
             reasons.append(
                 f"{metric} baseline drift {drift:.6f} exceeds "
                 f"{baseline_drift_limit:.6f}"
@@ -5475,18 +5634,26 @@ def _empirical_round_summary(
             }
         metrics[metric] = {
             "accepted": metric_accepted,
+            "qualifying": qualifying,
             "baseline_before_ms": before,
             "baseline_after_ms": after,
             "baseline_drift_fraction": drift,
             "profiles": profiles,
         }
-    metric_acceptance = [metric["accepted"] for metric in metrics.values()]
+    metric_acceptance = [
+        metric["accepted"]
+        for metric in metrics.values()
+        if metric.get("qualifying") is True
+    ]
     return {
         "round": round_index,
         "profile_order": order,
         "rows_accepted": rows_accepted,
-        "usable": any(metric_acceptance),
-        "fully_accepted": bool(metric_acceptance) and all(metric_acceptance),
+        "usable": rows_accepted and (any(metric_acceptance) if qualifying else True),
+        "fully_accepted": rows_accepted
+        and (
+            bool(metric_acceptance) and all(metric_acceptance) if qualifying else True
+        ),
         "reasons": reasons,
         "metrics": metrics,
     }
@@ -5519,15 +5686,22 @@ def _combine_empirical_round_summaries(
         for name, schedule in schedules.items()
         for reason in schedule["reasons"]
     ]
-    metric_acceptance = [metric["accepted"] for metric in metrics.values()]
+    metric_acceptance = [
+        metric["accepted"]
+        for metric in metrics.values()
+        if metric.get("qualifying") is True
+    ]
+    rows_accepted = all(
+        bool(schedule["rows_accepted"]) for schedule in schedules.values()
+    )
     return {
         "round": round_index,
         "profile_order": order,
-        "rows_accepted": all(
-            bool(schedule["rows_accepted"]) for schedule in schedules.values()
+        "rows_accepted": rows_accepted,
+        "usable": rows_accepted and any(metric_acceptance),
+        "fully_accepted": (
+            rows_accepted and bool(metric_acceptance) and all(metric_acceptance)
         ),
-        "usable": any(metric_acceptance),
-        "fully_accepted": bool(metric_acceptance) and all(metric_acceptance),
         "reasons": reasons,
         "metrics": metrics,
         "schedules": schedules,
@@ -5544,7 +5718,12 @@ def _empirical_campaign_summary(
     require_structural_metrics: bool = False,
 ) -> dict[str, object]:
     metric_names = sorted(
-        {metric for round_result in rounds for metric in round_result["metrics"]}
+        {
+            metric
+            for round_result in rounds
+            for metric, value in round_result["metrics"].items()
+            if value.get("qualifying") is True
+        }
     )
     profile_summaries = {}
     insufficient = []
@@ -7039,6 +7218,8 @@ def _load_empirical_row(
     discard_first_timing_sample: bool,
     retain_code_objects: bool,
     collect_structural_metrics: bool,
+    collect_gtest_device_timing: bool,
+    minimum_device_timed_aggregate_ms: float | None,
 ) -> dict:
     result_path = row_dir / "result.json"
     try:
@@ -7065,21 +7246,23 @@ def _load_empirical_row(
             + "; ".join(mismatches)
         )
     expected_repetition_policy = {
-        "empirical_row_schema_version": 1,
+        "empirical_row_schema_version": 2,
         "outer_processes": 1,
         "inner_repetitions_override": inner_repetitions_override,
         "discarded_first_timing_sample": discard_first_timing_sample,
         "discarded_timing_samples_per_process": int(discard_first_timing_sample),
         "retained_code_objects": retain_code_objects,
         "collected_structural_metrics": collect_structural_metrics,
+        "collected_gtest_device_timing": collect_gtest_device_timing,
+        "minimum_device_timed_aggregate_ms": minimum_device_timed_aggregate_ms,
     }
     repetition_policy = result.get("repetition_policy")
     if (
         not isinstance(repetition_policy, dict)
-        or repetition_policy.get("empirical_row_schema_version") != 1
+        or repetition_policy.get("empirical_row_schema_version") != 2
     ):
         raise ValidationError(
-            f"empirical row predates or lacks empirical row schema version 1: "
+            f"empirical row predates or lacks empirical row schema version 2: "
             f"{result_path}"
         )
     if repetition_policy != expected_repetition_policy:
@@ -7115,6 +7298,8 @@ def _run_or_resume_empirical_row(
     discard_first_timing_sample: bool = False,
     retain_code_objects: bool = False,
     collect_structural_metrics: bool = False,
+    collect_gtest_device_timing: bool = False,
+    minimum_device_timed_aggregate_ms: float | None = None,
 ) -> dict:
     result_path = row_dir / "result.json"
     if result_path.is_file():
@@ -7130,6 +7315,8 @@ def _run_or_resume_empirical_row(
             discard_first_timing_sample=discard_first_timing_sample,
             retain_code_objects=retain_code_objects,
             collect_structural_metrics=collect_structural_metrics,
+            collect_gtest_device_timing=collect_gtest_device_timing,
+            minimum_device_timed_aggregate_ms=minimum_device_timed_aggregate_ms,
         )
     if row_dir.exists():
         if not resume:
@@ -7150,15 +7337,37 @@ def _run_or_resume_empirical_row(
         discard_first_timing_sample=discard_first_timing_sample,
         retain_code_objects=retain_code_objects,
         collect_structural_metrics=collect_structural_metrics,
+        collect_gtest_device_timing=collect_gtest_device_timing,
+        minimum_device_timed_aggregate_ms=minimum_device_timed_aggregate_ms,
     )
 
 
 def _empirical_supports_warm_timing(target: str, workload: Workload) -> bool:
-    return (
-        target not in SINGLE_REPETITION_TARGETS
-        and workload.overhead_processes == 1
-        and workload.warm_timing_mode in {"host-json", "device-fixed"}
+    return target not in SINGLE_REPETITION_TARGETS and workload.warm_timing_mode in {
+        "host-json",
+        "device-json",
+        "device-fixed",
+        "device-gtest",
+    }
+
+
+def _empirical_uses_device_timing(workload: Workload) -> bool:
+    return workload.warm_timing_mode in {
+        "device-json",
+        "device-fixed",
+        "device-gtest",
+    }
+
+
+def _empirical_device_timed_minimum(workload: Workload) -> float:
+    minimum = (
+        workload.empirical_device_timed_minimum_ms
+        if workload.empirical_device_timed_minimum_ms is not None
+        else EMPIRICAL_MINIMUM_TIMED_MS
     )
+    if not math.isfinite(minimum) or minimum <= 0.0:
+        raise ValidationError("empirical device timed minimum must be positive")
+    return minimum
 
 
 def _empirical_timing_protocol(
@@ -7179,7 +7388,18 @@ def _empirical_timing_protocol(
     timing = calibration.get("timing_median_ms")
     if not isinstance(timing, dict) or not timing:
         raise ValidationError("warm empirical calibration has no workload timing")
-    values = [float(value) for value in timing.values()]
+    qualifying_timing = (
+        {
+            mode: value
+            for mode, value in timing.items()
+            if isinstance(mode, str) and mode.endswith(":device")
+        }
+        if _empirical_uses_device_timing(workload)
+        else timing
+    )
+    if not qualifying_timing:
+        raise ValidationError("warm empirical calibration has no qualifying timing")
+    values = [float(value) for value in qualifying_timing.values()]
     if any(not math.isfinite(value) or value <= 0.0 for value in values):
         raise ValidationError(
             "warm empirical calibration timing must be finite and positive"
@@ -7218,16 +7438,26 @@ def _empirical_timing_protocol(
         return {
             "kind": "warm-device-self-timed",
             "minimum_timed_aggregate_ms": workload.self_timed_device_minimum_ms,
-            "calibration_timing_median_ms": timing,
+            "calibration_timing_median_ms": qualifying_timing,
             "calibration_timed_aggregate_ms": float(aggregate_ms),
             "timed_inner_repetitions": fixed_iterations,
             "command_inner_repetitions": fixed_iterations,
             "discard_first_timing_sample": False,
         }
+    device_minimum = _empirical_device_timed_minimum(workload)
     timed_repetitions = max(
         1,
-        math.ceil(EMPIRICAL_MINIMUM_TIMED_MS / min(values)),
+        math.ceil(device_minimum / min(values)),
     )
+    if (
+        workload.device_timing_max_iterations is not None
+        and timed_repetitions > workload.device_timing_max_iterations
+    ):
+        raise ValidationError(
+            "warm empirical calibration exceeds the workload's device iteration "
+            f"limit: required={timed_repetitions}, "
+            f"maximum={workload.device_timing_max_iterations}"
+        )
     discard_first = workload.kind == "pytorch"
     command_repetitions = timed_repetitions + int(discard_first)
     if command_repetitions > EMPIRICAL_MAX_INNER_REPETITIONS:
@@ -7237,9 +7467,17 @@ def _empirical_timing_protocol(
             f"maximum={EMPIRICAL_MAX_INNER_REPETITIONS}"
         )
     return {
-        "kind": "warm-host",
-        "minimum_timed_aggregate_ms": EMPIRICAL_MINIMUM_TIMED_MS,
-        "calibration_timing_median_ms": timing,
+        "kind": (
+            "warm-device-gtest"
+            if workload.warm_timing_mode == "device-gtest"
+            else (
+                "warm-device-json"
+                if workload.warm_timing_mode == "device-json"
+                else "warm-host"
+            )
+        ),
+        "minimum_timed_aggregate_ms": device_minimum,
+        "calibration_timing_median_ms": qualifying_timing,
         "timed_inner_repetitions": timed_repetitions,
         "command_inner_repetitions": command_repetitions,
         "discard_first_timing_sample": discard_first,
@@ -7256,7 +7494,7 @@ def _empirical_config(
 ) -> dict[str, object]:
     return {
         "schema_version": EMPIRICAL_CAMPAIGN_SCHEMA_VERSION,
-        "protocol": "consan-gfx1201-empirical-v2",
+        "protocol": "consan-gfx1201-empirical-v3",
         "target": target,
         "workload": workload.id,
         "profiles": list(profiles),
@@ -7266,8 +7504,23 @@ def _empirical_config(
         "randomization_seed": args.seed,
         "baseline_drift_limit": args.baseline_drift_limit,
         "bootstrap_resamples": args.bootstrap_resamples,
-        "minimum_timed_aggregate_ms": EMPIRICAL_MINIMUM_TIMED_MS,
+        "minimum_timed_aggregate_ms": (
+            _empirical_device_timed_minimum(workload)
+            if _empirical_uses_device_timing(workload)
+            else EMPIRICAL_MINIMUM_TIMED_MS
+        ),
+        "timing_acceptance_source": (
+            "gpu-timestamps"
+            if _empirical_uses_device_timing(workload)
+            else "host-timing"
+        ),
+        "process_timing_role": (
+            "secondary-diagnostic"
+            if _empirical_uses_device_timing(workload)
+            else "qualifying"
+        ),
         "maximum_inner_repetitions": EMPIRICAL_MAX_INNER_REPETITIONS,
+        "workload_maximum_device_iterations": workload.device_timing_max_iterations,
         "timeout_seconds": timeout,
         "launcher": args.launcher,
     }
@@ -7423,6 +7676,8 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
             args.launcher,
             calibration_root,
             resume=args.resume,
+            collect_gtest_device_timing=(workload.warm_timing_mode == "device-gtest"),
+            minimum_device_timed_aggregate_ms=(workload.self_timed_device_minimum_ms),
         )
         calibration_record = {
             "accepted": calibration.get("accepted") is True,
@@ -7453,6 +7708,10 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
             include_process: bool,
             include_workload: bool,
             collect_structural_metrics: bool,
+            qualifying: bool,
+            device_workload_only: bool,
+            collect_gtest_device_timing: bool,
+            minimum_device_timed_aggregate_ms: float | None,
         ) -> dict[str, object]:
             schedule_root = round_root / name
             row_phase = (
@@ -7473,6 +7732,8 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
                 resume=args.resume,
                 inner_repetitions_override=schedule_inner_repetitions,
                 discard_first_timing_sample=discard_first,
+                collect_gtest_device_timing=collect_gtest_device_timing,
+                minimum_device_timed_aggregate_ms=(minimum_device_timed_aggregate_ms),
             )
             profile_results = {}
             for position, profile in enumerate(order, start=1):
@@ -7490,6 +7751,10 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
                     inner_repetitions_override=schedule_inner_repetitions,
                     discard_first_timing_sample=discard_first,
                     collect_structural_metrics=collect_structural_metrics,
+                    collect_gtest_device_timing=collect_gtest_device_timing,
+                    minimum_device_timed_aggregate_ms=(
+                        minimum_device_timed_aggregate_ms
+                    ),
                 )
             after_position = len(order) + 1
             after = _run_or_resume_empirical_row(
@@ -7505,6 +7770,8 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
                 resume=args.resume,
                 inner_repetitions_override=schedule_inner_repetitions,
                 discard_first_timing_sample=discard_first,
+                collect_gtest_device_timing=collect_gtest_device_timing,
+                minimum_device_timed_aggregate_ms=(minimum_device_timed_aggregate_ms),
             )
             schedule = _empirical_round_summary(
                 round_index,
@@ -7515,6 +7782,8 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
                 baseline_drift_limit=args.baseline_drift_limit,
                 include_process_metric=include_process,
                 include_workload_metrics=include_workload,
+                device_workload_only=device_workload_only,
+                qualifying=qualifying,
                 metric_prefix=name,
             )
             schedule["structural_metrics"] = {}
@@ -7542,6 +7811,10 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
                 True,
                 workload.self_timed_device_minimum_ms is None,
                 True,
+                not _empirical_uses_device_timing(workload),
+                False,
+                False,
+                None,
             ),
         }
         if _empirical_supports_warm_timing(target, workload):
@@ -7552,6 +7825,14 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
                 False,
                 True,
                 False,
+                True,
+                _empirical_uses_device_timing(workload),
+                workload.warm_timing_mode == "device-gtest",
+                (
+                    float(timing_protocol["minimum_timed_aggregate_ms"])
+                    if _empirical_uses_device_timing(workload)
+                    else None
+                ),
             )
         round_summary = _combine_empirical_round_summaries(
             round_index,
