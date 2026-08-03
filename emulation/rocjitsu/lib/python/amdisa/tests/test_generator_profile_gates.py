@@ -58,7 +58,7 @@ def _repo_root() -> Path:
 
 def _mrisa_dir() -> Path:
     default = _repo_root() / 'shared' / 'machine-readable-isa' / 'isa'
-    return Path(os.environ.get('ISA_XML_DIR', default))
+    return Path(os.environ.get('MRISA_PATH', default))
 
 
 @pytest.fixture
@@ -2017,17 +2017,63 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
 def test_generated_sdwa_uses_shared_source_staging(
     amdgpu_generated_root: Path,
 ) -> None:
+    checked_sdwa_files = 0
     for arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2'):
         for filename in ('vop1.cpp', 'vop2.cpp', 'vopc.cpp'):
             path = amdgpu_generated_root / arch / filename
-            if not path.exists():
-                continue
+            assert path.exists(), f'missing generated file: {path}'
             generated = path.read_text()
             if 'amdgpu::SRC_SDWA' not in generated:
                 continue
+            checked_sdwa_files += 1
             assert 'amdgpu::sdwa::stage_source(' in generated
             assert 'sdwa_src_select(' not in generated
             assert 'std::make_unique<DppOperand>' not in generated
+    assert checked_sdwa_files > 0
+
+
+def test_generated_sdwa_uses_source_specific_modifier_formats(
+    cdna4_generated_root: Path,
+) -> None:
+    vop1 = (cdna4_generated_root / 'vop1.cpp').read_text()
+    vop2 = (cdna4_generated_root / 'vop2.cpp').read_text()
+    vopc = (cdna4_generated_root / 'vopc.cpp').read_text()
+
+    cvt_f32_f16 = _generated_method_body(vop1, 'VCvtF32F16Vop1', 'VCvtRpiI32F32Vop1')
+    assert 'SourceModifierFormat::F16' in cvt_f32_f16
+
+    cvt_i32_f32 = _generated_method_body(vop1, 'VCvtI32F32Vop1', 'VCvtF16F32Vop1')
+    assert 'SourceModifierFormat::F32' in cvt_i32_f32
+
+    cvt_f32_bf16 = vop1[vop1.index('void VCvtF32Bf16Vop1::execute_impl') :]
+    assert 'SourceModifierFormat::BF16' in cvt_f32_bf16
+
+    add_f32 = _generated_method_body(vop2, 'VAddF32Vop2', 'VSubF32Vop2')
+    assert add_f32.count('SourceModifierFormat::F32') == 2
+
+    add_f16 = _generated_method_body(vop2, 'VAddF16Vop2', 'VSubF16Vop2')
+    assert add_f16.count('SourceModifierFormat::F16') == 2
+
+    ldexp_f16 = _generated_method_body(vop2, 'VLdexpF16Vop2', 'VAddU32Vop2')
+    assert 'SourceModifierFormat::F16' in ldexp_f16
+    assert 'SourceModifierFormat::NONE' in ldexp_f16
+
+    cmp_class_f16 = _generated_method_body(
+        vopc, 'VCmpClassF16Vopc', 'VCmpxClassF16Vopc'
+    )
+    assert 'SourceModifierFormat::F16' in cmp_class_f16
+    assert 'SourceModifierFormat::NONE' in cmp_class_f16
+
+
+def test_generated_operandless_vop_does_not_stage_missing_source(
+    cdna4_generated_root: Path,
+) -> None:
+    vop1 = (cdna4_generated_root / 'vop1.cpp').read_text()
+    nop = _generated_method_body(vop1, 'VNopVop1', 'VMovB32Vop1')
+    assert 'apply_dpp(' not in nop
+    assert 'apply_dpp8(' not in nop
+    assert 'stage_source(' not in nop
+    assert 'src_operands_[0]' not in nop
 
 
 @pytest.mark.parametrize(

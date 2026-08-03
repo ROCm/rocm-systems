@@ -15,7 +15,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <utility>
 
 namespace simdojo {
 template <size_t NUM_ELEMS, typename VecElem> class VectorReg;
@@ -58,6 +57,8 @@ void amdgpu_isa_write_lane_chunk_base(const AmdgpuIsaOperand<Isa> &op, amdgpu::W
                                       uint64_t mask);
 } // namespace detail
 
+class ScopedOperandDelegate;
+
 /// @brief Base class for an instruction operand with value resolution.
 ///
 /// @details Instruction execution code treats Operand as a descriptor: it can
@@ -71,6 +72,7 @@ public:
   // operand value-access backend. Keep these hooks private so generated
   // instruction bodies cannot bypass read observation by calling them directly.
   friend class amdgpu::RegisterAccess;
+  friend class ScopedOperandDelegate;
   template <typename Isa> friend class AmdgpuIsaOperand;
 
   Operand() = default;
@@ -226,12 +228,10 @@ private:
   virtual void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const;
 
 public:
-  /// @brief Set a delegate operand that overrides read methods.
+  /// @brief Return the active read delegate, if any.
   ///
-  /// @details Supports temporary source substitution without changing the
-  /// concrete operand member type.
-  void set_delegate(Operand *d) { delegate_ = d; }
-  void clear_delegate() { delegate_ = nullptr; }
+  /// Delegate mutation is restricted to ScopedOperandDelegate so restoration
+  /// cannot be skipped on exceptions or early returns.
   Operand *delegate() const { return delegate_; }
 
   /// @brief Whether `read_lane_chunk` / `write_lane_chunk` produce correct,
@@ -249,6 +249,8 @@ public:
   }
 
 private:
+  void set_delegate(Operand *delegate) { delegate_ = delegate; }
+
   /// @brief Fill `out[0..count)` with operand values for lanes
   /// `[lane_base, lane_base + count)`.
   ///
@@ -554,18 +556,8 @@ public:
 
   ScopedOperandDelegate(const ScopedOperandDelegate &) = delete;
   ScopedOperandDelegate &operator=(const ScopedOperandDelegate &) = delete;
-
-  ScopedOperandDelegate(ScopedOperandDelegate &&other) noexcept
-      : operand_(std::exchange(other.operand_, nullptr)), previous_(other.previous_) {}
-
-  ScopedOperandDelegate &operator=(ScopedOperandDelegate &&other) noexcept {
-    if (this == &other)
-      return *this;
-    restore();
-    operand_ = std::exchange(other.operand_, nullptr);
-    previous_ = other.previous_;
-    return *this;
-  }
+  ScopedOperandDelegate(ScopedOperandDelegate &&) = delete;
+  ScopedOperandDelegate &operator=(ScopedOperandDelegate &&) = delete;
 
 private:
   void restore() noexcept {
@@ -599,7 +591,7 @@ public:
   /// @brief Construct from 64-bit staged lane values.
   StagedOperand(const Operand &base, const uint64_t *data, int lane_count);
 
-  std::string name() const override { return "dpp_src"; }
+  std::string name() const override { return "staged_src"; }
 
   bool simd_capable() const override { return true; }
 

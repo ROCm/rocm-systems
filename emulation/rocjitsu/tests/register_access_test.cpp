@@ -24,9 +24,11 @@
 
 #include <gtest/gtest.h>
 
+#include <bit>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -47,6 +49,8 @@ static_assert(!ExposesRawComputeUnit<InstructionComputeUnitView>);
 static_assert(!ExposesRawComputeUnit<Wavefront>);
 static_assert(!ExposesRawVgprData<InstructionComputeUnitView>);
 static_assert(!ExposesUnobservedVgprWrite<InstructionComputeUnitView>);
+static_assert(!std::is_move_constructible_v<ScopedOperandDelegate>);
+static_assert(!std::is_move_assignable_v<ScopedOperandDelegate>);
 
 constexpr uint32_t kSgprsPerWave = 104;
 constexpr uint32_t kVgprsPerWave = 256;
@@ -120,22 +124,26 @@ TEST(RegisterAccessTest, ScopedOperandDelegateRestoresAfterException) {
   Operand source(32, 1);
   Operand previous(32, 2);
   Operand staged(32, 3);
-  source.set_delegate(&previous);
 
-  EXPECT_THROW(
-      {
-        ScopedOperandDelegate binding(source, &staged);
-        EXPECT_EQ(source.delegate(), &staged);
-        throw std::runtime_error("test");
-      },
-      std::runtime_error);
-  EXPECT_EQ(source.delegate(), &previous);
+  {
+    ScopedOperandDelegate previous_binding(source, &previous);
+    EXPECT_EQ(source.delegate(), &previous);
+
+    EXPECT_THROW(
+        {
+          ScopedOperandDelegate binding(source, &staged);
+          EXPECT_EQ(source.delegate(), &staged);
+          throw std::runtime_error("test");
+        },
+        std::runtime_error);
+    EXPECT_EQ(source.delegate(), &previous);
+  }
+  EXPECT_EQ(source.delegate(), nullptr);
 
   {
     ScopedOperandDelegate no_binding(source, nullptr);
-    EXPECT_EQ(source.delegate(), &previous);
+    EXPECT_EQ(source.delegate(), nullptr);
   }
-  EXPECT_EQ(source.delegate(), &previous);
 }
 
 TEST(RegisterAccessTest, SdwaStageSourceObservesAndSelectsActiveBytes) {
@@ -153,7 +161,7 @@ TEST(RegisterAccessTest, SdwaStageSourceObservesAndSelectsActiveBytes) {
   cdna4::Operand source(32, cdna4::OperandType::OPR_SRC_VGPR, 256 + logical_vgpr);
   std::unique_ptr<StagedOperand> storage;
   sdwa::stage_source(source, sdwa::BYTE_0, /*sign_extend=*/true, /*negate=*/false,
-                     /*absolute=*/false, storage, *fx.wf);
+                     /*absolute=*/false, sdwa::SourceModifierFormat::NONE, storage, *fx.wf);
 
   ASSERT_NE(storage, nullptr);
   ASSERT_EQ(fx.plugin->reads.size(), 1u);
@@ -168,8 +176,57 @@ TEST(RegisterAccessTest, SdwaStageSourceObservesAndSelectsActiveBytes) {
   EXPECT_EQ(staged.lane(3), 0u);
 
   sdwa::stage_source(source, sdwa::DWORD, /*sign_extend=*/false, /*negate=*/false,
-                     /*absolute=*/false, storage, *fx.wf);
+                     /*absolute=*/false, sdwa::SourceModifierFormat::NONE, storage, *fx.wf);
   EXPECT_EQ(storage, nullptr);
+}
+
+TEST(RegisterAccessTest, SdwaStageSourceAppliesModifiersInSemanticFloatWidth) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->set_exec(1);
+
+  constexpr uint32_t logical_vgpr = 6;
+  const uint32_t physical_vgpr = fx.vgpr_base() + logical_vgpr;
+  cdna4::Operand source(32, cdna4::OperandType::OPR_SRC_VGPR, 256 + logical_vgpr);
+  std::unique_ptr<StagedOperand> storage;
+
+  fx.cu->write_vgpr(physical_vgpr, 0, std::bit_cast<uint32_t>(-2.0f));
+  sdwa::stage_source(source, sdwa::DWORD, /*sign_extend=*/false, /*negate=*/false,
+                     /*absolute=*/true, sdwa::SourceModifierFormat::F32, storage, *fx.wf);
+  ASSERT_NE(storage, nullptr);
+  EXPECT_EQ(RegisterAccess(*fx.wf).read_operand(*storage, 1).lane(0),
+            std::bit_cast<uint32_t>(2.0f));
+  ASSERT_EQ(fx.plugin->reads.size(), 1u);
+  EXPECT_EQ(fx.plugin->reads[0].byte_mask, ExecutionPlugin::kFullByteMask);
+
+  fx.plugin->reads.clear();
+  sdwa::stage_source(source, sdwa::DWORD, /*sign_extend=*/false, /*negate=*/true,
+                     /*absolute=*/true, sdwa::SourceModifierFormat::F32, storage, *fx.wf);
+  ASSERT_NE(storage, nullptr);
+  EXPECT_EQ(RegisterAccess(*fx.wf).read_operand(*storage, 1).lane(0),
+            std::bit_cast<uint32_t>(-2.0f));
+
+  fx.plugin->reads.clear();
+  fx.cu->write_vgpr(physical_vgpr, 0, 0xC000'BEEFu);
+  sdwa::stage_source(source, sdwa::WORD_1, /*sign_extend=*/false, /*negate=*/false,
+                     /*absolute=*/true, sdwa::SourceModifierFormat::F16, storage, *fx.wf);
+  ASSERT_NE(storage, nullptr);
+  EXPECT_EQ(RegisterAccess(*fx.wf).read_operand(*storage, 1).lane(0), 0x4000u);
+  ASSERT_EQ(fx.plugin->reads.size(), 1u);
+  EXPECT_EQ(fx.plugin->reads[0].byte_mask, ExecutionPlugin::kHighHalfByteMask);
+
+  fx.plugin->reads.clear();
+  fx.cu->write_vgpr(physical_vgpr, 0, 0x4000'BEEFu);
+  sdwa::stage_source(source, sdwa::WORD_1, /*sign_extend=*/false, /*negate=*/true,
+                     /*absolute=*/false, sdwa::SourceModifierFormat::F16, storage, *fx.wf);
+  ASSERT_NE(storage, nullptr);
+  EXPECT_EQ(RegisterAccess(*fx.wf).read_operand(*storage, 1).lane(0), 0xC000u);
+
+  fx.plugin->reads.clear();
+  sdwa::stage_source(source, sdwa::WORD_1, /*sign_extend=*/false, /*negate=*/true,
+                     /*absolute=*/true, sdwa::SourceModifierFormat::NONE, storage, *fx.wf);
+  ASSERT_NE(storage, nullptr);
+  EXPECT_EQ(RegisterAccess(*fx.wf).read_operand(*storage, 1).lane(0), 0x4000u);
 }
 
 TEST(RegisterAccessTest, ReadRegionObservesAllRegistersAndReturnsLaneSpans) {

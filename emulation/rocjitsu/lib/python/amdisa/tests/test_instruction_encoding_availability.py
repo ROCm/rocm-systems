@@ -16,7 +16,7 @@ def _mrisa_dir() -> Path:
     default = (
         Path(__file__).resolve().parents[6] / 'shared' / 'machine-readable-isa' / 'isa'
     )
-    return Path(os.environ.get('ISA_XML_DIR', default))
+    return Path(os.environ.get('MRISA_PATH', default))
 
 
 def _find_instruction(spec, encoding_name: str, instruction_name: str):

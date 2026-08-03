@@ -651,6 +651,31 @@ class CodeGenerator:
         return opnd.operand_type
 
     @staticmethod
+    def _sdwa_source_modifier_format(
+        sem: InstructionSemantics, source_index: int, opnd: Operand
+    ) -> str:
+        """Return the C++ floating format for one SDWA source modifier.
+
+        MRISA operand formats distinguish conversion inputs from outputs, which
+        instruction-level ``data_type`` cannot do by itself. Two instructions
+        have mixed semantic source types despite homogeneous XML operand
+        formats: class compares use an integer class mask as src1, and LDEXP
+        uses an integer exponent as src1.
+        """
+        if source_index == 1 and (
+            sem.semantic_class in ('vector_cmp_class', 'vector_cmpx_class')
+            or (sem.semantic_class == 'vector_binop' and sem.operation == 'ldexp')
+        ):
+            return 'amdgpu::sdwa::SourceModifierFormat::NONE'
+
+        suffix = {
+            'FMT_NUM_F16': 'F16',
+            'FMT_NUM_BF16': 'BF16',
+            'FMT_NUM_F32': 'F32',
+        }.get(opnd.data_format_name, 'NONE')
+        return f'amdgpu::sdwa::SourceModifierFormat::{suffix}'
+
+    @staticmethod
     def _literal_encoding_info(
         enc: InstEncoding, inst_enc_obj: InstEncoding | None, inst: Instruction
     ) -> tuple[str, tuple[str, ...]] | None:
@@ -7603,7 +7628,9 @@ class CodeGenerator:
                         _uses_full_dpp_write_mask = self._uses_full_dpp_write_mask(
                             _enc_upper
                         )
-                        _has_dpp_encoding = (
+                        _has_dpp_encoding = any(
+                            opnd.name == 'src0' for opnd in inst.operands
+                        ) and (
                             _supports_dpp_encoding
                             or _supports_dpp8_encoding
                             or _has_sdwa_encoding
@@ -7751,19 +7778,29 @@ class CodeGenerator:
                                 # byte observation, source selection/modifiers,
                                 # and staged storage; generated code supplies only
                                 # instruction-specific operands and fields.
+                                _sdwa_src0_modifier_format = (
+                                    self._sdwa_source_modifier_format(
+                                        sem, 0, _src_input_ops[0]
+                                    )
+                                )
                                 _sdwa_src1_block = ''
                                 if _src1_name:
+                                    _sdwa_src1_modifier_format = (
+                                        self._sdwa_source_modifier_format(
+                                            sem, 1, _src_input_ops[1]
+                                        )
+                                    )
                                     _sdwa_src1_block = (
                                         '    if (num_src_ > 1)\n'
                                         f'      amdgpu::sdwa::stage_source({_src1_name}, sdwa_src1_sel_,\n'
                                         '          sdwa_src1_sext_, sdwa_src1_neg_, sdwa_src1_abs_,\n'
-                                        '          dpp_src1_, wf);\n'
+                                        f'          {_sdwa_src1_modifier_format}, dpp_src1_, wf);\n'
                                     )
                                 _dpp_preamble += (
                                     '  if (inst_.src0 == amdgpu::SRC_SDWA) {\n'
                                     '    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_,\n'
                                     '        sdwa_src0_sext_, sdwa_src0_neg_, sdwa_src0_abs_,\n'
-                                    '        dpp_src0_, wf);\n'
+                                    f'        {_sdwa_src0_modifier_format}, dpp_src0_, wf);\n'
                                     + _sdwa_src1_block
                                     + '  }\n'
                                 )
