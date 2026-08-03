@@ -9,11 +9,11 @@
 #   Operation : *ReadOnly*    - queries only, no root required
 #               *ReadWrite*   - mutates device state, root required
 #
-# Category -> quality tier mapping:
-#   quick    (P0): unit tests only            -> no hardware, no root
-#   standard (P1): unit + functional read-only -> hardware, no root
-#   comprehensive (P2): every test            -> hardware + root (writes)
-#   full     (P3): every test                 -> hardware + root (writes)
+# AMD SMI Test Quality Definitions:
+# 1. P0 - **Quick** -  Unit & Smoke tests only (no driver, no sudo required).
+# 2. P1 - **Standard** - nightly-easy (driver, read-only, no sudo) (+ P0)
+# 3. P2 - **Comprehensive** - nightly-medium (writes, needs sudo) (+ P0/P1) - All tests
+# 4. P3 - **Full** - all tests (P0-P2)
 #
 # Running the categories:
 #   - TheRock CI: test_runner.py drives the installed tree with
