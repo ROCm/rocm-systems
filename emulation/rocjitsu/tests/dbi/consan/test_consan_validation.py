@@ -3865,6 +3865,33 @@ class ConSanValidationTest(unittest.TestCase):
             "/artifacts/benchmark-0-llama-work",
         )
 
+    def test_llama_rdna4_overhead_uses_fixed_gpu_event_timing(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        with (
+            temporary_root() as workspace,
+            mock.patch.dict(
+                os.environ, {validation.LLAMA_BUILD_DIR_ENV: ""}, clear=False
+            ),
+        ):
+            build_root = (
+                workspace / "rocjitsu-test-corpus-build" / "kernels" / "gfx1201"
+            )
+            create_llama_runtime_fixture(build_root, workload.relative_path)
+            command = validation._workload_command(
+                workspace,
+                "gfx1201",
+                workload,
+                "overhead",
+                Path("/artifacts/benchmark-0.json"),
+                inner_repetitions_override=123,
+            )
+        self.assertEqual(command[command.index("--n-embd") + 1], "1024")
+        self.assertEqual(command[command.index("--benchmark-iterations") + 1], "123")
+        self.assertEqual(
+            command[command.index("--minimum-timed-ms") + 1],
+            str(validation.EMPIRICAL_MINIMUM_TIMED_MS),
+        )
+
     def test_llama_build_directory_can_be_pinned(self) -> None:
         workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
         with temporary_root() as root:
@@ -4026,6 +4053,21 @@ class ConSanValidationTest(unittest.TestCase):
             path.write_bytes(b"short")
             with self.assertRaises(ValueError):
                 llama_validation._read_f32(path)
+
+    def test_llama_gpu_timing_requires_consistent_native_event_row(self) -> None:
+        aggregate, per_iteration = llama_validation._gpu_timing(
+            "llama_gpu_timing timer=hip-event aggregate_ms=250.0 "
+            "iterations=10000 per_iteration_ms=0.025\n",
+            10000,
+        )
+        self.assertEqual(aggregate, 250.0)
+        self.assertEqual(per_iteration, 0.025)
+        with self.assertRaisesRegex(ValueError, "iteration mismatch"):
+            llama_validation._gpu_timing(
+                "llama_gpu_timing timer=hip-event aggregate_ms=250.0 "
+                "iterations=9999 per_iteration_ms=0.02500250025\n",
+                10000,
+            )
 
     def test_llama_oracle_writes_fault_runner_result(self) -> None:
         with temporary_root() as root:
@@ -4835,20 +4877,43 @@ class ConSanValidationTest(unittest.TestCase):
         protocol = validation._empirical_timing_protocol(
             "gfx1201",
             workload,
-            {"accepted": True, "timing_median_ms": {"softmax": 0.05}},
+            {
+                "accepted": True,
+                "timing_median_ms": {
+                    "softmax": 0.06,
+                    "softmax:device": 0.05,
+                },
+            },
         )
-        self.assertEqual(protocol["kind"], "warm-host")
+        self.assertEqual(protocol["kind"], "warm-device-json")
+        self.assertEqual(
+            protocol["calibration_timing_median_ms"], {"softmax:device": 0.05}
+        )
         self.assertEqual(protocol["timed_inner_repetitions"], 5000)
         self.assertEqual(protocol["command_inner_repetitions"], 5001)
         self.assertTrue(protocol["discard_first_timing_sample"])
 
-        cold = validation._empirical_timing_protocol(
+        gtest_device = validation._empirical_timing_protocol(
             "gfx1201",
             validation.WORKLOAD_BY_ID["d128-block"],
-            None,
+            {
+                "accepted": True,
+                "timing_median_ms": {"target-dispatch:device": 50.0},
+            },
         )
-        self.assertEqual(cold["kind"], "cold-process")
-        self.assertIsNone(cold["command_inner_repetitions"])
+        self.assertEqual(gtest_device["kind"], "warm-device-gtest")
+        self.assertEqual(gtest_device["command_inner_repetitions"], 5)
+
+        streamk = validation._empirical_timing_protocol(
+            "gfx1201",
+            validation.WORKLOAD_BY_ID["streamk-arrival"],
+            {
+                "accepted": True,
+                "timing_median_ms": {"target-dispatch:device": 1.0},
+            },
+        )
+        self.assertEqual(streamk["command_inner_repetitions"], 1)
+        self.assertEqual(streamk["minimum_timed_aggregate_ms"], 0.5)
 
     def test_rdna4_matmul_uses_self_timed_device_protocol(self) -> None:
         workload = validation.WORKLOAD_BY_ID["rdna4-matmul-fp16-production"]
@@ -4961,6 +5026,62 @@ class ConSanValidationTest(unittest.TestCase):
             {"matmul:device": [1.1, 0.9]},
         )
 
+    def test_gtest_device_timing_requires_consistent_native_event_row(self) -> None:
+        output = (
+            "hip_moi_gpu_timing benchmark=d128-block timer=hip-event "
+            "aggregate_ms=250 iterations=5 per_iteration_ms=50\n"
+        )
+        per_iteration, measurement = validation._gtest_device_measurement(
+            output, "d128-block", 5
+        )
+        self.assertEqual(per_iteration, 50.0)
+        self.assertEqual(measurement["timed_aggregate_ms"], 250.0)
+        self.assertEqual(measurement["timing_source"], "hip-event")
+        with self.assertRaisesRegex(validation.ValidationError, "iteration mismatch"):
+            validation._gtest_device_measurement(output, "d128-block", 6)
+
+    def test_gpu_timing_makes_process_time_secondary(self) -> None:
+        def row(process_ms: float, host_ms: float, device_ms: float) -> dict:
+            return {
+                "accepted": True,
+                "elapsed_seconds": [process_ms / 1000.0],
+                "timing_median_ms": {
+                    "kernel": host_ms,
+                    "kernel:device": device_ms,
+                },
+            }
+
+        cold = validation._empirical_round_summary(
+            0,
+            ["sampled"],
+            row(100.0, 10.0, 1.0),
+            {"sampled": row(900.0, 90.0, 2.0)},
+            row(300.0, 30.0, 1.0),
+            baseline_drift_limit=0.05,
+            metric_prefix="cold",
+            qualifying=False,
+        )
+        warm = validation._empirical_round_summary(
+            0,
+            ["sampled"],
+            row(100.0, 10.0, 1.0),
+            {"sampled": row(900.0, 90.0, 2.0)},
+            row(102.0, 40.0, 1.02),
+            baseline_drift_limit=0.05,
+            include_process_metric=False,
+            device_workload_only=True,
+            metric_prefix="warm",
+        )
+        combined = validation._combine_empirical_round_summaries(
+            0, ["sampled"], {"cold": cold, "warm": warm}
+        )
+        self.assertTrue(combined["fully_accepted"])
+        self.assertFalse(combined["metrics"]["cold:process"]["qualifying"])
+        self.assertNotIn("warm:workload:kernel", combined["metrics"])
+        self.assertTrue(
+            combined["metrics"]["warm:workload:kernel:device"]["qualifying"]
+        )
+
     def test_empirical_campaign_requires_requested_accepted_rounds(self) -> None:
         def accepted_round(index: int, slowdown: float) -> dict:
             return {
@@ -4970,6 +5091,7 @@ class ConSanValidationTest(unittest.TestCase):
                 "metrics": {
                     "workload:dispatch": {
                         "accepted": True,
+                        "qualifying": True,
                         "profiles": {
                             "sampled": {
                                 "timing_ms": slowdown * 2.0,
