@@ -95,10 +95,11 @@ Working with symmetric memory from a kernel involves three pieces:
   ``ncclDevCommCreate`` and passed to the kernel by value. It carries the rank
   layout, barriers, and the device-side window registry.
 - One or more **symmetric windows**, registered on the host with
-  ``ncclCommWindowRegister`` using the ``NCCL_WIN_COLL_SYMMETRIC`` flag (or
-  created implicitly for buffers allocated with ``ncclMemAlloc``).
-- The **device API** (declared in ``nccl_device/impl/core__funcs.h``) that turns
-  a window plus an offset into a pointer to a specific peer's copy of the buffer.
+  ``ncclCommWindowRegister`` using the ``NCCL_WIN_COLL_SYMMETRIC`` flag.
+  ``ncclMemAlloc`` only allocates and maps symmetric-capable memory; it does not
+  populate the window registry, so the explicit registration call is required.
+- The **device API** (available through ``nccl_device.h``) that turns a window
+  plus an offset into a pointer to a specific peer's copy of the buffer.
 
 When a kernel already holds the ``ncclWindow_t`` handle (for example, because
 the host passed it as a launch argument), it can call ``ncclGetLsaPointer``
@@ -119,9 +120,12 @@ in NCCL 2.28.7), with no host round-trip:
   ``[base, base + size)`` range.
 
 ``ncclFindWindow`` walks the registry that ``ncclDevCommCreate`` populated and
-returns the matching ``ncclWindow_t``, or ``nullptr`` if ``ptr`` is not covered
-by any registered window. Once you have a window, resolve a specific peer's copy
-of the buffer with one of the pointer helpers:
+returns the matching ``ncclWindow_t``. Passing a pointer that no registered
+window covers is undefined behavior rather than a recoverable error: the lookup
+returns only from its hit path, so a miss runs past the end of the registry and
+faults. Make sure the pointer is covered by a registration instead of testing
+the result against ``nullptr``. Once you have a window, resolve a specific
+peer's copy of the buffer with one of the pointer helpers:
 
 - ``ncclGetLsaPointer(window, offset, peer)`` returns a pointer to ``peer``'s
   copy of the buffer at ``offset`` bytes into the window, for peers reachable
@@ -139,8 +143,7 @@ backing window on the device, then reads the value stored by its ring neighbor:
 
 .. code-block:: cpp
 
-   #include "nccl_device/impl/core__funcs.h"
-   #include "nccl_device/impl/lsa_barrier__funcs.h"
+   #include <nccl_device.h>
 
    __global__ void readPeerValue(void* localPtr, int* out, ncclDevComm_t comm)
    {
@@ -152,8 +155,11 @@ backing window on the device, then reads the value stored by its ring neighbor:
        // Device-side registry lookup (all threads participate).
        ncclWindow_t window = ncclFindWindow(ncclCoopCta(), comm, localPtr);
 
-       if (threadIdx.x == 0 && window != nullptr) {
-           int  peer     = (comm.rank + 1) % comm.nRanks;
+       if (threadIdx.x == 0) {
+           // ncclGetLsaPointer indexes the LSA team, so the peer must be an LSA
+           // rank. Use ncclGetPeerPointer(window, 0, team, peer) to address a
+           // rank of some other team by its rank in that team.
+           int  peer     = (comm.lsaRank + 1) % comm.lsaSize;
            int* peerData = reinterpret_cast<int*>(ncclGetLsaPointer(window, 0, peer));
            out[0] = peerData[0];
        }
@@ -177,12 +183,11 @@ communicator before launching:
 
 ``ncclFindWindow`` can only resolve windows that were registered before the
 device communicator was created, on a communicator for which symmetric memory
-is available. If ``ncclDevCommCreate`` returns ``ncclInvalidUsage`` or a lookup
-unexpectedly returns ``nullptr``, confirm the prerequisites above
+is available. If ``ncclDevCommCreate`` returns ``ncclInvalidUsage``, or a kernel
+faults inside the lookup, confirm the prerequisites above
 (``NCCL_CUMEM_ENABLE=1``, ``NCCL_WIN_ENABLE=1``, peer-to-peer capable ranks),
-that the buffer was registered with ``NCCL_WIN_COLL_SYMMETRIC`` (or allocated
-with ``ncclMemAlloc``), and that the pointer passed to ``ncclFindWindow`` lies
-within that registration.
+that the buffer was registered with ``NCCL_WIN_COLL_SYMMETRIC``, and that the
+pointer passed to ``ncclFindWindow`` lies within that registration.
 
 Ignoring CPU affinity with multi-node
 =====================================

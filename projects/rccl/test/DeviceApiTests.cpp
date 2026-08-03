@@ -59,16 +59,15 @@ __global__ void
     barrier.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 
-// Same peer-read as above, but the symmetric window is resolved entirely on the
-// device: instead of receiving a host-provided ncclWindow_t, the kernel is given
-// the local user pointer and calls ncclFindWindow() to look up the registered
-// window from the device-side window registry (no host round-trip). This is the
-// behavior under test for the device-side window lookup API. ncclFindWindow is a
-// cooperative (warp-coalesced) call and must be entered by all threads, so it is
-// invoked before the single-thread read.
+// Same peer-read as above, except the window is resolved on the device from the
+// local user pointer instead of being handed in by the host. ncclFindWindow is
+// warp-coalesced, so every thread must enter it before the single-thread read.
+// The resolved handle is written out for the host to compare against the one
+// ncclCommWindowRegister returned; it is used unchecked because ncclFindWindow
+// never yields nullptr (see runFindWindowRemoteReadTest).
 __global__ void findWindowReadPeerValueKernel(void*         localInputPtr,
                                               int*          outputValue,
-                                              int*          windowFound,
+                                              ncclWindow_t* resolvedWindow,
                                               ncclDevComm_t devComm)
 {
     ncclLsaBarrierSession<ncclCoopCta> barrier(ncclCoopCta(),
@@ -82,13 +81,11 @@ __global__ void findWindowReadPeerValueKernel(void*         localInputPtr,
 
     if(threadIdx.x == 0)
     {
-        windowFound[0] = (window != nullptr) ? 1 : 0;
-        if(window != nullptr)
-        {
-            const int peer      = (devComm.rank + 1) % devComm.nRanks;
-            int*      peerInput = reinterpret_cast<int*>(ncclGetLsaPointer(window, 0, peer));
-            outputValue[0]      = peerInput[0];
-        }
+        resolvedWindow[0] = window;
+
+        const int peer      = (devComm.lsaRank + 1) % devComm.lsaSize;
+        int*      peerInput = reinterpret_cast<int*>(ncclGetLsaPointer(window, 0, peer));
+        outputValue[0]      = peerInput[0];
     }
 
     barrier.sync(ncclCoopCta(), cuda::memory_order_release);
@@ -147,6 +144,60 @@ struct DeviceApiResources
     std::vector<DeviceApiRankResources> ranks;
 };
 
+// Owns one device-side ncclWindow_t slot per rank. A fatal assertion only
+// returns from the enclosing function, so freeing in a destructor is what keeps
+// the assertion and skip paths from leaking these allocations.
+class ResolvedWindowBuffers
+{
+public:
+    explicit ResolvedWindowBuffers(const std::vector<DeviceApiRankResources>& ranks)
+        : ranks_(ranks)
+        , pointers_(ranks.size(), nullptr)
+    {
+    }
+
+    ResolvedWindowBuffers(const ResolvedWindowBuffers&)            = delete;
+    ResolvedWindowBuffers& operator=(const ResolvedWindowBuffers&) = delete;
+
+    ~ResolvedWindowBuffers()
+    {
+        for(size_t rankIdx = 0; rankIdx < pointers_.size(); ++rankIdx)
+        {
+            if(pointers_[rankIdx] == nullptr)
+                continue;
+
+            (void)hipSetDevice(ranks_[rankIdx].device);
+            (void)hipFree(pointers_[rankIdx]);
+        }
+    }
+
+    hipError_t allocate()
+    {
+        for(size_t rankIdx = 0; rankIdx < pointers_.size(); ++rankIdx)
+        {
+            hipError_t error = hipSetDevice(ranks_[rankIdx].device);
+            if(error != hipSuccess)
+                return error;
+
+            error = hipMalloc(reinterpret_cast<void**>(&pointers_[rankIdx]), sizeof(ncclWindow_t));
+            if(error != hipSuccess)
+                return error;
+
+            error = hipMemset(pointers_[rankIdx], 0, sizeof(ncclWindow_t));
+            if(error != hipSuccess)
+                return error;
+        }
+
+        return hipSuccess;
+    }
+
+    ncclWindow_t* operator[](size_t rankIdx) const { return pointers_[rankIdx]; }
+
+private:
+    const std::vector<DeviceApiRankResources>& ranks_;
+    std::vector<ncclWindow_t*>                 pointers_;
+};
+
 static int getVisibleGpuCount()
 {
     int gpuCount = 0;
@@ -177,8 +228,10 @@ static bool hasFullDirectP2p(int gpuCount)
 static bool isFindWindowUnsupportedArch()
 {
     hipDeviceProp_t props{};
+    // Without a readable architecture the gate cannot be evaluated, so report
+    // unsupported: skipping is preferable to running a test we failed to gate.
     if(hipGetDeviceProperties(&props, 0) != hipSuccess)
-        return false;
+        return true;
 
     return std::string(props.gcnArchName).find("gfx950") != std::string::npos;
 }
@@ -214,7 +267,7 @@ static void allocatePositiveBuffers(DeviceApiResources&                    resou
         ASSERT_EQ(hipSetDevice(rank.device), hipSuccess);
         ASSERT_EQ(hipStreamCreate(&rank.stream), hipSuccess);
 
-        allocateInputBuffer(rank, inputValues[rankIdx]);
+        ASSERT_NO_FATAL_FAILURE(allocateInputBuffer(rank, inputValues[rankIdx]));
 
         ASSERT_EQ(hipMalloc(reinterpret_cast<void**>(&rank.outputBuffer), kBufferBytes),
                   hipSuccess);
@@ -267,10 +320,10 @@ static void runPositiveLsaRemoteReadTest()
         GTEST_SKIP() << "This test requires direct P2P access between the first 2 GPUs.";
 
     DeviceApiResources resources(kPositiveRanks);
-    initializeCommunicators(resources);
+    ASSERT_NO_FATAL_FAILURE(initializeCommunicators(resources));
 
     const std::array<int, kPositiveRanks> inputValues = {7, 11};
-    allocatePositiveBuffers(resources, inputValues);
+    ASSERT_NO_FATAL_FAILURE(allocatePositiveBuffers(resources, inputValues));
 
     // Symmetric-window registration is a precondition for this test, not the
     // behavior under test. If the runtime reports the configuration is
@@ -357,10 +410,13 @@ static void runPositiveLsaRemoteReadTest()
 }
 
 // Exercises the device-side window registry lookup (ncclFindWindow): each rank
-// hands the kernel only its local user pointer, the kernel resolves the backing
-// symmetric window on-device, then reads its peer's value through that window.
-// Success proves ncclFindWindow located a registered window from a device thread
-// and that the resolved handle yields a valid peer pointer.
+// hands the kernel only its local user pointer and the kernel resolves the
+// backing symmetric window on-device, then reads its peer's value through it.
+// The resolved handle is compared against the one ncclCommWindowRegister
+// returned, which catches a registry that maps the pointer to the wrong window
+// rather than merely to some window. A non-null check would prove nothing:
+// ncclFindWindow returns only from its hit path, and on a miss it walks to the
+// null terminator of the table list and faults, so it never yields nullptr.
 static void runFindWindowRemoteReadTest()
 {
     if(getVisibleGpuCount() < kPositiveRanks)
@@ -369,56 +425,27 @@ static void runFindWindowRemoteReadTest()
     if(!hasFullDirectP2p(kPositiveRanks))
         GTEST_SKIP() << "This test requires direct P2P access between the first 2 GPUs.";
 
-    if(isFindWindowUnsupportedArch())
-        GTEST_SKIP() << "ncclFindWindow is not yet functional on gfx950 (ROCM-27777).";
-
     DeviceApiResources resources(kPositiveRanks);
-    initializeCommunicators(resources);
+    ASSERT_NO_FATAL_FAILURE(initializeCommunicators(resources));
 
     const std::array<int, kPositiveRanks> inputValues = {23, 29};
-    allocatePositiveBuffers(resources, inputValues);
+    ASSERT_NO_FATAL_FAILURE(allocatePositiveBuffers(resources, inputValues));
 
-    // Per-rank flag written by the kernel: 1 if ncclFindWindow resolved the
-    // window, 0 otherwise. Kept separate from the value buffer so a lookup
-    // failure is diagnosable independently of the peer read.
-    std::vector<int*> windowFoundBuffers(resources.ranks.size(), nullptr);
-    for(size_t rankIdx = 0; rankIdx < resources.ranks.size(); ++rankIdx)
-    {
-        ASSERT_EQ(hipSetDevice(resources.ranks[rankIdx].device), hipSuccess);
-        ASSERT_EQ(hipMalloc(reinterpret_cast<void**>(&windowFoundBuffers[rankIdx]), sizeof(int)),
-                  hipSuccess);
-        ASSERT_EQ(hipMemset(windowFoundBuffers[rankIdx], 0, sizeof(int)), hipSuccess);
-    }
-
-    auto freeWindowFoundBuffers = [&]() {
-        for(size_t rankIdx = 0; rankIdx < windowFoundBuffers.size(); ++rankIdx)
-        {
-            if(windowFoundBuffers[rankIdx] != nullptr)
-            {
-                (void)hipSetDevice(resources.ranks[rankIdx].device);
-                (void)hipFree(windowFoundBuffers[rankIdx]);
-                windowFoundBuffers[rankIdx] = nullptr;
-            }
-        }
-    };
+    // Per-rank slot holding the handle ncclFindWindow resolved on the device.
+    ResolvedWindowBuffers resolvedWindows(resources.ranks);
+    ASSERT_EQ(resolvedWindows.allocate(), hipSuccess);
 
     // Symmetric-window registration is a precondition, not the behavior under
     // test; treat an unsupported configuration as a skip (see LsaRemoteRead).
     const ncclResult_t registerResult = tryRegisterInputWindows(resources);
     if(registerResult == ncclInvalidUsage)
-    {
-        freeWindowFoundBuffers();
         GTEST_SKIP() << "Symmetric window registration is unsupported on this configuration.";
-    }
     ASSERT_EQ(registerResult, ncclSuccess);
 
     for(const auto& rank : resources.ranks)
     {
         if(rank.inputWindow == nullptr)
-        {
-            freeWindowFoundBuffers();
             GTEST_SKIP() << "Symmetric window registration is unavailable on this configuration.";
-        }
     }
 
     ncclDevCommRequirements_t requirements = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
@@ -446,10 +473,7 @@ static void runFindWindowRemoteReadTest()
         unsupportedConfiguration |= (result == ncclInvalidUsage);
 
     if(unsupportedConfiguration)
-    {
-        freeWindowFoundBuffers();
         GTEST_SKIP() << "Symmetric device API is unsupported on this configuration.";
-    }
 
     for(const auto& result : createResults)
         ASSERT_EQ(result, ncclSuccess);
@@ -468,7 +492,7 @@ static void runFindWindowRemoteReadTest()
                            rank.stream,
                            rank.inputBuffer,
                            rank.outputBuffer,
-                           windowFoundBuffers[rankIdx],
+                           resolvedWindows[rankIdx],
                            rank.devComm);
         const hipError_t launchError = hipGetLastError();
         ASSERT_EQ(launchError, hipSuccess)
@@ -486,23 +510,25 @@ static void runFindWindowRemoteReadTest()
 
     for(size_t rankIdx = 0; rankIdx < resources.ranks.size(); ++rankIdx)
     {
-        auto& rank        = resources.ranks[rankIdx];
-        int   hostFound   = 0;
-        int   hostOutput  = 0;
+        auto&        rank                 = resources.ranks[rankIdx];
+        ncclWindow_t deviceResolvedWindow = nullptr;
+        int          hostOutput           = 0;
 
         ASSERT_EQ(hipSetDevice(rank.device), hipSuccess);
-        ASSERT_EQ(
-            hipMemcpy(&hostFound, windowFoundBuffers[rankIdx], sizeof(int), hipMemcpyDeviceToHost),
-            hipSuccess);
+        ASSERT_EQ(hipMemcpy(&deviceResolvedWindow,
+                            resolvedWindows[rankIdx],
+                            sizeof(ncclWindow_t),
+                            hipMemcpyDeviceToHost),
+                  hipSuccess);
         ASSERT_EQ(hipMemcpy(&hostOutput, rank.outputBuffer, kBufferBytes, hipMemcpyDeviceToHost),
                   hipSuccess);
 
-        EXPECT_EQ(hostFound, 1) << "ncclFindWindow failed to resolve the window on device "
-                                << rank.device;
+        EXPECT_EQ(deviceResolvedWindow, rank.inputWindow)
+            << "ncclFindWindow resolved a different window than ncclCommWindowRegister returned "
+               "on device "
+            << rank.device;
         EXPECT_EQ(hostOutput, expectedOutputs[rankIdx]);
     }
-
-    freeWindowFoundBuffers();
 }
 
 static void runDevCommCreateFailureTest()
@@ -511,8 +537,8 @@ static void runDevCommCreateFailureTest()
         GTEST_SKIP() << "This test requires at least 1 visible GPU.";
 
     DeviceApiResources resources(kNegativeRanks);
-    initializeCommunicators(resources);
-    allocateInputBuffer(resources.ranks[0], kNegativeTestSeed);
+    ASSERT_NO_FATAL_FAILURE(initializeCommunicators(resources));
+    ASSERT_NO_FATAL_FAILURE(allocateInputBuffer(resources.ranks[0], kNegativeTestSeed));
 
     // The device API is gated off in these configs (cuMem / symmetric windows
     // disabled). NCCL 2.30 rejects the unsupported configuration at symmetric-
@@ -605,6 +631,12 @@ TEST(DeviceApi, LsaRemoteRead)
 
 TEST(DeviceApi, FindWindowRemoteRead)
 {
+    // Gated here rather than inside the isolated body: RUN_ISOLATED_TESTS ends in
+    // EXPECT_TRUE(), so a GTEST_SKIP() in the child is reported as a pass by the
+    // parent. Checking the architecture up front makes gtest report a real skip.
+    if(isFindWindowUnsupportedArch())
+        GTEST_SKIP() << "ncclFindWindow is not yet functional on gfx950 (ROCM-27777).";
+
     RUN_ISOLATED_TESTS(makeDeviceApiEnabledConfig("DeviceApi.FindWindowRemoteRead",
                                                   []() { runFindWindowRemoteReadTest(); }));
 }
