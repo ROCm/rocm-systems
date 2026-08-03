@@ -25,6 +25,64 @@ protected:
 };
 
 // ---------------------------------------------------------------------------
+// Scratch sizing
+// ---------------------------------------------------------------------------
+
+TEST(DdaFabricScratchSizingTest, ExplicitOverrideTakesPrecedence)
+{
+    const auto forced = nccl_dda_detail::ddaFabricScratchSizing(8, 4096, 0, 0, 0, 0);
+    EXPECT_EQ(forced.bytes, 4096u);
+
+    const auto disabled =
+        nccl_dda_detail::ddaFabricScratchSizing(8, 0, 1, 128 * 1024 * 1024, 1, 32 * 1024 * 1024);
+    EXPECT_EQ(disabled.bytes, 0u);
+}
+
+TEST(DdaFabricScratchSizingTest, DisabledDdaHasNoDerivedAllocation)
+{
+    const auto sizing =
+        nccl_dda_detail::ddaFabricScratchSizing(8, -1, 0, 128 * 1024 * 1024, 1, 32 * 1024 * 1024);
+    EXPECT_EQ(sizing.bytes, 0u);
+    EXPECT_EQ(sizing.effectiveLL128Threshold, 0u);
+}
+
+TEST(DdaFabricScratchSizingTest, ZeroOverallThresholdHasNoDerivedAllocation)
+{
+    const auto sizing = nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, 0, 1, 32 * 1024 * 1024);
+    EXPECT_EQ(sizing.bytes, 0u);
+    EXPECT_EQ(sizing.effectiveLL128Threshold, 0u);
+}
+
+TEST(DdaFabricScratchSizingTest, DisabledLL128UsesSimpleCapacity)
+{
+    constexpr int64_t simpleThreshold = 128 * 1024 * 1024;
+    const auto sizing = nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, simpleThreshold, 0, 32 * 1024 * 1024);
+    EXPECT_EQ(sizing.bytes, (size_t)simpleThreshold + (size_t)simpleThreshold / 8);
+    EXPECT_EQ(sizing.effectiveLL128Threshold, 0u);
+}
+
+TEST(DdaFabricScratchSizingTest, LL128ThresholdIsCappedByOverallThreshold)
+{
+    constexpr int64_t overallThreshold = 64 * 1024 * 1024;
+    const auto oversized =
+        nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, overallThreshold, 1, 128 * 1024 * 1024);
+    const auto atCap =
+        nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, overallThreshold, 1, overallThreshold);
+    EXPECT_EQ(oversized.effectiveLL128Threshold, (size_t)overallThreshold);
+    EXPECT_EQ(oversized.bytes, atCap.bytes);
+}
+
+TEST(DdaFabricScratchSizingTest, LL128ThresholdIsCappedByPathLimit)
+{
+    constexpr int64_t twoGiB = 2LL * 1024 * 1024 * 1024;
+    const auto oversized = nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, twoGiB, 1, twoGiB);
+    const auto atCap = nccl_dda_detail::ddaFabricScratchSizing(
+        8, -1, 1, twoGiB, 1, nccl_dda_detail::kDdaLL128ArMaxBytes);
+    EXPECT_EQ(oversized.effectiveLL128Threshold, nccl_dda_detail::kDdaLL128ArMaxBytes);
+    EXPECT_EQ(oversized.bytes, atCap.bytes);
+}
+
+// ---------------------------------------------------------------------------
 // AllGather
 // ---------------------------------------------------------------------------
 

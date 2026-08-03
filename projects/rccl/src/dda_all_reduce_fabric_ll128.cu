@@ -13,6 +13,7 @@
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
+#include "dda_init_detail.h"
 #include "fabric_gpu_barrier.h" // meta::comms::kDdaMaxNranks
 #include "param.h"
 
@@ -29,10 +30,10 @@ RCCL_PARAM(DdaLL128ArThreads, "DDA_LL128_AR_THREADS", 1024);
 
 namespace {
 
-using meta::comms::kDdaLL128ArMaxBytes;
 using meta::comms::kDdaLL128DataElems;
 using meta::comms::kDdaLL128Lanes;
 using meta::comms::LLLine128;
+using nccl_dda_detail::kDdaLL128ArMaxBytes;
 
 // Per-call slot stride in 128B lines for a message of `numLines` lines. The
 // stride matches the message exactly (compact layout) so small all-reduces keep

@@ -24,53 +24,12 @@
 
 using meta::comms::kDdaMaxNranks;
 using nccl_dda_detail::ddaFabricMaxNBlocksForScratch;
+using nccl_dda_detail::ddaFabricScratchSizing;
 using nccl_dda_detail::ddaLLEpochCount;
 using nccl_dda_detail::DdaFabricBarrierState;
 using nccl_dda_detail::kDdaFabricLLArMaxBlocks;
 
 RCCL_PARAM(DdaFabricBufferSizeForScratch, "DDA_FABRIC_BUFFER_SIZE", -1);
-
-// Size (in bytes) of the per-comm DDA fabric VMM scratch buffer.
-//
-// Explicit override:
-//   RCCL_DDA_FABRIC_BUFFER_SIZE=<bytes>
-//     - 0 disables fabric DDA init
-//     - >0 forces exact scratch size
-//
-// Derived default:
-//   max(RCCL_DDA_THRESHOLD,
-//       LL128_AR_FOOTPRINT(RCCL_DDA_LL128_THRESHOLD, nRanks) when RCCL_DDA_LL128 is enabled)
-//   plus 12.5% margin for fixed LL/AG/A2A/RS slots.
-//
-// Notes:
-// - An LL128 enable flag or threshold of 0 disables that tier's contribution
-//   to sizing.
-// - LL128 AllReduce threshold is hard-capped by launcher semantics at 1 GiB.
-static size_t ddaFabricScratchBytes(int nRanks) {
-  const int64_t forceBytes = rcclParamDdaFabricBufferSizeForScratch();
-  if (forceBytes >= 0) {
-    return forceBytes > 0 ? (size_t)forceBytes : 0;
-  }
-
-  if (nRanks < 1) nRanks = 1;
-
-  const int64_t simpleThresh = rcclParamDdaThreshold();
-  const size_t simpleCap = simpleThresh > 0 ? (size_t)simpleThresh : 0;
-
-  const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
-  size_t ll128Cap = rcclParamDdaLL128() && ll128Thresh > 0 ? (size_t)ll128Thresh : 0;
-  const size_t kLL128ArHardMax = 1073741824ULL; // 1 GiB
-  if (ll128Cap > kLL128ArHardMax) ll128Cap = kLL128ArHardMax;
-
-  // LL128 line geometry (see CollCommon_ll128.h): 128B lines, 15 payload words.
-  const size_t words = (ll128Cap + 7) / 8;
-  const size_t lines = (words + 14) / 15;
-  const size_t ll128Ar = (size_t)2 * (size_t)nRanks * lines * 128;
-
-  size_t bytes = simpleCap > ll128Ar ? simpleCap : ll128Ar;
-  bytes += bytes / 8; // ~12% margin for the fixed LL/AG/A2A/RS slot arrays
-  return bytes;
-}
 
 bool ncclDdaUseFabricPath(ncclComm* comm) {
   if (comm == nullptr) {
@@ -105,12 +64,12 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   const int64_t ll128ThreshCfg = rcclParamDdaLL128Threshold();
   const int64_t simpleThresh = rcclParamDdaThreshold();
   const int64_t fabricScratchOverride = rcclParamDdaFabricBufferSizeForScratch();
-  const int64_t ll128ThreshEff =
-    ll128Enabled && ll128ThreshCfg > 0
-      ? (ll128ThreshCfg > (int64_t)1073741824ULL ? (int64_t)1073741824ULL : ll128ThreshCfg)
-      : 0;
+  const auto scratchSizing = ddaFabricScratchSizing(nRanks, fabricScratchOverride, rcclParamDdaEnable(),
+                                                    simpleThresh, ll128Enabled, ll128ThreshCfg);
 
-  size_t bytes = DDA_FABRIC_BUFFER_SIZE;
+  // Right-sized from the DDA thresholds and nRanks (env-overridable) instead of
+  // a fixed 10 GiB. RCCL_DDA_FABRIC_BUFFER_SIZE=0 disables the fabric DDA path.
+  size_t bytes = scratchSizing.bytes;
   if (bytes == 0) {
     return ncclSuccess;
   }
@@ -209,7 +168,7 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     "LL128 enabled=%lld threshold=%lld (effective=%lld, 1GiB cap), "
     "Simple threshold=%lld, FabricGpuBarrier nBlocks=%d, peer table on device",
     nRanks, bytes, (long long)fabricScratchOverride, (long long)llEnabled, (long long)llThresh,
-    (long long)ll128Enabled, (long long)ll128ThreshCfg, (long long)ll128ThreshEff,
+    (long long)ll128Enabled, (long long)ll128ThreshCfg, (long long)scratchSizing.effectiveLL128Threshold,
     (long long)simpleThresh, nBlocksMax);
   return ncclSuccess;
 
