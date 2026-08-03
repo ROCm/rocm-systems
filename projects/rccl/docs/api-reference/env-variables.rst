@@ -274,3 +274,63 @@ application adds explicit synchronization between streams.
         | output feeds into the next.
       - | ``0``: Disabled (default).
         | ``1``: Enabled. Operations execute in host launch order.
+
+Inspector profiling
+===================
+
+The NCCL Inspector is a profiler plugin that emits per-communicator,
+per-operation performance data (collectives and point-to-point) as JSON or
+Prometheus textfile metrics. For a full walkthrough, see
+:doc:`../how-to/using-rccl-inspector-plugin`. The most common Inspector
+environment variables are collected in the following table.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``NCCL_INSPECTOR_ENABLE``
+        | Enables the Inspector profiler plugin. The plugin must also be
+        | loaded through ``NCCL_PROFILER_PLUGIN``.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``NCCL_INSPECTOR_ENABLE_P2P``
+        | Enables tracking of point-to-point (``Send``/``Recv``) operations in
+        | addition to collectives. Required for the ``nccl_p2p_*`` Prometheus
+        | metrics and the P2P panels of the Grafana dashboard.
+      - | ``0``: Disabled.
+        | ``1``: Enabled (default).
+
+    * - | ``NCCL_INSPECTOR_PROM_DUMP``
+        | Selects the Prometheus node-exporter textfile output format
+        | (``nccl_inspector_metrics_<uuid>.prom``) instead of the default JSON.
+      - | ``0``: JSON output (default).
+        | ``1``: Prometheus textfile output.
+
+    * - | ``NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS``
+        | Interval, in microseconds, at which the internal dump thread writes
+        | output. Output is always written at communicator teardown.
+      - | ``-1``: Dump only at teardown (default).
+        | ``0``: Dump continuously.
+        | ``N``: Dump every ``N`` microseconds. In Prometheus mode a minimum of
+        | ``30000000`` (30 s) is enforced to match node-exporter polling.
+
+    * - | ``NCCL_INSPECTOR_DUMP_DIR``
+        | Output directory for Inspector logs/metrics. For Prometheus mode,
+        | point this at the node-exporter textfile collector directory.
+      - | String path.
+        | Default: ``nccl-inspector-<slurm_job_id>`` or
+        | ``nccl-inspector-unknown-jobid``.
+
+    * - | ``NCCL_INSPECTOR_DUMP_VERBOSE``
+        | Includes per-event trace information (sequence numbers and
+        | timestamps) in the JSON output.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``NCCL_INSPECTOR_DUMP_MIN_SIZE_BYTES``
+        | Minimum message size (in bytes) tracked by the Inspector.
+      - | Integer value in bytes (default: ``8192``).
