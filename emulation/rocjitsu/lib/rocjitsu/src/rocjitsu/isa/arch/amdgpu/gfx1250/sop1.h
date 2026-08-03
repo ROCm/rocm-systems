@@ -38,6 +38,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -47,6 +48,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -199,6 +201,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -208,6 +211,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -217,6 +221,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -226,6 +231,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -235,6 +241,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -244,6 +251,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -253,6 +261,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -262,6 +271,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -271,6 +281,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -280,6 +291,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -289,6 +301,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -298,6 +311,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -307,6 +323,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -316,6 +335,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -325,6 +347,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -334,6 +359,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -343,6 +371,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -352,6 +383,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -361,6 +395,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -370,6 +407,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -379,6 +419,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -388,6 +431,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -397,6 +443,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -406,6 +455,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -415,6 +467,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -424,6 +479,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -433,6 +491,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -442,6 +503,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -451,6 +515,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -460,6 +527,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -469,6 +539,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -478,6 +551,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -487,6 +563,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -496,6 +575,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -505,6 +587,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand sdst_exec;
+  Operand scc;
+  Operand sdst_exec_in;
   static const bool execute_registered_;
 };
 
@@ -514,6 +599,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -523,6 +609,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -532,6 +619,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -541,6 +629,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -550,6 +639,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -558,6 +648,7 @@ public:
   SGetPcI64Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
+  Operand pc;
   static const bool execute_registered_;
 };
 
@@ -566,6 +657,7 @@ public:
   SSetPcI64Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
+  Operand pc;
   static const bool execute_registered_;
 };
 
@@ -575,6 +667,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
+  Operand pc;
+  Operand pc_in;
   static const bool execute_registered_;
 };
 
@@ -583,6 +677,7 @@ public:
   SRfeI64Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
+  Operand pc;
   static const bool execute_registered_;
 };
 
@@ -591,6 +686,7 @@ public:
   SAddPcI64Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
+  Operand pc;
   static const bool execute_registered_;
 };
 
@@ -625,6 +721,7 @@ public:
   SBarrierSignalIsfirstSop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
+  Operand scc;
   static const bool execute_registered_;
 };
 
@@ -642,6 +739,7 @@ public:
   SBarrierInitSop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
+  Operand m0;
   static const bool execute_registered_;
 };
 
@@ -658,6 +756,7 @@ public:
   SAllocVgprSop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
+  Operand scc;
   static const bool execute_registered_;
 };
 
