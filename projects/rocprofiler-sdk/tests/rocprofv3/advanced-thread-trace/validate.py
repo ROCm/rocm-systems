@@ -292,6 +292,7 @@ def test_occupancy_event_tracing_fields(att_occupancy_event_trace_out_dir_path):
         assert isinstance(
             dispatches, dict
         ), f"dispatches must be an object in {occupancy_file}"
+        assert dispatches, f"dispatches is empty in {occupancy_file}"
 
         events = occupancy_data.get("events", {})
         assert isinstance(events, dict), f"events must be an object in {occupancy_file}"
