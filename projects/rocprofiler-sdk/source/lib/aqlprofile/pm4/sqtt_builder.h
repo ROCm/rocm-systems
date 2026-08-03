@@ -837,7 +837,9 @@ public:
                                        &control.status_double_buffer,
                                        Primitives::COPY_DATA_SEL_COUNT_1DW_PRM,
                                        false);
-        if(Primitives::GFXIP_LEVEL == 9)
+        // gfx9 uses WPTR to derive the read offset; gfx11 uses it to tell whether the
+        // final write granule of the buffer being drained was actually filled.
+        if(Primitives::GFXIP_LEVEL == 9 || Primitives::GFXIP_LEVEL == 11)
             builder.BuildCopyRegDataPacket(cmd_buffer,
                                            Primitives::SQ_THREAD_TRACE_WPTR_ADDR,
                                            &control.wptr_doublebuffer,

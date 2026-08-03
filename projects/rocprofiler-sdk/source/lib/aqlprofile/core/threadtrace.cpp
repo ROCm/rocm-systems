@@ -437,13 +437,37 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
 
         auto& buffer_data = it->second;
         out->read_size    = manager->config.capacity_per_se;
-        // Exclude the final 32-byte block from gfx11 readable data.
-        if(pm4_factory->GetGpuId() == aql_profile::GFX11_GPU_ID)
-            out->read_size -= sqttbuilder->GetWritePtrBlk();
-        out->num_swaps = manager->buffer_swaps.fetch_add(1);
-        out->data = buffer_data.at((out->num_swaps + buffer_data.size() - 1) % buffer_data.size());
+        out->num_swaps    = manager->buffer_swaps.fetch_add(1);
 
-        out->read_offset = sizeof(uint16_t) * (control.wptr_doublebuffer >> 30);
+        const size_t drained = (out->num_swaps + buffer_data.size() - 1) % buffer_data.size();
+        out->data            = buffer_data.at(drained);
+
+        if(pm4_factory->GetGpuId() == aql_profile::GFX11_GPU_ID)
+        {
+            // gfx11 SQ_THREAD_TRACE_WPTR holds OFFSET in bits 28:0 and BUFFER_ID in bit 31.
+            constexpr uint32_t WPTR_BUF_ID = 1u << 31;
+
+            const uint32_t wptr = control.wptr_doublebuffer;
+            const size_t   blk  = sqttbuilder->GetWritePtrBlk();
+            // buffer_data[i] is programmed into BUF(i % 2), so a buffer id that no longer
+            // matches means the hardware has moved on and filled the drained buffer entirely.
+            const bool wptr_is_drained = ((wptr & WPTR_BUF_ID) != 0) == ((drained % 2) != 0);
+
+            if(wptr_is_drained)
+            {
+                // OFFSET counts write granules of an absolute address; rebase onto the buffer.
+                const size_t buffer_base = reinterpret_cast<uint64_t>(out->data);
+                const size_t wptr_addr   = (wptr & sqttbuilder->GetWritePtrMask()) * blk;
+                const size_t written     = (wptr_addr - buffer_base) & ((1ull << 29) - 1);
+
+                // Exclude the final granule only when the hardware never reached it.
+                if(written + blk <= out->read_size) out->read_size -= blk;
+            }
+        }
+
+        out->read_offset = (pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID)
+                               ? sizeof(uint16_t) * (control.wptr_doublebuffer >> 30)
+                               : 0;
     }
 
     return HSA_STATUS_SUCCESS;
