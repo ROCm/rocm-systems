@@ -37,13 +37,15 @@ cmake --build "$ROCJITSU_BUILD_DIR" --target rocjitsu_dbi_hooks
 export CONSAN_HOOK="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
 
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
+  RJ_CONSAN_MODE=sampled \
   ./application
 ```
 
-Loading the hook activates MOI Record/Replay by default. It is the recommended
-starting engine and provides an inspectable host-side model. Its retained
-dynamic history is bounded, so a clean replay is not proof of race freedom.
-Add `RJ_CONSAN_LOG=1` for instrumentation and completeness summaries.
+Loading the hook activates MOI Record/Replay by default. On gfx1201, the
+empirical recommendation is to select Sampled for ordinary barrier/LDS triage
+and reserve Record/Replay for expert synchronization investigations. The coded
+default has not yet changed. Add `RJ_CONSAN_LOG=1` for instrumentation and
+completeness summaries.
 
 When enabled, the same hook always runs waitcheck over each supported original
 code object before ConSan DBI. It reports missing waits or analysis failures,
@@ -84,9 +86,11 @@ or GPU reset is not by itself a ConSan diagnostic.
   [gfx1201](STATUS_RDNA4.md), and [gfx1250](STATUS_GFX1250.md).
 - [VALIDATION.md](VALIDATION.md): reproducible physical, simulator, and offline
   gates behind those ledgers.
-- [GFX1201_EMPIRICAL_STUDY.md](GFX1201_EMPIRICAL_STUDY.md): the frozen
-  methodology and empirical recommendation comparing engine overhead,
-  detection yield, and implementation complexity on physical gfx1201.
+- [GFX1201_EMPIRICAL_STUDY.md](GFX1201_EMPIRICAL_STUDY.md): the audience-facing
+  physical-gfx1201 recommendation comparing engine overhead, detection yield,
+  and implementation complexity.
+- [EMPIRICAL_METHODOLOGY.md](EMPIRICAL_METHODOLOGY.md): the reusable admission,
+  GPU-timing, fault-detection, provenance, and recommendation contract.
 - [GFX1201_EMPIRICAL_RESULTS.md](GFX1201_EMPIRICAL_RESULTS.md): generated
   performance, detection, structural, and complexity tables for that study.
 - [SPILLING.md](SPILLING.md): ConSan register selection, ownership, private
