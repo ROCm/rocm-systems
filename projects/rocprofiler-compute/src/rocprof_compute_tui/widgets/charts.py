@@ -322,6 +322,7 @@ class MemoryChart(Static):
             elif is_gfx115x(gpu_arch):
                 plot_func = plot_mem_chart_gfx11
             else:
+                self.update("Error: Memory chart not supported by this architecture.")
                 return
 
             original_stdout = sys.stdout

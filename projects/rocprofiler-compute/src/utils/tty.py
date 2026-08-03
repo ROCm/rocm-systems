@@ -798,13 +798,15 @@ def format_table_output(
         value_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
         df = scale_bw_columns(df, value_cols, args.decimal)
 
-    # When --view table is set, force table output and ignore cli_style from config
+    # When --view table is set, force table output and ignore cli_style from config.
+    # Gate to architectures with a renderer so unsupported arches fall back to table.
     use_mem_chart = (
         not _tty_view_is_table(args)
         and table_config.get("cli_style") == "mem_chart"
         and len(runs) == 1
         and "Metric" in df.columns
         and "Value" in df.columns
+        and (is_gfx9(gpu_arch) or is_gfx115x(gpu_arch))
     )
 
     if use_mem_chart:
@@ -995,9 +997,13 @@ def show_all(
 
                 # For mem_chart panels, collect all tables and merge
                 # into a single chart; skip individual table output.
-                is_mem_chart = table_config.get(
-                    "cli_style"
-                ) == "mem_chart" and not _tty_view_is_table(args)
+                # Gate to architectures with a renderer; unsupported arches fall back to
+                # normal table output.
+                is_mem_chart = (
+                    table_config.get("cli_style") == "mem_chart"
+                    and not _tty_view_is_table(args)
+                    and (is_gfx9(gpu_arch) or is_gfx115x(gpu_arch))
+                )
 
                 if is_mem_chart and len(runs) == 1:
                     has_cols = (
