@@ -33,7 +33,7 @@ _common_excludes: &common_excludes
 
 test_categories:
   quick:
-    description: "P0 sanity checks (target: < 5 min) - unit tests only, no hardware/root"
+    description: "P0 - Quick - Unit & Smoke tests only (no driver, no sudo required)."
     test_patterns:
       - "*Unit.*"
     exclude: *common_excludes
@@ -43,7 +43,7 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "P1 pre-checkin validation - unit + functional read-only (no root)"
+    description: "P1 - Standard - nightly-easy (driver, read-only, no sudo) (+ P0)"
     test_patterns:
       - "*FunctionalReadOnly.*"
       - "*Unit.*"
@@ -54,7 +54,7 @@ test_categories:
       - "precheckin"
 
   comprehensive:
-    description: "P2 nightly - all tests including functional read/write (root required)"
+    description: "P2 - Comprehensive - nightly-medium (writes, needs sudo) (+ P0/P1) - All tests"
     test_patterns:
       - "*"
     exclude: *common_excludes
@@ -64,7 +64,7 @@ test_categories:
       - "extended"
 
   full:
-    description: "P3 complete test suite - every test the binary registers"
+    description: "P3 - Full - all tests (P0-P2)"
     test_patterns:
       - "*"
     exclude: *common_excludes
