@@ -123,9 +123,11 @@ struct SpillBracket {
 
   // SGPRs: writelane into the bridge then store.
   for (const SpillSlot &slot : sgpr_spills) {
-    const std::array<uint32_t, 2> wl = build_v_writelane_b32(bridge_vgpr, slot.reg, kUniformLane, arch);
+    const std::array<uint32_t, 2> wl =
+        build_v_writelane_b32(bridge_vgpr, slot.reg, kUniformLane, arch);
     bracket.prologue.insert(bracket.prologue.end(), wl.begin(), wl.end());
-    const std::vector<uint32_t> store = build_scratch_store_dword(bridge_vgpr, slot.byte_offset, arch);
+    const std::vector<uint32_t> store =
+        build_scratch_store_dword(bridge_vgpr, slot.byte_offset, arch);
     bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
   }
 
@@ -142,10 +144,12 @@ struct SpillBracket {
   // Epilogue: restore SGPRs first (load/wait/readlane each, since the single bridge
   // is reused), then the VGPRs, so a reused bridge's reload lands last (see above).
   for (const SpillSlot &slot : sgpr_spills) {
-    const std::vector<uint32_t> load = build_scratch_load_dword(bridge_vgpr, slot.byte_offset, arch);
+    const std::vector<uint32_t> load =
+        build_scratch_load_dword(bridge_vgpr, slot.byte_offset, arch);
     bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
     bracket.epilogue.push_back(build_wait_loads_complete(arch));
-    const std::array<uint32_t, 2> rl = build_v_readlane_b32(slot.reg, bridge_vgpr, kUniformLane, arch);
+    const std::array<uint32_t, 2> rl =
+        build_v_readlane_b32(slot.reg, bridge_vgpr, kUniformLane, arch);
     bracket.epilogue.insert(bracket.epilogue.end(), rl.begin(), rl.end());
   }
   for (const SpillSlot &slot : vgpr_spills) {
