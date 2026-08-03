@@ -9,7 +9,7 @@ import consan_empirical_report as report
 
 
 class ConSanEmpiricalReportTest(unittest.TestCase):
-    def test_metric_cells_require_qualification_or_explicit_allowlist(self):
+    def test_metric_cells_require_qualified_gpu_timing(self):
         campaign = {
             "workload": "kernel",
             "required_accepted_rounds": 10,
@@ -30,11 +30,24 @@ class ConSanEmpiricalReportTest(unittest.TestCase):
                 }
             },
         }
-        with self.assertRaisesRegex(report.StudyError, "underqualified metric"):
-            report.extract_metric_cells(campaign, set())
-        cells = report.extract_metric_cells(campaign, {"kernel/sampled/cold:process"})
-        self.assertFalse(cells["sampled"]["cold_process"]["qualified"])
-        self.assertEqual(cells["sampled"]["cold_process"]["count"], 7)
+        with self.assertRaisesRegex(report.StudyError, "non-device metric"):
+            report.extract_metric_cells(campaign)
+        metrics = campaign["summary"]["profiles"]["sampled"]["metrics"]
+        metrics.clear()
+        metrics["warm:workload:kernel:device"] = {
+            "slowdown": {
+                "count": 7,
+                "median": 2.0,
+                "bootstrap_median_95": {"lower": 1.5, "upper": 2.5},
+            },
+            "timing_ms": {"median": 0.02},
+        }
+        with self.assertRaisesRegex(report.StudyError, "underqualified GPU metric"):
+            report.extract_metric_cells(campaign)
+        metrics["warm:workload:kernel:device"]["slowdown"]["count"] = 10
+        cells = report.extract_metric_cells(campaign)
+        self.assertTrue(cells["sampled"]["warm_device"]["qualified"])
+        self.assertEqual(cells["sampled"]["warm_device"]["count"], 10)
 
     def test_detection_rejects_unreached_final_trial(self):
         not_applicable = [
@@ -131,7 +144,12 @@ class ConSanEmpiricalReportTest(unittest.TestCase):
                     "root": "/checkout/corpus",
                     "head": "1" * 40,
                     "dirty": False,
-                }
+                },
+                {
+                    "root": "/checkout/pytorch",
+                    "head": None,
+                    "dirty": None,
+                },
             ],
             "workload_runtime": {
                 "loaded_runtime_libraries": {
@@ -149,6 +167,44 @@ class ConSanEmpiricalReportTest(unittest.TestCase):
         provenance["files"]["executable"]["sha256"] = "d" * 64
         second = report.workload_provenance_signature(provenance, config)
         self.assertNotEqual(first, second)
+
+    def test_device_timing_contract_requires_gpu_source_and_declared_exception(self):
+        manifest = {
+            "minimum_device_timed_aggregate_ms": 250.0,
+            "single_dispatch_timing": {
+                "streamk": {
+                    "maximum_iterations": 1,
+                    "minimum_device_timed_aggregate_ms": 0.5,
+                    "reason": "one dispatch preserves bounded evidence",
+                }
+            },
+        }
+        campaign = {
+            "workload": "kernel",
+            "timing_acceptance_source": "gpu-timestamps",
+            "process_timing_role": "secondary-diagnostic",
+            "workload_maximum_device_iterations": None,
+            "timing_protocol": {
+                "minimum_timed_aggregate_ms": 250.0,
+                "timed_inner_repetitions": 10,
+            },
+        }
+        report._validate_device_timing_contract(manifest, campaign)
+        campaign["timing_acceptance_source"] = "process-elapsed"
+        with self.assertRaisesRegex(report.StudyError, "GPU timestamps"):
+            report._validate_device_timing_contract(manifest, campaign)
+        campaign.update(
+            {
+                "workload": "streamk",
+                "timing_acceptance_source": "gpu-timestamps",
+                "workload_maximum_device_iterations": 1,
+                "timing_protocol": {
+                    "minimum_timed_aggregate_ms": 0.5,
+                    "timed_inner_repetitions": 1,
+                },
+            }
+        )
+        report._validate_device_timing_contract(manifest, campaign)
 
     def test_unknown_metric_and_ragged_markdown_fail_closed(self):
         with self.assertRaisesRegex(report.StudyError, "unmapped empirical metric"):

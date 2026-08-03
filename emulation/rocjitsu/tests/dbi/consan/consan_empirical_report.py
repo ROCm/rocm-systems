@@ -152,11 +152,14 @@ def _source_heads(provenance: dict[str, Any]) -> dict[str, str]:
             continue
         name = Path(str(source.get("root", ""))).name
         head = source.get("head")
+        dirty = source.get("dirty")
+        if head is None and dirty is None:
+            continue
         _require(
             isinstance(head, str) and len(head) == 40,
             f"source {name} has no commit identity",
         )
-        _require(source.get("dirty") is False, f"source {name} was dirty")
+        _require(dirty is False, f"source {name} was dirty")
         output[name] = head
     return output
 
@@ -314,7 +317,7 @@ def _metric_kind(metric: str) -> str:
 
 
 def extract_metric_cells(
-    campaign: dict[str, Any], allowed_unqualified: set[str]
+    campaign: dict[str, Any],
 ) -> dict[str, dict[str, dict[str, Any]]]:
     workload = campaign.get("workload")
     required = campaign.get("required_accepted_rounds")
@@ -332,19 +335,23 @@ def extract_metric_cells(
         for metric_name, metric in metrics.items():
             kind = _metric_kind(metric_name)
             _require(
+                kind == "warm_device",
+                f"{workload}/{profile}: non-device metric entered the final summary: "
+                f"{metric_name}",
+            )
+            _require(
                 kind not in profile_cells,
                 f"{workload}/{profile}: duplicate {kind} metric",
             )
             slowdown = metric.get("slowdown", {})
             timing = metric.get("timing_ms", {})
             count = slowdown.get("count")
-            key = f"{workload}/{profile}/{metric_name}"
             qualified = isinstance(count, int) and count >= required
-            if not qualified:
-                _require(
-                    key in allowed_unqualified,
-                    f"unexpected underqualified metric {key}: {count}/{required}",
-                )
+            _require(
+                qualified,
+                f"underqualified GPU metric {workload}/{profile}/{metric_name}: "
+                f"{count}/{required}",
+            )
             interval = slowdown.get("bootstrap_median_95", {})
             profile_cells[kind] = {
                 "metric": metric_name,
@@ -358,6 +365,70 @@ def extract_metric_cells(
             }
         cells[profile] = profile_cells
     return cells
+
+
+def _timing_method(campaign: dict[str, Any]) -> str:
+    protocol = campaign.get("timing_protocol", {})
+    kind = protocol.get("kind")
+    labels = {
+        "warm-device-self-timed": "native HIP events in project harness",
+        "warm-device-gtest": "native HIP events in GTest launch path",
+        "warm-device-json": "PyTorch HIP events",
+    }
+    _require(kind in labels, f"{campaign.get('workload')}: unknown GPU timing kind")
+    iterations = protocol.get("timed_inner_repetitions")
+    _require(
+        isinstance(iterations, int) and iterations > 0,
+        f"{campaign.get('workload')}: invalid GPU timing iteration count",
+    )
+    dispatch = "dispatch" if iterations == 1 else "dispatches"
+    return f"{labels[kind]}; {iterations} timed {dispatch} per row"
+
+
+def _validate_device_timing_contract(
+    manifest: dict[str, Any], campaign: dict[str, Any]
+) -> None:
+    workload = campaign.get("workload")
+    _require(
+        campaign.get("timing_acceptance_source") == "gpu-timestamps",
+        f"{workload}: qualifying timing is not sourced from GPU timestamps",
+    )
+    _require(
+        campaign.get("process_timing_role") == "secondary-diagnostic",
+        f"{workload}: process timing role is not secondary",
+    )
+    protocol = campaign.get("timing_protocol", {})
+    observed_minimum = protocol.get("minimum_timed_aggregate_ms")
+    exception = manifest.get("single_dispatch_timing", {}).get(workload)
+    if exception is None:
+        _require(
+            isinstance(observed_minimum, (int, float))
+            and float(observed_minimum)
+            >= float(manifest.get("minimum_device_timed_aggregate_ms", math.inf)),
+            f"{workload}: GPU timed aggregate is below the study minimum",
+        )
+        _require(
+            campaign.get("workload_maximum_device_iterations") is None,
+            f"{workload}: unexpected device iteration limit",
+        )
+    else:
+        _require(
+            isinstance(exception, dict),
+            f"{workload}: malformed single-dispatch declaration",
+        )
+        _require(
+            observed_minimum == exception.get("minimum_device_timed_aggregate_ms")
+            and campaign.get("workload_maximum_device_iterations")
+            == exception.get("maximum_iterations")
+            and protocol.get("timed_inner_repetitions")
+            == exception.get("maximum_iterations"),
+            f"{workload}: single-dispatch timing contract mismatch",
+        )
+        _require(
+            isinstance(exception.get("reason"), str)
+            and bool(exception["reason"].strip()),
+            f"{workload}: single-dispatch timing exception lacks a reason",
+        )
 
 
 def _median(values: list[float | int]) -> float | None:
@@ -511,17 +582,15 @@ def structural_metrics(
 def collect_performance(
     manifest: dict[str, Any], performance: list[tuple[str, Path, dict[str, Any]]]
 ) -> tuple[list[dict[str, Any]], dict[tuple[str, str], dict[str, int]]]:
-    allowed = set(manifest.get("allowed_unqualified_metrics", []))
     expected_workloads = set(manifest.get("performance_workloads", []))
     found_workloads = {campaign.get("workload") for _, _, campaign in performance}
     _require(found_workloads == expected_workloads, "performance workload set mismatch")
     rows: list[dict[str, Any]] = []
     clean_gates: dict[tuple[str, str], dict[str, int]] = {}
-    observed_rejected_campaigns = set()
     for artifact, path, campaign in performance:
         workload = campaign.get("workload")
         _require(
-            campaign.get("schema_version") == 2, f"{workload}: campaign schema mismatch"
+            campaign.get("schema_version") == 3, f"{workload}: campaign schema mismatch"
         )
         _require(
             campaign.get("protocol") == manifest.get("campaign_protocol"),
@@ -550,31 +619,13 @@ def collect_performance(
             admitted == timed,
             f"{workload}: timed profiles differ from admitted profiles",
         )
-        cells = extract_metric_cells(campaign, allowed)
+        _validate_device_timing_contract(manifest, campaign)
+        cells = extract_metric_cells(campaign)
         campaign_summary = campaign.get("summary", {})
-        campaign_reasons = campaign_summary.get("reasons", [])
-        expected_reasons = manifest.get("allowed_rejected_campaigns", {}).get(workload)
-        if campaign_summary.get("accepted") is not True:
-            _require(
-                isinstance(expected_reasons, list)
-                and campaign_reasons == expected_reasons,
-                f"{workload}: rejected campaign is not exactly allowlisted",
-            )
-            observed_rejected_campaigns.add(workload)
-        else:
-            _require(
-                expected_reasons is None,
-                f"{workload}: manifest allowlists an accepted campaign",
-            )
-        derived_reasons = sorted(
-            f"{profile}/{cell['metric']}: {cell['count']}/{cell['required']} accepted rounds"
-            for profile, profile_cells in cells.items()
-            for cell in profile_cells.values()
-            if not cell["qualified"]
-        )
         _require(
-            sorted(campaign_reasons) == derived_reasons,
-            f"{workload}: campaign rejection reasons do not match underqualified metrics",
+            campaign_summary.get("accepted") is True
+            and campaign_summary.get("reasons") == [],
+            f"{workload}: final performance campaign rejected",
         )
         structural = structural_metrics(path, campaign)
         for profile in PROFILE_ORDER:
@@ -593,6 +644,7 @@ def collect_performance(
                     None if is_admitted else _coverage_reason(admission)
                 ),
                 "metrics": cells.get(profile, {}),
+                "timing_method": _timing_method(campaign),
                 "structural": structural.get(profile),
             }
             if is_admitted:
@@ -615,23 +667,6 @@ def collect_performance(
                     "diagnostics": int(gate["unexpected_diagnostics"]),
                 }
             rows.append(row)
-    _require(
-        not (
-            allowed
-            - {
-                f"{row['workload']}/{row['profile']}/{cell['metric']}"
-                for row in rows
-                for cell in row["metrics"].values()
-                if not cell["qualified"]
-            }
-        ),
-        "manifest names an underqualified cell that was not observed",
-    )
-    _require(
-        observed_rejected_campaigns
-        == set(manifest.get("allowed_rejected_campaigns", {})),
-        "manifest rejected-campaign allowlist does not match observed campaigns",
-    )
     return rows, clean_gates
 
 
@@ -813,8 +848,6 @@ def _fmt_number(value: Any, digits: int = 2) -> str:
 def _fmt_metric(cell: dict[str, Any] | None) -> str:
     if cell is None:
         return "—"
-    if not cell.get("qualified"):
-        return f"unqualified {cell.get('count')}/{cell.get('required')}"
     return (
         f"{_fmt_number(cell.get('slowdown'))}× / {_fmt_number(cell.get('timing_ms'), 3)} ms "
         f"(n={cell.get('count')}, CI {_fmt_number(cell.get('lower'))}–{_fmt_number(cell.get('upper'))}×)"
@@ -871,8 +904,10 @@ def render_markdown(
         "",
         "## Performance",
         "",
-        "Ratios are paired medians against interpolated native baselines. Each qualified cell also gives",
-        "absolute median latency, sample count, and the bootstrap 95% interval for the slowdown.",
+        "Only GPU-timestamp-derived warm device measurements qualify for this table. CPU/process",
+        "elapsed time is retained in raw artifacts as a secondary diagnostic and is excluded here.",
+        "Ratios are paired medians against interpolated native baselines; cells also give absolute",
+        "device latency, sample count, and the bootstrap 95% interval for the slowdown.",
         "",
     ]
     perf_rows: list[list[str]] = []
@@ -888,10 +923,7 @@ def render_markdown(
                 row["workload"],
                 PROFILE_LABELS[row["profile"]],
                 admission,
-                _fmt_metric(cells.get("cold_process")),
-                _fmt_metric(cells.get("cold_workload")),
-                _fmt_metric(cells.get("cold_device")),
-                _fmt_metric(cells.get("warm_host")),
+                row["timing_method"],
                 _fmt_metric(cells.get("warm_device")),
                 row["artifact"],
             ]
@@ -902,11 +934,8 @@ def render_markdown(
                 "Workload",
                 "Engine",
                 "Admission",
-                "Cold process",
-                "Cold workload",
-                "Cold device",
-                "Warm host",
-                "Warm device",
+                "GPU timing method",
+                "Warm device slowdown / latency",
                 "Artifact",
             ],
             perf_rows,
@@ -915,7 +944,9 @@ def render_markdown(
     lines.extend(
         [
             "",
-            "An `unqualified` cell is retained but excluded from conclusions; all other shown timing cells meet the frozen sample requirement.",
+            "Stream-K is the sole declared exception to the 250 ms aggregate rule: ordinary ConSan",
+            "dynamic-evidence capacity permits one real dispatch per fresh process, so its single-dispatch",
+            "GPU result is reported with that constraint and is not generalized to steady-state throughput.",
             "",
         ]
     )
@@ -1088,7 +1119,7 @@ def render_markdown(
 
 def build_report(manifest_path: Path, artifact_base: Path, source_root: Path) -> str:
     manifest = _read_json(manifest_path)
-    _require(manifest.get("schema_version") == 1, "study manifest schema mismatch")
+    _require(manifest.get("schema_version") == 2, "study manifest schema mismatch")
     fault_spec = source_root / str(manifest.get("fault_spec_path", ""))
     _require(
         fault_spec.is_file(), f"missing checked-in fault specification {fault_spec}"

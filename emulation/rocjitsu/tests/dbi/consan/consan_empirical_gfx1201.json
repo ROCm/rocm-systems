@@ -1,8 +1,8 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "target": "gfx1201",
   "provenance_schema_version": 3,
-  "campaign_protocol": "consan-gfx1201-empirical-v2",
+  "campaign_protocol": "consan-gfx1201-empirical-v3",
   "required_runtime_tools": [
     "amdclang++",
     "llvm-readelf",
@@ -10,14 +10,22 @@
     "rocminfo"
   ],
   "collection_date": "2026-08-02",
-  "source_head": "cff57df4c926bc02483de04417632ec83320aaec",
+  "source_head": "2a4af5a44ad555d594b45a8d34d45f6983322e64",
   "hook_sha256": "b72109fb27a9f2edd49dac504e3469b536613dae2b34eb8b5be7961a180a6a6d",
-  "fault_spec_sha256": "31199ce68876dc02792285c853a281770b83fc101af71a4d4c5ed5875743e5cf",
+  "fault_spec_sha256": "ac56252db119e9625fa9d7f90d7014a3c492c082e9e128f175d95dff2addada2",
   "fault_spec_path": "emulation/rocjitsu/tests/dbi/consan/consan_validation_faults_gfx1201_empirical.json",
   "required_rounds": 10,
   "randomization_seed": 20260802,
   "baseline_drift_limit": 0.05,
   "bootstrap_resamples": 10000,
+  "minimum_device_timed_aggregate_ms": 250.0,
+  "single_dispatch_timing": {
+    "streamk-arrival": {
+      "maximum_iterations": 1,
+      "minimum_device_timed_aggregate_ms": 0.5,
+      "reason": "Repeated launches exceed ordinary ConSan dynamic-evidence capacity; every row uses a fresh process and one real kernel dispatch."
+    }
+  },
   "performance_workloads": [
     "rdna4-matmul-fp8-production",
     "llama-rdna4-mul-mat-vec-q",
@@ -26,24 +34,12 @@
     "pytorch-rdna4-compiled-softmax"
   ],
   "performance_artifacts": [
-    "bd-2wsf-perf-cff57df4c9-fp8-20260802",
-    "bd-2wsf-perf-cff57df4c9-llama-20260802",
-    "bd-2wsf-perf-cff57df4c9-d128-20260802",
-    "bd-2wsf-perf-cff57df4c9-streamk-20260802",
-    "bd-2wsf-perf-cff57df4c9-softmax-20260802"
+    "bd-2wsf-perf-2a4af5a44a-fp8-gpu-final-20260802",
+    "bd-2wsf-perf-2a4af5a44a-llama-gpu-final-20260802",
+    "bd-2wsf-perf-2a4af5a44a-d128-gpu-final-20260802",
+    "bd-2wsf-perf-2a4af5a44a-streamk-gpu-final-20260802-r2",
+    "bd-2wsf-perf-2a4af5a44a-softmax-gpu-final-20260802"
   ],
-  "allowed_unqualified_metrics": [
-    "pytorch-rdna4-compiled-softmax/supercollider/cold:process",
-    "pytorch-rdna4-compiled-softmax/sampled/cold:process",
-    "pytorch-rdna4-compiled-softmax/inline-shadow/cold:process"
-  ],
-  "allowed_rejected_campaigns": {
-    "pytorch-rdna4-compiled-softmax": [
-      "supercollider/cold:process: 7/10 accepted rounds",
-      "sampled/cold:process: 7/10 accepted rounds",
-      "inline-shadow/cold:process: 7/10 accepted rounds"
-    ]
-  },
   "workload_identities": {
     "rdna4-matmul-fp8-production": {
       "file_labels": [
@@ -69,21 +65,21 @@
       ],
       "required_runtime_libraries": ["hip-runtime", "hsa-runtime"],
       "source_heads": {
-        "rocjitsu-test-corpus": "5f1e7f57a8d502294e94e5b960aec71964f1b79d"
+        "rocjitsu-test-corpus": "a4c21378d144b4f49a53e6084306c0d3c40240bb"
       }
     },
     "d128-block": {
       "file_labels": ["executable"],
       "required_runtime_libraries": ["hip-runtime", "hsa-runtime"],
       "source_heads": {
-        "hip-moi": "0fcd57def36188500a19abaf3b6bca3a6e773034"
+        "hip-moi": "72a675dd671d2ef2e8592c858427d8f9a71bb300"
       }
     },
     "streamk-arrival": {
       "file_labels": ["executable"],
       "required_runtime_libraries": ["hip-runtime", "hsa-runtime"],
       "source_heads": {
-        "hip-moi": "0fcd57def36188500a19abaf3b6bca3a6e773034"
+        "hip-moi": "72a675dd671d2ef2e8592c858427d8f9a71bb300"
       }
     },
     "pytorch-rdna4-compiled-softmax": {
@@ -119,12 +115,12 @@
     }
   ],
   "detection_artifacts": [
-    "bd-2wsf-detection-cff57df4c9-fp8-20260802",
-    "bd-2wsf-detection-cff57df4c9-llama-20260802",
-    "bd-2wsf-detection-cff57df4c9-d128-20260802",
-    "bd-2wsf-detection-cff57df4c9-streamk-order-20260802",
-    "bd-2wsf-detection-cff57df4c9-streamk-scope-20260802",
-    "bd-2wsf-detection-cff57df4c9-softmax-20260802"
+    "bd-2wsf-detection-2a4af5a44a-fp8-gpu-final-20260802",
+    "bd-2wsf-detection-2a4af5a44a-llama-gpu-final-20260802",
+    "bd-2wsf-detection-2a4af5a44a-d128-gpu-final-20260802",
+    "bd-2wsf-detection-2a4af5a44a-streamk-order-gpu-final-20260802",
+    "bd-2wsf-detection-2a4af5a44a-streamk-scope-gpu-final-20260802",
+    "bd-2wsf-detection-2a4af5a44a-softmax-gpu-final-20260802"
   ],
   "complexity": {
     "source_tree_sha256": "d4c89bb774b02f0d0aa2f3ffeca934a0fd3bf96dae482db21b532ff256674742",
