@@ -92,12 +92,10 @@ class OmniAnalyze_Base:
         config = getattr(self, "_profiling_config", {})
         return is_only_pc_sampling(config.get("filter_blocks", []))
 
-    def load_pc_sampling_tool_data(
-        self, workload_path: str
-    ) -> Optional[dict[str, Any]]:
-        """Return parsed PC sampling tool data, or None when not collected."""
+    def load_pc_sampling_tool_data(self, workload_path: str) -> list[dict[str, Any]]:
+        """Return parsed PC sampling tool records, or an empty list."""
         if not self.pc_sampling_collected():
-            return None
+            return []
         return file_io.load_pc_sampling_results(str(workload_path))
 
     def build_pc_sampling_only_workload(
@@ -105,10 +103,10 @@ class OmniAnalyze_Base:
         workload: schema.Workload,
         dir_path: str,
         args: argparse.Namespace,
-        tool_data: Optional[dict[str, Any]],
+        tool_data: list[dict[str, Any]],
     ) -> None:
         """Build dispatch scaffolding and tables for a run without counters."""
-        workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(tool_data)
+        workload.raw_pmc = file_io.process_pc_sampling_kernel_traces(tool_data)
         workload.raw_pmc = workload.raw_pmc.rename(
             columns={"Dispatch_Id": "Dispatch_ID"}
         )
