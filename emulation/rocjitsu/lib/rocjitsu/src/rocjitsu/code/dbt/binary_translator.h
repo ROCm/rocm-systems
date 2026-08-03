@@ -192,6 +192,9 @@ public:
   [[nodiscard]] TranslatedCodeObject translate(const AmdGpuCodeObject &obj);
 
 private:
+  /// @brief Whether this translator is running the gfx1250 B0-to-A0 profile.
+  [[nodiscard]] bool is_gfx1250_b0_to_a0() const;
+
   /// @brief Return the generated or revision-specific legalization for an instruction.
   [[nodiscard]] const InstructionLegalization *lookup_legalization(const Instruction &inst) const;
 
