@@ -22,12 +22,13 @@
 
 #pragma once
 
-#include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/kfd/correlation_types.hpp"
 
 #include <atomic>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <unordered_map>
 
@@ -37,11 +38,21 @@
 // there, so validation can compare against the HSA result on the same call).
 // evict_stale() reclaims entries the completion path never took (dispatch
 // completed via HSA fallback before its record arrived) to prevent leaks.
+//
+// deposit() is an event: it notifies wait_take(), so the completion path can wait
+// for a record that is merely late instead of one-shot take()ing and silently
+// substituting HSA timestamps. That rendezvous is the Phase 1 race-seal; it is
+// only entered when kfd_selection_enabled() is true.
 
 namespace rocprofiler
 {
 namespace kfd
 {
+// Monotonic clock backing the rendezvous deadline. Distinct from the
+// CLOCK_BOOTTIME stamps stored in records: only used to bound the wait.
+uint64_t
+steady_now_ns();
+
 // Raw firmware timing for one dispatch. Ticks are converted to CLOCK_BOOTTIME
 // ns later (in get_dispatch_time); deposited_at_ns is a host CLOCK_BOOTTIME
 // stamp used only for stale eviction.
@@ -71,6 +82,24 @@ public:
     // Atomically find + erase. nullopt if not present.
     std::optional<kfd_timing_result> take(const correlation_key& key);
 
+    // Rendezvous form of take(): block until the reader deposits this key, the
+    // waiters are abandoned, or the ABSOLUTE steady_now_ns() deadline passes, then
+    // take. deadline_ns == 0 means do not block (plain take). The predicate is
+    // re-evaluated under the lock on every wakeup, so a deposit racing the start of
+    // the wait cannot be lost and a spurious wakeup cannot end the wait early.
+    //
+    // Blocks the calling completion thread: the caller must hold no other KFD lock.
+    std::optional<kfd_timing_result> wait_take(const correlation_key& key, uint64_t deadline_ns);
+
+    // Terminal: no further results can be deposited (reader dead or stopped). Wakes
+    // every waiter and makes later waits return immediately instead of burning
+    // their deadline on a reader that will never answer.
+    void abandon_waiters();
+
+    // Count an eligible dispatch that reported HSA timestamps anyway, so a source
+    // substitution is never silent.
+    void note_hsa_fallback();
+
     // Remove entries whose deposited_at_ns is older than max_age_ns relative to
     // now_ns. now_ns is passed in (not sampled) so the function is deterministic
     // and unit-testable. Returns the number of entries evicted.
@@ -82,16 +111,25 @@ public:
     // the only externally visible symptom of that race.
     struct take_stats
     {
-        uint64_t hits   = 0;
-        uint64_t misses = 0;
+        uint64_t hits      = 0;
+        uint64_t misses    = 0;
+        uint64_t fallbacks = 0;
     };
     take_stats stats() const;
 
 private:
     using map_t = std::unordered_map<correlation_key, kfd_timing_result, correlation_key_hash>;
-    common::Synchronized<map_t> m_data   = {};
-    std::atomic<uint64_t>       m_hits   = {0};
-    std::atomic<uint64_t>       m_misses = {0};
+
+    // Caller must hold m_mutex.
+    std::optional<kfd_timing_result> take_locked(const correlation_key& key);
+
+    mutable std::mutex      m_mutex     = {};
+    std::condition_variable m_cv        = {};
+    map_t                   m_data      = {};
+    bool                    m_abandoned = false;
+    std::atomic<uint64_t>   m_hits      = {0};
+    std::atomic<uint64_t>   m_misses    = {0};
+    std::atomic<uint64_t>   m_fallbacks = {0};
 };
 }  // namespace kfd
 }  // namespace rocprofiler
