@@ -507,6 +507,26 @@ async_signal_handler(hsa_signal_t                            completion_signal,
     }
 }
 
+// Lazy HW-profiling enable: a queue turns profiling on the first time it takes
+// the SIGNAL path, and never if every one of its batches is signal-less. Called
+// before the batch publishes, so profiling is on before the dispatch it belongs
+// to can complete. No-op unless lazy mode is active.
+void
+enable_profiling_for_signal_batch(Queue* queue)
+{
+    if(!kfd::signal_less_lazy_profiling()) return;
+    if(!queue || !queue->intercept_queue()) return;
+    if(!kfd::profiling_tracker().mark(queue->get_id().handle)) return;
+
+    const auto* _ext = get_amd_ext_table();
+    if(!_ext || !_ext->hsa_amd_profiling_set_profiler_enabled_fn) return;
+
+    ROCP_HSA_TABLE_CALL(WARNING,
+                        _ext->hsa_amd_profiling_set_profiler_enabled_fn(
+                            const_cast<hsa_queue_t*>(queue->intercept_queue()), true))
+        << "Could not enable profiler for a queue taking the signal path";
+}
+
 // The no-signal finalizer. Runs on an async task-group worker -- or, for a
 // permanently rejected submission, on the thread flushing the retry owner -- and
 // NEVER on the reader thread or under a hub lock.
@@ -643,7 +663,8 @@ signal_less_batch_eligible(Queue*                                            que
     _inputs.fully_wired           = kfd::signal_less_fully_wired();
     _inputs.session_live_for_gpu  = true;
     _inputs.reader_alive          = kfd::signal_less_hub().mode() == kfd::session_mode::running;
-    _inputs.doorbells_injective   = kfd::doorbell_owner_is_injective(_db->doorbell_off);
+    _inputs.doorbells_injective =
+        kfd::owner_registry().is_injective(static_cast<uint32_t>(_gpu_id), _db->doorbell_off);
     _inputs.hub_accepts_batch     = kfd::signal_less_hub().can_register_batch(_flat);
     // The payload is value-only (see kfd::pending_payload), so construction cannot
     // fail once the key resolved.
@@ -1063,6 +1084,10 @@ write_interceptor(Queue*                                queue,
         auto current_signal_value   = hsa_signal_value_t{0};
         auto _shared_info_session   = std::shared_ptr<queue_info_session_t>{};
 
+        // Signal path for this batch: make sure HW profiling is on before it
+        // publishes, since its completion will read HSA timestamps.
+        if(!_signal_less_batch) enable_profiling_for_signal_batch(queue);
+
         // Register the whole batch BEFORE the writer publishes any packet, so the
         // reader can never drain a firmware record for a dispatch the hub does not
         // know about. Eligibility already asked the hub to accept these keys while
@@ -1286,7 +1311,14 @@ create_queue_state(const hsa_queue_t* queue, bool overwrite)
 
     // this is needed for OpenMP target offload which, unlike HIP, does not automatically enable
     // profiler for queues it creates.
-    if(get_amd_ext_table() && get_amd_ext_table()->hsa_amd_profiling_set_profiler_enabled_fn)
+    //
+    // Lazy mode defers this to the queue's first SIGNAL-path batch so a purely
+    // signal-less queue never enables profiling at all. It is deliberately only
+    // active when signal-less is, because with the feature off every batch takes
+    // the signal path anyway -- deferring would move a call that always happens,
+    // for no benefit and with real risk.
+    if(!kfd::signal_less_lazy_profiling() && get_amd_ext_table() &&
+       get_amd_ext_table()->hsa_amd_profiling_set_profiler_enabled_fn)
     {
         ROCP_HSA_TABLE_CALL(WARNING,
                             get_amd_ext_table()->hsa_amd_profiling_set_profiler_enabled_fn(

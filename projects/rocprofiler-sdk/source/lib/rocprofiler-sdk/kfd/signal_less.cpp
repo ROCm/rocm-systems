@@ -23,6 +23,8 @@
 #include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 
 #include "lib/common/environment.hpp"
+
+#include <fmt/core.h>
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
@@ -85,6 +87,20 @@ any_leaked()
     return _v;
 }
 
+OwnerRegistry&
+registry_storage()
+{
+    static auto*& _v = common::static_object<OwnerRegistry>::construct();
+    return *_v;
+}
+
+ProfilingEnableTracker&
+profiling_storage()
+{
+    static auto*& _v = common::static_object<ProfilingEnableTracker>::construct();
+    return *_v;
+}
+
 retry_owner<signal_less_hub_t::proven>&
 retry()
 {
@@ -134,6 +150,55 @@ size_t
 retry_owner_size()
 {
     return retry().size();
+}
+
+OwnerRegistry&
+owner_registry()
+{
+    return registry_storage();
+}
+
+ProfilingEnableTracker&
+profiling_tracker()
+{
+    return profiling_storage();
+}
+
+void
+add_live_queue(uint64_t queue_token, uint32_t gpu_id, std::optional<uint32_t> doorbell_slot)
+{
+    auto _result = owner_registry().add_queue(queue_token, gpu_id, doorbell_slot);
+    if(_result != OwnerRegistry::add_result::collision) return;
+
+    // A second live queue owns this slot, so a firmware record on it can no longer
+    // be attributed to one dispatch. Quarantine it for the rest of the process:
+    // that strands whatever was pending on the slot (P1, no record and no retire)
+    // and refuses every later reservation for it, so both owners fall back to the
+    // signal path. Done AFTER add_queue returned, so the registry lock is not held
+    // while the hub lock is taken.
+    auto _stranded = signal_less_hub().quarantine_slot(*doorbell_slot);
+    if(_stranded.empty()) return;
+
+    note_signal_less_losses();
+    ROCP_WARNING << fmt::format(
+        "KFD dispatch-log: doorbell slot {} now has more than one live queue, so firmware records "
+        "for it are ambiguous. The slot is quarantined for the rest of the process and {} "
+        "in-flight signal-less dispatch(es) on it emit no record; those queues use signals.",
+        *doorbell_slot,
+        _stranded.size());
+}
+
+void
+remove_live_queue(uint64_t queue_token)
+{
+    owner_registry().remove_queue(queue_token);
+    profiling_tracker().forget(queue_token);
+}
+
+bool
+signal_less_lazy_profiling()
+{
+    return signal_less_feature_enabled() && signal_less_fully_wired();
 }
 
 void

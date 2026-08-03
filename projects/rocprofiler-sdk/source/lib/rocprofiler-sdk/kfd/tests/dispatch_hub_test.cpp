@@ -26,6 +26,7 @@
 // the HSA runtime, or the reader thread (test seam S2).
 
 #include "lib/rocprofiler-sdk/kfd/dispatch_hub.hpp"
+#include "lib/rocprofiler-sdk/kfd/owner_registry.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 
 #include <gtest/gtest.h>
@@ -602,15 +603,13 @@ TEST(signal_less_flag, master_switch_holds_the_feature_off)
     EXPECT_FALSE(batch_is_signal_less_eligible(in));
 }
 
-// The owner-injectivity input is a placeholder that reports "not trackable" until
-// the all-live-queue reverse owner registry lands, so it alone also holds every
-// batch on the signal path.
-TEST(signal_less_flag, placeholder_owner_check_is_not_yet_trackable)
+// The owner-injectivity input now comes from the live-owner registry, and a slot
+// with no known owner is not injective -- so it alone holds a batch on the signal
+// path even with everything else satisfied.
+TEST(signal_less_flag, unknown_slot_is_not_injective)
 {
-    EXPECT_FALSE(doorbell_owner_is_injective(0));
-    EXPECT_FALSE(doorbell_owner_is_injective(4100));
+    auto reg = OwnerRegistry{};
 
-    // fully_wired is set true here to isolate the owner check as the sole failure.
     auto in                  = eligibility_inputs{};
     in.feature_enabled       = true;
     in.fully_wired           = true;
@@ -618,7 +617,7 @@ TEST(signal_less_flag, placeholder_owner_check_is_not_yet_trackable)
     in.reader_alive          = true;
     in.hub_accepts_batch     = true;
     in.payload_constructible = true;
-    in.doorbells_injective   = doorbell_owner_is_injective(4100);
+    in.doorbells_injective   = reg.is_injective(/*gpu_id=*/0, /*slot=*/4100);
 
     EXPECT_FALSE(batch_is_signal_less_eligible(in));
 }
@@ -745,4 +744,178 @@ TEST(DispatchHub, loss_ledger_selects_exactly_the_leaked_ids)
         retired.emplace_back(id);
     }
     EXPECT_EQ(retired, (std::vector<uint64_t>{11, 33}));
+}
+
+// ---------------------------------------------------------------------------
+// Unit 4: live doorbell-owner registry (requirement 3)
+// ---------------------------------------------------------------------------
+
+// One live queue on a slot is the sole owner, so records for it are unambiguous
+// and a batch on that queue can be eligible.
+TEST(OwnerRegistry, sole_owner_is_injective)
+{
+    auto reg = OwnerRegistry{};
+    EXPECT_EQ(reg.add_queue(/*token=*/1, /*gpu=*/0, /*slot=*/uint32_t{40}),
+              OwnerRegistry::add_result::sole_owner);
+
+    EXPECT_TRUE(reg.is_injective(0, 40));
+    EXPECT_EQ(reg.owners_of(0, 40), 1u);
+    EXPECT_EQ(reg.live_queues(), 1u);
+
+    // With injectivity satisfied and everything else true, a batch is eligible.
+    auto in                  = eligibility_inputs{};
+    in.feature_enabled       = true;
+    in.fully_wired           = true;  // forced: the real switch is still off
+    in.session_live_for_gpu  = true;
+    in.reader_alive          = true;
+    in.hub_accepts_batch     = true;
+    in.payload_constructible = true;
+    in.doorbells_injective   = reg.is_injective(0, 40);
+    EXPECT_TRUE(batch_is_signal_less_eligible(in));
+}
+
+// A second live owner is a collision: the registry says so, the slot stops being
+// injective, and the caller quarantines it in the hub.
+TEST(OwnerRegistry, second_owner_collides_and_quarantines)
+{
+    auto reg = OwnerRegistry{};
+    auto hub = hub_t{};
+
+    ASSERT_TRUE(register_one(hub, key_of(40, 1)));
+    ASSERT_TRUE(register_one(hub, key_of(40, 2)));
+
+    EXPECT_EQ(reg.add_queue(1, 0, uint32_t{40}), OwnerRegistry::add_result::sole_owner);
+    EXPECT_EQ(reg.add_queue(2, 0, uint32_t{40}), OwnerRegistry::add_result::collision);
+
+    EXPECT_FALSE(reg.is_injective(0, 40));
+    EXPECT_EQ(reg.owners_of(0, 40), 2u);
+
+    // The caller's response: quarantine, stranding what was pending on the slot.
+    auto stranded = hub.quarantine_slot(40);
+    EXPECT_EQ(stranded.size(), 2u);
+    EXPECT_TRUE(hub.is_quarantined(40));
+    EXPECT_FALSE(hub.can_register_batch({key_of(40, 3)}));  // both owners now signal-path
+}
+
+// Quarantine outlives the collision: after one colliding queue dies the registry
+// sees a sole owner again, but the hub still refuses the slot for the rest of the
+// process, so signal-less never resumes on it.
+TEST(OwnerRegistry, quarantine_persists_after_the_collision_clears)
+{
+    auto reg = OwnerRegistry{};
+    auto hub = hub_t{};
+
+    reg.add_queue(1, 0, uint32_t{40});
+    reg.add_queue(2, 0, uint32_t{40});
+    hub.quarantine_slot(40);
+
+    reg.remove_queue(2);
+    EXPECT_TRUE(reg.is_injective(0, 40));  // ownership looks clean again...
+    EXPECT_TRUE(hub.is_quarantined(40));   // ...but the slot stays unusable
+    EXPECT_FALSE(hub.can_register_batch({key_of(40, 9)}));
+}
+
+// A queue registered before the session existed still participates: it is already
+// an owner, so a queue created later on the same slot collides with it.
+TEST(OwnerRegistry, pre_session_queue_participates_in_injectivity)
+{
+    auto reg = OwnerRegistry{};
+
+    // Registered at creation, long before any dispatch-log session.
+    EXPECT_EQ(reg.add_queue(/*pre-session*/ 1, 0, uint32_t{7}),
+              OwnerRegistry::add_result::sole_owner);
+    EXPECT_TRUE(reg.is_injective(0, 7));
+
+    EXPECT_EQ(reg.add_queue(/*post-session*/ 2, 0, uint32_t{7}),
+              OwnerRegistry::add_result::collision);
+    EXPECT_FALSE(reg.is_injective(0, 7));
+}
+
+// A live queue whose doorbell could not be resolved could be the second owner of
+// ANY slot, so it makes every slot on its GPU non-injective until it dies.
+TEST(OwnerRegistry, unresolved_queue_disables_the_whole_gpu)
+{
+    auto reg = OwnerRegistry{};
+    reg.add_queue(1, 0, uint32_t{40});
+    reg.add_queue(2, 1, uint32_t{50});  // a different GPU
+    EXPECT_TRUE(reg.is_injective(0, 40));
+
+    EXPECT_EQ(reg.add_queue(3, 0, std::nullopt), OwnerRegistry::add_result::slot_unknown);
+    EXPECT_EQ(reg.unresolved_queues(0), 1u);
+
+    EXPECT_FALSE(reg.is_injective(0, 40));  // this GPU is out
+    EXPECT_FALSE(reg.is_injective(0, 99));
+    EXPECT_TRUE(reg.is_injective(1, 50));   // the other GPU is unaffected
+
+    reg.remove_queue(3);
+    EXPECT_EQ(reg.unresolved_queues(0), 0u);
+    EXPECT_TRUE(reg.is_injective(0, 40));
+}
+
+// Slots are scoped per GPU: the same page-relative slot on two GPUs is not a
+// collision, because records for a slot only ever come from the session GPU.
+TEST(OwnerRegistry, same_slot_on_different_gpus_is_not_a_collision)
+{
+    auto reg = OwnerRegistry{};
+    EXPECT_EQ(reg.add_queue(1, 0, uint32_t{40}), OwnerRegistry::add_result::sole_owner);
+    EXPECT_EQ(reg.add_queue(2, 1, uint32_t{40}), OwnerRegistry::add_result::sole_owner);
+    EXPECT_TRUE(reg.is_injective(0, 40));
+    EXPECT_TRUE(reg.is_injective(1, 40));
+}
+
+// Destroying a queue releases its ownership so a surviving co-owner is sole again,
+// and re-registering the same token replaces rather than double-counts.
+TEST(OwnerRegistry, remove_and_reregister_keep_counts_exact)
+{
+    auto reg = OwnerRegistry{};
+    reg.add_queue(1, 0, uint32_t{40});
+    reg.add_queue(1, 0, uint32_t{40});  // same token again
+    EXPECT_EQ(reg.owners_of(0, 40), 1u);
+    EXPECT_EQ(reg.live_queues(), 1u);
+
+    // The same token moving to another slot leaves the old one empty.
+    reg.add_queue(1, 0, uint32_t{41});
+    EXPECT_EQ(reg.owners_of(0, 40), 0u);
+    EXPECT_EQ(reg.owners_of(0, 41), 1u);
+
+    reg.remove_queue(1);
+    EXPECT_EQ(reg.owners_of(0, 41), 0u);
+    EXPECT_EQ(reg.live_queues(), 0u);
+    reg.remove_queue(1);  // idempotent
+    EXPECT_EQ(reg.live_queues(), 0u);
+}
+
+// ---------------------------------------------------------------------------
+// Unit 4: lazy HW-profiling enable
+// ---------------------------------------------------------------------------
+
+// A queue enables profiling exactly once, on its first signal-path batch; a queue
+// that only ever runs signal-less batches never enables it.
+TEST(ProfilingEnableTracker, enables_once_per_queue_and_never_for_signal_less)
+{
+    auto tracker = ProfilingEnableTracker{};
+
+    // Queue 1 takes the signal path three times: enabled once.
+    EXPECT_TRUE(tracker.mark(1));
+    EXPECT_FALSE(tracker.mark(1));
+    EXPECT_FALSE(tracker.mark(1));
+    EXPECT_TRUE(tracker.enabled(1));
+
+    // Queue 2 only ever runs signal-less batches, so mark() is never called.
+    EXPECT_FALSE(tracker.enabled(2));
+    EXPECT_EQ(tracker.size(), 1u);
+
+    // Queue destroy forgets it, so a reused token re-enables on its first signal
+    // batch rather than assuming a new queue inherited the old one's state.
+    tracker.forget(1);
+    EXPECT_FALSE(tracker.enabled(1));
+    EXPECT_TRUE(tracker.mark(1));
+}
+
+// While signal-less is off, laziness is off too: the create-time enable stays,
+// which is what keeps the flag-off path byte-identical.
+TEST(ProfilingEnableTracker, laziness_is_tied_to_the_feature_being_active)
+{
+    static_assert(!signal_less_fully_wired(),
+                  "lazy profiling must not engage before signal-less is fully wired");
 }

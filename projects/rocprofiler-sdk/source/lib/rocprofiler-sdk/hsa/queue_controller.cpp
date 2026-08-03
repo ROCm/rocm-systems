@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 
 #include <hsa/amd_hsa_queue.h>
 #include <hsa/amd_hsa_signal.h>
@@ -390,6 +391,23 @@ QueueController::add_queue(hsa_queue_t*           id,
         });
     });
 
+    // Register doorbell ownership for EVERY live compute queue, at creation and
+    // regardless of whether a dispatch-log session exists yet -- so a queue that
+    // predates the session is already accounted for, and a queue that never
+    // dispatches still counts as an owner of its slot. A queue whose doorbell
+    // cannot be resolved is registered with no slot, which makes every slot on its
+    // GPU non-injective (it could be the second owner of any of them).
+    if(const auto* _queue = get_queue(*id))
+    {
+        auto _slot = std::optional<uint32_t>{};
+        if(auto _db = capture_doorbell_key(_queue->get_id(), _queue->intercept_queue()))
+            _slot = _db->doorbell_off;
+
+        kfd::add_live_queue(_queue->get_id().handle,
+                            static_cast<uint32_t>(_queue->get_agent().get_rocp_agent()->gpu_id),
+                            _slot);
+    }
+
     if(create_interposition_state)
     {
         queue_interposition::create_queue_state(id);
@@ -410,6 +428,11 @@ QueueController::destroy_queue(hsa_queue_t* id)
     // so a reused doorbell cannot misattribute records to this dead queue). The
     // gate keeps a forked child out of the DoorbellMap lock.
     if(kfd::kfd_dispatch_log_available()) kfd::doorbell_map().on_queue_destroyed(queue->get_id());
+
+    // Drop this queue's doorbell ownership so a surviving co-owner becomes the
+    // sole owner again. A slot that already collided stays quarantined in the hub
+    // for the rest of the process regardless.
+    kfd::remove_live_queue(queue->get_id().handle);
 
     queue_interposition::destroy_queue_state(id);
     queue->sync();

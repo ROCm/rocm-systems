@@ -100,18 +100,15 @@ batch_is_signal_less_eligible(const eligibility_inputs& in)
            in.doorbells_injective && in.hub_accepts_batch && in.payload_constructible;
 }
 
-// Whether the doorbell slot has exactly ONE live owner across ALL live compute
-// queues on the session GPU (correctness requirement 3).
+// Whether HW profiling should be enabled lazily (only on a queue's first
+// SIGNAL-path batch) instead of at queue creation.
 //
-// PLACEHOLDER: returns false until the all-live-queue reverse owner registry
-// lands. Current-owner uniqueness alone is explicitly NOT sufficient (it cannot
-// tell a current owner from a previous generation of the slot), so until the
-// registry exists this reports "not trackable" and every batch stays on the
-// signal path.
-inline bool
-doorbell_owner_is_injective(uint32_t /*doorbell_off*/)
-{
-    return false;
-}
+// Deliberately tied to the feature being fully active: while signal-less is off,
+// EVERY batch takes the signal path, so deferring the enable would only move a
+// call that always happens anyway -- with a real risk that some path needs
+// profiling on before its first completion. Keeping the create-time enable
+// untouched in that case makes the flag-off behavior byte-identical.
+bool
+signal_less_lazy_profiling();
 }  // namespace kfd
 }  // namespace rocprofiler
