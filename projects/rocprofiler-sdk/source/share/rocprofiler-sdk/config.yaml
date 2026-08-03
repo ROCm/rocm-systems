@@ -17,6 +17,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx9
             - gfx906
             - gfx908
@@ -549,6 +550,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -581,6 +583,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -730,6 +733,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -823,6 +827,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx9
             - gfx906
             - gfx908
@@ -967,6 +972,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -997,6 +1003,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1044,6 +1051,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1074,6 +1082,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1097,6 +1106,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1127,6 +1137,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1150,6 +1161,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1170,6 +1182,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1258,6 +1271,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1285,6 +1299,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1307,6 +1322,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1337,6 +1353,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1359,6 +1376,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1380,6 +1398,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1401,6 +1420,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1421,6 +1441,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1448,6 +1469,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1467,6 +1489,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1497,6 +1520,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1519,6 +1543,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1541,6 +1566,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1568,6 +1594,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1600,6 +1627,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1738,6 +1766,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1911,6 +1940,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1941,6 +1971,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -1995,6 +2026,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx90a
             - gfx940
             - gfx941
@@ -2041,6 +2073,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -2064,6 +2097,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -2088,6 +2122,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -2123,6 +2158,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -2154,6 +2190,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -2303,6 +2340,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -2329,6 +2367,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -2361,6 +2400,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -3712,6 +3752,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -3742,6 +3783,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -4020,6 +4062,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -4308,6 +4351,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -4538,6 +4582,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -4617,6 +4662,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -4665,6 +4711,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -4745,6 +4792,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -4832,6 +4880,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -4900,6 +4949,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -4923,6 +4973,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -4966,6 +5017,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -5585,6 +5637,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -5615,6 +5668,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -5645,6 +5699,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -5730,6 +5785,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
           block: SQ
           event: 106
         - architectures:
@@ -5828,6 +5884,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
           block: SQ
           event: 87
     - name: SQ_INST_LEVEL_LDS
@@ -5865,6 +5922,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -6256,6 +6314,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -6304,6 +6363,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx12
             - gfx1200
             - gfx1201
@@ -6358,6 +6418,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -6385,6 +6446,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -6415,6 +6477,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -6454,6 +6517,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -6684,6 +6748,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -6737,6 +6802,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -7292,6 +7358,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx12
             - gfx1200
             - gfx1201
@@ -7306,6 +7373,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx12
             - gfx1200
             - gfx1201
@@ -7347,6 +7415,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx12
             - gfx1200
             - gfx1201
@@ -7361,6 +7430,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx12
             - gfx1200
             - gfx1201
@@ -7467,6 +7537,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -7498,6 +7569,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -7529,6 +7601,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -7762,6 +7835,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -12700,6 +12774,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -12833,6 +12908,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx12
             - gfx1200
             - gfx1201
@@ -12851,6 +12927,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx12
             - gfx1200
             - gfx1201
@@ -12917,6 +12994,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -12970,6 +13048,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
@@ -13019,6 +13098,7 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1103
             - gfx1150
             - gfx1151
             - gfx1152
