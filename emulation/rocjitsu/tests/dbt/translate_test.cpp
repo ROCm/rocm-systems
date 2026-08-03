@@ -8027,6 +8027,77 @@ TEST(BinaryTranslatorE2E, SkipFailedVirtualLdsSidecarStubsOversizedNormalDescrip
   EXPECT_EQ(rocjitsu::find_section(translated, rocjitsu::kVirtualLdsMetadataSectionName), nullptr);
 }
 
+TEST(BinaryTranslatorE2E, Cdna4ToCdna3KernargPreloadFirmwareEntryKeepsMaskedDefLive) {
+  using namespace rocr::llvm::amdhsa;
+  constexpr uint16_t kScratchFloor = 120;
+
+  auto image = rocjitsu::make_large_amdgpu_elf_with_waitcnt_entry();
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_FALSE(layout.text_sections().empty());
+
+  auto source_kd = rocjitsu::read_kernel_descriptor_for_test(image.data() + rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  // Declare a small VGPR file so the globally-unused search is exhausted at the
+  // scratch floor, forcing the allocator onto the per-point find_free_run path
+  // (the only path the firmware EXEC pin can influence).
+  AMDHSA_BITS_SET(source_kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 15);
+  rocjitsu::write_kernel_descriptor_for_test(image.data() + rodata->sectionOffset(), source_kd);
+
+  auto *words =
+      reinterpret_cast<uint32_t *>(image.data() + layout.text_sections()[0]->sectionOffset());
+  words[0] = 0xBEFE01C1u; // s_mov_b64 exec, -1  (ordinary path establishes Full).
+  const auto cvt = make_cdna4_cvt_pk_f16_f32_words(); // Needs one scratch temp.
+  words[64] = cvt[0];
+  words[65] = cvt[1];
+  // Masked vector def of the floor VGPR, read afterwards. Under the firmware
+  // entry's pinned-Unknown EXEC this def is not a whole-register kill, so v120 is
+  // live across the cvt and find_free_run must not reuse it.
+  words[66] = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 0, .vdst = kScratchFloor})[0];
+  words[67] = cdna4::build_vop1(cdna4::kVMovB32Vop1,
+                                {.src0 = static_cast<uint16_t>(256 + kScratchFloor), .vdst = 20})[0];
+  words[68] = cdna4::build_sopp(cdna4::kSEndpgmSopp)[0];
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslatorOptions options;
+  options.debug_min_free_vgpr = kScratchFloor;
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0,
+                                        options);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+
+  // The packed-F16 lowering converts the high half into a scratch temp picked by
+  // find_free_run (globally-unused VGPRs are exhausted at the floor). With the
+  // firmware entry pinned Unknown, v120's masked def is not a kill, so v120 is
+  // live across the cvt and the temp must skip it (v121). If the firmware entry
+  // wrongly inherited Full, v120 would look dead and be reused as the temp (v120),
+  // clobbering the value the kernel reads after the preload window.
+  const auto writes_cvt_f16_to = [&](uint16_t vdst) {
+    for (size_t i = 0; i + 1 < target_word_count; ++i) {
+      rocjitsu::cdna3::Vop3MachineInst v{};
+      std::memcpy(&v, target_words + i, sizeof(v));
+      if (v.encoding == 0x34u && v.op == cdna3::kVCvtF16F32Vop3 && v.vdst == vdst)
+        return true;
+    }
+    return false;
+  };
+  EXPECT_TRUE(writes_cvt_f16_to(kScratchFloor + 1))
+      << "temp must skip the live firmware-entry def register v" << kScratchFloor;
+  EXPECT_FALSE(writes_cvt_f16_to(kScratchFloor))
+      << "temp reused v" << kScratchFloor << ", clobbering the live firmware-entry def";
+}
+
 TEST(BinaryTranslatorE2E, Cdna4ToCdna3Bitop3ScratchGrowsDescriptor) {
   constexpr uint16_t kScratchFloor = 120;
   const auto words = make_cdna4_bitop3_words(cdna4::kVBitop3B32Vop3, 16);
