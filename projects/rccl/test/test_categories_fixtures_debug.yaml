@@ -30,6 +30,7 @@ test_categories:
       - "XmlTest.*"
       - "NetDevsPolicyP2pNetTests.*"
       - "TopoTest.*"
+      - "TopoNicFusionTests.*"
     exclude_windows:
       - "*"
     labels:

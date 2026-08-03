@@ -264,6 +264,11 @@
           "test_filter": "NetIbMPITest.MakeVirtualDeviceInvalidProps"
         },
         {
+          "name": "NetIB_VDev_NegativeNdevs",
+          "description": "Reject makeVDevice with a negative ndevs (ncclInvalidUsage)",
+          "test_filter": "NetIbMPITest.MakeVirtualDeviceNegativeNdevs"
+        },
+        {
           "name": "NetIB_VDev_MergeMultipleDevices",
           "description": "Merge more than two physical IB NICs into a single virtual device",
           "test_filter": "NetIbMPITest.MergeMultipleDevices"

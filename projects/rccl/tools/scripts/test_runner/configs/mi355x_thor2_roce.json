@@ -374,9 +374,19 @@
           "test_filter": "NetIbMPITest.MakeVirtualDeviceOutOfRangeDev"
         },
         {
+          "name": "NetIB_VNic_NegativeNdevs",
+          "description": "makeVDevice rejects a negative device count",
+          "test_filter": "NetIbMPITest.MakeVirtualDeviceNegativeNdevs"
+        },
+        {
           "name": "NetIB_VNic_DuplicateDevs",
           "description": "makeVDevice dedups a repeated device into a single-device vNIC",
           "test_filter": "NetIbMPITest.MakeVirtualDeviceDuplicateDevs"
+        },
+        {
+          "name": "NetIB_VNic_MergeMultipleDevices",
+          "description": "makeVDevice merges up to NCCL_NET_MAX_DEVS_PER_NIC devices and rejects an over-limit request. GTEST_SKIPs without two physical NICs at a common speed",
+          "test_filter": "NetIbMPITest.MergeMultipleDevices"
         },
         {
           "name": "NetIB_VNic_CrossNuma",
