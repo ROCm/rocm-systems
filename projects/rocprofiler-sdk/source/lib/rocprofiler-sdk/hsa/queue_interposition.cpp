@@ -689,6 +689,17 @@ write_interceptor(Queue*                                queue,
             // write index of packet i is simply base + i. Low 32 bits match the
             // firmware record's dispatch_id. The doorbell + generation that
             // complete the correlation key are resolved below.
+            //
+            // ASSUMPTION: base + i equals the slot firmware stamps only while this
+            // SDK is the sole packet-modifying layer on the queue. Any other agent
+            // that injects, drops, or reorders packets (a second HSA queue
+            // interceptor, a layered tool, or a future SDK path that itself emits
+            // extra packets) shifts the true hardware slot away from base + i, so
+            // the low-32 index no longer matches the firmware dispatch_id and this
+            // dispatch will mis-correlate. There is no cross-layer accounting for
+            // that shift; if it becomes possible, derive the index from the actual
+            // wrapped-queue submit position instead (e.g. an intercept marker
+            // packet callback) rather than base + i.
             _packet_data.kfd_dispatch_idx_low32 =
                 static_cast<uint32_t>((_base_pkt_index + i) & 0xFFFFFFFFULL);
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
