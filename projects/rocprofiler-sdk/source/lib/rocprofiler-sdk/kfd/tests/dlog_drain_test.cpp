@@ -78,15 +78,25 @@ struct fake_ring
     }
 };
 
-// Recording sink: capture the pair callback stream so tests can assert on it.
+// Recording sink: capture the record callback stream so tests can assert on it.
+// Matched pairs and EOPs whose START was lost (shape ii) are kept apart, and the
+// drain's loss-free verdict is captured for every record it publishes.
 struct recorder
 {
     std::map<std::pair<uint32_t, uint32_t>, std::pair<uint64_t, uint64_t>> pairs;  // -> (start,end)
+    std::vector<std::pair<uint32_t, uint32_t>>                             eops_without_start;
+    size_t                                                                 records      = 0;
+    bool                                                                   all_loss_free = true;
 
-    auto on_pair()
+    auto on_record()
     {
-        return [this](uint32_t db, uint32_t disp, uint64_t start, uint64_t end) {
-            pairs[{db, disp}] = {start, end};
+        return [this](const drained_record& r) {
+            ++records;
+            if(!r.loss_free) all_loss_free = false;
+            if(r.start_known)
+                pairs[{r.doorbell_off, r.dispatch_id}] = {r.start_ticks, r.end_ticks};
+            else
+                eops_without_start.emplace_back(r.doorbell_off, r.dispatch_id);
         };
     }
 };
@@ -102,7 +112,7 @@ run_drain(fake_ring& ring, drain_state& st, recorder& rec, uint64_t now_ns = 100
                        ring.rptr.data(),
                        st,
                        now_ns,
-                       rec.on_pair());
+                       rec.on_record());
 }
 }  // namespace
 
@@ -227,8 +237,10 @@ TEST(dlog_drain, padding_slots_skipped)
     EXPECT_EQ(rec.pairs[key].second, 20u);
 }
 
-// An eop with no matching start is dropped (that dispatch falls back to HSA).
-TEST(dlog_drain, unmatched_eop_dropped)
+// An eop with no matching start is not a pair, but it IS reported: the EOP still
+// proves the kernel completed (shape ii), it just carries no interval. It is not
+// counted as a pair and carries start_known=false so no consumer can invent one.
+TEST(dlog_drain, unmatched_eop_reported_without_a_start)
 {
     fake_ring   ring(2, 2048);
     drain_state st;
@@ -239,8 +251,13 @@ TEST(dlog_drain, unmatched_eop_dropped)
     ring.wptr[0] = 1;
 
     recorder rec;
-    EXPECT_EQ(run_drain(ring, st, rec), 0u);
+    EXPECT_EQ(run_drain(ring, st, rec), 0u);  // no matched pair
     EXPECT_TRUE(rec.pairs.empty());
+    ASSERT_EQ(rec.eops_without_start.size(), 1u);
+    EXPECT_EQ(rec.eops_without_start[0].first, 4100u);
+    EXPECT_EQ(rec.eops_without_start[0].second, 9u);
+    EXPECT_EQ(st.unmatched_eops, 1u);
+    EXPECT_TRUE(rec.all_loss_free);
 }
 
 // A start in one drain pairs with its eop in a LATER drain (state persists).
@@ -293,11 +310,12 @@ TEST(dlog_drain, invalid_geometry_rejected)
     recorder    rec;
 
     // num_regions == 0 -> reject.
-    EXPECT_EQ(drain_pipes(nullptr, 0, 2048, nullptr, nullptr, st, 1000, rec.on_pair()), 0u);
+    EXPECT_EQ(drain_pipes(nullptr, 0, 2048, nullptr, nullptr, st, 1000, rec.on_record()), 0u);
 
     // num_regions beyond kMaxRegions (cursor storage) -> reject.
-    EXPECT_EQ(
-        drain_pipes(nullptr, kMaxRegions + 1, 2048, nullptr, nullptr, st, 1000, rec.on_pair()), 0u);
+    EXPECT_EQ(drain_pipes(nullptr, kMaxRegions + 1, 2048, nullptr, nullptr, st, 1000,
+                          rec.on_record()),
+              0u);
 
     // region_record_count not a power of two (3000) -> reject.
     fake_ring ring(2, 3000);
@@ -413,6 +431,9 @@ TEST(dlog_drain, mid_scan_lap_detected_by_after_scan_reread)
     ring.put(0, 1, kRecEop, 1, db, 20);
     ring.wptr[0] = 4;  // safe at the pre-scan read
 
+    // The post-scan seam (S1) moves the producer between the scan and the
+    // after-scan wptr read, which is exactly the mid-scan lap window.
+    recorder rec;
     uint64_t pairs = drain_pipes(ring.records.data(),
                                  ring.num_regions,
                                  ring.rrc,
@@ -420,13 +441,16 @@ TEST(dlog_drain, mid_scan_lap_detected_by_after_scan_reread)
                                  ring.rptr.data(),
                                  st,
                                  1000,
-                                 [&ring](uint32_t, uint32_t, uint64_t, uint64_t) {
-                                     ring.wptr[0] = 9;  // lapped mid-scan
-                                 });
+                                 rec.on_record(),
+                                 [&ring]() { ring.wptr[0] = 9; });
 
     EXPECT_EQ(pairs, 1u);
     EXPECT_EQ(st.overruns, 1u);
     EXPECT_EQ(st.lost_records, 9u - 8u + 1u);
+    // The lap is known BEFORE anything is published, so the record is reported as
+    // not loss-free and a signal-less consumer will refuse to complete on it.
+    EXPECT_EQ(rec.records, 1u);
+    EXPECT_FALSE(rec.all_loss_free);
 }
 
 // One lap is counted once, not twice: a pre-scan overrun must not also be counted
@@ -616,4 +640,83 @@ TEST(dlog_drain, ring_wrap_pairs_across_boundary)
     ASSERT_EQ(rec.pairs.count(std::make_pair(db, 7u)), 1u);
     EXPECT_EQ(rec.pairs[std::make_pair(db, 7u)].first, 500u);
     EXPECT_EQ(rec.pairs[std::make_pair(db, 7u)].second, 600u);
+}
+
+// --- Phase 2 unit 3: the drain's loss-free verdict is what lets a signal-less
+// consumer decide whether an EOP may prove a completion. ---
+
+// A normal drain reports every record as loss-free.
+TEST(dlog_drain, loss_free_verdict_on_a_clean_drain)
+{
+    fake_ring   ring(1, 8);
+    drain_state st;
+    recorder    rec0;
+    run_drain(ring, st, rec0);
+
+    const uint32_t db = 4100;
+    ring.put(0, 0, kRecStart, 1, db, 10);
+    ring.put(0, 1, kRecEop, 1, db, 20);
+    ring.put(0, 2, kRecEop, 2, db, 30);  // shape ii: no start
+    ring.wptr[0] = 3;
+
+    recorder rec;
+    EXPECT_EQ(run_drain(ring, st, rec), 1u);
+    EXPECT_EQ(rec.records, 2u);
+    EXPECT_TRUE(rec.all_loss_free);
+    EXPECT_EQ(rec.pairs.size(), 1u);
+    EXPECT_EQ(rec.eops_without_start.size(), 1u);
+    EXPECT_EQ(st.overruns, 0u);
+}
+
+// A pre-scan overrun (the `>=` boundary) marks the whole region's records not
+// loss-free, so nothing drained from it may prove a completion.
+TEST(dlog_drain, overrun_marks_records_not_loss_free)
+{
+    fake_ring   ring(1, 8);
+    drain_state st;
+    recorder    rec0;
+    run_drain(ring, st, rec0);
+
+    ring.put(0, 0, kRecStart, 1, 4100, 10);
+    ring.put(0, 1, kRecEop, 1, 4100, 20);
+    ring.wptr[0] = 8;  // == region_slots: the definitive overrun boundary
+
+    recorder rec;
+    run_drain(ring, st, rec);
+
+    EXPECT_EQ(st.overruns, 1u);
+    EXPECT_GT(rec.records, 0u);
+    EXPECT_FALSE(rec.all_loss_free);
+}
+
+// Nothing is published before the after-scan wptr read settles the verdict, so a
+// consumer never observes a record it would later have to un-publish.
+TEST(dlog_drain, records_are_published_only_after_the_verdict_is_known)
+{
+    fake_ring   ring(1, 8);
+    drain_state st;
+    recorder    rec0;
+    run_drain(ring, st, rec0);
+
+    ring.put(0, 0, kRecStart, 1, 4100, 10);
+    ring.put(0, 1, kRecEop, 1, 4100, 20);
+    ring.wptr[0] = 2;
+
+    // The seam laps the producer after the scan; every record published must
+    // already carry the lossy verdict.
+    bool     seen_any_loss_free = false;
+    uint64_t pairs              = drain_pipes(ring.records.data(),
+                                 ring.num_regions,
+                                 ring.rrc,
+                                 ring.wptr.data(),
+                                 ring.rptr.data(),
+                                 st,
+                                 1000,
+                                 [&seen_any_loss_free](const drained_record& r) {
+                                     if(r.loss_free) seen_any_loss_free = true;
+                                 },
+                                 [&ring]() { ring.wptr[0] = 40; });
+
+    EXPECT_EQ(pairs, 1u);
+    EXPECT_FALSE(seen_any_loss_free);
 }

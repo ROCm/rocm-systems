@@ -442,31 +442,36 @@ drain_records(dlog_session* s)
         rptr_arr,
         s->drain,
         common::timestamp_ns(),
-        [](uint32_t doorbell_off, uint32_t dispatch_id, uint64_t start_ticks, uint64_t end_ticks) {
-            uint32_t slot = doorbell_off_to_page_slot(doorbell_off);
+        [](const drained_record& rec) {
+            uint32_t slot = doorbell_off_to_page_slot(rec.doorbell_off);
             uint32_t gen  = doorbell_map().get_generation(slot);
-            auto     key  = correlation_key{slot, dispatch_id, gen};
+            auto     key  = correlation_key{slot, rec.dispatch_id, gen};
 
             // Signal-less dispatch: this EOP IS the completion event (G3). Record
-            // the start on the entry, then claim it -- the hub decides the single
-            // result-vs-loss winner under its own lock and hands back the owned
-            // payload. The reader converts nothing, emits nothing, and runs no
-            // client callback; it only proves completion and hands off, holding no
-            // hub/results/doorbell lock while it does (invariant 11).
+            // the start (when it survived) on the entry, then claim it -- the hub
+            // decides the single result-vs-loss winner under its own lock and hands
+            // back the owned payload. Both EOP shapes go through here: a matched
+            // pair carries start_ticks, and an EOP whose START was lost proves
+            // completion with the interval unknown, which the finalizer turns into
+            // COMPLETED_NO_TIMING. Under a lossy drain prove_eop refuses, so a
+            // possibly-torn record completes nothing.
             //
-            // drain_loss_free is true here because the current drain publishes only
-            // matched pairs; the real per-drain overrun verdict is plumbed through
-            // with the leak-and-shout stage.
-            signal_less_hub().note_start(key, start_ticks);
-            if(auto _proven = signal_less_hub().prove_eop(key, end_ticks, /*loss_free=*/true))
+            // The reader converts nothing, emits nothing, and runs no client
+            // callback; it proves completion and hands off holding no
+            // hub/results/doorbell lock (invariant 11).
+            if(rec.start_known) signal_less_hub().note_start(key, rec.start_ticks);
+            if(auto _proven = signal_less_hub().prove_eop(key, rec.end_ticks, rec.loss_free))
             {
                 hand_off_proven(std::move(*_proven));
                 return;
             }
 
-            // Signal-backed dispatch: unchanged rendezvous deposit.
+            // Signal-backed dispatch: unchanged rendezvous deposit. An EOP with no
+            // START carries no interval, so there is nothing to deposit for it.
+            if(!rec.start_known) return;
             results_map().deposit(
-                key, kfd_timing_result{start_ticks, end_ticks, common::timestamp_ns()});
+                key,
+                kfd_timing_result{rec.start_ticks, rec.end_ticks, common::timestamp_ns()});
         });
 }
 
@@ -486,6 +491,38 @@ warn_on_overrun(const drain_state& d)
         d.overruns,
         d.lost_records,
         kDlogMaxRingKb);
+}
+
+// Signal-less loss policy (P1, leak-and-shout). An overrun means firmware records
+// were permanently lost, and wptr cannot say WHICH dispatches lost them, so every
+// still-matchable pending entry is stranded: no record (P2), correlation id
+// deliberately NOT retired, key tombstoned. Signal-less is then off for the rest
+// of the process because the hub stays LOSS_POISONED, which makes every later
+// batch fail eligibility and take the signal path.
+//
+// Distinct from the Phase 0 diagnostic overrun warning above, which stays as-is
+// for the signal path. Reader thread only, so the local static needs no lock; the
+// leaked payloads are released here, and releasing one runs no client code.
+void
+poison_signal_less_on_overrun(const drain_state& d)
+{
+    static uint64_t _reported = 0;
+    if(d.overruns == _reported) return;
+    _reported = d.overruns;
+
+    if(signal_less_hub().mode() != session_mode::running) return;
+
+    auto _loss = signal_less_hub().poison(session_mode::loss_poisoned);
+    if(_loss.second.dispatches == 0) return;
+
+    note_signal_less_losses();
+    ROCP_WARNING << fmt::format(
+        "KFD dispatch-log: ring OVERRUN stranded {} in-flight signal-less dispatch(es) across {} "
+        "correlation id(s). Those dispatches emit no record and their correlation ids are "
+        "deliberately not retired. Signal-less completion is now disabled for this process; "
+        "raise the ring with ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB.",
+        _loss.second.dispatches,
+        _loss.second.correlation_ids);
 }
 
 // KFD_DLOG_STREAM_OP_STATUS is DIAGNOSTICS ONLY: the kernel's counters are logged
@@ -642,6 +679,7 @@ reader_loop()
 
             total_seen += drain_records(&st.session);
             warn_on_overrun(st.session.drain);
+            poison_signal_less_on_overrun(st.session.drain);
 
             if(now_ns - last_evict_ns >= kEvictIntervalNs)
             {
@@ -658,6 +696,7 @@ reader_loop()
     {
         total_seen += drain_records(&st.session);
         warn_on_overrun(st.session.drain);
+        poison_signal_less_on_overrun(st.session.drain);
         log_stream_status(st.session);
     }
 

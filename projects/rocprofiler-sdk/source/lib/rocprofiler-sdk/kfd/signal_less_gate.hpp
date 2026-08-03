@@ -46,6 +46,21 @@ namespace kfd
 bool
 signal_less_feature_enabled();
 
+// Whether this correlation id was deliberately leaked by the signal-less loss
+// policy, in which case correlation_id_finalize() must NOT force-retire it: its
+// kernel may still be running and its references were intentionally not dropped.
+//
+// Declared here, in the header with no tracing/HSA dependencies, so the
+// correlation-id finalize path can call it without pulling the hub in. It is a
+// single acquire load returning false until something is actually leaked, which
+// with signal-less off is never -- so the finalize path is untouched.
+bool
+signal_less_id_is_leaked(uint64_t correlation_id);
+
+// Record that the loss ledger is now non-empty. Called by the loss paths only.
+void
+note_signal_less_losses();
+
 // Parse helper for the above; pure so the accepted spellings are unit-testable.
 inline bool
 parse_signal_less_env(std::string_view v)

@@ -26,6 +26,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -237,6 +238,14 @@ correlation_id_finalize()
         {
             if(itr && itr->get_ref_count() > 0)
             {
+                // Deliberately leaked by the signal-less loss policy: its firmware
+                // record was lost, so its kernel may still be running and its
+                // references were intentionally not dropped. Force-retiring it here
+                // would release state the GPU can still reach. Reduces to one
+                // atomic load -- returning false -- whenever nothing was leaked,
+                // which is always the case while signal-less is off.
+                if(kfd::signal_less_id_is_leaked(itr->internal)) continue;
+
                 ++ndangling;
                 ROCP_WARNING << "retiring dangling correlation ID " << itr->internal
                              << " from thread " << itr->thread_idx

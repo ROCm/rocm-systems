@@ -652,3 +652,97 @@ TEST(signal_less_flag, eligibility_requires_every_condition)
         EXPECT_FALSE(batch_is_signal_less_eligible(one_false));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Unit 3: EOP shape (ii), overrun leak-and-shout, and the finalize skip
+// ---------------------------------------------------------------------------
+
+// Shape (ii): an EOP whose START was lost still proves completion for the unique
+// current PENDING entry, with start_ticks unknown -> COMPLETED_NO_TIMING.
+TEST(DispatchHub, shape_ii_proves_completion_without_a_start)
+{
+    auto hub = hub_t{};
+    auto key = key_of(4, 50);
+    ASSERT_TRUE(register_one(hub, key));
+
+    // No note_start(): the START record was overwritten before the reader saw it.
+    auto p = hub.prove_eop(key, 900, /*drain_loss_free=*/true);
+    ASSERT_TRUE(p.has_value());
+    EXPECT_FALSE(p->start_ticks.has_value());
+    EXPECT_EQ(p->end_ticks, 900u);
+    EXPECT_EQ(hub.live_entries(), 0u);
+}
+
+// The same EOP under a lossy drain proves nothing: the record may be torn and
+// wptr cannot say which dispatch it belongs to.
+TEST(DispatchHub, shape_ii_under_a_lossy_drain_proves_nothing)
+{
+    auto hub = hub_t{};
+    auto key = key_of(4, 51);
+    ASSERT_TRUE(register_one(hub, key));
+
+    EXPECT_FALSE(hub.prove_eop(key, 900, /*drain_loss_free=*/false).has_value());
+    EXPECT_EQ(hub.live_entries(), 1u);  // still pending, still matchable
+}
+
+// Leak-and-shout: one overrun strands every in-flight dispatch, reports the two
+// counts the warning needs, poisons the session, and puts the ids on the ledger.
+TEST(DispatchHub, overrun_strands_everything_and_reports_both_counts)
+{
+    auto hub = hub_t{};
+
+    auto b1 = std::vector<hub_t::registration>{};
+    for(uint32_t i = 0; i < 4; ++i)
+        b1.emplace_back(reg_of(key_of(4, i), /*corr_id=*/700));
+    ASSERT_TRUE(hub.register_batch(std::move(b1)));
+
+    auto b2 = std::vector<hub_t::registration>{};
+    b2.emplace_back(reg_of(key_of(5, 0), /*corr_id=*/800));
+    ASSERT_TRUE(hub.register_batch(std::move(b2)));
+
+    auto loss = hub.poison(session_mode::loss_poisoned);
+
+    EXPECT_EQ(loss.second.dispatches, 5u);       // five stranded dispatches
+    EXPECT_EQ(loss.second.correlation_ids, 2u);  // sharing two correlation ids
+    EXPECT_EQ(loss.first.size(), 5u);            // payloads handed back for release
+
+    // Signal-less is off for the rest of the process: no later batch is admissible.
+    EXPECT_EQ(hub.mode(), session_mode::loss_poisoned);
+    EXPECT_FALSE(hub.can_register_batch({key_of(6, 0)}));
+    EXPECT_FALSE(register_one(hub, key_of(6, 0)));
+
+    // A late record for a stranded dispatch completes nothing.
+    EXPECT_FALSE(hub.prove_eop(key_of(4, 0), 1, true).has_value());
+}
+
+// The ledger drives the finalize skip: leaked ids must be excluded from
+// force-retirement, non-leaked ids must not be, and an empty ledger excludes
+// nothing at all.
+TEST(DispatchHub, loss_ledger_selects_exactly_the_leaked_ids)
+{
+    auto hub = hub_t{};
+
+    // Empty ledger: nothing is excluded.
+    EXPECT_FALSE(hub.is_ledgered(11));
+    EXPECT_FALSE(hub.is_ledgered(22));
+
+    ASSERT_TRUE(register_one(hub, key_of(4, 1), /*corr_id=*/11));
+    ASSERT_TRUE(register_one(hub, key_of(4, 2), /*corr_id=*/22));
+
+    // 11 completes normally, 22 is leaked.
+    ASSERT_TRUE(hub.prove_eop(key_of(4, 1), 1, true).has_value());
+    ASSERT_TRUE(hub.leak(key_of(4, 2)).has_value());
+
+    EXPECT_FALSE(hub.is_ledgered(11));  // completed -> retires normally
+    EXPECT_TRUE(hub.is_ledgered(22));   // leaked -> finalize must skip it
+
+    // Simulate the correlation_id_finalize() force-retire loop.
+    auto  dangling = std::vector<uint64_t>{11, 22, 33};
+    auto  retired  = std::vector<uint64_t>{};
+    for(auto id : dangling)
+    {
+        if(hub.is_ledgered(id)) continue;
+        retired.emplace_back(id);
+    }
+    EXPECT_EQ(retired, (std::vector<uint64_t>{11, 33}));
+}

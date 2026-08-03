@@ -37,6 +37,7 @@
 #include <cstring>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -115,6 +116,32 @@ struct fw_record
 static_assert(sizeof(fw_record) == kFwRecBytes,
               "fw_record must match the 20-byte firmware record layout");
 
+// One completion the drain is reporting.
+//
+// `start_known` distinguishes the two EOP shapes: a matched START+EOP pair
+// (start_ticks valid), and an EOP whose START was lost to a ring overwrite --
+// which still proves the kernel completed but carries no interval.
+//
+// `loss_free` is the drain's verdict for the region this record came from: false
+// means the producer lapped the reader before or during the scan, so the records
+// around the collision may be torn and nothing may be published from them.
+struct drained_record
+{
+    uint32_t doorbell_off = 0;
+    uint32_t dispatch_id  = 0;
+    uint64_t start_ticks  = 0;
+    uint64_t end_ticks    = 0;
+    bool     start_known  = false;
+    bool     loss_free    = true;
+};
+
+// Default post-scan hook: the test seam (S1) uses this to move the producer
+// between the scan and the after-scan wptr read.
+struct no_post_scan_hook
+{
+    void operator()() const {}
+};
+
 // Per-pipe drain cursors + unmatched starts, carried across drain calls. One
 // instance lives in dlog_session (reader) or is stack-local (test).
 struct drain_state
@@ -135,8 +162,14 @@ struct drain_state
     // is unchanged, so pairing/timestamp behavior is exactly as before. The
     // producer has lapped the reader once `w - rptr` reaches region_slots -- its
     // next write target is then the slot at rptr, so that record is lost or torn.
-    uint64_t overruns     = 0;  // laps observed (before or during a scan)
-    uint64_t lost_records = 0;  // records the producer advanced past the safe window
+    uint64_t overruns       = 0;  // laps observed (before or during a scan)
+    uint64_t lost_records   = 0;  // records the producer advanced past the safe window
+    uint64_t unmatched_eops = 0;  // EOPs whose START was lost (shape ii)
+
+    // Staging buffer for one region's records. Reused across drains so the reader
+    // does not allocate per drain; nothing is published from it until the
+    // after-scan wptr read has settled the region's loss-free verdict.
+    std::vector<drained_record> staged = {};
 
     bool note_overrun(uint64_t dist, uint32_t region_slots)
     {
@@ -169,11 +202,18 @@ struct drain_state
 
 // Drain new firmware records from every pipe, pairing start/eop by
 // (doorbell_off, dispatch_id). Pure: no singletons, no mmap ownership, no host
-// clock. on_pair(doorbell_off, dispatch_id, start, end) is invoked for each
-// completed start+eop pair, in ring order.
+// clock. on_record(const drained_record&) is invoked for every EOP, in ring
+// order, AFTER that region's after-scan wptr read -- so a consumer never sees a
+// record before the drain knows whether the producer lapped it (invariant 5, no
+// early publication).
+//
 // Advances rptr_arr (the shared consumer cursor firmware/kernel read) and
-// state.rptr. Returns completed-pair count, or 0 on invalid geometry.
-template <typename OnPair>
+// state.rptr. Returns the matched start+eop pair count, or 0 on invalid geometry;
+// EOPs without a START are counted in state.unmatched_eops instead.
+//
+// post_scan is a test seam (S1): it runs between the scan and the after-scan wptr
+// read so a producer lap during the scan can be made deterministic.
+template <typename OnRecord, typename PostScanHook = no_post_scan_hook>
 uint64_t
 drain_pipes(const uint8_t*           records_base,
             uint32_t                 num_regions,
@@ -182,7 +222,8 @@ drain_pipes(const uint8_t*           records_base,
             volatile uint64_t*       rptr_arr,
             drain_state&             state,
             uint64_t                 now_ns,
-            OnPair&&                 on_pair)
+            OnRecord&&               on_record,
+            PostScanHook&&           post_scan = {})
 {
     // Reject geometry that exceeds the cursor storage (drain_state::rptr[]) rather
     // than silently draining a subset.
@@ -228,6 +269,7 @@ drain_pipes(const uint8_t*           records_base,
         // so +1 keeps recovery strictly behind it.
         if(w - scan > region_slots) scan = w - region_slots + 1;
 
+        state.staged.clear();
         for(uint64_t idx = scan; idx != w; ++idx)
         {
             auto rec = read_rec(p, idx);
@@ -246,24 +288,44 @@ drain_pipes(const uint8_t*           records_base,
             }
             else if(rec.record_type == kRecEop)
             {
+                auto out         = drained_record{};
+                out.doorbell_off = rec.doorbell_off;
+                out.dispatch_id  = rec.dispatch_id;
+                out.end_ticks    = ts;
+
                 auto it = state.pending_starts.find(key);
                 if(it != state.pending_starts.end())
                 {
-                    uint64_t start_ticks = it->second.start_ticks;
+                    out.start_ticks = it->second.start_ticks;
+                    out.start_known = true;
                     state.pending_starts.erase(it);
-                    ++seen;
-                    on_pair(rec.doorbell_off, rec.dispatch_id, start_ticks, ts);
                 }
-                // eop with no matching start: dropped; that dispatch uses HSA.
+                // Otherwise the START was lost (shape ii): the EOP still proves the
+                // kernel finished, it just carries no interval.
+                state.staged.emplace_back(out);
             }
         }
 
-        // Re-read the producer frontier: a lap DURING the scan means the slots just
-        // read may have been overwritten under us. Detection only (the pairs are
-        // still published, as before).
+        post_scan();
+
+        // Re-read the producer frontier BEFORE publishing anything: a lap during
+        // the scan means the slots just read may have been overwritten under us,
+        // so the whole region's records are reported as not loss-free.
+        bool overran_post = false;
         if(!overran)
-            state.note_overrun(__atomic_load_n(&wptr_arr[p], __ATOMIC_ACQUIRE) - state.rptr[p],
-                               region_slots);
+            overran_post = state.note_overrun(
+                __atomic_load_n(&wptr_arr[p], __ATOMIC_ACQUIRE) - state.rptr[p], region_slots);
+
+        const bool loss_free = !overran && !overran_post;
+        for(auto& rec : state.staged)
+        {
+            rec.loss_free = loss_free;
+            if(rec.start_known)
+                ++seen;
+            else
+                ++state.unmatched_eops;
+            on_record(rec);
+        }
 
         state.rptr[p] = w;
         __atomic_store_n(&rptr_arr[p], w, __ATOMIC_RELEASE);

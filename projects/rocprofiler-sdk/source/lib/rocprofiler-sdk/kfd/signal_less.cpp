@@ -76,6 +76,15 @@ ops_ready()
     return _v;
 }
 
+// Guards the loss-ledger lookup so the correlation-id finalize path costs one
+// atomic load, and never constructs the hub, until something is actually leaked.
+std::atomic<bool>&
+any_leaked()
+{
+    static auto _v = std::atomic<bool>{false};
+    return _v;
+}
+
 retry_owner<signal_less_hub_t::proven>&
 retry()
 {
@@ -125,6 +134,19 @@ size_t
 retry_owner_size()
 {
     return retry().size();
+}
+
+void
+note_signal_less_losses()
+{
+    any_leaked().store(true, std::memory_order_release);
+}
+
+bool
+signal_less_id_is_leaked(uint64_t correlation_id)
+{
+    if(!any_leaked().load(std::memory_order_acquire)) return false;
+    return signal_less_hub().is_ledgered(correlation_id);
 }
 
 bool
