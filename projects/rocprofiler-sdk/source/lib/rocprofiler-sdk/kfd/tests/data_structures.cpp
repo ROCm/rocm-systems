@@ -466,13 +466,14 @@ TEST(ResultsMap, hsa_fallback_is_counted)
 // block while this is false, which is what makes every dispatch deterministically
 // report HSA timestamps.
 //
-// kfd_selection_enabled() is now the env feature flag AND the fully-wired master
-// switch, so this stays false even when a user sets the env var -- see
-// signal_less_test's coverage of the flag itself.
-TEST(kfd_selection_gate, disabled_until_signal_less_is_fully_wired)
+// kfd_selection_enabled() is the env feature flag AND the fully-wired master
+// switch. The machinery is complete, so the guarantee that matters now is that it
+// stays OFF unless the operator opts in: with ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS
+// unset -- the default in every test process -- no KFD timestamp is selected and
+// get_dispatch_time() skips the whole KFD block.
+TEST(kfd_selection_gate, off_by_default_without_the_env_opt_in)
 {
-    static_assert(!signal_less_fully_wired(),
-                  "flipping the master switch requires every signal-less stage to be present");
+    static_assert(signal_less_fully_wired(), "the signal-less machinery is complete");
     EXPECT_FALSE(kfd_selection_enabled());
 }
 

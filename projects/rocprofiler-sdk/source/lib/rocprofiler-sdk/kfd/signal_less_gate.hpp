@@ -68,15 +68,21 @@ parse_signal_less_env(std::string_view v)
     return v == "1" || v == "on" || v == "ON" || v == "true" || v == "TRUE" || v == "yes";
 }
 
-// MASTER SWITCH for observable signal-less behavior. The feature is being landed
-// in units (hub, enqueue, reader handoff, finalizer, loss ledger, owner registry,
-// generation closure, teardown order, fork); enabling it before all of them exist
-// would hand dispatches to a completion path that cannot finish them. Flipping
-// this to a runtime value is the LAST unit.
+// Whether the signal-less machinery is COMPLETE in this build: the hub, the
+// enqueue-side eligibility and P3 packet no-touch, the reader handoff and
+// no-signal finalizer, the overrun loss ledger, the live-owner registry and
+// collision quarantine, the generation/reuse closure, the strict teardown order,
+// and the fork epoch. All of it is present, so this is true.
+//
+// It is NOT the on switch. Activation still requires the operator to opt in with
+// ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS=1 (signal_less_feature_enabled()); with
+// the variable unset -- the default -- every dispatch keeps the signal path and
+// HSA timestamps exactly as before. This stays separate from the env flag so a
+// build that ever ships the machinery incomplete can force it off in one place.
 constexpr bool
 signal_less_fully_wired()
 {
-    return false;
+    return true;
 }
 
 // Per-BATCH eligibility (design plan "Eligibility"). Every condition must hold;

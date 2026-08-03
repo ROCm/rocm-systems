@@ -593,24 +593,28 @@ TEST(signal_less_flag, only_explicit_enable_turns_it_on)
     EXPECT_FALSE(parse_signal_less_env("1 "));
 }
 
-// The master switch is what keeps signal-less inert while it is being landed:
-// even with the env flag on, no batch can be eligible until it flips.
-TEST(signal_less_flag, master_switch_holds_the_feature_off)
+// The machinery is complete, so the master switch is true -- but activation is
+// still an explicit operator opt-in. With the env variable unset (the default)
+// the feature is off and every dispatch keeps the signal path.
+TEST(signal_less_flag, machinery_is_present_but_activation_is_opt_in)
 {
-    static_assert(!signal_less_fully_wired(),
-                  "signal-less must stay inert until every stage is present");
+    static_assert(signal_less_fully_wired(),
+                  "the signal-less machinery is complete in this build");
 
-    // Everything else set to what a batch could possibly satisfy today.
+    // Default: env unset -> not enabled -> no batch can be eligible.
     auto in                  = eligibility_inputs{};
-    in.feature_enabled       = true;
+    in.fully_wired           = signal_less_fully_wired();
     in.session_live_for_gpu  = true;
     in.reader_alive          = true;
     in.doorbells_injective   = true;
     in.hub_accepts_batch     = true;
     in.payload_constructible = true;
-    in.fully_wired           = signal_less_fully_wired();
-
+    in.feature_enabled       = false;  // ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS unset
     EXPECT_FALSE(batch_is_signal_less_eligible(in));
+
+    // Opted in: the path becomes reachable.
+    in.feature_enabled = true;
+    EXPECT_TRUE(batch_is_signal_less_eligible(in));
 }
 
 // The owner-injectivity input now comes from the live-owner registry, and a slot
@@ -922,12 +926,13 @@ TEST(ProfilingEnableTracker, enables_once_per_queue_and_never_for_signal_less)
     EXPECT_TRUE(tracker.mark(1));
 }
 
-// While signal-less is off, laziness is off too: the create-time enable stays,
-// which is what keeps the flag-off path byte-identical.
+// Laziness is tied to the feature being ACTIVE, not merely present: with the env
+// opt-in unset every batch takes the signal path, so the create-time enable stays
+// and the default path is unchanged.
 TEST(ProfilingEnableTracker, laziness_is_tied_to_the_feature_being_active)
 {
-    static_assert(!signal_less_fully_wired(),
-                  "lazy profiling must not engage before signal-less is fully wired");
+    EXPECT_FALSE(signal_less_lazy_profiling())
+        << "lazy profiling must stay off until the operator opts in";
 }
 
 // ---------------------------------------------------------------------------

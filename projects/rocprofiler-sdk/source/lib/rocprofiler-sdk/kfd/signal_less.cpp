@@ -52,9 +52,11 @@ signal_less_feature_enabled()
     static const bool _enabled = []() {
         auto _v = common::get_env_optional("ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS");
         if(!_v || !parse_signal_less_env(*_v)) return false;
-        ROCP_WARNING << "KFD dispatch-log: signal-less kernel-dispatch completion requested via "
-                        "ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS; the feature is still being "
-                        "landed and remains inactive until every stage is present";
+        ROCP_WARNING << "KFD dispatch-log: signal-less kernel-dispatch completion is ACTIVE "
+                        "(ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS). Eligible batches publish "
+                        "their packets untouched and complete from firmware records instead of "
+                        "completion signals; ineligible batches keep the signal path. Unset the "
+                        "variable to return to signal-based completion.";
         return true;
     }();
     return _enabled;

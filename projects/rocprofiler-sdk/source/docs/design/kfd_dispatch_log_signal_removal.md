@@ -1,7 +1,18 @@
 # KFD Dispatch-Log: Signal-less Kernel-Dispatch Completion (design plan v3)
 
-Status: PLAN (not yet implemented). Signal-less mode must ship feature-disabled
-until the full Phase 2+3 change-set lands and passes the test matrix below.
+Status: IMPLEMENTED, shipped feature-disabled. Phases 0-3 have landed. Signal-less
+completion is inert unless the operator opts in with
+`ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS=1`; with the variable unset -- the
+default -- every dispatch keeps its completion signal and HSA timestamps, which is
+the behavior this document calls the "signal path" throughout.
+
+Landed in eight units, each built and tested on hardware before the next:
+the hub; the feature flag, batch eligibility and P3 packet no-touch; the reader
+handoff and no-signal finalizer; the overrun leak-and-shout, loss ledger and
+`correlation_id_finalize()` skip; the all-live-queue owner registry, collision
+quarantine and lazy HW profiling; the generation/reuse closure on queue destroy;
+the strict teardown order and hub-aware sync; and the fork epoch. The remaining
+open item is the real-GPU matrix (G-1..G-13) under the enabled flag.
 
 ## Motivation
 

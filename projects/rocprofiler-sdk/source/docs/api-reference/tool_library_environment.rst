@@ -165,6 +165,28 @@ Kernel dispatch timestamp source
         640 MiB is clamped. The effective size is logged whenever it differs from
         the requested one.
 
+    * - ``ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS``
+      - ``false``
+      - Boolean. Opt in to signal-less kernel-dispatch completion. When enabled,
+        a dispatch batch that qualifies is published with its AQL packet
+        **untouched** -- the SDK allocates no completion signal, does not modify
+        the application's, and does not enable HW profiling for that queue --
+        and the dispatch completes from the firmware dispatch-log record instead
+        of a signal. A batch that does not qualify keeps the signal path, so the
+        two coexist.
+
+        A batch qualifies only when the dispatch log is live for that GPU, the
+        reader is healthy, and every packet's doorbell slot has exactly one live
+        owning queue; a doorbell collision or a queue destroy permanently retires
+        that slot to the signal path. If the firmware ring overruns, the affected
+        dispatches emit no record, their correlation ids are deliberately not
+        retired, a warning names the counts, and signal-less turns itself off for
+        the rest of the process.
+
+        Disabled by default. Enabling it changes when dispatch records are
+        delivered relative to the application observing its own completion
+        signal, so it is opt-in.
+
 Beta-feature opt-in
 -------------------
 
