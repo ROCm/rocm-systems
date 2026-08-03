@@ -115,36 +115,39 @@ typedef struct hipGpuActivityExt {
     const char* kernel_name;    /**< Kernel name        (op==HIP_OP_DISPATCH_EXT, may be NULL) */
   };
   /* Originally _pad1[96].  First 16 bytes repurposed for multi-op linked list;
-   * next 40 bytes repurposed for op-specific payload (dispatch dims/args or copy src/dst);
-   * remaining 40 bytes stay reserved and must be treated as zero by external callers. */
+   * next 48 bytes repurposed for op-specific payload (dispatch dims/args or copy src/dst);
+   * remaining 32 bytes stay reserved and must be treated as zero by external callers. */
   uint32_t                   gpu_op_count; /**< Total GPU ops (0=none, 1=in gpu field, >1=graph) */
   uint32_t                   _reserved_u32;/**< Reserved — must be zero */
   const struct hipGpuActivityExt* next;    /**< Next spill node (ops 2..N); NULL at tail or when
                                                  gpu_op_count <= 1.  rec->gpu.next is the head. */
-  /* Op-specific payload — 40 bytes, two arms sharing the same storage. */
+  /* Op-specific payload — 48 bytes, two arms sharing the same storage. */
   union {
-    struct { /* op==HIP_OP_DISPATCH_EXT: grid/block dims and kernel arg blob.
+    struct { /* op==HIP_OP_DISPATCH_EXT: grid/block/cluster dims and kernel arg blob.
               * Dims are valid when launched from a single hipLaunchKernel or a graph node
-              * captured at hipGraphInstantiate time; zero for barriers/copies. */
+              * captured at hipGraphInstantiate time; zero for barriers/copies.
+              * cluster_x/y/z are set to 1 for non-cluster launches. */
       uint32_t    grid_x;          /**< Grid X (number of blocks) */
       uint32_t    grid_y;          /**< Grid Y */
       uint32_t    grid_z;          /**< Grid Z */
       uint32_t    block_x;         /**< Block X (threads per block) */
       uint32_t    block_y;         /**< Block Y */
       uint32_t    block_z;         /**< Block Z */
-      const uint8_t* kernel_args;  /**< Packed arg blob, or NULL.  Owned by the profiler. */
+      uint32_t    cluster_x;       /**< Cluster X (number of blocks in cluster) */
+      uint32_t    cluster_y;       /**< Cluster Y */
+      uint32_t    cluster_z;       /**< Cluster Z */
       uint32_t    kernel_args_size;/**< Byte length of kernel_args blob */
-      uint32_t    _reserved_dispatch; /**< Reserved — must be zero */
+      const uint8_t* kernel_args;  /**< Packed arg blob, or NULL.  Owned by the profiler. */
     };
     struct { /* op==HIP_OP_COPY_EXT: source and destination addresses.
               * Populated for both direct copies and graph copy nodes captured at
               * hipGraphInstantiate time.  NULL when address is unavailable. */
       const void* src;             /**< Source address (host or device) */
       const void* dst;             /**< Destination address (host or device) */
-      uint8_t     _reserved_copy[24]; /**< Reserved — must be zero */
+      uint8_t     _reserved_copy[32]; /**< Reserved — must be zero */
     };
   };
-  uint8_t     _pad1[40];           /**< Remaining reserved padding — must be zero */
+  uint8_t     _pad1[32];           /**< Remaining reserved padding — must be zero */
 } hipGpuActivityExt;
 #ifdef __cplusplus
 static_assert(sizeof(hipGpuActivityExt) == 128, "hipGpuActivityExt must be 128 bytes");

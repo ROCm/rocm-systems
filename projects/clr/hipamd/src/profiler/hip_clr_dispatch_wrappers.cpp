@@ -2120,6 +2120,7 @@ static hipError_t hipLaunchKernelLayer(const void* function_address, dim3 numBlo
   _rec->stream = stream;
   _rec->gpu.grid_x = numBlocks.x; _rec->gpu.grid_y = numBlocks.y; _rec->gpu.grid_z = numBlocks.z;
   _rec->gpu.block_x = dimBlocks.x; _rec->gpu.block_y = dimBlocks.y; _rec->gpu.block_z = dimBlocks.z;
+  _rec->gpu.cluster_x = 1; _rec->gpu.cluster_y = 1; _rec->gpu.cluster_z = 1;
   if (args) {
     hipFunction_t hfunc = nullptr;
     if (hip::ihipGetFuncBySymbol(&hfunc, function_address) == hipSuccess)
@@ -4728,6 +4729,16 @@ static hipError_t hipLaunchKernelExCLayer(const hipLaunchConfig_t* config, const
     _rec->stream = config->stream;
     _rec->gpu.grid_x = config->gridDim.x; _rec->gpu.grid_y = config->gridDim.y; _rec->gpu.grid_z = config->gridDim.z;
     _rec->gpu.block_x = config->blockDim.x; _rec->gpu.block_y = config->blockDim.y; _rec->gpu.block_z = config->blockDim.z;
+    // Extract cluster dimensions from launch attributes
+    _rec->gpu.cluster_x = 1; _rec->gpu.cluster_y = 1; _rec->gpu.cluster_z = 1;
+    for (size_t i = 0; i < config->numAttrs; ++i) {
+      if (config->attrs[i].id == hipLaunchAttributeClusterDimension) {
+        _rec->gpu.cluster_x = config->attrs[i].val.clusterDim.x;
+        _rec->gpu.cluster_y = config->attrs[i].val.clusterDim.y;
+        _rec->gpu.cluster_z = config->attrs[i].val.clusterDim.z;
+        break;
+      }
+    }
   }
   auto _r = g_next.hipLaunchKernelExC_fn(config, fPtr, args);
   _rec->end_ns = NowNs();
@@ -4742,6 +4753,16 @@ static hipError_t hipDrvLaunchKernelExLayer(const HIP_LAUNCH_CONFIG* config, hip
     _rec->stream = config->hStream;
     _rec->gpu.grid_x = config->gridDimX; _rec->gpu.grid_y = config->gridDimY; _rec->gpu.grid_z = config->gridDimZ;
     _rec->gpu.block_x = config->blockDimX; _rec->gpu.block_y = config->blockDimY; _rec->gpu.block_z = config->blockDimZ;
+    // Extract cluster dimensions from launch attributes
+    _rec->gpu.cluster_x = 1; _rec->gpu.cluster_y = 1; _rec->gpu.cluster_z = 1;
+    for (size_t i = 0; i < config->numAttrs; ++i) {
+      if (config->attrs[i].id == hipLaunchAttributeClusterDimension) {
+        _rec->gpu.cluster_x = config->attrs[i].val.clusterDim.x;
+        _rec->gpu.cluster_y = config->attrs[i].val.clusterDim.y;
+        _rec->gpu.cluster_z = config->attrs[i].val.clusterDim.z;
+        break;
+      }
+    }
   }
   auto _r = g_next.hipDrvLaunchKernelEx_fn(config, f, params, extra);
   _rec->end_ns = NowNs();

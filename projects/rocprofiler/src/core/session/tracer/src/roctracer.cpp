@@ -889,6 +889,14 @@ std::optional<std::string> GetHipKernelName(uint32_t cid, hip_api_data_t* data) 
       function = data->args.hipHccModuleLaunchKernel.f;
       break;
     }
+    case HIP_API_ID_hipDrvLaunchKernelEx: {
+      function = data->args.hipDrvLaunchKernelEx.f;
+      break;
+    }
+    case HIP_API_ID_hipLaunchKernelExC: {
+      function = data->args.hipLaunchKernelExC.fPtr;
+      break;
+    }
     default:
       return {};
   }
