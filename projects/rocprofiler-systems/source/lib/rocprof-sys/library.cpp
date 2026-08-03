@@ -82,6 +82,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <mutex>
 #include <pthread.h>
 #include <sstream>
