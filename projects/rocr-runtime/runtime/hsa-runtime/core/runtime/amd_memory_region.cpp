@@ -458,7 +458,13 @@ hsa_status_t MemoryRegion::AllowAccess(uint32_t num_agents,
                                                  &agent_count, &accessible,
                                                  &blockInfo) == HSA_STATUS_SUCCESS) {
     /*  Thunk may return type = HSA_EXT_POINTER_TYPE_UNKNOWN for userptrs */
+    /*  Only adopt the owning block's base/length when the block info is VALID. On the
+     *  virtio path QueryPointerInfo can intermittently report a degenerate {base=0,
+     *  length=0} block for a valid whole-BO pointer; adopting it would overwrite the
+     *  caller's valid (ptr,size) with (NULL,0) and make MakeMemoryResident/map fail
+     *  with OUT_OF_RESOURCES, surfacing as a spurious hipStreamCreate/hipMalloc OOM. */
     if (info.type != HSA_EXT_POINTER_TYPE_UNKNOWN &&
+        blockInfo.base != nullptr && blockInfo.length != 0 &&
         (blockInfo.length != size || info.sizeInBytes != size)) {
       for (int i = 0; i < num_agents; i++) union_agents.push_back(agents[i].handle);
       for (int i = 0; i < agent_count; i++) union_agents.push_back(accessible[i].handle);
