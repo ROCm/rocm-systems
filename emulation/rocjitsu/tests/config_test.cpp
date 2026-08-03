@@ -3,6 +3,7 @@
 
 #include "aql_queue.h"
 #include "halt_snapshot_plugin.h"
+#include "long_path_handoff.h"
 #include "scoped_temp.h"
 
 #include "embedded_schema.h"
@@ -675,6 +676,40 @@ TEST(ConfigLoaderTest, LoadsDbtRuntimeConfigHandoffFromInvocationDirectory) {
   ASSERT_TRUE(loaded);
   EXPECT_TRUE(loaded->enabled);
   EXPECT_EQ(loaded->host.gpu_id, 28851u);
+}
+
+// The HSA-hook half of a pair. GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes drives
+// the same oversized handoff through the other consumer -- the KFD interposer's raw read loop,
+// which is where a fixed 4096-byte read once truncated it. This reader has always been an
+// unbounded std::ifstream, so the case is coverage rather than a fix; what it locks down is that
+// the two independent readers agree. Both are built by install_oversized_handoff() and both
+// assert test::kOversizedHandoffHostGpuId, so a reader that starts resolving a different host
+// GPU from identical bytes fails here or there instead of silently splitting the two layers
+// onto different GPUs on a multi-GPU host.
+TEST(ConfigLoaderTest, ReadsRuntimeHandoffLargerThan4095Bytes) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-oversized-");
+
+  // Same treatment as the KFD-side test: a temp directory already deeper than the path being
+  // built is a limit of where the test runs, not a defect in the reader, so it must skip.
+  const test::LongPathHandoff handoff = test::install_oversized_handoff(runtime.path(), R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx942"
+        }
+      })");
+  if (handoff.status() == test::LongPathHandoff::Status::kSkip)
+    GTEST_SKIP() << "cannot build the oversized handoff here: " << handoff.reason();
+  ASSERT_TRUE(handoff.status() == test::LongPathHandoff::Status::kOk) << handoff.reason();
+
+  const test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv,
+                                                       runtime.path());
+  const std::optional<config::DbtGuestConfig> loaded =
+      config::load_dbt_guest_config_from_runtime_config();
+
+  ASSERT_TRUE(loaded);
+  EXPECT_TRUE(loaded->enabled);
+  EXPECT_EQ(loaded->host.gpu_id, test::kOversizedHandoffHostGpuId);
 }
 
 TEST(ConfigLoaderTest, RejectsPathOnlyHandoffForAutomaticDbtHost) {
