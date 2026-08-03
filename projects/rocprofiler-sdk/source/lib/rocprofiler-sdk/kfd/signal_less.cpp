@@ -189,6 +189,41 @@ add_live_queue(uint64_t queue_token, uint32_t gpu_id, std::optional<uint32_t> do
 }
 
 void
+begin_close_signal_less_queue(uint64_t queue_token)
+{
+    auto _slot = owner_registry().slot_of(queue_token);
+    if(!_slot) return;
+    // Hub lock is taken and released inside; the caller fences gate_lock next.
+    signal_less_hub().mark_slot_closing(*_slot);
+}
+
+void
+finish_close_signal_less_queue(uint64_t queue_token)
+{
+    auto _slot = owner_registry().slot_of(queue_token);
+    if(!_slot) return;
+
+    // Leak + permanently quarantine in one hub critical section. The returned
+    // payloads are released here, off the hub lock; releasing one runs no client
+    // code, so this is safe on the destroying thread.
+    auto _stranded = signal_less_hub().quarantine_slot(*_slot);
+
+    // The reader owns its retained starts, so ask it to purge rather than touching
+    // them from this thread; results are behind their own lock and can be dropped
+    // directly.
+    request_reader_slot_purge(*_slot);
+
+    if(_stranded.empty()) return;
+    note_signal_less_losses();
+    ROCP_WARNING << fmt::format(
+        "KFD dispatch-log: queue destroyed with {} in-flight signal-less dispatch(es) on doorbell "
+        "slot {}; they emit no record and their correlation ids are not retired. The slot is "
+        "signal-path-only for the rest of the process.",
+        _stranded.size(),
+        *_slot);
+}
+
+void
 remove_live_queue(uint64_t queue_token)
 {
     owner_registry().remove_queue(queue_token);

@@ -665,7 +665,10 @@ signal_less_batch_eligible(Queue*                                            que
     _inputs.reader_alive          = kfd::signal_less_hub().mode() == kfd::session_mode::running;
     _inputs.doorbells_injective =
         kfd::owner_registry().is_injective(static_cast<uint32_t>(_gpu_id), _db->doorbell_off);
-    _inputs.hub_accepts_batch     = kfd::signal_less_hub().can_register_batch(_flat);
+    // is_closing() is an eligibility-only gate: a batch already past this point
+    // may still register, which is what the destroy path fences before it strands.
+    _inputs.hub_accepts_batch = kfd::signal_less_hub().can_register_batch(_flat) &&
+                                !kfd::signal_less_hub().is_closing(_db->doorbell_off);
     // The payload is value-only (see kfd::pending_payload), so construction cannot
     // fail once the key resolved.
     _inputs.payload_constructible = true;
@@ -1154,6 +1157,16 @@ write_interceptor(Queue*                                queue,
         });
 }
 }  // namespace
+
+void
+fence_queue_gate(const hsa_queue_t* queue)
+{
+    auto state = lookup_queue_state(queue, /*create_if_missing=*/false);
+    if(!state) return;
+    // Acquire + release only. Nothing is called while it is held, so this cannot
+    // participate in a lock cycle.
+    auto lk = std::lock_guard<std::mutex>{state->gate_lock};
+}
 
 void
 process_doorbell_impl(const queue_state_ptr_t& state,

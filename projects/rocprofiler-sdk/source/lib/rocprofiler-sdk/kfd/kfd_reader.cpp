@@ -172,6 +172,23 @@ struct reader_state
     reader_state& operator=(const reader_state&) = delete;
 };
 
+// Slots whose queue was destroyed, waiting for the reader to purge its retained
+// starts. Written by destroying app threads, drained by the reader; drain_state
+// itself therefore stays reader-owned and is never touched cross-thread.
+std::mutex&
+purge_mutex()
+{
+    static auto _v = std::mutex{};
+    return _v;
+}
+
+std::vector<uint32_t>&
+purge_requests()
+{
+    static auto _v = std::vector<uint32_t>{};
+    return _v;
+}
+
 reader_state&
 state()
 {
@@ -681,6 +698,17 @@ reader_loop()
             warn_on_overrun(st.session.drain);
             poison_signal_less_on_overrun(st.session.drain);
 
+            // Purge slots whose queue was destroyed before aging anything else out.
+            {
+                auto _slots = std::vector<uint32_t>{};
+                {
+                    auto lk = std::lock_guard<std::mutex>{purge_mutex()};
+                    _slots.swap(purge_requests());
+                }
+                for(auto _slot : _slots)
+                    st.session.drain.erase_slot(_slot, kDoorbellSlotsPerPage);
+            }
+
             if(now_ns - last_evict_ns >= kEvictIntervalNs)
             {
                 st.session.drain.evict_stale(now_ns, kStartMaxAgeNs);
@@ -786,6 +814,17 @@ void
 stop_kfd_reader()
 {
     stop_reader();
+}
+
+void
+request_reader_slot_purge(uint32_t doorbell_slot)
+{
+    // Results are behind their own lock, so they can go now; retained starts are
+    // the reader's, so they are queued for it.
+    results_map().erase_slot(doorbell_slot);
+
+    auto lk = std::lock_guard<std::mutex>{purge_mutex()};
+    purge_requests().emplace_back(doorbell_slot);
 }
 
 bool

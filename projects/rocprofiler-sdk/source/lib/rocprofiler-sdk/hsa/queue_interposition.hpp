@@ -212,6 +212,14 @@ create_queue_state(const hsa_queue_t* queue, bool overwrite = false);
 void
 destroy_queue_state(const hsa_queue_t* queue);
 
+// Wait out any in-flight process_doorbell_impl() for this queue by taking and
+// immediately releasing its gate_lock. Used by the destroy path to fence
+// registration/publication before it strands and quarantines the queue's doorbell
+// slot. The caller MUST hold no hub or owner-registry lock: the enqueue path holds
+// gate_lock while taking those, so the reverse nesting would deadlock.
+void
+fence_queue_gate(const hsa_queue_t* queue);
+
 /**
  * @brief Check if queue interposition has been installed
  *

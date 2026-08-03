@@ -179,6 +179,29 @@ struct drain_state
         return true;
     }
 
+    // Drop retained starts belonging to a page-relative doorbell slot whose queue
+    // was destroyed, so a stale start cannot pair with a record from whatever
+    // reuses the slot. Reader-thread only, like the rest of this state.
+    size_t erase_slot(uint32_t page_slot, uint32_t slots_per_page)
+    {
+        size_t removed = 0;
+        for(auto it = pending_starts.begin(); it != pending_starts.end();)
+        {
+            const auto _slot =
+                static_cast<uint32_t>(it->first >> 32) & (slots_per_page - 1);
+            if(_slot == page_slot)
+            {
+                it = pending_starts.erase(it);
+                ++removed;
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        return removed;
+    }
+
     // Age out unmatched starts (queue died mid-dispatch, ring overwrite) so the
     // map cannot grow unbounded. now_ns/max_age_ns passed in for testability.
     size_t evict_stale(uint64_t now_ns, uint64_t max_age_ns)

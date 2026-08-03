@@ -116,6 +116,26 @@ ResultsMap::stats() const
 }
 
 size_t
+ResultsMap::erase_slot(uint32_t doorbell_off)
+{
+    auto   lk      = std::lock_guard<std::mutex>{m_mutex};
+    size_t erased  = 0;
+    for(auto it = m_data.begin(); it != m_data.end();)
+    {
+        if(it->first.doorbell_off == doorbell_off)
+        {
+            it = m_data.erase(it);
+            ++erased;
+        }
+        else
+        {
+            ++it;
+        }
+    }
+    return erased;
+}
+
+size_t
 ResultsMap::evict_stale(uint64_t now_ns, uint64_t max_age_ns)
 {
     auto   lk      = std::lock_guard<std::mutex>{m_mutex};

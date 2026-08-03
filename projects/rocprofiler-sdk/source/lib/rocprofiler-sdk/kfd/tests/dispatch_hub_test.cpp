@@ -919,3 +919,129 @@ TEST(ProfilingEnableTracker, laziness_is_tied_to_the_feature_being_active)
     static_assert(!signal_less_fully_wired(),
                   "lazy profiling must not engage before signal-less is fully wired");
 }
+
+// ---------------------------------------------------------------------------
+// Unit 5: generation/reuse closure on queue destroy (requirement 4)
+// ---------------------------------------------------------------------------
+
+// The whole destroy sequence: a queue with in-flight signal-less work goes away,
+// its pending entries are stranded, and the slot becomes signal-path-only so a
+// queue that reuses the doorbell can never be matched to the old queue's records.
+TEST(DispatchHub, destroy_closes_the_slot_for_reuse)
+{
+    auto reg = OwnerRegistry{};
+    auto hub = hub_t{};
+
+    // Queue A owns slot 40 and has two dispatches in flight.
+    reg.add_queue(/*token=*/1, /*gpu=*/0, uint32_t{40});
+    ASSERT_TRUE(register_one(hub, key_of(40, 1), /*corr_id=*/500, /*queue_token=*/1));
+    ASSERT_TRUE(register_one(hub, key_of(40, 2), /*corr_id=*/500, /*queue_token=*/1));
+
+    // Step 1: stop new reservations (hub lock taken and released).
+    hub.mark_slot_closing(40);
+    EXPECT_TRUE(hub.is_closing(40));
+
+    // Step 2 is the gate_lock fence, which holds no hub lock; nothing to assert
+    // here beyond it not being part of this critical section.
+
+    // Step 3+4: strand what is left and quarantine permanently.
+    auto stranded = hub.quarantine_slot(40);
+    EXPECT_EQ(stranded.size(), 2u);
+    EXPECT_TRUE(hub.is_quarantined(40));
+    EXPECT_EQ(hub.live_entries(), 0u);
+
+    // Their correlation id is on the ledger: deliberately not retired.
+    EXPECT_TRUE(hub.is_ledgered(500));
+
+    reg.remove_queue(1);
+
+    // Queue B reuses the doorbell. Ownership looks clean, but the slot is
+    // quarantined for the rest of the process, so B is signal-path-only.
+    reg.add_queue(/*token=*/2, 0, uint32_t{40});
+    EXPECT_TRUE(reg.is_injective(0, 40));
+    EXPECT_FALSE(hub.can_register_batch({key_of(40, 1)}));
+    EXPECT_FALSE(register_one(hub, key_of(40, 7), 600, 2));
+
+    // A stale late record from queue A completes nothing.
+    EXPECT_FALSE(hub.prove_eop(key_of(40, 1), 999, /*loss_free=*/true).has_value());
+    EXPECT_FALSE(hub.prove_eop(key_of(40, 2), 999, true).has_value());
+}
+
+// "Closing" is deliberately an ELIGIBILITY-only gate. A batch that already passed
+// eligibility and skipped its completion signals must still be able to register,
+// because the destroy path fences those in flight before it strands anything --
+// refusing them would leave dispatches with neither a signal nor a hub entry.
+TEST(DispatchHub, closing_blocks_new_reservations_but_not_an_in_flight_one)
+{
+    auto hub = hub_t{};
+    hub.mark_slot_closing(40);
+
+    // Eligibility consults is_closing() and refuses...
+    EXPECT_TRUE(hub.is_closing(40));
+
+    // ...but a batch already past that point still registers, and can complete.
+    EXPECT_TRUE(hub.can_register_batch({key_of(40, 1)}));
+    ASSERT_TRUE(register_one(hub, key_of(40, 1)));
+    EXPECT_TRUE(hub.prove_eop(key_of(40, 1), 5, true).has_value());
+
+    // Quarantine, by contrast, refuses registration outright.
+    hub.quarantine_slot(40);
+    EXPECT_FALSE(hub.can_register_batch({key_of(40, 2)}));
+    EXPECT_FALSE(register_one(hub, key_of(40, 2)));
+}
+
+// A clean destroy -- nothing signal-less on the slot -- strands nothing and
+// reports nothing, which is what keeps the flag-off destroy path silent.
+TEST(DispatchHub, clean_destroy_strands_nothing)
+{
+    auto hub = hub_t{};
+    hub.mark_slot_closing(40);
+    auto stranded = hub.quarantine_slot(40);
+
+    EXPECT_TRUE(stranded.empty());
+    EXPECT_EQ(hub.live_entries(), 0u);
+    EXPECT_EQ(hub.tombstones(), 0u);
+    EXPECT_EQ(hub.mode(), session_mode::running);
+}
+
+// Destroy runs concurrently with enqueue registration on other slots. The hub must
+// stay internally consistent and never deadlock; run under TSan for the ordering.
+TEST(DispatchHub, concurrent_destroy_and_registration_stay_consistent)
+{
+    constexpr uint32_t kSlots = 64;
+
+    auto hub = hub_t{};
+    for(uint32_t s = 0; s < kSlots; ++s)
+    {
+        ASSERT_TRUE(register_one(hub, key_of(s, 1), /*corr_id=*/s, /*queue_token=*/s));
+    }
+
+    // "Destroy" thread walks the slots doing the close sequence.
+    auto destroyer = std::thread{[&hub]() {
+        for(uint32_t s = 0; s < kSlots; ++s)
+        {
+            hub.mark_slot_closing(s);
+            hub.quarantine_slot(s);
+        }
+    }};
+
+    // "Reader" thread races it trying to prove the same entries.
+    auto prover = std::atomic<uint32_t>{0};
+    auto reader = std::thread{[&hub, &prover]() {
+        for(uint32_t s = 0; s < kSlots; ++s)
+            if(hub.prove_eop(key_of(s, 1), 9, true).has_value()) ++prover;
+    }};
+
+    destroyer.join();
+    reader.join();
+
+    // Every slot ended quarantined, nothing is still pending, and each entry went
+    // exactly one way -- proven or stranded, never both.
+    for(uint32_t s = 0; s < kSlots; ++s)
+    {
+        EXPECT_TRUE(hub.is_quarantined(s));
+    }
+    EXPECT_EQ(hub.live_entries(), 0u);
+    EXPECT_LE(prover.load(), kSlots);
+    EXPECT_EQ(tracked_payload::live.load(), 0);
+}

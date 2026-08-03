@@ -424,15 +424,32 @@ QueueController::destroy_queue(hsa_queue_t* id)
     // return if queue does not exist
     if(!queue) return;
 
+    // Signal-less generation/reuse closure (design requirement 4), before the
+    // doorbell generation is bumped. The lock sequence is load-bearing:
+    //
+    //   1. begin_close: takes the hub lock and RELEASES it (stops new reservations)
+    //   2. fence:       takes gate_lock and releases it, holding NO hub lock
+    //   3. finish_close: takes the hub lock again (strand + quarantine), releases
+    //
+    // The enqueue path holds gate_lock while taking the hub lock, so this path
+    // must never hold the hub lock while waiting on gate_lock; it holds at most
+    // one of the two at any instant, so no cycle exists.
+    const auto _queue_token = queue->get_id().handle;
+    kfd::begin_close_signal_less_queue(_queue_token);
+    queue_interposition::fence_queue_gate(id);
+    kfd::finish_close_signal_less_queue(_queue_token);
+
     // KFD dispatch-log: retire this queue's doorbell binding (bumps generation
     // so a reused doorbell cannot misattribute records to this dead queue). The
-    // gate keeps a forked child out of the DoorbellMap lock.
+    // gate keeps a forked child out of the DoorbellMap lock. For the signal path
+    // this bump is the protection; for signal-less the quarantine above is, and
+    // the two are independent.
     if(kfd::kfd_dispatch_log_available()) kfd::doorbell_map().on_queue_destroyed(queue->get_id());
 
     // Drop this queue's doorbell ownership so a surviving co-owner becomes the
-    // sole owner again. A slot that already collided stays quarantined in the hub
-    // for the rest of the process regardless.
-    kfd::remove_live_queue(queue->get_id().handle);
+    // sole owner again. After the closure above the slot stays quarantined in the
+    // hub for the rest of the process regardless.
+    kfd::remove_live_queue(_queue_token);
 
     queue_interposition::destroy_queue_state(id);
     queue->sync();

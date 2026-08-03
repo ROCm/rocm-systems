@@ -720,3 +720,26 @@ TEST(dlog_drain, records_are_published_only_after_the_verdict_is_known)
     EXPECT_EQ(pairs, 1u);
     EXPECT_FALSE(seen_any_loss_free);
 }
+
+// Queue destroy asks the reader to drop what it retains for the dead queue's
+// doorbell slot, so a stale start cannot pair with a record from whatever reuses
+// it. Only that slot's starts go.
+TEST(dlog_drain, erase_slot_drops_only_that_slots_retained_starts)
+{
+    drain_state st;
+    // key = (doorbell_off << 32) | dispatch_id; page slot = doorbell_off & 1023.
+    const uint64_t on_slot_7    = (uint64_t{7} << 32) | 1;
+    const uint64_t also_slot_7  = (uint64_t{1024 + 7} << 32) | 2;  // aliases to slot 7
+    const uint64_t on_slot_8    = (uint64_t{8} << 32) | 3;
+
+    st.pending_starts[on_slot_7]   = drain_state::pending_start{100, 1000};
+    st.pending_starts[also_slot_7] = drain_state::pending_start{200, 1000};
+    st.pending_starts[on_slot_8]   = drain_state::pending_start{300, 1000};
+
+    EXPECT_EQ(st.erase_slot(/*page_slot=*/7, /*slots_per_page=*/1024), 2u);
+    EXPECT_EQ(st.pending_starts.count(on_slot_7), 0u);
+    EXPECT_EQ(st.pending_starts.count(also_slot_7), 0u);
+    EXPECT_EQ(st.pending_starts.count(on_slot_8), 1u);
+
+    EXPECT_EQ(st.erase_slot(7, 1024), 0u);  // idempotent
+}

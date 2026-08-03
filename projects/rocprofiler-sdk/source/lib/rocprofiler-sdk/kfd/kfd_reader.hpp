@@ -63,5 +63,13 @@ stop_kfd_reader();
 // dispatches fall back to HSA. Multi-GPU sessions are not supported.
 bool
 ensure_reader_session(uint32_t gpu_id);
+
+// Ask the reader to drop everything it retains for a page-relative doorbell slot
+// whose queue was destroyed. The reader's retained starts are reader-thread-owned,
+// so a destroying thread posts a request instead of touching them; the reader
+// consumes it on its next pass. Results, which sit behind their own lock, are
+// dropped immediately here.
+void
+request_reader_slot_purge(uint32_t doorbell_slot);
 }  // namespace kfd
 }  // namespace rocprofiler

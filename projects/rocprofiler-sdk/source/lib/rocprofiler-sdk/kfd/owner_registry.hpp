@@ -110,6 +110,17 @@ public:
         return owners_locked(gpu_id, slot) == 1;
     }
 
+    // The slot this queue owns, if it is live and its doorbell resolved. Used by
+    // the destroy path, which must know the slot without dereferencing a queue
+    // that is already being torn down.
+    std::optional<uint32_t> slot_of(uint64_t queue_token) const
+    {
+        auto lk = std::lock_guard<std::mutex>{m_mu};
+        auto it = m_by_queue.find(queue_token);
+        if(it == m_by_queue.end()) return std::nullopt;
+        return it->second.slot;
+    }
+
     size_t owners_of(uint32_t gpu_id, uint32_t slot) const
     {
         auto lk = std::lock_guard<std::mutex>{m_mu};

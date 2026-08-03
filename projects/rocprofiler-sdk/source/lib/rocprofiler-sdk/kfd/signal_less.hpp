@@ -97,6 +97,23 @@ add_live_queue(uint64_t queue_token, uint32_t gpu_id, std::optional<uint32_t> do
 void
 remove_live_queue(uint64_t queue_token);
 
+// Generation/reuse closure on queue destroy (design requirement 4), split into
+// the two halves the lock ordering demands.
+//
+// STEP 1, before the caller fences the queue's gate_lock: stop new signal-less
+// reservations on the slot. Takes and RELEASES the hub lock, so the caller never
+// holds it while waiting on gate_lock -- the enqueue path holds gate_lock while
+// taking the hub lock, so the reverse nesting would deadlock.
+void
+begin_close_signal_less_queue(uint64_t queue_token);
+
+// STEP 2, after the fence: strand whatever is still pending on the slot (P1, no
+// record and no retire) and quarantine it permanently, so a queue that reuses the
+// doorbell is signal-path-only and a stale late record can never be matched to
+// it. Must be called with NO lock held.
+void
+finish_close_signal_less_queue(uint64_t queue_token);
+
 // How the KFD reader reaches the completion machinery without depending on the
 // HSA interposition layer (which in turn depends on the hub). The interposition
 // layer installs these once at init, before any queue -- and therefore any

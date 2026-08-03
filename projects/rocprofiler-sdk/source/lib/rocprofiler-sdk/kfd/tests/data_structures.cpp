@@ -475,3 +475,20 @@ TEST(kfd_selection_gate, disabled_until_signal_less_is_fully_wired)
                   "flipping the master switch requires every signal-less stage to be present");
     EXPECT_FALSE(kfd_selection_enabled());
 }
+
+// Queue destroy drops stale results for the dead queue's doorbell slot, so a
+// queue reusing the slot cannot take one. Other slots are untouched.
+TEST(ResultsMap, erase_slot_drops_only_that_slot)
+{
+    auto m = ResultsMap{};
+    m.deposit(correlation_key{7, 1, 0}, kfd_timing_result{1, 2, 0});
+    m.deposit(correlation_key{7, 2, 1}, kfd_timing_result{3, 4, 0});  // later generation
+    m.deposit(correlation_key{8, 1, 0}, kfd_timing_result{5, 6, 0});
+
+    EXPECT_EQ(m.erase_slot(7), 2u);
+    EXPECT_FALSE(m.take(correlation_key{7, 1, 0}).has_value());
+    EXPECT_FALSE(m.take(correlation_key{7, 2, 1}).has_value());
+    EXPECT_TRUE(m.take(correlation_key{8, 1, 0}).has_value());
+
+    EXPECT_EQ(m.erase_slot(7), 0u);  // idempotent
+}
