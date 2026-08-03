@@ -39,12 +39,31 @@ import re
 EXPECTED_DISPATCHES = 100 * 100
 KERNEL_NAME = "add(int, float*, float*)"
 
+# AQLProfile has known counter mis-reporting bugs on these architectures, so the
+# per-dispatch SQ_WAVES *value* is unreliable under the InterceptQueue overflow
+# path (the structural checks remain valid). Shared by the CSV and JSON validators.
+SKIP_GFX = ("gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1152", "gfx1153")
+
 
 def is_helper(name):
     return bool(re.search(r"__amd_rocclr_.*", name))
 
 
-def test_validate_counter_collection_queue_overflow(input_data: pd.DataFrame):
+def dispatch_agent_names(json_data):
+    # Names (e.g. "gfx1150") of the agents that actually ran the collected
+    # dispatches, resolved from the JSON tool output.
+    data = json_data["rocprofiler-sdk-tool"]
+    agents_by_handle = {a["id"]["handle"]: a for a in data["agents"]}
+    names = set()
+    for counter in data["callback_records"]["counter_collection"]:
+        info = counter["dispatch_data"]["dispatch_info"]
+        agent = agents_by_handle.get(info["agent_id"]["handle"])
+        if agent is not None:
+            names.add(agent["name"])
+    return names
+
+
+def test_validate_counter_collection_queue_overflow(input_data: pd.DataFrame, json_data):
     df = input_data
 
     assert not df.empty
@@ -59,9 +78,14 @@ def test_validate_counter_collection_queue_overflow(input_data: pd.DataFrame):
     )
     assert real_kernels == [KERNEL_NAME]
 
-    # all counters requested are SQ_WAVES and every dispatch reported a positive value
+    # all counters requested are SQ_WAVES
     assert df["Counter_Name"].str.contains("SQ_WAVES").all()
-    assert (df["Counter_Value"].astype(int).values > 0).all()
+
+    # Skip ONLY the per-value >0 check on architectures with known AQLProfile
+    # counter mis-reporting under the InterceptQueue overflow path (mirrors the
+    # JSON validator below). Every structural check above/below still runs.
+    if not (dispatch_agent_names(json_data) & set(SKIP_GFX)):
+        assert (df["Counter_Value"].astype(int).values > 0).all()
 
     # key regression check: every one of the 10000 dispatches was captured (a hang or
     # out-of-bounds ring copy in the overflow/retry path would strand or drop dispatches)
@@ -78,9 +102,6 @@ def test_validate_counter_collection_queue_overflow(input_data: pd.DataFrame):
 def test_validate_counter_collection_queue_overflow_json(json_data):
     data = json_data["rocprofiler-sdk-tool"]
     counter_collection_data = data["callback_records"]["counter_collection"]
-
-    # at present, AQLProfile has bugs when reporting the counters for below architectures
-    skip_gfx = ("gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1152", "gfx1153")
 
     def get_kernel_name(kernel_id):
         return data["kernel_symbols"][kernel_id]["formatted_kernel_name"]
@@ -125,10 +146,10 @@ def test_validate_counter_collection_queue_overflow_json(json_data):
             assert (
                 counter_meta["name"] == "SQ_WAVES"
             ), f"record:\n\t{record}\ncounter:\n\t{counter_meta}"
-            if agent["name"] not in skip_gfx:
+            if agent["name"] not in SKIP_GFX:
                 sq_waves_values.append(record["value"])
 
-        if agent["name"] not in skip_gfx:
+        if agent["name"] not in SKIP_GFX:
             assert sum(sq_waves_values) > 0, "SQ_WAVES value is not > 0"
 
     # key regression check: all 10000 dispatches captured, none stranded/dropped
