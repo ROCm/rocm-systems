@@ -1008,7 +1008,12 @@ TEST(HsaHooksUnitTest, IterateAgentsDropsGuestOwnSlotWhenHostAppearsFirst) {
   EXPECT_EQ(seen, std::vector<uint64_t>{kGuestAgent.handle});
 }
 
-TEST(HsaHooksUnitTest, MissingResolvedHostKeepsPhysicalAgentOrder) {
+// The configured host gpu_id has no topology node here, so the hook cannot tell
+// which physical agent the guest should execute on. Enumeration must fail rather
+// than fall through to the raw agent list: publishing the physical host would let
+// an application using the default device run untranslated on it. GuestKfd already
+// rejects the same unresolved host with ENODEV.
+TEST(HsaHooksUnitTest, MissingResolvedHostFailsAgentIteration) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);
   FakeApiTable api;
@@ -1023,8 +1028,8 @@ TEST(HsaHooksUnitTest, MissingResolvedHostKeepsPhysicalAgentOrder) {
       },
       &seen);
 
-  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
-  EXPECT_EQ(seen, (std::vector<uint64_t>{kGuestAgent.handle, kHostAgent.handle}));
+  EXPECT_EQ(status, HSA_STATUS_ERROR);
+  EXPECT_TRUE(seen.empty());
 }
 
 TEST(HsaHooksUnitTest, BatchCopyMapsScalarSourceAndDestinationAgents) {

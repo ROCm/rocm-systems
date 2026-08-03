@@ -1490,6 +1490,18 @@ public:
     return has_mapping_ ? guest_ : hsa_agent_t{};
   }
 
+  /// @brief Return true when the config demands a mapping that discovery could
+  /// not establish.
+  ///
+  /// @details Distinguishes "DBT is configured but its host is unreachable" from
+  /// "there is nothing to map", so callers can fail closed only in the former.
+  /// Discovery caches its outcome, so this stays true once it has failed.
+  [[nodiscard]] bool mapping_failed() {
+    ensure_discovered();
+    std::lock_guard lock(mutex_);
+    return mapping_required_ && !has_mapping_;
+  }
+
   /// @brief Replace the selected host agent with the visible guest agent.
   hsa_agent_t guest_for_host(hsa_agent_t agent) {
     ensure_discovered();
@@ -1504,6 +1516,7 @@ public:
     std::lock_guard lock(mutex_);
     discovered_ = false;
     has_mapping_ = false;
+    mapping_required_ = false;
     guest_ = {};
     host_ = {};
     ++generation_;
@@ -1630,6 +1643,7 @@ private:
     hsa_agent_t discovered_host{};
     bool has_mapping = false;
     bool attempted_agent_search = false;
+    const bool mapping_required = config && config->guest_target.has_value();
 
     if (config && config->guest_target) {
       auto *iterate_agents = layer().iterate_agents();
@@ -1666,6 +1680,7 @@ private:
         guest_ = discovered_guest;
         host_ = discovered_host;
         has_mapping_ = has_mapping;
+        mapping_required_ = mapping_required;
         discovered_ = true;
         published = true;
       }
@@ -1698,6 +1713,7 @@ private:
   bool discovering_ = false;
   bool discovered_ = false;
   bool has_mapping_ = false;
+  bool mapping_required_ = false;
   uint64_t generation_ = 0;
   hsa_agent_t guest_{};
   hsa_agent_t host_{};
@@ -3062,8 +3078,21 @@ hsa_status_t HSA_API rj_iterate_agents(hsa_status_t (*callback)(hsa_agent_t agen
 
   hsa_agent_t guest = AgentMapper::instance().guest_agent();
   hsa_agent_t host = AgentMapper::instance().host_for_guest();
-  if (guest.handle == 0 || host.handle == 0)
+  if (guest.handle == 0 || host.handle == 0) {
+    // Fail closed when DBT is configured but its host never resolved -- the
+    // topology node for the configured gpu_id was not found, or ROCR never
+    // exposed both agents. Public enumeration is the replacement boundary, so
+    // falling through to the original iterator here would publish the physical
+    // host as an application-visible device and let anything using the default
+    // device run untranslated on it, which is exactly what the guest exists to
+    // prevent. GuestKfd rejects the same unresolved host with ENODEV.
+    if (AgentMapper::instance().mapping_failed()) {
+      std::fprintf(stderr, "[rocjitsu-hooks] refusing to enumerate agents: DBT is enabled but no "
+                           "guest/host agent mapping was resolved\n");
+      return HSA_STATUS_ERROR;
+    }
     return original(callback, data);
+  }
 
   struct ShadowIteration {
     hsa_status_t (*callback)(hsa_agent_t, void *) = nullptr;
