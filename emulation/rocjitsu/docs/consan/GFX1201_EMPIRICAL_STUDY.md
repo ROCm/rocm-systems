@@ -4,7 +4,8 @@ Tracking: `bd-2wsf`
 
 Status: complete physical-gfx1201 performance and detection campaigns have
 been analyzed with a checked-in provenance-verifying reader. The recommendation
-below is final for this frozen study and is awaiting its single local review.
+below is final for this frozen study; the required single local review is
+complete.
 
 This study measures the practical cost and detection value of the four ConSan
 engines on physical `gfx1201`. Its final output is a recommendation for the
@@ -15,7 +16,9 @@ The existing [RDNA4 status ledger](STATUS_RDNA4.md) remains useful historical
 and qualification evidence. Numbers enter this study only when their raw
 artifacts satisfy the protocol below at one frozen source and workload
 checkpoint. In particular, cold process ratios, warm kernel ratios, and
-simulator timings are not interchangeable.
+simulator timings are not interchangeable. Only GPU-timestamp-derived device
+measurements qualify for the performance recommendation; CPU/process elapsed
+time remains a secondary diagnostic in the raw artifacts.
 
 ## Decision questions
 
@@ -128,6 +131,36 @@ collection must not hide them by substituting a smaller workload or a relaxed
 engine configuration. A pair may enter a later campaign only after a real
 implementation fix and a fresh clean-source checkpoint.
 
+The final performance and detection campaigns re-ran every admission gate at
+RocJITsu commit `2a4af5a44ad555d594b45a8d34d45f6983322e64`. Native GPU
+timing support is pinned at hip-moi commit
+`72a675dd671d2ef2e8592c858427d8f9a71bb300` and rocjitsu-test-corpus
+commit `a4c21378d144b4f49a53e6084306c0d3c40240bb`; the rdna4_matmul
+source remains `03431b8af28be2c3cad828bec77dfe8836d4a555`. Those timing
+changes use the existing launch and oracle paths rather than reduced or
+test-specific kernels.
+
+The external rdna4_matmul project is
+[`kuhar/sanitizer-strategy`](https://github.com/kuhar/sanitizer-strategy) at
+commit `03431b8af28be2c3cad828bec77dfe8836d4a555`. The checked-in empirical
+manifest pins that source identity, and the report reader rejects artifacts
+whose recorded `rdna4_matmul` source head differs. A reproducible checkout and
+production-only build starts with:
+
+```sh
+git clone https://github.com/kuhar/sanitizer-strategy.git rdna4_matmul
+git -C rdna4_matmul checkout 03431b8af28be2c3cad828bec77dfe8836d4a555
+VENV=/path/to/therock-venv PRODUCTION_ONLY=1 \
+  rdna4_matmul/build_and_test.sh --help
+```
+
+`build_and_test.sh` is the executable interface between this validator and the
+external project. The validator supplies the selected production kernel,
+oracle shape, benchmark duration or fixed iteration count, device-timing
+request, and output mode through the environment assembled in
+`consan_rdna4_matmul_validation.py`; that module is the frozen definition of
+the interface for this study.
+
 The `rdna4_matmul` source-level instrumentation catalog is not the workload
 binary: loading that catalog would make RocJITsu transform hundreds of
 unexecuted experimental kernels. Build the project-owned production-only
@@ -191,6 +224,25 @@ Use a new artifact root after any source, hook, binary, input, methodology, or
 failed-preparation change. Never merge samples from different checkpoints into
 one summary row.
 
+### Artifact retention and reproduction
+
+The eleven final artifact roots named by `consan_empirical_gfx1201.json` and
+listed in the generated results file are retained under
+`/home/jakub/rocjitsu/sanitizers/artifacts` in the study workspace. Together
+they currently occupy 1.2 GiB. They contain the raw rows, code objects,
+provenance, campaign summaries, and device-health observations required for a
+fresh `--check`; the checked-in generated report is not a substitute for those
+raw artifacts.
+
+These roots are workspace evidence, not repository contents, and no durable
+shared archive exists at this checkpoint. They must remain intact through
+landing and any decision based on this study. Before that workspace is cleaned,
+all eleven roots must be copied without renaming to a durable project-selected
+store. Until such a copy exists, another checkout can reproduce the procedure
+from the pinned sources but cannot independently re-verify the exact retained
+samples. Any later campaign uses a new root and updates the manifest instead of
+overwriting these results.
+
 ## Clean admission gate
 
 Before timing or fault trials, every workload/engine pair must:
@@ -211,7 +263,7 @@ behavior.
 Performance collection never injects a fault. Native and instrumented rows use
 the same workload binary, input, launch shape, and correctness oracle.
 
-Measure three distinct costs where the workload supports them:
+Record three distinct costs where the workload supports them:
 
 1. **Transformation and cold first-operation cost:** process start through the
    first accepted operation, with transformation time and workload execution
@@ -221,9 +273,15 @@ Measure three distinct costs where the workload supports them:
 3. **Warm device-kernel cost:** device timing for the workload kernel sequence,
    excluding process startup and one-time transformation.
 
-If bounded detector state makes repeated dispatches invalid, collect fresh
-single-operation processes and label the result cold. Do not compare that ratio
-to a warm row.
+Only the third cost is a qualifying performance metric. Transformation,
+first-operation, host, and process elapsed measurements remain useful
+operational diagnostics, but they do not enter overhead comparisons or the
+recommendation.
+
+If bounded detector state makes repeated dispatches invalid, collect one
+device-timed operation per fresh process and report it as an explicit
+single-dispatch exception. Do not generalize that ratio to steady-state
+throughput.
 
 The default final collection uses at least ten independent process rounds. A
 round brackets the instrumented modes with native baseline-before and
@@ -233,6 +291,15 @@ warm sample performs an untimed correctness-preserving warmup and enough timed
 iterations to exceed 250 ms in aggregate, unless the workload's state contract
 requires fresh processes. The native calibration fixes one iteration count for
 all engines in that campaign.
+
+Qualifying timing comes from native HIP events in the project harness, native
+HIP events around the exact GTest launch path, or PyTorch HIP events. The
+compiled-softmax calibration discards the compile transient, retains 100 GPU
+event samples, and sizes the common timed window from the fastest retained
+sample with 25% headroom. Stream-K is the sole exception to the 250 ms
+aggregate: repeated launches exceed ordinary ConSan dynamic-evidence capacity,
+so each row contains one real dispatch with a recorded 0.5 ms minimum and no
+warmup.
 
 A project-owned self-timed harness may satisfy the same 250 ms requirement
 internally. Its native calibration reports the exact launch count and measured
@@ -395,8 +462,9 @@ python3 rocm-systems/emulation/rocjitsu/tests/dbi/consan/consan_empirical_report
 
 The final fault specification is
 `consan_validation_faults_gfx1201_empirical.json`, byte-for-byte identical to
-the precommitted specification used by all 522 final trials. Its SHA-256 is
-`31199ce68876dc02792285c853a281770b83fc101af71a4d4c5ed5875743e5cf`.
+the reviewed specification materialized before all 522 final trials and now
+checked in. Its SHA-256 is
+`ac56252db119e9625fa9d7f90d7014a3c492c082e9e128f175d95dff2addada2`.
 
 ### Performance and resource summary
 
@@ -406,17 +474,17 @@ the precommitted specification used by all 522 final trials. Its SHA-256 is
   Shadow; Record/Replay had incomplete FP8 history, failed to transform llama,
   and emitted 512 clean access-conflict diagnoses on softmax; Inline Shadow did
   not cover the Stream-K accesses or atomics.
-- **Warm cost was moderate where a workload supported meaningful repetition.**
-  Sampled slowed the production FP8 device loop by 4.72x. On generated softmax,
-  warm host/device slowdowns were 1.02x/1.02x for SuperCollider,
-  1.44x/2.47x for Sampled, and 1.67x/3.34x for Inline Shadow. The three softmax
-  cold-process cells reached only 7/10 stable brackets and are deliberately
-  excluded; its cold-workload and warm cells are qualified.
-- **Fresh-process native tests are dominated by one-time analysis and
-  transformation.** Cold-workload slowdowns ranged from 11.23x to 14.89x for
-  llama, 19.97x to 24.52x for D128, and 47.30x to 61.87x for Stream-K. These are
-  operational costs for short sanitizer reproductions, not steady-state kernel
-  throughput estimates.
+- **GPU overhead is workload- and engine-dependent.** Sampled slowed the
+  production FP8 loop by 4.72x, llama by 1.47x, D128 by 1.04x, and generated
+  softmax by 2.47x. SuperCollider measured 2.99x on llama, 0.99x on D128, and
+  2.46x on softmax. Inline Shadow measured 3.87x, 1.40x, and 3.32x on those
+  same workloads. Record/Replay measured 4.14x on D128.
+- **Stream-K is not practical under the current ordinary implementation.** Its
+  constrained single-dispatch GPU slowdowns were 506.53x for SuperCollider,
+  632.83x for Sampled, and 703.19x for Record/Replay. These are valid native
+  event measurements, but the one-dispatch evidence-capacity constraint means
+  they are not steady-state throughput estimates. CPU/process timing is
+  retained only in the raw artifacts and is excluded from these conclusions.
 - **State and object costs separate the engines more clearly.** SuperCollider
   used no report allocation in admitted rows and grew modified objects by
   1.01x to 1.57x. Sampled used 0.01 MiB to 0.66 MiB of peak live report memory
@@ -435,9 +503,9 @@ the precommitted specification used by all 522 final trials. Its SHA-256 is
   of 88.6% within each 30-trial row. It diagnosed all 30 softmax trials even
   though the independent output oracle passed every time.
 - **Sampled traded breadth and low state for workload-dependent yield.** It
-  diagnosed 25/32 llama trials (78.1%, 95% interval 61.2% to 89.0%), 8/32 D128
-  trials (25.0%, 13.3% to 42.1%), and 2/32 softmax trials (6.25%, 1.7% to
-  20.1%). It diagnosed 0/32 FP8 trials, where the injected barrier drop also
+  diagnosed 21/32 llama trials (65.6%, 95% interval 48.3% to 79.6%), 8/32 D128
+  trials (25.0%, 13.3% to 42.1%), and 1/32 softmax trials (3.1%, 0.6% to
+  15.7%). It diagnosed 0/32 FP8 trials, where the injected barrier drop also
   produced no oracle manifestation, and 0/64 Stream-K atomic order/scope
   trials.
 - **Record/Replay supplied unique synchronization evidence.** It diagnosed
@@ -477,14 +545,15 @@ the precommitted specification used by all 522 final trials. Its SHA-256 is
 
 ## Empirical recommendation
 
-The recommendation is to make **Sampled the default general-purpose gfx1201
-ConSan mode**, while being explicit that a single run is only a sample. It is
-the only mode that cleanly admitted the entire corpus, its warm cost and report
-state were lower than Inline Shadow on the repeated workloads, and it found
-real barrier defects in native llama, owned HIP, and generated Triton kernels.
-Qualification and user guidance should prescribe a bounded offset sweep when
-confidence matters. The ordinary Sampled contract should not claim atomic
-order/scope coverage: both Stream-K faults were 0/32.
+The recommendation is to make **Sampled the default gfx1201 barrier/LDS triage
+mode**, while being explicit that a single run is only a sample. It is the only
+mode that cleanly admitted the entire corpus, cost 1.04x to 4.72x on the four
+repeatable GPU-timed workloads, and found real barrier defects in native llama,
+owned HIP, and generated Triton kernels. Qualification and user guidance should
+prescribe a bounded offset sweep when confidence matters. This is not a general
+atomic/fence contract: both Stream-K order/scope faults were 0/32 and the
+single-dispatch Sampled slowdown was 632.83x. Ordinary Sampled support should
+therefore exclude atomic order/scope claims until new evidence justifies them.
 
 Keep **Inline Shadow as an opt-in deterministic barrier/LDS diagnostic** only
 after its normal clean-coverage gate passes. Its 90/90 detection record is the
@@ -498,7 +567,8 @@ order and scope as its primary unique contract. Its 60/60 Stream-K result is
 the only evidence for those two fault classes, so retiring it would lose useful
 coverage. It should not be advertised as broadly supported until the FP8
 history, llama transformation, and clean softmax-diagnostic failures are fixed.
-Its high cold cost and report/ABI burden rule it out as the default.
+Its 703.19x constrained Stream-K GPU slowdown, 4.14x D128 slowdown, and
+report/ABI burden rule it out as the default.
 
 Remove **SuperCollider from the ordinary race-detection surface** and retain it
 only as an explicitly experimental perturbation probe while deciding whether
@@ -538,6 +608,28 @@ high-value class that no cheaper engine finds. Conversely, a cheap engine is
 not retained solely for low overhead if it produces no actionable evidence.
 The report must state uncertainty and preserve qualified misses rather than
 silently tuning a mode until it detects the selected fault.
+
+## Implementation follow-ups
+
+The empirical recommendation is deliberately separated from implementation
+work. The following issues are children of the existing cross-target ConSan
+support epic and carry the conclusions forward without changing this frozen
+evidence set:
+
+- `bd-2sjm.7`: encode the empirical gfx1201 supported-mode and semantic-family
+  policy in user-facing configuration, documentation, and qualification tests;
+- `bd-2sjm.8`: make Stream-K evidence scale across repeated dispatches before
+  claiming ordinary throughput or expanding its supported surface;
+- `bd-2sjm.9`: fix the FP8, llama, softmax, and Stream-K admission gaps before
+  broadening the corresponding engines; and
+- `bd-2sjm.10`: remove SuperCollider from ordinary race detection while
+  preserving an explicitly experimental path only if it remains useful.
+
+Future target studies should reuse the paired GPU-timestamp protocol and move
+target-specific policy into the manifest as those studies are scheduled. A
+recurring unattended regression gate needs durable artifact storage, stable
+physical runners, and bounded workload shapes before it can replace this
+point-in-time qualification.
 
 ## Execution order
 

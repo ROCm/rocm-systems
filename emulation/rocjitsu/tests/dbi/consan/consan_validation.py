@@ -1993,9 +1993,9 @@ def _manifest(target: str) -> dict:
 def _clean_environment(
     profile: str | None,
     workload: Workload,
-    hook: Path,
-    target: str | None = None,
-    workspace: Path | None = None,
+    hook: Path | None,
+    target: str | None,
+    workspace: Path,
 ) -> dict[str, str]:
     if target is not None:
         workload = _resolved_workload(target, workload)
@@ -2014,14 +2014,14 @@ def _clean_environment(
     if target is not None:
         environment["HIP_TARGET"] = target
     if workload.kind == "llama":
-        if workspace is None or target is None:
-            raise ValidationError(
-                "llama runtime environment requires a workspace and target"
-            )
+        if target is None:
+            raise ValidationError("llama runtime environment requires a target")
         runtime = _llama_runtime(workspace, target, workload.relative_path)
         _llama_library_environment(runtime, environment)
     if profile is None:
         return environment
+    if hook is None:
+        raise ValidationError("instrumented runtime environment requires a hook")
     config = PROFILES[profile]
     environment.update(config.environment)
     environment.update(
@@ -2048,7 +2048,7 @@ def _run_environment(
     hook: Path,
     target: str,
     phase: str,
-    workspace: Path | None = None,
+    workspace: Path,
 ) -> dict[str, str]:
     if phase not in {"clean", "overhead"}:
         raise ValidationError(f"unsupported validation phase: {phase}")
@@ -2603,9 +2603,7 @@ def _llama_runtime_identity(
     ldd = shutil.which("ldd")
     if ldd is None:
         raise ValidationError("cannot verify llama runtime closure: ldd is missing")
-    environment = _clean_environment(
-        None, workload, Path("/unused-consan-hook"), target, workspace
-    )
+    environment = _clean_environment(None, workload, None, target, workspace)
     try:
         completed = subprocess.run(
             [ldd, str(runtime.executable)],
@@ -2689,9 +2687,7 @@ def _workload_runtime_identity(
         return _llama_runtime_identity(workspace, target, workload)
     if workload.kind in {"gtest", "rdna4-matmul"}:
         executable = _input_files(workspace, target, workload)["executable"]
-        environment = _clean_environment(
-            None, workload, Path("/unused-consan-hook"), target, workspace
-        )
+        environment = _clean_environment(None, workload, None, target, workspace)
         return {
             "kind": workload.kind,
             "identity_source": "validated dynamic-loader closure",
@@ -2738,9 +2734,7 @@ print(json.dumps({
     packages = _command_identity(
         [str(python), "-c", script],
         timeout=TIMEOUT_SECONDS,
-        environment=_clean_environment(
-            None, workload, Path("/unused-consan-hook"), target, workspace
-        ),
+        environment=_clean_environment(None, workload, None, target, workspace),
     )
     if not packages.get("available"):
         raise ValidationError(
@@ -6325,7 +6319,7 @@ def _fault_trial_environment(
     fault: dict,
     policy: dict,
     trial: dict[str, str],
-    workspace: Path | None = None,
+    workspace: Path,
 ) -> dict[str, str]:
     environment = _clean_environment(profile, workload, hook, target, workspace)
     environment["CTEST_PARALLEL_LEVEL"] = "1"

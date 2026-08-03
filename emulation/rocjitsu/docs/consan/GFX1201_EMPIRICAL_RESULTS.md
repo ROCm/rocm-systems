@@ -7,92 +7,96 @@ It contains measurements only; interpretation and recommendations are in
 ## Verified provenance
 
 - Target: `gfx1201` on KFD node(s) `1`.
-- RocJITsu source: `cff57df4c926bc02483de04417632ec83320aaec`.
+- RocJITsu source: `2a4af5a44ad555d594b45a8d34d45f6983322e64`.
 - ConSan hook SHA-256: `b72109fb27a9f2edd49dac504e3469b536613dae2b34eb8b5be7961a180a6a6d`.
-- Fault specification SHA-256: `31199ce68876dc02792285c853a281770b83fc101af71a4d4c5ed5875743e5cf`.
+- Fault specification SHA-256: `ac56252db119e9625fa9d7f90d7014a3c492c082e9e128f175d95dff2addada2`.
 - Performance protocol: 10 accepted paired rounds, 5% maximum baseline drift, 10000 bootstrap resamples, seed `20260802`.
 - All retained fault campaigns use at least 30 reached, independently contained processes per applicable pair.
 
 ## Performance
 
-Ratios are paired medians against interpolated native baselines. Each qualified cell also gives
-absolute median latency, sample count, and the bootstrap 95% interval for the slowdown.
+Only GPU-timestamp-derived warm device measurements qualify for this table. CPU/process
+elapsed time is retained in raw artifacts as a secondary diagnostic and is excluded here.
+Ratios are paired medians against interpolated native baselines; cells also give absolute
+device latency, sample count, and the bootstrap 95% interval for the slowdown.
 
-| Workload | Engine | Admission | Cold process | Cold workload | Warm host | Warm device | Artifact |
-|---|---|---|---|---|---|---|---|
-| rdna4-matmul-fp8-production | SuperCollider | rejected: analysis incomplete; access=75/227 | — | — | — | — | bd-2wsf-perf-cff57df4c9-fp8-20260802 |
-| rdna4-matmul-fp8-production | Record/Replay | rejected: analysis incomplete; dynamic coverage incomplete; dynamic_incomplete=4079841 | — | — | — | — | bd-2wsf-perf-cff57df4c9-fp8-20260802 |
-| rdna4-matmul-fp8-production | Sampled | admitted | 2.11× / 1513.360 ms (n=11, CI 2.09–2.11×) | — | — | 4.72× / 2.859 ms (n=10, CI 4.71–4.74×) | bd-2wsf-perf-cff57df4c9-fp8-20260802 |
-| rdna4-matmul-fp8-production | Inline Shadow | rejected: analysis incomplete; access=215/227 | — | — | — | — | bd-2wsf-perf-cff57df4c9-fp8-20260802 |
-| llama-rdna4-mul-mat-vec-q | SuperCollider | admitted | 9.28× / 3136.203 ms (n=10, CI 9.00–9.90×) | 14.89× / 3010.138 ms (n=10, CI 14.48–15.87×) | — | — | bd-2wsf-perf-cff57df4c9-llama-20260802 |
-| llama-rdna4-mul-mat-vec-q | Record/Replay | rejected: runtime rejected (return codes 92) | — | — | — | — | bd-2wsf-perf-cff57df4c9-llama-20260802 |
-| llama-rdna4-mul-mat-vec-q | Sampled | admitted | 7.42× / 2491.132 ms (n=10, CI 7.11–7.62×) | 11.69× / 2356.324 ms (n=10, CI 11.30–12.07×) | — | — | bd-2wsf-perf-cff57df4c9-llama-20260802 |
-| llama-rdna4-mul-mat-vec-q | Inline Shadow | admitted | 7.13× / 2402.774 ms (n=10, CI 6.77–7.22×) | 11.23× / 2268.443 ms (n=10, CI 10.68–11.44×) | — | — | bd-2wsf-perf-cff57df4c9-llama-20260802 |
-| d128-block | SuperCollider | admitted | 14.08× / 2213.735 ms (n=10, CI 13.34–14.41×) | 19.97× / 2152.000 ms (n=11, CI 18.96–20.80×) | — | — | bd-2wsf-perf-cff57df4c9-d128-20260802 |
-| d128-block | Record/Replay | admitted | 17.60× / 2795.795 ms (n=10, CI 16.27–18.10×) | 24.52× / 2678.000 ms (n=11, CI 22.73–25.10×) | — | — | bd-2wsf-perf-cff57df4c9-d128-20260802 |
-| d128-block | Sampled | admitted | 15.51× / 2434.931 ms (n=10, CI 14.76–16.28×) | 22.42× / 2382.000 ms (n=11, CI 20.96–23.63×) | — | — | bd-2wsf-perf-cff57df4c9-d128-20260802 |
-| d128-block | Inline Shadow | admitted | 15.49× / 2433.415 ms (n=10, CI 14.62–16.13×) | 22.49× / 2424.000 ms (n=11, CI 21.07–23.18×) | — | — | bd-2wsf-perf-cff57df4c9-d128-20260802 |
-| streamk-arrival | SuperCollider | admitted | 28.07× / 2576.143 ms (n=11, CI 25.24–29.08×) | 47.30× / 2376.500 ms (n=10, CI 45.80–51.05×) | — | — | bd-2wsf-perf-cff57df4c9-streamk-20260802 |
-| streamk-arrival | Record/Replay | admitted | 35.08× / 3196.207 ms (n=11, CI 33.59–36.88×) | 61.87× / 3121.500 ms (n=10, CI 60.10–66.63×) | — | — | bd-2wsf-perf-cff57df4c9-streamk-20260802 |
-| streamk-arrival | Sampled | admitted | 32.97× / 3064.621 ms (n=11, CI 32.11–35.68×) | 58.23× / 2940.500 ms (n=10, CI 55.90–61.36×) | — | — | bd-2wsf-perf-cff57df4c9-streamk-20260802 |
-| streamk-arrival | Inline Shadow | rejected: analysis incomplete; dynamic coverage incomplete; access=0/4; atomic=0/15 | — | — | — | — | bd-2wsf-perf-cff57df4c9-streamk-20260802 |
-| pytorch-rdna4-compiled-softmax | SuperCollider | admitted | unqualified 7/10 | 1.03× / 996.763 ms (n=15, CI 1.00–1.26×) | 1.02× / 0.030 ms (n=19, CI 1.01–1.43×) | 1.02× / 0.008 ms (n=19, CI 1.01–2.42×) | bd-2wsf-perf-cff57df4c9-softmax-20260802 |
-| pytorch-rdna4-compiled-softmax | Record/Replay | rejected: replay diagnostics exceed declared maximum: observed=512, maximum=0; unexpected diagnostics=access-conflict | — | — | — | — | bd-2wsf-perf-cff57df4c9-softmax-20260802 |
-| pytorch-rdna4-compiled-softmax | Sampled | admitted | unqualified 7/10 | 1.01× / 970.504 ms (n=15, CI 1.00–1.19×) | 1.44× / 0.042 ms (n=19, CI 1.44–1.45×) | 2.47× / 0.019 ms (n=19, CI 2.46–2.48×) | bd-2wsf-perf-cff57df4c9-softmax-20260802 |
-| pytorch-rdna4-compiled-softmax | Inline Shadow | admitted | unqualified 7/10 | 1.09× / 1051.940 ms (n=15, CI 1.02–1.12×) | 1.67× / 0.048 ms (n=19, CI 1.65–1.67×) | 3.34× / 0.025 ms (n=19, CI 3.34–3.35×) | bd-2wsf-perf-cff57df4c9-softmax-20260802 |
+| Workload | Engine | Admission | GPU timing method | Warm device slowdown / latency | Artifact |
+|---|---|---|---|---|---|
+| rdna4-matmul-fp8-production | SuperCollider | rejected: analysis incomplete; access=75/227 | native HIP events in project harness; 521 timed dispatches per row | — | bd-2wsf-perf-2a4af5a44a-fp8-gpu-final-20260802 |
+| rdna4-matmul-fp8-production | Record/Replay | rejected: analysis incomplete; dynamic coverage incomplete; dynamic_incomplete=4079841 | native HIP events in project harness; 521 timed dispatches per row | — | bd-2wsf-perf-2a4af5a44a-fp8-gpu-final-20260802 |
+| rdna4-matmul-fp8-production | Sampled | admitted | native HIP events in project harness; 521 timed dispatches per row | 4.72× / 2.857 ms (n=10, CI 4.72–4.74×) | bd-2wsf-perf-2a4af5a44a-fp8-gpu-final-20260802 |
+| rdna4-matmul-fp8-production | Inline Shadow | rejected: analysis incomplete; access=215/227 | native HIP events in project harness; 521 timed dispatches per row | — | bd-2wsf-perf-2a4af5a44a-fp8-gpu-final-20260802 |
+| llama-rdna4-mul-mat-vec-q | SuperCollider | admitted | native HIP events in project harness; 40000 timed dispatches per row | 2.99× / 0.029 ms (n=10, CI 2.98–3.00×) | bd-2wsf-perf-2a4af5a44a-llama-gpu-final-20260802 |
+| llama-rdna4-mul-mat-vec-q | Record/Replay | rejected: runtime rejected (return codes 92) | native HIP events in project harness; 40000 timed dispatches per row | — | bd-2wsf-perf-2a4af5a44a-llama-gpu-final-20260802 |
+| llama-rdna4-mul-mat-vec-q | Sampled | admitted | native HIP events in project harness; 40000 timed dispatches per row | 1.47× / 0.014 ms (n=10, CI 1.46–1.47×) | bd-2wsf-perf-2a4af5a44a-llama-gpu-final-20260802 |
+| llama-rdna4-mul-mat-vec-q | Inline Shadow | admitted | native HIP events in project harness; 40000 timed dispatches per row | 3.87× / 0.038 ms (n=10, CI 3.86–3.90×) | bd-2wsf-perf-2a4af5a44a-llama-gpu-final-20260802 |
+| d128-block | SuperCollider | admitted | native HIP events in GTest launch path; 5 timed dispatches per row | 0.99× / 53.298 ms (n=10, CI 0.98–1.00×) | bd-2wsf-perf-2a4af5a44a-d128-gpu-final-20260802 |
+| d128-block | Record/Replay | admitted | native HIP events in GTest launch path; 5 timed dispatches per row | 4.14× / 220.316 ms (n=10, CI 4.03–4.17×) | bd-2wsf-perf-2a4af5a44a-d128-gpu-final-20260802 |
+| d128-block | Sampled | admitted | native HIP events in GTest launch path; 5 timed dispatches per row | 1.04× / 55.449 ms (n=10, CI 1.01–1.07×) | bd-2wsf-perf-2a4af5a44a-d128-gpu-final-20260802 |
+| d128-block | Inline Shadow | admitted | native HIP events in GTest launch path; 5 timed dispatches per row | 1.40× / 75.099 ms (n=10, CI 1.38–1.43×) | bd-2wsf-perf-2a4af5a44a-d128-gpu-final-20260802 |
+| streamk-arrival | SuperCollider | admitted | native HIP events in GTest launch path; 1 timed dispatch per row | 506.53× / 2352.629 ms (n=10, CI 472.73–548.70×) | bd-2wsf-perf-2a4af5a44a-streamk-gpu-final-20260802-r2 |
+| streamk-arrival | Record/Replay | admitted | native HIP events in GTest launch path; 1 timed dispatch per row | 703.19× / 3241.005 ms (n=10, CI 644.86–756.41×) | bd-2wsf-perf-2a4af5a44a-streamk-gpu-final-20260802-r2 |
+| streamk-arrival | Sampled | admitted | native HIP events in GTest launch path; 1 timed dispatch per row | 632.83× / 3031.387 ms (n=10, CI 618.36–658.69×) | bd-2wsf-perf-2a4af5a44a-streamk-gpu-final-20260802-r2 |
+| streamk-arrival | Inline Shadow | rejected: analysis incomplete; dynamic coverage incomplete; access=0/4; atomic=0/15 | native HIP events in GTest launch path; 1 timed dispatch per row | — | bd-2wsf-perf-2a4af5a44a-streamk-gpu-final-20260802-r2 |
+| pytorch-rdna4-compiled-softmax | SuperCollider | admitted | PyTorch HIP events; 39458 timed dispatches per row | 2.46× / 0.019 ms (n=10, CI 2.43–2.51×) | bd-2wsf-perf-2a4af5a44a-softmax-gpu-final-20260802 |
+| pytorch-rdna4-compiled-softmax | Record/Replay | rejected: replay diagnostics exceed declared maximum: observed=512, maximum=0; unexpected diagnostics=access-conflict | PyTorch HIP events; 39458 timed dispatches per row | — | bd-2wsf-perf-2a4af5a44a-softmax-gpu-final-20260802 |
+| pytorch-rdna4-compiled-softmax | Sampled | admitted | PyTorch HIP events; 39458 timed dispatches per row | 2.47× / 0.019 ms (n=10, CI 2.36–2.49×) | bd-2wsf-perf-2a4af5a44a-softmax-gpu-final-20260802 |
+| pytorch-rdna4-compiled-softmax | Inline Shadow | admitted | PyTorch HIP events; 39458 timed dispatches per row | 3.32× / 0.025 ms (n=10, CI 3.30–3.33×) | bd-2wsf-perf-2a4af5a44a-softmax-gpu-final-20260802 |
 
-An `unqualified` cell is retained but excluded from conclusions; all other shown timing cells meet the frozen sample requirement.
+Stream-K is the sole declared exception to the 250 ms aggregate rule: ordinary ConSan
+dynamic-evidence capacity permits one real dispatch per fresh process, so its single-dispatch
+GPU result is reported with that constraint and is not generalized to steady-state throughput.
 
 ## Structural cost
 
 | Workload | Engine | Patch | Waitcheck | Inventory | Object ratio | Modified bytes | Report peak | Transform peak | Descriptor growth | Spill | Unsupported resource attempts | Nonzero metadata deltas | Samples |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| rdna4-matmul-fp8-production | Sampled | 197.9 ms | 395.3 ms | 195.0 ms | 2.63× | 303632 → 799248 | 0.34 MiB | 4611.76 MiB reserved VA | 130 | 0 | 0 | 0 | 11 |
-| llama-rdna4-mul-mat-vec-q | SuperCollider | 652.5 ms | 1425.7 ms | 0.0 ms | 1.09× | 1532696 → 1671960 | 0.00 MiB | 4627.00 MiB reserved VA | 0 | 0 | 0 | 0 | 10 |
-| llama-rdna4-mul-mat-vec-q | Sampled | 333.3 ms | 1451.1 ms | 346.9 ms | 1.63× | 1532696 → 2499352 | 0.66 MiB | 4627.00 MiB reserved VA | 12 | 0 | 0 | 0 | 10 |
-| llama-rdna4-mul-mat-vec-q | Inline Shadow | 259.6 ms | 1434.7 ms | 350.2 ms | 2.09× | 1532696 → 3199768 | 2.70 MiB | 4627.00 MiB reserved VA | 124 | 0 | 0 | 0 | 10 |
-| d128-block | SuperCollider | 223.3 ms | 1601.8 ms | 0.0 ms | 1.01× | 323984 → 328080 | 0.00 MiB | 4612.02 MiB reserved VA | 0 | 0 | 0 | 0 | 11 |
-| d128-block | Record/Replay | 493.0 ms | 1620.7 ms | 249.9 ms | 1.16× | 323984 → 377232 | 57.61 MiB | 4612.02 MiB reserved VA | 20 | 0 | 10 | 0 | 11 |
-| d128-block | Sampled | 390.6 ms | 1616.2 ms | 221.5 ms | 1.14× | 323984 → 369040 | 0.02 MiB | 4612.02 MiB reserved VA | 20 | 0 | 10 | 0 | 11 |
-| d128-block | Inline Shadow | 401.5 ms | 1620.6 ms | 246.9 ms | 1.39× | 323984 → 450960 | 48.02 MiB | 4612.02 MiB reserved VA | 16 | 0 | 0 | 0 | 11 |
-| streamk-arrival | SuperCollider | 182.2 ms | 2025.2 ms | 0.0 ms | 1.01× | 342432 → 346528 | 0.00 MiB | 4612.25 MiB reserved VA | 0 | 0 | 0 | 0 | 16 |
-| streamk-arrival | Record/Replay | 655.6 ms | 2097.1 ms | 224.9 ms | 1.23× | 342432 → 420256 | 18.66 MiB | 4612.25 MiB reserved VA | 43 | 0 | 10 | 0 | 16 |
-| streamk-arrival | Sampled | 588.0 ms | 2110.2 ms | 225.5 ms | 1.13× | 342432 → 387488 | 0.01 MiB | 4612.25 MiB reserved VA | 27 | 0 | 10 | 0 | 16 |
-| pytorch-rdna4-compiled-softmax | SuperCollider | 0.5 ms | 11.0 ms | 0.0 ms | 1.57× | 7224 → 11320 | 0.00 MiB | 4608.58 MiB reserved VA | 0 | 0 | 0 | 0 | 20 |
-| pytorch-rdna4-compiled-softmax | Sampled | 2.3 ms | 8.1 ms | 3.4 ms | 3.83× | 7224 → 27704 | 0.01 MiB | 4608.58 MiB reserved VA | 10 | 0 | 0 | 0 | 20 |
-| pytorch-rdna4-compiled-softmax | Inline Shadow | 3.4 ms | 11.0 ms | 4.4 ms | 7.80× | 7224 → 56376 | 48.02 MiB | 4608.58 MiB reserved VA | 4 | 0 | 0 | 0 | 20 |
+| rdna4-matmul-fp8-production | Sampled | 199.1 ms | 408.5 ms | 194.4 ms | 2.63× | 303632 → 799248 | 0.34 MiB | 4611.76 MiB reserved VA | 130 | 0 | 0 | 0 / 390 compared | 11 |
+| llama-rdna4-mul-mat-vec-q | SuperCollider | 654.8 ms | 1432.9 ms | 0.0 ms | 1.09× | 1532696 → 1671960 | 0.00 MiB | 4627.00 MiB reserved VA | 0 | 0 | 0 | 0 / 1584 compared | 10 |
+| llama-rdna4-mul-mat-vec-q | Sampled | 336.9 ms | 1428.7 ms | 346.6 ms | 1.63× | 1532696 → 2499352 | 0.66 MiB | 4627.00 MiB reserved VA | 12 | 0 | 0 | 0 / 1584 compared | 10 |
+| llama-rdna4-mul-mat-vec-q | Inline Shadow | 238.3 ms | 1435.5 ms | 344.7 ms | 2.09× | 1532696 → 3199768 | 2.70 MiB | 4627.00 MiB reserved VA | 124 | 0 | 0 | 0 / 1584 compared | 10 |
+| d128-block | SuperCollider | 194.4 ms | 1577.6 ms | 0.0 ms | 1.01× | 323984 → 328080 | 0.00 MiB | 4612.02 MiB reserved VA | 0 | 0 | 0 | 0 / 12 compared | 10 |
+| d128-block | Record/Replay | 489.6 ms | 1603.7 ms | 248.1 ms | 1.16× | 323984 → 377232 | 57.61 MiB | 4612.02 MiB reserved VA | 20 | 0 | 10 | 0 / 12 compared | 10 |
+| d128-block | Sampled | 436.4 ms | 1610.1 ms | 248.0 ms | 1.14× | 323984 → 369040 | 0.02 MiB | 4612.02 MiB reserved VA | 20 | 0 | 10 | 0 / 12 compared | 10 |
+| d128-block | Inline Shadow | 389.1 ms | 1619.3 ms | 245.7 ms | 1.39× | 323984 → 450960 | 48.02 MiB | 4612.02 MiB reserved VA | 16 | 0 | 0 | 0 / 12 compared | 10 |
+| streamk-arrival | SuperCollider | 188.2 ms | 2137.0 ms | 0.0 ms | 1.01× | 342432 → 346528 | 0.00 MiB | 4612.25 MiB reserved VA | 0 | 0 | 0 | 0 / 12 compared | 22 |
+| streamk-arrival | Record/Replay | 660.6 ms | 2139.4 ms | 228.0 ms | 1.23× | 342432 → 420256 | 18.66 MiB | 4612.25 MiB reserved VA | 43 | 0 | 10 | 0 / 12 compared | 22 |
+| streamk-arrival | Sampled | 587.9 ms | 2136.9 ms | 234.8 ms | 1.13× | 342432 → 387488 | 0.01 MiB | 4612.25 MiB reserved VA | 27 | 0 | 10 | 0 / 12 compared | 22 |
+| pytorch-rdna4-compiled-softmax | SuperCollider | 0.4 ms | 9.5 ms | 0.0 ms | 1.57× | 7224 → 11320 | 0.00 MiB | 4608.58 MiB reserved VA | 0 | 0 | 0 | 0 / 6 compared | 12 |
+| pytorch-rdna4-compiled-softmax | Sampled | 2.5 ms | 8.4 ms | 3.4 ms | 3.83× | 7224 → 27704 | 0.01 MiB | 4608.58 MiB reserved VA | 10 | 0 | 0 | 0 / 6 compared | 12 |
+| pytorch-rdna4-compiled-softmax | Inline Shadow | 3.2 ms | 8.6 ms | 3.6 ms | 7.80× | 7224 → 56376 | 48.02 MiB | 4608.58 MiB reserved VA | 4 | 0 | 0 | 0 / 6 compared | 12 |
 
 Object sizes sum only code objects actually modified in each process. `Transform peak` is the
 maximum reserved virtual-address budget reported by the transformer, not resident memory.
 
 ## Detection
 
-| Workload | Fault | Engine | Reached | Oracle failures | Diagnoses | Wilson 95% | Unexpected clean diagnoses | Artifact |
-|---|---|---|---|---|---|---|---|---|
-| rdna4-matmul-fp8-production | barrier-drop | SuperCollider | not applicable | — | — | — | bd-2wsf-detection-cff57df4c9-fp8-20260802 |
-| rdna4-matmul-fp8-production | barrier-drop | Record/Replay | not applicable | — | — | — | bd-2wsf-detection-cff57df4c9-fp8-20260802 |
-| rdna4-matmul-fp8-production | barrier-drop | Sampled | 32/32 | 0/32 | 0/32 (0.0%) | 0.0–10.7% | 0/23 clean runs | bd-2wsf-detection-cff57df4c9-fp8-20260802 |
-| rdna4-matmul-fp8-production | barrier-drop | Inline Shadow | not applicable | — | — | — | bd-2wsf-detection-cff57df4c9-fp8-20260802 |
-| llama-rdna4-mul-mat-vec-q | barrier-drop | SuperCollider | 30/30 | 0/30 | 0/30 (0.0%) | 0.0–11.4% | 0/11 clean runs | bd-2wsf-detection-cff57df4c9-llama-20260802 |
-| llama-rdna4-mul-mat-vec-q | barrier-drop | Record/Replay | not applicable | — | — | — | bd-2wsf-detection-cff57df4c9-llama-20260802 |
-| llama-rdna4-mul-mat-vec-q | barrier-drop | Sampled | 32/32 | 28/32 | 25/32 (78.1%) | 61.2–89.0% | 0/11 clean runs | bd-2wsf-detection-cff57df4c9-llama-20260802 |
-| llama-rdna4-mul-mat-vec-q | barrier-drop | Inline Shadow | 30/30 | 5/30 | 30/30 (100.0%) | 88.6–100.0% | 0/11 clean runs | bd-2wsf-detection-cff57df4c9-llama-20260802 |
-| d128-block | barrier-drop | SuperCollider | 30/30 | 30/30 | 0/30 (0.0%) | 0.0–11.4% | 0/12 clean runs | bd-2wsf-detection-cff57df4c9-d128-20260802 |
-| d128-block | barrier-drop | Record/Replay | 30/30 | 30/30 | 30/30 (100.0%) | 88.6–100.0% | 0/12 clean runs | bd-2wsf-detection-cff57df4c9-d128-20260802 |
-| d128-block | barrier-drop | Sampled | 32/32 | 32/32 | 8/32 (25.0%) | 13.3–42.1% | 0/12 clean runs | bd-2wsf-detection-cff57df4c9-d128-20260802 |
-| d128-block | barrier-drop | Inline Shadow | 30/30 | 30/30 | 30/30 (100.0%) | 88.6–100.0% | 0/12 clean runs | bd-2wsf-detection-cff57df4c9-d128-20260802 |
-| streamk-arrival | atomic-weaken-order | SuperCollider | 30/30 | 0/30 | 0/30 (0.0%) | 0.0–11.4% | 0/17 clean runs | bd-2wsf-detection-cff57df4c9-streamk-order-20260802 |
-| streamk-arrival | atomic-weaken-order | Record/Replay | 30/30 | 0/30 | 30/30 (100.0%) | 88.6–100.0% | 0/17 clean runs | bd-2wsf-detection-cff57df4c9-streamk-order-20260802 |
-| streamk-arrival | atomic-weaken-order | Sampled | 32/32 | 0/32 | 0/32 (0.0%) | 0.0–10.7% | 0/17 clean runs | bd-2wsf-detection-cff57df4c9-streamk-order-20260802 |
-| streamk-arrival | atomic-weaken-order | Inline Shadow | not applicable | — | — | — | bd-2wsf-detection-cff57df4c9-streamk-order-20260802 |
-| streamk-arrival | atomic-weaken-scope | SuperCollider | 30/30 | 0/30 | 0/30 (0.0%) | 0.0–11.4% | 0/17 clean runs | bd-2wsf-detection-cff57df4c9-streamk-scope-20260802 |
-| streamk-arrival | atomic-weaken-scope | Record/Replay | 30/30 | 0/30 | 30/30 (100.0%) | 88.6–100.0% | 0/17 clean runs | bd-2wsf-detection-cff57df4c9-streamk-scope-20260802 |
-| streamk-arrival | atomic-weaken-scope | Sampled | 32/32 | 0/32 | 0/32 (0.0%) | 0.0–10.7% | 0/17 clean runs | bd-2wsf-detection-cff57df4c9-streamk-scope-20260802 |
-| streamk-arrival | atomic-weaken-scope | Inline Shadow | not applicable | — | — | — | bd-2wsf-detection-cff57df4c9-streamk-scope-20260802 |
-| pytorch-rdna4-compiled-softmax | barrier-drop | SuperCollider | 30/30 | 0/30 | 0/30 (0.0%) | 0.0–11.4% | 0/41 clean runs | bd-2wsf-detection-cff57df4c9-softmax-20260802 |
-| pytorch-rdna4-compiled-softmax | barrier-drop | Record/Replay | not applicable | — | — | — | bd-2wsf-detection-cff57df4c9-softmax-20260802 |
-| pytorch-rdna4-compiled-softmax | barrier-drop | Sampled | 32/32 | 2/32 | 2/32 (6.2%) | 1.7–20.1% | 0/41 clean runs | bd-2wsf-detection-cff57df4c9-softmax-20260802 |
-| pytorch-rdna4-compiled-softmax | barrier-drop | Inline Shadow | 30/30 | 0/30 | 30/30 (100.0%) | 88.6–100.0% | 0/41 clean runs | bd-2wsf-detection-cff57df4c9-softmax-20260802 |
+| Workload | Fault | Engine | Reached | Reach basis | Oracle failures | Diagnoses | Wilson 95% | Unexpected clean diagnoses | Artifact |
+|---|---|---|---|---|---|---|---|---|---|
+| rdna4-matmul-fp8-production | barrier-drop | SuperCollider | not applicable | — | — | — | — | — | bd-2wsf-detection-2a4af5a44a-fp8-gpu-final-20260802 |
+| rdna4-matmul-fp8-production | barrier-drop | Record/Replay | not applicable | — | — | — | — | — | bd-2wsf-detection-2a4af5a44a-fp8-gpu-final-20260802 |
+| rdna4-matmul-fp8-production | barrier-drop | Sampled | 32/32 | reviewed proof=32 | 0/32 | 0/32 (0.0%) | 0.0–10.7% | pass (23 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-fp8-gpu-final-20260802 |
+| rdna4-matmul-fp8-production | barrier-drop | Inline Shadow | not applicable | — | — | — | — | — | bd-2wsf-detection-2a4af5a44a-fp8-gpu-final-20260802 |
+| llama-rdna4-mul-mat-vec-q | barrier-drop | SuperCollider | 30/30 | reviewed proof=30 | 0/30 | 0/30 (0.0%) | 0.0–11.4% | pass (21 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-llama-gpu-final-20260802 |
+| llama-rdna4-mul-mat-vec-q | barrier-drop | Record/Replay | not applicable | — | — | — | — | — | bd-2wsf-detection-2a4af5a44a-llama-gpu-final-20260802 |
+| llama-rdna4-mul-mat-vec-q | barrier-drop | Sampled | 32/32 | detector runtime=21; oracle runtime=11 | 29/32 | 21/32 (65.6%) | 48.3–79.6% | pass (21 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-llama-gpu-final-20260802 |
+| llama-rdna4-mul-mat-vec-q | barrier-drop | Inline Shadow | 30/30 | detector runtime=30 | 8/30 | 30/30 (100.0%) | 88.6–100.0% | pass (21 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-llama-gpu-final-20260802 |
+| d128-block | barrier-drop | SuperCollider | 30/30 | oracle runtime=30 | 30/30 | 0/30 (0.0%) | 0.0–11.4% | pass (21 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-d128-gpu-final-20260802 |
+| d128-block | barrier-drop | Record/Replay | 30/30 | detector runtime=30 | 30/30 | 30/30 (100.0%) | 88.6–100.0% | pass (21 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-d128-gpu-final-20260802 |
+| d128-block | barrier-drop | Sampled | 32/32 | detector runtime=8; oracle runtime=24 | 32/32 | 8/32 (25.0%) | 13.3–42.1% | pass (21 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-d128-gpu-final-20260802 |
+| d128-block | barrier-drop | Inline Shadow | 30/30 | detector runtime=30 | 30/30 | 30/30 (100.0%) | 88.6–100.0% | pass (21 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-d128-gpu-final-20260802 |
+| streamk-arrival | atomic-weaken-order | SuperCollider | 30/30 | reviewed proof=30 | 0/30 | 0/30 (0.0%) | 0.0–11.4% | pass (45 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-streamk-order-gpu-final-20260802 |
+| streamk-arrival | atomic-weaken-order | Record/Replay | 30/30 | detector runtime=30 | 0/30 | 30/30 (100.0%) | 88.6–100.0% | pass (45 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-streamk-order-gpu-final-20260802 |
+| streamk-arrival | atomic-weaken-order | Sampled | 32/32 | reviewed proof=32 | 0/32 | 0/32 (0.0%) | 0.0–10.7% | pass (45 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-streamk-order-gpu-final-20260802 |
+| streamk-arrival | atomic-weaken-order | Inline Shadow | not applicable | — | — | — | — | — | bd-2wsf-detection-2a4af5a44a-streamk-order-gpu-final-20260802 |
+| streamk-arrival | atomic-weaken-scope | SuperCollider | 30/30 | reviewed proof=30 | 0/30 | 0/30 (0.0%) | 0.0–11.4% | pass (45 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-streamk-scope-gpu-final-20260802 |
+| streamk-arrival | atomic-weaken-scope | Record/Replay | 30/30 | detector runtime=30 | 0/30 | 30/30 (100.0%) | 88.6–100.0% | pass (45 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-streamk-scope-gpu-final-20260802 |
+| streamk-arrival | atomic-weaken-scope | Sampled | 32/32 | reviewed proof=32 | 0/32 | 0/32 (0.0%) | 0.0–10.7% | pass (45 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-streamk-scope-gpu-final-20260802 |
+| streamk-arrival | atomic-weaken-scope | Inline Shadow | not applicable | — | — | — | — | — | bd-2wsf-detection-2a4af5a44a-streamk-scope-gpu-final-20260802 |
+| pytorch-rdna4-compiled-softmax | barrier-drop | SuperCollider | 30/30 | reviewed proof=30 | 0/30 | 0/30 (0.0%) | 0.0–11.4% | pass (25 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-softmax-gpu-final-20260802 |
+| pytorch-rdna4-compiled-softmax | barrier-drop | Record/Replay | not applicable | — | — | — | — | — | bd-2wsf-detection-2a4af5a44a-softmax-gpu-final-20260802 |
+| pytorch-rdna4-compiled-softmax | barrier-drop | Sampled | 32/32 | detector runtime=1; oracle runtime=1; reviewed proof=30 | 2/32 | 1/32 (3.1%) | 0.6–15.7% | pass (25 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-softmax-gpu-final-20260802 |
+| pytorch-rdna4-compiled-softmax | barrier-drop | Inline Shadow | 30/30 | detector runtime=30 | 0/30 | 30/30 (100.0%) | 88.6–100.0% | pass (25 runs; 0 diagnostics) | bd-2wsf-detection-2a4af5a44a-softmax-gpu-final-20260802 |
 
 ## Mechanical complexity inventory
 
@@ -107,16 +111,16 @@ The two ConSan production directories contain 65 text/build files and 81531 line
 
 ## Artifact inventory
 
-- Performance: `bd-2wsf-perf-cff57df4c9-fp8-20260802`
-- Performance: `bd-2wsf-perf-cff57df4c9-llama-20260802`
-- Performance: `bd-2wsf-perf-cff57df4c9-d128-20260802`
-- Performance: `bd-2wsf-perf-cff57df4c9-streamk-20260802`
-- Performance: `bd-2wsf-perf-cff57df4c9-softmax-20260802`
-- Detection: `bd-2wsf-detection-cff57df4c9-fp8-20260802`
-- Detection: `bd-2wsf-detection-cff57df4c9-llama-20260802`
-- Detection: `bd-2wsf-detection-cff57df4c9-d128-20260802`
-- Detection: `bd-2wsf-detection-cff57df4c9-streamk-order-20260802`
-- Detection: `bd-2wsf-detection-cff57df4c9-streamk-scope-20260802`
-- Detection: `bd-2wsf-detection-cff57df4c9-softmax-20260802`
+- Performance: `bd-2wsf-perf-2a4af5a44a-fp8-gpu-final-20260802`
+- Performance: `bd-2wsf-perf-2a4af5a44a-llama-gpu-final-20260802`
+- Performance: `bd-2wsf-perf-2a4af5a44a-d128-gpu-final-20260802`
+- Performance: `bd-2wsf-perf-2a4af5a44a-streamk-gpu-final-20260802-r2`
+- Performance: `bd-2wsf-perf-2a4af5a44a-softmax-gpu-final-20260802`
+- Detection: `bd-2wsf-detection-2a4af5a44a-fp8-gpu-final-20260802`
+- Detection: `bd-2wsf-detection-2a4af5a44a-llama-gpu-final-20260802`
+- Detection: `bd-2wsf-detection-2a4af5a44a-d128-gpu-final-20260802`
+- Detection: `bd-2wsf-detection-2a4af5a44a-streamk-order-gpu-final-20260802`
+- Detection: `bd-2wsf-detection-2a4af5a44a-streamk-scope-gpu-final-20260802`
+- Detection: `bd-2wsf-detection-2a4af5a44a-softmax-gpu-final-20260802`
 
-Generated-content SHA-256: `4b4987cbab4b27bfb959ce15f4f743e36bcc648dd5e6c0cbad34cecdbc7c55a1`
+Generated-content SHA-256: `21485db2b238ddb7e3cb3c99a38a245896157772e608f640939421d8ae6ad044`

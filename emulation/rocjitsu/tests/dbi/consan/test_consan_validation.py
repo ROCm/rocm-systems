@@ -2241,7 +2241,11 @@ class ConSanValidationTest(unittest.TestCase):
             clear=False,
         ):
             environment = validation._clean_environment(
-                "record-replay", workload, Path("/new/hook.so")
+                "record-replay",
+                workload,
+                Path("/new/hook.so"),
+                None,
+                Path("/workspace"),
             )
         self.assertNotIn("RJ_CONSAN_MAX_PATCHES", environment)
         self.assertNotIn("RJ_CONSAN_TMP_VGPR", environment)
@@ -2268,9 +2272,15 @@ class ConSanValidationTest(unittest.TestCase):
             {"HSA_TOOLS_ROCPROFILER_V1_TOOLS": "0"},
             clear=False,
         ):
-            baseline = validation._clean_environment(None, workload, Path("/hook.so"))
+            baseline = validation._clean_environment(
+                None, workload, None, None, Path("/workspace")
+            )
             environment = validation._clean_environment(
-                "record-replay", workload, Path("/hook.so")
+                "record-replay",
+                workload,
+                Path("/hook.so"),
+                None,
+                Path("/workspace"),
             )
         self.assertNotIn("HSA_TOOLS_ROCPROFILER_V1_TOOLS", baseline)
         self.assertEqual(environment["HSA_TOOLS_ROCPROFILER_V1_TOOLS"], "1")
@@ -2296,7 +2306,7 @@ class ConSanValidationTest(unittest.TestCase):
     def test_supercollider_does_not_receive_moi_tracking_controls(self) -> None:
         workload = validation.WORKLOAD_BY_ID["streamk-arrival"]
         environment = validation._clean_environment(
-            "supercollider", workload, Path("/hook.so")
+            "supercollider", workload, Path("/hook.so"), None, Path("/workspace")
         )
         self.assertNotIn("RJ_CONSAN_MOI_TRACK_BARRIERS", environment)
         self.assertNotIn("RJ_CONSAN_MOI_TRACK_ATOMICS", environment)
@@ -2307,7 +2317,7 @@ class ConSanValidationTest(unittest.TestCase):
         workload = validation.WORKLOAD_BY_ID["pytorch-scatter-reduce"]
         for profile in ("record-replay", "inline-shadow"):
             environment = validation._clean_environment(
-                profile, workload, Path("/hook.so")
+                profile, workload, Path("/hook.so"), None, Path("/workspace")
             )
             self.assertEqual(environment["RJ_CONSAN_MOI_REQUIRE_RECORDS"], "0")
 
@@ -2315,10 +2325,10 @@ class ConSanValidationTest(unittest.TestCase):
         qwen = validation.WORKLOAD_BY_ID["qwen-prefill"]
         tp1 = validation.WORKLOAD_BY_ID["tp1-prefill"]
         qwen_environment = validation._clean_environment(
-            "sampled", qwen, Path("/hook.so")
+            "sampled", qwen, Path("/hook.so"), None, Path("/workspace")
         )
         tp1_environment = validation._clean_environment(
-            "sampled", tp1, Path("/hook.so")
+            "sampled", tp1, Path("/hook.so"), None, Path("/workspace")
         )
         self.assertEqual(qwen_environment["RJ_CONSAN_MOI_REQUIRE_RECORDS"], "1")
         self.assertNotIn("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", qwen_environment)
@@ -2503,6 +2513,7 @@ class ConSanValidationTest(unittest.TestCase):
             validation.WORKLOAD_BY_ID["pytorch-torch-mode"],
             hook,
             "gfx1201",
+            Path("/workspace"),
         )
         topk_clean = validation._run_environment(
             "record-replay",
@@ -2510,6 +2521,7 @@ class ConSanValidationTest(unittest.TestCase):
             hook,
             "gfx1201",
             "clean",
+            Path("/workspace"),
         )
 
         self.assertEqual(clean_gate["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
@@ -2521,6 +2533,7 @@ class ConSanValidationTest(unittest.TestCase):
             hook,
             "gfx1201",
             "overhead",
+            Path("/workspace"),
         )
         self.assertEqual(overhead["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
         for profile in ("sampled", "inline-shadow"):
@@ -2531,6 +2544,7 @@ class ConSanValidationTest(unittest.TestCase):
                     hook,
                     "gfx1201",
                     "clean",
+                    Path("/workspace"),
                 )
                 self.assertEqual(other_engine["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
 
@@ -2544,6 +2558,7 @@ class ConSanValidationTest(unittest.TestCase):
                 Path("/workspace/hook.so"),
                 "gfx1201",
                 "fault",
+                Path("/workspace"),
             )
 
     def test_coverage_output_overhead_uses_the_same_diagnostic_contract(
@@ -2738,6 +2753,7 @@ class ConSanValidationTest(unittest.TestCase):
             {"environment": {}},
             {"detector": "not_detected"},
             {},
+            Path("/workspace"),
         )
         self.assertEqual(environment["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
 
@@ -3544,6 +3560,7 @@ class ConSanValidationTest(unittest.TestCase):
                     validation.WORKLOAD_BY_ID[workload_id],
                     Path("/workspace/hook.so"),
                     target,
+                    Path("/workspace"),
                 )
                 for target, workload_id in (
                     ("gfx942", "qwen-prefill"),
@@ -3555,6 +3572,7 @@ class ConSanValidationTest(unittest.TestCase):
                 validation.WORKLOAD_BY_ID["pytorch-torch-mode"],
                 Path("/workspace/hook.so"),
                 "gfx1250",
+                Path("/workspace"),
             )
         for target, environment in native_cdna.items():
             with self.subTest(target=target):
@@ -6265,6 +6283,7 @@ class ConSanValidationTest(unittest.TestCase):
                 fault,
                 policy,
                 {},
+                Path("/workspace"),
             )
             self.assertEqual(environment["RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE"], "1")
         self.assertEqual(fault["environment"]["RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR"], "54")
