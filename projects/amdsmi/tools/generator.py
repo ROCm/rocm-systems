@@ -263,8 +263,6 @@ def main():
 # alternate .so explicitly.
 # ---------------------------------------------------------------------------
 
-_libraries = {{}}
-
 
 # SONAME the system rpm/deb ships and the relocatable tree names. Always the
 # system lib, never the wheel-private libamd_smi_python.so, even when the
@@ -309,12 +307,17 @@ def _load_library():
 
     # Relocatable ROCm tree: <root>/lib/<SONAME>, one fixed location relative
     # to this file, tried before the bare-SONAME linker lookup (not a search).
-    # amdsmi_interface.py resolves librocm-core.so the same way.
+    # amdsmi_interface.py resolves librocm-core.so the same way. A
+    # present-but-unloadable file (missing deps) must not shadow the system
+    # linker lookup, so fall through on OSError.
     here = Path(__file__).resolve()
     if len(here.parents) > 3:
         relocatable = here.parents[3] / "lib" / _AMDSMI_LIB_SONAME
         if relocatable.exists():
-            return ctypes.CDLL(str(relocatable), mode=mode), str(relocatable)
+            try:
+                return ctypes.CDLL(str(relocatable), mode=mode), str(relocatable)
+            except OSError:
+                pass
 
     return ctypes.CDLL(_AMDSMI_LIB_SONAME, mode=mode), _AMDSMI_LIB_SONAME
 

@@ -88,6 +88,8 @@ struct TranslateOptions {
 
 struct TranslateOutput {
   std::vector<uint8_t> elf_bytes;
+  /// 64-bit FNV-1a identity of the exact selected source code-object bytes.
+  uint64_t source_code_object_id = 0;
   rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_INVALID;
   uint32_t target_mach = 0;
   ProcessorRevision input_revision = ProcessorRevision::Unspecified;

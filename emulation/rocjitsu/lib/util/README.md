@@ -1,8 +1,8 @@
 # Shared Utilities
 
 The `util` library provides low-level building blocks shared across
-rocjitsu and simdojo. It is a header-heavy library with minimal
-compiled sources.
+rocjitsu and simdojo. It is header-only: the CMake target is an
+INTERFACE library that contributes an include path and nothing to link.
 
 ## Headers
 
@@ -59,6 +59,5 @@ All headers are under `lib/util/include/util/` and can be included as:
 #include "util/bit.h"
 ```
 
-Header-only consumers link `util_headers` in CMake. The `util` target links
-`util_headers` publicly and adds the small compiled SIMD implementation used by
-rocjitsu and simdojo.
+`util` is header-only: consumers link the `util` INTERFACE target in CMake,
+which contributes the include path and nothing else.

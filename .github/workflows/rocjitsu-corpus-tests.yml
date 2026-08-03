@@ -23,9 +23,9 @@ on:
         default: "ROCm/rocjitsu-test-corpus"
         required: true
       corpus_ref:
-        description: "Branch, tag, or SHA containing the packaged-HSACO DBT suite"
-        # Last updated on 2026/07/28.
-        default: "4c232fc5da6e42bb8fb16e2d8797b3415afeca47"
+        description: "Branch, tag, or SHA containing the gfx1250 corpus suites"
+        # Last updated on 2026/07/29.
+        default: "42944a3ff37490441dcd0f1838e289a419af082d"
         required: true
       legacy_corpus_ref:
         description: "Branch, tag, or SHA for the existing corpus tests"
@@ -49,7 +49,7 @@ env:
   ROCJITSU_DBT_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-dbt-test-corpus
   ROCJITSU_DBT_VENV: ${{ github.workspace }}/gfx1250-dbt-venv-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
-  ROCM_SDK_VERSION: 7.14.0a20260624
+  ROCM_SDK_VERSION: 7.15.0a20260728
   UV_VERSION: 0.9.26
 
 jobs:
@@ -72,6 +72,7 @@ jobs:
             # leaves substantial runner headroom while this release-only gate lands.
             verify_dbt_idempotence: 1
             dbt_timeout: 60
+            dbt_memory_limit_mib: 4096
             dbt_job_timeout: 20
             test_regex: ''
             build_type: Release
@@ -85,7 +86,8 @@ jobs:
             # Keep the first corpus gate on the fastest lane. Focused second-pass
             # paths remain covered by the sanitizer test suite.
             verify_dbt_idempotence: 0
-            dbt_timeout: 90
+            dbt_timeout: 180
+            dbt_memory_limit_mib: 4096
             dbt_job_timeout: 30
             test_regex: ''
             build_type: RelWithDebInfo
@@ -98,6 +100,7 @@ jobs:
             allow_failure: false
             verify_dbt_idempotence: 0
             dbt_timeout: 30
+            dbt_memory_limit_mib: 4096
             dbt_job_timeout: 20
             run_static_asan_launch: true
             test_regex: ''
@@ -110,7 +113,10 @@ jobs:
           - name: asan-ubsan-gcc
             allow_failure: true
             verify_dbt_idempotence: 0
-            dbt_timeout: 90
+            # GCC's combined sanitizers need additional headroom on the largest
+            # packaged code objects.
+            dbt_timeout: 180
+            dbt_memory_limit_mib: 8192
             dbt_job_timeout: 30
             test_regex: ''
             build_type: RelWithDebInfo
@@ -154,13 +160,13 @@ jobs:
           ref: ${{ github.event.inputs.legacy_corpus_ref || 'aa54cc86c9ebff3eb840743b36ff8d9b3b2d43c4' }}
           path: rocjitsu-test-corpus
 
-      - name: Checkout rocjitsu DBT corpus
+      - name: Checkout gfx1250 corpus
         if: matrix.enable_tsan == 0
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/07/28.
-          ref: ${{ github.event.inputs.corpus_ref || '4c232fc5da6e42bb8fb16e2d8797b3415afeca47' }}
+          # Last updated on 2026/07/29.
+          ref: ${{ github.event.inputs.corpus_ref || '42944a3ff37490441dcd0f1838e289a419af082d' }}
           path: rocjitsu-dbt-test-corpus
 
       - name: Set up Python
@@ -338,6 +344,62 @@ jobs:
           bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-corpus-tests.sh" "${corpus_test_flags[@]}" || corpus_test_status=$?
           exit "${corpus_test_status}"
 
+      - name: Compare plain and translated gfx1250 simulator runs
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' }}
+        timeout-minutes: 45
+        working-directory: ${{ env.ROCJITSU_DBT_CORPUS_DIR }}
+        shell: bash
+        env:
+          ROCJITSU_SEMANTIC_TIMEOUT_SECONDS: 120
+        run: |
+          ROCM_PATH="$(rocm-sdk path --root)"
+          export ROCM_PATH
+          LAUNCHER="${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu"
+          CONFIG="${ROCJITSU_SOURCE_DIR}/configs/gfx1250.json"
+          HOTSWAP="${ROCJITSU_BUILD_DIR}/lib/rocjitsu/src/rocjitsu/hooks/libhsa_hotswap_rocjitsu.so"
+          test -f "${HOTSWAP}"
+          # Disable ROCr's built-in mechanism in both legs. Load the branch-built
+          # hook explicitly so the candidate leg qualifies this checkout. Keep
+          # every env option before the shared NAME=VALUE assignment.
+          COMMON_UNSETS="-u LD_PRELOAD -u HSA_HOTSWAP_ENABLE"
+          COMMON_HOTSWAP_ENV="HSA_HOTSWAP_DISABLE=1"
+          PLAIN_WRAPPER="env ${COMMON_UNSETS} -u HSA_TOOLS_LIB -u HSA_TOOLS_DISABLE_REGISTER -u HSA_HOTSWAP_VERBOSE ${COMMON_HOTSWAP_ENV} ${LAUNCHER} --config ${CONFIG} --"
+          TRANSLATED_WRAPPER="env ${COMMON_UNSETS} ${COMMON_HOTSWAP_ENV} HSA_TOOLS_DISABLE_REGISTER=1 HSA_TOOLS_LIB=${HOTSWAP} HSA_HOTSWAP_VERBOSE=1 ${LAUNCHER} --config ${CONFIG} --"
+
+          python3 "${ROCJITSU_SOURCE_DIR}/tests/corpus/test-validate-gfx1250-semantic-translations.py"
+
+          python3 -m pytest tests/test_corpus.py \
+            --target gfx1250 \
+            --suite semantics \
+            --run-tests-config "${ROCJITSU_SOURCE_DIR}/tests/corpus/gfx1250_b0_a0_semantic_tests.json" \
+            --run-wrapper "${PLAIN_WRAPPER}" \
+            --comparison-run-wrapper "${TRANSLATED_WRAPPER}" \
+            --comparison-required-stderr "[hsa-hotswap-rj] eager translation " \
+            --comparison-required-stderr "outcome=translated" \
+            --comparison-required-stderr "translation_status=0 status=0" \
+            --artifact-directory .pytest-artifacts/gfx1250-semantic-qualification \
+            --timeout "${ROCJITSU_SEMANTIC_TIMEOUT_SECONDS}" \
+            -q \
+            --tb=short
+
+          python3 "${ROCJITSU_SOURCE_DIR}/tests/corpus/validate-gfx1250-semantic-translations.py" \
+            --translator "${ROCJITSU_BUILD_DIR}/tools/rj_dbt_translate" \
+            --selection "${ROCJITSU_SOURCE_DIR}/tests/corpus/gfx1250_b0_a0_semantic_tests.json" \
+            --expectations "${ROCJITSU_SOURCE_DIR}/tests/corpus/gfx1250_b0_a0_semantic_rewrites.json" \
+            --artifact-directory .pytest-artifacts/gfx1250-semantic-qualification \
+            --expected-runtime-translations 2
+
+      - name: Upload gfx1250 semantic qualification logs
+        if: ${{ always() && matrix.name == 'release' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gfx1250-semantic-qualification-${{ matrix.name }}
+          path: |
+            ${{ env.ROCJITSU_DBT_CORPUS_DIR }}/.pytest-artifacts/gfx1250-semantic-qualification/**/logs
+            ${{ env.ROCJITSU_DBT_CORPUS_DIR }}/.pytest-artifacts/gfx1250-semantic-qualification/translation-diffs
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Extract pinned gfx1250 packaged HSACOs
         id: extract_dbt
         if: ${{ !cancelled() && matrix.enable_tsan == 0 && steps.build_rocjitsu.outcome == 'success' }}
@@ -393,8 +455,10 @@ jobs:
             --dbt-expected-rewrites "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_expected_rewrites.json" \
             --dbt-allow-incomplete-corpus \
             --dbt-timeout "${{ matrix.dbt_timeout }}" \
+            --dbt-memory-limit-mib "${{ matrix.dbt_memory_limit_mib }}" \
             --artifact-directory .pytest-artifacts/gfx1250-dbt \
             -n "${DBT_WORKERS}" \
+            --durations=0 \
             -q \
             -rxX \
             --tb=short
