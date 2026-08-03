@@ -23,7 +23,7 @@
  * @ingroup MemoryTest
  * `hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes,
  * size_t count, hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
- * hipStream_t stream __dparm(0))`
+ * size_t* failIdx, hipStream_t stream __dparm(0))`
  *
  * Perform a batch of 1D copies.
  */
