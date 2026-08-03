@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/kfd/dlog_drain.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 
 // Active (v5) dispatch-log profiler ABI. Must be the ONLY kfd ioctl header in
 // this translation unit (it conflicts with lib/rocprofiler-sdk/details/kfd_ioctl.h).
@@ -444,9 +445,28 @@ drain_records(dlog_session* s)
         [](uint32_t doorbell_off, uint32_t dispatch_id, uint64_t start_ticks, uint64_t end_ticks) {
             uint32_t slot = doorbell_off_to_page_slot(doorbell_off);
             uint32_t gen  = doorbell_map().get_generation(slot);
+            auto     key  = correlation_key{slot, dispatch_id, gen};
+
+            // Signal-less dispatch: this EOP IS the completion event (G3). Record
+            // the start on the entry, then claim it -- the hub decides the single
+            // result-vs-loss winner under its own lock and hands back the owned
+            // payload. The reader converts nothing, emits nothing, and runs no
+            // client callback; it only proves completion and hands off, holding no
+            // hub/results/doorbell lock while it does (invariant 11).
+            //
+            // drain_loss_free is true here because the current drain publishes only
+            // matched pairs; the real per-drain overrun verdict is plumbed through
+            // with the leak-and-shout stage.
+            signal_less_hub().note_start(key, start_ticks);
+            if(auto _proven = signal_less_hub().prove_eop(key, end_ticks, /*loss_free=*/true))
+            {
+                hand_off_proven(std::move(*_proven));
+                return;
+            }
+
+            // Signal-backed dispatch: unchanged rendezvous deposit.
             results_map().deposit(
-                correlation_key{slot, dispatch_id, gen},
-                kfd_timing_result{start_ticks, end_ticks, common::timestamp_ns()});
+                key, kfd_timing_result{start_ticks, end_ticks, common::timestamp_ns()});
         });
 }
 

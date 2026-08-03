@@ -507,6 +507,74 @@ async_signal_handler(hsa_signal_t                            completion_signal,
     }
 }
 
+// The no-signal finalizer. Runs on an async task-group worker -- or, for a
+// permanently rejected submission, on the thread flushing the retry owner -- and
+// NEVER on the reader thread or under a hub lock.
+//
+// There is deliberately no HSA fallback: a signal-less dispatch never had an SDK
+// signal and the app may already have destroyed its own, so a convert/sanity
+// failure emits no record but still retires the correlation id (the EOP already
+// proved the kernel finished).
+void
+no_signal_finalize(kfd::signal_less_hub_t::proven&& proven)
+{
+    auto& _payload    = proven.payload;
+    auto* _rocp_agent = agent::get_agent(_payload.agent_id);
+    auto  _hsa_agent  = agent::get_hsa_agent(_rocp_agent);
+
+    auto _convert = [&_hsa_agent](uint64_t ticks, uint64_t* out) {
+        if(!_hsa_agent) return false;
+        const auto* _ext = get_amd_ext_table();
+        if(!_ext || !_ext->hsa_amd_profiling_convert_tick_to_system_domain_fn) return false;
+        return _ext->hsa_amd_profiling_convert_tick_to_system_domain_fn(
+                   *_hsa_agent, ticks, out) == HSA_STATUS_SUCCESS;
+    };
+
+    auto _emit = [&_payload](uint64_t start_ns, uint64_t end_ns) {
+        kernel_dispatch::emit_kernel_dispatch_record(_payload.tracing_data,
+                                                     _payload.callback_record,
+                                                     _payload.correlation_id,
+                                                     _payload.tid,
+                                                     start_ns,
+                                                     end_ns);
+    };
+
+    // Retires exactly once whatever the outcome, and even if a client callback
+    // throws (run_no_signal_finalizer arms this from a scope destructor).
+    auto _retire = [&_payload]() {
+        auto* _corr_id = _payload.correlation_id;
+        if(!_corr_id) return;
+        ROCP_FATAL_IF(_corr_id->get_ref_count() == 0)
+            << "reference counter for correlation id " << _corr_id->internal
+            << " has no reference count";
+        _corr_id->sub_kern_count();
+        _corr_id->sub_ref_count();
+    };
+
+    kfd::run_no_signal_finalizer(proven.start_ticks,
+                                 proven.end_ticks,
+                                 _payload.enqueue_ts,
+                                 common::timestamp_ns(),
+                                 _convert,
+                                 _emit,
+                                 _retire);
+}
+
+// Hand a proven completion to the async task group. Moves out of `proven` only
+// on acceptance, so a rejected entry stays intact for the retry owner.
+kfd::submit_result
+submit_no_signal_finalize(kfd::signal_less_hub_t::proven& proven)
+{
+    auto* _tg = get_async_signal_handler();
+    if(!_tg || registration::get_fini_status() != 0) return kfd::submit_result::rejected_permanent;
+
+    // task_group_t::async takes a std::function, which must be copy-constructible;
+    // the payload is move-only, so it travels in a shared_ptr.
+    auto _held = std::make_shared<kfd::signal_less_hub_t::proven>(std::move(proven));
+    _tg->async([_held]() { no_signal_finalize(std::move(*_held)); });
+    return kfd::submit_result::accepted;
+}
+
 bool
 is_dispatch_packet(const rocprofiler_packet& pkt)
 {
@@ -1461,6 +1529,14 @@ interposition_init(CoreApiTable* core_table, bool enabled)
     // attachment is not supported; in attachment mode this has been observed to deadlock.
     // TODO(rocprofiler-sdk): root-cause the attachment-mode deadlock so it can be enabled there.
     s_intercept_dynamic.store(!registration::supports_attachment(), std::memory_order_release);
+
+    // Install the signal-less completion hooks before any queue -- and therefore
+    // any eligible batch or firmware record -- can exist, so the reader thread
+    // never observes a half-installed set.
+    kfd::install_signal_less_ops(kfd::signal_less_ops{submit_no_signal_finalize,
+                                                      [](kfd::signal_less_hub_t::proven&& p) {
+                                                          no_signal_finalize(std::move(p));
+                                                      }});
 
     // mark that intercept has been installed
     s_intercept_installed.store(true, std::memory_order_release);

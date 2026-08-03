@@ -23,13 +23,16 @@
 #pragma once
 
 #include "lib/rocprofiler-sdk/kfd/dispatch_hub.hpp"
+#include "lib/rocprofiler-sdk/kfd/no_signal_finalizer.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 
 // Signal-less kernel-dispatch completion: the owned payload the hub carries for
 // each pending dispatch, plus the process-wide hub instance. The feature flag and
@@ -71,6 +74,43 @@ using signal_less_hub_t = DispatchHub<pending_payload>;
 // Process-wide hub. Backed by common::static_object for ordered teardown.
 signal_less_hub_t&
 signal_less_hub();
+
+// How the KFD reader reaches the completion machinery without depending on the
+// HSA interposition layer (which in turn depends on the hub). The interposition
+// layer installs these once at init, before any queue -- and therefore any
+// eligible batch -- can exist.
+struct signal_less_ops
+{
+    // Hand a proven completion to the async task group. Must move out of `p` ONLY
+    // when returning `accepted`; on rejection the entry is left intact so the
+    // retry owner can finalize it later.
+    std::function<submit_result(signal_less_hub_t::proven&)> submit = {};
+
+    // Run the no-signal finalizer synchronously on the CALLING thread. Used only
+    // by the retry-owner flush, which runs on the teardown thread -- never on the
+    // reader thread.
+    std::function<void(signal_less_hub_t::proven&&)> finalize_in_place = {};
+};
+
+void
+install_signal_less_ops(signal_less_ops ops);
+
+// Reader-side handoff for a proven completion. Submits to the task group and,
+// if the executor refuses, parks the entry in the bounded retry owner. It never
+// runs a client callback on the caller's thread (invariant 11) except in the
+// documented retry-owner overflow case.
+void
+hand_off_proven(signal_less_hub_t::proven&& p);
+
+// Drain the retry owner on the CALLING thread: re-submit what the executor still
+// takes, finalize the rest in place. Teardown step 4 calls this; it is defined
+// here so no EOP-proven completion can be dropped in the meantime.
+size_t
+flush_retry_owner();
+
+// Diagnostics / tests.
+size_t
+retry_owner_size();
 
 }  // namespace kfd
 }  // namespace rocprofiler

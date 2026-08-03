@@ -17,7 +17,8 @@ set(ROCPROFILER_LIB_KFD_EVENT_HEADERS
     dlog_drain.hpp
     dispatch_hub.hpp
     signal_less.hpp
-    signal_less_gate.hpp)
+    signal_less_gate.hpp
+    no_signal_finalizer.hpp)
 
 target_sources(
     rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_KFD_EVENT_SOURCES}

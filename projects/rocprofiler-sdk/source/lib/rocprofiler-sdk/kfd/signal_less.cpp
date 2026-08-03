@@ -27,6 +27,9 @@
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 
+#include <atomic>
+#include <utility>
+
 namespace rocprofiler
 {
 namespace kfd
@@ -52,6 +55,76 @@ signal_less_feature_enabled()
         return true;
     }();
     return _enabled;
+}
+
+namespace
+{
+// Installed once at interposition init, before any queue exists, and published
+// with a release store that the acquire load below pairs with -- so the reader
+// thread either sees no ops at all or sees fully-constructed ones.
+signal_less_ops&
+ops_storage()
+{
+    static auto*& _v = common::static_object<signal_less_ops>::construct();
+    return *_v;
+}
+
+std::atomic<bool>&
+ops_ready()
+{
+    static auto _v = std::atomic<bool>{false};
+    return _v;
+}
+
+retry_owner<signal_less_hub_t::proven>&
+retry()
+{
+    static auto*& _v =
+        common::static_object<retry_owner<signal_less_hub_t::proven>>::construct();
+    return *_v;
+}
+}  // namespace
+
+void
+install_signal_less_ops(signal_less_ops ops)
+{
+    ops_storage() = std::move(ops);
+    ops_ready().store(true, std::memory_order_release);
+}
+
+void
+hand_off_proven(signal_less_hub_t::proven&& p)
+{
+    if(!ops_ready().load(std::memory_order_acquire)) return;
+    auto& _ops = ops_storage();
+
+    auto _result = _ops.submit(p);
+    if(_result == submit_result::accepted) return;
+
+    // The executor is closing: stop trying, the flush will finalize what is held.
+    if(_result == submit_result::rejected_permanent) retry().close();
+
+    // Deliberately NOT finalized here. This runs on the reader thread, which must
+    // never execute a client callback (invariant 11), and an EOP-proven entry can
+    // never become LEAKED -- so it is parked until the teardown flush finalizes it
+    // on a normal SDK thread.
+    if(!retry().hold(std::move(p), _ops.finalize_in_place))
+        ROCP_WARNING << "KFD dispatch-log: signal-less retry owner is full; a completion was "
+                        "finalized on the calling thread";
+}
+
+size_t
+flush_retry_owner()
+{
+    if(!ops_ready().load(std::memory_order_acquire)) return 0;
+    auto& _ops = ops_storage();
+    return retry().flush(_ops.submit, _ops.finalize_in_place);
+}
+
+size_t
+retry_owner_size()
+{
+    return retry().size();
 }
 
 bool
