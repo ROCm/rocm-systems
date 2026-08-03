@@ -481,6 +481,9 @@ stop_reader()
     auto& st = state();
     if(!st.running) return;
 
+    // Latch unavailable before the join so no dispatch can acquire a correlation
+    // key against a reader that is on its way out (cleared again below).
+    st.setup_failed.store(true, std::memory_order_release);
     st.stop.store(true, std::memory_order_release);
     if(st.wake_fd >= 0)
     {
@@ -578,7 +581,19 @@ reader_loop()
         int       rc          = ::poll(&wake, 1, _timeout_ms);
         if(rc < 0 && errno != EINTR)
         {
-            ROCP_WARNING << "KFD dispatch-log reader: poll failed, exiting reader loop";
+            // Reader dead: nothing will drain the ring again, so publish that
+            // terminally. Clearing session_ready + latching setup_failed is the
+            // same permanent-unavailable state setup failure uses, and makes
+            // ensure_reader_session() refuse to hand out new correlation keys;
+            // dispatches already in flight simply miss and use HSA timestamps.
+            // kfd_dispatch_log_available() is deliberately left alone so queue
+            // destroy still retires doorbell-map entries.
+            st.session_ready.store(false, std::memory_order_release);
+            st.setup_failed.store(true, std::memory_order_release);
+            ROCP_WARNING << fmt::format(
+                "KFD dispatch-log reader: poll failed (errno={}), reader exiting; dispatch-log is "
+                "now disabled for this process, all dispatches use HSA timestamps",
+                errno);
             break;
         }
         if(wake.revents & POLLIN)
@@ -702,10 +717,12 @@ ensure_reader_session(uint32_t gpu_id)
     if(!kfd_dispatch_log_available() || !gpu_supports_dispatch_log(gpu_id)) return false;
 
     auto& st = state();
+    // setup_failed is checked FIRST so it overrides a still-published session: a
+    // dead or stopping reader latches it while session_ready may still be set.
+    if(st.setup_failed.load(std::memory_order_acquire)) return false;
     // The session's gpu_id is written before session_ready is released and never
     // mutated afterwards, so this acquire-load makes it safe to read unlocked.
     if(st.session_ready.load(std::memory_order_acquire)) return st.session.gpu_id == gpu_id;
-    if(st.setup_failed.load(std::memory_order_acquire)) return false;
 
     auto lk = std::lock_guard<std::mutex>{st.setup_mu};
     if(st.session_ready.load(std::memory_order_relaxed))
