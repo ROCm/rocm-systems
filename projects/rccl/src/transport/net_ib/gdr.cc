@@ -7,8 +7,7 @@
 
 #include "common.h"
 #include "graph/xml.h"
-
-#include <dirent.h>
+#include "gdr_peermem.h"
 
 // Detect whether GDR can work on a given NIC with the current CUDA device
 // Returns :
@@ -42,19 +41,7 @@ static void ibGdrSupportInitOnce() {
     const char* memory_peers_paths[] = {"/sys/kernel/mm/memory_peers", "/sys/kernel/memory_peers",
                                         "/sys/memory_peers", NULL};
 
-    for (int i = 0; memory_peers_paths[i] && ncclIbGdrModuleLoaded == 0; ++i) {
-      DIR* dir = opendir(memory_peers_paths[i]);
-      if (dir == NULL) continue;
-      struct dirent* entry;
-      while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_name[0] == '.') continue;
-        if (entry->d_type != DT_DIR && entry->d_type != DT_UNKNOWN) continue;
-        ncclIbGdrModuleLoaded = 1;
-        INFO(NCCL_INIT, "Found peer memory client %s/%s", memory_peers_paths[i], entry->d_name);
-        break;
-      }
-      closedir(dir);
-    }
+    if (ncclIbScanPeerMemClients(memory_peers_paths)) ncclIbGdrModuleLoaded = 1;
 
     char strValue[MAX_STR_LEN];
     (void)ncclTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue);
