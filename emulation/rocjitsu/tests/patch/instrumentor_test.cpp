@@ -3,6 +3,8 @@
 
 #include "rocjitsu/code/patch/instrumentor.h"
 
+#include "rocjitsu/analysis/exec_state.h"
+#include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
@@ -648,7 +650,8 @@ std::vector<uint8_t> make_gfx950_elf_with_two_nops() {
 // tests/dbt/translate_test.cpp; fold both into a shared test-fixture header (see
 // the duplication note above) in a follow-up.
 std::vector<uint8_t> make_gfx950_elf_with_kd(const std::vector<uint32_t> &text_words,
-                                             uint64_t entry_byte_offset) {
+                                             uint64_t entry_byte_offset,
+                                             uint16_t kernarg_preload = 0) {
   constexpr uint64_t kTextVaddr = 0x1000;
   constexpr uint64_t kKdVaddr = 0x2000;
   constexpr uint64_t kKdSize = 64; // sizeof(rocr::llvm::amdhsa::kernel_descriptor_t)
@@ -671,6 +674,9 @@ std::vector<uint8_t> make_gfx950_elf_with_kd(const std::vector<uint32_t> &text_w
   const int64_t entry_delta =
       static_cast<int64_t>(kTextVaddr + entry_byte_offset) - static_cast<int64_t>(kKdVaddr);
   std::memcpy(kd.data() + 16, &entry_delta, sizeof(entry_delta));
+  // kernarg_preload (uint16 at offset 58): its low 7 bits are the preload spec
+  // length, whose nonzero value gives CDNA3/CDNA4 a firmware entry at entry+256.
+  std::memcpy(kd.data() + 58, &kernarg_preload, sizeof(kernarg_preload));
 
   // Two symbols: the mandatory null entry plus the "kern.kd" descriptor.
   std::array<Elf64_Sym, 2> syms{};
@@ -965,7 +971,7 @@ TEST(Instrumentor, KernelEntryInteriorToFallthroughBlockIsInstrumentable) {
   auto image = make_gfx950_elf_with_kd(text, /*entry_byte_offset=*/8);
   AmdGpuCodeObject obj(image.data(), image.size());
   ASSERT_TRUE(obj.is_valid());
-  const auto entries = obj.kernel_entry_text_offsets();
+  const auto entries = obj.kernel_entry_text_offsets(kArch);
   ASSERT_EQ(entries.size(), 1u);
   ASSERT_EQ(entries.front(), 8u);
 
@@ -990,7 +996,7 @@ TEST(Instrumentor, ReadableKernelEntryWithNoExactBlockFailsClosed) {
   auto image = make_gfx950_elf_with_kd(text, /*entry_byte_offset=*/8);
   AmdGpuCodeObject obj(image.data(), image.size());
   ASSERT_TRUE(obj.is_valid());
-  const auto entries = obj.kernel_entry_text_offsets();
+  const auto entries = obj.kernel_entry_text_offsets(kArch);
   ASSERT_EQ(entries.size(), 1u);
   ASSERT_EQ(entries.front(), 8u);
 
@@ -1001,6 +1007,86 @@ TEST(Instrumentor, ReadableKernelEntryWithNoExactBlockFailsClosed) {
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("no basic block"), std::string::npos)
       << "error was: " << result.errors.front();
+}
+
+TEST(Instrumentor, KernargPreloadFirmwareEntryEnumeratedAndPinnedUnknown) {
+  // A CDNA4 descriptor with a nonzero KERNARG_PRELOAD_SPEC_LENGTH has two hardware
+  // entries: the descriptor entry at .text[0] and the firmware kernarg-preload
+  // window at .text[256]. The descriptor entry writes EXEC all-ones and falls
+  // through to +256, so the ordinary path reaches the firmware entry with EXEC
+  // Full -- but firmware may jump straight to +256 with unknown EXEC, so once
+  // kernel_entry_text_offsets() enumerates it, that entry must stay Unknown.
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kSMovExecAllOnes = 0xBEFE01C1u; // s_mov_b64 exec, -1
+  constexpr uint32_t kVMovV0S0 = 0x7E000200u;        // v_mov_b32 v0, s0
+  std::vector<uint32_t> text{kSMovExecAllOnes};      // .text[0]: descriptor entry
+  while (text.size() < 64)                           // pad the ordinary path to +256
+    text.push_back(build_s_nop(0, kArch));
+  text.push_back(kVMovV0S0);           // .text[256]: firmware entry def
+  text.push_back(build_s_endpgm(kArch));
+
+  auto image = make_gfx950_elf_with_kd(text, /*entry_byte_offset=*/0, /*kernarg_preload=*/1);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  // Both hardware entries are enumerated: the descriptor entry plus +256.
+  const auto entries = obj.kernel_entry_text_offsets(kArch);
+  ASSERT_EQ(entries.size(), 2u);
+  EXPECT_NE(std::ranges::find(entries, 0u), entries.end());
+  EXPECT_NE(std::ranges::find(entries, 256u), entries.end());
+
+  // Build blocks with the enumerated entries as leaders, as the instrumentor
+  // does, so a block starts at +256.
+  auto decoder = Decoder::create(kArch);
+  const auto blocks = BasicBlock::build(obj, *decoder, kArch, entries);
+  std::vector<BasicBlock *> scope;
+  scope.reserve(blocks.size());
+  for (const auto &block : blocks)
+    scope.push_back(block.get());
+
+  std::vector<const BasicBlock *> entry_blocks;
+  BasicBlock *entry_block = nullptr;
+  BasicBlock *firmware_block = nullptr;
+  for (BasicBlock *block : scope) {
+    if (block == nullptr)
+      continue;
+    if (std::ranges::find(entries, block->start_offset()) != entries.end())
+      entry_blocks.push_back(block);
+    if (block->start_offset() == 0u)
+      entry_block = block;
+    if (block->start_offset() == 256u)
+      firmware_block = block;
+  }
+  ASSERT_NE(entry_block, nullptr);
+  ASSERT_NE(firmware_block, nullptr);
+
+  const Instruction *s_mov = nullptr;
+  for (const Instruction &inst : entry_block->instructions()) {
+    s_mov = &inst;
+    break;
+  }
+  ASSERT_NE(s_mov, nullptr);
+  EXPECT_EQ(s_mov->mnemonic(), "s_mov_b64");
+  const Instruction *firmware_entry = nullptr;
+  for (const Instruction &inst : firmware_block->instructions()) {
+    firmware_entry = &inst;
+    break;
+  }
+  ASSERT_NE(firmware_entry, nullptr);
+  EXPECT_TRUE(firmware_entry->mnemonic().starts_with("v_mov_b32"));
+
+  // Establishing Full on the ordinary path needs the s_mov to carry RESULT_COPY.
+  ASSERT_TRUE(s_mov->flags() & RESULT_COPY)
+      << "s_mov lacks RESULT_COPY; regenerate ISA to enable EXEC-Full tracking";
+
+  const uint8_t wave_size = obj.kernel_wavefront_size(kArch);
+  // Without pinning, the ordinary fallthrough carries Full into +256; enumerating
+  // and pinning the firmware entry keeps it Unknown despite that Full predecessor.
+  const ExecMaskAnalysis unpinned{KernelBlockScope(scope), wave_size};
+  EXPECT_EQ(unpinned.before(*firmware_entry), ExecState::Full);
+  const ExecMaskAnalysis pinned{KernelBlockScope(scope), wave_size, /*extra_edges=*/{},
+                                entry_blocks};
+  EXPECT_EQ(pinned.before(*firmware_entry), ExecState::Unknown);
 }
 
 //==============================================================================

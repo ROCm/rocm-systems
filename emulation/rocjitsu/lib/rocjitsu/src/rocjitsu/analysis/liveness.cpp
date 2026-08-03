@@ -150,16 +150,15 @@ std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
   return postorder;
 }
 
-LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, const ExecMaskAnalysis &exec,
+LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, ExecMaskAnalysis exec,
                                    LivenessAnalysisOptions options,
                                    std::span<const ScopedCfgEdge> extra_edges) {
   min_free_vgpr_ = options.min_free_vgpr;
   max_free_vgpr_ =
       static_cast<uint16_t>(std::min<size_t>(options.max_free_vgpr, REGISTER_SET_MAX_VGPRS));
-  // Capture the EXEC-state analysis now; the backward dataflow is deferred to the
-  // first query (ensure_analyzed), by which point the caller's exec temporary is
-  // gone, so hold a copy for the deferred analyze() to consult for kills.
-  exec_ = std::make_unique<ExecMaskAnalysis>(exec);
+  // Own the EXEC-state analysis; the backward dataflow is deferred to the first
+  // query (ensure_analyzed), which consults it for kills.
+  exec_ = std::make_unique<ExecMaskAnalysis>(std::move(exec));
   deferred_blocks_.assign(blocks.begin(), blocks.end());
   scoped_blocks_.reserve(blocks.size());
   for (const BasicBlock *block : blocks) {

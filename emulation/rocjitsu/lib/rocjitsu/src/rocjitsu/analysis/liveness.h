@@ -144,7 +144,8 @@ public:
   /// @param blocks Blocks in one kernel CFG scope.
   /// @param exec Program-point EXEC-state analysis over the same @p blocks scope;
   /// lets EXEC-masked vector defs count as kills where EXEC is provably full.
-  LivenessAnalysis(KernelBlockScope blocks, const ExecMaskAnalysis &exec,
+  /// Taken by value and moved into the analysis; `std::move` it in.
+  LivenessAnalysis(KernelBlockScope blocks, ExecMaskAnalysis exec,
                    LivenessAnalysisOptions options = {},
                    std::span<const ScopedCfgEdge> extra_edges = {});
   ~LivenessAnalysis();

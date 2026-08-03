@@ -350,9 +350,16 @@ uint8_t AmdGpuCodeObject::kernel_wavefront_size(rj_code_arch_t arch) const {
   return (saw_kernel && all_wave32) ? 32 : 64;
 }
 
-std::vector<uint64_t> AmdGpuCodeObject::kernel_entry_text_offsets() const {
+std::vector<uint64_t> AmdGpuCodeObject::kernel_entry_text_offsets(rj_code_arch_t arch) const {
   namespace kd = rocr::llvm::amdhsa;
   using KD = kd::kernel_descriptor_t;
+
+  // CDNA3/CDNA4 implement kernarg preloading through the legacy firmware
+  // compatibility window: compatible firmware enters 256 bytes past the
+  // descriptor entry, so a preload kernel has a second hardware entry there.
+  constexpr int64_t kKernargPreloadSkipBytes = 256;
+  const bool preload_firmware_skip =
+      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
 
   std::vector<uint64_t> offsets;
   for (const auto &[name, kd_vaddr] : kd_offsets_) {
@@ -375,6 +382,20 @@ std::vector<uint64_t> AmdGpuCodeObject::kernel_entry_text_offsets() const {
             static_cast<uint64_t>(entry_vaddr) < tbase + text->size()) {
           offsets.push_back(static_cast<uint64_t>(entry_vaddr) - tbase);
           break;
+        }
+      }
+      // A nonzero KERNARG_PRELOAD_SPEC_LENGTH lets compatible firmware enter the
+      // +256 window directly with unknown EXEC, so seed that second entry too.
+      if (preload_firmware_skip &&
+          AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH) != 0) {
+        const int64_t firmware_vaddr = entry_vaddr + kKernargPreloadSkipBytes;
+        for (const Section *text : text_sections()) {
+          const uint64_t tbase = text->vaddr();
+          if (static_cast<uint64_t>(firmware_vaddr) >= tbase &&
+              static_cast<uint64_t>(firmware_vaddr) < tbase + text->size()) {
+            offsets.push_back(static_cast<uint64_t>(firmware_vaddr) - tbase);
+            break;
+          }
         }
       }
       break;

@@ -362,7 +362,7 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   // not start a block and would be silently dropped by the entry match below;
   // a preceding `s_mov exec, -1` could then make it look Full even though
   // hardware may enter with unknown EXEC, licensing unsound VGPR kills.
-  const std::vector<uint64_t> entry_offsets = obj_.kernel_entry_text_offsets();
+  const std::vector<uint64_t> entry_offsets = obj_.kernel_entry_text_offsets(arch_);
   blocks_ = BasicBlock::build(obj_, *decoder_, arch_, entry_offsets);
   // BasicBlock::build returns blocks in .text order. Keep clause state across
   // block boundaries because a branch target may split the linear instruction
@@ -554,16 +554,17 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   const std::span<const uint8_t> original_text = patcher.text_bytes();
   const auto liveness_edges =
       scoped_call_liveness_edges(KernelBlockScope(liveness_scope), original_text);
-  const auto entry_offsets = obj_.kernel_entry_text_offsets();
+  const auto entry_offsets = obj_.kernel_entry_text_offsets(arch_);
   const std::unordered_set<uint64_t> entry_offset_set(entry_offsets.begin(), entry_offsets.end());
   std::vector<const BasicBlock *> entry_blocks;
   for (BasicBlock *block : liveness_scope) {
     if (block != nullptr && entry_offset_set.contains(block->start_offset()))
       entry_blocks.push_back(block);
   }
-  const ExecMaskAnalysis exec{KernelBlockScope(liveness_scope), obj_.kernel_wavefront_size(arch_),
-                              liveness_edges, entry_blocks};
-  const LivenessAnalysis liveness{KernelBlockScope(liveness_scope), exec, {}, liveness_edges};
+  ExecMaskAnalysis exec{KernelBlockScope(liveness_scope), obj_.kernel_wavefront_size(arch_),
+                        liveness_edges, entry_blocks};
+  const LivenessAnalysis liveness{KernelBlockScope(liveness_scope), std::move(exec), {},
+                                  liveness_edges};
 
   // Lay out the appended region as [probe bodies][trampolines]. Each distinct
   // probe body is copied once, ahead of the trampolines that call into it, so a

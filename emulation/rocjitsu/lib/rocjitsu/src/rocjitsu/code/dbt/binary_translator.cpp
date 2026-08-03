@@ -1622,11 +1622,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           }
         }
       }
-      const ExecMaskAnalysis exec(KernelBlockScope(scope.blocks),
-                                  scope.translation->guest_wavefront_size, liveness_edges,
-                                  entry_blocks);
-      liveness =
-          LivenessAnalysis(KernelBlockScope(scope.blocks), exec, liveness_options, liveness_edges);
+      ExecMaskAnalysis exec(KernelBlockScope(scope.blocks),
+                            scope.translation->guest_wavefront_size, liveness_edges, entry_blocks);
+      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), std::move(exec), liveness_options,
+                                  liveness_edges);
     }
 
     std::unordered_map<uint64_t, const Instruction *> source_instruction_by_offset;

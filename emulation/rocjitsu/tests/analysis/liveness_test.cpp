@@ -3653,8 +3653,8 @@ TEST(ExecFlagsRealDecode, Cdna4SMovExecAllOnesPromotesVgprDefToKill) {
 
   // Proving EXEC=Full from `s_mov exec, -1` needs the s_mov to carry RESULT_COPY,
   // which only exists once the ISA is regenerated with the combinator metadata.
-  if (!(insts[0]->flags() & RESULT_COPY))
-    GTEST_SKIP() << "s_mov lacks RESULT_COPY; regenerate ISA to enable EXEC-Full tracking";
+  ASSERT_TRUE(insts[0]->flags() & RESULT_COPY)
+      << "s_mov lacks RESULT_COPY; regenerate ISA to enable EXEC-Full tracking";
 
   // EXEC is provably full at the def, so its vector write is a real kill.
   auto scope = block_scope(blocks);
@@ -3704,8 +3704,8 @@ TEST(ExecFlagsRealDecode, Cdna4WritelaneDestStaysLiveUnderFullExec) {
   EXPECT_EQ(*dst_ref, (RegisterRef{RegClass::VGPR, 5, 1}));
 
   // Full-EXEC tracking needs the regenerated s_mov RESULT_COPY metadata.
-  if (!(insts[0]->flags() & RESULT_COPY))
-    GTEST_SKIP() << "s_mov lacks RESULT_COPY; regenerate ISA to enable EXEC-Full tracking";
+  ASSERT_TRUE(insts[0]->flags() & RESULT_COPY)
+      << "s_mov lacks RESULT_COPY; regenerate ISA to enable EXEC-Full tracking";
 
   auto scope = block_scope(blocks);
   ExecMaskAnalysis exec{KernelBlockScope(scope), 64};

@@ -81,13 +81,16 @@ public:
   /// EXEC-mask analysis) unless every kernel descriptor is readable and Wave32.
   [[nodiscard]] uint8_t kernel_wavefront_size(rj_code_arch_t arch) const;
 
-  /// @brief Text-section-relative entry offset of each readable kernel.
+  /// @brief Text-section-relative entry offset of each hardware kernel entry.
   ///
   /// @details Decodes each descriptor's `kernel_code_entry_byte_offset` and maps
   /// it to an offset within the containing .text section, matching
   /// BasicBlock::start_offset(). Lets whole-object analyses pin the real kernel
-  /// entries even when an entry is a loop header with a backedge.
-  [[nodiscard]] std::vector<uint64_t> kernel_entry_text_offsets() const;
+  /// entries even when an entry is a loop header with a backedge. On CDNA3/CDNA4
+  /// a descriptor with a nonzero `KERNARG_PRELOAD_SPEC_LENGTH` has a second
+  /// hardware entry 256 bytes past the descriptor entry (the firmware
+  /// kernarg-preload window), which @p arch also enumerates.
+  [[nodiscard]] std::vector<uint64_t> kernel_entry_text_offsets(rj_code_arch_t arch) const;
 
 private:
   void load_sections();
