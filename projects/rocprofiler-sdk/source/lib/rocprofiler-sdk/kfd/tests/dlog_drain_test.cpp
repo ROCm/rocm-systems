@@ -469,20 +469,16 @@ TEST(dlog_ring_size, env_value_parsing)
     EXPECT_EQ(dlog_ring_bytes_from_kb_str("+80"), 0u);
     EXPECT_EQ(dlog_ring_bytes_from_kb_str("0x80"), 0u);
 
-    // Accepted: the smallest value, the 80 KiB default the driver is known to
-    // take, and the largest value that fits the uint32 field.
+    // Accepted: the smallest value, the 80 KiB default, and the largest value
+    // that fits the uint32 field. The parser only bounds the uint32 field; making
+    // the value driver-legal is dlog_snap_ring_bytes()'s job.
     EXPECT_EQ(dlog_ring_bytes_from_kb_str("1"), 1u * kb);
     EXPECT_EQ(dlog_ring_bytes_from_kb_str("80"), 80u * kb);
-    EXPECT_EQ(dlog_ring_bytes_from_kb_str("80"), kDlogDefaultRingKb * kb);
-    EXPECT_EQ(kDlogDefaultRingKb * kb, 81920u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("80"), kDlogMinRingBytes);
+    EXPECT_EQ(kDlogMinRingBytes, 81920u);
+    EXPECT_EQ(dlog_ring_bytes_from_kb_str("1024"), 1024u * kb);
     EXPECT_EQ(dlog_ring_bytes_from_kb_str("4194303"), kDlogMaxRingKb * kb);
     EXPECT_EQ(kDlogMaxRingKb, 4194303u);
-
-    // A size the DRIVER may reject still parses: the kernel's maximum is not
-    // documented, so REGISTER_BUFFER (not the parser) is what refuses it, and the
-    // existing setup-failed path falls back to HSA timestamps.
-    EXPECT_EQ(dlog_ring_bytes_from_kb_str("1024"), 1024u * kb);
-    EXPECT_EQ(dlog_ring_bytes_from_kb_str("8192"), 8192u * kb);
 
     // Over the uint32 buffer_size field, and overflow-adjacent inputs: rejected
     // without ever wrapping (the bound is checked per digit).
@@ -493,16 +489,89 @@ TEST(dlog_ring_size, env_value_parsing)
     EXPECT_EQ(dlog_ring_bytes_from_kb_str(std::string(64, '9')), 0u);
 }
 
+// The snap makes every requested size driver-legal. REGISTER_BUFFER requires
+// buffer_size == num_regions * 20 * region_record_count with a power-of-two
+// region_record_count <= 2^24; the 80 * 2^k lattice satisfies that for both
+// ASIC region counts (2 on gfx12, 4 on gfx9.4.x/9.5.0) without knowing which one
+// applies, because num_regions is only reported after the size is chosen.
+TEST(dlog_ring_size, snap_yields_a_driver_legal_size)
+{
+    // Any requested size, however arbitrary, lands on the lattice inside bounds
+    // and is legal for a 2-region AND a 4-region ASIC.
+    for(uint64_t want : {uint64_t{0},
+                         uint64_t{1},
+                         kDlogMinRingBytes - 1,
+                         kDlogMinRingBytes,
+                         uint64_t{100000},
+                         uint64_t{131072},  // 128 KiB
+                         uint64_t{1048576},
+                         uint64_t{5242880},
+                         kDlogMaxRingBytes - 1,
+                         kDlogMaxRingBytes,
+                         kDlogMaxRingBytes + 1,
+                         uint64_t{0xFFFFFFFF}})
+    {
+        uint64_t sz = dlog_snap_ring_bytes(want);
+
+        EXPECT_GE(sz, kDlogMinRingBytes);
+        EXPECT_LE(sz, kDlogMaxRingBytes);
+        EXPECT_LE(sz, 0xFFFFFFFFull);                       // uint32 buffer_size field
+        if(want >= kDlogMinRingBytes) EXPECT_LE(sz, want);  // never rounds up
+        EXPECT_EQ(sz % 80u, 0u);
+
+        // region_record_count is a power of two and within 2^24 under both counts.
+        for(uint64_t num_regions : {uint64_t{2}, uint64_t{4}})
+        {
+            ASSERT_EQ(sz % (num_regions * 20), 0u);
+            uint64_t rrc = sz / (num_regions * 20);
+            EXPECT_EQ(rrc & (rrc - 1), 0u);  // power of two
+            EXPECT_LE(rrc, 1u << 24);
+            EXPECT_GT(rrc, 0u);
+        }
+    }
+}
+
+// The specific cases that motivated the snap.
+TEST(dlog_ring_size, snap_boundaries)
+{
+    // The default is already on the lattice: it must snap to itself, so an unset
+    // env var keeps the known-good 80 KiB / 2048-record-per-region geometry.
+    EXPECT_EQ(dlog_snap_ring_bytes(kDlogMinRingBytes), 81920u);
+    EXPECT_EQ(81920u / (2 * 20), 2048u);  // gfx12 region_record_count
+
+    // 128 KiB is NOT valid (131072/40 = 3276.8): snap down to 80 KiB rather than
+    // let REGISTER_BUFFER EINVAL disable the dispatch log for the process.
+    EXPECT_EQ(dlog_snap_ring_bytes(131072u), 81920u);
+
+    // Anything below the floor clamps up to it.
+    EXPECT_EQ(dlog_snap_ring_bytes(0u), kDlogMinRingBytes);
+    EXPECT_EQ(dlog_snap_ring_bytes(1u), kDlogMinRingBytes);
+
+    // Sizes verified as accepted on hardware sit exactly on the lattice and are
+    // returned unchanged: 640 KiB, 5 MiB, 40 MiB, 640 MiB.
+    EXPECT_EQ(dlog_snap_ring_bytes(655360u), 655360u);
+    EXPECT_EQ(dlog_snap_ring_bytes(5242880u), 5242880u);
+    EXPECT_EQ(dlog_snap_ring_bytes(41943040u), 41943040u);
+    EXPECT_EQ(dlog_snap_ring_bytes(671088640u), 671088640u);
+    EXPECT_EQ(kDlogMaxRingBytes, 671088640u);  // 640 MiB == 80 * 2^23
+
+    // Above the ceiling clamps to it; just below it snaps to the next lattice
+    // point down (320 MiB), never up.
+    EXPECT_EQ(dlog_snap_ring_bytes(671088641u), kDlogMaxRingBytes);
+    EXPECT_EQ(dlog_snap_ring_bytes(kDlogMaxRingKb * 1024), kDlogMaxRingBytes);
+    EXPECT_EQ(dlog_snap_ring_bytes(kDlogMaxRingBytes - 1), 335544320u);
+}
+
 // The sizing math the session performs on the parsed value is validated BEFORE
-// use: any accepted value fits the uint32 buffer_size ioctl field, and the
+// use: any snapped value fits the uint32 buffer_size ioctl field, and the
 // derived sizes (arr_bytes, signal_off, alloc_size, stride, aperture candidate)
 // cannot overflow uint64.
 TEST(dlog_ring_size, accepted_sizes_keep_the_session_math_in_range)
 {
-    for(uint64_t k : {uint64_t{1}, kDlogDefaultRingKb, uint64_t{8192}, kDlogMaxRingKb})
+    for(uint64_t k : {uint64_t{1}, kDlogMinRingBytes / 1024, uint64_t{8192}, kDlogMaxRingKb})
     {
-        uint64_t buf_bytes = dlog_ring_bytes_from_kb_str(std::to_string(k));
-        ASSERT_EQ(buf_bytes, k * 1024);
+        uint64_t buf_bytes = dlog_snap_ring_bytes(dlog_ring_bytes_from_kb_str(std::to_string(k)));
+        ASSERT_LE(buf_bytes, kDlogMaxRingBytes);
         ASSERT_LE(buf_bytes, 0xFFFFFFFFull);  // uint32 buffer_size field
 
         // Mirrors setup_session(): arr_bytes/signal_off/alloc_size, then the

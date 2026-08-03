@@ -64,28 +64,36 @@ namespace
 {
 constexpr int kEventfdFlags = EFD_CLOEXEC | EFD_NONBLOCK;
 
-// Dispatch-log ring size in bytes. Validated before any sizing math uses it:
-// dlog_ring_bytes_from_kb_str() accepts only [1, kDlogMaxRingKb] KiB, so the value
-// always fits the uint32 buffer_size ioctl field. A parseable size the DRIVER
-// rejects is not our call to make here -- REGISTER_BUFFER fails and the existing
+// Dispatch-log ring size in bytes. Validated before any sizing math uses it: the
+// result is always a snapped value in [kDlogMinRingBytes, kDlogMaxRingBytes], so it
+// fits the uint32 buffer_size ioctl field and satisfies the driver's shape rule.
+// Should a future ASIC reject it anyway, REGISTER_BUFFER fails and the existing
 // setup-failed path warns and falls back to HSA timestamps.
 uint64_t
 ring_bytes()
 {
     auto _v = common::get_env_optional("ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB");
-    if(!_v) return kDlogDefaultRingKb * 1024;
+    if(!_v) return kDlogMinRingBytes;
 
-    uint64_t _bytes = dlog_ring_bytes_from_kb_str(*_v);
-    if(_bytes == 0)
+    uint64_t _want = dlog_ring_bytes_from_kb_str(*_v);
+    if(_want == 0)
     {
         ROCP_WARNING << fmt::format(
             "KFD dispatch-log: ignoring invalid ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB='{}' "
             "(expected an integer 1-{}); using {} KB",
             *_v,
             kDlogMaxRingKb,
-            kDlogDefaultRingKb);
-        return kDlogDefaultRingKb * 1024;
+            kDlogMinRingBytes / 1024);
+        return kDlogMinRingBytes;
     }
+
+    uint64_t _bytes = dlog_snap_ring_bytes(_want);
+    ROCP_WARNING_IF(_bytes != _want) << fmt::format(
+        "KFD dispatch-log: the driver only accepts ring sizes of 80*2^k bytes up to {} KB; "
+        "using {} KB instead of the requested {} KB",
+        kDlogMaxRingBytes / 1024,
+        _bytes / 1024,
+        _want / 1024);
     return _bytes;
 }
 
@@ -274,7 +282,7 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
     }
 
     // buffer_size below is a uint32 field; ring_bytes() is bounded to fit it.
-    static_assert(kDlogMaxRingKb * 1024 <= 0xFFFFFFFFull,
+    static_assert(kDlogMaxRingBytes <= 0xFFFFFFFFull,
                   "dlog ring size must fit the uint32 buffer_size ioctl field");
     auto reg                       = kfd_ioctl_profiler_args{};
     reg.op                         = KFD_IOC_PROFILER_DLOG;

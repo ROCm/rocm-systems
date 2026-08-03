@@ -154,14 +154,16 @@ Kernel dispatch timestamp source
     * - ``ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB``
       - ``80``
       - Size in KiB of the firmware dispatch-log ring, as an integer from ``1`` to
-        ``4194303``. Any other value is ignored with a warning and the default is
-        used. If the firmware laps the reader the SDK logs an overrun warning and
-        the affected dispatches fall back to the HSA timestamps; raising this
-        value gives the reader more headroom. The driver enforces its own maximum,
-        which is smaller than the range above and varies by kernel: a size the
-        driver rejects disables the dispatch log for the process (logged) and
-        every dispatch uses the HSA timestamps, so increase it incrementally and
-        check for the ``REGISTER_BUFFER failed`` warning.
+        ``4194303``. A non-integer, empty, zero, or out-of-range value is ignored
+        with a warning and the default is used. If the firmware laps the reader
+        the SDK logs an overrun warning and the affected dispatches fall back to
+        the HSA timestamps; raising this value gives the reader more headroom.
+
+        The driver only accepts ring sizes of ``80 * 2^k`` bytes (80 KiB, 160 KiB,
+        320 KiB, ... up to the 640 MiB maximum), so the requested size is rounded
+        DOWN to the nearest accepted size, and a size below 80 KiB or above
+        640 MiB is clamped. The effective size is logged whenever it differs from
+        the requested one.
 
 Beta-feature opt-in
 -------------------

@@ -49,24 +49,43 @@ constexpr uint32_t kFwRecBytes = 20;
 // more regions than this is rejected rather than partially drained.
 constexpr uint32_t kMaxRegions = 8;
 
-// Dispatch-log ring size, overridable via ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB.
-// The unit is KiB because the kernel accepts sub-MiB rings and rejects large ones
-// (REGISTER_BUFFER returns EINVAL at >=1 MiB on the ABI-5 kernel), so MiB
-// granularity could not express a working size. The default is the size the
-// driver is known to accept; a larger opt-in value that the kernel refuses fails
-// REGISTER_BUFFER and degrades through the existing setup-failed path.
+// Dispatch-log ring size, overridable via ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB
+// (KiB granularity: the useful sizes start below 1 MiB).
 //
-// The upper bound exists only because the KFD REGISTER_BUFFER `buffer_size` field
-// is a uint32. Every downstream size (arr_bytes, signal_off, alloc_size, stride,
-// aperture candidates) is computed in uint64 from a value below that bound and
-// therefore cannot overflow.
-constexpr uint64_t kDlogDefaultRingKb = 80;
-constexpr uint64_t kDlogMaxRingKb     = 0xFFFFFFFFull / 1024;
+// REGISTER_BUFFER only accepts buffer_size == num_regions * 20 *
+// region_record_count with region_record_count a power of two <= 2^24, and
+// num_regions is ASIC-fixed (2 on gfx12, 4 on gfx9.4.x/9.5.0) but is not reported
+// until STREAM_OP_INFO, i.e. AFTER the size has to be chosen. 80 * 2^k satisfies
+// the rule for both counts -- region_record_count is 2^(k+1) at 2 regions and 2^k
+// at 4 -- so it needs no advance knowledge of num_regions. k is capped at 23 to
+// keep the 2-region count <= 2^24, which makes 80 * 2^23 == 640 MiB the largest
+// accepted size. Requested sizes are snapped DOWN onto this lattice so a
+// reasonable-looking value (128 KiB, say) can never become an EINVAL that
+// disables the dispatch log for the whole process.
+//
+// Every downstream size (arr_bytes, signal_off, alloc_size, stride, aperture
+// candidates) is computed in uint64 from a value <= 640 MiB and cannot overflow.
+constexpr uint64_t kDlogMinRingBytes = 80ull << 10;  // 80 KiB; also the default
+constexpr uint64_t kDlogMaxRingBytes = 80ull << 23;  // 640 MiB
+constexpr uint64_t kDlogMaxRingKb    = 0xFFFFFFFFull / 1024;  // parse domain (uint32 field)
 
-// Parse a ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB value. Returns the ring size in
-// bytes, or 0 for anything that is not a plain decimal integer in
-// [1, kDlogMaxRingKb] -- empty, zero, negative, trailing junk, or too large. The
-// caller warns and falls back to kDlogDefaultRingKb.
+// Snap `want` down onto the 80 * 2^k lattice, clamped to
+// [kDlogMinRingBytes, kDlogMaxRingBytes]. Every result is a buffer_size the
+// kernel accepts whether the ASIC reports 2 or 4 regions.
+inline uint64_t
+dlog_snap_ring_bytes(uint64_t want)
+{
+    if(want >= kDlogMaxRingBytes) return kDlogMaxRingBytes;
+    uint64_t sz = kDlogMinRingBytes;
+    while((sz << 1) <= want)
+        sz <<= 1;
+    return sz;
+}
+
+// Parse a ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB value. Returns the requested size
+// in bytes (still to be snapped), or 0 for anything that is not a plain decimal
+// integer in [1, kDlogMaxRingKb] -- empty, zero, negative, trailing junk, or too
+// large. The caller warns and falls back to kDlogMinRingBytes.
 inline uint64_t
 dlog_ring_bytes_from_kb_str(std::string_view v)
 {
