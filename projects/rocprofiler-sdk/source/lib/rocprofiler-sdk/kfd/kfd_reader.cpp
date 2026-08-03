@@ -650,6 +650,13 @@ ensure_reader_session(uint32_t gpu_id)
     if(!setup_session(st.kfd_fd, gpu_id, &st.session))
     {
         st.setup_failed.store(true, std::memory_order_release);
+        // The GPU advertised dispatch-log support but the session could not be
+        // established (specific cause logged by setup_session above). This latch is
+        // permanent, so warn once that the whole process now uses HSA timestamps.
+        ROCP_WARNING << fmt::format(
+            "KFD dispatch-log: gpu_id={} supports dispatch-log but session setup failed; "
+            "dispatch-log is now disabled for this process, all dispatches use HSA timestamps",
+            gpu_id);
         return false;
     }
     st.session_ready.store(true, std::memory_order_release);
