@@ -86,7 +86,8 @@ __launch_bounds__(512)
   }
   __syncthreads();
   const uint32_t flag = s_flag;
-  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
+  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot * 2;
+  const size_t bankOffsetPkts_next = bankOffsetPkts + (size_t)nRanks * slot;
 
   const size_t gtid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
   const size_t stride = (size_t)gridDim.x * blockDim.x;
@@ -107,10 +108,6 @@ __launch_bounds__(512)
 #pragma unroll
     for (int r = 1; r < nRanks; ++r) {
       const int peer = (selfRank + r) % nRanks;
-      //const uint32_t* peer_in = reinterpret_cast<const uint32_t*>(sendbuff) + peer * nPk_rank * 2;
-      //const uint32_t d0 = peer_in[2 * pk];
-      //const uint32_t d1 = peer_in[2 * pk + 1];
-
       LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + bankOffsetPkts + (size_t)selfRank * slot;
       ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[pk]), d0[r], flag, d1[r], flag);
     }
@@ -133,6 +130,13 @@ __launch_bounds__(512)
     }
     out[2 * pk] = acc0;
     out[2 * pk + 1] = acc1;
+
+    #pragma unroll
+    for (int r = 1; r < nRanks; ++r) {
+      const int peer = (selfRank + r) % nRanks;
+      LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + bankOffsetPkts_next + (size_t)selfRank * slot;
+      ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[pk]), acc0, flag, acc1, flag);
+    }
   }
 
   if (threadIdx.x == 0) {
