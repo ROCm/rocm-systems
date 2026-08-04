@@ -142,3 +142,5 @@ Equivalently, set ``ROCPROF_OMPT_TRACE_OPERATIONS=parallel,task,target`` in the 
    ``--ompt-trace`` requires an OMPT-capable OpenMP runtime that implements ``ompt_start_tool``. The LLVM-based ``libomp`` shipped with ROCm / AOMP (used by ``amdclang++ -fopenmp`` above) qualifies. GCC's ``libgomp`` does not implement the OMPT interface (see the `GOMP status page <https://www.gnu.org/software/gcc/projects/gomp/>`_), so ``g++ -fopenmp`` binaries do not produce OMPT records.
 
    Most OMPT events are host-thread events that scale with ``OMP_NUM_THREADS``; ``OMP_NUM_THREADS=1`` suppresses most parallel-region events. Target-offload events also require ``OMP_TARGET_OFFLOAD`` not to be ``DISABLED`` and at least one supported GPU to be visible (for example, via ``ROCR_VISIBLE_DEVICES``).
+
+   The ``librocprofiler-sdk`` library does not itself provide an ``ompt_start_tool`` symbol -- OMPT is engaged only when the rocprofv3 tool library is loaded, as it is when running under ``rocprofv3``. An application that merely has rocprofiler-sdk in its address space, without running under ``rocprofv3``, is therefore not registered as an OMPT tool.
