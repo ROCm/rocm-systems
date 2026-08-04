@@ -69,19 +69,15 @@ __global__ void ddaAllReduceFlatLL(
   const size_t nPk = bytes >> 3;           // 8 payload bytes per packet
   const size_t slot = kDdaLLArSlotStridePkts;
 
-  // Flat block id + total launched blocks. tid 0 reads our own epoch cell (all
-  // cells hold the same value) and derives this launch's flag on the device, so
-  // nothing is baked into a HIP graph capture. bank = flag & 1.
+  // Flat block id + total launched blocks. Every thread reads our own epoch cell
+  // (all cells hold the same value) and derives this launch's flag on the device,
+  // so nothing is baked into a HIP graph capture. bank = flag & 1. The address is
+  // block-uniform, so this is a broadcast load and needs no shmem staging; the
+  // cell is not rewritten until the barrier before the epoch update below.
   const int flatBlockId = blockIdx.x;
   const int total = gridDim.x;
-  __shared__ uint32_t s_flag;
-  if (threadIdx.x == 0) {
-    uint32_t f = epochDev[flatBlockId] + 1u;
-    if (f == 0u) f = 2u;                   // skip 0 sentinel; keep bank parity
-    s_flag = f;
-  }
-  __syncthreads();
-  const uint32_t flag = s_flag;
+  uint32_t flag = epochDev[flatBlockId] + 1u;
+  if (flag == 0u) flag = 2u;               // skip 0 sentinel; keep bank parity
   const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
 
   const size_t gtid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -128,10 +124,15 @@ __global__ void ddaAllReduceFlatLL(
     out[2 * pk + 1] = acc1;
   }
 
-  if (threadIdx.x == 0) {
-    for (int e = flatBlockId; e < epochLen; e += total) {
-      epochDev[e] = flag;
-    }
+  // Bump every cell this block owns (cell e belongs to block e % total), split
+  // across the block's threads. The barrier is what makes the flag read above
+  // safe: thread 0 rewrites cell flatBlockId here, so every thread must have
+  // read it first. Cells at or above `total` are never read this launch.
+  __syncthreads();
+  for (int e = flatBlockId + (int)threadIdx.x * total;
+       e < epochLen;
+       e += total * (int)blockDim.x) {
+    epochDev[e] = flag;
   }
 }
 

@@ -125,12 +125,11 @@ static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, si
 }
 
 RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
-RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(67108864));
-// LL-protocol DDA all-gather (fabric path).
-// threshold: LL is attempted only when the size (per-rank * nRanks)
-// is <= threshold, otherwise the copy-based DDA path handles the call.
+RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(268435456));
 RCCL_PARAM(DdaAllGatherLL, "DDA_ALLGATHER_LL", 1);
-RCCL_PARAM(DdaAllGatherLLThreshold, "DDA_ALLGATHER_LL_THRESHOLD", (size_t)(131072));
+RCCL_PARAM(DdaAllGatherLLThreshold, "DDA_ALLGATHER_LL_THRESHOLD", (size_t)(65536));
+RCCL_PARAM(DdaAllGatherLL128, "DDA_ALLGATHER_LL128", 1);
+RCCL_PARAM(DdaAllGatherLL128Threshold, "DDA_ALLGATHER_LL128_THRESHOLD", (size_t)(134217728));
 // LL-protocol DDA all-reduce (fabric path).
 // threshold: LL is attempted only when the full-message size is <= threshold,
 // otherwise the copy-based DDA path handles the call.
@@ -264,6 +263,22 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
              "AllGather: taking DDA fabric LL path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d totalBytes=%zu",
              comm->nRanks, comm->nNodes, sendcount, (int)datatype, msgSize);
         NCCLCHECK(ncclAllGatherDdaFabricLL(
+            sendbuff,
+            recvbuff,
+            sendcount,
+            datatype,
+            comm,
+            stream));
+        return ncclSuccess;
+      }
+      // Mid/large tier: LL128 protocol (denser wire than LL, still barrier-free).
+      if (rcclParamDdaAllGatherLL128() &&
+          msgSize <= (size_t)rcclParamDdaAllGatherLL128Threshold() &&
+          ncclAllGatherDdaFabricLL128Eligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+        INFO(NCCL_COLL,
+             "AllGather: taking DDA fabric LL128 path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d totalBytes=%zu",
+             comm->nRanks, comm->nNodes, sendcount, (int)datatype, msgSize);
+        NCCLCHECK(ncclAllGatherDdaFabricLL128(
             sendbuff,
             recvbuff,
             sendcount,

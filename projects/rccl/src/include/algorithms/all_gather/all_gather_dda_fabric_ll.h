@@ -25,22 +25,26 @@
 namespace meta::comms {
 
 // Per-rank scratch slot capacity and hard per-rank cap (enforced in the
-// eligibility check); fixes the slot stride at compile time so the double-buffered
-// layout is identical on every rank and call. The effective size gate is the total
-// gathered size (DDA_ALLGATHER_LL_THRESHOLD, see collectives.cc), so the actual
-// per-rank payload is <= total / nRanks and usually well under this cap.
-// Footprint = 2 banks * nRanks * (kDdaLLAgMaxPerRankBytes * 2) for the 8B->16B
-// expansion; 36 MiB at 128 KiB / 72 ranks, within the 64 MiB DDA scratch.
+// eligibility check), fixing the slot stride at compile time so the
+// double-buffered layout is identical on every rank and call. The size gate is on
+// the total gathered size (DDA_ALLGATHER_LL_THRESHOLD in collectives.cc), so the
+// per-rank payload is <= total / nRanks and usually well under this cap. Footprint
+// = 2 banks * nRanks * (kDdaLLAgMaxPerRankBytes * 2) for the 8B->16B expansion:
+// 36 MiB at 128 KiB / 72 ranks, within the 64 MiB DDA scratch.
 constexpr size_t kDdaLLAgMaxPerRankBytes = 131072;                     // 128 KiB
 constexpr size_t kDdaLLAgSlotStridePkts  = kDdaLLAgMaxPerRankBytes / 8; // 16384
 
-// LL all-gather kernel. 2D grid: grid.x == nRanks selects the peer (column b
-// owns peer b); grid.y == blocksPerPeer splits that peer's packets into gridDim.y
-// contiguous chunks (chunk == blockIdx.y). grid.y == 1 is one block per peer.
+// LL scratch: 2 banks * nRanks slots * kDdaLLAgSlotStridePkts * 16B.
+inline size_t ddaLLAgScratchSize(int nRanks) {
+  return (size_t)2 * (size_t)nRanks * kDdaLLAgSlotStridePkts * sizeof(LLPacket16);
+}
+
+// LL all-gather kernel on a 2D grid: grid.x == nRanks selects the peer a column
+// owns, grid.y == blocksPerPeer splits that peer's packets into contiguous chunks.
 //
-// The self column copies sendbuff -> recvbuff[self] locally; other columns
-// scatter this rank's chunk into peer b's slot, then poll their own slot b for
-// peer b's chunk. Threads split the chunk's packet range.
+// The self column copies sendbuff -> recvbuff[self] locally; other columns scatter
+// this rank's chunk into peer b's slot, then poll their own slot b for peer b's
+// chunk, with threads splitting the packet range.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
@@ -57,7 +61,6 @@ __global__ void ddaAllGatherFabricLL(
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x;             // grid.x == nRanks: one column/peer
-  if (peer >= nRanks) return;              // safety if grid.x > nRanks
   const int chunk = blockIdx.y;            // grid.y == blocksPerPeer
   const int nChunks = gridDim.y;           // >= 1
   const int tid = threadIdx.x;
@@ -65,19 +68,10 @@ __global__ void ddaAllGatherFabricLL(
   const size_t nPk = perRankBytes >> 3;    // 8 payload bytes per packet
   const size_t slot = kDdaLLAgSlotStridePkts;
 
-  // Flat block id + total launched blocks. tid 0 reads our own epoch cell (all
-  // cells hold the same value) and derives this launch's flag on the device, so
-  // nothing is baked into a HIP graph capture. bank = flag & 1.
   const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;
   const int total = gridDim.x * gridDim.y;
-  __shared__ uint32_t s_flag;
-  if (tid == 0) {
-    uint32_t f = epochDev[flatBlockId] + 1u;
-    if (f == 0u) f = 2u;                   // skip 0 sentinel; keep bank parity
-    s_flag = f;
-  }
-  __syncthreads();
-  const uint32_t flag = s_flag;
+  uint32_t flag = epochDev[flatBlockId] + 1u;
+  if (flag == 0u) flag = 2u;               // skip 0 sentinel; keep bank parity
   const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
 
   // This block's packet range [pkBegin, pkEnd); [0, nPk) when nChunks == 1.
@@ -122,9 +116,8 @@ __global__ void ddaAllGatherFabricLL(
     }
 
     // gather: poll my slot for peer, unpack into recvbuff[peer].
-    volatile LLPacket16* src =
-        reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts +
-        (size_t)peer * slot;
+    volatile LLPacket16* src = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) +
+        bankOffsetPkts + (size_t)peer * slot;
     uint32_t* out = reinterpret_cast<uint32_t*>(
         reinterpret_cast<char*>(recvbuff) + (size_t)peer * perRankBytes);
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
@@ -138,11 +131,9 @@ __global__ void ddaAllGatherFabricLL(
       out[2 * pk + 1] = d1;
     }
   }
-
-  if (tid == 0) {
-    for (int e = flatBlockId; e < epochLen; e += total) {
-      epochDev[e] = flag;
-    }
+  __syncthreads();
+  for (int e = flatBlockId + tid * total; e < epochLen; e += total * nthreads) {
+    epochDev[e] = flag;
   }
 }
 

@@ -22,8 +22,8 @@
 
 using meta::comms::kDdaMaxNranks;
 using nccl_dda_detail::ddaFabricMaxNBlocksForScratch;
-using nccl_dda_detail::ddaLLEpochCount;
 using nccl_dda_detail::DdaFabricBarrierState;
+using nccl_dda_detail::kDdaLLMaxBlocks;
 
 bool ncclDdaUseFabricPath(ncclComm* comm) {
   if (comm == nullptr) {
@@ -71,7 +71,7 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   uint32_t* epochDev = nullptr;
   std::vector<void*> h_ptrs(nRanks, nullptr);
   const int nBlocksMax = ddaFabricMaxNBlocksForScratch();
-  const size_t epochLen = ddaLLEpochCount(nRanks, nBlocksMax);
+  const size_t epochLen = (size_t)kDdaLLMaxBlocks;
   ncclResult_t res = ncclSuccess;
 
   res = ncclCuMemAlloc(

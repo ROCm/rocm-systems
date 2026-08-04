@@ -76,4 +76,27 @@ ncclResult_t ncclAllGatherDdaFabricLL(
     ncclComm* comm,
     cudaStream_t stream);
 
+/**
+ * Check if the LL128-protocol DDA allgather is eligible for the fabric/VMM path.
+ * Covers the larger size tier above the LL threshold; gated at runtime by the
+ * DDA scratch capacity (2 banks * nRanks * per-rank slot at 128/120 expansion).
+ */
+bool ncclAllGatherDdaFabricLL128Eligible(
+    ncclComm* comm,
+    const void* sendbuff,
+    void* recvbuff,
+    size_t sendcount,
+    ncclDataType_t datatype);
+
+/**
+ * Execute the LL128-protocol DDA allgather using the fabric/VMM path.
+ */
+ncclResult_t ncclAllGatherDdaFabricLL128(
+    const void* sendbuff,
+    void* recvbuff,
+    size_t sendcount,
+    ncclDataType_t datatype,
+    ncclComm* comm,
+    cudaStream_t stream);
+
 #endif

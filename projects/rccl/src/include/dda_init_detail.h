@@ -19,7 +19,9 @@
 #define DDA_IPC_BUFFER_SIZE 268435456
 
 #define DDA_FABRIC_MAXBLOCKS 24
-#define DDA_FABRIC_BUFFER_SIZE 268435456
+// 288 MiB: size of LL128 all-gather scratch, 2 * total_size * 16/15, fits a 128 MiB msg.
+// Raising DDA_ALLGATHER_LL128_THRESHOLD beyond 128 MiB need this to be adjusted
+#define DDA_FABRIC_BUFFER_SIZE 301989888
 
 namespace nccl_dda_detail {
 
@@ -37,6 +39,8 @@ struct DdaFabricBarrierState {
   meta::comms::FabricGpuBarrier barrierHost;
 };
 
+constexpr int kDdaLLMaxBlocks = 256;
+
 inline int ddaMaxNBlocksForScratch() {
   unsigned maxBlocks = DDA_IPC_MAXBLOCKS;
   return static_cast<int>(maxBlocks);
@@ -53,22 +57,12 @@ inline int ddaFabricMaxNBlocksForScratch() {
     if (n < 1) {
       n = 1;
     }
-    if (n > 256) {
-      n = 256;
+    if (n > kDdaLLMaxBlocks) {
+      n = kDdaLLMaxBlocks;
     }
     maxBlocks = n;
   }
   return maxBlocks;
-}
-
-constexpr int kDdaLLAgMaxBlocksPerPeer = 8;
-
-// Number of device epoch cells for the LL collectives. it is sized for the larger of the two
-// max(AG total blocks, AR total blocks).
-inline size_t ddaLLEpochCount(int nRanks, int arMaxBlocks) {
-  const size_t ag = (size_t)nRanks * (size_t)kDdaLLAgMaxBlocksPerPeer;
-  const size_t ar = (size_t)arMaxBlocks;
-  return ag > ar ? ag : ar;
 }
 
 } // namespace nccl_dda_detail
