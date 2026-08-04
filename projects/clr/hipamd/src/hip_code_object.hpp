@@ -17,6 +17,7 @@
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "hip/hip_runtime.h"
@@ -237,9 +238,12 @@ class StatCO : public CodeObject {
     hipError_t terminalError = hipSuccess;
     // Highest managed-variable sequence number queued for initialization on this device.
     uint64_t queuedUpToSequenceNumber = 0;
+    // Fat binaries whose symbols are referenced by the current completion marker.
+    std::unordered_set<FatBinaryInfo**> modulesInProgress;
 
     void MarkCompleted() {
       completion.reset();
+      modulesInProgress.clear();
       phase = Phase::Completed;
     }
 
@@ -247,6 +251,7 @@ class StatCO : public CodeObject {
       assert(error != hipSuccess);
       assert(phase != Phase::Failed);
       completion.reset();
+      modulesInProgress.clear();
       terminalError = error;
       phase = Phase::Failed;
     }
