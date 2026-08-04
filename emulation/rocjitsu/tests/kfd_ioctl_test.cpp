@@ -803,6 +803,66 @@ TEST(RemoteDriverMmapTest, RejectsMappingLargerThanReceivedBacking) {
   EXPECT_EQ(errno, EINVAL);
 }
 
+TEST(RemoteDriverMmapTest, PartialFixedMappingPreservesWholeReplacedPage) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+
+  constexpr size_t kPageSize = 4096;
+  int backing_fd = memfd_create("remote_partial_mmap_test", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+  ASSERT_GE(backing_fd, 0);
+  ASSERT_EQ(ftruncate(backing_fd, kPageSize), 0);
+  ASSERT_EQ(fcntl(backing_fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW), 0);
+
+  uint8_t *reservation = static_cast<uint8_t *>(
+      ::mmap(nullptr, kPageSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(reservation, MAP_FAILED);
+  std::memset(reservation, 0xA5, kPageSize);
+  reservation[0] = 0x11;
+
+  std::jthread server([server_fd = sv[1], backing_fd] {
+    constexpr std::array<size_t, 2> expected_lengths = {1, 4096};
+    for (size_t expected_length : expected_lengths) {
+      rocjitsu::RpcHeader request_header{};
+      ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &request_header, sizeof(request_header)));
+      ASSERT_EQ(request_header.opcode, rocjitsu::RPC_MMAP);
+      ASSERT_EQ(request_header.payload_bytes, sizeof(rocjitsu::RpcMmapRequest));
+      rocjitsu::RpcMmapRequest request{};
+      ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &request, sizeof(request)));
+      EXPECT_EQ(request.length, expected_length);
+
+      rocjitsu::RpcHeader response_header{};
+      response_header.opcode = rocjitsu::RPC_MMAP;
+      response_header.request_id = request_header.request_id;
+      response_header.payload_bytes = sizeof(rocjitsu::RpcMmapResponse);
+      rocjitsu::RpcMmapResponse response{};
+      std::array<uint8_t, sizeof(response_header) + sizeof(response)> response_buffer{};
+      std::memcpy(response_buffer.data(), &response_header, sizeof(response_header));
+      std::memcpy(response_buffer.data() + sizeof(response_header), &response, sizeof(response));
+      ASSERT_GT(rocjitsu::rpc_send_msg(server_fd, response_buffer.data(), response_buffer.size(),
+                                       &backing_fd, 1),
+                0);
+    }
+    ::close(backing_fd);
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver driver(sv[0]);
+  ASSERT_EQ(driver.mmap(reservation, 1, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                        /*offset=*/0),
+            reservation);
+  EXPECT_EQ(reservation[0], 0x11);
+  EXPECT_EQ(reservation[1], 0xA5);
+  EXPECT_EQ(reservation[kPageSize - 1], 0xA5);
+
+  ASSERT_EQ(driver.mmap(reservation, kPageSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                        /*offset=*/0),
+            reservation);
+  EXPECT_EQ(reservation[0], 0x11);
+  EXPECT_EQ(reservation[1], 0xA5);
+  EXPECT_EQ(reservation[kPageSize - 1], 0xA5);
+  EXPECT_EQ(syscall(SYS_munmap, reservation, kPageSize), 0);
+}
+
 TEST(RemoteDriverEmbeddedArrayTest, WaitEventsSerializesEventsAcrossBufferGrowth) {
   int sv[2];
   ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);

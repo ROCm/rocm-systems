@@ -30,6 +30,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <atomic>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <iterator>
 #include <map>
@@ -266,6 +267,7 @@ TEST_F(SimulatedKfdTest, PermanentVramBackingImportsAcrossPartialMappings) {
   uint8_t *reservation = static_cast<uint8_t *>(
       ::mmap(nullptr, kAllocationSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
   ASSERT_NE(reservation, MAP_FAILED);
+  std::memset(reservation, 0xA5, kPageSize);
   *reinterpret_cast<uint32_t *>(reservation) = 0x11111111u;
   *reinterpret_cast<uint32_t *>(reservation + kPageSize) = 0x22222222u;
   *reinterpret_cast<uint32_t *>(reservation + 2 * kPageSize) = 0x33333333u;
@@ -277,12 +279,16 @@ TEST_F(SimulatedKfdTest, PermanentVramBackingImportsAcrossPartialMappings) {
   alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
   ASSERT_EQ(t.driver()->ioctl(process_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
 
-  ASSERT_EQ(t.driver()->mmap(reservation, kPageSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+  ASSERT_EQ(t.driver()->mmap(reservation, 1, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
                              static_cast<off_t>(alloc.mmap_offset)),
             reservation);
+  EXPECT_EQ(reservation[1], 0x11);
+  EXPECT_EQ(reservation[kPageSize - 1], 0xA5);
   ASSERT_EQ(t.driver()->mmap(reservation, kAllocationSize, PROT_READ | PROT_WRITE,
                              MAP_SHARED | MAP_FIXED, static_cast<off_t>(alloc.mmap_offset)),
             reservation);
+  EXPECT_EQ(reservation[1], 0x11);
+  EXPECT_EQ(reservation[kPageSize - 1], 0xA5);
 
   uint32_t gpu_id = alloc.gpu_id;
   kfd_ioctl_map_memory_to_gpu_args map{};
@@ -291,6 +297,7 @@ TEST_F(SimulatedKfdTest, PermanentVramBackingImportsAcrossPartialMappings) {
   map.n_devices = 1;
   ASSERT_EQ(t.driver()->ioctl(process_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
   EXPECT_EQ(memory->read32(alloc.va_addr, process_id), 0x11111111u);
+  EXPECT_EQ(memory->read8(alloc.va_addr + kPageSize - 1, process_id), 0xA5);
   EXPECT_EQ(memory->read32(alloc.va_addr + kPageSize, process_id), 0x22222222u);
   EXPECT_EQ(memory->read32(alloc.va_addr + 2 * kPageSize, process_id), 0x33333333u);
 

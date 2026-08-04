@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cstring>
 #include <fcntl.h>
+#include <limits>
 #include <linux/mman.h>
 #ifndef MADV_POPULATE_WRITE
 #define MADV_POPULATE_WRITE 23
@@ -698,6 +699,14 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
 void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t offset) {
   std::lock_guard<std::mutex> lock(rpc_mutex_);
 
+  constexpr size_t page_size = 4096;
+  constexpr size_t page_mask = page_size - 1;
+  if (length == 0 || length > std::numeric_limits<size_t>::max() - page_mask) {
+    errno = EINVAL;
+    return MAP_FAILED;
+  }
+  const size_t rounded_length = (length + page_mask) & ~page_mask;
+
   // Send the mmap RPC so the daemon creates its own mapping for GPU simulation.
   int memfd = -1;
   int rc = send_mmap(addr, length, prot, flags, offset, &memfd);
@@ -725,7 +734,7 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
       errno = saved_errno;
       return MAP_FAILED;
     }
-    if (backing_stat.st_size < 0 || length > static_cast<uint64_t>(backing_stat.st_size)) {
+    if (backing_stat.st_size < 0 || rounded_length > static_cast<uint64_t>(backing_stat.st_size)) {
       if (memfd >= 0)
         syscall(SYS_close, memfd);
       errno = EINVAL;
@@ -736,26 +745,24 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
     // reservation into the memfd before MAP_FIXED replaces them. Uses a temp
     // mapping outside the GPUVM range for the copy target.
     if ((flags & MAP_FIXED) && addr != nullptr) {
-      auto prot_rc = syscall(SYS_mprotect, addr, length, PROT_READ | PROT_WRITE);
+      auto prot_rc = syscall(SYS_mprotect, addr, rounded_length, PROT_READ | PROT_WRITE);
       if (prot_rc == 0) {
-        constexpr size_t page_size = 4096;
-        size_t num_pages = (length + page_size - 1) / page_size;
+        size_t num_pages = rounded_length / page_size;
         std::vector<uint8_t> page_resident(num_pages);
-        auto mc_rc = syscall(SYS_mincore, addr, length, page_resident.data());
+        auto mc_rc = syscall(SYS_mincore, addr, rounded_length, page_resident.data());
         auto *temp = static_cast<uint8_t *>(
-            safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, mapping_memfd, 0));
+            safe_mmap(nullptr, rounded_length, PROT_WRITE, MAP_SHARED, mapping_memfd, 0));
         if (temp != MAP_FAILED) {
           if (mc_rc == 0) {
             auto *src = static_cast<uint8_t *>(addr);
             for (size_t i = 0; i < num_pages; ++i) {
               if (page_resident[i] & 1) {
                 size_t off = i * page_size;
-                size_t n = std::min(page_size, length - off);
-                std::memcpy(temp + off, src + off, n);
+                std::memcpy(temp + off, src + off, page_size);
               }
             }
           }
-          syscall(SYS_munmap, temp, length);
+          syscall(SYS_munmap, temp, rounded_length);
         }
       }
     }

@@ -1188,7 +1188,8 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
     // Import each committed source extent at most once and only before GPU use
     // makes the allocation-owned memfd authoritative.
     if (!alloc.backing_authoritative && replaces_client_reservation) {
-      int prot_rc = libc_passthrough().mprotect(addr, length, PROT_READ | PROT_WRITE);
+      int prot_rc = libc_passthrough().mprotect(addr, static_cast<size_t>(*rounded_length),
+                                                PROT_READ | PROT_WRITE);
       if (prot_rc == 0) {
         constexpr size_t page_size = KfdProcess::kPageSize;
         std::vector<std::pair<uint64_t, uint64_t>> uncovered =
@@ -1196,10 +1197,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
         uint8_t *source = static_cast<uint8_t *>(addr);
         uint8_t *destination = static_cast<uint8_t *>(alloc.host_ptr);
         for (const auto &[extent_begin, extent_end] : uncovered) {
-          const uint64_t import_end = std::min<uint64_t>(extent_end, length);
-          if (extent_begin >= import_end)
-            continue;
-          const size_t import_size = static_cast<size_t>(import_end - extent_begin);
+          const size_t import_size = static_cast<size_t>(extent_end - extent_begin);
           const size_t num_pages = (import_size + page_size - 1) / page_size;
           std::vector<uint8_t> page_resident(num_pages);
           if (mincore(source + extent_begin, import_size, page_resident.data()) != 0)
