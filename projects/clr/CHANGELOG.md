@@ -19,7 +19,7 @@ This capability enables efficient bug reproduction, performance regression testi
     - `hipStreamWriteValue32`
     - `hipStreamWriteValue64`
     - `hipStreamBatchMemOp`
-* Support NUMA in `hipMemCreate` related APIs. HIP runtime added virtual memory support for `hipMemLocationTypeHostNuma` and `hipMemLocationTypeHostNumaCurrent` APIs. This enables NUMA-aware memory allocations backed by host CPU NUMA pools and aligns HIP virtual memory management behavior with CUDA host and host-NUMA VMM expectations.
+* Support Non-Uniform Memory Access (NUMA) in `hipMemCreate` related APIs. HIP runtime added virtual memory support for `hipMemLocationTypeHostNuma` and `hipMemLocationTypeHostNumaCurrent` APIs. This enables NUMA-aware memory allocations backed by host CPU NUMA pools and aligns HIP virtual memory management behavior with CUDA host and host-NUMA VMM expectations.
 
 ### Resolved issues
 
