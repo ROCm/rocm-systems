@@ -1404,7 +1404,13 @@ void VirtualGPU::writePacketToRingBuffer(AqlPacket* aql_loc, AqlPacket* packet,
 // ================================================================================================
 void VirtualGPU::ringQueueDoorbell(uint64_t index) {
   if (doorbell_ptr_) {
-    amd::ringDoorbell(doorbell_ptr_, index, use_movdir64b_);
+    // skip_fence is only safe when host-GPU memory access is coherent (HSA_PROFILE_FULL,
+    // e.g. IFoE/XGMI fabric). On non-coherent PCIe (HSA_PROFILE_BASE), MOVDIR64B closes
+    // the CPU WC buffer but does NOT guarantee the PCIe posted write reaches the device
+    // before the subsequent UC MMIO doorbell write. Without the sfence, the CP can ring
+    // the doorbell, fetch the ring-buffer slot, and read stale data (wrong kernel_object).
+    const bool skip_fence = use_movdir64b_ && roc_device_.info().hostUnifiedMemory_;
+    amd::ringDoorbell(doorbell_ptr_, index, skip_fence);
   } else {
     Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
   }
