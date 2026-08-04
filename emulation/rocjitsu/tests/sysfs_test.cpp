@@ -275,6 +275,16 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
     EXPECT_EQ(props["cu_per_simd_array"], 10u);
     EXPECT_EQ(props["num_xcc"], num_xcc);
 
+    // The same dump reads simd_count 1216, i.e. 304 of the 320 CUs the array
+    // geometry above holds: MI300X is harvested, and KFD publishes the physical
+    // arrays with the active SIMD total beside them. Pinned to the capture
+    // rather than to the product, because the product is what the part is not.
+    // Both configs are checked here for the same reason the geometry is --
+    // kfd_debug.c copies this field into the debugger's device entry verbatim,
+    // so a pair that disagrees reports one part two ways.
+    EXPECT_EQ(props["simd_count"], 1216u);
+    EXPECT_EQ(props["simd_per_cu"], 4u);
+
     // What libhsakmt derives from those: NumShaderBanks = array_count /
     // simd_arrays_per_engine, i.e. the node's total shader engines.
     EXPECT_EQ(props["array_count"] / props["simd_arrays_per_engine"],
@@ -290,10 +300,29 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
 // the declared simd_count, or a runtime sizing scratch and CWSR from the
 // reported CU count provisions for a machine the simulator does not have.
 //
+// simd_count itself can only be bounded here, not derived -- the shortfall on a
+// harvested part is a fact about the silicon. What can be checked is that every
+// config modelling the same part carries the same one, which is done below.
+//
 // \NPI new GPU: a config added to configs/ is picked up here automatically.
 TEST(SysfsTopologyGeometryTest, ShippedConfigsMatchTheSimulatedSoC) {
   const std::filesystem::path config_dir = CONFIG_DIR;
   unsigned checked = 0;
+
+  // One part may ship as several configs -- a KMD capture, a sibling that models
+  // more of the SoC, a multi-GPU variant -- and they have to advertise the same
+  // machine. Keyed by the part, first config seen wins and the rest are compared
+  // against it.
+  struct PartGeometry {
+    std::string config;
+    uint32_t simd_count;
+    uint32_t num_shader_engines;
+    uint32_t arrays_per_engine;
+    uint32_t num_cu_per_sh;
+    uint32_t simd_per_cu;
+    uint32_t num_xcc;
+  };
+  std::unordered_map<std::string, PartGeometry> parts;
 
   for (const auto &entry : std::filesystem::directory_iterator(config_dir)) {
     if (entry.path().extension() != ".json")
@@ -345,6 +374,37 @@ TEST(SysfsTopologyGeometryTest, ShippedConfigsMatchTheSimulatedSoC) {
     EXPECT_LE(loaded.device.simd_count, simds)
         << "simd_count exceeds the simulated CU geometry: " << soc_cus << " CUs * "
         << loaded.device.simd_per_cu << " SIMDs";
+
+    // That bound is all a lone config can be held to -- how far below the array
+    // geometry a harvested part sits is a property of the part, not something
+    // any product here can derive. So simd_count is carried alongside the
+    // geometry instead: every config for one part must agree on all of it.
+    // Nothing downstream reconciles a disagreement. sysfs publishes the loaded
+    // config's simd_count as the node property and debug_device_snapshot()
+    // copies it into the debugger's device entry, so two configs for one GPU
+    // that differ here report that GPU's active-SIMD count two ways depending
+    // on which one the run happened to load.
+    const PartGeometry geometry{name,
+                                loaded.device.simd_count,
+                                loaded.device.num_shader_engines,
+                                arrays_per_engine,
+                                loaded.device.num_cu_per_sh,
+                                loaded.device.simd_per_cu,
+                                num_xcc};
+    const std::string part =
+        std::to_string(loaded.device.gfx_target_version) + " " + loaded.device.marketing_name;
+    const auto [it, inserted] = parts.emplace(part, geometry);
+    if (!inserted) {
+      const PartGeometry &first = it->second;
+      SCOPED_TRACE("same part as " + first.config + " (" + part + ")");
+      EXPECT_EQ(geometry.simd_count, first.simd_count)
+          << "configs for one part disagree on the active SIMD count";
+      EXPECT_EQ(geometry.num_shader_engines, first.num_shader_engines);
+      EXPECT_EQ(geometry.arrays_per_engine, first.arrays_per_engine);
+      EXPECT_EQ(geometry.num_cu_per_sh, first.num_cu_per_sh);
+      EXPECT_EQ(geometry.simd_per_cu, first.simd_per_cu);
+      EXPECT_EQ(geometry.num_xcc, first.num_xcc);
+    }
   }
 
   EXPECT_GE(checked, 5u) << "expected the shipped device configs to be discovered";
