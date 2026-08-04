@@ -25,6 +25,7 @@
 // hand it hand-built signals rather than a live queue.
 
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/kfd/doorbell_map.hpp"
 
 #include <gtest/gtest.h>
