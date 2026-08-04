@@ -18,7 +18,10 @@ All commands are shown relative to the rocDecode project root (the directory con
   export ROCM_PATH="$HOME/TheRock_XXXX"
   ```
 
-  `test/validate.sh --check-rocm` verifies this and fails fast with guidance.
+  `ROCM_PATH` must also be **writable** — `make install` installs into it, so a system
+  `/opt/rocm` would need sudo (which the skill does not use); prefer a user-writable
+  install such as a TheRock build in `$HOME`. `test/validate.sh --check-rocm` verifies both
+  (compiler present + prefix writable) and fails fast with guidance.
 * rocDecode built and installed (`make install`) — the CTest cases and conformance
   runners test against the installed library and data.
 * [FFmpeg](https://ffmpeg.org/about.html) dev libraries — required for the samples and

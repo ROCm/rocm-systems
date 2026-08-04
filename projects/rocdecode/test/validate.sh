@@ -47,7 +47,7 @@ Options:
   --build-dir DIR      Path to the CMake build directory (default: ../build)
   --skip-ctest         Skip the CTest phase
   --skip-conformance   Skip all conformance phases
-  --check-rocm         Only verify the ROCm toolchain (ROCM_PATH) and exit
+  --check-rocm         Verify the ROCm toolchain (ROCM_PATH exists + writable) and exit
   -h, --help           Show this help and exit
 
 Environment:
@@ -86,6 +86,24 @@ check_rocm_path() {
   return 0
 }
 
+# Fail if the ROCm install prefix is not writable: `make install` installs into
+# ROCM_PATH, so a read-only prefix (e.g. a system /opt/rocm) would need sudo,
+# which the skill does not use. Checked only in the pre-build --check-rocm step.
+check_rocm_writable() {
+  local rp="${ROCM_PATH:-/opt/rocm}"
+  if [[ ! -w "$rp" ]]; then
+    {
+      echo "ERROR: ROCM_PATH=$rp is not writable."
+      echo "       'make install' installs into ROCM_PATH and will fail without sudo."
+      echo "  Fix: point ROCM_PATH at a user-writable ROCm install (e.g. a TheRock build"
+      echo "       in \$HOME), or install rocDecode manually with elevated privileges."
+    } >&2
+    return 1
+  fi
+  echo "Install prefix $rp is writable"
+  return 0
+}
+
 # --- parse args ---
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -106,9 +124,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Verify the ROCm toolchain up front (and exit early if only checking).
+# Verify the ROCm toolchain up front (and exit early if only checking). The
+# writable-prefix check runs only in --check-rocm, before the install step; the
+# normal test run (which does not install) skips it.
 check_rocm_path || exit 1
 if [[ $CHECK_ROCM -eq 1 ]]; then
+  check_rocm_writable || exit 1
   exit 0
 fi
 

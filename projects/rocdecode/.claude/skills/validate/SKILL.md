@@ -32,8 +32,12 @@ so the pipeline still runs without the full data set.
 
 Run: `test/validate.sh --check-rocm`
 
-This confirms `ROCM_PATH` points at a usable ROCm install before any build work. If it
-fails, fix `ROCM_PATH` (see the note above) and re-run before continuing.
+This confirms `ROCM_PATH` points at a usable ROCm install (the compiler exists) and that
+the install prefix is writable before any build work — `make install` installs into
+`ROCM_PATH`, so a read-only prefix like a system `/opt/rocm` would need sudo, which this
+skill does not use. If it fails, fix `ROCM_PATH` (see the note above; point it at a
+user-writable install) and re-run before continuing. Do not retry without changing
+`ROCM_PATH` — if it cannot be resolved, stop and ask the developer.
 
 ## Step 2 — Configure, clean, rebuild, and install the core library
 
