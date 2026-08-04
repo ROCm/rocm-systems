@@ -33,7 +33,7 @@ jobs:
       should_build: ${{ steps.check_paths.outputs.should_build }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
 
@@ -68,7 +68,7 @@ jobs:
       BUILD_DIR: ${{ github.workspace }}/build
     steps:
       - name: Checkout rocm-systems
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: rocm-systems
           sparse-checkout: |
@@ -78,7 +78,7 @@ jobs:
             projects/hipother
 
       - name: Checkout llvm-project repository # we only need hipcc to build HIP on nvidia platform
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: "ROCm/llvm-project"
           path: "llvm-project"
