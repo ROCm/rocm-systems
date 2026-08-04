@@ -269,9 +269,15 @@ get_gpuvm_aperture(int kfd, uint32_t gpu_id, uint64_t* base, uint64_t* limit)
 void
 teardown_session(int kfd, dlog_session* s);
 
+// Whether a failed setup can be retried later. Anything that depends on the KFD
+// device being usable -- aperture lookup, the GTT allocation, buffer
+// registration, opening the stream, the mapping -- may simply be too early when
+// setup runs at process init, so it is retryable. A geometry or layout mismatch
+// is an ABI disagreement that will never resolve, so it is permanent.
 bool
-setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
+setup_session(int kfd, uint32_t gpu_id, dlog_session* s, bool* permanent = nullptr)
 {
+    if(permanent) *permanent = false;
     s->gpu_id = gpu_id;
 
     const uint64_t buf_bytes  = ring_bytes();
@@ -380,6 +386,7 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
             s->info.fw_record_size,
             s->info.num_regions,
             rrc);
+        if(permanent) *permanent = true;  // ABI disagreement: retrying cannot help
         return false;
     }
 
@@ -403,6 +410,7 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
             s->info.records_offset,
             s->info.wptr_offset,
             s->info.rptr_offset);
+        if(permanent) *permanent = true;  // ABI disagreement: retrying cannot help
         return false;
     }
 
@@ -1068,8 +1076,18 @@ request_reader_slot_purge(uint32_t doorbell_slot)
     purge_requests().emplace_back(doorbell_slot);
 }
 
+namespace
+{
+// Shared by the eager (init-time) and lazy (first-dispatch) paths.
+//
+// latch_retryable distinguishes the two: at first dispatch the device is
+// certainly usable, so any failure is treated as permanent and latched -- that is
+// what stops every later dispatch repeating 128 alloc ioctls and a warning. At
+// init the device may simply not be ready yet, so a retryable failure must NOT
+// latch, or an attempt that was merely early would disable the feature for the
+// whole process. A genuinely permanent cause latches either way.
 bool
-ensure_reader_session(uint32_t gpu_id)
+establish_session(uint32_t gpu_id, bool latch_retryable)
 {
     if(!kfd_dispatch_log_available() || !gpu_supports_dispatch_log(gpu_id)) return false;
 
@@ -1091,8 +1109,20 @@ ensure_reader_session(uint32_t gpu_id)
 
     // One session for the first supported GPU. (This gpu_id is supported per the
     // guard above.)
-    if(!setup_session(st.kfd_fd, gpu_id, &st.session))
+    bool _permanent = false;
+    if(!setup_session(st.kfd_fd, gpu_id, &st.session, &_permanent))
     {
+        if(!_permanent && !latch_retryable)
+        {
+            // Too early, most likely: leave the door open for the first dispatch
+            // to try again rather than disabling the feature for the process.
+            ROCP_INFO << fmt::format(
+                "KFD dispatch-log: gpu_id={} session not established at init; will retry on the "
+                "first dispatch",
+                gpu_id);
+            return false;
+        }
+
         st.setup_failed.store(true, std::memory_order_release);
         // The GPU advertised dispatch-log support but the session could not be
         // established (specific cause logged by setup_session above). This latch is
@@ -1111,6 +1141,24 @@ ensure_reader_session(uint32_t gpu_id)
     auto     _   = ::write(st.wake_fd, &one, sizeof(one));
     (void) _;
     return true;
+}
+}  // namespace
+
+bool
+ensure_reader_session(uint32_t gpu_id)
+{
+    // First-dispatch path: the device is usable by now, so a failure here is
+    // permanent and latches, exactly as before.
+    return establish_session(gpu_id, /*latch_retryable=*/true);
+}
+
+bool
+arm_reader_session_early(uint32_t gpu_id)
+{
+    // Config-time path: arm the ring before any kernel can dispatch, so the
+    // firmware is already recording when the first one runs. A failure that might
+    // only mean "too early" does not latch; ensure_reader_session() retries.
+    return establish_session(gpu_id, /*latch_retryable=*/false);
 }
 }  // namespace kfd
 }  // namespace rocprofiler

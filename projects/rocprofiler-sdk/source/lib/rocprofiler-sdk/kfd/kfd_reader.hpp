@@ -64,6 +64,20 @@ stop_kfd_reader();
 bool
 ensure_reader_session(uint32_t gpu_id);
 
+// Arm the dispatch-log ring at CONFIGURATION time, before any queue exists.
+//
+// The firmware only writes records once the buffer is registered and the stream
+// is open, so establishing that on the first dispatch means the earliest
+// dispatches produce nothing -- the ring comes up underneath them. Called from
+// init_kfd_profiler() once the probe has published availability and the reader is
+// running.
+//
+// Unlike ensure_reader_session(), a failure that might only mean "the device is
+// not usable yet" does NOT latch the session off; the first dispatch retries
+// through ensure_reader_session(). Only a permanent ABI/geometry mismatch latches.
+bool
+arm_reader_session_early(uint32_t gpu_id);
+
 // Ask the reader to drop everything it retains for a page-relative doorbell slot
 // whose queue was destroyed. The reader's retained starts are reader-thread-owned,
 // so a destroying thread posts a request instead of touching them; the reader

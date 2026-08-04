@@ -188,6 +188,42 @@ init_kfd_profiler()
     ROCP_INFO << fmt::format("KFD dispatch-log: available (ABI version {}, {} supported GPU(s))",
                              st.abi_version,
                              st.supported_gpu_ids.size());
+
+    // Arm the ring NOW, at configuration time, rather than on the first eligible
+    // dispatch. The firmware only records once the buffer is registered and the
+    // stream is open, so establishing that lazily loses the dispatches that run
+    // while it is coming up.
+    //
+    // The single process-wide session design is unchanged: a dispatch on any
+    // other GPU still falls back to HSA timestamps. Ordering matters -- this runs
+    // after st.available is published and after start_kfd_reader(), because the
+    // session path checks both.
+    //
+    // If it cannot succeed yet (device not usable this early) nothing is latched;
+    // the first dispatch retries through ensure_reader_session().
+    //
+    // Only when exactly ONE GPU supports dispatch-log. With several, nothing here
+    // says which one the application will actually use, and the session is
+    // process-wide -- arming a guess would permanently deny the GPU that does get
+    // used, which is strictly worse than today. Multi-GPU therefore keeps the lazy
+    // behavior, where the session follows the first GPU to dispatch.
+    if(st.supported_gpu_ids.size() == 1)
+    {
+        const uint32_t _gpu_id = *st.supported_gpu_ids.begin();
+        if(arm_reader_session_early(_gpu_id))
+        {
+            ROCP_INFO << fmt::format(
+                "KFD dispatch-log: ring armed at init for gpu_id={}, before any dispatch",
+                _gpu_id);
+        }
+    }
+    else
+    {
+        ROCP_INFO << fmt::format(
+            "KFD dispatch-log: {} GPUs support dispatch-log; the single process-wide session is "
+            "left to follow the first GPU that dispatches",
+            st.supported_gpu_ids.size());
+    }
 }
 
 void
