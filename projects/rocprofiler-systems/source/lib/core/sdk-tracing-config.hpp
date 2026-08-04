@@ -160,18 +160,24 @@ private:
         std::string operations_exclude_env_name            = {};
         std::string operations_annotate_backtrace_env_name = {};
 
-        bool is_empty() const
+        operation_options_env_names() = default;
+
+        explicit operation_options_env_names(const std::string_view domain_name)
+        : operations_include_env_name(
+              fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS", domain_name))
+        , operations_exclude_env_name(
+              fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS_EXCLUDE", domain_name))
+        , operations_annotate_backtrace_env_name(fmt::format(
+              "ROCPROFSYS_ROCM_{}_OPERATIONS_ANNOTATE_BACKTRACE", domain_name))
+        {}
+
+        [[nodiscard]] bool is_empty() const
         {
             return operations_annotate_backtrace_env_name.empty() &&
                    operations_exclude_env_name.empty() &&
                    operations_include_env_name.empty();
         }
     };
-
-    /// @brief Pure: nullopt if not filterable, else the three formatted env names.
-    [[nodiscard]] static operation_options_env_names
-    assemble_operation_env_names_for_domain(std::string_view domain_name,
-                                            bool             has_operations);
 
     /// @brief Env-var names for one kind, via SdkBackend's cached tracing-name
     /// table, applying the MARKER_CORE_API -> "MARKER_API" alias.
@@ -210,18 +216,12 @@ namespace rocprofsys::rocprofiler_sdk
 
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-const std::unordered_set<std::string_view>
-    sdk_tracing_config<SdkBackend, Externals>::s_domains_to_skip{
+const std::unordered_set<std::string_view> sdk_tracing_config<
+    SdkBackend, Externals>::s_domains_to_skip{
 
-        "none",
-        "correlation_id_retirement",
-        "marker_core_api",
-        "marker_control_api",
-        "marker_name_api",
-        "code_object",
-        "kernel_dispatch",
-        "page_migration",
-    };
+    "none",        "correlation_id_retirement", "marker_control_api", "marker_name_api",
+    "code_object", "kernel_dispatch",           "page_migration",
+};
 
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
@@ -250,45 +250,36 @@ sdk_tracing_config<SdkBackend, Externals>::finalize_and_throw(
 
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-typename sdk_tracing_config<SdkBackend, Externals>::operation_options_env_names
-sdk_tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_domain(
-    std::string_view domain_name, bool has_operations)
-{
-    if(!has_operations || s_domains_to_skip.contains(to_lower(domain_name)))
-    {
-        return {};
-    }
-
-    return operation_options_env_names{
-        fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS", domain_name),
-        fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS_EXCLUDE", domain_name),
-        fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS_ANNOTATE_BACKTRACE", domain_name),
-    };
-}
-
-template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
 template <typename TracingKind>
     requires concepts::tracing_kind_for<SdkBackend, TracingKind>
 typename sdk_tracing_config<SdkBackend, Externals>::operation_options_env_names
 sdk_tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind(
     TracingKind kind)
 {
+    std::string_view name{};
+    bool             has_operations{};
+
     if constexpr(std::same_as<TracingKind, typename SdkBackend::callback_tracing_kind_t>)
     {
-        const auto& entry       = SdkBackend::get_callback_tracing_names()[kind];
-        const auto  domain_name = (kind == SdkBackend::CALLBACK_TRACING_MARKER_CORE_API)
-                                      ? std::string_view{ "MARKER_API" }
-                                      : std::string_view{ entry.name };
-        return assemble_operation_env_names_for_domain(domain_name,
-                                                       !entry.operations.empty());
+        const auto& entry = SdkBackend::get_callback_tracing_names()[kind];
+        name              = (kind == SdkBackend::CALLBACK_TRACING_MARKER_CORE_API)
+                                ? std::string_view{ "MARKER_API" }
+                                : std::string_view{ entry.name };
+        has_operations    = !entry.operations.empty();
     }
     else
     {
         const auto& entry = SdkBackend::get_buffer_tracing_names()[kind];
-        return assemble_operation_env_names_for_domain(std::string_view{ entry.name },
-                                                       !entry.operations.empty());
+        name              = entry.name;
+        has_operations    = !entry.operations.empty();
     }
+
+    if(!has_operations || s_domains_to_skip.contains(to_lower(name)))
+    {
+        return {};
+    }
+
+    return operation_options_env_names{ name };
 }
 
 template <typename SdkBackend, typename Externals>
@@ -462,34 +453,28 @@ sdk_tracing_config<SdkBackend, Externals>::operation_settings()
 
     auto result = std::vector<operation_setting_spec>{};
 
-    auto gather_domain_f = [&result](std::string_view domain_name,
-                                     const auto&      domain_operations) {
-        const auto names = assemble_operation_env_names_for_domain(
-            domain_name, !domain_operations.empty());
-        if(names.is_empty())
+    auto gather_domain_f = [&result](auto kind, const auto& domain_operations) {
+        const auto env_names = assemble_operation_env_names_for_kind(kind);
+        if(env_names.is_empty())
         {
             return;
         }
 
         result.push_back(operation_setting_spec{
-            names.operations_include_env_name,
-            names.operations_exclude_env_name,
-            names.operations_annotate_backtrace_env_name,
+            env_names.operations_include_env_name,
+            env_names.operations_exclude_env_name,
+            env_names.operations_annotate_backtrace_env_name,
             { domain_operations.begin(), domain_operations.end() } });
     };
 
-    gather_domain_f(
-        "MARKER_API",
-        callback_tracing_info[SdkBackend::CALLBACK_TRACING_MARKER_CORE_API].operations);
-
     for(const auto& itr : callback_tracing_info)
     {
-        gather_domain_f(itr.name, itr.operations);
+        gather_domain_f(itr.value, itr.operations);
     }
 
     for(const auto& itr : buffered_tracing_info)
     {
-        gather_domain_f(itr.name, itr.operations);
+        gather_domain_f(itr.value, itr.operations);
     }
 
     return result;
