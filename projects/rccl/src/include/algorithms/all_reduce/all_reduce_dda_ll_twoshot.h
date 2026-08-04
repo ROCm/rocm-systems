@@ -3,17 +3,18 @@
  *
  * Two-shot tier of the LL-protocol all-reduce for the DDA path.
  *
- * The kernel below is currently a verbatim copy of ddaAllReduceFlatLL from
- * all_reduce_dda_ll.h -- same phases, same staging layout, same epoch. Only the
- * name and the dispatch tier differ, so any measured gap between the two tiers
- * comes from the launcher or the dispatch, never from the device code. The
- * reduce-scatter/all-gather decomposition that gives this tier its name is meant
- * to replace the body later; keeping the copy exact is what makes that a
- * one-variable change.
+ * Each rank owns one shard of count/nRanks elements and only ever transports
+ * that shard, so every rank moves nRanks-1 shards instead of nRanks-1 whole
+ * messages the way the one-shot tier does. Three phases, all flag-ordered like
+ * the one-shot, so still no GPU barrier:
  *
- * Because it is a copy, it shares the one-shot tier's scratch layout and epoch
- * counter (see the constants below), so the two tiers are interchangeable on the
- * same comm and neither can strand the other's scratch.
+ *   1. publish: send each peer the shard that peer owns,
+ *   2. reduce:  sum the copies of my own shard that arrived, write it to my part
+ *               of recvbuff, and publish the reduced shard back to every peer,
+ *   3. writeback: collect the peers' reduced shards into the rest of recvbuff.
+ *
+ * It shares comm->ddaScratch and the LL epoch counter with the one-shot tier
+ * (see the constants below), so the two stay interchangeable on the same comm.
  *
  * See LICENSE.txt for license information.
  ************************************************************************/
@@ -36,25 +37,39 @@
 namespace meta::comms {
 
 // Both tiers stage through comm->ddaScratch under one epoch counter, so bank =
-// flag & 1 only lands where the other tier expects it while the cap and the slot
-// stride stay identical. Aliased rather than copied so the two cannot drift: a
-// tier that needs its own capacity has to also give the pair a bank stride that
-// still agrees.
+// flag & 1 has to land where the other tier expects it. A slot here only holds a
+// shard, so it is half the one-shot slot; the bank then spans two of them (the
+// publish stage and the write-back stage), which puts bank 1 at the same offset
+// the one-shot tier uses. Derived from the one-shot constants rather than spelled
+// out so that pairing cannot drift silently -- dda_all_reduce_fabric_ll.cu
+// static_asserts the halving.
 constexpr size_t kDdaLLArTwoShotMaxBytes = kDdaLLArMaxBytes;
 constexpr size_t kDdaLLArTwoShotSlotStridePkts = kDdaLLArSlotStridePkts / 2;
 
-// LL two-shot all-reduce kernel. 1D grid over packets (8B payload each).
+// LL two-shot all-reduce kernel. 1D grid over one shard's packets (8B payload
+// each), so the launcher sizes the grid on count/nRanks, not on count.
 //
-// Phase 1 (publish): rank selfRank writes its full sendbuff into every peer's
-// scratch at slot selfRank, as LL lines carrying the epoch flag.
+// Phase 1 (publish): rank selfRank sends peer p the part of sendbuff that p
+// owns, into p's scratch at slot selfRank, as LL lines carrying the epoch flag.
+// The shard reads are hoisted out of the store loop on purpose: leaving them
+// interleaved makes each store wait on the next load and the per-peer streams
+// stop overlapping, which costs about 2x.
 // Phase 2 (reduce): rank selfRank polls its own scratch slot for each other
-// rank (waiting on the flag), and sums those with its own sendbuff into
-// recvbuff. The flag polling provides the cross-rank ordering, so no GPU
-// barrier is used.
+// rank (waiting on the flag), sums those with its own shard of sendbuff into
+// recvbuff, then publishes that reduced shard back to every peer at the
+// write-back stage of the bank.
+// Phase 3 (write-back): poll each peer's reduced shard and drop it into that
+// peer's part of recvbuff. Flag polling provides all the cross-rank ordering, so
+// no GPU barrier is used.
 //
-// Scratch is double-buffered: bank = epoch & 1, selected via bankOffsetPkts.
-// Self does not round-trip through scratch; its contribution is read directly
-// from sendbuff in the reduce.
+// Scratch is double-buffered: bank = epoch & 1, selected via bankOffsetPkts,
+// with bankOffsetPkts_next naming the write-back stage inside that bank. Self
+// does not round-trip through scratch; its contribution is read directly from
+// sendbuff in the reduce.
+//
+// Threads own disjoint packet indices in every phase, so an in-place call (where
+// sendbuff aliases recvbuff) never has one thread's phase-3 store land on a
+// packet another thread still has to read in phase 1.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)

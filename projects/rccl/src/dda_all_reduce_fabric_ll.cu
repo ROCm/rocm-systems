@@ -5,10 +5,11 @@
  * All-reduce analogue of dda_all_gather_fabric_ll.cu; reuses the codepath-
  * agnostic ddaAllReduceFlatLL kernel from all_reduce_dda_ll.h.
  *
- * Carries both LL tiers. The two-shot tier's kernel is still a verbatim copy of
- * the one-shot's, so hosting the two launchers in one translation unit keeps
- * them on identical compile flags and leaves the dispatch tier as the only
- * difference between them.
+ * Carries both LL all-reduce tiers: the one-shot kernel above and the two-shot
+ * kernel from all_reduce_dda_ll_twoshot.h, which transports one shard per rank
+ * instead of the whole message. They share a scratch layout and epoch counter, so
+ * keeping both launchers in one translation unit also keeps the invariant that
+ * ties them (the static_assert below) next to the code it constrains.
  * See LICENSE.txt for license information.
  ************************************************************************/
 
@@ -42,8 +43,8 @@ static inline size_t ddaLLArScratchSize(int nRanks) {
   return (size_t)2 * (size_t)nRanks * kDdaLLArSlotStridePkts * sizeof(LLPacket16);
 }
 
-// Same shape, off the two-shot tier's own constant, so a tier that later grows
-// its slot is sized against the scratch it actually uses.
+// Two-shot footprint, sized off that tier's own slot constant so it tracks the
+// tier it guards rather than the one-shot's.
 static inline size_t ddaLLArTwoShotScratchSize(int nRanks) {
   return (size_t)2 * (size_t)nRanks * kDdaLLArTwoShotSlotStridePkts * sizeof(LLPacket16);
 }
@@ -120,10 +121,10 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   return ncclSuccess;
 }
 
-// Mirrors ncclAllReduceDdaFabricLLTyped: the kernel it launches is a copy, so the
-// grid sizing and arguments are deliberately the same. Keep them that way while
-// the kernels match, so a measured difference between the tiers can only come
-// from the dispatch.
+// Every phase of the two-shot kernel loops over one shard, with the peer fan-out
+// inside it, so the grid covers count/nRanks packets rather than the whole
+// message; sizing it on the message would only add blocks whose gtid starts past
+// the loop bound.
 template <typename T>
 static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, void* recvbuff, size_t count,
                                                          ncclComm* comm, cudaStream_t stream) {

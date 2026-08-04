@@ -35,8 +35,8 @@ bool ncclAllReduceDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
 ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                       ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
-// Two-shot tier of the LL fabric path. Its kernel is still a verbatim copy of the
-// one-shot tier's, so the two differ only in which tier dispatch picks.
+// Two-shot tier of the LL fabric path: each rank transports only the shard it
+// owns, so it moves count/nRanks per peer where the one-shot moves count.
 bool ncclAllReduceDdaFabricLLTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                              ncclDataType_t datatype, ncclRedOp_t op);
 
