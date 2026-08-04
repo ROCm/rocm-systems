@@ -1,167 +1,186 @@
 # Demoing Bounded Specialist Creativity
 
-A 10-minute walkthrough you can give another engineer to show what the
-exploratory-proposal feature does and why it is safe. It needs **no API
-key, no GPU, and no network** — the demo scripts a hostile model in
-place of a real provider, so it produces the same output every time and
-runs anywhere.
+A 10-minute walkthrough for showing another engineer what the exploratory
+proposal lane does and why it is safe. It needs **no API key, no GPU, and no
+network** — the demo scripts a hostile model in place of a provider, so it
+prints the same thing every time.
 
-For what the feature *is*, read
-[Bounded specialist creativity](bounded-specialist-creativity.md) first.
-This guide is only about showing it.
+For the concepts, see
+[Bounded specialist creativity](bounded-specialist-creativity.md).
 
-Cross-links:
-- [Agentic mode](agentic-mode.md) — air-gap vs LLM-enabled
-- [Agent hierarchy](../architecture/agent-hierarchy.md) — who may explore
-- [RFC 0001](../rfcs/0001-bounded-specialist-creativity.md) — the design
+## Open with the tension
 
-## The one-sentence pitch
+> PerfXpert recommends GPU optimizations that engineers act on, so its advice
+> comes from a catalog of techniques someone measured. We want the model to
+> suggest something *not* in that catalog — without it ever passing that
+> suggestion off as measured.
 
-Open with the tension, because everything else follows from it:
+## 1. How the architecture is extended
 
-> PerfXpert recommends GPU optimizations that engineers actually act on,
-> so its advice comes from a catalog of techniques someone measured. We
-> want the model to be able to suggest something *not* in that catalog —
-> without it ever being able to pass that suggestion off as measured.
+Start from the hierarchy your audience already knows
+([agent-hierarchy.md](../architecture/agent-hierarchy.md)): Root routes, the
+Tier-1 agents own classification and strategy, and four Tier-2 specialists own
+performance domains. **None of that changes.** The feature adds one output to
+Tier-2 specialists and nothing else:
 
-Then the answer: two lanes that never merge. Recommendations stay
-catalog-only and deterministic. Model ideas arrive in a separate field,
-labelled unproven, bound to evidence from the run, and capped in
-confidence.
+```mermaid
+flowchart TD
+  classDef brain fill:#fff8c7,stroke:#9a6b00,color:#3d2b00,stroke-width:2px
+  classDef specialist fill:#eaf8ef,stroke:#227343,color:#143b26,stroke-width:1px
+  classDef vetted fill:#eaf8ef,stroke:#227343,color:#143b26,stroke-width:2px
+  classDef added fill:#fdeee3,stroke:#b4551d,color:#5a2a0c,stroke-width:2px
 
-## Setup
+  subgraph brainSection["🧠 PerfXpert agent brain — unchanged"]
+    root["Root<br/>intent router"]
+    recommendation["Recommendation<br/>hands off to specialists"]
+  end
+
+  memory["memory_specialist<br/>Tier 2"]
+  catalog[("proven_optimizations.yaml<br/>measured catalog")]
+  model{{"LLM<br/>live sessions only"}}
+
+  vettedOut["techniques<br/>ranked · measured · deterministic"]
+  explOut["exploratory_proposals<br/>NEW · unproven · labelled"]
+
+  root --> recommendation
+  recommendation --> memory
+  catalog --> memory
+  model -. "exploratory tier only" .-> memory
+  memory --> vettedOut
+  memory -. "additive" .-> explOut
+
+  class root,recommendation brain
+  class memory specialist
+  class vettedOut vetted
+  class explOut added
+```
+
+The point to land: the model does not sit *between* the catalog and the
+advice. It hangs off the side, feeding a second output that never merges with
+the first.
+
+## 2. What happens inside a specialist
+
+The ordering is the safety property. The vetted answer is finished *before*
+anything considers calling a model:
+
+```mermaid
+flowchart TD
+  classDef det fill:#eaf8ef,stroke:#227343,color:#143b26,stroke-width:1px
+  classDef gate fill:#fff4d8,stroke:#a66a00,color:#4a3100,stroke-width:1px
+  classDef added fill:#fdeee3,stroke:#b4551d,color:#5a2a0c,stroke-width:1px
+
+  start(["run_memory_specialist"])
+  rank["rank catalog · attach predictions"]
+  frozen["techniques · confidence · citations<br/>FROZEN — no model input"]
+  tier{"tier == exploratory?<br/>config AND live AND capability"}
+  call["one bounded model call"]
+  check["validate drafts against evidence"]
+  out(["output"])
+
+  start --> rank --> frozen --> tier
+  tier -- "no — the default" --> out
+  tier -- yes --> call --> check -.-> out
+
+  class rank,frozen det
+  class tier gate
+  class call,check added
+```
+
+Two things worth saying out loud. Under the default `strict` tier the
+specialist returns at that gate and **never calls the model at all** — this
+costs nothing until you ask for it. And because the vetted fields are already
+frozen upstream of the call, a provider that returns garbage cannot reach
+them.
+
+## 3. Run the demo
 
 ```bash
-# SKIP-SAMPLE — demo setup; run from the perfxpert project root
+# SKIP-SAMPLE — run from the perfxpert project root
 cd experimental/python/perfxpert
 python scripts/demo_bounded_creativity.py
 ```
 
-That is the whole setup. The script monkeypatches the framework's
-provider call with a canned response, so "the model" is whatever the
-demo tells it to be. It is hostile at every step: it invents techniques,
-claims perfect confidence, cites tools it never called, and forges its
-own tool-call record.
+About a second. Six steps:
 
-Run it once yourself before presenting. It takes about a second.
+| Step | What it shows |
+|---|---|
+| 1 | Default config: hostile model returns invented techniques at 0.99 confidence — output is pure catalog, no proposals |
+| 2 | Exploration on: proposal appears, `status: exploratory`, confidence 0.4 against a 0.5 ceiling, runtime-assigned id. **Vetted lane identical to step 1** |
+| 3 | Four forged proposals, four rejections, advice never moves |
+| 4 | Live output vs air-gap: every measured field identical |
+| 5 | `proposals list / show / promote` |
+| 6 | A proposal that tries to forge its own measurements |
 
-## The walkthrough
+## 4. Step 3 is the demo — the gauntlet
 
-The script prints six steps. Here is what to say at each.
+Every proposal runs this before it is allowed to exist:
 
-### Step 1 — The default configuration ignores the model entirely
+```mermaid
+flowchart LR
+  classDef added fill:#fdeee3,stroke:#b4551d,color:#5a2a0c,stroke-width:1px
+  classDef bad fill:#fdeaea,stroke:#a32020,color:#4a0f0f,stroke-width:1px
+  classDef good fill:#eaf8ef,stroke:#227343,color:#143b26,stroke-width:2px
 
-The model returns `invented_technique` at 0.99 confidence with a made-up
-citation. The output contains the two real catalog techniques, the
-deterministic confidence, no citations, and no proposals.
+  draft["model draft"]
+  c1{"schema clean?<br/>no runtime fields"}
+  c2{"cites only tools<br/>that actually ran?"}
+  c3{"targets a kernel<br/>that was measured?"}
+  c4{"confidence<br/>≤ 0.5?"}
+  ok["stamped and emitted<br/>id · status · provenance"]
+  drop["dropped<br/>vetted lane unaffected"]
 
-Say: *this is the default, and it is not "we filtered the model out"
-— under the default `strict` tier the specialist never calls the model
-at all.* That matters for cost and latency, not just safety.
+  draft --> c1
+  c1 -- yes --> c2
+  c2 -- yes --> c3
+  c3 -- yes --> c4
+  c4 -- yes --> ok
+  c1 -- no --> drop
+  c2 -- no --> drop
+  c3 -- no --> drop
+  c4 -- no --> drop
 
-### Step 2 — Turning exploration on
+  class draft,c1,c2,c3,c4 added
+  class drop bad
+  class ok good
+```
 
-Set `PERFXPERT_AGENT_CREATIVITY=exploratory` and the same hostile model
-now yields a proposal. Point at three things in the printed record:
+Dwell on two answers here.
 
-- The vetted lane is **identical to step 1**. Enabling exploration did
-  not change one word of the advice.
-- The proposal carries `status: exploratory` and a confidence of 0.4
-  against a hard ceiling of 0.5. It cannot be mistaken for advice.
-- `proposal_id` was assigned by the runtime, not the model. It is a hash
-  of the proposal's content, which is what lets the same idea be
-  recognized across runs and promoted later.
+**The manifest is built from what the framework observed, not what the model
+reports.** That's the difference between "the model says it called the
+profiler" and "the runtime recorded a profiler call." The model cannot vouch
+for itself.
 
-### Step 3 — Evidence binding (the core of the demo)
+**Over-confidence is rejected, not clamped.** A clamped proposal would look
+exactly like an honest one, so refusing preserves the signal.
 
-Four hostile proposals, four rejections, vetted lane untouched each
-time:
-
-| The model tries to | Why it fails |
-| --- | --- |
-| Cite a tool the run never called | Manifest is built from tools actually invoked |
-| Target a kernel nobody measured | Manifest lists only measured kernels |
-| Claim 0.95 confidence | Over the ceiling — rejected, not clamped |
-| Forge its own `tool_calls` record | Field is runtime-owned; output rejected |
-
-Two points are worth dwelling on.
-
-**The manifest is built from what the SDK observed, not what the model
-reports.** The model cannot vouch for itself. This is the difference
-between "the model says it called the profiler" and "the runtime
-recorded a profiler call."
-
-**Over-confidence is rejected, not clamped.** If it were clamped, a
-proposal that tried to cheat would end up looking exactly like an honest
-one. Refusing preserves the signal that something went wrong.
-
-On the fourth case, the framework's own rejection appears on stderr
-mid-demo:
+On the fourth case the framework's own rejection prints mid-demo:
 
 ```
 framework: discarding MemoryTechniquesSpecialist output that failed
 MemorySpecialistOutput validation: tool_calls Extra inputs are not permitted
 ```
 
-That log line is the demo. The model tried to write the evidence record
-it would later be judged against, and schema validation threw away the
-entire response.
+That log line is the demo. The model tried to write the evidence record it
+would later be judged against, and validation threw away the whole response.
 
-### Step 4 — Air-gap parity
+## 5. Promotion, and why it refuses to finish
 
-The same call is made live and air-gapped. Every deterministic field
-matches. The only difference is that air-gap returns zero proposals.
-
-Say: *this is the invariant that makes the whole thing auditable. If a
-customer runs PerfXpert on a closed network with no model at all, they
-get the same measured findings. The exploratory lane is the single
-permitted divergence, and it is additive.*
-
-If someone asks how that is enforced rather than merely intended, this
-is a good moment for the test suite (below).
-
-### Steps 5 and 6 — Review and promotion
-
-The script saves a real result to `/tmp/perfxpert_demo_result.json` and
-prints three commands. Run them live:
-
-```bash
-# SKIP-SAMPLE — requires the demo script to have run first
-perfxpert proposals list /tmp/perfxpert_demo_result.json
-perfxpert proposals show /tmp/perfxpert_demo_result.json <proposal-id>
-perfxpert proposals promote /tmp/perfxpert_demo_result.json <proposal-id> --promoted-by you
-```
-
-`list` and `show` are the review surface. Note the framing in the header
-— "hypotheses, not recommendations" — and that `show` prints the
-evidence the proposal is bound to.
-
-`promote` is the interesting one, and it is where people are usually
-surprised. It emits a catalog entry skeleton that **deliberately fails
-catalog validation**:
+The script saves a result and prints three commands. Run them live. `promote`
+emits a catalog entry that **deliberately fails validation**:
 
 ```
 This entry is incomplete by design: measured_speedup_range,
 source_citation, preconditions, fixture_pair still need real measurements.
 ```
 
-Say: *promotion cannot be automated, because the four fields it withholds
-only exist once a human has actually run the experiment and produced a
-before/after fixture pair. The tool scaffolds the entry and then stops.
-That is the point at which an unmeasured idea would otherwise quietly
-become measured advice.*
+Say: *promotion cannot be automated, because those four fields only exist once
+a human ran the experiment. The tool scaffolds the entry and then stops —
+that's the point where an unmeasured idea would otherwise quietly become
+measured advice.*
 
-Step 6 then shows a proposal whose `mechanism` text is crafted to break
-out of its YAML field and add sibling keys claiming a measured speedup.
-The output shows the entry's keys — the forged fields are absent, and
-the hostile text is inert inside a quoted string. The entry is
-serialized rather than concatenated, and a fail-closed check re-parses
-the result and refuses to emit if any withheld field reappeared.
-
-## Showing that it is enforced, not just intended
-
-Everything above is a demonstration. If your audience wants the
-guarantee, the properties are encoded as tests:
+## If they want proof rather than a demonstration
 
 ```bash
 # SKIP-SAMPLE — run from the perfxpert project root
@@ -171,45 +190,30 @@ pytest tests/test_agents/test_specialist_lanes.py \
        tests/test_cli/test_proposals_cmd.py -q
 ```
 
-99 tests, about a second. Worth naming what is in there: the parity
-suite runs specialists under a deliberately hostile model and asserts
-the vetted lane is byte-identical to air-gap; the boundary probes assert
-the model cannot reach runtime-owned fields; the promotion tests cover
-five distinct YAML injection vectors.
+99 tests, about a second. The parity suite runs specialists under a hostile
+model and asserts the vetted lane is byte-identical to air-gap; the boundary
+probes assert the model cannot reach runtime-owned fields; the promotion tests
+cover five YAML injection vectors.
 
-A good closing line: *the demo shows the model failing to get through.
-The tests are what keep it failing.*
+Closing line: *the demo shows the model failing to get through. The tests are
+what keep it failing.*
 
-## Questions you should expect
+## Questions you will get
 
-**"What if the model's idea is actually good?"** Then someone runs the
-experiment, and `promote` scaffolds the catalog entry. The feature is not
-meant to filter good ideas out; it is meant to keep unmeasured ideas
-labelled as unmeasured until measurement happens.
+**"What if the idea is actually good?"** Someone runs the experiment and
+`promote` scaffolds the catalog entry. The goal isn't to filter good ideas
+out, it's to keep unmeasured ideas labelled until measurement happens.
 
-**"Why cap confidence at 0.5 instead of clamping to it?"** Clamping
-makes a dishonest proposal indistinguishable from an honest one. The cap
-exists to bound how much weight the lane can ever carry, and rejection
-keeps a violation visible.
+**"Why can only Tier-2 specialists propose?"** Tiers 0 and 1 route and decide.
+A model-influenced routing decision would move the deterministic core and
+break air-gap parity. A specialist suggestion can only ever be additive.
 
-**"Why can only Layer 2 specialists explore?"** Layers 0 and 1 route and
-rank. If a routing decision could be model-influenced, the deterministic
-core would move, and air-gap parity would break. Specialists are the
-only place where an additive suggestion cannot change what was measured.
+**"What stops exploration shipping on by default?"** It is off by default,
+requires a live session, and requires the agent to declare the capability. All
+three must independently permit it.
 
-**"Isn't the proposal ID hash missing the evidence?"** Yes, deliberately.
-The ID covers the idea, so the same hypothesis is recognizable across
-runs and can accumulate support. Including per-run evidence would make
-every run produce a new ID and break deduplication.
+## If you have two minutes
 
-**"What stops someone shipping with exploration on by default?"** It is
-off by default, it requires a live session, and it requires the agent to
-declare the capability. All three must independently permit it, and
-`PERFXPERT_AIRGAP=1` overrides the config entirely rather than acting as
-a default.
-
-## If you have only two minutes
-
-Run the script and show step 3 and step 4. The hostile model failing
-four times while the advice never moves, and live output matching
-air-gap exactly, are the whole idea.
+Run the script and show steps 3 and 4. A hostile model failing four times
+while the advice never moves, and live output matching air-gap exactly, is the
+whole idea.
