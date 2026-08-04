@@ -9,7 +9,7 @@
 EMIT_LLVM_IR ?= 0
 NCCL_EMIT_LTO_IR ?= 0
 
-# One sub-make: llvm_ir and ltoir share nccl_device_wrapper.h, two processes race on it.
+# Set up one make target to avoid race
 IR_GOALS :=
 ifneq ($(EMIT_LLVM_IR), 0)
 IR_GOALS += llvm_ir

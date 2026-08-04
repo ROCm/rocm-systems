@@ -69,7 +69,6 @@ OPT_PASSES := --passes='internalize,inline,globaldce' \
 # Build rules
 WRAPPER_HEADER := $(BUILDDIR)/include/nccl_device_wrapper.h
 
-# Never run llvm_ir and ltoir as concurrent sub-makes: this cp races (EEXIST).
 $(WRAPPER_HEADER): nccl_device_wrapper.h
 	@mkdir -p $(BUILDDIR)/include
 	@echo "Copying nccl_device_wrapper.h to build include..."
@@ -135,3 +134,10 @@ clean:
 	rm -rf $(OBJDIR) $(FINAL_BC) $(FINAL_LTO_IR) $(WRAPPER_HEADER)
 
 .PHONY: llvm_ir ltoir build clean
+
+# Serialize IR-gen to avoid race
+ifneq ($(EMIT_LLVM_IR), 0)
+ifneq ($(NCCL_EMIT_LTO_IR), 0)
+$(FINAL_LTO_IR): | $(FINAL_BC)
+endif
+endif
