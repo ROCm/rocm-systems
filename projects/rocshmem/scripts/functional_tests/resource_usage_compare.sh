@@ -5,7 +5,10 @@
 #
 # Builds are cached per (gpu_target, build_config, commit) under
 # $PROJECTS_DIR/build-cache so re-comparing COMMIT_1 against a
-# different COMMIT_2 doesn't rebuild COMMIT_1 again.
+# different COMMIT_2 doesn't rebuild COMMIT_1 again. The durable outputs of
+# that build (res-<sha>.csv, build.log, resource_usage_summary.log) live
+# separately under $PROJECTS_DIR/resource-usage-cache, so build-cache can be
+# wiped for disk space without losing prior measurements.
 #
 # Each commit is built in an isolated git worktree under /tmp so the main
 # working tree is never touched — uncommitted changes are safe.
@@ -36,8 +39,7 @@
 #                         report/chart regardless of delta.
 #   --output-dir DIR      Directory to write the comparison report (CSVs +
 #                         charts) to. Default:
-#                         build-cache/<gpu>-<config>-<sha1>-vs-<sha2>/
-#                         under the rocshmem repo root.
+#                         $PROJECTS_DIR/resource-usage/<gpu>-<config>-<sha1>-vs-<sha2>/
 #
 # Example: compare two explicit commits
 #   ./resource_usage_compare.sh --commit1 d48c64f6e --commit2 3caf8d080 \
@@ -128,7 +130,8 @@ measure_commit() {
   local commit="$1"
   local sha="$2"
   local build_dir="$PROJECTS_DIR/build-cache/${GPU_TARGET}-${BUILD_CONFIG}-${sha}"
-  local csv="$build_dir/res-${sha}.csv"
+  local cache_dir="$PROJECTS_DIR/resource-usage/cache/${GPU_TARGET}-${BUILD_CONFIG}-${sha}"
+  local csv="$cache_dir/res-${sha}.csv"
 
   if [[ -f "$csv" && "$FORCE_REBUILD" == false ]]; then
     echo "  [$sha] cached -> $csv" >&2
@@ -158,18 +161,21 @@ measure_commit() {
   # relying on it.
   rm -rf "$build_dir"
   mkdir -p "$build_dir"
+  mkdir -p "$cache_dir"
   (
     cd "$build_dir"
     # measure_commit's own stdout is captured by the caller ($(measure_commit ...)) and
     # must contain only the final `echo "$csv"` path below -- tee's stdout copy of the
     # build log must go to stderr (>&2), not stdout, or it corrupts the captured path
     # (and can make it megabytes long, blowing out ARG_MAX in later `cp "$CSV_1" ...`).
+    # build.log/resource_usage_summary.log are written under cache_dir (not
+    # build_dir) so they survive a `rm -rf build-cache/`.
     "$FOUND_BUILD_CONFIG" \
       --fresh \
       -DGPU_TARGETS="$GPU_TARGET" \
       -DCMAKE_CXX_FLAGS="-Rpass-analysis=kernel-resource-usage" 2>&1 |
-      tee "$build_dir/build.log" >&2
-    grep -B1 -A9 "Function Name:" "$build_dir/build.log" >"$build_dir/resource_usage_summary.log" || true
+      tee "$cache_dir/build.log" >&2
+    grep -B1 -A9 "Function Name:" "$cache_dir/build.log" >"$cache_dir/resource_usage_summary.log" || true
   )
 
   git -C "$ROCSHMEM_DIR" worktree remove "$worktree" >&2 || true
@@ -180,7 +186,7 @@ measure_commit() {
   # report (which prints to stdout) to stderr so it stays visible without corrupting
   # the captured path.
   python3 "$TOOLS_DIR/resource_usage_to_csv.py" \
-    --log "$build_dir/resource_usage_summary.log" \
+    --log "$cache_dir/resource_usage_summary.log" \
     --arch "$GPU_TARGET" --build-config "$BUILD_CONFIG" --commit "$sha" \
     --out "$csv" >&2
 
