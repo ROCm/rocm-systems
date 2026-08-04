@@ -268,6 +268,14 @@ class RocProfCompute:
     def generate_machine_specs(self) -> None:
         """Generate MachineSpecs for RocProfCompute"""
         self.__mspec = generate_machine_specs(self.__args)
+        if (
+            self.__mode == "profile"
+            and self.__mspec.compute_partition.strip().lower() == "cpx"
+        ):
+            console_warning(
+                "Compute partition detected as CPX mode - metrics calculated are "
+                "based on number of XCDs derived from CPX"
+            )
 
     @demarcate
     def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
