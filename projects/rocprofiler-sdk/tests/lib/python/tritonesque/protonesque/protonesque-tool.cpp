@@ -72,13 +72,13 @@ struct trace_record_t
     std::string name            = {};
 };
 
-std::mutex                  trace_mutex   = {};
-std::vector<trace_record_t> traces        = {};
-rocprofiler_context_id_t    client_ctx    = {.handle = 0};
-rocprofiler_client_id_t*    client_id_ptr = nullptr;
-std::atomic<bool>           is_active{false};
-std::atomic<bool>           is_initialized{false};
-std::string                 output_filename = "protonesque-trace.json";
+std::mutex               trace_mutex   = {};
+auto                     traces        = new std::vector<trace_record_t>{};
+rocprofiler_context_id_t client_ctx    = {.handle = 0};
+rocprofiler_client_id_t* client_id_ptr = nullptr;
+std::atomic<bool>        is_active{false};
+std::atomic<bool>        is_initialized{false};
+std::string              output_filename = "protonesque-trace.json";
 
 std::string
 get_operation_name(rocprofiler_callback_tracing_kind_t kind, int32_t operation)
@@ -101,7 +101,8 @@ hip_api_callback(rocprofiler_callback_tracing_record_t record,
     auto ts = std::chrono::steady_clock::now().time_since_epoch().count();
 
     std::lock_guard<std::mutex> lock(trace_mutex);
-    traces.push_back(trace_record_t{
+    if(!traces) return;
+    traces->push_back(trace_record_t{
         (record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER) ? static_cast<uint64_t>(ts) : 0,
         (record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT) ? static_cast<uint64_t>(ts) : 0,
         record.kind,
@@ -125,16 +126,18 @@ write_json()
         return;
     }
 
+    if(!traces) return;
+
     fprintf(stderr,
             "[protonesque][%d] Writing %zu traces to %s\n",
             getpid(),
-            traces.size(),
+            traces->size(),
             ofname.c_str());
 
     ofs << "{\n  \"protonesque-traces\": [\n";
-    for(size_t i = 0; i < traces.size(); ++i)
+    for(size_t i = 0; i < traces->size(); ++i)
     {
-        auto& t = traces[i];
+        auto& t = (*traces)[i];
         ofs << "    {";
         ofs << "\"start_timestamp\": " << t.start_timestamp;
         ofs << ", \"end_timestamp\": " << t.end_timestamp;
@@ -143,7 +146,7 @@ write_json()
         ofs << ", \"phase\": " << t.phase;
         ofs << ", \"name\": \"" << t.name << "\"";
         ofs << "}";
-        if(i + 1 < traces.size()) ofs << ",";
+        if(i + 1 < traces->size()) ofs << ",";
         ofs << "\n";
     }
     ofs << "  ]\n}\n";
@@ -193,7 +196,13 @@ tool_fini(void* tool_data)
     (void) tool_data;
 
     is_active.store(false, std::memory_order_release);
-    write_json();
+
+    if(traces)
+    {
+        write_json();
+        delete traces;
+        traces = nullptr;
+    }
 
     fprintf(stderr, "[protonesque] Tool finalized\n");
 }
@@ -292,6 +301,6 @@ ROCPROFILER_PUBLIC_API int
 protonesque_get_trace_count()
 {
     std::lock_guard<std::mutex> lock(trace_mutex);
-    return static_cast<int>(traces.size());
+    return (traces) ? static_cast<int>(traces->size()) : 0;
 }
 }  // extern "C"
