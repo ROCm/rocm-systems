@@ -2668,7 +2668,7 @@
       "test_dir": "test/nccl4py",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 0,
+      "num_gpus": "auto",
       "timeout": 600,
       "tests": [
         {
