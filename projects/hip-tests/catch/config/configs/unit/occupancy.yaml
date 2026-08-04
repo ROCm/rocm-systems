@@ -63,3 +63,13 @@ occupancy:
   Unit_hipOccupancyMaxPotentialClusterSize_Negative_Parameters: *level_2
   Unit_hipOccupancyMaxPotentialClusterSize_Positive_RangeValidation: *level_2
   Unit_hipOccupancyMaxPotentialClusterSize_Verify_Launch: *level_2
+  Unit_hipOccupancy_Positive_SharedMemPerMultiprocessorConsistency:
+    <<: *level_2
+    # WGP/CU LDS reporting is AMD specific; not built for the NVIDIA platform
+    disabled: [nvidia]
+  Unit_hipOccupancy_Positive_OccupancyMatchesSharedMemPerMultiprocessor:
+    <<: *level_2
+    disabled: [nvidia]
+  Unit_hipOccupancy_Positive_ZeroLdsMatchesThreadLimit:
+    <<: *level_2
+    disabled: [nvidia]
