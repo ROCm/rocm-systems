@@ -388,20 +388,14 @@ CuidUtilities::make_fallback_fingerprint(const std::string &id,
   std::string system_id;
   amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
 
-  if (geteuid() == 0) {
-    // If running as root, get platform serial number
-    status = SmbiosUtil::get_system_serial(system_id);
-  }
-  if (geteuid() != 0 || system_id.empty() || status != AMDCUID_STATUS_SUCCESS) {
-    std::ifstream machine_id_file("/etc/machine-id");
-    if (machine_id_file.is_open())
-      std::getline(machine_id_file, system_id);
+  std::ifstream machine_id_file("/etc/machine-id");
+  if (machine_id_file.is_open())
+    std::getline(machine_id_file, system_id);
 
-    if (system_id.empty()) {
-      std::ifstream hostname_file("/etc/hostname");
-      if (hostname_file.is_open())
-        std::getline(hostname_file, system_id);
-    }
+  if (system_id.empty()) {
+    std::ifstream hostname_file("/etc/hostname");
+    if (hostname_file.is_open())
+      std::getline(hostname_file, system_id);
   }
 
   std::string id_hex;

@@ -452,6 +452,10 @@ rocprofiler-sdk:
           event: 23
         - architectures:
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
           block: CPF
           event: 24
     - name: CPF_CPF_STAT_IDLE
@@ -860,6 +864,10 @@ rocprofiler-sdk:
       definitions:
         - architectures:
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
           block: GL1A
           event: 0
     - name: GL1A_CYCLE
@@ -870,6 +878,13 @@ rocprofiler-sdk:
             - gfx1250
           block: GL1A
           event: 77
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: GL1A
+          event: 23
     - name: GL1C_GL2_REQ_READ_LEVEL
       description: Number of cycles in-flight for reads, atomics with return, NOP_RTN0. Average GL2 
         read latency = GL1C_PERF_SEL_GL2_REQ_READ_LEVEL/SUM_OF_REQ_COUNTERS
@@ -6676,6 +6691,7 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
             - gfx9
             - gfx900
             - gfx906
@@ -7058,12 +7074,16 @@ rocprofiler-sdk:
       properties: []
       definitions:
         - architectures:
-            - gfx1201
             - gfx12
             - gfx1200
+            - gfx1201
           block: SQ
           event: 99
         - architectures:
+            - gfx11
+            - gfx1100
+            - gfx1101
+            - gfx1102
             - gfx1150
             - gfx1151
             - gfx1152
@@ -7123,6 +7143,10 @@ rocprofiler-sdk:
         - architectures:
             - gfx90a
             - gfx908
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
           block: TA
           event: 54
         - architectures:
@@ -7153,6 +7177,10 @@ rocprofiler-sdk:
         - architectures:
             - gfx90a
             - gfx908
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
           block: TA
           event: 55
         - architectures:
@@ -7348,6 +7376,10 @@ rocprofiler-sdk:
         - architectures:
             - gfx90a
             - gfx908
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
           block: TA
           event: 49
         - architectures:
@@ -12653,6 +12685,10 @@ rocprofiler-sdk:
             - gfx950
           expression: 100*reduce(SQ_ACTIVE_INST_VALU,sum)/CU_NUM/reduce(GRBM_GUI_ACTIVE,max)
         - architectures:
+            - gfx11
+            - gfx1100
+            - gfx1101
+            - gfx1102
             - gfx12
             - gfx1200
             - gfx1201
@@ -12706,6 +12742,19 @@ rocprofiler-sdk:
       description: Fraction of time the SIMDs are being utilized [0,1].
       properties: []
       definitions:
+        - architectures:
+            - gfx11
+            - gfx1100
+            - gfx1101
+            - gfx1102
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+            - gfx12
+            - gfx1200
+            - gfx1201
+          expression: reduce(SQ_BUSY_CYCLES,sum)/reduce(GRBM_COUNT,max)/(SIMD_NUM/4)
         - architectures:
             - gfx90a
             - gfx940
@@ -12768,6 +12817,10 @@ rocprofiler-sdk:
             - gfx950
           expression: 100*reduce(SQ_ACTIVE_INST_VALU,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
         - architectures:
+            - gfx11
+            - gfx1100
+            - gfx1101
+            - gfx1102
             - gfx12
             - gfx1200
             - gfx1201
@@ -15166,7 +15219,7 @@ rocprofiler-sdk:
             - gfx1151
             - gfx1152
           expression: reduce(TCP_TCP_TA_REQ_STALL,sum)
-  fw-restriction-schema-version: 1
+  fw-restriction-schema-version: 2
   firmware_restrictions:
     - affected_architectures:
         - gfx940

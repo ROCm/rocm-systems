@@ -39,8 +39,11 @@
 
 #pragma once
 
+#include "rocjitsu/code/patch/probe_callable.h"
+#include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/register_set.h"
 
 #include <cstdint>
 #include <memory>
@@ -48,6 +51,7 @@
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
@@ -83,15 +87,19 @@ struct InstrumentationPoint {
 
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
 
-  // Not used yet. The validator rejects any non-default value to keep the
-  // contract honest until each field is actually implemented.
-  // TODO: consume probe_obj / probe_symbol when probe-call
-  // trampolines are supported; consume force_full_exec when EXEC policy
-  // management lands; consume filter_flags to filter based on InstFlags
+  // filter_flags / force_full_exec are not used yet. The validator rejects any
+  // non-default value to keep the contract honest until each field is actually
+  // implemented.
+  // TODO: consume force_full_exec when EXEC policy management lands; consume
+  // filter_flags to filter based on InstFlags.
   uint32_t filter_flags = 0;
+  // probe_obj / probe_symbol are consumed: set both to request a probe-call
+  // trampoline, or leave both empty for the inline nop.
   const AmdGpuCodeObject *probe_obj = nullptr;
   std::string probe_symbol;
   bool force_full_exec = false;
+  // TODO: SCC will eventually need a per-point knob mirroring force_full_exec
+  // (e.g. probe_consumes_scc) since the probe call clobbers it
 };
 
 /// @brief Per-site record produced after validation and byte capture.
@@ -101,6 +109,12 @@ struct ResolvedInstrumentationSite {
   uint32_t original_size = 0;
   std::vector<uint8_t> original_bytes;
   std::string mnemonic; // Diagnostic/debug only.
+
+  // Index into the probe registry produced by resolve_points()
+  // (ResolvedPoints::probes); nullopt if no probes
+  std::optional<size_t> probe_index;
+
+  [[nodiscard]] bool is_probe_call() const { return probe_index.has_value(); }
 };
 
 /// @brief Per-site patch record, for testing and debugging.
@@ -116,6 +130,13 @@ struct InstrumentationPatch {
   uint64_t return_target;
   std::vector<uint8_t> original_bytes;
   std::vector<uint8_t> patched_anchor_bytes;
+
+  // Probe-call details, populated for probe-call sites
+  bool is_probe_call = false;
+  std::string probe_symbol;
+  uint64_t probe_target_offset = 0; // .text-relative offset of the copied body.
+  uint16_t link_pair_base = 0;      // cc-derived return-link pair.
+  uint16_t target_pair_base = 0;    // dead pair holding the materialized address.
 };
 
 /// @brief Result of Instrumentor::patch().
@@ -152,6 +173,9 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 ///     program terminator, and branch_offset_bytes() is nullopt.
 ///   - anchor.mnemonic() is not in the small PC-relative denylist
 ///     (s_getpc_b64, s_call_b64, s_setpc_b64, s_swappc_b64, s_rfe_*).
+///   - anchor is not s_clause. Because this predicate has no surrounding
+///     instruction-stream context, Instrumentor additionally rejects anchors
+///     among the following instructions covered by an s_clause.
 ///
 /// @p arch is accepted now so a future denylist can grow ISA-specific entries
 /// without an API change; today's checks are uniform across all AMDGPU ISAs.
@@ -170,8 +194,9 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 /// Temporary rules enforced here:
 ///   - @p pt.filter_flags is zero.
 ///   - @p pt.kind is BeforeInst (other kinds are unsupported in this milestone).
-///   - @p pt.probe_obj is null, @p pt.probe_symbol is empty, and
-///     @p pt.force_full_exec is false.
+///   - @p pt.probe_obj and @p pt.probe_symbol are consistent: both set (a probe
+///     call) or both empty (the inline nop). Setting only one is rejected.
+///   - @p pt.force_full_exec is false.
 [[nodiscard]] std::optional<ResolvedInstrumentationSite>
 validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                 std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
@@ -200,6 +225,69 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// TODO: delete this when DBI supports more plans
 [[nodiscard]] bool validate_inline_nop_plan(const TrampolinePlan &plan,
                                             std::string *error_out = nullptr);
+
+//==============================================================================
+// Spill formula and policy (orchestrator-owned).
+//
+// The probe-call spill set is the live registers an instrumentation envelope
+// would clobber:
+//
+//   instrument_clobbers = probe_clobbers | builder_clobbers
+//   spill_set           = live_at_anchor & instrument_clobbers
+//
+// The two inputs come from different owners: `probe_clobbers` is the callee fact
+// from ProbeClobberSummary (probe_clobber.h); `builder_clobbers` is the
+// call-envelope fact the builder's resource plan reports (link pair,
+// target-address pair, SCC temp, ...). That builder plan and its dead-register
+// selection land in a later slice; these helpers take `builder_clobbers` as a
+// plain RegisterSet so the formula and v0 policy are testable now. Combining the
+// two and applying policy is the Instrumentor's job, so it lives here rather
+// than in the callee-only probe_clobber unit.
+//==============================================================================
+
+/// @brief What the builder will do about registers that are simultaneously live
+///        at the anchor and clobbered by instrumentation.
+///
+/// Currently implements only the no-spill path: a non-empty spill set is a hard
+/// failure rather than something the builder saves and restores. The enum exists
+/// now so the contract has a name and a later spill-capable slice can add a
+/// value without a rename.
+enum class SpillPolicy {
+  NoSpillsSupported, ///< Any non-empty spill set is a hard failure.
+  // TODO: SpillsSupported once a bootstrap save/restore sequence exists.
+};
+
+/// @brief instrument_clobbers = probe body clobbers | builder envelope clobbers.
+[[nodiscard]] RegisterSet compute_instrumentation_clobbers(const ProbeClobberSummary &probe_summary,
+                                                           const RegisterSet &builder_clobbers);
+
+/// @brief spill_set = live_at_anchor & instrumentation_clobbers.
+[[nodiscard]] RegisterSet compute_spill_set(const RegisterSet &live_at_anchor,
+                                            const RegisterSet &instrumentation_clobbers);
+
+/// @brief Enforce the current spill policy, NoSpillsSupported.
+///
+/// Under @ref SpillPolicy::NoSpillsSupported a non-empty @p spill_set fails
+/// closed: returns false and writes a diagnostic naming the live, clobbered
+/// registers. An empty spill set always succeeds.
+[[nodiscard]] bool check_spill_policy(const RegisterSet &spill_set, SpillPolicy policy,
+                                      std::string *error_out = nullptr);
+
+/// @brief Does a kernel that allocates @p kernel_sgpr_count SGPRs own the fixed
+///        return-link pair s[link_base : link_base+1]?
+///
+/// The probe-call trampoline returns through a link pair fixed by the calling
+/// convention (s[30:31] today). A kernel only owns SGPRs [0, sgpr_count), so it
+/// is possible that it does not own the registers even if they look dead from
+/// liveness. This coarse gate fails such a kernel closed early.
+///
+/// NOTE: this exists only because the link pair is hardcoded and the kernel
+/// must be built padded up to it. Remove once the link pair is chosen from dead
+/// registers within the kernel's real allocation (SGPR auto-grow).
+[[nodiscard]] constexpr bool probe_link_pair_fits_in_kernel(uint32_t kernel_sgpr_count,
+                                                            uint16_t link_base) {
+  return kernel_sgpr_count >= static_cast<uint32_t>(link_base) + 2;
+}
 
 /// @brief DBI orchestrator. Collects InstrumentationPoints, validates each
 ///        anchor, plans + builds per-site trampolines, and drives the
@@ -284,6 +372,10 @@ private:
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).
   std::unordered_map<uint64_t, const Instruction *> offset_to_inst_;
+  // .text-relative byte offsets that cannot be trampoline anchors because they
+  // are among the following instructions covered by an s_clause. The s_clause
+  // instruction itself is rejected by is_relocatable_anchor().
+  std::unordered_set<uint64_t> clause_blocked_offsets_;
   bool blocks_built_ = false;
 
   // Returns false if no decoder exists for arch_ (RV32I/RV64I/INVALID/etc.);
@@ -291,6 +383,16 @@ private:
   // is reported instead of crashing in BasicBlock::build.
   [[nodiscard]] bool ensure_blocks_built(std::string *error_out = nullptr);
   [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset) const;
+
+  // Everything one resolution pass produces.
+  struct ResolvedPoints {
+    std::vector<ResolvedInstrumentationSite> sites;
+    std::vector<ProbeCallable> probes;
+    std::vector<std::string> errors;
+  };
+
+  // Validate and resolve every queued point in one pass.
+  [[nodiscard]] ResolvedPoints resolve_points();
 };
 
 } // namespace rocjitsu

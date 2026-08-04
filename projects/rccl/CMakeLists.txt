@@ -84,12 +84,13 @@ option(BUILD_BFD                               "Enable custom backtrace (if bfd.
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
 option(BUILD_TESTS                             "Build unit test programs"                      OFF)
-option(BUILD_EXT_EXAMPLES                      "Build ext-{net,tuner,profiler} example plugins" OFF)
+option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env)" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
+option(BUILD_NCCL4PY                           "Build the nccl4py Python bindings wheel"       OFF)
 # Move .hip_fatbin to the end of librccl.so so that small-code-model host
 # relocations (PC32/PLT32/GOTPCRELX/32S) between .text and the read-only /
 # writable data clusters stay in range even when the bundled device fat
@@ -106,7 +107,9 @@ option(QP_TRACKING                             "Enable per-device QP tracking"  
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
-option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
+option(ENABLE_ROCSHMEM                         "Link librocshmem.a into librccl.so (full rocSHMEM device+host integration)" OFF)
+option(ENABLE_ROCSHMEM_GIN                     "Compile GIN rocshmem plugins; symbols resolved at runtime by the executable" OFF)
+option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device unit tests with ENABLE_ROCSHMEM on test targets only (no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 
 # Default GPU architectures to build
@@ -137,7 +140,7 @@ include(GNUInstallDirs)
 include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
 include(cmake/CheckSymbolExistsNoWarn.cmake)
 # Include rocSHMEM build module only if enabled
-if(ENABLE_ROCSHMEM)
+if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   include(cmake/ROCSHMEM.cmake)
 endif()
 
@@ -661,6 +664,21 @@ if(EMIT_LLVM_IR)
   add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
 endif()
 
+# nccl4py Python bindings (opt-in)
+#==================================================================================================
+# When BUILD_NCCL4PY=ON, expose the `uv`-driven wheel/dev targets defined in
+# bindings/nccl4py/CMakeLists.txt. This is opt-in (OFF by default) so a normal
+# RCCL build never requires `uv` or a managed Python toolchain. The wheel build
+# itself is CUDA/HIP-header free (see bindings/nccl4py/setup.py); librccl.so is
+# resolved at runtime via dlopen, so we only add a build-order dependency on the
+# rccl target for convenience when running the bindings against a fresh build.
+if(BUILD_NCCL4PY)
+  add_subdirectory(bindings/nccl4py)
+  if(TARGET nccl4py AND TARGET rccl)
+    add_dependencies(nccl4py rccl)
+  endif()
+endif()
+
 # Install settings
 #==================================================================================================
 ## Specify install targets
@@ -748,7 +766,7 @@ if(BUILD_TESTS)
   enable_testing()
   rocm_package_setup_component(clients)
   rocm_package_setup_client_component(tests PACKAGE_NAME unittests)
-  if(BUILD_EXT_EXAMPLES)
+  if(BUILD_PLUGIN_EXAMPLES)
     add_subdirectory(plugins/net/example)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)

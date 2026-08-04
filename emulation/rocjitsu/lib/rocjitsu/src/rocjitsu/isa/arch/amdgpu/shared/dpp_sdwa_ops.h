@@ -15,10 +15,12 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_DPP_SDWA_OPS_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_DPP_SDWA_OPS_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -27,47 +29,12 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-/// @brief VOP1/VOP2 src0 encoding values that indicate a DPP or SDWA suffix.
-constexpr uint32_t SRC_SDWA = 249;
-constexpr uint32_t SRC_DPP = 250;
-constexpr uint32_t SRC_DPP8_FI_0 = 233;
-constexpr uint32_t SRC_DPP8_FI_1 = 234;
-constexpr uint32_t SRC_DPP8_LO = SRC_DPP8_FI_0;
-constexpr uint32_t SRC_DPP8_HI = SRC_DPP8_FI_1;
-
 namespace dpp {
-
-inline bool is_src_dpp8(uint32_t src0) { return src0 == SRC_DPP8_FI_0 || src0 == SRC_DPP8_FI_1; }
-
-inline uint32_t src_dpp8_fi(uint32_t src0) { return src0 == SRC_DPP8_FI_1 ? 1u : 0u; }
 
 /// Row size for DPP operations (16 lanes per row).
 constexpr int ROW_SIZE = 16;
 /// Number of banks per row (4 banks of 4 lanes each).
 constexpr int NUM_BANKS = 4;
-
-/// @brief DPP control value ranges.
-enum DppCtrl : uint32_t {
-  QUAD_PERM_MAX = 0xFF,
-  ROW_SHL1 = 0x101, // row shift left 1..15
-  ROW_SHL_MAX = 0x10F,
-  ROW_SHR1 = 0x111, // row shift right 1..15
-  ROW_SHR_MAX = 0x11F,
-  ROW_ROR1 = 0x121, // row rotate right 1..15
-  ROW_ROR_MAX = 0x12F,
-  WF_SHL1 = 0x130,
-  WF_ROL1 = 0x134, // wave rotate left 1
-  WF_SRL1 = 0x138, // wave shift right 1
-  WF_ROR1 = 0x13C, // wave rotate right 1
-  ROW_MIRROR = 0x140,
-  ROW_HALF_MIRROR = 0x141,
-  ROW_BCAST15 = 0x142,    // broadcast lane 15 of each row to the following row
-  ROW_BCAST31 = 0x143,    // broadcast lane 31 to the upper half-wave
-  ROW_SHARE_BASE = 0x150, // row_share/row_newbcast: broadcast one lane within each row
-  ROW_SHARE_MAX = 0x15F,
-  ROW_XMASK_BASE = 0x160, // row_xmask (GFX10+)
-  ROW_XMASK_MAX = 0x16F,
-};
 
 /// @brief Compute the source lane index for a DPP permutation.
 ///
@@ -249,49 +216,112 @@ inline uint64_t dpp_write_mask(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row
   return mask;
 }
 
-/// @brief Apply a complete DPP read for one lane.
+/// @brief Return destination lanes enabled by EXEC and instruction modifiers.
 ///
-/// Reads the permuted source value from a VGPR across the wavefront.
-/// Handles row/bank masking (returns old_val if masked), out-of-bounds
-/// permutation (returns 0 if bound_ctrl=1, else returns old_val), and RDNA
-/// fetch-inactive mode (returns 0 for inactive source lanes when fi=0).
-/// Callers must still apply dpp_write_mask() after the ALU operation so lanes
-/// disabled by masks or BOUND_CTRL=0 invalid shared data keep their old
-/// destination values.
-///
-/// @param src_data Array of wf_size source values (one per lane).
-/// @param lane Current lane index.
-/// @param wf_size Wavefront size.
-/// @param dpp_ctrl 9-bit DPP control value.
-/// @param row_mask 4-bit row mask.
-/// @param bank_mask 4-bit bank mask.
-/// @param bound_ctrl If 1, out-of-bounds lanes read 0; if 0, unchanged.
-/// @param fi If 1, inactive source lanes still read GPRs; if 0, they read 0.
-/// @param old_val The lane's current value (used when masked/OOB with bound_ctrl=0).
-/// @param exec_mask EXEC value used to classify inactive source lanes.
-/// @returns The DPP-permuted source value for this lane.
-inline uint32_t dpp_read(const uint32_t *src_data, int lane, int wf_size, uint32_t dpp_ctrl,
-                         uint32_t row_mask, uint32_t bank_mask, uint32_t bound_ctrl, uint32_t fi,
-                         uint32_t old_val, uint64_t exec_mask) {
-  if (dpp_lane_masked(lane, row_mask, bank_mask))
-    return old_val;
+/// Applies DPP destination masking without changing architectural wave state.
+template <typename Inst>
+inline uint64_t execution_lane_mask(const Inst &inst, const amdgpu::Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  if constexpr (requires {
+                  inst.inst_.src0;
+                  inst.dpp_ctrl_;
+                  inst.dpp_row_mask_;
+                  inst.dpp_bank_mask_;
+                  inst.dpp_bound_ctrl_;
+                }) {
+    if (inst.inst_.src0 == amdgpu::SRC_DPP)
+      exec &= dpp_write_mask(wf.wf_size(), inst.dpp_ctrl_, inst.dpp_row_mask_, inst.dpp_bank_mask_,
+                             inst.dpp_bound_ctrl_);
+  }
+  return exec;
+}
 
-  bool oob = false;
-  int src_lane = dpp_permute(dpp_ctrl, lane, wf_size, oob);
+/// @brief Complete lane-access plan for a DPP source permutation.
+struct DppAccessPlan {
+  static constexpr int8_t kNoSourceLane = -1;
 
-  if (oob)
-    return bound_ctrl ? 0u : old_val;
+  uint64_t source_lane_mask = 0;
+  std::array<int8_t, 64> source_lane_for_destination{};
 
-  if (!fi && (exec_mask & (1ULL << src_lane)) == 0)
-    return 0u;
+  DppAccessPlan() { source_lane_for_destination.fill(kNoSourceLane); }
+};
 
-  return src_data[src_lane];
+inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel);
+
+inline uint8_t true16_source_byte_mask(uint32_t opsel, uint32_t source_index) {
+  return (opsel & (1u << source_index)) ? rocjitsu::ExecutionPlugin::kHighHalfByteMask
+                                        : rocjitsu::ExecutionPlugin::kLowHalfByteMask;
+}
+
+inline DppAccessPlan make_dpp_access_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
+                                          uint32_t bank_mask, uint32_t bound_ctrl, uint32_t fi,
+                                          uint64_t exec_mask) {
+  DppAccessPlan plan;
+  for (uint32_t lane = 0; lane < wf_size; ++lane) {
+    const uint64_t lane_bit = uint64_t{1} << lane;
+    if ((exec_mask & lane_bit) == 0 ||
+        !dpp_lane_write_enabled(static_cast<int>(lane), static_cast<int>(wf_size), dpp_ctrl,
+                                row_mask, bank_mask, bound_ctrl))
+      continue;
+
+    bool out_of_bounds = false;
+    const int source_lane =
+        dpp_permute(dpp_ctrl, static_cast<int>(lane), static_cast<int>(wf_size), out_of_bounds);
+    if (out_of_bounds || (!fi && (exec_mask & (uint64_t{1} << source_lane)) == 0))
+      continue;
+    plan.source_lane_for_destination[lane] = static_cast<int8_t>(source_lane);
+    plan.source_lane_mask |= uint64_t{1} << source_lane;
+  }
+  return plan;
+}
+
+inline DppAccessPlan make_dpp8_access_plan(uint32_t wf_size, uint32_t lane_sel, uint32_t fi,
+                                           uint64_t exec_mask) {
+  DppAccessPlan plan;
+  for (uint32_t lane = 0; lane < wf_size; ++lane) {
+    if ((exec_mask & (uint64_t{1} << lane)) == 0)
+      continue;
+    const uint32_t source_lane = dpp8_src_lane(lane, lane_sel);
+    if (source_lane >= wf_size || (!fi && (exec_mask & (uint64_t{1} << source_lane)) == 0))
+      continue;
+    plan.source_lane_for_destination[lane] = static_cast<int8_t>(source_lane);
+    plan.source_lane_mask |= uint64_t{1} << source_lane;
+  }
+  return plan;
+}
+
+inline void stage_dpp_operand(Operand *&src0, const DppAccessPlan &plan,
+                              std::unique_ptr<StagedOperand> &storage, amdgpu::Wavefront &wf,
+                              uint8_t source_byte_mask = 0) {
+  RegisterAccess regs(wf);
+  if (src0->size_bits_ > 32) {
+    auto src_view = regs.read_operand64(*src0, plan.source_lane_mask);
+    uint64_t result[64] = {};
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      const int source_lane = plan.source_lane_for_destination[lane];
+      if (source_lane >= 0)
+        result[lane] = src_view.lane(static_cast<uint32_t>(source_lane));
+    }
+    storage = std::make_unique<StagedOperand>(*src0, result, static_cast<int>(wf.wf_size()));
+  } else {
+    if (source_byte_mask == 0)
+      source_byte_mask = src0->size_bits_ == 16 ? rocjitsu::ExecutionPlugin::kLowHalfByteMask
+                                                : rocjitsu::ExecutionPlugin::kFullByteMask;
+    auto src_view = regs.read_operand(*src0, plan.source_lane_mask, source_byte_mask);
+    uint32_t result[64] = {};
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      const int source_lane = plan.source_lane_for_destination[lane];
+      if (source_lane >= 0)
+        result[lane] = src_view.lane(static_cast<uint32_t>(source_lane));
+    }
+    storage = std::make_unique<StagedOperand>(*src0, result, static_cast<int>(wf.wf_size()));
+  }
 }
 
 /// @brief Pre-permute src0 for a DPP instruction.
 ///
 /// Reads all src0 VGPR lanes, applies the DPP permutation, creates a
-/// DppOperand with the permuted data, and swaps the src0 pointer.
+/// StagedOperand with the permuted data, and swaps the src0 pointer.
 /// Called from VOP1/VOP2 execute_impl() when src0 == 250.
 ///
 /// @param[in,out] src0 Source operand pointer to replace.
@@ -300,23 +330,14 @@ inline uint32_t dpp_read(const uint32_t *src_data, int lane, int wf_size, uint32
 /// @param bank_mask 4-bit bank mask.
 /// @param bound_ctrl Bound control (1 = zero OOB, 0 = preserve).
 /// @param fi Fetch-inactive control (1 = read inactive source lanes, 0 = zero).
-/// @param[out] storage Owning pointer for the DppOperand lifetime.
+/// @param[out] storage Owning pointer for the staged operand lifetime.
 /// @param wf Wavefront providing register state.
 inline void apply_dpp(Operand *&src0, uint32_t dpp_ctrl, uint32_t row_mask, uint32_t bank_mask,
-                      uint32_t bound_ctrl, uint32_t fi, std::unique_ptr<DppOperand> &storage,
-                      amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t ws = wf.wf_size();
-  uint32_t vbase = wf.vgpr_alloc().base + src0->encoding_value_;
-  uint64_t exec_mask = wf.exec();
-  uint32_t raw[64], result[64];
-  for (uint32_t i = 0; i < ws; ++i)
-    raw[i] = cu.read_vgpr(vbase, i);
-  for (uint32_t i = 0; i < ws; ++i)
-    result[i] = dpp_read(raw, static_cast<int>(i), static_cast<int>(ws), dpp_ctrl, row_mask,
-                         bank_mask, bound_ctrl, fi, raw[i], exec_mask);
-  storage = std::make_unique<DppOperand>(*src0, result, static_cast<int>(ws));
-  src0 = storage.get();
+                      uint32_t bound_ctrl, uint32_t fi, std::unique_ptr<StagedOperand> &storage,
+                      amdgpu::Wavefront &wf, uint8_t source_byte_mask = 0) {
+  const DppAccessPlan plan =
+      make_dpp_access_plan(wf.wf_size(), dpp_ctrl, row_mask, bank_mask, bound_ctrl, fi, wf.exec());
+  stage_dpp_operand(src0, plan, storage, wf, source_byte_mask);
 }
 
 inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel) {
@@ -324,52 +345,27 @@ inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel) {
   return (lane & ~7u) | sel;
 }
 
-inline uint32_t dpp8_read(const uint32_t *src_data, uint32_t lane, uint32_t wf_size,
-                          uint32_t lane_sel, uint32_t fi, uint64_t exec_mask) {
-  uint32_t src_lane = dpp8_src_lane(lane, lane_sel);
-  if (src_lane >= wf_size)
-    return 0u;
-  if (!fi && (exec_mask & (1ULL << src_lane)) == 0)
-    return 0u;
-  return src_data[src_lane];
-}
-
 inline void apply_dpp8(Operand *&src0, uint32_t lane_sel, uint32_t fi,
-                       std::unique_ptr<DppOperand> &storage, amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t ws = wf.wf_size();
-  uint32_t vbase = wf.vgpr_alloc().base + src0->encoding_value_;
-  uint64_t exec_mask = wf.exec();
-  uint32_t raw[64], result[64];
-  for (uint32_t i = 0; i < ws; ++i)
-    raw[i] = cu.read_vgpr(vbase, i);
-  for (uint32_t lane = 0; lane < ws; ++lane)
-    result[lane] = dpp8_read(raw, lane, ws, lane_sel, fi, exec_mask);
-  storage = std::make_unique<DppOperand>(*src0, result, static_cast<int>(ws));
-  src0 = storage.get();
+                       std::unique_ptr<StagedOperand> &storage, amdgpu::Wavefront &wf,
+                       uint8_t source_byte_mask = 0) {
+  const DppAccessPlan plan = make_dpp8_access_plan(wf.wf_size(), lane_sel, fi, wf.exec());
+  stage_dpp_operand(src0, plan, storage, wf, source_byte_mask);
 }
 
 } // namespace dpp
 
 namespace sdwa {
 
-/// @brief SDWA sub-dword selection values.
-enum SdwaSel : uint32_t {
-  BYTE_0 = 0,
-  BYTE_1 = 1,
-  BYTE_2 = 2,
-  BYTE_3 = 3,
-  WORD_0 = 4,
-  WORD_1 = 5,
-  DWORD = 6,
-};
-
-/// @brief SDWA unused bits handling for destination.
-enum SdwaUnused : uint32_t {
-  UNUSED_PAD = 0,      ///< Zero-fill unused bytes/words.
-  UNUSED_SEXT = 1,     ///< Sign-extend from the selected portion's MSB.
-  UNUSED_PRESERVE = 2, ///< Keep the original destination register value.
-};
+/// @brief Return the architectural source bytes selected by an SDWA selector.
+inline uint8_t sdwa_src_byte_mask(uint32_t sel) {
+  if (sel <= BYTE_3)
+    return uint8_t{1} << sel;
+  if (sel == WORD_0)
+    return 0b0011;
+  if (sel == WORD_1)
+    return 0b1100;
+  return rocjitsu::ExecutionPlugin::kFullByteMask;
+}
 
 /// @brief Extract a sub-dword from a source value per SDWA sel.
 ///
@@ -439,18 +435,83 @@ inline uint32_t sdwa_dst_merge(uint32_t result, uint32_t old_dst, uint32_t dst_s
   return fill | merged;
 }
 
+inline uint8_t sdwa_dst_byte_mask(uint32_t dst_sel, uint32_t dst_unused) {
+  if (dst_sel == DWORD || dst_unused != UNUSED_PRESERVE)
+    return rocjitsu::ExecutionPlugin::kFullByteMask;
+  return sdwa_src_byte_mask(dst_sel);
+}
+
+inline uint32_t sdwa_clamp_f32(uint32_t result, const Wavefront &wf);
+
+/// @brief Whether a generated SIMD path can store its result without a
+/// destination transform.
+template <typename Inst> inline bool supports_direct_simd_store(const Inst &inst) {
+  if constexpr (requires {
+                  inst.inst_.src0;
+                  inst.sdwa_dst_sel_;
+                  inst.sdwa_clamp_;
+                }) {
+    return inst.inst_.src0 != amdgpu::SRC_SDWA ||
+           (inst.sdwa_dst_sel_ == DWORD && !inst.sdwa_clamp_);
+  }
+  return true;
+}
+
+/// @brief Store one semantic result with destination modifiers applied.
+///
+/// Destination preservation and optional clamp are part of one architectural
+/// write.
+template <bool ApplyFloatClamp, typename Inst, typename Op>
+inline void write_lane(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t lane,
+                       uint32_t value) {
+  if constexpr (requires {
+                  inst.inst_.src0;
+                  inst.sdwa_dst_sel_;
+                  inst.sdwa_dst_unused_;
+                  inst.sdwa_clamp_;
+                  inst.dst_operand(0);
+                }) {
+    if (inst.inst_.src0 == amdgpu::SRC_SDWA && op.is_vgpr() &&
+        inst.dst_operand(0) == static_cast<const Operand *>(&op)) {
+      const bool clamp = ApplyFloatClamp && inst.sdwa_clamp_;
+      const uint8_t update_byte_mask =
+          sdwa_dst_byte_mask(inst.sdwa_dst_sel_, inst.sdwa_dst_unused_);
+      const uint8_t observed_byte_mask =
+          clamp ? rocjitsu::ExecutionPlugin::kFullByteMask : update_byte_mask;
+      const uint32_t placed = sdwa_dst_merge(value, 0, inst.sdwa_dst_sel_, inst.sdwa_dst_unused_);
+      amdgpu::RegisterAccess(wf).write_lane_masked(op, lane, placed, update_byte_mask,
+                                                   observed_byte_mask,
+                                                   clamp ? &sdwa_clamp_f32 : nullptr);
+      return;
+    }
+  }
+  amdgpu::RegisterAccess(wf).write_lane(op, lane, value);
+}
+
+template <bool ApplyFloatClamp, typename Inst, typename Op>
+inline void write_lane64(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t lane,
+                         uint64_t value) {
+  (void)ApplyFloatClamp;
+  (void)inst;
+  amdgpu::RegisterAccess(wf).write_lane64(op, lane, value);
+}
+
 /// @brief Apply SDWA clamp to an ALU result.
 ///
 /// For floating-point operations, clamps the result to [0.0, 1.0].
-/// The caller determines whether the operation is float or integer
-/// based on the instruction's semantic type.
-inline uint32_t sdwa_clamp_f32(uint32_t result) {
+/// NaN bits are preserved unless MODE.DX10_CLAMP requests conversion to zero.
+/// The caller determines whether the operation is float or integer based on
+/// the instruction's semantic type.
+inline uint32_t sdwa_clamp_f32(uint32_t result, const Wavefront &wf) {
   float f = std::bit_cast<float>(result);
+  if (std::isnan(f))
+    return wf.dx10_clamp() ? std::bit_cast<uint32_t>(0.0f) : result;
   f = std::fmin(std::fmax(f, 0.0f), 1.0f);
   return std::bit_cast<uint32_t>(f);
 }
 
 } // namespace sdwa
+
 } // namespace amdgpu
 } // namespace rocjitsu
 

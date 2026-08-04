@@ -17,7 +17,7 @@ endif()
 # Set the library version in a variable so we can use
 # it in *.in files and avoid version mismatch.
 set(AIS_LIBRARY_MAJOR 0)
-set(AIS_LIBRARY_MINOR 3)
+set(AIS_LIBRARY_MINOR 4)
 set(AIS_LIBRARY_PATCH 0)
 set(AIS_LIBRARY_VERSION "${AIS_LIBRARY_MAJOR}.${AIS_LIBRARY_MINOR}.${AIS_LIBRARY_PATCH}")
 
@@ -138,8 +138,12 @@ elseif(DEFINED ROCM_VERSION)
         set(ROCM_INITIAL_PATH "/opt/rocm-${ROCM_VERSION}")
     endif()
 else()
-    # Default install location symlink
-    set(ROCM_INITIAL_PATH "/opt/rocm")
+    # No ROCM_PATH env or ROCM_VERSION given. Find correct Initial Path
+    if(EXISTS "/opt/rocm/core/.info/version")
+        set(ROCM_INITIAL_PATH "/opt/rocm/core")
+    else()
+        set(ROCM_INITIAL_PATH "/opt/rocm")
+    endif()
 endif()
 set(ROCM_PATH "${ROCM_INITIAL_PATH}" CACHE PATH "The path to the ROCm installation")
 
@@ -158,10 +162,6 @@ message(STATUS "ROCM_PATH set to: ${ROCM_PATH}")
 list(APPEND CMAKE_PREFIX_PATH
     ${ROCM_PATH}/llvm
     ${ROCM_PATH}
-    ${ROCM_PATH}/hip
-    /opt/rocm/llvm
-    /opt/rocm
-    /opt/rocm/hip
 )
 
 # Set hipFile Install Path to the ROCm directory
@@ -310,6 +310,9 @@ endif()
 if(NOT AIS_CAPABLE_DIR)
     set(AIS_CAPABLE_DIR "/tmp" CACHE STRING "Directory to use for e2e tests.")
 endif()
+
+option(HIPFILE_ALLOW_SKIP_FASTPATH_TESTS
+  "Skip (instead of fail) fastpath-only tests when fastpath is unavailable" OFF)
 
 #-----------------------------------------------------------------------------
 # Configure hipFile
