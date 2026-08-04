@@ -9,13 +9,10 @@ Covers:
 - mem_chart_gfx9.py  - CDNA (plotille-based) memory architecture visualization
 """
 
-import math
 import re
-from pathlib import Path
 
 import common
 import pytest
-import yaml
 
 from utils import mem_chart_gfx9, mem_chart_gfx11
 
@@ -558,281 +555,18 @@ class TestIntegrationGfx11:
 
 
 # =============================================================================
-# Tests for make_format_spec function (gfx9)
-# =============================================================================
-
-
-class TestMakeFormatSpecGfx9:
-    @pytest.mark.parametrize(
-        ("value", "expected_spec"),
-        [
-            pytest.param(6, ">6", id="integer"),
-            pytest.param(123456789, ">123456789", id="large-integer"),
-            pytest.param(0, ">0", id="zero"),
-            pytest.param(6.0, ">6.0f", id="whole-number-float"),
-            pytest.param(3.14, ">3.14f", id="decimal-float"),
-            pytest.param(-42, ">-42", id="negative-integer"),
-            pytest.param(-3.14, ">3.14f", id="negative-float"),
-            pytest.param(1e20, ">1e+20f", id="scientific-float"),
-            pytest.param(math.nan, ">nanf", id="nan"),
-            pytest.param(math.inf, ">inff", id="infinity"),
-        ],
-    )
-    def test_default_alignment_specs(self, value, expected_spec):
-        assert mem_chart_gfx9.make_format_spec(value) == expected_spec
-
-    @pytest.mark.parametrize(
-        ("alignment", "expected_spec"),
-        [
-            pytest.param("<", "<12.34f", id="left"),
-            pytest.param(">", ">12.34f", id="right"),
-            pytest.param("^", "^12.34f", id="center"),
-        ],
-    )
-    def test_explicit_alignment_specs(self, alignment, expected_spec):
-        assert mem_chart_gfx9.make_format_spec(12.34, alignment) == expected_spec
-
-    def test_invalid_alignment_raises(self):
-        with pytest.raises(ValueError) as error:
-            mem_chart_gfx9.make_format_spec(12.34, "@")
-
-        assert str(error.value) == "align must be one of '<', '>', or '^'"
-
-
-# =============================================================================
-# Tests for is_value_valid function (gfx9)
-# =============================================================================
-
-
-class TestIsValueValidGfx9:
-    @pytest.mark.parametrize(
-        ("value", "expected_validity"),
-        [
-            pytest.param(5, True, id="integer"),
-            pytest.param(5.0, True, id="float"),
-            pytest.param(0, True, id="zero"),
-            pytest.param(True, True, id="boolean"),
-            pytest.param(None, False, id="none"),
-            pytest.param("abc", False, id="string"),
-            pytest.param(math.nan, True, id="nan"),
-            pytest.param(math.inf, True, id="infinity"),
-        ],
-    )
-    def test_value_validity(self, value, expected_validity):
-        assert mem_chart_gfx9.is_value_valid(value) is expected_validity
-
-
-# =============================================================================
-# Tests for format_text function (gfx9)
-# =============================================================================
-
-
-class TestFormatTextGfx9:
-    def test_basic_key_and_value(self):
-        result = mem_chart_gfx9.format_text(
-            85.5,
-            key="Util",
-            value_step_prec_rightalign=4.0,
-        )
-
-        assert result == "Util:   86"
-
-    @pytest.mark.parametrize(
-        ("value", "format_sample", "expected_text"),
-        [
-            pytest.param(85.5, 4.1, "85.5 %", id="valid-value-appends-suffix"),
-            pytest.param(None, 5.1, "  N/A", id="na-suppresses-suffix"),
-        ],
-    )
-    def test_unit_suffix_rules(self, value, format_sample, expected_text):
-        result = mem_chart_gfx9.format_text(
-            value,
-            post_description_with_space=" %",
-            value_step_prec_rightalign=format_sample,
-        )
-
-        assert result == expected_text
-
-    @pytest.mark.parametrize(
-        "invalid_value",
-        [
-            pytest.param(None, id="none"),
-            pytest.param("abc", id="string"),
-        ],
-    )
-    def test_invalid_values_format_as_na(self, invalid_value):
-        result = mem_chart_gfx9.format_text(
-            invalid_value,
-            key="Util",
-            value_step_prec_rightalign=5.1,
-        )
-
-        assert result == "Util:   N/A"
-
-    def test_precision_comes_from_sample(self):
-        result = mem_chart_gfx9.format_text(
-            1.234,
-            value_step_prec_rightalign=6.2,
-        )
-
-        assert result == "  1.23"
-
-    def test_custom_separator_keeps_string_key_unformatted(self):
-        result = mem_chart_gfx9.format_text(
-            7,
-            key="LDS",
-            mark_between="=",
-            value_step_prec_rightalign=0,
-            key_step_prec_leftalign=10,
-            key_align="^",
-        )
-
-        assert result == "LDS=7"
-
-    def test_numeric_key_alignment(self):
-        result = mem_chart_gfx9.format_text(
-            7,
-            key=3,
-            value_step_prec_rightalign=2,
-            key_step_prec_leftalign=4,
-        )
-
-        assert result == "3   :  7"
-
-    @pytest.mark.parametrize(
-        ("key_alignment", "value_alignment", "expected_text"),
-        [
-            pytest.param(">", "<", "  3: 7  ", id="right-key-left-value"),
-            pytest.param("^", "^", " 3 :  7 ", id="centered"),
-        ],
-    )
-    def test_alternate_key_and_value_alignments(
-        self,
-        key_alignment,
-        value_alignment,
-        expected_text,
-    ):
-        result = mem_chart_gfx9.format_text(
-            7,
-            key=3,
-            value_step_prec_rightalign=3,
-            key_step_prec_leftalign=3,
-            key_align=key_alignment,
-            value_align=value_alignment,
-        )
-
-        assert result == expected_text
-
-    @pytest.mark.parametrize(
-        ("value", "expected_text"),
-        [
-            pytest.param(1.234, "1.234", id="numeric-value"),
-            pytest.param(None, "N/A", id="na-value"),
-        ],
-    )
-    def test_zero_width(self, value, expected_text):
-        assert (
-            mem_chart_gfx9.format_text(value, value_step_prec_rightalign=0)
-            == expected_text
-        )
-
-    @pytest.mark.parametrize(
-        "format_sample",
-        [
-            pytest.param(1e20, id="scientific-float"),
-            pytest.param(math.nan, id="nan"),
-            pytest.param(math.inf, id="infinity"),
-        ],
-    )
-    def test_unusable_sample_specs_raise(self, format_sample):
-        with pytest.raises(ValueError, match="Invalid format specifier"):
-            mem_chart_gfx9.format_text(
-                1,
-                value_step_prec_rightalign=format_sample,
-            )
-
-    @pytest.mark.parametrize(
-        ("value", "expected_text"),
-        [
-            pytest.param(math.nan, "nan", id="nan"),
-            pytest.param(math.inf, "inf", id="infinity"),
-        ],
-    )
-    def test_non_finite_values_are_formatted(self, value, expected_text):
-        assert mem_chart_gfx9.format_text(value) == expected_text
-
-
-# =============================================================================
 # Tests for plot_mem_chart function (gfx9)
 # =============================================================================
-
-
-GFX9_SAMPLE_METRICS = {
-    "Wavefront Occupancy": 1,
-    "Wave Life": 2,
-    "SALU": 3,
-    "SMEM": 4,
-    "VALU": 5,
-    "Matrix Ops": 6,
-    "VMEM": 7,
-    "LDS": 8,
-    "GWS": 9,
-    "BR": 10,
-    "Active CUs": 11,
-    "Num CUs": 12,
-    "VGPR": 13,
-    "SGPR": 14,
-    "LDS Allocation": 15,
-    "Scratch Allocation": 16,
-    "Wavefronts": 17,
-    "Workgroups": 18,
-    "LDS Req": 19,
-    "LDS Util": 20,
-    "LDS Latency": 21,
-    "VL1 Rd": 22,
-    "VL1 Wr": 23,
-    "VL1 Atomic": 24,
-    "VL1 Hit": 25,
-    "VL1 Lat": 26,
-    "VL1 Coalesce": 27,
-    "VL1 Stall": 28,
-    "sL1D Rd": 29,
-    "sL1D Hit": 30,
-    "sL1D Lat": 31,
-    "IL1 Fetch": 32,
-    "IL1 Hit": 33,
-    "IL1 Lat": 34,
-    "VL1_L2 Rd": 36,
-    "VL1_L2 Wr": 37,
-    "VL1_L2 Atomic": 38,
-    "sL1D_L2 Rd": 39,
-    "sL1D_L2 Wr": 40,
-    "sL1D_L2 Atomic": 41,
-    "IL1_L2 Rd": 42,
-    "L2 Hit": 43,
-    "L2 Rd": 44,
-    "L2 Wr": 45,
-    "L2 Atomic": 46,
-    "L2 Rd Lat": 47,
-    "L2 Wr Lat": 48,
-    "Fabric_L2 Rd": 49,
-    "Fabric_L2 Wr": 50,
-    "Fabric_L2 Atomic": 51,
-    "Fabric Rd Lat": 52,
-    "Fabric Wr Lat": 53,
-    "Fabric Atomic Lat": 54,
-    "HBM Rd": 55,
-    "HBM Wr": 56,
-}
 
 
 class TestPlotMemChartGfx9:
     """Tests for gfx9 plot_mem_chart - CDNA memory chart generation."""
 
     def test_full_sample_metrics_render_without_na_placeholders(self):
+        """Render complete gfx9 metrics without N/A placeholders."""
         output = common.strip_ansi(
             mem_chart_gfx9.plot_mem_chart(
-                dict(GFX9_SAMPLE_METRICS),
+                common.GFX9_SAMPLE_METRICS,
                 chart_title=DEFAULT_TITLE,
             )
         )
@@ -841,6 +575,7 @@ class TestPlotMemChartGfx9:
         assert "N/A" not in output
 
     def test_empty_metrics_render_expected_placeholders(self):
+        """Render 54 N/A placeholders when no gfx9 metrics are provided."""
         output = common.strip_ansi(
             mem_chart_gfx9.plot_mem_chart({}, chart_title=DEFAULT_TITLE)
         )
@@ -852,6 +587,7 @@ class TestPlotMemChartGfx9:
         assert output.count("N/A") == 54
 
     def test_partial_metrics_render_values_and_placeholders(self):
+        """Render supplied gfx9 values and placeholders for missing metrics."""
         partial = {"HBM Rd": 100}
         output = common.strip_ansi(
             mem_chart_gfx9.plot_mem_chart(partial, chart_title=DEFAULT_TITLE)
@@ -865,7 +601,7 @@ class TestPlotMemChartGfx9:
         """CDNA output contains every component enabled by the renderer."""
         output = common.strip_ansi(
             mem_chart_gfx9.plot_mem_chart(
-                dict(GFX9_SAMPLE_METRICS),
+                common.GFX9_SAMPLE_METRICS,
                 chart_title=DEFAULT_TITLE,
             )
         )
@@ -892,7 +628,7 @@ class TestPlotMemChartGfx9:
         """CDNA output prints the heading once outside the chart, with connectors."""
         output = common.strip_ansi(
             mem_chart_gfx9.plot_mem_chart(
-                dict(GFX9_SAMPLE_METRICS),
+                common.GFX9_SAMPLE_METRICS,
                 chart_title=DEFAULT_TITLE,
             )
         )
@@ -1009,6 +745,7 @@ class TestPlotMemChartGfx9:
         expected_row_index,
         expected_column_slice,
     ):
+        """Place each gfx9 metric in the expected chart region."""
         output_lines = common.strip_ansi(
             mem_chart_gfx9.plot_mem_chart(
                 {metric_name: metric_value},
@@ -1019,92 +756,12 @@ class TestPlotMemChartGfx9:
         assert expected_text in output_lines[expected_row_index][expected_column_slice]
 
     def test_empty_placeholders_do_not_render_metric_suffixes(self):
+        """Omit percentage and cycle suffixes from N/A placeholders."""
         output = common.strip_ansi(
             mem_chart_gfx9.plot_mem_chart({}, chart_title=DEFAULT_TITLE)
         )
 
         assert re.search(r"N/A[ \t]*(?:%|cycles)", output) is None
-
-
-ANALYSIS_CONFIGS = Path(common.SRC) / "rocprof_compute_soc" / "analysis_configs"
-GFX9_ARCHITECTURES = (
-    "gfx908",
-    "gfx90a",
-    "gfx940",
-    "gfx941",
-    "gfx942",
-    "gfx950",
-)
-DISCOVERED_GFX9_ARCHITECTURES = tuple(
-    path.parent.name
-    for path in sorted(ANALYSIS_CONFIGS.glob("gfx9*/0300_memory_chart.yaml"))
-)
-GFX94X_ARCHITECTURES = frozenset({"gfx940", "gfx941", "gfx942"})
-GFX9_ALWAYS_MISSING_METRIC_KEYS = frozenset({"Active CUs"})
-GFX94X_MISSING_METRIC_KEYS = frozenset({"L2 Rd Lat", "L2 Wr Lat", "VL1 Lat"})
-GFX9_YAML_ONLY_METRIC_KEYS = frozenset({"Active CUs (deprecated)"})
-
-
-def _panel_yaml_metric_keys(architecture: str) -> frozenset[str]:
-    config_path = ANALYSIS_CONFIGS / architecture / "0300_memory_chart.yaml"
-    panel_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-
-    return frozenset(
-        metric_name
-        for data_source in panel_config["Panel Config"]["data source"]
-        for metric_name in data_source["metric_table"]["metric"]
-    )
-
-
-def _expected_missing_metric_keys(architecture: str) -> frozenset[str]:
-    if architecture in GFX94X_ARCHITECTURES:
-        return GFX9_ALWAYS_MISSING_METRIC_KEYS | GFX94X_MISSING_METRIC_KEYS
-    return GFX9_ALWAYS_MISSING_METRIC_KEYS
-
-
-def _normalized_panel_metrics(architecture: str) -> dict[str, int | None]:
-    panel_metric_keys = _panel_yaml_metric_keys(architecture)
-    return {
-        metric_name: 42 if metric_name in panel_metric_keys else None
-        for metric_name in GFX9_SAMPLE_METRICS
-    }
-
-
-class TestIntegrationGfx9:
-    def test_discovers_expected_architectures(self):
-        assert DISCOVERED_GFX9_ARCHITECTURES == GFX9_ARCHITECTURES
-
-    @pytest.mark.parametrize("architecture", GFX9_ARCHITECTURES)
-    def test_panel_yaml_matches_sample_metric_contract(self, architecture):
-        panel_metric_keys = _panel_yaml_metric_keys(architecture)
-        sample_metric_keys = frozenset(GFX9_SAMPLE_METRICS)
-        expected_missing_metric_keys = _expected_missing_metric_keys(architecture)
-        normalized_metrics = _normalized_panel_metrics(architecture)
-
-        assert sample_metric_keys - panel_metric_keys == expected_missing_metric_keys
-        assert panel_metric_keys - sample_metric_keys == GFX9_YAML_ONLY_METRIC_KEYS
-        assert tuple(normalized_metrics) == tuple(GFX9_SAMPLE_METRICS)
-        assert {
-            metric_name
-            for metric_name, value in normalized_metrics.items()
-            if value is None
-        } == expected_missing_metric_keys
-
-    @pytest.mark.parametrize("architecture", GFX9_ARCHITECTURES)
-    def test_normalized_panel_metrics_render_expected_shape_and_placeholders(
-        self, architecture
-    ):
-        output = common.strip_ansi(
-            mem_chart_gfx9.plot_mem_chart(
-                _normalized_panel_metrics(architecture),
-                chart_title=DEFAULT_TITLE,
-            )
-        )
-        expected_na_count = 3 if architecture in GFX94X_ARCHITECTURES else 0
-
-        assert len(output.splitlines()) == 43
-        assert output.count("N/A") == expected_na_count
-        assert "n/a:" not in output
 
 
 @pytest.mark.parametrize(
@@ -1117,7 +774,7 @@ class TestIntegrationGfx9:
         ),
         pytest.param(
             mem_chart_gfx9.plot_mem_chart,
-            dict(GFX9_SAMPLE_METRICS),
+            common.GFX9_SAMPLE_METRICS,
             id="gfx9",
         ),
     ],
