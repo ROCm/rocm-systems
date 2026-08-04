@@ -23,7 +23,7 @@ TRITON_TRACE_WORKLOAD = "tests/workloads/triton_trace/MI300A"
 # Triton operators in a single run.
 ML_API_TRACE_WORKLOAD = "tests/workloads/ml_api_trace/MI300A"
 
-# 30 workloads common to MI100, MI200, MI300A_A1, MI300X_A1.
+# 28 workloads common to MI100, MI200, MI300A_A1, MI300X_A1.
 CDNA_WORKLOADS = [
     "device_filter",
     "device_inv_int",
