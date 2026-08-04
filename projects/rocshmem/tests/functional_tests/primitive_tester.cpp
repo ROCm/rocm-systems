@@ -92,7 +92,7 @@ __global__ void PrimitiveTest(int loop, int skip,
     } else if constexpr (Type == PutNBITestType) {
       rocshmem_ctx_putmem_nbi(ctx, dest + offset, source + offset, size, 1);
     } else if constexpr (Type == PTestType) {
-      /* Assignment required to verify we can send non-symetric memory */
+      /* Assignment required to verify we can send non-symmetric memory */
       char val = source[offset];
       rocshmem_ctx_char_p(ctx, dest + offset, val, 1);
     } else if constexpr (Type == GTestType) {

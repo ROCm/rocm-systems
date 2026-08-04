@@ -28,6 +28,14 @@
 #include "tester.hpp"
 
 /******************************************************************************
+ * DEVICE TEST KERNEL
+ *****************************************************************************/
+template <TestType Type>
+__global__ void FloodTest(int loop, int skip, long long int *start_time,
+                           long long int *end_time, uint64_t *r_buf, uint64_t *s_buf,
+                           ShmemContextType ctx_type, int wf_size);
+
+/******************************************************************************
  * HOST TESTER CLASS
  *****************************************************************************/
 class FloodTester : public Tester {

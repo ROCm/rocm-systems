@@ -89,6 +89,16 @@ __global__ void DefaultCTXPrimitiveTest(int loop, int skip,
       rocshmem_putmem(dest + offset, source + offset, size, 1);
     } else if constexpr (Type == DefaultCTXPutNBITestType) {
       rocshmem_putmem_nbi(dest + offset, source + offset, size, 1);
+    } else if constexpr (Type == DefaultCTXPTestType) {
+      for (size_t s = 0; s < size; s++) {
+        char val = source[offset + s];
+        rocshmem_char_p(&dest[offset + s], val, 1);
+      }
+    } else if constexpr (Type == DefaultCTXGTestType) {
+      for (size_t s = 0; s < size; s++) {
+        char ret = rocshmem_char_g(&source[offset + s], 1);
+        dest[offset + s] = ret;
+      }
     }
   }
 
@@ -222,6 +232,18 @@ void DefaultCTXPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
           blockSize, shared_bytes, stream, loop, args.skip, start_time,
           end_time, source, dest, size, _shmem_context, wf_size, batch_size,
           grid_psync);
+      break;
+    case DefaultCTXPTestType:
+      hipLaunchKernelGGL(DefaultCTXPrimitiveTest<DefaultCTXPTestType>,
+                         gridSize, blockSize, shared_bytes, stream, loop,
+                         args.skip, start_time, end_time, source, dest, size,
+                         _shmem_context, wf_size, batch_size, grid_psync);
+      break;
+    case DefaultCTXGTestType:
+      hipLaunchKernelGGL(DefaultCTXPrimitiveTest<DefaultCTXGTestType>,
+                         gridSize, blockSize, shared_bytes, stream, loop,
+                         args.skip, start_time, end_time, source, dest, size,
+                         _shmem_context, wf_size, batch_size, grid_psync);
       break;
     default:
       std::cerr << "Invalid Test: unhandled TestType " << _type
