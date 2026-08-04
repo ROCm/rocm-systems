@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <functional>
 #include <chrono>
 #include <thread>
 #include <utility>
@@ -310,7 +311,8 @@ close_drain_remaining_ns()
 }
 
 size_t
-drain_close_signal_less_queue(uint64_t queue_token)
+drain_close_signal_less_queue(uint64_t                             queue_token,
+                              const std::function<bool(uint64_t)>& wait_hw_drained)
 {
     if(g_child_stale.load(std::memory_order_acquire)) return 0;
     if(!signal_less_feature_enabled() || !signal_less_fully_wired()) return 0;
@@ -319,24 +321,35 @@ drain_close_signal_less_queue(uint64_t queue_token)
     auto _gpu  = owner_registry().gpu_of(queue_token);
     if(!_slot || !_gpu) return 0;
 
-    auto& _hub     = signal_less_hub();
-    auto  _pending = _hub.pending_for_slot(*_gpu, *_slot);
-    if(_pending == 0) return 0;
+    auto& _hub = signal_less_hub();
 
-    // Spend the smaller of this queue's budget and what the process has left.
+    // A queue that never registered a signal-less dispatch has nothing to wait
+    // for, so it pays nothing at destroy.
+    if(_hub.outstanding(queue_token) == 0) return 0;
+
+    // ONE budget for both waits: the GPU finishing and the reader pairing are two
+    // halves of the same close, and doubling the timeout would double teardown.
     const uint64_t _remaining = close_drain_remaining_ns().load(std::memory_order_relaxed);
     const uint64_t _budget    = std::min(close_drain_budget_ns(), _remaining);
-    if(_budget == 0) return _pending;
+    if(_budget == 0) return _hub.pending_for_slot(*_gpu, *_slot);
 
-    // No lock is held across this wait: pending_for_slot() takes the hub lock and
-    // releases it on every poll, and the caller already released gate_lock. The
-    // reader/processor reduce the count concurrently as they pair the records.
     const uint64_t _start    = steady_now_ns();
     const uint64_t _deadline = _start + _budget;
+
+    // PHASE 1: wait for the hardware to finish. Until it has, the EOP records for
+    // its in-flight dispatches do not exist yet, so polling the hub would see a
+    // low pending count, return early, and strand kernels that were merely still
+    // running. Standard tracing gets this from Queue::sync() waiting on
+    // _active_kernels; the inline path never increments that, so we wait on the
+    // queue's own read index instead.
+    const bool _hw_drained = wait_hw_drained ? wait_hw_drained(_deadline) : true;
+
+    // PHASE 2: now the records exist, wait for the reader to pair them. No lock is
+    // held across either wait: pending_for_slot() takes the hub lock and releases
+    // it on every poll, and the caller already released gate_lock.
+    auto _pending = _hub.pending_for_slot(*_gpu, *_slot);
     while(_pending > 0 && steady_now_ns() < _deadline)
     {
-        // The records may still be sitting in the ring; make the reader copy them
-        // now rather than at its next poll.
         nudge_reader();
         std::this_thread::sleep_for(std::chrono::microseconds{500});
         _pending = _hub.pending_for_slot(*_gpu, *_slot);
@@ -352,10 +365,12 @@ drain_close_signal_less_queue(uint64_t queue_token)
     {}
 
     ROCP_INFO << fmt::format(
-        "KFD dispatch-log: close drain for doorbell slot {} waited {} us, {} dispatch(es) still "
-        "outstanding",
+        "KFD dispatch-log: close drain for gpu {} slot {} waited {} us (hardware {}), {} "
+        "dispatch(es) still outstanding",
+        *_gpu,
         *_slot,
         _spent / 1000,
+        _hw_drained ? "drained" : "still busy at the deadline",
         _pending);
     return _pending;
 }

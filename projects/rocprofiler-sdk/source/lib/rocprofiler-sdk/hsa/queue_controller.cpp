@@ -445,7 +445,14 @@ QueueController::destroy_queue(hsa_queue_t* id)
     const auto _queue_token = queue->get_id().handle;
     kfd::begin_close_signal_less_queue(_queue_token);
     queue_interposition::fence_queue_gate(id);
-    kfd::drain_close_signal_less_queue(_queue_token);
+    // Wait for the hardware to finish this queue's dispatches BEFORE deciding
+    // anything was lost: Queue::sync() below only waits on _active_kernels, which
+    // the inline path never increments, so it returns immediately for signal-less
+    // work. The QueueState is still alive here -- destroy_queue_state() runs
+    // further down -- and gate_lock was fenced above, so next_submit_pos is final.
+    kfd::drain_close_signal_less_queue(_queue_token, [id](uint64_t _deadline_ns) {
+        return queue_interposition::wait_queue_hw_drained(id, _deadline_ns);
+    });
     kfd::finish_close_signal_less_queue(_queue_token);
 
     // KFD dispatch-log: retire this queue's doorbell binding (bumps generation

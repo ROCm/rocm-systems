@@ -1692,3 +1692,43 @@ TEST(DispatchHub, a_leak_on_one_gpu_does_not_tombstone_another)
     EXPECT_TRUE(register_one(hub, on_gpu1, 20, 2));
     EXPECT_TRUE(hub.prove_eop(on_gpu1, 7, true).has_value());
 }
+
+// The close drain has two phases and the order matters: wait for the hardware to
+// finish, THEN wait for the reader to pair. Polling the hub first would see a low
+// pending count for kernels that are still running and strand them.
+TEST(DispatchHub, a_queue_with_no_signal_less_work_needs_no_drain)
+{
+    auto hub = hub_t{};
+    // Nothing was ever registered for this queue, so a close has nothing to wait
+    // for -- the early-out that keeps non-signal-less queues from paying.
+    EXPECT_EQ(hub.outstanding(/*queue_token=*/77), 0u);
+    EXPECT_EQ(hub.pending_for_slot(0, 40), 0u);
+
+    auto stranded = hub.quarantine_slot(0, 40);
+    EXPECT_TRUE(stranded.empty());
+}
+
+// Records that only become pairable AFTER the hardware finishes still get
+// completed, and strand nothing -- this is what phase 1 buys.
+TEST(DispatchHub, records_arriving_after_hw_completion_still_complete)
+{
+    auto hub = hub_t{};
+    ASSERT_TRUE(register_one(hub, key_of(40, 1), /*corr_id=*/900, /*queue_token=*/77));
+    ASSERT_TRUE(register_one(hub, key_of(40, 2), /*corr_id=*/900, /*queue_token=*/77));
+
+    hub.mark_slot_closing(0, 40);
+    EXPECT_EQ(hub.outstanding(77), 2u);
+    EXPECT_EQ(hub.pending_for_slot(0, 40), 2u);
+
+    // Phase 1 returns: the GPU has finished, so the EOPs now exist and the reader
+    // pairs them during phase 2.
+    ASSERT_TRUE(hub.prove_eop(key_of(40, 1), 500, true).has_value());
+    ASSERT_TRUE(hub.prove_eop(key_of(40, 2), 600, true).has_value());
+    EXPECT_EQ(hub.pending_for_slot(0, 40), 0u);
+    EXPECT_EQ(hub.outstanding(77), 0u);
+
+    // Phase 3: nothing left to strand, and no correlation id leaks.
+    auto stranded = hub.quarantine_slot(0, 40);
+    EXPECT_TRUE(stranded.empty());
+    EXPECT_FALSE(hub.is_ledgered(900));
+}

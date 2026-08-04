@@ -100,5 +100,31 @@ TEST(queue_controller, capture_doorbell_key_rejects_missing_doorbell)
     EXPECT_FALSE(
         capture_doorbell_key(kTestGpuId, rocprofiler_queue_id_t{3}, &queue).has_value());
 }
+// The inline path's stand-in for "_active_kernels == 0": the hardware has
+// consumed every packet we submitted. A closing queue must wait for this before
+// anything decides its dispatches produced no record -- until the read index
+// catches up, their kernels are still running and their EOP records do not exist.
+TEST(queue_interposition, hw_queue_drained_predicate)
+{
+    using queue_interposition::hw_queue_drained;
+
+    // Nothing submitted: trivially drained.
+    EXPECT_TRUE(hw_queue_drained(/*real_rdid=*/0, /*next_submit_pos=*/0));
+
+    // Packets outstanding: NOT drained -- this is the case the old code raced.
+    EXPECT_FALSE(hw_queue_drained(0, 4));
+    EXPECT_FALSE(hw_queue_drained(3, 4));
+
+    // Read index caught up, or ran past (the CP consumed packets we did not
+    // submit through the interposed path): drained.
+    EXPECT_TRUE(hw_queue_drained(4, 4));
+    EXPECT_TRUE(hw_queue_drained(5, 4));
+
+    // Large indices: the comparison must not be done by subtraction, which would
+    // wrap. These are monotonically increasing 64-bit counters.
+    constexpr uint64_t big = uint64_t{1} << 62;
+    EXPECT_TRUE(hw_queue_drained(big + 1, big));
+    EXPECT_FALSE(hw_queue_drained(big, big + 1));
+}
 }  // namespace hsa
 }  // namespace rocprofiler

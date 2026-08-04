@@ -1270,6 +1270,24 @@ fence_queue_gate(const hsa_queue_t* queue)
     auto lk = std::lock_guard<std::mutex>{state->gate_lock};
 }
 
+bool
+wait_queue_hw_drained(const hsa_queue_t* queue, uint64_t deadline_ns)
+{
+    auto state = lookup_queue_state(queue, /*create_if_missing=*/false);
+    if(!state || !state->real_rdid) return true;
+
+    // next_submit_pos is only written by process_doorbell_impl under gate_lock,
+    // and the caller fenced that gate before calling us, so it is final here.
+    const uint64_t _submit_pos = state->next_submit_pos;
+
+    while(!hw_queue_drained(__atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE), _submit_pos))
+    {
+        if(kfd::steady_now_ns() >= deadline_ns) return false;
+        std::this_thread::sleep_for(std::chrono::microseconds{200});
+    }
+    return true;
+}
+
 void
 fence_all_queue_gates()
 {
