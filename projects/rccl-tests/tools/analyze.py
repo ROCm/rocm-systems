@@ -59,6 +59,38 @@ def setup_tools_path(tools_dir_override=None):
 
 
 # ---------------------------------------------------------------------------
+# Data sources
+# ---------------------------------------------------------------------------
+
+# Every subcommand offers the same set, in the order 'auto' prefers them: RCCL's
+# own dispatch timing first, because it is GPU-accurate and costs nothing to
+# collect, then the host-side baseline, then a profiled run, then the logs.
+SOURCES = ["auto", "dispatch", "baseline", "profiled", "log"]
+
+
+def loaders(rc):
+    return {
+        "dispatch": rc.load_dispatch_data,
+        "baseline": rc.load_baseline_data,
+        "profiled": rc.load_profiled_data,
+        "log": rc.load_log_data,
+    }
+
+
+def auto_source(run_dir, rc):
+    """Best available source in *run_dir*, or None if it holds no timings."""
+    for name, present in (
+        ("dispatch", rc._has_dispatch_traces),
+        ("baseline", rc._has_baseline_csvs),
+        ("profiled", rc._has_profiled_traces),
+        ("log", rc._has_log_files),
+    ):
+        if present(run_dir):
+            return name
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Metadata helpers
 # ---------------------------------------------------------------------------
 
@@ -161,16 +193,8 @@ def cmd_report(args):
 
     source = args.source
     if source == "auto":
-        has_base = rc._has_baseline_csvs(run_dir)
-        has_prof = bool(ra.discover_multi_run_groups(run_dir))
-        has_log = rc._has_log_files(run_dir)
-        if has_base:
-            source = "baseline"
-        elif has_prof:
-            source = "profiled"
-        elif has_log:
-            source = "log"
-        else:
+        source = auto_source(run_dir, rc)
+        if source is None:
             print("No data found in run directory.", file=sys.stderr)
             return 1
 
@@ -183,18 +207,20 @@ def cmd_report(args):
         for (collective, dtype), rows in sorted(data.items()):
             _print_baseline_report(rows, collective, dtype, method_name, np_val)
 
-    elif source == "profiled":
-        multi_groups = ra.discover_multi_run_groups(run_dir)
-        if multi_groups:
-            for (collective, dtype), subdirs in multi_groups.items():
+    elif source in ("dispatch", "profiled"):
+        groups = ra.discover_groups(run_dir, source)
+        if groups:
+            for (collective, dtype), subdirs in groups.items():
                 print(f"{'=' * 60}")
                 print(f"  {collective}  /  {dtype}  ({len(subdirs)} rep(s))")
                 print(f"{'=' * 60}")
                 rows, show_bw, _regions = ra._analyze_dirs(
-                    subdirs, np_val, collective, outlier_fn, method_name)
+                    subdirs, np_val, collective, outlier_fn, method_name, source=source)
                 ra.print_report(rows, method_name, show_bw=show_bw)
+                if getattr(args, "timing", False):
+                    ra.print_timing(ra.timing_samples(subdirs, source=source))
         else:
-            print("No profiled trace directories found.", file=sys.stderr)
+            print(f"No {source} trace directories found.", file=sys.stderr)
             return 1
 
     elif source == "log":
@@ -206,69 +232,154 @@ def cmd_report(args):
     return 0
 
 
-def _fmt_us_stat(ns):
-    if ns is None:
-        return "--"
-    return f"{ns / 1000.0:.2f}"
-
-
 def cmd_variance(args):
-    """GPU-time jitter per (size, place) from profiled traces.
+    """GPU-time jitter per (size, place), from whichever GPU-timed source exists.
 
-    Reports, per point: per-launch on-GPU duration (End-Start; the accurate
-    rocprofv3 HW timestamp) and inter-launch gap (next.Start - this.End), with
-    median/std/p90, plus the fraction of wall time spent in gaps. This exposes
-    launch jitter/stalls that rccl-tests' host_time/N averaging hides.
+    Reports, per point: per-launch on-GPU duration and inter-launch gap
+    (next.Start - this.End) with median/std/p90, plus the fraction of wall time
+    spent in gaps, and -- from a dispatch trace, which knows which rank each
+    record came from -- how far apart the ranks started the same dispatch. This
+    exposes launch jitter and stalls that rccl-tests' host_time/N averaging
+    hides.
     """
     setup_tools_path(args.tools_dir)
     import roctx_analyze as ra
 
     run_dir = args.run_dir
-    groups = ra.discover_multi_run_groups(run_dir)
+    source = args.source if args.source in ("dispatch", "profiled") else \
+        ra.resolve_source(run_dir, "auto")
+    groups = ra.discover_groups(run_dir, source) if source else None
     if not groups:
-        print("No profiled trace directories found (variance needs profiled "
-              "runs).", file=sys.stderr)
+        print("No GPU-timed trace directories found (variance needs a dispatch "
+              "or profiled run).", file=sys.stderr)
         return 1
 
-    print(f"Run: {os.path.basename(run_dir)}   (profiled GPU-time jitter)")
-    print("  dur = per-launch on-GPU duration (End-Start); "
-          "gap = inter-launch (next.Start - prev.End); us.")
+    print(f"Run: {os.path.basename(run_dir)}   ({source} GPU-time jitter)")
     print()
 
     for (collective, dtype), subdirs in sorted(groups.items()):
-        samples = ra.collective_timing_samples(subdirs)
+        samples = ra.timing_samples(subdirs, source=source)
         if not samples:
             continue
         print(f"{'=' * 78}")
         print(f"  {collective}  /  {dtype}  ({len(subdirs)} trace dir(s))")
         print(f"{'=' * 78}")
-        hdr = (f"{'size':>10}  {'place':>5}  {'n':>6}  "
-               f"{'dur_med':>8}  {'dur_std':>8}  {'dur_p90':>8}  "
-               f"{'gap_med':>8}  {'gap_std':>8}  {'gap_p90':>8}  {'%gap':>6}")
+        ra.print_timing(samples)
+    return 0
+
+
+def cmd_overhead(args):
+    """What the instrumentation costs, measured by rccl-tests itself.
+
+    A run made with --baseline holds the same sweep timed uninstrumented and
+    again under each instrumentation mode. Comparing the test's own reported
+    time per size across those logs prices the instrumentation without
+    trusting the instrumentation to report its own cost.
+    """
+    setup_tools_path(args.tools_dir)
+    import roctx_compare as rc
+
+    outlier_fn, method_name = _build_outlier_fn(args)
+    by_mode, np_val = rc.load_mode_log_data(args.run_dir, outlier_fn)
+    if "baseline" not in by_mode:
+        print("No baseline logs in this run; re-run the sweep with "
+              "roctx_perf_run.py --baseline to price the instrumentation.", file=sys.stderr)
+        return 1
+
+    others = [m for m in ("dispatch", "profiled") if m in by_mode]
+    if not others:
+        print("Only baseline logs found; nothing to compare against.", file=sys.stderr)
+        return 1
+
+    print(f"Run: {run_label(args.run_dir, args.label)}   (cost of instrumentation vs uninstrumented)")
+    print()
+
+    empty = _modes_without_timings(args.run_dir, others)
+    for mode, why in empty.items():
+        print(f"  note: the {mode} run produced no kernel timings ({why}), so its")
+        print(f"        column prices a profiler that collected nothing.")
+    if empty:
+        print()
+
+    for key in sorted(by_mode["baseline"]):
+        collective, dtype = key
+        base = {(r["size"], r["in_place"]): r.get("median_us") for r in by_mode["baseline"][key]}
+        cols = [(m, {(r["size"], r["in_place"]): r.get("median_us")
+                     for r in by_mode[m].get(key, [])}) for m in others]
+
+        print("=" * (34 + 22 * len(cols)))
+        print(f"  {collective}  /  {dtype}" + (f"  (np={np_val})" if np_val else ""))
+        print("=" * (34 + 22 * len(cols)))
+        hdr = f"  {'size':>10}  {'place':>5}  {'baseline':>10}"
+        for mode, _ in cols:
+            hdr += f"  {mode:>10}  {'delta':>9}"
         print(hdr)
-        print("-" * len(hdr))
-        place_labels = {0: "oop", 1: "ip"}
-        for (size, in_place) in sorted(samples, key=lambda k: (k[1], k[0])):
-            durs = samples[(size, in_place)]["dur"]
-            gaps = samples[(size, in_place)]["gap"]
-            ds = ra.summarize(durs)
-            gs = ra.summarize(gaps)
-            if ds is None:
+        print("  " + "-" * (len(hdr) - 2))
+
+        totals = {mode: [] for mode, _ in cols}
+        for (size, in_place) in sorted(base, key=lambda k: (k[1], k[0])):
+            b = base[(size, in_place)]
+            line = (f"  {_fmt_us_size(size):>10}  {'ip' if in_place else 'oop':>5}  "
+                    f"{_fmt_us(b):>10}")
+            for mode, other in cols:
+                v = other.get((size, in_place))
+                if v is None or not b:
+                    line += f"  {'--':>10}  {'--':>9}"
+                    continue
+                pct = (v - b) / b * 100.0
+                totals[mode].append(pct)
+                line += f"  {_fmt_us(v):>10}  {pct:>+8.1f}%"
+            print(line)
+
+        print()
+        for mode, _ in cols:
+            pcts = sorted(totals[mode])
+            if not pcts:
                 continue
-            sum_dur = sum(durs)
-            sum_gap = sum(gaps) if gaps else 0
-            pct_gap = (100.0 * sum_gap / (sum_dur + sum_gap)) if (sum_dur + sum_gap) else 0.0
-            print(
-                f"{size:>10}  {place_labels.get(in_place, in_place):>5}  {ds['n']:>6}  "
-                f"{_fmt_us_stat(ds['p50']):>8}  {_fmt_us_stat(ds['std']):>8}  "
-                f"{_fmt_us_stat(ds['p90']):>8}  "
-                f"{_fmt_us_stat(gs['p50']) if gs else '--':>8}  "
-                f"{_fmt_us_stat(gs['std']) if gs else '--':>8}  "
-                f"{_fmt_us_stat(gs['p90']) if gs else '--':>8}  "
-                f"{pct_gap:>5.1f}%"
-            )
+            med = pcts[len(pcts) // 2]
+            print(f"  {mode}: median {med:+.1f}%, worst {max(pcts, key=abs):+.1f}% "
+                  f"over {len(pcts)} points")
+        print()
+        print("  Times are the test's own reported wall time per iteration, not the")
+        print("  instrumentation's view of itself.")
         print()
     return 0
+
+
+def _modes_without_timings(run_dir, modes):
+    """Which of *modes* ran but collected no kernel timings, and why.
+
+    A rocprofv3 older than the runtime it profiles still intercepts rocTX, so
+    it yields marker traces and no kernel traces; the run then looks free
+    because nothing was measured.
+    """
+    import glob
+    missing = {}
+    for mode in modes:
+        if mode == "dispatch":
+            if not glob.glob(os.path.join(run_dir, "*_dispatch", "*_pid*.csv")):
+                missing[mode] = "no dispatch trace CSVs"
+        elif mode == "profiled":
+            kernels = glob.glob(os.path.join(run_dir, "**", "*_kernel_trace.csv"), recursive=True)
+            if not kernels:
+                markers = glob.glob(os.path.join(run_dir, "**", "*_marker_api_trace.csv"),
+                                    recursive=True)
+                missing[mode] = (f"{len(markers)} marker trace(s), no kernel trace"
+                                 if markers else "no rocprofv3 traces at all")
+    return missing
+
+
+def _fmt_us(v):
+    if v is None:
+        return "--"
+    if v >= 1000:
+        return f"{v/1000:.2f}ms"
+    return f"{v:.2f}us"
+
+
+def _fmt_us_size(nbytes):
+    import roctx_analyze as ra
+    return ra.fmt_size(nbytes)
 
 
 def _print_baseline_report(rows, collective, dtype, method_name, np_val=None):
@@ -366,12 +477,7 @@ def cmd_compare(args):
         print(auto_msg)
     print()
 
-    loaders = {
-        "baseline": rc.load_baseline_data,
-        "profiled": rc.load_profiled_data,
-        "log":      rc.load_log_data,
-    }
-    loader = loaders[source]
+    loader = loaders(rc)[source]
     data_a, np_a = loader(args.run_dir_a, outlier_fn)
     data_b, np_b = loader(args.run_dir_b, outlier_fn)
     np_val = np_a or np_b
@@ -421,26 +527,14 @@ def cmd_plot(args):
     for run_dir in run_dirs:
         label = run_label(run_dir)
         if source == "auto":
-            has_base = rc._has_baseline_csvs(run_dir)
-            has_prof = bool(ra.discover_multi_run_groups(run_dir))
-            has_log = rc._has_log_files(run_dir)
-            if has_base:
-                eff_source = "baseline"
-            elif has_prof:
-                eff_source = "profiled"
-            elif has_log:
-                eff_source = "log"
-            else:
+            eff_source = auto_source(run_dir, rc)
+            if eff_source is None:
                 print(f"  WARNING: no data in {run_dir}", file=sys.stderr)
                 continue
         else:
             eff_source = source
 
-        loader = {
-            "baseline": rc.load_baseline_data,
-            "profiled": rc.load_profiled_data,
-            "log":      rc.load_log_data,
-        }[eff_source]
+        loader = loaders(rc)[eff_source]
         data, np_val = loader(run_dir, outlier_fn)
         if data:
             lib_data.append((label, data, np_val, eff_source))
@@ -761,16 +855,18 @@ def main():
     # -- report --
     p_report = sub.add_parser("report", help="Text report for a single run")
     p_report.add_argument("run_dir", help="Run directory")
-    p_report.add_argument("--source", choices=["auto", "baseline", "profiled", "log"],
+    p_report.add_argument("--source", choices=SOURCES,
                           default="auto", help="Data source (default: auto)")
+    p_report.add_argument("--timing", action="store_true",
+                          help="Also report per-launch duration spread, "
+                               "inter-launch gaps and rank skew")
     _add_common_args(p_report)
 
     # -- compare --
     p_cmp = sub.add_parser("compare", help="Compare two runs")
     p_cmp.add_argument("run_dir_a", help="First run directory (A)")
     p_cmp.add_argument("run_dir_b", help="Second run directory (B)")
-    p_cmp.add_argument("--source", choices=["auto", "baseline", "profiled", "log"],
-                        default="auto")
+    p_cmp.add_argument("--source", choices=SOURCES, default="auto")
     p_cmp.add_argument("--label-a", default=None, help="Label for run A")
     p_cmp.add_argument("--label-b", default=None, help="Label for run B")
     p_cmp.add_argument("--csv", default=None, metavar="FILE",
@@ -783,8 +879,7 @@ def main():
     p_plot = sub.add_parser("plot", help="Overlay plot of runs")
     p_plot.add_argument("run_dirs", nargs="+",
                         help="Run directories or exported records .json files")
-    p_plot.add_argument("--source", choices=["auto", "baseline", "profiled", "log"],
-                        default="auto")
+    p_plot.add_argument("--source", choices=SOURCES, default="auto")
     p_plot.add_argument("-o", "--output", default="comparison.png",
                         help="Output file (.png for matplotlib, .html for plotly)")
     p_plot.add_argument("--metric", choices=["busbw", "algbw", "time", "eff_busbw"],
@@ -816,8 +911,7 @@ def main():
     p_export.add_argument("run_dirs", nargs="+", help="Run directories")
     p_export.add_argument("-o", "--output", default="records.json",
                           help="Output JSON file (default: records.json)")
-    p_export.add_argument("--source", choices=["auto", "baseline", "profiled", "log"],
-                          default="auto")
+    p_export.add_argument("--source", choices=SOURCES, default="auto")
     p_export.add_argument("--drop-samples", action="store_true",
                           help="Omit per-iteration samples (smaller; no box/violin)")
     _add_common_args(p_export)
@@ -825,10 +919,21 @@ def main():
     # -- variance --
     p_var = sub.add_parser(
         "variance",
-        help="Per-size GPU-time jitter from profiled traces: per-launch "
-             "duration spread and inter-launch gaps")
-    p_var.add_argument("run_dir", help="Run directory (profiled traces)")
+        help="Per-size GPU-time jitter: per-launch duration spread, "
+             "inter-launch gaps and rank skew")
+    p_var.add_argument("run_dir", help="Run directory (dispatch or profiled traces)")
+    p_var.add_argument("--source", choices=["auto", "dispatch", "profiled"],
+                       default="auto")
     p_var.add_argument("--tools-dir", default=None)
+
+    # -- overhead --
+    p_over = sub.add_parser(
+        "overhead",
+        help="What each instrumentation mode costs, against the "
+             "uninstrumented baseline in the same run")
+    p_over.add_argument("run_dir", help="Run directory made with --baseline")
+    p_over.add_argument("--label", default=None, help="Label for the run")
+    _add_common_args(p_over)
 
     args = parser.parse_args()
 
@@ -843,6 +948,7 @@ def main():
         "plot": cmd_plot,
         "export": cmd_export,
         "variance": cmd_variance,
+        "overhead": cmd_overhead,
     }
     return dispatch[args.cmd](args)
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Tidy (long-form) records for rccl-tests perf runs, plus compact export.
 
-This is the pivot layer between the source-specific loaders (baseline CSV,
-profiled rocTX traces, log files) and any consumer (plots, comparisons,
-notebooks).  Every source is normalized to a flat list of per-point records
+This is the pivot layer between the source-specific loaders (RCCL dispatch
+traces, baseline CSV, profiled rocTX traces, log files) and any consumer (plots,
+comparisons, notebooks).  Every source is normalized to a flat list of per-point records
 with a uniform, microsecond-based schema and, crucially, the *retained sample
 distribution* (`samples_us`) so downstream code can draw IQR bands, box/violin
 plots, etc.
@@ -85,9 +85,11 @@ def run_machine(run_dir):
 # ---------------------------------------------------------------------------
 
 def resolve_source(run_dir, source="auto"):
-    """Return an effective source name for *run_dir* ('baseline'|'profiled'|'log')."""
+    """Return an effective source for *run_dir* ('dispatch'|'baseline'|'profiled'|'log')."""
     if source != "auto":
         return source
+    if rc._has_dispatch_traces(run_dir):
+        return "dispatch"
     if rc._has_baseline_csvs(run_dir):
         return "baseline"
     if rc._has_profiled_traces(run_dir):
@@ -98,15 +100,20 @@ def resolve_source(run_dir, source="auto"):
 
 
 _LOADERS = {
+    "dispatch": rc.load_dispatch_data,
     "baseline": rc.load_baseline_data,
     "profiled": rc.load_profiled_data,
     "log": rc.load_log_data,
 }
 
+# Sources whose rows carry nanosecond GPU timings rather than microsecond
+# host timings.
+_NS_SOURCES = ("dispatch", "profiled")
+
 
 def _row_to_record_us(row, source):
-    """Normalize one loader row (profiled ns-based or baseline/log us-based) to us."""
-    if source == "profiled":
+    """Normalize one loader row (ns-based GPU timing or us-based host timing) to us."""
+    if source in _NS_SOURCES:
         def us(v):
             return (v / 1000.0) if v is not None else None
         samples_us = [s / 1000.0 for s in (row.get("samples") or [])]
@@ -235,7 +242,7 @@ def main(argv=None):
     parser.add_argument("run_dirs", nargs="+", help="Run directories")
     parser.add_argument("-o", "--output", default="records.json",
                         help="Output JSON file (default: records.json)")
-    parser.add_argument("--source", choices=["auto", "baseline", "profiled", "log"],
+    parser.add_argument("--source", choices=["auto", "dispatch", "baseline", "profiled", "log"],
                         default="auto")
     parser.add_argument("--drop-samples", action="store_true",
                         help="Omit per-iteration samples (smaller file, no box/violin)")

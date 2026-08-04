@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Compare two rccl-tests perf-run directories side-by-side.
 
-Reads baseline CSVs (default) or profiled rocTX kernel traces from two run
-directories, joins on (size, in_place), and prints a comparison table with
-bandwidth deltas.  Optionally writes the comparison to CSV.
+Reads RCCL dispatch traces, baseline CSVs, profiled rocTX kernel traces or plain
+logs from two run directories, joins on (size, in_place), and prints a
+comparison table with bandwidth deltas.  Optionally writes the comparison to
+CSV.
 
 Examples:
   %(prog)s perf-runs/20260319-201332 perf-runs/20260319-201434
-  %(prog)s perf-runs/A perf-runs/B --source profiled --csv cmp.csv
+  %(prog)s perf-runs/A perf-runs/B --source dispatch --csv cmp.csv
   %(prog)s perf-runs/A perf-runs/B --source log
   %(prog)s perf-runs/A perf-runs/B --label-a "build-A" --label-b "build-B"
 """
@@ -25,13 +26,14 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, SCRIPT_DIR)
 
+import dispatch_trace as dt
 import roctx_analyze as ra
 
 _BASELINE_FILE_RE = re.compile(
     r"^(?P<collective>.+?)_(?P<dtype>[a-zA-Z0-9]+)_baseline_rep(?P<rep>\d+)\.csv$"
 )
 _LOG_FILE_RE = re.compile(
-    r"^(?P<collective>.+?)_(?P<dtype>[a-zA-Z0-9]+)_(?:baseline_)?rep(?P<rep>\d+)\.log$"
+    r"^(?P<collective>.+?)_(?P<dtype>[a-zA-Z0-9]+)_(?:(?P<mode>baseline|dispatch)_)?rep(?P<rep>\d+)\.log$"
 )
 _LOG_DATA_RE = re.compile(
     r"^\s*(?P<size>\d+)\s+\d+\s+\S+\s+\S+\s+[-\d]+\s+"
@@ -192,29 +194,37 @@ def load_baseline_data(run_dir, outlier_fn):
 # Log-file loading (parses rccl-tests stdout table format)
 # ---------------------------------------------------------------------------
 
+def _discover_log_files_by_mode(run_dir):
+    """Return dict: mode -> {(collective, dtype): [log_path, ...]}.
+
+    A run made with --mode/--baseline holds one log per mode: the
+    uninstrumented `baseline`, RCCL's own `dispatch` timing, and the rocprofv3
+    `profiled` run (whose log has no mode word in its name).
+    """
+    groups = defaultdict(lambda: defaultdict(list))
+    for entry in sorted(os.listdir(run_dir)):
+        m = _LOG_FILE_RE.match(entry)
+        if not m:
+            continue
+        mode = m.group("mode") or "profiled"
+        groups[mode][(m.group("collective"), m.group("dtype"))].append(os.path.join(run_dir, entry))
+    return {mode: dict(by_key) for mode, by_key in groups.items()}
+
+
 def _discover_log_files(run_dir, prefer_baseline=True):
     """Return dict: (collective, dtype) -> [log_path, ...].
 
     When *prefer_baseline* is True and ``*_baseline_rep*.log`` files exist for
     a (collective, dtype) group, only those are returned (they have no profiler
-    overhead).  Otherwise the profiled ``*_rep*.log`` files are used.
+    overhead).  Otherwise the instrumented logs are used.
     """
-    baseline_groups = defaultdict(list)
-    profiled_groups = defaultdict(list)
-    for entry in sorted(os.listdir(run_dir)):
-        m = _LOG_FILE_RE.match(entry)
-        if not m:
-            continue
-        key = (m.group("collective"), m.group("dtype"))
-        path = os.path.join(run_dir, entry)
-        if "baseline" in entry:
-            baseline_groups[key].append(path)
-        else:
-            profiled_groups[key].append(path)
-
-    if prefer_baseline and baseline_groups:
-        return dict(baseline_groups)
-    return dict(profiled_groups) if profiled_groups else dict(baseline_groups)
+    by_mode = _discover_log_files_by_mode(run_dir)
+    if prefer_baseline and by_mode.get("baseline"):
+        return by_mode["baseline"]
+    for mode in ("profiled", "dispatch", "baseline"):
+        if by_mode.get(mode):
+            return by_mode[mode]
+    return {}
 
 
 def _parse_log_file(path):
@@ -249,8 +259,23 @@ def load_log_data(run_dir, outlier_fn):
 
     Same return schema as ``load_baseline_data``.
     """
-    file_groups = _discover_log_files(run_dir)
     np_val, _ = ra.load_run_metadata(run_dir)
+    return _rows_from_log_groups(_discover_log_files(run_dir), outlier_fn), np_val
+
+
+def load_mode_log_data(run_dir, outlier_fn):
+    """Per-instrumentation-mode view of the same logs.
+
+    Returns dict: mode -> {(collective, dtype): rows}, so a run that measured
+    the same sweep uninstrumented, dispatch-timed and under rocprofv3 can be
+    priced against itself.
+    """
+    np_val, _ = ra.load_run_metadata(run_dir)
+    by_mode = _discover_log_files_by_mode(run_dir)
+    return {mode: _rows_from_log_groups(groups, outlier_fn) for mode, groups in by_mode.items()}, np_val
+
+
+def _rows_from_log_groups(file_groups, outlier_fn):
     result = {}
 
     for (collective, dtype), log_paths in file_groups.items():
@@ -303,7 +328,7 @@ def load_log_data(run_dir, outlier_fn):
 
         result[(collective, dtype)] = rows
 
-    return result, np_val
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +403,44 @@ def load_profiled_data(run_dir, outlier_fn):
                 r["median_us"] = None
         dtype = "unknown"
         result[(collective or "unknown", dtype)] = rows
+
+    return result, np_val
+
+
+# ---------------------------------------------------------------------------
+# Dispatch loading
+# ---------------------------------------------------------------------------
+
+def load_dispatch_data(run_dir, outlier_fn):
+    """Load RCCL dispatch-timing traces.
+
+    Same return shape as :func:`load_profiled_data`, so a dispatch run and a
+    profiled run can be compared against each other directly -- which is how you
+    see what the profiler cost.
+    """
+    np_val, meta_collective = ra.load_run_metadata(run_dir)
+    groups = dt.discover_dispatch_groups(run_dir)
+    result = {}
+
+    if not groups:
+        if not dt.has_dispatch_traces(run_dir):
+            return result, np_val
+        collective = meta_collective or ra.infer_collective(run_dir) or "unknown"
+        groups = {(collective, "unknown"): [run_dir]}
+
+    for (collective, dtype), subdirs in groups.items():
+        bus_factor = None
+        factor_fn = ra.BUS_BW_FACTOR.get(collective)
+        if factor_fn and np_val:
+            bus_factor = factor_fn(np_val)
+
+        regions, _, _ = dt.collect_regions(subdirs)
+        rows = ra.generate_report(ra.collective_samples(regions), outlier_fn,
+                                  np_val=np_val, bus_factor=bus_factor,
+                                  overhead_by_key=ra.compute_overhead(regions))
+        for r in rows:
+            r["median_us"] = r["median"] / 1000.0 if r.get("median") is not None else None
+        result[(collective, dtype)] = rows
 
     return result, np_val
 
@@ -567,6 +630,11 @@ def _has_profiled_traces(run_dir):
     return bool(ra.discover_multi_run_groups(run_dir))
 
 
+def _has_dispatch_traces(run_dir):
+    """True if *run_dir* contains RCCL dispatch traces."""
+    return dt.has_dispatch_traces(run_dir)
+
+
 def _has_log_files(run_dir):
     """True if *run_dir* contains at least one ``*_rep*.log``."""
     for entry in os.listdir(run_dir):
@@ -581,12 +649,17 @@ def _resolve_auto_source(dir_a, dir_b):
     Returns (source_name, note_string).
 
     Priority:
-      1. baseline CSVs if both dirs have them (cleanest host-side timing)
-      2. profiled traces if both dirs have them (GPU kernel timing, comparable
+      1. dispatch traces if both dirs have them (GPU kernel timing that cost
+         nothing to collect, so the run is the one you would have had anyway)
+      2. baseline CSVs if both dirs have them (cleanest host-side timing)
+      3. profiled traces if both dirs have them (GPU kernel timing, comparable
          even when one dir was profiled and the other wasn't)
-      3. log files as last resort (host-side timing from rccl-tests stdout;
+      4. log files as last resort (host-side timing from rccl-tests stdout;
          beware that profiled-run logs include profiler overhead)
     """
+    if _has_dispatch_traces(dir_a) and _has_dispatch_traces(dir_b):
+        return "dispatch", "both dirs have RCCL dispatch traces"
+
     a_base = _has_baseline_csvs(dir_a)
     b_base = _has_baseline_csvs(dir_b)
     if a_base and b_base:
@@ -636,10 +709,11 @@ def parse_args(argv=None):
     parser.add_argument("run_dir_a", help="First run directory (A)")
     parser.add_argument("run_dir_b", help="Second run directory (B)")
     parser.add_argument(
-        "--source", choices=["auto", "baseline", "profiled", "log"],
+        "--source", choices=["auto", "dispatch", "baseline", "profiled", "log"],
         default="auto",
         help="Data source to compare (default: auto).  'auto' picks the best"
-             " common source; 'log' parses rccl-tests stdout log files.",
+             " common source, preferring RCCL's dispatch traces; 'log' parses"
+             " rccl-tests stdout log files.",
     )
     parser.add_argument("--label-a", default=None, help="Label for run A")
     parser.add_argument("--label-b", default=None, help="Label for run B")
@@ -685,6 +759,7 @@ def main():
     print()
 
     _LOADERS = {
+        "dispatch": load_dispatch_data,
         "baseline": load_baseline_data,
         "profiled": load_profiled_data,
         "log":      load_log_data,

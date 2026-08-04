@@ -25,8 +25,9 @@ sys.path.insert(0, SCRIPT_DIR)
 
 from roctx_analyze import (
     BUS_BW_FACTOR,
+    collective_samples,
     correlate_collective,
-    discover_multi_run_groups,
+    discover_groups,
     discover_trace_files,
     generate_report,
     iqr_outliers,
@@ -34,7 +35,10 @@ from roctx_analyze import (
     mad_outliers,
     parse_kernel_csv,
     parse_marker_csv,
+    resolve_source,
 )
+
+import dispatch_trace as dt
 
 # ---------------------------------------------------------------------------
 # Library identification
@@ -70,10 +74,11 @@ def get_lib_id(run_dir):
 # Data collection
 # ---------------------------------------------------------------------------
 
-def collect_data(run_dir, outlier_fn):
+def collect_data(run_dir, outlier_fn, source="auto"):
     """Return {dtype: {in_place: [(size_bytes, median_ns), ...]}} for a run dir."""
     result = {}
-    multi_groups = discover_multi_run_groups(run_dir)
+    eff_source = resolve_source(run_dir, source)
+    multi_groups = discover_groups(run_dir, eff_source) if eff_source else None
     if not multi_groups:
         print(f"WARNING: {run_dir} does not look like a multi-run directory, skipping.",
               file=sys.stderr)
@@ -81,12 +86,17 @@ def collect_data(run_dir, outlier_fn):
 
     for (collective, dtype), subdirs in multi_groups.items():
         all_samples = defaultdict(list)
-        for d in subdirs:
-            for marker_path, kernel_path in discover_trace_files(d):
-                markers = parse_marker_csv(marker_path)
-                kernels = parse_kernel_csv(kernel_path)
-                for key, durations in correlate_collective(markers, kernels).items():
-                    all_samples[key].extend(durations)
+        if eff_source == "dispatch":
+            regions, _, _ = dt.collect_regions(subdirs)
+            for key, durations in collective_samples(regions).items():
+                all_samples[key].extend(durations)
+        else:
+            for d in subdirs:
+                for marker_path, kernel_path in discover_trace_files(d):
+                    markers = parse_marker_csv(marker_path)
+                    kernels = parse_kernel_csv(kernel_path)
+                    for key, durations in correlate_collective(markers, kernels).items():
+                        all_samples[key].extend(durations)
 
         rows = generate_report(all_samples, outlier_fn)
 
@@ -206,6 +216,8 @@ def main():
     parser.add_argument("--labels", type=str, default=None,
                         help="Comma-separated library labels, one per run dir "
                              "(e.g. --labels 'rocm-7.0.0,fast-LDS,fast-flat')")
+    parser.add_argument("--source", choices=["auto", "dispatch", "profiled"], default="auto",
+                        help="Timing source (default: auto, preferring dispatch traces)")
     parser.add_argument("--outlier", default="mad", choices=["mad", "iqr"],
                         help="Outlier detection method (default: mad)")
     parser.add_argument("--mad-threshold", type=float, default=3.5)
@@ -226,7 +238,7 @@ def main():
     lib_data = []
     for i, run_dir in enumerate(args.run_dirs):
         lib_id = custom_labels[i] if i < len(custom_labels) else get_lib_id(run_dir)
-        data = collect_data(run_dir, outlier_fn)
+        data = collect_data(run_dir, outlier_fn, source=args.source)
         if data:
             lib_data.append((lib_id, data))
             print(f"  {os.path.basename(run_dir)} → {lib_id}  "

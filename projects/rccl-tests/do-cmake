@@ -1,6 +1,0 @@
-MPI_HOME=/work2/lmeadows/openmpi \
-cmake -B build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DUSE_MPI=ON \
-  -DBUILD_LOCAL_GPU_TARGET_ONLY=ON \
-  .

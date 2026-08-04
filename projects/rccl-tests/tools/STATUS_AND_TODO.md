@@ -1,86 +1,120 @@
-# RCCL rocTX + rocprofv3 Performance Tooling
+# RCCL kernel-timing performance tooling
 
-## Instrumentation (`src/common.cu`)
+Kernel timings come from RCCL itself: every dispatch carries a completion signal
+whose hardware start/end ticks RCCL converts to CLOCK_BOOTTIME nanoseconds and
+buffers per communicator. rccl-tests drains that buffer and writes a CSV. No
+profiler is involved, so the numbers are the kernel's own, and they merge with
+an external rocprof trace without calibration because the clock domain is the
+same.
 
-- rocTX push/pop markers bracket the timed launch region in `BenchTime()`.
-- Runtime-gated by `RCCL_TESTS_ROCTX=1` (off by default, zero overhead when disabled).
-- Marker message encodes `size`, `count`, `type`, `op`, `in_place`, `proc`, `thread`, `ngpus`, `graph`.
-- rocTX symbols are loaded via `dlsym`/`dlopen` at first use -- no link-time dependency.
+rocprofv3 is still supported as an alternative source (`--source profiled`), but
+it is no longer the default anywhere -- and on the toolchain this was developed
+against it does not work at all. srock (ROCm 10.0.0) ships no rocprofv3, and the
+system one (1.1.0, ROCm 7.2.1) is too old to trace dispatches against that
+runtime. It still intercepts rocTX, so a profiled run "succeeds" and produces
+marker traces with no kernels whatsoever. Both the runner and `analyze.py
+overhead` now call that out instead of letting it read as a zero-cost profile;
+do not trust a profiled column without checking for that note.
+
+## Instrumentation
+
+### RCCL (`RCCL_KERNEL_TIMING=1`)
+
+- Off by default; when off, RCCL launches exactly as it always did.
+- Covers every kernel RCCL dispatches: the planned collectives and the
+  symmetric kernels through `ncclLaunchKernelTimed`, and the standalone
+  launches -- all eight DDA IPC/fabric backends, the hierarchical all-gather
+  shuffle, and the one-rank reduction -- through `ncclKernelTimingLaunch`.
+  This matters on an 8-GPU node, where the DDA fast path, not the planned path,
+  is what actually runs.
+- `RCCL_KERNEL_TIMING_LAYOUT`: `none` disables, `1`/`2`/`3` pins a known HIP
+  event layout. Unset (the default) probes for the layout at the first dispatch.
+- Records carry rank, per-communicator dispatch sequence number, comm hash,
+  func, datatype, count, nChannels, nThreads and nColls. The sequence number is
+  incremented for every dispatch whether or not it ends up timed, so a gap in
+  the sequence means a dispatch went unmeasured rather than unrecorded.
+
+### rccl-tests (`RCCL_TESTS_KERNEL_TIMING=<prefix>`)
+
+- Drains the records at each configuration change and tags them with the same
+  message the rocTX marker carries (size, count, type, op, in_place, proc,
+  thread, ngpus, graph), plus `phase=setup` for warmup and verification.
+- Writes `<prefix>_pid<pid>.csv` at exit, one file per process. Reports the
+  dropped-record count, and says so explicitly when it drained nothing.
+- rocTX markers (`RCCL_TESTS_ROCTX=1`) are unchanged and still drive the
+  rocprofv3 path.
 
 ## Tools
 
-### `roctx_perf_run.py` -- Profiled Performance Runner
+Everything goes through `analyze.py`; the `roctx_*.py` modules are the
+implementation. Each subcommand takes `--source
+{auto,dispatch,baseline,profiled,log}` and `auto` prefers a dispatch trace.
 
-Launches `rocprofv3 --marker-trace --kernel-trace` around `mpirun <test>_perf` for a
-matrix of tests x dtypes x repeats.
+| subcommand | what it answers |
+| --- | --- |
+| `list` | which runs exist |
+| `report` | per-size kernel duration, algbw/busbw, outliers |
+| `variance` | per-launch jitter, inter-launch gaps, rank skew |
+| `overhead` | what the instrumentation costs against an uninstrumented baseline |
+| `compare` | two runs side by side, with bandwidth deltas |
+| `plot` | overlay plot (matplotlib or interactive plotly) |
+| `export` | tidy-records JSON for external analysis |
 
-Key features:
-- Auto-detects GPU count for `--np` via `rocm_agent_enumerator`.
-- Derives `mpirun` from `build/CMakeCache.txt` (`MPIEXEC_EXECUTABLE` or `MPI_HOME`),
-  falling back to `$MPI_HOME` env var, then `$PATH`.
-- Resolves `rocprofv3` from `$ROCM_PATH/bin` first (falling back to `PATH`), avoiding
-  stale system installs under `/usr/bin`. Override with `--rocprofv3`.
-- Uses a `.tmp-*` staging directory during the run; renames to `YYYYMMDD-HHMMSS` only on
-  clean exit. Interrupted runs leave a clearly-marked temp directory.
-- Captures comprehensive `metadata.json`: command, environment, `rocm-smi`, git status,
-  `ldd` output, and `librccl.so` provenance (path, realpath, md5, RCCL version,
-  ROCm/HIP build IDs, embedded git hash).
-- Strips ANSI escape codes from profiler log output.
-- Output format: CSV (`-f csv`).
+`variance` is what the dispatch trace makes possible and rocprof did not: it
+reports per-launch on-GPU duration spread, the gap between one dispatch ending
+and the next starting on the same rank, the share of wall time spent outside a
+kernel, and how far apart the ranks started the same dispatch.
 
-Usage:
+### `roctx_perf_run.py` -- the runner
+
 ```
-python3 tools/roctx_perf_run.py --test all_reduce [--dtypes float,half] [--repeats 1]
-python3 tools/roctx_perf_run.py --list-tests
-```
-
-Default perf args: `-b 8 -e 1G -f 2 -w 5 -n 50 -A 1`
-
-### `roctx_analyze.py` -- Trace Correlation and Statistics
-
-Reads rocprofv3 CSV output from a run directory, correlates kernel dispatches to rocTX
-markers via timestamp containment, and reports per-(size, place) statistics.
-
-Key features:
-- Auto-discovers all `*_marker_api_trace.csv` / `*_kernel_trace.csv` pairs recursively.
-- Identifies collective kernels by `ncclDev` in the kernel name.
-- Aggregates kernel durations across all ranks and repetitions per (size, in_place) tuple.
-- Outlier detection: MAD (modified Z-score, default threshold 3.5) or IQR (default factor 1.5).
-- Reports `#kept`, `#outliers`, `min`, `median`, `max` on inliers.
-- Computes algorithm bandwidth (`size/time`) and bus bandwidth (with per-collective scaling
-  factor) from median kernel duration when the collective type and rank count are known.
-- **Multi-run directory support**: when pointed at a top-level run directory containing
-  subdirs named `{collective}_{dtype}_rep{N}`, automatically groups by (collective, dtype)
-  and produces a separate headed section for each -- no more mixing kernels across
-  different collectives. `np` is read correctly from `metadata.json` so bus bandwidth
-  is always shown.
-
-Usage:
-```
-python3 tools/roctx_analyze.py perf-runs/20260306-012345          # single or multi-run
-python3 tools/roctx_analyze.py perf-runs/20260306-012345 --outlier iqr
+python3 tools/roctx_perf_run.py --test all_reduce --mode dispatch --baseline
+python3 tools/roctx_perf_run.py --test all_reduce --mode dispatch,profiled --baseline --repeats 3
 ```
 
-## librccl.so Provenance
+- `--mode dispatch` (default) sets `RCCL_KERNEL_TIMING=1` and no profiler;
+  `--mode profiled` runs rocprofv3 as before; both may be given. A profiled rep
+  that ends with no kernel trace is reported as such at the end of the rep.
+- `--baseline` adds an uninstrumented run of the same sweep, which is what
+  `analyze.py overhead` prices the instrumented runs against.
+- `--kernel-timing-layout N` pins the event layout for dispatch runs.
+- Auto-detects GPU count, resolves `mpirun` from the build, records
+  `metadata.json` (command, environment, rocm-smi, git status, ldd, and
+  librccl provenance: path, md5, version, ROCm/HIP build IDs, git hash).
+- Stages into `.tmp-*` and renames on clean exit.
 
-Each run records in `metadata.json`:
-- `path`: the `librccl.so` resolved by `ldd` on the test binary.
-- `realpath`: canonical path after symlink resolution.
-- `md5`: hash of the actual `.so` file.
-- `rccl_version`, `rocm_build`, `hip_build`: extracted from embedded strings.
-- `git_hash`: the `rcclGitHash` value (e.g. `branch:shorthash+`), extracted from strings.
+## What the instrumentation costs
 
-## TODO
+Measured on 8x gfx950, `-b 8 -e 1G -f 2 -w 20 -n 100`, three repeats, against
+the uninstrumented baseline in the same run:
 
-1. **Visual aids** -- bar-and-whisker charts, side-by-side comparison plots across builds.
-2. **Multi-collective runs** -- extend beyond all-reduce to all-gather, reduce-scatter, etc.
-3. **Multi-platform** -- run the same battery on at least two platforms.
-4. **Per-test `-b` selection** -- some tests require minimum message sizes > 8 bytes.
-5. **Algorithm/protocol diagnostics** -- capture algo/proto/channel decisions and correlate
-   to bandwidth inflection points.
+- Free where the timed kernel is dispatched back to back: all-gather is +1.5%
+  median (about 0.2us), and all-reduce is +2% at small sizes and 0.0% from 16M
+  up, where the kernel dominates.
+- About +3.5us per iteration wherever a device-to-device staging copy
+  immediately precedes the timed kernel, because the runtime cannot batch a
+  signalled dispatch with the copy ahead of it. This is a fixed cost, so it
+  reads as +55% on small reduce-scatter and decays to +0.7% by 64M. All-reduce
+  shows it only above 256KB, exactly where the DDA path switches from the flat
+  kernel to the tree kernel with its staging copy.
+
+So the timing is close to free on the paths without a staging copy, and costs a
+fixed few microseconds per iteration on the ones with it.
 
 ## Notes
 
-- Timestamp comparison is rank-local only; do not compare absolute timestamps across ranks.
-- `LD_LIBRARY_PATH` must be set to use a non-system `librccl.so`.
-- The test binary must be built with MPI support (`make -C src MPI=1` or cmake with `-DUSE_MPI=ON`).
+- Timestamps are comparable across the GPUs of a node, which is what makes rank
+  skew meaningful; they are CLOCK_BOOTTIME, so they do not survive a reboot.
+- `LD_LIBRARY_PATH` must point at the `librccl.so` under test.
+- The test binary must be built with MPI (`make MPI=1 MPI_HOME=...`), and the
+  `mpirun` used must match the `libmpi` the binary linked against, or every
+  rank silently runs as a singleton.
+
+## TODO
+
+1. **Multi-platform** -- run the same battery on at least two platforms.
+2. **Algorithm/protocol diagnostics** -- capture algo/proto/channel decisions
+   and correlate them to bandwidth inflection points.
+3. **Per-test `-b` selection** -- some tests need a minimum message size > 8.
+4. **Staging-copy overhead** -- decide whether the +3.5us on staged DDA paths is
+   worth avoiding, e.g. by timing the copy and the kernel as one region.

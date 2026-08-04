@@ -316,12 +316,13 @@ def build_box_figure(records, metric="time", kind="box", color_by=None,
 
     One subplot per (collective[, dtype]); within each, one box (or violin) per
     message size, grouped by the colour dimension (default: placement).  Needs
-    the retained per-iteration ``samples_us`` (i.e. the profiled source); rows
-    with a single sample degenerate to a flat line.
+    the retained per-iteration ``samples_us`` (i.e. a GPU-timed source: dispatch
+    or profiled); rows with a single sample degenerate to a flat line.
     """
     records = [r for r in records if r.get("samples_us")]
     if not records:
-        raise ValueError("no records with per-iteration samples (use --source profiled)")
+        raise ValueError("no records with per-iteration samples "
+                         "(use --source dispatch, or profiled)")
 
     minfo = _METRICS[metric]
 

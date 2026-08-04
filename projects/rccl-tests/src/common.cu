@@ -258,7 +258,9 @@ public:
     for (;;) {
       int got = 0;
       uint64_t dropped = 0;
-      if (_drain(comm, buf, (int)(sizeof(buf) / sizeof(buf[0])), &got, &dropped) != ncclSuccess) return;
+      _drains++;
+      _lastResult = _drain(comm, buf, (int)(sizeof(buf) / sizeof(buf[0])), &got, &dropped);
+      if (_lastResult != ncclSuccess) return;
       _dropped = dropped;
       for (int i = 0; i < got; i++) {
         _records.push_back(buf[i]);
@@ -291,7 +293,15 @@ private:
   }
 
   void write() {
-    if (!enabled() || _records.empty()) return;
+    if (!enabled()) return;
+    if (_records.empty()) {
+      // Asked for a trace and got nothing: say which end came up empty, since
+      // the alternative is a silently missing file.
+      fprintf(stderr, "rccl-tests: no kernel timing records after %d drain(s), result %d "
+                      "(is RCCL_KERNEL_TIMING=1 set, and did the library find an event layout?)\n",
+              _drains, (int)_lastResult);
+      return;
+    }
     char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s_pid%d.csv", _prefix.c_str(), (int)getpid());
     FILE* f = fopen(path, "w");
@@ -321,6 +331,8 @@ private:
   std::vector<size_t> _tagIdx;
   std::vector<std::string> _tags;
   uint64_t _dropped = 0;
+  int _drains = 0;
+  ncclResult_t _lastResult = ncclSuccess;
 };
 
 // Test bias
@@ -1060,13 +1072,18 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
     TESTCHECK(completeColl(args));
   }
-  for (int i = 0; i < args->nGpus; i++) KernelTimingTrace::get().collect(args->comms[i], roctxMsg);
   double cputimeSec = tim.elapsed()/(iters*agg_iters);
 
   double deltaSec = tim.elapsed();
   deltaSec = deltaSec/(iters*agg_iters);
   if (cudaGraphLaunches >= 1) deltaSec = deltaSec/cudaGraphLaunches;
   Allreduce(args, &deltaSec, average);
+
+  // Drained after the timer reads: harvesting kernel-timing records is real
+  // host-side work (event queries, HSA timestamp lookups) that has nothing to
+  // do with the collective's own cost, so it must not be inside the timed
+  // window above.
+  for (int i = 0; i < args->nGpus; i++) KernelTimingTrace::get().collect(args->comms[i], roctxMsg);
 
 #if HIP_VERSION >= 50221310
   if (cudaGraphLaunches >= 1) {

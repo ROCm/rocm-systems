@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Correlate rocTX markers with rocprofv3 kernel traces and report statistics.
+"""Report per-dispatch GPU timing statistics for an rccl-tests run.
 
-Reads the rocprofv3 CSV output from a run directory, correlates kernel
-dispatches to rocTX timed_loop markers via timestamp containment, groups
-kernel durations by (size, in_place), performs outlier detection, and
-prints a summary report.
+Two sources provide the same measurement.  RCCL's own kernel timing writes a
+dispatch trace per rank, already tagged with the configuration it belongs to
+(see :mod:`dispatch_trace`); rocprofv3 writes marker and kernel traces that have
+to be correlated by timestamp containment.  Either way the durations are grouped
+by (size, in_place), outliers are detected, and a summary is printed.
+
+The dispatch trace is preferred when both are present: it costs nothing to
+collect, so its numbers are the ones the application would actually see.
 """
 
 import argparse
@@ -20,6 +24,10 @@ from collections import defaultdict
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
+import dispatch_trace as dt
 
 # Kernel categorization is used ONLY for filtering/display -- never to drop data
 # at parse/correlate time. Every kernel that falls inside a marker region is
@@ -192,6 +200,39 @@ def discover_multi_run_groups(run_dir):
 # ---------------------------------------------------------------------------
 # Correlation
 # ---------------------------------------------------------------------------
+
+def resolve_source(run_dir, source="auto"):
+    """Pick the timing source for *run_dir*: 'dispatch', 'profiled', or None.
+
+    RCCL's own dispatch timing wins when a run has both, since it is the one
+    that did not perturb what it measured.
+    """
+    if source != "auto":
+        return source
+    if dt.discover_dispatch_groups(run_dir) or dt.has_dispatch_traces(run_dir):
+        return "dispatch"
+    if discover_multi_run_groups(run_dir) or discover_trace_files(run_dir):
+        return "profiled"
+    return None
+
+
+def discover_groups(run_dir, source):
+    """(collective, dtype) -> [dir, ...] for whichever source is in use."""
+    if source == "dispatch":
+        return dt.discover_dispatch_groups(run_dir)
+    return discover_multi_run_groups(run_dir)
+
+
+def timing_samples(dirs, source="profiled"):
+    """Per (size, in_place) launch sequences from either source.
+
+    Both return ``dur`` and ``gap``; a dispatch trace also carries ``skew``,
+    which needs the per-rank identity only it records.
+    """
+    if source == "dispatch":
+        return dt.timing_samples(dirs)
+    return collective_timing_samples(dirs)
+
 
 def correlate(markers, kernels):
     """Assign every contained kernel to its marker region -- no filtering.
@@ -574,6 +615,68 @@ def print_report(rows, method_name, show_bw=False):
     print()
 
 
+def _fmt_us_stat(ns):
+    return "--" if ns is None else f"{ns / 1000.0:.2f}"
+
+
+def print_timing(samples):
+    """Per-launch duration, inter-launch gap and rank skew, in microseconds.
+
+    The duration is what the report already summarizes; the gap is the time the
+    GPU spent between one dispatch and the next, which rccl-tests' host_time/N
+    averages away, and the skew is how far apart the ranks entered the same
+    dispatch.  Together they say whether a slow point is the kernel or the wait
+    around it.
+    """
+    if not samples:
+        print("  No launch sequences found.")
+        print()
+        return
+
+    has_skew = any(s.get("skew") for s in samples.values())
+    hdr = (f"  {'size':>10}  {'place':>5}  {'n':>6}  "
+           f"{'dur_med':>8}  {'dur_std':>8}  {'dur_p90':>8}  "
+           f"{'gap_med':>8}  {'gap_std':>8}  {'gap_p90':>8}  {'%gap':>6}")
+    if has_skew:
+        hdr += f"  {'skew_med':>8}  {'skew_p90':>8}"
+    print(hdr)
+    print("  " + "-" * (len(hdr) - 2))
+
+    place_labels = {0: "oop", 1: "ip"}
+    for (size, in_place) in sorted(samples, key=lambda k: (k[1], k[0])):
+        durs = samples[(size, in_place)]["dur"]
+        gaps = samples[(size, in_place)]["gap"]
+        skews = samples[(size, in_place)].get("skew") or []
+        ds = summarize(durs)
+        if ds is None:
+            continue
+        gs = summarize(gaps)
+        ss = summarize(skews)
+        sum_dur = sum(durs)
+        sum_gap = sum(gaps) if gaps else 0
+        pct_gap = (100.0 * sum_gap / (sum_dur + sum_gap)) if (sum_dur + sum_gap) else 0.0
+        line = (f"  {fmt_size(size):>10}  {place_labels.get(in_place, in_place):>5}  {ds['n']:>6}  "
+                f"{_fmt_us_stat(ds['p50']):>8}  {_fmt_us_stat(ds['std']):>8}  "
+                f"{_fmt_us_stat(ds['p90']):>8}  "
+                f"{(_fmt_us_stat(gs['p50']) if gs else '--'):>8}  "
+                f"{(_fmt_us_stat(gs['std']) if gs else '--'):>8}  "
+                f"{(_fmt_us_stat(gs['p90']) if gs else '--'):>8}  "
+                f"{pct_gap:>5.1f}%")
+        if has_skew:
+            line += (f"  {(_fmt_us_stat(ss['p50']) if ss else '--'):>8}"
+                     f"  {(_fmt_us_stat(ss['p90']) if ss else '--'):>8}")
+        print(line)
+
+    print()
+    print("  dur = on-GPU duration of one dispatch; gap = next start - previous end "
+          "on the same rank;")
+    print("  %gap = share of the wall time between the first and last dispatch spent "
+          "outside a kernel.")
+    if has_skew:
+        print("  skew = spread of start times across ranks for the same dispatch.")
+    print()
+
+
 def print_breakdown(regions):
     """Per-(size, place) accounting of ALL kernels by category.
 
@@ -640,7 +743,11 @@ def parse_args(argv=None):
     )
     parser.add_argument(
         "run_dir", type=str,
-        help="Run directory containing rocprofv3 CSV output",
+        help="Run directory containing RCCL dispatch traces or rocprofv3 CSV output",
+    )
+    parser.add_argument(
+        "--source", choices=["auto", "dispatch", "profiled"], default="auto",
+        help="Timing source (default: auto, which prefers RCCL's dispatch traces)",
     )
     parser.add_argument(
         "--outlier", type=str, default="mad",
@@ -658,7 +765,14 @@ def parse_args(argv=None):
     parser.add_argument(
         "--breakdown", action="store_true",
         help="Also print a per-(size,place) breakdown of ALL kernels by category "
-             "(collective/rocclr/harness/other), so hidden costs are visible.",
+             "(collective/rocclr/harness/other), so hidden costs are visible. "
+             "A dispatch trace only sees RCCL's own kernels, so the other "
+             "categories need --source profiled.",
+    )
+    parser.add_argument(
+        "--timing", action="store_true",
+        help="Also print per-launch duration and inter-launch gap statistics "
+             "(and rank skew, from a dispatch trace)",
     )
 
     return parser.parse_args(argv)
@@ -696,8 +810,8 @@ def _collect_regions(pairs_iter):
     return regions, total_pairs, total_markers, total_kernels
 
 
-def _analyze_dirs(dirs, np_val, collective, outlier_fn, method_name):
-    """Collect trace pairs from *dirs*, correlate, and return (rows, show_bw, regions)."""
+def _analyze_dirs(dirs, np_val, collective, outlier_fn, method_name, source="profiled"):
+    """Collect *dirs* from the named source and return (rows, show_bw, regions)."""
     bus_factor = None
     show_bw = False
     if collective and np_val:
@@ -706,18 +820,26 @@ def _analyze_dirs(dirs, np_val, collective, outlier_fn, method_name):
             bus_factor = factor_fn(np_val)
             show_bw = True
 
-    def _pairs():
-        for d in dirs:
-            for p in discover_trace_files(d):
-                yield p
+    if source == "dispatch":
+        regions, n_files, n_records = dt.collect_regions(dirs)
+        stats = dt.dispatch_stats(dirs)
+        all_samples = collective_samples(regions)
+        n_collective = sum(len(v) for v in all_samples.values())
+        print(f"  Dispatch traces: {n_files}  ranks: {stats['ranks']}  "
+              f"records: {n_records}  untimed: {stats['untimed']}  "
+              f"(size,place) groups: {len(all_samples)}")
+    else:
+        def _pairs():
+            for d in dirs:
+                for p in discover_trace_files(d):
+                    yield p
 
-    regions, total_pairs, total_markers, total_kernels = _collect_regions(_pairs())
-    all_samples = collective_samples(regions)
-    n_collective = sum(len(v) for v in all_samples.values())
-
-    print(f"  Trace pairs: {total_pairs}  markers: {total_markers}  "
-          f"kernels retained: {total_kernels}  collective samples: {n_collective}  "
-          f"(size,place) groups: {len(all_samples)}")
+        regions, total_pairs, total_markers, total_kernels = _collect_regions(_pairs())
+        all_samples = collective_samples(regions)
+        n_collective = sum(len(v) for v in all_samples.values())
+        print(f"  Trace pairs: {total_pairs}  markers: {total_markers}  "
+              f"kernels retained: {total_kernels}  collective samples: {n_collective}  "
+              f"(size,place) groups: {len(all_samples)}")
     if show_bw:
         print(f"  bus_bw_factor: {bus_factor:.4f}  (np={np_val})")
 
@@ -731,57 +853,49 @@ def main():
     args = parse_args()
     outlier_fn, method_name = _build_outlier_fn(args)
 
-    multi_groups = discover_multi_run_groups(args.run_dir)
+    source = resolve_source(args.run_dir, args.source)
+    if source is None:
+        print(f"No dispatch traces or rocprofv3 trace pairs found in {args.run_dir}",
+              file=sys.stderr)
+        sys.exit(1)
+    print(f"Source: {source}")
 
-    if multi_groups:
-        np_val, _ = load_run_metadata(args.run_dir)
+    np_val, meta_collective = load_run_metadata(args.run_dir)
+    groups = discover_groups(args.run_dir, source)
+
+    if groups:
         print(f"Multi-run directory detected: {args.run_dir}")
-        print(f"Groups: {', '.join(f'{c}/{d}' for c, d in multi_groups)}")
+        print(f"Groups: {', '.join(f'{c}/{d}' for c, d in groups)}")
         print()
 
-        for (collective, dtype), subdirs in multi_groups.items():
+        for (collective, dtype), subdirs in groups.items():
             print(f"{'=' * 60}")
             print(f"  {collective}  /  {dtype}  ({len(subdirs)} rep(s))")
             print(f"{'=' * 60}")
-            rows, show_bw, regions = _analyze_dirs(subdirs, np_val, collective, outlier_fn, method_name)
+            rows, show_bw, regions = _analyze_dirs(subdirs, np_val, collective, outlier_fn,
+                                                   method_name, source=source)
             print_report(rows, method_name, show_bw=show_bw)
+            if args.timing:
+                print_timing(timing_samples(subdirs, source=source))
             if args.breakdown:
                 print_breakdown(regions)
         return
 
-    # Single-run directory (original behavior).
-    trace_pairs = discover_trace_files(args.run_dir)
-    if not trace_pairs:
-        print(f"No marker/kernel trace CSV pairs found in {args.run_dir}", file=sys.stderr)
-        sys.exit(1)
-
-    np_val, meta_collective = load_run_metadata(args.run_dir)
+    # A single directory of traces, with no per-(collective, dtype) grouping.
     collective = meta_collective or infer_collective(args.run_dir)
-
-    bus_factor = None
-    show_bw = False
     if collective and np_val:
         factor_fn = BUS_BW_FACTOR.get(collective)
         if factor_fn:
-            bus_factor = factor_fn(np_val)
-            show_bw = True
-            print(f"Collective: {collective}  np: {np_val}  bus_bw_factor: {bus_factor:.4f}")
+            print(f"Collective: {collective}  np: {np_val}  "
+                  f"bus_bw_factor: {factor_fn(np_val):.4f}")
 
-    print(f"Found {len(trace_pairs)} trace file pairs across {args.run_dir}")
-
-    regions, _, total_markers, total_kernels = _collect_regions(iter(trace_pairs))
-    all_samples = collective_samples(regions)
-    n_collective = sum(len(v) for v in all_samples.values())
-
-    print(f"Markers: {total_markers}, kernels retained: {total_kernels}, "
-          f"collective samples: {n_collective}")
-    print(f"Unique (size, place) groups: {len(all_samples)}")
+    dirs = [args.run_dir]
+    rows, show_bw, regions = _analyze_dirs(dirs, np_val, collective, outlier_fn,
+                                           method_name, source=source)
     print()
-
-    overhead_by_key = compute_overhead(regions)
-    rows = generate_report(all_samples, outlier_fn, np_val=np_val, bus_factor=bus_factor,
-                           overhead_by_key=overhead_by_key)
     print_report(rows, method_name, show_bw=show_bw)
+    if args.timing:
+        print_timing(timing_samples(dirs, source=source))
     if args.breakdown:
         print_breakdown(regions)
 
