@@ -49,6 +49,9 @@ make_intercept_queue(const amd_signal_t* signal)
     q.doorbell_signal = hsa_signal_t{.handle = reinterpret_cast<uint64_t>(signal)};
     return q;
 }
+
+// Any GPU id; capture only threads it through onto the entry.
+constexpr uint32_t kTestGpuId = 25567;
 }  // namespace
 
 // A legacy intercept queue exposes a USER-kind signal, whose `value` member
@@ -61,7 +64,8 @@ TEST(queue_controller, capture_doorbell_key_rejects_non_doorbell_signal)
     signal.value = 0x7f0000004010;  // aliases hardware_doorbell_ptr
     auto queue   = make_intercept_queue(&signal);
 
-    EXPECT_FALSE(capture_doorbell_key(rocprofiler_queue_id_t{1}, &queue).has_value());
+    EXPECT_FALSE(
+        capture_doorbell_key(kTestGpuId, rocprofiler_queue_id_t{1}, &queue).has_value());
 }
 
 // A doorbell-kind signal yields the page-relative slot of its hardware doorbell
@@ -75,21 +79,26 @@ TEST(queue_controller, capture_doorbell_key_accepts_doorbell_signal)
     signal.hardware_doorbell_ptr = &doorbell;
     auto queue                   = make_intercept_queue(&signal);
 
-    auto entry = capture_doorbell_key(rocprofiler_queue_id_t{2}, &queue);
+    auto entry = capture_doorbell_key(kTestGpuId, rocprofiler_queue_id_t{2}, &queue);
     ASSERT_TRUE(entry.has_value());
     EXPECT_EQ(entry->doorbell_off,
               kfd::doorbell_ptr_to_page_slot(reinterpret_cast<uint64_t>(&doorbell),
                                              static_cast<uint64_t>(sysconf(_SC_PAGESIZE))));
     EXPECT_EQ(entry->generation, 0u);
+    // The entry carries the GPU it was captured for: doorbell slots repeat across
+    // GPUs, so the key is only unambiguous with it.
+    EXPECT_EQ(entry->gpu_id, kTestGpuId);
 }
 
 // No intercept queue and a null doorbell signal are both "unavailable" -> no key.
 TEST(queue_controller, capture_doorbell_key_rejects_missing_doorbell)
 {
-    EXPECT_FALSE(capture_doorbell_key(rocprofiler_queue_id_t{3}, nullptr).has_value());
+    EXPECT_FALSE(
+        capture_doorbell_key(kTestGpuId, rocprofiler_queue_id_t{3}, nullptr).has_value());
 
     auto queue = make_intercept_queue(nullptr);
-    EXPECT_FALSE(capture_doorbell_key(rocprofiler_queue_id_t{3}, &queue).has_value());
+    EXPECT_FALSE(
+        capture_doorbell_key(kTestGpuId, rocprofiler_queue_id_t{3}, &queue).has_value());
 }
 }  // namespace hsa
 }  // namespace rocprofiler
