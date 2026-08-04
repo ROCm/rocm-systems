@@ -808,6 +808,7 @@ TEST(RemoteDriverMmapTest, PartialFixedMappingPreservesWholeReplacedPage) {
   ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
 
   constexpr size_t kPageSize = 4096;
+  constexpr uint64_t kHandle = 7;
   int backing_fd = memfd_create("remote_partial_mmap_test", MFD_CLOEXEC | MFD_ALLOW_SEALING);
   ASSERT_GE(backing_fd, 0);
   ASSERT_EQ(ftruncate(backing_fd, kPageSize), 0);
@@ -820,6 +821,30 @@ TEST(RemoteDriverMmapTest, PartialFixedMappingPreservesWholeReplacedPage) {
   reservation[0] = 0x11;
 
   std::jthread server([server_fd = sv[1], backing_fd] {
+    rocjitsu::RpcHeader alloc_header{};
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &alloc_header, sizeof(alloc_header)));
+    ASSERT_EQ(alloc_header.opcode, rocjitsu::RPC_IOCTL);
+    std::vector<uint8_t> alloc_payload(alloc_header.payload_bytes);
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, alloc_payload.data(), alloc_payload.size()));
+    auto *alloc_request = reinterpret_cast<rocjitsu::RpcIoctlRequest *>(alloc_payload.data());
+    ASSERT_EQ(alloc_request->ioctl_cmd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU);
+    auto *alloc_args = reinterpret_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(
+        alloc_payload.data() + sizeof(*alloc_request));
+    alloc_args->handle = kHandle;
+    alloc_args->mmap_offset = kHandle << 12;
+
+    rocjitsu::RpcHeader alloc_response{};
+    alloc_response.opcode = rocjitsu::RPC_IOCTL;
+    alloc_response.request_id = alloc_header.request_id;
+    alloc_response.payload_bytes = sizeof(*alloc_args);
+    std::array<uint8_t, sizeof(alloc_response) + sizeof(*alloc_args)> alloc_response_buffer{};
+    std::memcpy(alloc_response_buffer.data(), &alloc_response, sizeof(alloc_response));
+    std::memcpy(alloc_response_buffer.data() + sizeof(alloc_response), alloc_args,
+                sizeof(*alloc_args));
+    ASSERT_GT(rocjitsu::rpc_send_msg(server_fd, alloc_response_buffer.data(),
+                                     alloc_response_buffer.size(), &backing_fd, 1),
+              0);
+
     constexpr std::array<size_t, 2> expected_lengths = {1, 4096};
     for (size_t expected_length : expected_lengths) {
       rocjitsu::RpcHeader request_header{};
@@ -847,19 +872,144 @@ TEST(RemoteDriverMmapTest, PartialFixedMappingPreservesWholeReplacedPage) {
   });
 
   rocjitsu::RemoteDriver driver(sv[0]);
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = reinterpret_cast<uint64_t>(reservation);
+  alloc.size = kPageSize;
+  alloc.gpu_id = kGpuId;
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver.ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+
   ASSERT_EQ(driver.mmap(reservation, 1, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
-                        /*offset=*/0),
+                        static_cast<off_t>(alloc.mmap_offset)),
             reservation);
   EXPECT_EQ(reservation[0], 0x11);
   EXPECT_EQ(reservation[1], 0xA5);
   EXPECT_EQ(reservation[kPageSize - 1], 0xA5);
 
+  ASSERT_EQ(syscall(SYS_munmap, reservation, kPageSize), 0);
+  ASSERT_EQ(::mmap(reservation, kPageSize, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0),
+            reservation);
+  std::memset(reservation, 0xCC, kPageSize);
+
   ASSERT_EQ(driver.mmap(reservation, kPageSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
-                        /*offset=*/0),
+                        static_cast<off_t>(alloc.mmap_offset)),
             reservation);
   EXPECT_EQ(reservation[0], 0x11);
   EXPECT_EQ(reservation[1], 0xA5);
   EXPECT_EQ(reservation[kPageSize - 1], 0xA5);
+  EXPECT_EQ(syscall(SYS_munmap, reservation, kPageSize), 0);
+}
+
+TEST(RemoteDriverMmapTest, GpuAuthoritativeBackingSurvivesClientMmap) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+
+  constexpr size_t kPageSize = 4096;
+  constexpr uint64_t kHandle = 7;
+  constexpr uint32_t kStaleClientValue = 0x11111111;
+  constexpr uint32_t kGpuBackingValue = 0x22222222;
+  int backing_fd = memfd_create("remote_authoritative_mmap_test", MFD_CLOEXEC);
+  ASSERT_GE(backing_fd, 0);
+  ASSERT_EQ(ftruncate(backing_fd, kPageSize), 0);
+
+  uint32_t *reservation = static_cast<uint32_t *>(
+      ::mmap(nullptr, kPageSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(reservation, MAP_FAILED);
+  *reservation = kStaleClientValue;
+
+  std::jthread server([server_fd = sv[1], backing_fd, reservation, kHandle, kGpuBackingValue] {
+    rocjitsu::RpcHeader alloc_header{};
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &alloc_header, sizeof(alloc_header)));
+    ASSERT_EQ(alloc_header.opcode, rocjitsu::RPC_IOCTL);
+    std::vector<uint8_t> alloc_payload(alloc_header.payload_bytes);
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, alloc_payload.data(), alloc_payload.size()));
+    auto *alloc_request = reinterpret_cast<rocjitsu::RpcIoctlRequest *>(alloc_payload.data());
+    ASSERT_EQ(alloc_request->ioctl_cmd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU);
+    auto *alloc_args = reinterpret_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(
+        alloc_payload.data() + sizeof(*alloc_request));
+    alloc_args->handle = kHandle;
+    alloc_args->mmap_offset = kHandle << 12;
+
+    rocjitsu::RpcHeader alloc_response{};
+    alloc_response.opcode = rocjitsu::RPC_IOCTL;
+    alloc_response.request_id = alloc_header.request_id;
+    alloc_response.payload_bytes = sizeof(*alloc_args);
+    std::array<uint8_t, sizeof(alloc_response) + sizeof(*alloc_args)> alloc_response_buffer{};
+    std::memcpy(alloc_response_buffer.data(), &alloc_response, sizeof(alloc_response));
+    std::memcpy(alloc_response_buffer.data() + sizeof(alloc_response), alloc_args,
+                sizeof(*alloc_args));
+    ASSERT_GT(rocjitsu::rpc_send_msg(server_fd, alloc_response_buffer.data(),
+                                     alloc_response_buffer.size(), &backing_fd, 1),
+              0);
+
+    rocjitsu::RpcHeader map_header{};
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &map_header, sizeof(map_header)));
+    ASSERT_EQ(map_header.opcode, rocjitsu::RPC_IOCTL);
+    std::vector<uint8_t> map_payload(map_header.payload_bytes);
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, map_payload.data(), map_payload.size()));
+    auto *map_request = reinterpret_cast<rocjitsu::RpcIoctlRequest *>(map_payload.data());
+    ASSERT_EQ(map_request->ioctl_cmd, AMDKFD_IOC_MAP_MEMORY_TO_GPU);
+    auto *map_args = reinterpret_cast<kfd_ioctl_map_memory_to_gpu_args *>(map_payload.data() +
+                                                                          sizeof(*map_request));
+    ASSERT_EQ(map_args->handle, kHandle);
+    map_args->n_success = map_args->n_devices;
+    ASSERT_EQ(pwrite(backing_fd, &kGpuBackingValue, sizeof(kGpuBackingValue), 0),
+              static_cast<ssize_t>(sizeof(kGpuBackingValue)));
+
+    rocjitsu::RpcHeader map_response{};
+    map_response.opcode = rocjitsu::RPC_IOCTL;
+    map_response.request_id = map_header.request_id;
+    map_response.payload_bytes = sizeof(*map_args);
+    ASSERT_TRUE(rocjitsu::rpc_send_exact(server_fd, &map_response, sizeof(map_response)));
+    ASSERT_TRUE(rocjitsu::rpc_send_exact(server_fd, map_args, sizeof(*map_args)));
+
+    rocjitsu::RpcHeader mmap_header{};
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &mmap_header, sizeof(mmap_header)));
+    ASSERT_EQ(mmap_header.opcode, rocjitsu::RPC_MMAP);
+    ASSERT_EQ(mmap_header.payload_bytes, sizeof(rocjitsu::RpcMmapRequest));
+    rocjitsu::RpcMmapRequest mmap_request{};
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &mmap_request, sizeof(mmap_request)));
+    EXPECT_EQ(mmap_request.addr, reinterpret_cast<uint64_t>(reservation));
+    EXPECT_EQ(mmap_request.offset, static_cast<int64_t>(kHandle << 12));
+
+    rocjitsu::RpcHeader mmap_response_header{};
+    mmap_response_header.opcode = rocjitsu::RPC_MMAP;
+    mmap_response_header.request_id = mmap_header.request_id;
+    mmap_response_header.payload_bytes = sizeof(rocjitsu::RpcMmapResponse);
+    rocjitsu::RpcMmapResponse mmap_response{.mapped_addr = mmap_request.addr};
+    std::array<uint8_t, sizeof(mmap_response_header) + sizeof(mmap_response)>
+        mmap_response_buffer{};
+    std::memcpy(mmap_response_buffer.data(), &mmap_response_header, sizeof(mmap_response_header));
+    std::memcpy(mmap_response_buffer.data() + sizeof(mmap_response_header), &mmap_response,
+                sizeof(mmap_response));
+    ASSERT_GT(rocjitsu::rpc_send_msg(server_fd, mmap_response_buffer.data(),
+                                     mmap_response_buffer.size(), &backing_fd, 1),
+              0);
+    EXPECT_EQ(::close(backing_fd), 0);
+    EXPECT_EQ(::close(server_fd), 0);
+  });
+
+  rocjitsu::RemoteDriver driver(sv[0]);
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = reinterpret_cast<uint64_t>(reservation);
+  alloc.size = kPageSize;
+  alloc.gpu_id = kGpuId;
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver.ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  ASSERT_EQ(alloc.handle, kHandle);
+
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = alloc.handle;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  map.n_devices = 1;
+  ASSERT_EQ(driver.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  ASSERT_EQ(driver.mmap(reservation, kPageSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                        static_cast<off_t>(alloc.mmap_offset)),
+            reservation);
+  EXPECT_EQ(*reservation, kGpuBackingValue);
   EXPECT_EQ(syscall(SYS_munmap, reservation, kPageSize), 0);
 }
 

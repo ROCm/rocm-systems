@@ -8,13 +8,16 @@
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <fcntl.h>
+#include <iterator>
 #include <limits>
 #include <linux/mman.h>
+#include <map>
 #ifndef MADV_POPULATE_WRITE
 #define MADV_POPULATE_WRITE 23
 #endif
@@ -29,10 +32,59 @@
 #include <sys/un.h>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
 namespace {
+
+template <typename Address>
+void merge_interval(std::map<Address, Address> &intervals, Address begin, Address end) {
+  assert(begin < end);
+
+  typename std::map<Address, Address>::iterator it = intervals.lower_bound(begin);
+  if (it != intervals.begin()) {
+    typename std::map<Address, Address>::iterator previous = std::prev(it);
+    if (previous->second >= begin) {
+      begin = previous->first;
+      end = std::max(end, previous->second);
+      it = intervals.erase(previous);
+    }
+  }
+
+  while (it != intervals.end() && it->first <= end) {
+    end = std::max(end, it->second);
+    it = intervals.erase(it);
+  }
+  intervals.emplace(begin, end);
+}
+
+std::vector<std::pair<uint64_t, uint64_t>>
+find_uncovered_extents(const std::map<uint64_t, uint64_t> &covered, uint64_t begin, uint64_t end) {
+  std::vector<std::pair<uint64_t, uint64_t>> uncovered;
+  uint64_t cursor = begin;
+  std::map<uint64_t, uint64_t>::const_iterator it = covered.upper_bound(begin);
+  if (it != covered.begin()) {
+    --it;
+  }
+
+  for (; it != covered.end() && cursor < end; ++it) {
+    if (it->second <= cursor) {
+      continue;
+    }
+    if (it->first >= end) {
+      break;
+    }
+    if (it->first > cursor) {
+      uncovered.emplace_back(cursor, std::min(it->first, end));
+    }
+    cursor = std::max(cursor, it->second);
+  }
+  if (cursor < end) {
+    uncovered.emplace_back(cursor, end);
+  }
+  return uncovered;
+}
 
 constexpr bool has_embedded_pointers(unsigned long request) {
   switch (canonical_ioctl_request(request)) {
@@ -128,7 +180,7 @@ RemoteDriver::MemfdLookup RemoteDriver::find_memfd_for_addr(void *addr, size_t l
       // Return a DUP of the memfd, not the stored fd, so the caller owns a
       // descriptor whose lifetime is independent of this RemoteDriver. Without
       // this, a concurrent last-close -> RemoteDriver::close() (which closes the
-      // stored handle_memfds_ fds) could close the fd between this return and the
+      // stored allocation fds) could close the fd between this return and the
       // caller's ftruncate/fallocate/mmap, operating on a closed/reused fd. The
       // dup is taken under rpc_mutex_, the same lock close() holds, so the stored
       // fd is guaranteed still open here. The caller MUST close the returned fd.
@@ -156,9 +208,11 @@ RemoteDriver::RemoteDriver(int sock_fd) : sock_(sock_fd) {
 }
 
 RemoteDriver::~RemoteDriver() {
-  for (auto &[handle, fd] : handle_memfds_) {
-    if (fd >= 0)
-      syscall(SYS_close, fd);
+  for (const auto &[handle, allocation] : remote_allocations_) {
+    (void)handle;
+    if (allocation.memfd >= 0) {
+      syscall(SYS_close, allocation.memfd);
+    }
   }
   if (sock_ >= 0)
     syscall(SYS_close, sock_);
@@ -267,11 +321,13 @@ int RemoteDriver::close() {
       sock_ = -1;
     }
 
-    for (auto &[handle, fd] : handle_memfds_) {
-      if (fd >= 0)
-        syscall(SYS_close, fd);
+    for (const auto &[handle, allocation] : remote_allocations_) {
+      (void)handle;
+      if (allocation.memfd >= 0) {
+        syscall(SYS_close, allocation.memfd);
+      }
     }
-    handle_memfds_.clear();
+    remote_allocations_.clear();
     alloc_ranges_.clear();
     // Deliberately do NOT clear the handshake metadata (topology_path_,
     // drm_path_, gpu_info_, has_gpu_info_). It is written once during open() and
@@ -613,10 +669,15 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     }
   }
 
-  auto register_allocation = [&](uint64_t handle, uint64_t va_addr, uint64_t size, int memfd) {
-    handle_memfds_[handle] = memfd;
-    if (va_addr != 0 && size > 0)
+  auto register_allocation = [&](uint64_t handle, uint64_t va_addr, uint64_t size, int memfd,
+                                 bool backing_authoritative) {
+    RemoteAllocation allocation;
+    allocation.memfd = memfd;
+    allocation.backing_authoritative = backing_authoritative;
+    remote_allocations_[handle] = std::move(allocation);
+    if (va_addr != 0 && size > 0) {
       alloc_ranges_.push_back({va_addr, size, memfd});
+    }
   };
 
   auto promote_userptr = [&](uint64_t va_addr, uint64_t size, int memfd) {
@@ -658,7 +719,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     auto *alloc_args = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(arg);
     if (num_fds > 0 && received_fds[0] >= 0) {
       register_allocation(alloc_args->handle, alloc_args->va_addr, alloc_args->size,
-                          received_fds[0]);
+                          received_fds[0], false);
 
       if (alloc_args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
         promote_userptr(alloc_args->va_addr, alloc_args->size, received_fds[0]);
@@ -672,7 +733,16 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       struct stat st {};
       if (fstat(received_fds[0], &st) == 0)
         size = static_cast<uint64_t>(st.st_size);
-      register_allocation(import_args->handle, import_args->va_addr, size, received_fds[0]);
+      register_allocation(import_args->handle, import_args->va_addr, size, received_fds[0], true);
+    }
+  }
+
+  if (request == AMDKFD_IOC_MAP_MEMORY_TO_GPU && resp->result == 0) {
+    const auto *map_args = static_cast<const kfd_ioctl_map_memory_to_gpu_args *>(arg);
+    std::unordered_map<uint64_t, RemoteAllocation>::iterator allocation =
+        remote_allocations_.find(map_args->handle);
+    if (allocation != remote_allocations_.end()) {
+      allocation->second.backing_authoritative = true;
     }
   }
 
@@ -684,12 +754,14 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
 
   if (request == AMDKFD_IOC_FREE_MEMORY_OF_GPU && resp->result == 0) {
     auto *free_args = static_cast<kfd_ioctl_free_memory_of_gpu_args *>(arg);
-    if (auto it = handle_memfds_.find(free_args->handle); it != handle_memfds_.end()) {
-      int freed_memfd = it->second;
+    std::unordered_map<uint64_t, RemoteAllocation>::iterator allocation =
+        remote_allocations_.find(free_args->handle);
+    if (allocation != remote_allocations_.end()) {
+      const int freed_memfd = allocation->second.memfd;
       std::erase_if(alloc_ranges_,
                     [freed_memfd](const AllocRange &r) { return r.memfd == freed_memfd; });
       syscall(SYS_close, freed_memfd);
-      handle_memfds_.erase(it);
+      remote_allocations_.erase(allocation);
     }
   }
 
@@ -719,11 +791,23 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
   // Resolve the memfd for this allocation: prefer the mmap response fd, fall
   // back to the stored ALLOC_MEMORY fd (same underlying file, different fd).
   int mapping_memfd = memfd;
-  uint64_t type = static_cast<uint64_t>(offset) & (0x3ULL << 62);
+  const uint64_t type = static_cast<uint64_t>(offset) & (0x3ULL << 62);
+  RemoteAllocation *allocation = nullptr;
   if (mapping_memfd < 0 && type == 0) {
-    uint64_t handle = static_cast<uint64_t>(offset) >> 12;
-    if (auto it = handle_memfds_.find(handle); it != handle_memfds_.end())
-      mapping_memfd = it->second;
+    const uint64_t handle = static_cast<uint64_t>(offset) >> 12;
+    std::unordered_map<uint64_t, RemoteAllocation>::iterator allocation_it =
+        remote_allocations_.find(handle);
+    if (allocation_it != remote_allocations_.end()) {
+      allocation = &allocation_it->second;
+      mapping_memfd = allocation->memfd;
+    }
+  } else if (type == 0) {
+    const uint64_t handle = static_cast<uint64_t>(offset) >> 12;
+    std::unordered_map<uint64_t, RemoteAllocation>::iterator allocation_it =
+        remote_allocations_.find(handle);
+    if (allocation_it != remote_allocations_.end()) {
+      allocation = &allocation_it->second;
+    }
   }
   if (mapping_memfd >= 0) {
     struct stat backing_stat {};
@@ -741,24 +825,32 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
       return MAP_FAILED;
     }
 
-    // Pre-copy committed pages (code objects) from the existing anonymous
-    // reservation into the memfd before MAP_FIXED replaces them. Uses a temp
-    // mapping outside the GPUVM range for the copy target.
-    if ((flags & MAP_FIXED) && addr != nullptr) {
+    const bool replaces_client_reservation = (flags & MAP_FIXED) && addr != nullptr;
+    const bool can_import_client_pages = !allocation || !allocation->backing_authoritative;
+    if (replaces_client_reservation && can_import_client_pages) {
       auto prot_rc = syscall(SYS_mprotect, addr, rounded_length, PROT_READ | PROT_WRITE);
       if (prot_rc == 0) {
-        size_t num_pages = rounded_length / page_size;
-        std::vector<uint8_t> page_resident(num_pages);
-        auto mc_rc = syscall(SYS_mincore, addr, rounded_length, page_resident.data());
         auto *temp = static_cast<uint8_t *>(
             safe_mmap(nullptr, rounded_length, PROT_WRITE, MAP_SHARED, mapping_memfd, 0));
         if (temp != MAP_FAILED) {
-          if (mc_rc == 0) {
-            auto *src = static_cast<uint8_t *>(addr);
+          const std::vector<std::pair<uint64_t, uint64_t>> extents =
+              allocation
+                  ? find_uncovered_extents(allocation->imported_client_extents, 0, rounded_length)
+                  : std::vector<std::pair<uint64_t, uint64_t>>{{0, rounded_length}};
+          auto *source = static_cast<uint8_t *>(addr);
+          for (const auto &[extent_begin, extent_end] : extents) {
+            const size_t import_size = static_cast<size_t>(extent_end - extent_begin);
+            const size_t num_pages = import_size / page_size;
+            std::vector<uint8_t> page_resident(num_pages);
+            if (syscall(SYS_mincore, source + extent_begin, import_size, page_resident.data()) !=
+                0) {
+              continue;
+            }
             for (size_t i = 0; i < num_pages; ++i) {
               if (page_resident[i] & 1) {
-                size_t off = i * page_size;
-                std::memcpy(temp + off, src + off, page_size);
+                const size_t page_offset = i * page_size;
+                std::memcpy(temp + extent_begin + page_offset, source + extent_begin + page_offset,
+                            page_size);
               }
             }
           }
@@ -774,6 +866,11 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
     if (flags & MAP_FIXED)
       mflags |= MAP_FIXED;
     auto *mapped = safe_mmap(addr, length, PROT_READ | PROT_WRITE, mflags, mapping_memfd, 0);
+    if (mapped != MAP_FAILED && allocation && replaces_client_reservation &&
+        !allocation->backing_authoritative) {
+      merge_interval(allocation->imported_client_extents, uint64_t{0},
+                     static_cast<uint64_t>(rounded_length));
+    }
     if (memfd >= 0)
       syscall(SYS_close, memfd);
     return mapped;

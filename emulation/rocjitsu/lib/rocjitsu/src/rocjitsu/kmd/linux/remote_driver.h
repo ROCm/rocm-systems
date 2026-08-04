@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -135,8 +136,14 @@ private:
   /// socket writes without this lock, corrupting the RPC stream.
   std::mutex rpc_mutex_;
 
-  /// @brief Memfds received from the daemon during ALLOC_MEMORY, keyed by handle.
-  std::unordered_map<uint64_t, int> handle_memfds_;
+  struct RemoteAllocation {
+    int memfd = -1;
+    bool backing_authoritative = false;
+    std::map<uint64_t, uint64_t> imported_client_extents;
+  };
+
+  /// @brief Client-side state for allocations shared by the daemon.
+  std::unordered_map<uint64_t, RemoteAllocation> remote_allocations_;
 
   /// @brief Maps GPUVM addresses to allocation memfds for anonymous MAP_FIXED
   /// interception. When ROCR's FMM does anonymous MAP_FIXED at a GPUVM address
