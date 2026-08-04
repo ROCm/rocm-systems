@@ -3578,7 +3578,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   auto& qInfo = result.first->second;
   qInfo.refCount = 1;
   qInfo.hasDedicatedQueue_ = dedicated_queue;
-  qInfo.ringPublish = std::make_unique<RingPublishState>(queue->size);
+  qInfo.ringPublish = std::make_shared<RingPublishState>(queue->size);
   populateExtras();
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "acquireQueue refCount: %p (%d) %s",
           result.first->first->base_address, result.first->second.refCount,

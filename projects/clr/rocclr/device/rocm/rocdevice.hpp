@@ -778,7 +778,9 @@ class Device : public NullDevice {
     int refCount;             //! Reference counter. Shows how many time the queue was shared
     bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
     //! Per-ring publish state, shared by every VirtualGPU multiplexed onto this ring.
-    std::unique_ptr<RingPublishState> ringPublish;
+    //! shared_ptr (not unique_ptr) keeps QueueInfo copyable, which std::vector<std::map>
+    //! requires on MSVC when the pool vector reallocates.
+    std::shared_ptr<RingPublishState> ringPublish;
 
     // Constructor
     QueueInfo() : refCount(0), hasDedicatedQueue_(false) {}
