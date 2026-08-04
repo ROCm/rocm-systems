@@ -12,22 +12,19 @@
 # - Supports prebuilt stages to skip certain build stages
 # - Better parallelization across GPU architectures
 
-# TheRock ref: using main until full migration, then switch to pinned SHA (TheRock#3343)
-# NOTE: update all `@<ref>` refs and `ref:` inputs together when switching
-
-# =============================================================================
-# TEMPORARY: MI455 (gfx125X) bringup configuration
-# TODO(geomin12): Remove this block once MI455 is fully enabled in therock-ci-config
-#
-# The gfx125x_family_overrides JSON configures MI455-specific test settings:
-# - test-runs-on: Custom runner label for MI455 hardware
-# - test_labels_for_family: Limit tests to hip-tests, rocrtst (sanity always runs)
-# - Container options with ulimit for RCCL compatibility
-# =============================================================================
+# TEST BRANCH: users/geomin12/dynamic-determination-stage
+# Testing dynamic baseline_run_id selection for external repos
+# NOTE: rocm-systems changes affect compiler-runtime which cascades to ALL stages,
+# so no stages will be reusable. This is expected behavior.
 
 name: TheRock Multi-Arch CI
 
 on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -74,6 +71,9 @@ jobs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
       skip_tests: ${{ steps.configure.outputs.skip_tests }}
+      reusable_stages: ${{ steps.configure.outputs.reusable_stages }}
+      rebuild_stages: ${{ steps.configure.outputs.rebuild_stages }}
+      baseline_run_id: ${{ steps.configure.outputs.baseline_run_id }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -85,53 +85,55 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: main
+          ref: users/geomin12/dynamic-determination-stage
           path: _therock
-          sparse-checkout: build_tools/github_actions
-          sparse-checkout-cone-mode: true
+          sparse-checkout: |
+            build_tools
+            BUILD_TOPOLOGY.toml
+          sparse-checkout-cone-mode: false
 
       - name: Configure CI
         id: configure
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
             --event-name "${{ github.event_name }}" \
             --github-repo "${{ github.repository }}" \
             --base-sha "${{ github.event.pull_request.base.sha }}" \
             --head-sha "${{ github.event.pull_request.head.sha }}" \
-            --config-path ".github/repos-config.json"
+            --config-path ".github/repos-config.json" \
+            --enable-stage-reuse \
+            --ignore-ci-triggers
+
+      - name: Debug outputs
+        run: |
+          echo "=== Configure Outputs ==="
+          echo "changed_projects: ${{ steps.configure.outputs.changed_projects }}"
+          echo "run_all_tests: ${{ steps.configure.outputs.run_all_tests }}"
+          echo "skip_tests: ${{ steps.configure.outputs.skip_tests }}"
+          echo "reusable_stages: ${{ steps.configure.outputs.reusable_stages }}"
+          echo "rebuild_stages: ${{ steps.configure.outputs.rebuild_stages }}"
+          echo "baseline_run_id: ${{ steps.configure.outputs.baseline_run_id }}"
 
   setup:
     needs: configure
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/geomin12/dynamic-determination-stage
     with:
       build_variant: "release"
       # Limit GPU families for rocm-systems CI
-      # Note: gfx125X is added for MI455 bringup with limited tests (hip-tests, rocrtst, sanity)
-      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
-      windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx1151' }}
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X' }}
+      windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || '' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
-      prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
-      baseline_run_id: ${{ inputs.baseline_run_id || '' }}
+      # Use dynamically determined prebuilt_stages and baseline_run_id
+      # NOTE: For rocm-systems, reusable_stages will likely be empty since changes
+      # affect compiler-runtime which cascades to all stages
+      prebuilt_stages: ${{ inputs.prebuilt_stages || needs.configure.outputs.reusable_stages }}
+      baseline_run_id: ${{ inputs.baseline_run_id || needs.configure.outputs.baseline_run_id }}
       repository: ROCm/TheRock
-      ref: main
-      # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
-      # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
-      # NOTE: MI455 machine is down - test-runs-on set to "" until back online (was: linux-mi455-gpu-rocm)
-      external_repo: >-
-        {
-          "repository": "${{ github.repository }}",
-          "ref": "${{ github.sha }}",
-          "family_overrides": {
-            "gfx125x": {
-              "linux": {
-                "test-runs-on": "",
-                "test_labels_for_family": ["test:hip-tests", "test:rocrtst"],
-                "fetch-gfx-targets": ["gfx1250"]
-              }
-            }
-          }
-        }
+      ref: users/geomin12/dynamic-determination-stage
+      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
@@ -142,7 +144,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/geomin12/dynamic-determination-stage
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -153,7 +155,7 @@ jobs:
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
-      ref: main
+      ref: users/geomin12/dynamic-determination-stage
     permissions:
       contents: read
       id-token: write
@@ -167,7 +169,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@main
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@users/geomin12/dynamic-determination-stage
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -178,7 +180,7 @@ jobs:
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
-      ref: main
+      ref: users/geomin12/dynamic-determination-stage
     permissions:
       contents: read
       id-token: write
@@ -196,7 +198,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: main
+          ref: users/geomin12/dynamic-determination-stage
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

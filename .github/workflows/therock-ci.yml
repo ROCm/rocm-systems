@@ -1,16 +1,19 @@
 name: TheRock CI
 
+# DISABLED for testing multi-arch CI with dynamic baseline_run_id
+# TODO: Re-enable pull_request trigger after testing
+
 on:
   push:
     branches:
       - develop
       - release/therock-*
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - labeled
+  # pull_request:
+  #   types:
+  #     - opened
+  #     - synchronize
+  #     - reopened
+  #     - labeled
   workflow_dispatch:
     inputs:
       projects:
