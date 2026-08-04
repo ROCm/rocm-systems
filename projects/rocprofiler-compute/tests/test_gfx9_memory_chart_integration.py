@@ -13,6 +13,8 @@ import yaml
 from utils import mem_chart_gfx9
 
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
+MEMORY_CHART_CONFIG_FILENAME = "0300_memory_chart.yaml"
+EXPECTED_CHART_LINE_COUNT = 43
 ANALYSIS_CONFIGS = Path(common.SRC) / "rocprof_compute_soc" / "analysis_configs"
 GFX9_ARCHITECTURES = (
     "gfx908",
@@ -24,7 +26,7 @@ GFX9_ARCHITECTURES = (
 )
 DISCOVERED_GFX9_ARCHITECTURES = tuple(
     path.parent.name
-    for path in sorted(ANALYSIS_CONFIGS.glob("gfx9*/0300_memory_chart.yaml"))
+    for path in sorted(ANALYSIS_CONFIGS.glob(f"gfx9*/{MEMORY_CHART_CONFIG_FILENAME}"))
 )
 GFX94X_ARCHITECTURES = frozenset({"gfx940", "gfx941", "gfx942"})
 GFX9_ALWAYS_MISSING_METRIC_KEYS = frozenset({"Active CUs"})
@@ -34,7 +36,7 @@ GFX9_YAML_ONLY_METRIC_KEYS = frozenset({"Active CUs (deprecated)"})
 
 @functools.lru_cache(maxsize=None)
 def panel_yaml_metric_keys(architecture: str) -> frozenset[str]:
-    config_path = ANALYSIS_CONFIGS / architecture / "0300_memory_chart.yaml"
+    config_path = ANALYSIS_CONFIGS / architecture / MEMORY_CHART_CONFIG_FILENAME
     panel_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
     return frozenset(
@@ -53,8 +55,8 @@ def expected_missing_metric_keys(architecture: str) -> frozenset[str]:
 def normalized_panel_metrics(architecture: str) -> dict[str, int | None]:
     panel_metric_keys = panel_yaml_metric_keys(architecture)
     return {
-        metric_name: 42 if metric_name in panel_metric_keys else None
-        for metric_name in common.GFX9_SAMPLE_METRICS
+        metric_name: value if metric_name in panel_metric_keys else None
+        for metric_name, value in common.GFX9_SAMPLE_METRICS.items()
     }
 
 
@@ -91,9 +93,11 @@ class TestIntegrationGfx9:
                 chart_title=DEFAULT_TITLE,
             )
         )
-        expected_na_count = 3 if architecture in GFX94X_ARCHITECTURES else 0
+        expected_na_count = len(
+            expected_missing_metric_keys(architecture) - GFX9_ALWAYS_MISSING_METRIC_KEYS
+        )
 
-        assert len(output.splitlines()) == 43
+        assert len(output.splitlines()) == EXPECTED_CHART_LINE_COUNT
         assert output.count("N/A") == expected_na_count
 
     @pytest.mark.xfail(
