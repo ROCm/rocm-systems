@@ -91,9 +91,6 @@
 	path = projects/rocprofiler-systems/external/pybind11
 	url = https://github.com/jrmadsen/pybind11.git
 	shallow = true
-[submodule "projects/rocprofiler-systems/external/sqlite"]
-	path = projects/rocprofiler-systems/external/sqlite
-	url = https://github.com/sqlite/sqlite.git
 [submodule "projects/rocprofiler-systems/external/googletest"]
 	path = projects/rocprofiler-systems/external/googletest
 	url = https://github.com/google/googletest.git

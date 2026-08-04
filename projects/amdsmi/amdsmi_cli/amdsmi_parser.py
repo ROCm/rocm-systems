@@ -696,6 +696,25 @@ class AMDSMIParser(argparse.ArgumentParser):
                         path.touch()
                         setattr(args, self.dest, path)
                         return
+                    # Fail fast instead of blocking on the interactive overwrite/
+                    # append prompt when stdin is not an interactive terminal
+                    # (e.g. launched by an automation framework with stdin piped
+                    # or closed). Reading from a held-open pipe can block input()
+                    # forever; automation should pass --overwrite or --append to
+                    # choose a behavior explicitly.
+                    stdin_is_tty = False
+                    try:
+                        stdin_is_tty = sys.stdin is not None and sys.stdin.isatty()
+                    except (ValueError, OSError):
+                        stdin_is_tty = False
+                    if not stdin_is_tty:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(
+                            path,
+                            CheckOutputFilePath.outputformat,
+                            f"File '{path}' exists and stdin is not a TTY; "
+                            "cannot prompt to overwrite or append. Re-run with "
+                            "--overwrite or --append.",
+                        )
                     # Prompt if neither --append nor --overwrite are specified
                     try:
                         resp = (

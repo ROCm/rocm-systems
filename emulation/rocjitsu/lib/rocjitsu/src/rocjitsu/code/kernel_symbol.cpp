@@ -5,6 +5,11 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 
+#include <cctype>
+#include <cstdlib>
+#include <cstring>
+#include <cxxabi.h>
+#include <memory>
 #include <string_view>
 
 namespace rocjitsu {
@@ -13,6 +18,38 @@ namespace {
 bool in_range(const uint8_t *ptr, uint64_t size, const uint8_t *base, uint64_t range_size) {
   return ptr >= base && size <= range_size &&
          static_cast<uint64_t>(ptr - base) <= range_size - size;
+}
+
+size_t find_outer_argument_list(std::string_view text) {
+  size_t argument_list = std::string_view::npos;
+  int angle_depth = 0;
+  int parenthesis_depth = 0;
+
+  for (size_t pos = 0; pos < text.size(); ++pos) {
+    switch (text[pos]) {
+    case '<':
+      if (parenthesis_depth == 0)
+        ++angle_depth;
+      break;
+    case '>':
+      if (angle_depth > 0 && parenthesis_depth == 0)
+        --angle_depth;
+      break;
+    case '(':
+      if (angle_depth == 0 && parenthesis_depth == 0)
+        argument_list = pos;
+      ++parenthesis_depth;
+      break;
+    case ')':
+      if (parenthesis_depth > 0)
+        --parenthesis_depth;
+      break;
+    default:
+      break;
+    }
+  }
+
+  return argument_list;
 }
 
 } // namespace
@@ -73,21 +110,28 @@ std::string find_kernel_symbol(const uint8_t *kernel_object_ptr, const uint8_t *
       auto *hash = reinterpret_cast<const uint32_t *>(elf_base + hash_off);
       nsyms = hash[1];
     }
+    if (syment < sizeof(Elf64_Sym))
+      break;
     if (nsyms == 0 ||
         !in_range(elf_base + symtab_off, uint64_t{nsyms} * syment, elf_base, elf_accessible))
       break;
     if (!in_range(elf_base + strtab_off, strsz, elf_base, elf_accessible))
       break;
 
-    auto *syms = reinterpret_cast<const Elf64_Sym *>(elf_base + symtab_off);
     auto *strtab = reinterpret_cast<const char *>(elf_base + strtab_off);
 
     for (uint32_t s = 0; s < nsyms; ++s) {
-      if (syms[s].st_value != kd_offset)
+      auto *sym = reinterpret_cast<const Elf64_Sym *>(elf_base + symtab_off + uint64_t{s} * syment);
+      if (sym->st_value != kd_offset)
         continue;
-      if (syms[s].st_name >= strsz)
+      if (sym->st_name >= strsz)
         continue;
-      std::string_view name(strtab + syms[s].st_name);
+      const char *symbol_name = strtab + sym->st_name;
+      size_t max_name_size = strsz - sym->st_name;
+      size_t name_size = strnlen(symbol_name, max_name_size);
+      if (name_size == max_name_size)
+        continue;
+      std::string_view name(symbol_name, name_size);
       if (name.size() > 3 && name.substr(name.size() - 3) == ".kd")
         name = name.substr(0, name.size() - 3);
       if (!name.empty())
@@ -133,6 +177,35 @@ std::string find_kernel_symbol(const uint8_t *kernel_object_ptr, const uint8_t *
       return best_name;
   }
   return {};
+}
+
+std::string demangle_kernel_symbol(std::string_view symbol) {
+  if (symbol.empty())
+    return {};
+
+  std::string symbol_string(symbol);
+  if (!symbol_string.starts_with("_Z"))
+    return symbol_string;
+
+  int status = 0;
+  std::unique_ptr<char, decltype(&std::free)> demangled(
+      abi::__cxa_demangle(symbol_string.c_str(), nullptr, nullptr, &status), &std::free);
+  if (status != 0 || demangled == nullptr)
+    return symbol_string;
+
+  return std::string(demangled.get());
+}
+
+std::string kernel_display_name(std::string_view symbol) {
+  std::string result = demangle_kernel_symbol(symbol);
+  size_t parenthesis_position = find_outer_argument_list(result);
+  if (parenthesis_position != std::string::npos)
+    result.resize(parenthesis_position);
+  if (result.starts_with("void "))
+    result.erase(0, 5);
+
+  std::erase_if(result, [](unsigned char c) { return std::isspace(c); });
+  return result;
 }
 
 } // namespace rocjitsu

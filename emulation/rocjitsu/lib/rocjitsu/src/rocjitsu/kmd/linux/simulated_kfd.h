@@ -105,6 +105,13 @@ public:
   void *mmap(uint32_t process_id, void *addr, size_t length, int prot, int flags, off_t offset);
   int munmap(uint32_t process_id, void *addr, size_t length);
   int close(uint32_t process_id);
+
+  /// @brief Close every registered process, waking any parked event waiters.
+  /// @details Daemon-teardown helper: iterates all live processes and closes each,
+  /// firing notify_closing() so client threads blocked in an infinite-timeout
+  /// WAIT_EVENTS unblock and their jthread joins can complete.
+  void close_all_processes();
+
   [[nodiscard]] int get_mmap_memfd(uint32_t process_id, off_t offset) const;
   /// @}
 
@@ -152,6 +159,35 @@ public:
   [[nodiscard]] int claim_fd(int real_fd);
   [[nodiscard]] bool owns_reserved_fd(int fd) const;
 
+  /// @brief Derive the PTE MTYPE from KFD allocation flags (mirrors amdgpu).
+  /// @details Public so the interposer's DRM GEM_VA path can install page-table
+  /// entries with the same coherency type the KFD alloc requested.
+  static amdgpu::Mtype pte_mtype_for_flags(uint32_t alloc_flags);
+
+  /// @brief Install a host range into the local process's GPU page table.
+  /// @details Drives DRM AMDGPU_GEM_VA MAP/REPLACE from the interposer: maps
+  /// @p size bytes at @p gpu_va to @p host_ptr with the MTYPE derived from
+  /// @p alloc_flags.
+  /// @retval true the range was installed.
+  /// @retval false the local process is gone, so nothing was mapped (the caller
+  ///         must surface an error rather than report a phantom success).
+  [[nodiscard]] bool gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags);
+
+  /// @brief Remove a GPU page-table range installed by gem_va_map (GEM_VA UNMAP).
+  /// @retval true the range was unmapped.
+  /// @retval false the local process is gone, so nothing was unmapped.
+  [[nodiscard]] bool gem_va_unmap(uint64_t gpu_va, size_t size);
+
+  /// @brief Look up a KfdProcess by ID. Returns nullptr if not found.
+  std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;
+
+  /// @brief KFD allocation flags for a local-process allocation @p handle, or 0.
+  /// @details Locks the process alloc mutex internally, keeping lock discipline for
+  /// per-process allocation state inside the driver. Used by the interposer to
+  /// capture the GPU PTE MTYPE flags at EXPORT_DMABUF time (before the allocation
+  /// may be freed).
+  uint32_t alloc_flags_for_handle(uint64_t handle) const;
+
   /// @brief Per-GPU device state (mirrors kfd_dev in the kernel).
   struct GpuDevice {
     SoC *soc = nullptr;
@@ -161,9 +197,6 @@ public:
   };
 
 private:
-  /// @brief Look up a KfdProcess by ID. Returns nullptr if not found.
-  std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;
-
   /// @brief Look up the local-mode process.
   std::shared_ptr<KfdProcess> find_local_process() const;
 
@@ -189,6 +222,8 @@ private:
   void map_to_gpu(KfdProcess &proc, uint64_t gpu_va, void *host_ptr, size_t size,
                   amdgpu::Mtype mtype = amdgpu::Mtype::RW);
   void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size);
+
+  void update_cp_doorbell_base(uint32_t gpu_ordinal, uint32_t process_id, void *base);
 
   int dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg);
   void *dispatch_mmap(KfdProcess &proc, void *addr, size_t length, int prot, int flags,
@@ -284,6 +319,11 @@ private:
   std::unordered_map<uint32_t, EventState *> event_dispatch_;
 
   /// @brief Process ID for local-mode (interposer). Set once in open().
+  /// @details Written under process_mutex_ in open(), then read lock-free from the
+  /// ioctl/mmap/munmap/gem paths. Safe only under the local-mode contract: the app
+  /// opens /dev/kfd before issuing any ioctl and never re-opens concurrently, so the
+  /// single publishing write happens-before every read. Not for use outside that
+  /// single-primary-fd local path.
   uint32_t local_process_id_ = 0;
 
   static constexpr kfd_process_device_apertures default_apertures_{

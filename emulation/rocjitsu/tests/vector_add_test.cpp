@@ -17,6 +17,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -36,7 +37,6 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #ifdef HAS_DEVICE_KERNELS
@@ -75,7 +75,7 @@ TEST(VectorAddStressTest, AllCUsGoldenReference) {
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
-  engine->build();
+  engine->create();
 
   // Load code into GPU memory. Place .rodata (kernel descriptor) and .text (code)
   // at their virtual addresses relative to a base. The .kd symbol value matches
@@ -156,21 +156,8 @@ TEST(VectorAddStressTest, AllCUsGoldenReference_MultiThreaded) {
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
 
-  // Partition by XCD so each XCD's components stay on one thread.
-  std::unordered_map<simdojo::Component *, simdojo::PartitionID> xcd_map;
-  for (uint32_t i = 0; i < soc->num_xcds(); ++i)
-    xcd_map[soc->xcd(i)] = i;
-  engine->topology().partition_manual(
-      TOTAL_XCDS, [&](simdojo::Component *c) -> simdojo::PartitionID {
-        for (auto *p = static_cast<simdojo::Component *>(c); p != nullptr;
-             p = static_cast<simdojo::Component *>(p->parent())) {
-          auto it = xcd_map.find(p);
-          if (it != xcd_map.end())
-            return it->second;
-        }
-        return 0;
-      });
-  engine->build();
+  ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, TOTAL_XCDS));
+  engine->create();
 
   co->load_to_memory(memory, KD_ADDR);
   uint64_t kernel_object = KD_ADDR + co->kernel_descriptor_offset("vector_add");
