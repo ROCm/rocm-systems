@@ -22,14 +22,6 @@ on:
       - 'projects/amdsmi/CMakeLists.txt'
       - 'projects/amdsmi/tests/dme_integration/**'
       - '.github/workflows/amdsmi-dme-ci.yml'
-  push:
-    branches: [develop]
-    paths:
-      - 'projects/amdsmi/include/**'
-      - 'projects/amdsmi/src/**'
-      - 'projects/amdsmi/CMakeLists.txt'
-      - 'projects/amdsmi/tests/dme_integration/**'
-      - '.github/workflows/amdsmi-dme-ci.yml'
   workflow_dispatch:
     inputs:
       dme_branch:
