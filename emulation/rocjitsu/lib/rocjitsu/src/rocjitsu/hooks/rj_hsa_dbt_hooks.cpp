@@ -26,6 +26,7 @@
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/hooks/rj_hsa_dbt_test_seams.h"
 #include "rocjitsu/hooks/sidecar_registry.h"
 #include "rocjitsu/hooks/virtual_lds.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -36,6 +37,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cassert>
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
@@ -71,6 +73,34 @@ RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
 RJ_DIAGNOSTIC_POP
+
+// Test seams live outside the anonymous namespace so the test-only translation
+// unit can reach them, but they stay at hidden visibility: only
+// librocjitsu_hooks_testing.so exports a C entry point for them.
+namespace rocjitsu::hooks {
+namespace {
+
+std::mutex g_topology_nodes_root_mutex;
+std::optional<std::string> g_topology_nodes_root_for_test;
+
+/// @brief Return a snapshot of the synthetic KFD topology root, if one is set.
+///
+/// @details Always empty in production: nothing outside the test-only library
+/// can reach set_topology_nodes_root_for_test().
+[[nodiscard]] std::optional<std::string> topology_nodes_root_for_test() {
+  std::lock_guard lock(g_topology_nodes_root_mutex);
+  return g_topology_nodes_root_for_test;
+}
+
+} // namespace
+
+void set_topology_nodes_root_for_test(const char *root) {
+  std::lock_guard lock(g_topology_nodes_root_mutex);
+  g_topology_nodes_root_for_test =
+      root != nullptr && *root != '\0' ? std::optional<std::string>(root) : std::nullopt;
+}
+
+} // namespace rocjitsu::hooks
 
 namespace {
 
@@ -543,6 +573,10 @@ void trace_virtual_lds_kernarg(uint64_t packet_id, const void *kernarg, size_t s
     return "expand-missing";
   case DiagnosticKind::ExpandFailed:
     return "expand-failed";
+  case DiagnosticKind::DataOnly:
+    return "data-only";
+  case DiagnosticKind::NothingToTranslate:
+    return "nothing-to-translate";
   case DiagnosticKind::ResourceLimit:
     return "resource-limit";
   case DiagnosticKind::KernelSkipped:
@@ -1337,6 +1371,17 @@ RjHsaLayer &layer() {
   return state;
 }
 
+/// @brief Return true when the installed config selects DBT guest mode.
+///
+/// @details Derived from the layer on every call rather than cached alongside
+/// discovery results: a cached copy goes stale whenever discovery is abandoned
+/// (an `OnUnload()` racing an in-flight search never republishes it), and a
+/// stale `false` would make the enumeration guard fail open.
+[[nodiscard]] bool dbt_guest_configured() {
+  std::optional<HookConfig> config = layer().config();
+  return config && config->guest_target.has_value();
+}
+
 /// @brief Parse a uint32_t from a NUL-terminated sysfs text value.
 [[nodiscard]] bool parse_u32_text(const char *text, uint32_t *out) {
   if (!text || !out)
@@ -1372,14 +1417,32 @@ RjHsaLayer &layer() {
   return value;
 }
 
+/// @brief Why a KFD topology lookup did or did not yield a node id.
+///
+/// @details Absence and unreadability must stay distinguishable: a configured
+/// gpu_id missing from a topology read end to end is a permanent configuration
+/// verdict, while a topology that could not be read says nothing about the
+/// gpu_id and may succeed on a later attempt.
+enum class TopologyLookup : uint8_t {
+  kFound,      ///< A node advertising the requested gpu_id was read.
+  kAbsent,     ///< Every node in a readable topology was checked; none matched.
+  kUnreadable, ///< The topology could not be read, so absence is not proven.
+};
+
+/// @brief Result of translating a KFD gpu_id to a topology node id.
+struct TopologyNodeResult {
+  TopologyLookup status = TopologyLookup::kUnreadable;
+  uint32_t node_id = 0;
+};
+
 /// @brief Search one KFD topology root for the node id owning @p gpu_id.
-[[nodiscard]] std::optional<uint32_t> node_id_for_kfd_gpu_id_in_root(const char *root,
-                                                                     uint32_t gpu_id) {
+[[nodiscard]] TopologyNodeResult node_id_for_kfd_gpu_id_in_root(const char *root, uint32_t gpu_id) {
   DIR *dir = opendir(root);
   if (!dir)
-    return std::nullopt;
+    return TopologyNodeResult{TopologyLookup::kUnreadable, 0};
 
-  std::optional<uint32_t> result;
+  bool unreadable_node = false;
+  TopologyNodeResult result{TopologyLookup::kAbsent, 0};
   while (dirent *entry = readdir(dir)) {
     if (entry->d_name[0] == '.')
       continue;
@@ -1390,12 +1453,21 @@ RjHsaLayer &layer() {
 
     std::string gpu_id_path = std::string(root) + "/" + entry->d_name + "/gpu_id";
     std::optional<uint32_t> node_gpu_id = read_u32_file(gpu_id_path);
-    if (node_gpu_id && *node_gpu_id == gpu_id) {
-      result = node_id;
+    if (!node_gpu_id) {
+      // Every KFD node exposes gpu_id, so a failed read is I/O failure rather
+      // than a node that does not advertise one -- and the skipped node may be
+      // the one being searched for, so this scan can no longer prove absence.
+      unreadable_node = true;
+      continue;
+    }
+    if (*node_gpu_id == gpu_id) {
+      result = TopologyNodeResult{TopologyLookup::kFound, node_id};
       break;
     }
   }
   closedir(dir);
+  if (result.status == TopologyLookup::kAbsent && unreadable_node)
+    result.status = TopologyLookup::kUnreadable;
   return result;
 }
 
@@ -1405,14 +1477,24 @@ RjHsaLayer &layer() {
 /// across ROCR agent handle creation and is the id KFD ioctls use. HSA does
 /// not expose that value directly, so the hook reads the redirected topology
 /// tree and later compares agents by `HSA_AMD_AGENT_INFO_DRIVER_NODE_ID`.
-[[nodiscard]] std::optional<uint32_t> node_id_for_kfd_gpu_id(uint32_t gpu_id) {
+[[nodiscard]] TopologyNodeResult node_id_for_kfd_gpu_id(uint32_t gpu_id) {
+  if (std::optional<std::string> root = rocjitsu::hooks::topology_nodes_root_for_test())
+    return node_id_for_kfd_gpu_id_in_root(root->c_str(), gpu_id);
+
   constexpr std::array<const char *, 2> kTopologyNodeRoots = {
       "/sys/devices/virtual/kfd/kfd/topology/nodes", "/sys/class/kfd/kfd/topology/nodes"};
+  // The two roots are the same tree on a healthy system and one of them is
+  // normally absent, so absence is only proven when at least one root was
+  // scanned end to end.
+  TopologyNodeResult verdict{TopologyLookup::kUnreadable, 0};
   for (const char *root : kTopologyNodeRoots) {
-    if (std::optional<uint32_t> node_id = node_id_for_kfd_gpu_id_in_root(root, gpu_id))
-      return node_id;
+    TopologyNodeResult result = node_id_for_kfd_gpu_id_in_root(root, gpu_id);
+    if (result.status == TopologyLookup::kFound)
+      return result;
+    if (result.status == TopologyLookup::kAbsent)
+      verdict.status = TopologyLookup::kAbsent;
   }
-  return std::nullopt;
+  return verdict;
 }
 
 /// @brief Maps the configured guest HSA agent to the selected host execution agent.
@@ -1420,8 +1502,21 @@ RjHsaLayer &layer() {
 /// @details Discovery is lazy because HSA tools are installed before ROCR has
 /// necessarily enumerated agents. The guest agent remains visible to callers,
 /// but calls that would execute or allocate through it are redirected to host_.
+///
+/// Discovery classifies its own failure. A transient miss (sysfs I/O, ROCR not
+/// yet enumerating) is retried a bounded number of times and only from callers
+/// that opt in with RetryPolicy::kRetryTransient -- in practice just the
+/// enumeration entry point, whose failure is fatal to the process. A
+/// deterministic miss latches immediately. Hot-path accessors never re-enter
+/// discovery: they forward handles unchanged when no mapping exists.
 class AgentMapper {
 public:
+  /// @brief Whether a caller may pay for a fresh discovery attempt.
+  enum class RetryPolicy : uint8_t {
+    kCachedOnly,     ///< Never re-run discovery once an attempt was published.
+    kRetryTransient, ///< Re-run discovery while the last attempt was retryable.
+  };
+
   /// @brief Return the process-wide agent mapper.
   static AgentMapper &instance() {
     static AgentMapper mapper;
@@ -1458,6 +1553,60 @@ public:
     return has_mapping_ ? guest_ : hsa_agent_t{};
   }
 
+  /// @brief Guest and host handles plus the failure verdict, from one locked read.
+  struct MappingSnapshot {
+    hsa_agent_t guest{};
+    hsa_agent_t host{};
+    /// @brief True when DBT is configured but discovery could not resolve both agents.
+    bool failed = false;
+  };
+
+  /// @brief Return the guest and host handles plus the failure verdict, with the
+  /// handles and verdict read under one lock.
+  ///
+  /// @details Callers needing more than one field must use this rather than
+  /// composing `guest_agent()`/`host_for_guest()`: a `clear()` landing between
+  /// two separate accessors yields a torn view that pairs a stale handle with a
+  /// fresh verdict, which is exactly how the enumeration guard would fail open.
+  ///
+  /// The DBT-configured flag is necessarily sampled outside `mutex_` (layer() has its
+  /// own lock and nesting it here would invert the order ensure_discovered() uses), so
+  /// `failed` can pair a pre-unload config read with a post-unload mapping. That
+  /// direction is deliberate: every caller refuses on `failed`, so the race can only
+  /// over-refuse, and only while the wrappers are already being torn down.
+  ///
+  /// `failed` is not sticky across a retryable failure when @p policy is
+  /// RetryPolicy::kRetryTransient. An unreadable KFD topology, or a ROCR agent
+  /// iteration that errored or has not published any agent yet, is re-attempted
+  /// on the next such call, up to kMaxTransientAttempts. It does latch once
+  /// discovery reaches a verdict: the configured gpu_id was absent from a
+  /// topology read end to end, the agent list did not hold the configured pair,
+  /// or the retry budget ran out. Callers that only need a consistent read of
+  /// an already-published attempt keep the default and stay O(1).
+  [[nodiscard]] MappingSnapshot snapshot(RetryPolicy policy = RetryPolicy::kCachedOnly) {
+    ensure_discovered(policy);
+    // Read the config outside mutex_: layer() has its own lock, and taking it
+    // underneath this one would invert the order used by ensure_discovered().
+    const bool configured = dbt_guest_configured();
+    std::lock_guard lock(mutex_);
+    if (!has_mapping_)
+      return MappingSnapshot{{}, {}, configured};
+    return MappingSnapshot{guest_, host_, false};
+  }
+
+  /// @brief Return true only for the first refusal report since the last verdict.
+  ///
+  /// @details Enumeration is retried by HIP/ROCR on every device query, so the
+  /// refusal diagnostic must be emitted once per discovery attempt rather than
+  /// once per call, or it buries the message naming the unresolved gpu_id. A
+  /// retryable attempt re-arms the flag, so the worst case is one line per
+  /// attempt (kMaxTransientAttempts + 1) instead of one per process: a transient
+  /// refusal must not consume the report that names the permanent failure.
+  [[nodiscard]] bool claim_failure_report() {
+    std::lock_guard lock(mutex_);
+    return !std::exchange(reported_failure_, true);
+  }
+
   /// @brief Replace the selected host agent with the visible guest agent.
   hsa_agent_t guest_for_host(hsa_agent_t agent) {
     ensure_discovered();
@@ -1467,17 +1616,36 @@ public:
     return agent;
   }
 
-  /// @brief Drop cached agent mapping so unload/reload can rediscover it.
+  /// @brief Drop the cached agent mapping, verdict, and retry budget so
+  /// unload/reload can rediscover from scratch.
   void clear() {
     std::lock_guard lock(mutex_);
     discovered_ = false;
     has_mapping_ = false;
+    reported_failure_ = false;
+    outcome_ = DiscoveryOutcome::kRetryable;
+    transient_attempts_ = 0;
     guest_ = {};
     host_ = {};
     ++generation_;
   }
 
 private:
+  /// @brief How a completed discovery attempt should be cached.
+  enum class DiscoveryOutcome : uint8_t {
+    kResolved,  ///< Both agents found; nothing left to retry.
+    kRetryable, ///< I/O or not-yet-ready failure; a later attempt may succeed.
+    kFinal,     ///< Deterministic negative; retrying cannot change it.
+  };
+
+  /// @brief Cap on repeated discovery attempts after a transient failure.
+  ///
+  /// @details Bounds the worst case for an application that calls
+  /// hsa_iterate_agents in a loop: at most this many sysfs topology scans plus
+  /// ROCR agent iterations for the whole process, after which the mapper latches
+  /// and every entry point is O(1) again.
+  static constexpr uint32_t kMaxTransientAttempts = 8;
+
   /// @brief Agent discovery callback state.
   struct AgentSearchData {
     AgentMapper *self = nullptr;
@@ -1486,6 +1654,14 @@ private:
     std::optional<uint32_t> host_node_id;
     hsa_agent_t guest_agent{};
     hsa_agent_t host_agent{};
+    /// @brief Agents ROCR offered this attempt; zero means it published none yet.
+    uint32_t visited = 0;
+    /// @brief Set when one agent satisfied both the host and the guest predicate.
+    ///
+    /// @details Only meaningful when the guest slot stays empty: a later,
+    /// distinct agent may still fill it, which is the intended outcome for a
+    /// same-ISA config that does have a separate synthetic guest node.
+    bool role_collision = false;
   };
 
   /// @brief ISA discovery callback state for matching configured targets.
@@ -1560,34 +1736,77 @@ private:
   }
 
   /// @brief Return true when @p agent is the configured host execution agent.
+  ///
+  /// @details The driver node id is what makes host selection unique on a multi-GPU
+  /// box, so ensure_discovered() never starts a search without one; matching on the
+  /// host ISA alone would pick whichever GPU ROCR happens to enumerate first.
   bool agent_matches_host(hsa_agent_t agent, const AgentSearchData &search) {
-    if (!agent_has_target(agent, search.host))
-      return false;
-    if (search.host_node_id)
-      return agent_has_driver_node(agent, *search.host_node_id);
-    return true;
+    assert(search.host_node_id.has_value());
+    return agent_has_target(agent, search.host) &&
+           agent_has_driver_node(agent, *search.host_node_id);
   }
 
   /// @brief HSA agent iteration callback that records guest and host agents.
+  ///
+  /// @details The host is tested first and wins any agent that satisfies both
+  /// roles. Only the host predicate carries the node-id constraint, so when the
+  /// two predicates overlap -- `guest_isa == host_isa`, which the config layer
+  /// deliberately still accepts for the gfx1250 B0-on-A0 revision profile -- a
+  /// guest-first test would let the guest greedily claim the physical host and
+  /// leave the synthetic guest unmapped, and which side that happened on would
+  /// depend on ROCR's enumeration order.
   static hsa_status_t agent_callback(hsa_agent_t agent, void *data) {
     auto *search = static_cast<AgentSearchData *>(data);
-    if (search->guest_agent.handle == 0 && search->self->agent_has_target(agent, search->guest))
-      search->guest_agent = agent;
-    if (search->host_agent.handle == 0 && search->self->agent_matches_host(agent, *search))
+    ++search->visited;
+    const bool claimed_host =
+        search->host_agent.handle == 0 && search->self->agent_matches_host(agent, *search);
+    if (claimed_host)
       search->host_agent = agent;
+    if (search->guest_agent.handle == 0 && search->self->agent_has_target(agent, search->guest)) {
+      // Leave the guest slot open for a distinct agent rather than aliasing the
+      // host into it: a mapping whose two sides are the same agent translates
+      // nothing.
+      if (claimed_host)
+        search->role_collision = true;
+      else
+        search->guest_agent = agent;
+    }
     if (search->guest_agent.handle != 0 && search->host_agent.handle != 0)
       return HSA_STATUS_INFO_BREAK;
     return HSA_STATUS_SUCCESS;
   }
 
+  /// @brief Return true when a published attempt may be repeated for @p policy.
+  ///
+  /// @details Hot-path callers never re-enter discovery: rj_amd_memory_async_copy
+  /// and rj_amd_profiling_get_dispatch_time reach map() once per copy and once
+  /// per dispatch, and re-running a sysfs topology walk plus a full ROCR agent
+  /// iteration there would trade a correctness bug for a throughput bug. They
+  /// also do not need it -- they forward handles unchanged when no mapping
+  /// exists and pick up a later success for free.
+  [[nodiscard]] bool may_retry_locked(RetryPolicy policy) const {
+    return policy == RetryPolicy::kRetryTransient && outcome_ == DiscoveryOutcome::kRetryable &&
+           transient_attempts_ < kMaxTransientAttempts;
+  }
+
+  /// @brief Return true when the already-published attempt answers @p policy.
+  [[nodiscard]] bool attempt_settled_locked(RetryPolicy policy) const {
+    return discovered_ && !may_retry_locked(policy);
+  }
+
   /// @brief Lazily discover the guest-to-host agent mapping.
-  void ensure_discovered() {
+  void ensure_discovered(RetryPolicy policy = RetryPolicy::kCachedOnly) {
     uint64_t generation = 0;
     {
       std::unique_lock lock(mutex_);
-      while (discovering_)
+      // Test the published attempt before waiting: a caller that would accept it must
+      // not park behind someone else's retry. Discovery is a sysfs topology walk plus a
+      // full ROCR agent iteration, and map()/is_guest() reach here once per copy and
+      // once per dispatch. The first discovery still waits, because discovered_ is
+      // false until an attempt has been published.
+      while (!attempt_settled_locked(policy) && discovering_)
         discovery_cv_.wait(lock);
-      if (discovered_)
+      if (attempt_settled_locked(policy))
         return;
       discovering_ = true;
       generation = generation_;
@@ -1598,18 +1817,41 @@ private:
     hsa_agent_t discovered_host{};
     bool has_mapping = false;
     bool attempted_agent_search = false;
+    bool role_collision = false;
+    // No guest target means there is nothing to rediscover, and the enumeration
+    // guard never fires because dbt_guest_configured() is false.
+    DiscoveryOutcome outcome = DiscoveryOutcome::kFinal;
 
     if (config && config->guest_target) {
       auto *iterate_agents = layer().iterate_agents();
-      if (iterate_agents) {
+      if (iterate_agents == nullptr) {
+        outcome = DiscoveryOutcome::kRetryable;
+      } else {
         std::optional<uint32_t> host_node_id;
         bool can_search = true;
-        if (config->host_gpu_id != 0) {
-          host_node_id = node_id_for_kfd_gpu_id(config->host_gpu_id);
-          if (!host_node_id) {
+        if (config->host_gpu_id == 0) {
+          // load_dbt_guest_config_from_handoff() refuses an enabled DBT config with no
+          // resolved gpu_id, so reaching this means the handoff contract broke. Searching
+          // with an unconstrained host predicate is the first-ISA-match selection that
+          // picks the wrong GPU on a multi-GPU host; refuse instead of reintroducing it.
+          std::fprintf(stderr, "[rocjitsu-hooks] DBT config carries no resolved host KFD "
+                               "gpu_id; refusing to guess a host agent\n");
+          outcome = DiscoveryOutcome::kFinal;
+          can_search = false;
+        } else {
+          const TopologyNodeResult node = node_id_for_kfd_gpu_id(config->host_gpu_id);
+          if (node.status == TopologyLookup::kFound) {
+            host_node_id = node.node_id;
+          } else {
+            const bool absent = node.status == TopologyLookup::kAbsent;
             std::fprintf(stderr,
-                         "[rocjitsu-hooks] failed to find topology node for host KFD gpu_id=%u\n",
-                         config->host_gpu_id);
+                         "[rocjitsu-hooks] failed to find topology node for host KFD gpu_id=%u "
+                         "(%s)\n",
+                         config->host_gpu_id,
+                         absent ? "absent from a fully read topology" : "topology unreadable");
+            // An unreadable topology is an I/O failure, not a verdict about the
+            // configured gpu_id.
+            outcome = absent ? DiscoveryOutcome::kFinal : DiscoveryOutcome::kRetryable;
             can_search = false;
           }
         }
@@ -1618,11 +1860,22 @@ private:
           AgentSearchData search{this, *config->guest_target, config->target, host_node_id};
           hsa_status_t status = iterate_agents(agent_callback, &search);
           attempted_agent_search = true;
-          has_mapping = (status == HSA_STATUS_SUCCESS || status == HSA_STATUS_INFO_BREAK) &&
-                        search.guest_agent.handle != 0 && search.host_agent.handle != 0 &&
+          const bool iterated = status == HSA_STATUS_SUCCESS || status == HSA_STATUS_INFO_BREAK;
+          has_mapping = iterated && search.guest_agent.handle != 0 &&
+                        search.host_agent.handle != 0 &&
                         search.guest_agent.handle != search.host_agent.handle;
           discovered_guest = search.guest_agent;
           discovered_host = search.host_agent;
+          role_collision = search.role_collision && search.guest_agent.handle == 0;
+          if (has_mapping)
+            outcome = DiscoveryOutcome::kResolved;
+          else if (!iterated || search.visited == 0)
+            // ROCR refused the iteration or has published no agent yet.
+            outcome = DiscoveryOutcome::kRetryable;
+          else
+            // A complete agent list that does not hold the configured pair is a
+            // configuration verdict; a retry reads the same list.
+            outcome = DiscoveryOutcome::kFinal;
         }
       }
     }
@@ -1635,6 +1888,13 @@ private:
         host_ = discovered_host;
         has_mapping_ = has_mapping;
         discovered_ = true;
+        outcome_ = outcome;
+        if (outcome == DiscoveryOutcome::kRetryable) {
+          ++transient_attempts_;
+          // Re-arm the one-shot report: a refusal that will be retried must not
+          // consume the message that names the eventual permanent failure.
+          reported_failure_ = false;
+        }
         published = true;
       }
       discovering_ = false;
@@ -1656,6 +1916,20 @@ private:
                      static_cast<unsigned long long>(discovered_guest.handle), config->host_gpu_id,
                      selected_node_id.value_or(0));
       }
+    } else if (role_collision) {
+      // Naming the collision keeps "the one matching agent is already the host"
+      // from being reported as the generic "no agents matched", which sends the
+      // reader looking for a missing device instead of a missing guest node.
+      // The verdict is still failure: a mapping whose guest and host are the
+      // same agent would load guest code objects untranslated on real silicon,
+      // and this layer has nothing to offer a run that needs no translation.
+      const std::string_view guest_name = config->guest_target->name;
+      std::fprintf(stderr,
+                   "[rocjitsu-hooks] HSA agent=%llu satisfies both the configured host and the "
+                   "guest ISA '%.*s'; no distinct guest agent remains. A same-ISA DBT config "
+                   "needs a separate synthetic guest agent -- refusing to run untranslated\n",
+                   static_cast<unsigned long long>(discovered_host.handle),
+                   static_cast<int>(guest_name.size()), guest_name.data());
     } else if (attempted_agent_search) {
       std::fprintf(stderr, "[rocjitsu-hooks] failed to find guest/host HSA agents for DBT\n");
     }
@@ -1666,6 +1940,9 @@ private:
   bool discovering_ = false;
   bool discovered_ = false;
   bool has_mapping_ = false;
+  bool reported_failure_ = false;
+  DiscoveryOutcome outcome_ = DiscoveryOutcome::kRetryable;
+  uint32_t transient_attempts_ = 0;
   uint64_t generation_ = 0;
   hsa_agent_t guest_{};
   hsa_agent_t host_{};
@@ -1759,8 +2036,16 @@ private:
     auto *iterate_pools = layer().amd_agent_iterate_memory_pools();
     auto *get_info = layer().amd_memory_pool_get_info();
 
-    hsa_agent_t guest = AgentMapper::instance().guest_agent();
-    hsa_agent_t host = AgentMapper::instance().host_for_guest();
+    // One locked read rather than composing guest_agent()/host_for_guest(), per
+    // the AgentMapper::snapshot() contract. It deliberately keeps the default
+    // RetryPolicy::kCachedOnly: pool discovery retries on every mapped-pool call
+    // and is cheap (two ROCR pool iterations), while agent discovery is a sysfs
+    // tree walk plus a full agent iteration plus a per-agent ISA iteration.
+    // Letting this path rediscover agents would multiply that cost by every
+    // hsa_amd_memory_pool_allocate made before pool convergence.
+    const AgentMapper::MappingSnapshot agents = AgentMapper::instance().snapshot();
+    const hsa_agent_t guest = agents.guest;
+    const hsa_agent_t host = agents.host;
     if (guest.handle == 0 || host.handle == 0)
       return;
 
@@ -1818,6 +2103,49 @@ void clear_agent_mapper() { AgentMapper::instance().clear(); }
 [[nodiscard]] hsa_agent_t mapped_agent(hsa_agent_t agent) {
   return AgentMapper::instance().map(agent);
 }
+
+/// @brief Return true unless ROCR positively reports @p agent as a non-GPU device.
+///
+/// @details Only used on the enumeration refusal path, where discovery failed
+/// and the hook cannot say which physical GPU the guest was supposed to execute
+/// on -- with no topology node it holds no agent handle at all, so device type
+/// is the only discriminator left. Anything that cannot be positively
+/// classified is reported as a GPU so an unclassifiable device is suppressed
+/// rather than published. `install()` refuses a table with a null
+/// hsa_agent_get_info_fn, so only the query-failed branch is reachable here; the
+/// null check is a local guard against that precondition being relaxed.
+[[nodiscard]] bool agent_is_gpu(hsa_agent_t agent) {
+  auto *get_info = layer().agent_get_info();
+  if (get_info == nullptr)
+    return true;
+  hsa_device_type_t device_type{};
+  if (get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type) != HSA_STATUS_SUCCESS)
+    return true;
+  return device_type == HSA_DEVICE_TYPE_GPU;
+}
+
+/// @brief Return true when DBT is configured but its guest/host mapping is unusable.
+///
+/// @details Guards the entry points that can put code on, or dispatch to, real
+/// silicon. Enumeration already suppresses every GPU agent in this state, so a
+/// GPU handle only reaches them if it was cached before discovery failed or came
+/// from a tool holding a pre-patch table pointer; without this the load path in
+/// particular fails open, because `is_guest()` is false whenever the mapping
+/// failed and the "not the guest, forward verbatim" branch would then load an
+/// untranslated guest code object on the raw host.
+///
+/// Deliberately NOT applied to the query, copy, and pool hooks (region/pool/ISA
+/// iteration, pointer info, memory lock, async copy, profiling): those routinely
+/// take CPU agents, none of them can execute a kernel, and refusing them would
+/// break the host fine-grained pool discovery and host-side copies that the
+/// enumeration guard goes out of its way to keep working. With no queue and no
+/// loaded code object there is no dispatch, so the pair still fails closed.
+///
+/// The hook only installs when `parse_config()` succeeds, and that always sets
+/// `guest_target`, so a false here means `OnUnload()` has already run rather
+/// than that this is a native non-DBT process; there is no non-DBT pass-through
+/// case at this layer for it to mis-refuse.
+[[nodiscard]] bool mapping_unusable() { return AgentMapper::instance().snapshot().failed; }
 
 /// @brief Map one guest memory pool to the matching host memory pool.
 [[nodiscard]] hsa_amd_memory_pool_t mapped_memory_pool(hsa_amd_memory_pool_t pool) {
@@ -3028,10 +3356,49 @@ hsa_status_t HSA_API rj_iterate_agents(hsa_status_t (*callback)(hsa_agent_t agen
   if (!original)
     return HSA_STATUS_ERROR;
 
-  hsa_agent_t guest = AgentMapper::instance().guest_agent();
-  hsa_agent_t host = AgentMapper::instance().host_for_guest();
-  if (guest.handle == 0 || host.handle == 0)
+  // One locked read: reading the handles and the verdict separately lets a
+  // concurrent clear() pair a stale handle with a fresh verdict. This is also
+  // the only entry point that opts into rediscovery: it is the only one whose
+  // failure is unrecoverable, and it is cold enough to pay for a retry.
+  const AgentMapper::MappingSnapshot mapping =
+      AgentMapper::instance().snapshot(AgentMapper::RetryPolicy::kRetryTransient);
+  const hsa_agent_t guest = mapping.guest;
+  const hsa_agent_t host = mapping.host;
+  if (guest.handle == 0 || host.handle == 0) {
+    // Fail closed when DBT is configured but its host never resolved -- the
+    // topology node for the configured gpu_id was not found, or ROCR never
+    // exposed both agents. Public enumeration is the replacement boundary, so
+    // falling through to the original iterator here would publish the physical
+    // host as an application-visible device and let anything using the default
+    // device run untranslated on it, which is exactly what the guest exists to
+    // prevent. GuestKfd rejects the same unresolved host with ENODEV.
+    //
+    // Fail closed for GPUs only, though. CPU agents carry no untranslated
+    // execution risk and are still needed for host fine-grained pools,
+    // hsa_amd_memory_lock, and host-side copies, so they pass through. A GPU
+    // client then sees a well-formed empty device list rather than an opaque
+    // HSA_STATUS_ERROR out of hsa_iterate_agents, which HIP/CLR reports as a
+    // fatal ROCR init failure instead of "no device".
+    if (mapping.failed) {
+      if (AgentMapper::instance().claim_failure_report())
+        std::fprintf(stderr, "[rocjitsu-hooks] suppressing all GPU agents: DBT is enabled but no "
+                             "guest/host agent mapping was resolved\n");
+
+      struct GpuSuppression {
+        hsa_status_t (*callback)(hsa_agent_t, void *) = nullptr;
+        void *data = nullptr;
+      } suppression{callback, data};
+
+      auto suppress_callback = [](hsa_agent_t agent, void *opaque) -> hsa_status_t {
+        auto *suppressed = static_cast<GpuSuppression *>(opaque);
+        if (agent_is_gpu(agent))
+          return HSA_STATUS_SUCCESS;
+        return suppressed->callback(agent, suppressed->data);
+      };
+      return original(suppress_callback, &suppression);
+    }
     return original(callback, data);
+  }
 
   struct ShadowIteration {
     hsa_status_t (*callback)(hsa_agent_t, void *) = nullptr;
@@ -3085,6 +3452,9 @@ hsa_status_t HSA_API rj_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue
   auto *original = layer().queue_create();
   if (!original)
     return HSA_STATUS_ERROR;
+  // A queue on a raw agent is the dispatch path the enumeration guard closes.
+  if (mapping_unusable())
+    return HSA_STATUS_ERROR_INVALID_AGENT;
   hsa_agent_t mapped = AgentMapper::instance().map(agent);
   log_message(kLogVerbose, "queue_create agent=%llu mapped=%llu size=%u",
               static_cast<unsigned long long>(agent.handle),
@@ -3123,6 +3493,9 @@ hsa_status_t HSA_API rj_amd_queue_intercept_create(
   auto *original = layer().amd_queue_intercept_create();
   if (!original)
     return HSA_STATUS_ERROR;
+  // Same dispatch path as rj_queue_create, reached directly by tools.
+  if (mapping_unusable())
+    return HSA_STATUS_ERROR_INVALID_AGENT;
   hsa_agent_t mapped = AgentMapper::instance().map(agent_handle);
   log_message(kLogVerbose, "queue_intercept_create agent=%llu mapped=%llu size=%u",
               static_cast<unsigned long long>(agent_handle.handle),
@@ -3721,6 +4094,9 @@ hsa_status_t HSA_API rj_amd_agent_set_async_scratch_limit(hsa_agent_t agent, siz
   auto *original = layer().amd_agent_set_async_scratch_limit();
   if (!original)
     return HSA_STATUS_ERROR;
+  // GPU-only scratch tuning; with no mapping this would reconfigure the raw host.
+  if (mapping_unusable())
+    return HSA_STATUS_ERROR_INVALID_AGENT;
   hsa_agent_t mapped = mapped_agent(agent);
   log_message(kLogVerbose, "amd_agent_set_async_scratch_limit agent=%llu mapped=%llu threshold=%zu",
               static_cast<unsigned long long>(agent.handle),
@@ -3762,6 +4138,9 @@ hsa_status_t HSA_API rj_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
   auto *original = layer().amd_agent_preload();
   if (!original)
     return HSA_STATUS_ERROR;
+  // Stages code onto a GPU ahead of dispatch; GPU-only, so refuse with the rest.
+  if (mapping_unusable())
+    return HSA_STATUS_ERROR_INVALID_AGENT;
   hsa_agent_t mapped = mapped_agent(agent);
   log_message(kLogVerbose, "amd_agent_preload agent=%llu mapped=%llu flags=0x%llx",
               static_cast<unsigned long long>(agent.handle),
@@ -3810,6 +4189,15 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     // an HSA error here is safer than dereferencing cleared hook state.
     std::fprintf(stderr, "[rocjitsu-hooks] DBT hook layer is inactive during code-object load\n");
     return HSA_STATUS_ERROR;
+  }
+
+  // is_guest() below is false whenever the mapping failed, which would send this
+  // load down the verbatim "not the guest" path and put an untranslated guest
+  // code object on real silicon. Refuse before reaching that branch.
+  if (mapping_unusable()) {
+    std::fprintf(stderr, "[rocjitsu-hooks] refusing code-object load: DBT is enabled but no "
+                         "guest/host agent mapping was resolved\n");
+    return HSA_STATUS_ERROR_INVALID_AGENT;
   }
 
   const bool guest_load = AgentMapper::instance().is_guest(agent);
@@ -4038,6 +4426,11 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
   if (!config)
     return false;
   const bool signal_backtrace = config->signal_backtrace;
+  // The mapper is a process-wide singleton, so it outlives the layer. uninstall()
+  // clears it, but a discovery already in flight then republishes a kFinal miss
+  // behind that clear -- and nothing clears it again. Repeat the clear here so such
+  // a verdict cannot latch a permanent all-GPU suppression into this install.
+  clear_agent_mapper();
   if (!layer().install(table, std::move(*config)))
     return false;
   // Virtual-LDS resource management lives in its own hook component. Give it

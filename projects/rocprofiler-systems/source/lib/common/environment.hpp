@@ -507,10 +507,7 @@ is_python_interpreter(std::string_view executable)
 {
     if(executable.empty()) return false;
 
-    const auto slash_pos = executable.rfind('/');
-    const auto basename  = (slash_pos != std::string_view::npos)
-                               ? executable.substr(slash_pos + 1)
-                               : executable;
+    const auto basename = path::filename(executable);
 
     if(basename == "python" || basename == "python3") return true;
 

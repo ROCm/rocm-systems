@@ -19,6 +19,7 @@
 
 #include "embedded_schema.h"
 #include "launch_preload.h"
+#include "rocm_visibility.h"
 
 #include <algorithm>
 #include <cctype>
@@ -171,16 +172,6 @@ std::string find_interposer_lib() { return find_runtime_lib("librocjitsu.so"); }
 
 std::string find_hooks_lib() { return find_runtime_lib("librocjitsu_hooks.so"); }
 
-bool write_config_file(const std::string &config_path, pid_t pid) {
-  auto cfg_file = rpc_invocation_config_file_path(pid);
-  std::filesystem::create_directories(std::filesystem::path(cfg_file).parent_path());
-  std::ofstream ofs(cfg_file);
-  if (!ofs)
-    return false;
-  ofs << config_path << '\n';
-  return ofs.good();
-}
-
 void cleanup_runtime_files(pid_t pid) {
   std::error_code error;
   std::filesystem::remove_all(rpc_invocation_runtime_dir(pid), error);
@@ -231,12 +222,7 @@ void reap_stale_runtime_dirs() {
   }
 }
 
-struct KfdGpuOrdinal {
-  uint32_t ordinal = 0;
-  uint32_t node_id = 0;
-  uint32_t gpu_id = 0;
-  uint32_t gfx_target_version = 0;
-};
+using KfdGpuOrdinal = rocjitsu::cli::VisibleGpu;
 
 std::optional<uint32_t> parse_u32(std::string_view text) {
   uint32_t value = 0;
@@ -246,14 +232,6 @@ std::optional<uint32_t> parse_u32(std::string_view text) {
   if (err != std::errc{} || ptr != end)
     return std::nullopt;
   return value;
-}
-
-std::string_view trim(std::string_view text) {
-  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())))
-    text.remove_prefix(1);
-  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))
-    text.remove_suffix(1);
-  return text;
 }
 
 std::optional<uint32_t> read_u32_file(const std::filesystem::path &path) {
@@ -275,6 +253,17 @@ std::optional<uint32_t> read_u32_property(const std::filesystem::path &path, std
   return std::nullopt;
 }
 
+std::optional<uint64_t> read_u64_property(const std::filesystem::path &path, std::string_view key) {
+  std::ifstream in(path);
+  std::string name;
+  uint64_t value = 0;
+  while (in >> name >> value) {
+    if (name == key)
+      return value;
+  }
+  return std::nullopt;
+}
+
 std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
   std::filesystem::path nodes_dir = "/sys/devices/virtual/kfd/kfd/topology/nodes";
   if (!std::filesystem::exists(nodes_dir))
@@ -284,6 +273,7 @@ std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
     uint32_t node_id = 0;
     uint32_t gpu_id = 0;
     uint32_t gfx_target_version = 0;
+    uint64_t unique_id = 0;
   };
 
   std::vector<KfdNodeInfo> nodes;
@@ -299,9 +289,10 @@ std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
 
     auto gpu_id = read_u32_file(entry.path() / "gpu_id");
     if (gpu_id && *gpu_id != 0) {
-      uint32_t gfx_target_version =
-          read_u32_property(entry.path() / "properties", "gfx_target_version").value_or(0);
-      nodes.push_back({*node_id, *gpu_id, gfx_target_version});
+      const std::filesystem::path properties = entry.path() / "properties";
+      uint32_t gfx_target_version = read_u32_property(properties, "gfx_target_version").value_or(0);
+      uint64_t unique_id = read_u64_property(properties, "unique_id").value_or(0);
+      nodes.push_back({*node_id, *gpu_id, gfx_target_version, unique_id});
     }
   }
 
@@ -311,126 +302,74 @@ std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
   std::vector<KfdGpuOrdinal> gpus;
   gpus.reserve(nodes.size());
   for (uint32_t ordinal = 0; ordinal < nodes.size(); ++ordinal)
-    gpus.push_back({ordinal, nodes[ordinal].node_id, nodes[ordinal].gpu_id,
-                    nodes[ordinal].gfx_target_version});
-  return gpus;
+    gpus.push_back({ordinal, nodes[ordinal].gpu_id, nodes[ordinal].gfx_target_version,
+                    nodes[ordinal].unique_id});
+  return rocjitsu::cli::enumerate_kfd_gpus(gpus);
 }
 
-/// @brief Reject implicit host selection when more than one GPU has the host ISA.
-///
-/// @details The launcher, GuestKfd, and HSA tools hook discover the host through
-/// separate views of KFD and ROCR. Selecting the first ISA match independently
-/// is only well-defined when that match is unique. On a multi-GPU host, require
-/// the config to name the shared KFD gpu_id so every layer routes to the same
-/// physical GPU.
-bool has_unambiguous_host_gpu(const rocjitsu::config::DbtGuestConfig &dbt_guest) {
-  if (dbt_guest.host.gpu_id != 0)
-    return true;
+std::optional<std::string_view> environment_value(const char *name) {
+  const char *value = std::getenv(name);
+  return value == nullptr ? std::nullopt : std::optional<std::string_view>(value);
+}
+
+/// @brief Resolve automatic host selection once for every DBT runtime layer.
+bool resolve_host_gpu(rocjitsu::config::DbtGuestConfig *dbt_guest,
+                      const std::vector<KfdGpuOrdinal> &topology) {
+  const std::vector<KfdGpuOrdinal> visible_gpus = rocjitsu::cli::effective_visible_gpus(
+      topology, environment_value("ROCR_VISIBLE_DEVICES"), environment_value("HIP_VISIBLE_DEVICES"),
+      environment_value("CUDA_VISIBLE_DEVICES"));
 
   std::optional<uint32_t> target_version =
-      rocjitsu::kmd::gfx_target_version_from_name(dbt_guest.host.isa);
-  if (!target_version)
-    return true;
-
-  std::vector<uint32_t> matching_gpu_ids;
-  for (const KfdGpuOrdinal &gpu : real_kfd_gpu_ordinals()) {
-    if (gpu.gfx_target_version == *target_version)
-      matching_gpu_ids.push_back(gpu.gpu_id);
+      rocjitsu::kmd::gfx_target_version_from_name(dbt_guest->host.isa);
+  if (!target_version) {
+    std::cerr << std::format("rocjitsu: unrecognized dbt_guest.host_isa '{}'\n",
+                             dbt_guest->host.isa);
+    return false;
   }
-  if (matching_gpu_ids.size() <= 1)
-    return true;
 
-  std::cerr << std::format(
-      "rocjitsu: dbt_guest.host_isa '{}' matches {} host GPUs; set host_gpu_id to one of:",
-      dbt_guest.host.isa, matching_gpu_ids.size());
-  for (uint32_t gpu_id : matching_gpu_ids)
-    std::cerr << ' ' << gpu_id;
-  std::cerr << '\n';
+  const rocjitsu::cli::HostSelection selection =
+      rocjitsu::cli::select_host_gpu(visible_gpus, dbt_guest->host.gpu_id, *target_version);
+  if (selection.status == rocjitsu::cli::HostSelectionStatus::Selected) {
+    dbt_guest->host.gpu_id = selection.gpu_id;
+    return true;
+  }
+  if (selection.status == rocjitsu::cli::HostSelectionStatus::ExplicitGpuHidden) {
+    std::cerr << std::format(
+        "rocjitsu: dbt_guest.host_gpu_id {} is hidden by ROCm device visibility settings\n",
+        dbt_guest->host.gpu_id);
+    return false;
+  }
+  if (selection.status == rocjitsu::cli::HostSelectionStatus::ExplicitGpuIsaMismatch) {
+    std::cerr << std::format("rocjitsu: dbt_guest.host_gpu_id {} does not match host_isa '{}'\n",
+                             dbt_guest->host.gpu_id, dbt_guest->host.isa);
+    return false;
+  }
+
+  std::cerr << std::format("rocjitsu: no host GPU matches dbt_guest.host_isa '{}'\n",
+                           dbt_guest->host.isa);
   return false;
 }
 
-bool append_unique(std::vector<std::string> *tokens, std::string token) {
-  if (token.empty())
-    return false;
-  if (std::find(tokens->begin(), tokens->end(), token) != tokens->end())
-    return false;
-  tokens->push_back(std::move(token));
-  return true;
-}
+std::vector<KfdGpuOrdinal>
+dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
+                           const rocjitsu::config::DbtGuestConfig &dbt_guest) {
+  if (dbt_guest.host.backend == rocjitsu::config::DbtExecutionBackend::Hardware)
+    return real_kfd_gpu_ordinals();
 
-std::string join_comma(const std::vector<std::string> &tokens) {
-  std::string result;
-  for (size_t i = 0; i < tokens.size(); ++i) {
-    if (i != 0)
-      result += ',';
-    result += tokens[i];
+  const std::string host_config_path = rocjitsu::config::resolve_dbt_host_config_path(
+      dbt_config_path, dbt_guest.host.simulator_config_path);
+  rocjitsu::config::LoadedConfig loaded =
+      rocjitsu::config::load_config(host_config_path, rocjitsu::kEmbeddedSchema);
+  std::vector<rocjitsu::config::KfdDeviceConfig> devices = loaded.devices;
+  if (devices.empty() && loaded.device.present)
+    devices.push_back(loaded.device);
+
+  std::vector<KfdGpuOrdinal> gpus;
+  for (uint32_t ordinal = 0; ordinal < devices.size(); ++ordinal) {
+    const auto &device = devices[ordinal];
+    gpus.push_back({ordinal, device.gpu_id, device.gfx_target_version, device.unique_id});
   }
-  return result;
-}
-
-std::optional<std::string>
-expanded_rocr_visible_devices(const rocjitsu::config::DbtGuestConfig &dbt_guest) {
-  const char *visible = std::getenv("ROCR_VISIBLE_DEVICES");
-  if (visible == nullptr || *visible == '\0')
-    return std::nullopt;
-
-  std::vector<KfdGpuOrdinal> gpus = real_kfd_gpu_ordinals();
-  if (gpus.empty())
-    return std::nullopt;
-
-  uint32_t host_ordinal = 0;
-  if (dbt_guest.host.gpu_id != 0) {
-    auto match = std::find_if(gpus.begin(), gpus.end(), [&](const KfdGpuOrdinal &gpu) {
-      return gpu.gpu_id == dbt_guest.host.gpu_id;
-    });
-    if (match == gpus.end())
-      return std::nullopt;
-    host_ordinal = match->ordinal;
-  } else {
-    std::optional<uint32_t> target_version =
-        rocjitsu::kmd::gfx_target_version_from_name(dbt_guest.host.isa);
-    if (!target_version)
-      return std::nullopt;
-
-    auto match = std::find_if(gpus.begin(), gpus.end(), [&](const KfdGpuOrdinal &gpu) {
-      return gpu.gfx_target_version == *target_version;
-    });
-    if (match == gpus.end())
-      return std::nullopt;
-    host_ordinal = match->ordinal;
-  }
-
-  const uint32_t guest_ordinal = static_cast<uint32_t>(gpus.size());
-  std::vector<std::string> expanded;
-  std::string_view rest = visible;
-  bool changed = false;
-
-  while (true) {
-    size_t comma = rest.find(',');
-    std::string_view raw = comma == std::string_view::npos ? rest : rest.substr(0, comma);
-    std::string_view token = trim(raw);
-    if (!token.empty()) {
-      std::optional<uint32_t> ordinal = parse_u32(token);
-      if (ordinal && (*ordinal == host_ordinal || *ordinal == guest_ordinal)) {
-        // ROCR filters topology before HSA tools callbacks. Include both the
-        // hidden host and appended guest internally so our HSA iteration hook
-        // can present one public replacement agent.
-        changed = append_unique(&expanded, std::to_string(host_ordinal)) || changed;
-        changed = append_unique(&expanded, std::to_string(guest_ordinal)) || changed;
-      } else {
-        changed = append_unique(&expanded, std::string(token)) || changed;
-      }
-    }
-
-    if (comma == std::string_view::npos)
-      break;
-    rest.remove_prefix(comma + 1);
-  }
-
-  std::string rewritten = join_comma(expanded);
-  if (!rewritten.empty() && rewritten != visible)
-    return rewritten;
-  return std::nullopt;
+  return rocjitsu::cli::enumerate_kfd_gpus(gpus);
 }
 
 void print_usage() {
@@ -536,12 +475,19 @@ int main(int argc, char *argv[]) {
   }
 
   std::string hooks_path;
+  std::vector<KfdGpuOrdinal> dbt_execution_gpus;
   if (dbt_guest_mode) {
     if (dbt_guest_config.guest_isa.empty() || dbt_guest_config.host.isa.empty()) {
       std::cerr << "rocjitsu: dbt_guest requires guest_isa and host_isa\n";
       return 1;
     }
-    if (!has_unambiguous_host_gpu(dbt_guest_config))
+    try {
+      dbt_execution_gpus = dbt_execution_gpu_ordinals(abs_config, dbt_guest_config);
+    } catch (const std::exception &e) {
+      std::cerr << std::format("rocjitsu: failed to load DBT execution topology: {}\n", e.what());
+      return 1;
+    }
+    if (!resolve_host_gpu(&dbt_guest_config, dbt_execution_gpus))
       return 1;
     hooks_path = find_hooks_lib();
     if (hooks_path.empty()) {
@@ -607,7 +553,7 @@ int main(int argc, char *argv[]) {
       return 1;
     }
   } else {
-    if (!write_config_file(abs_config, my_pid)) {
+    if (!rocjitsu::config::write_dbt_runtime_config_handoff(abs_config, dbt_guest_config, my_pid)) {
       std::cerr << "rocjitsu: failed to write config file\n";
       cleanup_runtime_files(my_pid);
       return 1;
@@ -617,9 +563,18 @@ int main(int argc, char *argv[]) {
   rocjitsu::cli::LaunchEnvironment launch_environment;
   rocjitsu::cli::prepend_launch_preloads(launch_environment, lib_path);
   if (dbt_guest_mode) {
-    if (std::optional<std::string> rocr_visible_devices =
-            expanded_rocr_visible_devices(dbt_guest_config))
-      launch_environment.set("ROCR_VISIBLE_DEVICES", *rocr_visible_devices);
+    std::optional<std::string_view> child_rocr_visible = environment_value("ROCR_VISIBLE_DEVICES");
+    std::optional<std::string> expanded_rocr_visible =
+        rocjitsu::cli::expanded_rocr_visible_devices(dbt_execution_gpus, child_rocr_visible);
+    if (expanded_rocr_visible) {
+      launch_environment.set("ROCR_VISIBLE_DEVICES", *expanded_rocr_visible);
+      child_rocr_visible = *expanded_rocr_visible;
+    }
+    if (std::optional<rocjitsu::cli::VisibilityOverride> client_visible =
+            rocjitsu::cli::normalized_client_visible_devices(
+                dbt_execution_gpus, child_rocr_visible, environment_value("HIP_VISIBLE_DEVICES"),
+                environment_value("CUDA_VISIBLE_DEVICES"), dbt_guest_config.host.gpu_id))
+      launch_environment.set(client_visible->name, client_visible->value);
     // The HSA hook still uses the legacy tools callback path. Disable only the
     // rocprofiler-register table-delivery path so it cannot validate an
     // unshadowed table before rocjitsu installs guest-agent wrappers.

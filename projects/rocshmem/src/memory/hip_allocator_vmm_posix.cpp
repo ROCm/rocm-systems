@@ -35,6 +35,24 @@
 #include <sys/prctl.h>
 #include <sys/utsname.h>
 
+// Syscall numbers for pidfd_open (Linux 5.3+) and pidfd_getfd (Linux 5.6+).
+// Older kernel headers may not define these; provide the x86-64 values as a
+// fallback so the code compiles — the runtime kernel check will gate their use.
+#ifndef __NR_pidfd_open
+#  if defined(__x86_64__)
+#    define __NR_pidfd_open 434
+#  elif defined(__aarch64__)
+#    define __NR_pidfd_open 434
+#  endif
+#endif
+#ifndef __NR_pidfd_getfd
+#  if defined(__x86_64__)
+#    define __NR_pidfd_getfd 438
+#  elif defined(__aarch64__)
+#    define __NR_pidfd_getfd 438
+#  endif
+#endif
+
 namespace rocshmem {
 
 // Static member definitions
@@ -136,7 +154,7 @@ HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFre
 
   if (!vmm_supported) {
     LOG_ERROR_ABORT("Virtual Memory Management (VMM) is not supported on device %d. "
-                    "The USE_HEAP_DEVICE_VMM_POSIX allocator requires a GPU with VMM support. "
+                    "The vmm_posix allocator requires a GPU with VMM support. "
                     "Please use a different memory allocator.", device_id);
   }
 
