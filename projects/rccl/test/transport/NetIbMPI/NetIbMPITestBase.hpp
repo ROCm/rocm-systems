@@ -470,14 +470,30 @@ protected:
         ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, request), ncclSuccess);
     }
 
-    // Returns true if the IB device has at least one routable GID (non-zero IPv4-mapped
-    // or global-scope IPv6). NICs with only link-local GIDs cannot do cross-node RDMA.
-    static bool HasRoutableGid(const char* devName) {
+    // Returns true unless the port is RoCE with no routable GID: such a port completes QP
+    // setup and then silently drops cross-node RDMA traffic. On InfiniBand every GID is
+    // link-local, so the GID table says nothing about routability there. When the port
+    // cannot be inspected, assume it is usable rather than dropping the NIC.
+    static bool CanRouteCrossNode(const char* devName, int port) {
         char path[PATH_MAX];
-        if (snprintf(path, sizeof(path), "/sys/class/infiniband/%s/ports/1/gids", devName) >= PATH_MAX)
-            return false;
+        if (snprintf(path, sizeof(path), "/sys/class/infiniband/%s/ports/%d/link_layer",
+                     devName, port) >= PATH_MAX)
+            return true;
+
+        FILE* linkLayerFile = fopen(path, "r");
+        if (!linkLayerFile) return true;
+
+        char linkLayer[32] = {};
+        fscanf(linkLayerFile, "%31s", linkLayer);
+        fclose(linkLayerFile);
+
+        if (strcmp(linkLayer, "Ethernet") != 0) return true;
+
+        snprintf(path, sizeof(path), "/sys/class/infiniband/%s/ports/%d/gids", devName, port);
+
         DIR* d = opendir(path);
-        if (!d) return false;
+        if (!d) return true;
+
         struct dirent* ent;
         bool found = false;
         while ((ent = readdir(d)) != nullptr) {
@@ -501,8 +517,8 @@ protected:
     // Helper: create a merged device from N physical NICs.
     // Returns merged device index, or -1 if no suitable group found.
     // Iterates speed groups (fastest-first by enumeration order). Within each
-    // group, slides a window of nNicsToMerge; skips windows containing a NIC
-    // without a routable GID (those can set up QPs but drop RDMA traffic cross-node).
+    // group, slides a window of nNicsToMerge; skips windows containing a NIC that
+    // cannot carry cross-node RDMA traffic.
     // speedGroupStart: index into physDevs indicating which speed group to try first.
     // rank: MPI rank of this process
     int CreateMergedDevice(int nNicsToMerge, int rank, int speedGroupStart = 0)
@@ -539,8 +555,8 @@ protected:
         for (int w = 0; w + nNicsToMerge <= (int)compat.size(); w++) {
             bool routable = true;
             for (int i = 0; i < nNicsToMerge; i++) {
-                const char* name = props[compat[w + i]].name;
-                if (name && !HasRoutableGid(name)) { routable = false; break; }
+                const ncclNetProperties_t& dev = props[compat[w + i]];
+                if (dev.name && !CanRouteCrossNode(dev.name, dev.port)) { routable = false; break; }
             }
             if (!routable) continue;
 
