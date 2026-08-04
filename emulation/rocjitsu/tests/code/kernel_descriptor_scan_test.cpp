@@ -111,6 +111,16 @@ TEST(KernelDescriptorScan, WrappingSymtabRangeIsRejected) {
   EXPECT_TRUE(scan_kernel_descriptors({image.data(), image.size()}, text_off, text_sz).empty());
 }
 
+// A `.kd` whose 64-byte descriptor extends past its owning section's sh_size into the
+// adjacent section is rejected: the descriptor must be bounded by its section, not just
+// the image, so it cannot be returned (and later mutated) across the section boundary.
+TEST(KernelDescriptorScan, DescriptorCrossingOwningSectionIsRejected) {
+  const std::vector<uint32_t> code = {kMovV3V2, 0xbf810000u};
+  const auto [text_off, text_sz] = clean_text_coords(code);
+  const auto image = make_gfx950_kd_crossing_section_elf(code, /*private_bytes=*/64);
+  EXPECT_TRUE(scan_kernel_descriptors({image.data(), image.size()}, text_off, text_sz).empty());
+}
+
 // When no section matches the requested (text_offset, text_size), the walk cannot
 // resolve .text's base address and returns nothing.
 TEST(KernelDescriptorScan, NoMatchingTextSectionReturnsEmpty) {
