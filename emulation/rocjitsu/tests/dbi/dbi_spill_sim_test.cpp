@@ -81,6 +81,26 @@ constexpr uint32_t kWaveSize = 64;
 constexpr uint32_t kSentinel = 7;  // Inline-const value placed into the spilled reg (1..64).
 constexpr uint32_t kSentinel2 = 9; // Distinct value for a second reg, to catch swapped restores.
 
+// v_add_u32 (gfx9) / v_add_nc_u32 (gfx11) vdst, src0, v{vsrc1}: a VOP2 that reads two
+// operands and writes one VGPR. src0 is the 9-bit VOP2 src field (VGPR = 256 + index, SGPR
+// = index); vsrc1 and vdst are VGPR indices. Reading a register as a source keeps it live
+// across the anchor without clobbering it -- used to pin many registers live at once.
+[[nodiscard]] uint32_t build_v_add_u32(uint16_t vdst, uint16_t src0, uint16_t vsrc1,
+                                       rj_code_arch_t arch) {
+  const uint8_t d = static_cast<uint8_t>(vdst);
+  const uint8_t s1 = static_cast<uint8_t>(vsrc1);
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::build_vop2(cdna3::kVAddU32Vop2, {.src0 = src0, .vsrc1 = s1, .vdst = d})[0];
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::build_vop2(cdna4::kVAddU32Vop2, {.src0 = src0, .vsrc1 = s1, .vdst = d})[0];
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::build_vop2(rdna4::kVAddNcU32Vop2, {.src0 = src0, .vsrc1 = s1, .vdst = d})[0];
+  default:
+    throw util::UnimplementedInst("v_add_u32 for target architecture");
+  }
+}
+
 // Minimal single-CU simulator (CDNA3, CDNA4, or RDNA4, selected by the constructor
 // arch) that lays out a kernel descriptor + code in GPU memory (AMDHSA ABI), dispatches
 // one workgroup, runs to completion, and reads back a VGPR. Self-contained so this
@@ -204,7 +224,7 @@ protected:
     const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
     // v_mov v2, K ; v_mov v3, v2 (ANCHOR at offset 4, v2 live) ; s_endpgm.
     auto target = test::make_amdgpu_kernel_elf(
-        {test::make_mov_v2_inline(kSentinel), kMovV3V2, endpgm}, /*private_bytes=*/64,
+        {test::make_mov_vgpr_inline(2, kSentinel), kMovV3V2, endpgm}, /*private_bytes=*/64,
         /*granulated_sgpr_count=*/3, a_.e_flags);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {kMovV2Zero, setpc}, a_.e_flags);
 
@@ -541,6 +561,120 @@ TEST_F(DbiRdna4TwoSgprSpillSimFixture, BothSpilledSgprsSurviveClobberingProbe) {
   expect_both_sgprs_survive();
 }
 
+// A live+clobbered SGPR bridged through a *spilled* VGPR (reused bridge), on CDNA3/CDNA4/
+// RDNA4. When no VGPR in the kernel's allocation is dead, the SGPR bridge reuses a clobbered
+// VGPR that is itself being spilled; the epilogue must restore the SGPR (readlane out of the
+// bridge) before it reloads the bridge VGPR's own value. A swapped reload would leave the
+// bridge holding the writelaned scalar in lane 0. Runtime counterpart of the static
+// PlanSgprSpillsReusesSpilledBridgeWhenNoneDead, which only checks bridge *selection*.
+//
+// The kernel allocates the minimum 8 VGPRs (encoding granule 8) and keeps all of v0-v7 live
+// at the anchor via an add chain that reads each without writing v0, so the bridge search
+// finds no dead VGPR in [0,8) and must reuse spilled v0. The probe clobbers v0 and s8 with
+// distinct sentinels (v0 = kSentinel, s8 = kSentinel2): a correct restore leaves v0 = kSentinel
+// on every lane; a swapped reload leaves v0[lane 0] = kSentinel2 (s8's writelaned value).
+class DbiReusedBridgeSpillSimBase : public ::testing::Test {
+protected:
+  explicit DbiReusedBridgeSpillSimBase(const SpillSimArch &a) : a_(a) {}
+
+  void SetUp() override {
+    const uint32_t endpgm = build_s_endpgm(a_.arch);
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    const uint32_t mov_s8_k =
+        build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel2), a_.arch);
+    constexpr uint16_t kVgprSrc = 256; // VOP2 src field: VGPR = 256 + index.
+    auto vadd = [&](uint16_t d, uint16_t s0, uint16_t s1) {
+      return build_v_add_u32(d, s0, s1, a_.arch);
+    };
+    // v_mov v0,K ; s_mov s8,K2 ; then an add chain (ANCHOR at offset 8) that reads v0..v7
+    // and s8 -- keeping all eight VGPRs and s8 live -- while writing only v1/v3/v5/v7, so v0
+    // and s8 stay intact for readback. s_endpgm.
+    auto target = test::make_amdgpu_kernel_elf(
+        {test::make_mov_vgpr_inline(0, kSentinel), mov_s8_k, vadd(1, kVgprSrc + 0, 1),
+         vadd(3, kVgprSrc + 2, 3), vadd(5, kVgprSrc + 4, 5), vadd(7, kVgprSrc + 6, 7),
+         vadd(1, kSpilledSgpr, 1), endpgm},
+        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+    auto probe = test::make_amdgpu_probe_elf(
+        "rj_test_probe", {test::make_mov_vgpr_inline(0, 0), kMovS8Zero, setpc}, a_.e_flags);
+
+    AmdGpuCodeObject obj(target.data(), target.size());
+    AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+    ASSERT_TRUE(obj.is_valid());
+    ASSERT_TRUE(probe_obj.is_valid());
+
+    Instrumentor instr(obj, a_.arch);
+    InstrumentationPoint pt;
+    pt.anchor_offset = 8; // first add: reads v0; the chain keeps v0-v7 and s8 live.
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    instr.add_point(pt);
+
+    auto result = instr.patch_with_debug_summaries();
+    ASSERT_TRUE(result.errors.empty())
+        << (result.errors.empty() ? std::string{} : result.errors.front());
+    ASSERT_EQ(result.patches.size(), 1u);
+    ASSERT_TRUE(result.patches[0].is_probe_call);
+
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    patched_text_ = test::section_words(patched, ".text");
+    ASSERT_FALSE(patched_text_.empty());
+    patched_scratch_ = test::patched_private_segment_size(patched);
+  }
+
+  // The reused bridge is restored in the right order: v0 (the spilled bridge) reads its own
+  // sentinel on every lane. A swapped reload -- bridge VGPR reloaded before the SGPR readlane
+  // -- would leave lane 0 holding s8's sentinel. The target ELF's descriptor declares 8 VGPRs
+  // (make_amdgpu_kernel_elf leaves the VGPR-count field 0 -> (0+1)*8), so the patch-time bridge
+  // window is [0,8); with v0-v7 all live there is no dead bridge and the spiller must reuse
+  // spilled v0. Scratch grows by v0's and s8's slots (64 -> 72).
+  void expect_reused_bridge_restored_in_order() {
+    EXPECT_EQ(patched_scratch_, 72u) << "descriptor scratch must grow for the v0 and s8 slots";
+    // Guard non-triviality: the bridge must be the reused spilled v0, not a dead VGPR. A live
+    // VGPR can only become the bridge via the reuse fallback, so an epilogue readlane pulling
+    // s8 out of v0 proves the reused-bridge path was taken.
+    const auto readlane = build_v_readlane_b32(kSpilledSgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
+    EXPECT_NE(
+        std::search(patched_text_.begin(), patched_text_.end(), readlane.begin(), readlane.end()),
+        patched_text_.end())
+        << "SGPR bridge is not the reused spilled v0";
+    DbiSim sim(a_.sim_arch, a_.wave_size);
+    const std::vector<uint32_t> v0 =
+        sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/0);
+    ASSERT_EQ(v0.size(), a_.wave_size) << "kernel did not run to completion (no dispatched wave)";
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+      EXPECT_EQ(v0[lane], kSentinel)
+          << "lane " << lane << ": bridge v0 not restored; a swapped reload corrupts lane 0";
+  }
+
+  SpillSimArch a_;
+  std::vector<uint32_t> patched_text_;
+  uint32_t patched_scratch_ = 0;
+};
+
+class DbiCdna3ReusedBridgeSpillSimFixture : public DbiReusedBridgeSpillSimBase {
+protected:
+  DbiCdna3ReusedBridgeSpillSimFixture() : DbiReusedBridgeSpillSimBase(kCdna3SpillArch) {}
+};
+class DbiCdna4ReusedBridgeSpillSimFixture : public DbiReusedBridgeSpillSimBase {
+protected:
+  DbiCdna4ReusedBridgeSpillSimFixture() : DbiReusedBridgeSpillSimBase(kCdna4SpillArch) {}
+};
+class DbiRdna4ReusedBridgeSpillSimFixture : public DbiReusedBridgeSpillSimBase {
+protected:
+  DbiRdna4ReusedBridgeSpillSimFixture() : DbiReusedBridgeSpillSimBase(kRdna4SpillArch) {}
+};
+
+TEST_F(DbiCdna3ReusedBridgeSpillSimFixture, ReusedSpilledBridgeRestoredBeforeOwnReload) {
+  expect_reused_bridge_restored_in_order();
+}
+TEST_F(DbiCdna4ReusedBridgeSpillSimFixture, ReusedSpilledBridgeRestoredBeforeOwnReload) {
+  expect_reused_bridge_restored_in_order();
+}
+TEST_F(DbiRdna4ReusedBridgeSpillSimFixture, ReusedSpilledBridgeRestoredBeforeOwnReload) {
+  expect_reused_bridge_restored_in_order();
+}
+
 // EXEC preservation + full-mask spilling on CDNA3 (wave64), CDNA4 (wave64), and
 // RDNA4 (wave32). The partial-EXEC-mask scenario is wave-size-specific, so it rides
 // a per-arch config (ExecSimArch) with thin DbiCdna3*/DbiCdna4*/DbiRdna4* wrappers.
@@ -752,10 +886,10 @@ protected:
   void SetUp() override {
     const uint32_t endpgm = build_s_endpgm(a_.base.arch);
     const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch);
-    const uint32_t mov_v2_k = test::make_mov_v2_inline(kSentinel); // v_mov v2, K (all lanes)
-    const uint32_t mov_v3_0 = 0x7E060280u;                         // v_mov v3, 0
-    const uint32_t mov_v4_v2 = 0x7E080302u;                        // v_mov v4, v2 (v2 live)
-    const uint32_t mov_v3_v2 = kMovV3V2;                           // v_mov v3, v2
+    const uint32_t mov_v2_k = test::make_mov_vgpr_inline(2, kSentinel); // v_mov v2, K (all lanes)
+    const uint32_t mov_v3_0 = 0x7E060280u;                              // v_mov v3, 0
+    const uint32_t mov_v4_v2 = 0x7E080302u;                             // v_mov v4, v2 (v2 live)
+    const uint32_t mov_v3_v2 = kMovV3V2;                                // v_mov v3, v2
     // Probe widens EXEC to all lanes, then clobbers v2 on all of them.
     const uint32_t probe_widen = build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch),
                                                  scalar_inline_neg_one(a_.base.arch), a_.base.arch);
@@ -897,10 +1031,10 @@ protected:
   void SetUp() override {
     const uint32_t endpgm = build_s_endpgm(a_.base.arch);
     const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch);
-    const uint32_t mov_v5_0 = 0x7E0A0280u;                         // v_mov v5, 0 (all lanes)
-    const uint32_t mov_v5_k = 0x7E0A0200u | (128u + kSentinel);    // v_mov v5, K (probe marker)
-    const uint32_t mov_v2_k = test::make_mov_v2_inline(kSentinel); // v_mov v2, K (spilled reg)
-    const uint32_t mov_v4_v2 = 0x7E080302u;                        // v_mov v4, v2 (v2 live)
+    const uint32_t mov_v5_0 = 0x7E0A0280u;                      // v_mov v5, 0 (all lanes)
+    const uint32_t mov_v5_k = 0x7E0A0200u | (128u + kSentinel); // v_mov v5, K (probe marker)
+    const uint32_t mov_v2_k = test::make_mov_vgpr_inline(2, kSentinel); // v_mov v2, K (spilled reg)
+    const uint32_t mov_v4_v2 = 0x7E080302u;                             // v_mov v4, v2 (v2 live)
     // Probe marks v5 per lane, then clobbers v2 (forcing the spill + EXEC toggles).
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {mov_v5_k, kMovV2Zero, setpc},
                                              a_.base.e_flags);

@@ -47,11 +47,11 @@ inline constexpr uint32_t kMovS8Zero = 0xbe880080u; // s_mov_b32 s8, 0  -> clobb
 inline constexpr uint32_t kMovV4S9 = 0x7E080209u;   // v_mov_b32 v4, s9 -> reads s9 (s9 live).
 inline constexpr uint32_t kMovS9Zero = 0xbe890080u; // s_mov_b32 s9, 0  -> clobbers s9.
 
-// v_mov_b32 v2, <inline const K> for K in [0, 64]. Inline constant 0 is encoded
-// as 128, and 1..64 as 129..192, in the src0 field (bits [8:0]).
-[[nodiscard]] inline constexpr uint32_t make_mov_v2_inline(uint32_t k) {
+// v_mov_b32 v{dst}, <inline const K> for K in [0, 64]. vdst occupies bits [24:17];
+// inline constant 0 is encoded as 128, and 1..64 as 129..192, in the src0 field (bits [8:0]).
+[[nodiscard]] inline constexpr uint32_t make_mov_vgpr_inline(uint16_t dst, uint32_t k) {
   const uint32_t src0 = (k == 0) ? 128u : (128u + k); // 129..192 for 1..64.
-  return 0x7E040200u | (src0 & 0x1FFu);
+  return 0x7E000200u | (static_cast<uint32_t>(dst) << 17) | (src0 & 0x1FFu);
 }
 
 // s_setpc_b64 s[30:31] (GFX9 family): a minimal probe body tail that returns
