@@ -21,28 +21,34 @@ config["METRIC_COMPARE"] = False
 num_devices = 1
 
 
-PC_SAMPLING_HOST_TRAP_FILES = sorted([
-    "ps_file_results.json",
-    "sysinfo.csv",
-])
-
-PC_SAMPLING_STOCHASTIC_FILES = sorted([
-    "ps_file_results.json",
-    "sysinfo.csv",
-])
-
-
-def _assert_pc_sampling_files(file_dict, expected):
-    """Assert the PC sampling output file-set, matching the native collector's
-    ``<pid>_code_obj_info.json``.
-    """
-    keys = list(file_dict.keys())
-    code_obj = [k for k in keys if k.endswith("_code_obj_info.json")]
+def _assert_pc_sampling_files(file_dict):
+    """Assert PID-prefixed PC sampling and code-object output files."""
+    file_names = file_dict.keys()
+    code_obj = [
+        file_name
+        for file_name in file_names
+        if file_name.endswith("_code_obj_info.json")
+    ]
     assert len(code_obj) == 1, (
         f"expected exactly one *_code_obj_info.json, got {code_obj}"
     )
-    remaining = sorted(k for k in keys if k not in code_obj)
-    assert remaining == sorted(expected)
+    pc_sampling_results = [
+        file_name
+        for file_name in file_names
+        if file_name.endswith("_ps_file_results.json")
+    ]
+    assert len(pc_sampling_results) == 1, (
+        f"expected exactly one *_ps_file_results.json, got {pc_sampling_results}"
+    )
+
+    code_obj_pid = code_obj[0].split("_", maxsplit=1)[0]
+    pc_sampling_pid = pc_sampling_results[0].split("_", maxsplit=1)[0]
+    assert pc_sampling_pid.isdigit()
+    assert pc_sampling_pid == code_obj_pid
+
+    dynamic_files = {*code_obj, *pc_sampling_results}
+    remaining = file_names - dynamic_files
+    assert remaining == {"sysinfo.csv"}
 
 
 def is_pc_sampling_not_supported(output):
@@ -50,7 +56,15 @@ def is_pc_sampling_not_supported(output):
     To be called with the stdout + stderr after profiling.
     Check whether profiling output said PC sampling is not supported on the machine
     """
-    return "Given PC sampling configuration is not supported" in output
+    return any(
+        marker in output
+        for marker in (
+            # rocprof-compute's own pre-flight check against the agent configs
+            "is not supported on any of the agents on this system",
+            # rocprofiler-sdk, when it accepts the run and then rejects the config
+            "Given PC sampling configuration is not supported",
+        )
+    )
 
 
 def _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir):
@@ -92,7 +106,7 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute, monkeypat
 
     assert code == 0
     file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
-    _assert_pc_sampling_files(file_dict, PC_SAMPLING_HOST_TRAP_FILES)
+    _assert_pc_sampling_files(file_dict)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -130,7 +144,7 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute, monkeypa
 
     assert code == 0
     file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
-    _assert_pc_sampling_files(file_dict, PC_SAMPLING_STOCHASTIC_FILES)
+    _assert_pc_sampling_files(file_dict)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -264,7 +278,7 @@ def test_pc_sampling_profile_then_analyze(
 
     assert code == 0
     file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
-    _assert_pc_sampling_files(file_dict, PC_SAMPLING_HOST_TRAP_FILES)
+    _assert_pc_sampling_files(file_dict)
 
     code = binary_handler_analyze_rocprof_compute(
         [
@@ -358,7 +372,7 @@ def test_pc_sampling_with_sol_block(
 
     assert code == 0
     file_dict = common.check_csv_files(workload_dir, num_devices, 1)
-    _assert_pc_sampling_files(file_dict, PC_SAMPLING_HOST_TRAP_FILES)
+    _assert_pc_sampling_files(file_dict)
 
     assert common.check_file_pattern("- '21'", f"{workload_dir}/profiling_config.yaml")
     assert common.check_file_pattern("- '2'", f"{workload_dir}/profiling_config.yaml")
@@ -402,11 +416,10 @@ def test_load_pc_sampling_data_missing_or_empty_sources_return_empty() -> None:
     """Absent tool data and empty buffer records both yield empty frames."""
     workload = SimpleNamespace(filter_kernel_ids=[])
 
-    assert load_pc_sampling_data(workload, "none", "count", None).empty
-    assert load_pc_sampling_data(workload, "missing", "count", None).empty
+    assert load_pc_sampling_data(workload, "count", None).empty
 
     workload.filter_kernel_ids = [0, 1, 2]
-    assert load_pc_sampling_data(workload, "test", "count", None).empty
+    assert load_pc_sampling_data(workload, "count", None).empty
 
     empty_records = load_pc_sample_records({
         "buffer_records": {
@@ -429,32 +442,9 @@ def test_load_pc_sampling_data_out_of_bounds_kernel_warns(monkeypatch) -> None:
     }
 
     workload.filter_kernel_ids = [99]
-    result = load_pc_sampling_data(workload, "test", "count", tool_data)
+    result = load_pc_sampling_data(workload, "count", [tool_data])
 
     mock_warning.assert_called()
     call_args_str = str(mock_warning.call_args)
     assert "out of bounds" in call_args_str or "99" in call_args_str
     assert result.empty
-
-
-def test_load_pc_sampling_data_single_kernel_uses_workload_dfs(monkeypatch) -> None:
-    """A single-kernel filter reads the kernel name from workload.dfs[1]."""
-    per_kernel_calls = []
-
-    def record_per_kernel(*args, **kwargs):
-        per_kernel_calls.append((args, kwargs))
-        return pd.DataFrame()
-
-    monkeypatch.setattr(
-        "utils.parser.load_pc_sampling_data_per_kernel", record_per_kernel
-    )
-    workload = _kernel_top_workload()
-    tool_data = {
-        "buffer_records": {"pc_sample_stochastic": [{}], "pc_sample_host_trap": []}
-    }
-
-    workload.filter_kernel_ids = [1]
-    load_pc_sampling_data(workload, "test", "count", tool_data)
-
-    if per_kernel_calls:
-        assert "kernel_b" in str(per_kernel_calls[0])
