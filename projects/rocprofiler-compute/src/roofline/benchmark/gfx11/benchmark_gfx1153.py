@@ -5,7 +5,6 @@
 # benchmark_gfx1153.py
 #
 # Benchmarking class for all gfx1153 products
-# AMD Ryzen AI 7 / AI 5
 #
 # -----------------------------------------------------------------------------
 
