@@ -602,19 +602,19 @@ kernel_hardware_entry_offsets(std::span<const KdTranslation> kernels) {
   return offset <= image_size && size <= image_size - offset;
 }
 
-/// @brief Collect defined addressable symbol entries within one executable section.
+/// @brief Collect relocation-backed entries within one executable section.
 ///
-/// @details Kernel descriptors and relocation-backed function tables are the
-/// translator's primary executable roots. Defined STT_FUNC and STT_NOTYPE
-/// externally visible symbols supply conservative additional boundaries for
-/// descriptorless images and helpers: instructions immediately before such a
-/// symbol are not guaranteed to execute before the symbol target. Local labels
-/// are omitted because direct control-flow targets are recovered structurally
-/// and address-taken entries are recovered from relocations. Anonymous
-/// R_AMDGPU_RELATIVE64 addends into .text are runtime-dereferenced entries and
-/// supply the same boundary even without an owning table symbol.
+/// @details Kernel descriptors and relocation-backed function tables are
+/// collected by their owning subsystems. This helper adds ordinary text symbols
+/// demonstrably consumed through an allocated relocation and anonymous
+/// R_AMDGPU_RELATIVE64 addends into .text. Symbol visibility alone is not an
+/// executable-entry contract: ROCr ignores ordinary STT_FUNC/STT_NOTYPE symbols
+/// during executable symbol loading unless a relocation consumes them, and the
+/// patcher intentionally does not require unreferenced tooling/debug symbols to
+/// have output mappings. Keeping those symbols out of this set makes reachability,
+/// relocation, and final verification agree on which entries DBT preserves.
 [[nodiscard]] std::optional<std::vector<uint64_t>>
-text_external_block_leaders(std::span<const uint8_t> image, const Section &text) {
+text_relocation_block_leaders(std::span<const uint8_t> image, const Section &text) {
   if (!elf_image_contains(image, 0, sizeof(Elf64_Ehdr)))
     return std::nullopt;
 
@@ -630,32 +630,30 @@ text_external_block_leaders(std::span<const uint8_t> image, const Section &text)
   if (!shdrs.empty())
     std::memcpy(shdrs.data(), image.data() + ehdr.e_shoff, shdrs.size() * sizeof(Elf64_Shdr));
 
-  const auto text_it = std::ranges::find_if(shdrs, [&](const Elf64_Shdr &section) {
-    return section.sh_offset == text.sectionOffset() && section.sh_size == text.size();
-  });
-  if (text_it == shdrs.end())
+  const auto text_index = text.sectionHeaderIndex();
+  if (!text_index || *text_index >= shdrs.size())
     return std::nullopt;
-  const size_t text_index = static_cast<size_t>(text_it - shdrs.begin());
+  const Elf64_Shdr &text_header = shdrs[*text_index];
+  if (text_header.sh_type == SHT_NOBITS || text_header.sh_name != text.sectionHeaderNameIdx() ||
+      text_header.sh_flags != text.flags() || text_header.sh_addr != text.vaddr() ||
+      text_header.sh_offset != text.sectionOffset() || text_header.sh_size != text.size()) {
+    return std::nullopt;
+  }
 
   std::vector<uint64_t> leaders;
-  std::unordered_set<uint64_t> allocated_relocation_symbols;
-  const auto relocation_place_is_allocated = [&](const Elf64_Shdr &relocs,
-                                                 const Elf64_Rela &relocation) {
-    if (relocs.sh_info < shdrs.size() && (shdrs[relocs.sh_info].sh_flags & SHF_ALLOC) != 0)
-      return true;
-    if (ehdr.e_type != ET_DYN)
-      return false;
-    return std::ranges::any_of(shdrs, [&](const Elf64_Shdr &section) {
-      return (section.sh_flags & SHF_ALLOC) != 0 && relocation.r_offset >= section.sh_addr &&
-             relocation.r_offset - section.sh_addr < section.sh_size;
-    });
-  };
+  std::unordered_map<size_t, std::unordered_set<uint32_t>> allocated_relocation_symbols;
 
   for (size_t relocation_section_index = 0; relocation_section_index < shdrs.size();
        ++relocation_section_index) {
     const Elf64_Shdr &relocs = shdrs[relocation_section_index];
     if (relocs.sh_type != SHT_RELA)
       continue;
+    if (relocs.sh_info != SHN_UNDEF) {
+      if (relocs.sh_info >= shdrs.size())
+        return std::nullopt;
+      if ((shdrs[relocs.sh_info].sh_flags & SHF_ALLOC) == 0)
+        continue;
+    }
     if (relocs.sh_entsize != sizeof(Elf64_Rela) || relocs.sh_size % sizeof(Elf64_Rela) != 0 ||
         !elf_image_contains(image, relocs.sh_offset, relocs.sh_size)) {
       return std::nullopt;
@@ -667,7 +665,7 @@ text_external_block_leaders(std::span<const uint8_t> image, const Section &text)
       std::memcpy(&relocation,
                   image.data() + relocs.sh_offset + relocation_index * sizeof(Elf64_Rela),
                   sizeof(relocation));
-      if (!relocation_place_is_allocated(relocs, relocation))
+      if (!elf_relocation_place_is_allocated(ehdr, shdrs, relocs, relocation.r_offset))
         continue;
 
       const uint32_t relocation_type = elf_reloc_type(relocation.r_info);
@@ -675,8 +673,7 @@ text_external_block_leaders(std::span<const uint8_t> image, const Section &text)
       if (relocation_type == R_AMDGPU_ABS64 && symbol_index != 0) {
         if (relocs.sh_link >= shdrs.size())
           return std::nullopt;
-        allocated_relocation_symbols.insert((static_cast<uint64_t>(relocs.sh_link) << 32) |
-                                            symbol_index);
+        allocated_relocation_symbols[relocs.sh_link].insert(symbol_index);
       }
 
       if (ehdr.e_type != ET_DYN || relocation_type != R_AMDGPU_RELATIVE64 ||
@@ -692,30 +689,25 @@ text_external_block_leaders(std::span<const uint8_t> image, const Section &text)
     }
   }
 
-  for (size_t symtab_section_index = 0; symtab_section_index < shdrs.size();
-       ++symtab_section_index) {
+  for (const auto &[symtab_section_index, symbol_indices] : allocated_relocation_symbols) {
     const Elf64_Shdr &symtab = shdrs[symtab_section_index];
     if (symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM)
-      continue;
+      return std::nullopt;
     if (symtab.sh_entsize != sizeof(Elf64_Sym) || symtab.sh_size % sizeof(Elf64_Sym) != 0 ||
         !elf_image_contains(image, symtab.sh_offset, symtab.sh_size)) {
       return std::nullopt;
     }
 
     const size_t count = symtab.sh_size / sizeof(Elf64_Sym);
-    for (size_t symbol_index = 0; symbol_index < count; ++symbol_index) {
+    for (const uint32_t symbol_index : symbol_indices) {
+      if (symbol_index >= count)
+        return std::nullopt;
       Elf64_Sym symbol{};
       std::memcpy(&symbol, image.data() + symtab.sh_offset + symbol_index * sizeof(Elf64_Sym),
                   sizeof(symbol));
       const uint8_t symbol_type = elf_symbol_type(symbol.st_info);
-      const uint8_t symbol_bind = elf_symbol_bind(symbol.st_info);
-      const bool is_externally_visible =
-          symbol_bind == kElfSymbolBindGlobal || symbol_bind == kElfSymbolBindWeak;
-      const bool is_address_taken = allocated_relocation_symbols.contains(
-          (static_cast<uint64_t>(symtab_section_index) << 32) | symbol_index);
-      if (symbol.st_shndx != text_index ||
-          (symbol_type != kElfSymbolTypeFunc && symbol_type != kElfSymbolTypeNone) ||
-          (!is_externally_visible && !is_address_taken)) {
+      if (symbol.st_shndx != *text_index ||
+          (symbol_type != kElfSymbolTypeFunc && symbol_type != kElfSymbolTypeNone)) {
         continue;
       }
 
@@ -749,6 +741,14 @@ text_external_block_leaders(std::span<const uint8_t> image, const Section &text)
   return std::ranges::any_of(block_leaders, [&](uint64_t leader) {
     return leader >= text_size || !decoded_block_starts.contains(leader);
   });
+}
+
+[[nodiscard]] bool has_supported_executable_section_layout(const AmdGpuCodeObject &object) {
+  const auto &text = object.text_sections();
+  const auto &executable = object.allocated_executable_sections();
+  if (text.empty() && executable.empty())
+    return true;
+  return text.size() == 1 && executable.size() == 1 && text.front() == executable.front();
 }
 
 struct KernelTranslationScope {
@@ -2068,14 +2068,15 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
           "rewrite-discharge verification could not parse the final code object");
       return;
     }
-    if (output.text_sections().empty()) {
-      result.rewrite_discharge_verified = true;
-      return;
-    }
-    if (output.text_sections().size() != 1) {
+    if (!has_supported_executable_section_layout(output)) {
       append_rewrite_discharge_error(
           result.diagnostics,
-          "rewrite-discharge verification requires exactly one executable text section");
+          "rewrite-discharge verification requires exactly one allocated executable section "
+          "named .text");
+      return;
+    }
+    if (output.allocated_executable_sections().empty()) {
+      result.rewrite_discharge_verified = true;
       return;
     }
 
@@ -2098,7 +2099,8 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
 
     KernelDescriptorTranslator descriptor_parser(host_arch_, host_arch_);
     const auto descriptor_translations = descriptor_parser.translate_image(
-        image, text->sectionOffset(), text->size(), KernelDescriptorTranslationOptions{});
+        image, text->sectionOffset(), text->size(), KernelDescriptorTranslationOptions{},
+        text->sectionHeaderIndex());
     auto block_leaders = kernel_block_leaders(descriptor_translations, text_bytes);
 
     for (const RelocationFunctionTable &table : discover_relocation_function_tables(output)) {
@@ -2106,14 +2108,15 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
         block_leaders.push_back(entry.target_text_offset);
     }
 
-    const auto external_leaders = text_external_block_leaders(image, *text);
-    if (!external_leaders) {
+    const auto relocation_leaders = text_relocation_block_leaders(image, *text);
+    if (!relocation_leaders) {
       append_rewrite_discharge_error(
           result.diagnostics,
           "rewrite-discharge verification could not recover final executable entries");
       return;
     }
-    block_leaders.insert(block_leaders.end(), external_leaders->begin(), external_leaders->end());
+    block_leaders.insert(block_leaders.end(), relocation_leaders->begin(),
+                         relocation_leaders->end());
     std::ranges::sort(block_leaders);
     block_leaders.erase(std::ranges::unique(block_leaders).begin(), block_leaders.end());
 
@@ -2173,6 +2176,37 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                  "code object is too small to contain an ELF header");
     return leave_unchanged();
   }
+  if (!obj.is_valid()) {
+    append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                 "translation could not parse input code object");
+    return leave_unchanged();
+  }
+
+  // A same-architecture gfx1250 translation is direction-specific: A0 and B0
+  // share an ELF machine ID, so both revisions must be given. Enforce this here
+  // as well as in the C API.
+  if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250) {
+    if (options_.input_revision == ProcessorRevision::Unspecified ||
+        options_.output_revision == ProcessorRevision::Unspecified) {
+      append_error(result.diagnostics, DiagnosticKind::Legalization,
+                   "gfx1250 same-target translation requires both input and output silicon "
+                   "revisions");
+      return leave_unchanged();
+    }
+    // Only the B0-to-A0 direction is implemented.
+    if (options_.input_revision == ProcessorRevision::Gfx1250A0 &&
+        options_.output_revision == ProcessorRevision::Gfx1250B0) {
+      append_error(result.diagnostics, DiagnosticKind::Legalization,
+                   "gfx1250 A0-to-B0 translation is not supported");
+      return leave_unchanged();
+    }
+  }
+
+  if (!has_supported_executable_section_layout(obj)) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "translation requires exactly one allocated executable section named .text");
+    return leave_unchanged();
+  }
 
   CodeObjectPatcher patcher(obj);
   auto text = patcher.text_bytes();
@@ -2211,9 +2245,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   const bool can_emit_sidecar_descriptors = supports_virtual_lds_sidecars(guest_arch_, host_arch_);
   KernelDescriptorTranslationOptions initial_descriptor_options;
   initial_descriptor_options.allow_oversized_lds = can_emit_sidecar_descriptors;
-  auto descriptor_translations =
-      descriptor_translator.translate_image(patcher.image_bytes(), patcher.text_offset(),
-                                            patcher.text_size(), initial_descriptor_options);
+  auto descriptor_translations = descriptor_translator.translate_image(
+      patcher.image_bytes(), patcher.text_offset(), patcher.text_size(), initial_descriptor_options,
+      obj.text_sections().front()->sectionHeaderIndex());
   bool descriptors_supported = true;
   for (const auto &translation : descriptor_translations) {
     if (translation.supported || !skip_failed_kernels)
@@ -2244,19 +2278,25 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
 
   const auto relocation_function_tables = discover_relocation_function_tables(obj);
   auto block_leaders = kernel_block_leaders(descriptor_translations, text);
+  std::vector<uint64_t> required_external_entries;
   for (const RelocationFunctionTable &table : relocation_function_tables) {
     for (const RelocationFunctionPointer &entry : table.entries)
-      block_leaders.push_back(entry.target_text_offset);
+      required_external_entries.push_back(entry.target_text_offset);
   }
-  const auto external_leaders =
-      text_external_block_leaders(patcher.image_bytes(), *obj.text_sections().front());
-  if (!external_leaders) {
+  const auto relocation_leaders =
+      text_relocation_block_leaders(patcher.image_bytes(), *obj.text_sections().front());
+  if (!relocation_leaders) {
     append_error(result.diagnostics, DiagnosticKind::Legalization,
-                 "translation could not recover executable entries from ELF symbols and "
-                 "relocations");
+                 "translation could not recover relocation-backed executable entries");
     return leave_unchanged();
   }
-  block_leaders.insert(block_leaders.end(), external_leaders->begin(), external_leaders->end());
+  required_external_entries.insert(required_external_entries.end(), relocation_leaders->begin(),
+                                   relocation_leaders->end());
+  std::ranges::sort(required_external_entries);
+  required_external_entries.erase(std::ranges::unique(required_external_entries).begin(),
+                                  required_external_entries.end());
+  block_leaders.insert(block_leaders.end(), required_external_entries.begin(),
+                       required_external_entries.end());
   std::ranges::sort(block_leaders);
   block_leaders.erase(std::ranges::unique(block_leaders).begin(), block_leaders.end());
 
@@ -2699,6 +2739,30 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                                                           adopted_roots.end());
   const std::unordered_set<uint64_t> adopted_return_offsets =
       adopted_root_return_offsets(block_index, adopted_roots, text);
+
+  // An address consumed by loaded data must survive translation even when no direct branch reaches
+  // it. Function-table targets may have been adopted into the emitted scopes above; fail before
+  // lowering only when an entry remains outside every scope. The patcher would also reject its
+  // missing offset mapping during commit, but enforcing the contract here keeps reachability,
+  // emission, and verification in agreement and avoids doing a complete translation that cannot
+  // commit.
+  if (!required_external_entries.empty()) {
+    std::unordered_set<uint64_t> uncovered_external_entries(required_external_entries.begin(),
+                                                            required_external_entries.end());
+    for (const KernelTranslationScope &scope : scopes) {
+      for (const BasicBlock *block : scope.blocks) {
+        if (block != nullptr)
+          uncovered_external_entries.erase(block->start_offset());
+      }
+    }
+    if (!uncovered_external_entries.empty()) {
+      const uint64_t uncovered_entry = *std::ranges::min_element(uncovered_external_entries);
+      append_error(result.diagnostics, DiagnosticKind::Legalization,
+                   "relocation-backed executable entry is outside every kernel translation scope",
+                   uncovered_entry);
+      return leave_unchanged();
+    }
+  }
 
   const size_t expected_scope_count = kernel_translation_scope_count(descriptor_translations);
   if (scopes.size() != expected_scope_count) {

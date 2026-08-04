@@ -123,6 +123,25 @@ register either a residual predicate or a no-success contract; a no-success rule
 that later begins emitting output fails its registry contract instead of
 silently escaping verification.
 
+Translation and final verification require every runtime-loaded executable byte
+to reside in one `SHF_ALLOC | SHF_EXECINSTR` section named `.text`. Inputs with
+another allocated executable section, or with executable bytes only in a
+differently named section, fail closed instead of leaving an unaudited stream in
+the output object.
+
+Executable entries use the same preservation contract as translation and ELF
+patching: kernel descriptors, relocation-backed function tables, allocated
+`R_AMDGPU_ABS64` relocations to ordinary text symbols, and
+`R_AMDGPU_RELATIVE64` addends into `.text`. Global or weak
+`STT_FUNC`/`STT_NOTYPE` symbols without such a runtime reference are symbol-table
+metadata, not independent execution roots. They do not acquire a translation
+scope or an output-offset requirement merely because of their binding.
+Relocation sections explicitly targeting non-allocated sections are likewise
+metadata and do not create executable entries. If a runtime-referenced source
+entry is emitted at multiple output placements, materialization fails closed:
+neither a named symbol nor a relative addend can safely select one kernel-local
+clone on behalf of every caller.
+
 This is an opt-in offline development audit. The implementation lives beside
 translation because it needs the final materialized ELF and decoded CFG, while
 `rj_dbt_translate` is the enabling consumer. Runtime translation leaves the

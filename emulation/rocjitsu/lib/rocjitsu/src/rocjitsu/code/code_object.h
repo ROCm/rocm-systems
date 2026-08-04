@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -79,6 +80,10 @@ public:
   /// @returns String table index.
   virtual uint32_t sectionHeaderNameIdx() const = 0;
 
+  /// @brief Index of this section in its owning ELF section-header table.
+  /// @returns Section index when the section is backed by ELF metadata.
+  virtual std::optional<size_t> sectionHeaderIndex() const { return std::nullopt; }
+
   /// @brief File offset of this section in the ELF image.
   /// @returns Byte offset from the start of the file.
   virtual uint64_t sectionOffset() const = 0;
@@ -105,6 +110,12 @@ public:
   /// @brief .text sections containing executable machine code.
   /// @returns Vector of pointers to .text sections.
   const std::vector<const Section *> &text_sections() const { return text_sections_; }
+
+  /// @brief Runtime-loaded sections containing executable bytes.
+  /// @returns Sections carrying both SHF_ALLOC and SHF_EXECINSTR.
+  const std::vector<const Section *> &allocated_executable_sections() const {
+    return allocated_executable_sections_;
+  }
 
   /// @brief .rodata sections containing read-only data.
   /// @returns Vector of pointers to .rodata sections.
@@ -189,6 +200,7 @@ protected:
   std::unique_ptr<Header> header_;
   std::vector<std::unique_ptr<Section>> sections_;
   std::vector<const Section *> text_sections_;
+  std::vector<const Section *> allocated_executable_sections_;
   std::vector<const Section *> rodata_sections_;
 };
 

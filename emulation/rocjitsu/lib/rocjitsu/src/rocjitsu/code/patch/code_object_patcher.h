@@ -189,6 +189,7 @@ public:
 
 private:
   std::vector<uint8_t> image_;
+  std::optional<size_t> text_section_index_;
   uint64_t text_offset_;
   uint64_t text_size_;
   uint64_t text_vaddr_;

@@ -7,6 +7,7 @@
 #include "rocjitsu/code/rj_code.h"
 
 #include <cstdint>
+#include <span>
 
 namespace rocjitsu {
 
@@ -339,6 +340,30 @@ struct Elf64_Rela {
   uint64_t r_info;
   int64_t r_addend;
 };
+
+/// @brief Return whether a relocation record applies to storage loaded at runtime.
+///
+/// Relocation sections with an explicit sh_info target inherit that section's allocation
+/// state. Generic ET_DYN relocation sections use SHN_UNDEF and identify their target storage
+/// through each record's virtual r_offset instead. Keeping this ABI rule here prevents entry
+/// discovery and final ELF patching from disagreeing about debug-only relocation metadata.
+[[nodiscard]] inline bool elf_relocation_place_is_allocated(const Elf64_Ehdr &ehdr,
+                                                            std::span<const Elf64_Shdr> shdrs,
+                                                            const Elf64_Shdr &relocs,
+                                                            uint64_t relocation_offset) {
+  if (relocs.sh_info != SHN_UNDEF) {
+    return relocs.sh_info < shdrs.size() && (shdrs[relocs.sh_info].sh_flags & SHF_ALLOC) != 0;
+  }
+  if (ehdr.e_type != ET_DYN)
+    return false;
+  for (const Elf64_Shdr &section : shdrs) {
+    if ((section.sh_flags & SHF_ALLOC) != 0 && relocation_offset >= section.sh_addr &&
+        relocation_offset - section.sh_addr < section.sh_size) {
+      return true;
+    }
+  }
+  return false;
+}
 
 } // namespace rocjitsu
 

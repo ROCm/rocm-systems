@@ -3633,6 +3633,108 @@ TEST(BinaryTranslatorE2E, DuplicatesSharedReachableBlocksPerKernel) {
   EXPECT_EQ(target_words[second_entry_word + 1], kCdna4SEndpgm);
 }
 
+TEST(BinaryTranslatorE2E, RejectsAmbiguousRuntimeEntryClonedAcrossKernelScopes) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_GFX1250), // kernel0 -> helper 0x08.
+      rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_GFX1250), // kernel1 -> helper 0x08.
+      kGfx1250SEndpgm,
+  };
+  for (const auto relocation : {rocjitsu::test_support::TestRuntimeTextRelocation::Abs64,
+                                rocjitsu::test_support::TestRuntimeTextRelocation::Relative64}) {
+    SCOPED_TRACE(relocation == rocjitsu::test_support::TestRuntimeTextRelocation::Abs64 ? "ABS64"
+                                                                                       : "RELATIVE64");
+    auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_two_kernel_descriptors(
+        words, rocjitsu::test_support::TestRuntimeTextReference{
+                   .relocation = relocation,
+                   .target_text_offset = 2 * sizeof(uint32_t),
+               });
+    rocjitsu::write_value_for_test<uint32_t>(image, offsetof(rocjitsu::Elf64_Ehdr, e_flags),
+                                             rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250);
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    const auto result = translator.translate(source);
+
+    EXPECT_FALSE(result.ok());
+    EXPECT_EQ(result.elf_bytes, image);
+    EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::ResourceLimit,
+                                               "relocated .text could not be materialized safely"));
+  }
+}
+
+TEST(BinaryTranslatorE2E, PreservesUniqueRelocationBackedTextEntries) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint64_t kReferencedEntry = sizeof(uint32_t);
+
+  for (const auto relocation : {rocjitsu::test_support::TestRuntimeTextRelocation::Abs64,
+                                rocjitsu::test_support::TestRuntimeTextRelocation::Relative64}) {
+    SCOPED_TRACE(relocation == rocjitsu::test_support::TestRuntimeTextRelocation::Abs64 ? "ABS64"
+                                                                                       : "RELATIVE64");
+    auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_two_kernel_descriptors(
+        {kGfx1250SEndpgm, kGfx1250SEndpgm}, rocjitsu::test_support::TestRuntimeTextReference{
+                                                .relocation = relocation,
+                                                .target_text_offset = kReferencedEntry,
+                                            });
+    rocjitsu::write_value_for_test<uint32_t>(image, offsetof(rocjitsu::Elf64_Ehdr, e_flags),
+                                             rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250);
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+
+    auto options = gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                            rocjitsu::ProcessorRevision::Gfx1250A0);
+    options.verify_rewrite_discharge = true;
+    rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+                                          options);
+    const auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+    EXPECT_TRUE(result.rewrite_discharge_checked);
+    EXPECT_TRUE(result.rewrite_discharge_verified);
+
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(translated.is_valid());
+    ASSERT_EQ(translated.text_sections().size(), 1u);
+    const auto *text = translated.text_sections().front();
+    rocjitsu::KernelDescriptorTranslator parser(ROCJITSU_CODE_ARCH_GFX1250,
+                                                ROCJITSU_CODE_ARCH_GFX1250);
+    const auto infos = parser.translate_image(result.elf_bytes, text->sectionOffset(), text->size(),
+                                              rocjitsu::KernelDescriptorTranslationOptions{});
+    ASSERT_EQ(infos.size(), 2u);
+    const auto referenced_descriptor =
+        std::ranges::find_if(infos, [](const auto &info) { return info.entry_text_offset != 0; });
+    ASSERT_NE(referenced_descriptor, infos.end());
+    const uint64_t expected_vaddr = text->vaddr() + referenced_descriptor->entry_text_offset;
+
+    const auto output_ehdr =
+        rocjitsu::read_elf_struct_for_test<rocjitsu::Elf64_Ehdr>(result.elf_bytes, 0);
+    const auto output_shdrs = rocjitsu::read_elf_array_for_test<rocjitsu::Elf64_Shdr>(
+        result.elf_bytes, output_ehdr.e_shoff, output_ehdr.e_shnum);
+    const auto rela = std::ranges::find_if(output_shdrs, [](const rocjitsu::Elf64_Shdr &section) {
+      return section.sh_type == rocjitsu::SHT_RELA;
+    });
+    ASSERT_NE(rela, output_shdrs.end());
+    const auto relocation_record =
+        rocjitsu::read_elf_struct_for_test<rocjitsu::Elf64_Rela>(result.elf_bytes, rela->sh_offset);
+    if (relocation == rocjitsu::test_support::TestRuntimeTextRelocation::Relative64) {
+      EXPECT_EQ(relocation_record.r_addend, static_cast<int64_t>(expected_vaddr));
+      continue;
+    }
+
+    ASSERT_LT(rela->sh_link, output_shdrs.size());
+    const auto &symtab = output_shdrs[rela->sh_link];
+    const auto symbols = rocjitsu::read_elf_array_for_test<rocjitsu::Elf64_Sym>(
+        result.elf_bytes, symtab.sh_offset, symtab.sh_size / sizeof(rocjitsu::Elf64_Sym));
+    const uint32_t symbol_index = rocjitsu::elf_reloc_sym(relocation_record.r_info);
+    ASSERT_LT(symbol_index, symbols.size());
+    EXPECT_EQ(symbols[symbol_index].st_value, expected_vaddr);
+  }
+}
+
 TEST(BinaryTranslatorE2E, Cdna4ToCdna3SemanticExpandRulesHaveTranslationFixtures) {
   const auto test_cases = cdna4_to_cdna3_semantic_rule_cases();
   const auto rules = rocjitsu::semantic_expand_rules_cdna4_to_cdna3();
