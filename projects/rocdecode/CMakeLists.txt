@@ -129,10 +129,16 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
 
   # HIP
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
-  # LibVA
+  # LibVA - headers always needed for VA-API type definitions.
+  # In TheRock builds the libraries are loaded at runtime via dlmopen into a
+  # private namespace (see vaapi_loader.cpp) to prevent symbol collision with
+  # any system libva.so.2 that may be present in the same process.  Outside
+  # TheRock, link directly as before.
   include_directories(${LIBVA_INCLUDE_DIR})
-  set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
-  set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
+  if(NOT USING_THE_ROCK)
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
+  endif()
 
   # DRM_AMDGPU
   include_directories(${LIBDRM_AMDGPU_INCLUDE_DIR})
@@ -164,6 +170,9 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
 
   if(USING_THE_ROCK)
     set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
+    # Enable dlmopen-based VA isolation and link against libdl for dlmopen/dlsym/dlclose.
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ROCDECODE_USE_DLMOPEN_VA)
+    target_link_libraries(${PROJECT_NAME} dl)
   endif()
 
   # rocprofiler
