@@ -170,6 +170,7 @@ public:
     virtual bool IsGFX10() const { return false; }
     virtual bool IsGFX11() const { return false; }
     virtual bool IsGFX12() const { return false; }
+    virtual bool IsGFX1250() const { return false; }
     // Return number of XCC on the GPU
     uint32_t GetXccNumber() const { return agent_info_->xcc_num; }
     // Return number of XCC per AID
@@ -244,6 +245,7 @@ public:
 
     virtual int GetAccumLowID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
     virtual int GetAccumHiID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
+    virtual int GetSQGAccumID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
 
     // Return GPU id for a given gfxip string. Pure mapping function; the
     // instance-side GetGpuId() above returns the cached value resolved by
@@ -335,6 +337,9 @@ private:
 inline Pm4Factory*
 Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent)
 {
+    // Serialize all access to the shared instance map and static mode flags.
+    std::lock_guard<mutex_t> lck(mutex_);
+
     // Check if we have the instance already created
     if(instances_ == nullptr) instances_ = new instances_t;
     const auto            ret = instances_->insert({*agent_info, nullptr});
@@ -378,8 +383,9 @@ Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent
 inline Pm4Factory*
 Pm4Factory::Create(const hsa_agent_t agent, bool concurrent)
 {
-    std::lock_guard<mutex_t> lck(mutex_);
-    const AgentInfo*         agent_info = HsaRsrcFactory::Instance().GetAgentInfo(agent);
+    // Note: locking is handled by Create(const AgentInfo*, gpu_id_t, bool) below, which is
+    // the single chokepoint that mutates the shared instance map.
+    const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(agent);
     // Get GPU id for a given agent
 
     hsa_status_t      status = HSA_STATUS_ERROR;
