@@ -35,7 +35,7 @@ namespace rocshmem {
 class GDABackend;
 
 class GDADefaultContextProxy {
-  using ProxyT = DeviceProxy<HIPAllocator, GDAContext>;
+  using ProxyT = DeviceProxy<GDAContext>;
 
  public:
   GDADefaultContextProxy() = default;
@@ -44,13 +44,13 @@ class GDADefaultContextProxy {
    * Placement new the memory which is allocated by proxy_
    */
   explicit GDADefaultContextProxy(GDABackend* backend, TeamInfo *tinfo,
-                                  [[maybe_unused]] const HIPAllocator& alloc = HIPAllocator(),
+                                  HIPAllocator alloc = HIPAllocator(),
                                   size_t num_elems = 1)
-  : proxy_{num_elems}, constructed_{true} {
+  : alloc_{alloc}, proxy_{num_elems, alloc_}, constructed_{true} {
     auto ctx{proxy_.get()};
     new (ctx) GDAContext(reinterpret_cast<Backend*>(backend), 0);
     ctx->tinfo = tinfo;
-    rocshmem_ctx_t local{ctx, tinfo};
+    rocshmem_ctx_t local{ctx, nullptr};
     set_internal_ctx(&local);
   }
 
@@ -85,6 +85,7 @@ class GDADefaultContextProxy {
   __host__ __device__ Context* get() { return proxy_.get(); }
 
  private:
+  HIPAllocator alloc_{};
   /*
    * @brief Memory managed by the lifetime of this object
    */

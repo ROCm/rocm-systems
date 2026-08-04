@@ -66,6 +66,7 @@ RUN if python3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)"
         OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
         OS_ID=$(grep '^ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
         if [ "${OS_ID}" == "ubuntu" ] && [ "${OS_VERSION}" == "22.04" ]; then \
+            python3 -m pip install --upgrade pip; \
             python3 -m pip install -r /tmp/requirements.txt; \
         else \
             python3 -m pip install --break-system-packages -r /tmp/requirements.txt; \

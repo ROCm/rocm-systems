@@ -37,12 +37,22 @@ from vendored import yaml
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
 
+# Shared suffix for the invalid --block error in the profile and analyze paths.
+INVALID_BLOCK_HINT = (
+    "\n\tRun rocprof-compute --list-blocks <arch> to see all block ids/aliases."
+)
+
+
+def is_gfx115x(gpu_arch: Optional[str]) -> bool:
+    """Return True if gpu_arch is a gfx115x (RDNA 3.5 APU) architecture."""
+    return bool(gpu_arch and gpu_arch.startswith("gfx115"))
+
 
 def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
     """Map GPU architectures to the shared analysis-config directory name."""
     if gpu_arch is None:
         return None
-    if gpu_arch.startswith("gfx115"):
+    if is_gfx115x(gpu_arch):
         return "gfx115x"
     return gpu_arch
 
@@ -66,7 +76,7 @@ SUPPORTED_FIELD: list[str] = [
     "Q1",
     "Q3",
     "Expression",
-    "Pct of Peak",
+    "Percent of Peak",
     # Special keywords for L2 channel
     "Channel",
     "L2 Cache Hit Rate",
@@ -897,10 +907,7 @@ def convert_filter_blocks_to_panel_ids(
         token = str(bid)
         if not METRIC_ID_RE.match(token):
             if token not in alias_map:
-                console_error(
-                    f"Invalid --block value {token}. "
-                    "Run rocprof-compute --list-blocks to see valid values."
-                )
+                console_error(f"Invalid --block value {token!r}.{INVALID_BLOCK_HINT}")
             token = alias_map[token]
         resolved.add(int(convert_metric_id_to_panel_info(token)[0]))
     return resolved
@@ -965,7 +972,7 @@ def get_arch_panel_id_to_alias(arch: str) -> dict[str, str]:
     filename prefix matches arch. Empty/None aliases stay as "".
     Returns {} when no template matches the arch."""
     analysis_dir = (
-        Path(config.rocprof_compute_home) / "rocprof_compute_soc" / "analysis_configs"
+        config.rocprof_compute_home / "rocprof_compute_soc" / "analysis_configs"
     )
     for path in sorted(analysis_dir.glob("*_config_template.yaml")):
         m = re.match(r"(gfx\d+)_config_template\.yaml$", path.name)

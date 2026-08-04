@@ -32,6 +32,7 @@ AMD SMI is the successor to [ROCm SMI](https://github.com/ROCm/rocm-systems/tree
 :::{grid-item-card} Install
 * [Library and CLI tool installation](./install/install.md)
 * [Build from source](./install/build.md)
+* [Packaging and install paths](./packaging.md)
 :::
 
 :::{grid-item-card} How to
@@ -58,6 +59,7 @@ AMD SMI is the successor to [ROCm SMI](https://github.com/ROCm/rocm-systems/tree
 * [GPU violations](./conceptual/gpu-violations.md)
 * [Performance determinism](./conceptual/perf-determinism.md)
 * [Reliability, availability, serviceability](./conceptual/ras.md)
+* [Test suite design](./conceptual/test-design.md)
 :::
 
 :::{grid-item-card} Tutorials

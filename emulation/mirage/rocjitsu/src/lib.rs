@@ -2,9 +2,9 @@
 //!
 //! This crate exposes helpers the mirage binary needs at runtime:
 //!
-//! mirage does **not** build or embed the rocjitsu *libraries*
-//! (`librocjitsu_kmd.so`, `librocjitsu.so`); they are discovered at
-//! runtime from the installed system (see [`kmd_preload`]).
+//! mirage does **not** build or embed the rocjitsu *library*
+//! (`librocjitsu.so`); it is discovered at runtime from the installed
+//! system (see [`kmd_preload`]).
 //!
 //! Runtime entry points:
 //!
@@ -18,7 +18,7 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
 use mirage_core::agent::AgentDef;
-use mirage_core::common::{MaybeRef, SimpleValue};
+use mirage_core::common::{MaybeRef, SimpleMap, SimpleValue};
 use mirage_core::config::OptionDef;
 use mirage_core::emulator::{
     EmulatorBackend, EmulatorBackendDef, EmulatorDaemon, EmulatorDef, EmulatorDescription,
@@ -104,7 +104,19 @@ impl EmulatorBackend for Rocjitsu {
     }
 
     fn discover_plugins(&self) -> Vec<PluginsDef> {
-        Vec::new()
+        // Report the plugins whose shared objects ship next to the
+        // interposer (`librocjitsu_plugin_<name>.so`). Each entry is a
+        // ready-to-use selection — the plugin name mapped to an empty
+        // argument object — that a caller can merge into a profile's
+        // `plugins` to enable it with its schema defaults. Empty when
+        // rocjitsu is not installed or ships no plugins.
+        let Some(preload) = kmd_preload() else {
+            return Vec::new();
+        };
+        discover_plugin_names(&preload)
+            .into_iter()
+            .map(|name| PluginsDef::from([(name, SimpleMap::new())]))
+            .collect()
     }
 
     fn health(&self, _session: &SessionId) -> SessionHealth {
@@ -116,7 +128,7 @@ impl EmulatorBackend for Rocjitsu {
             message: if installed {
                 None
             } else {
-                Some(format!("rocjitsu KMD library ({KMD_LIB_NAME}) not found"))
+                Some(format!("rocjitsu KMD library ({LIB_NAME}) not found"))
             },
             ..Default::default()
         }
@@ -133,7 +145,7 @@ impl EmulatorBackend for Rocjitsu {
         // loudly rather than silently running on real hardware.
         let ld_preload = kmd_preload().ok_or_else(|| {
             MirageError::Other(format!(
-                "rocjitsu: KMD preload library ({KMD_LIB_NAME}) not found; \
+                "rocjitsu: KMD preload library ({LIB_NAME}) not found; \
                  cannot emulate workload"
             ))
         })?;
@@ -179,28 +191,31 @@ impl EmulatorBackend for Rocjitsu {
 
         // For a containerised session the workload runs inside a node
         // container that does *not* share the host filesystem, so the
-        // rocjitsu libraries (the KMD interposer and the host-side library
-        // it may dlopen) must be made available inside it. We declare them
-        // as `libraries`; the orchestrator bind-mounts each into
-        // `CONTAINER_LIB_DIR` (`/mnt/mirage/lib`), preserving its file
-        // name, and adds that directory to `LD_LIBRARY_PATH`. The per-node
-        // host *inside* the container re-resolves this injection against
-        // its own environment, where its discovery also searches
-        // `CONTAINER_LIB_DIR`, so the in-container resolution finds the
-        // KMD library there with no extra configuration. Without these the
-        // in-container host fails to locate the KMD library and the exec
-        // can never start.
+        // rocjitsu library (`librocjitsu.so`) must be made available
+        // inside it. We declare it as a `library`; the orchestrator
+        // bind-mounts it into `CONTAINER_LIB_DIR` (`/mnt/mirage/lib`),
+        // preserving its file name, and adds that directory to
+        // `LD_LIBRARY_PATH`. The per-node host *inside* the container
+        // re-resolves this injection against its own environment, where
+        // its discovery also searches `CONTAINER_LIB_DIR`, so the
+        // in-container resolution finds the library there with no extra
+        // configuration. Without it the in-container host fails to locate
+        // the library and the exec can never start.
         let libraries = if profile.containerize.is_some() {
-            let mut libraries = vec![ld_preload.display().to_string()];
-            // A sibling host-side `librocjitsu.so`, if present next to the
-            // KMD interposer: the interposer may dlopen it at runtime.
-            if let Some(host_lib) = ld_preload.parent().map(|d| d.join(LIB_NAME))
-                && host_lib != ld_preload
-                && host_lib.exists()
-            {
-                libraries.push(host_lib.display().to_string());
-            }
-            libraries
+            // Bind-mount the interposer plus the shared object for each
+            // plugin this profile enables so the in-container plugin loader
+            // can resolve it next to the interposer (the loader searches the
+            // interposer's own directory / `LD_LIBRARY_PATH`, both of which
+            // include `CONTAINER_LIB_DIR`). A plugin the interposer build
+            // does not ship is silently skipped here and by the loader at
+            // runtime.
+            let mut libs = vec![ld_preload.display().to_string()];
+            libs.extend(
+                enabled_plugin_libs(&ld_preload, &def.plugins)
+                    .into_iter()
+                    .map(|path| path.display().to_string()),
+            );
+            libs
         } else {
             Default::default()
         };
@@ -225,7 +240,7 @@ impl EmulatorBackend for Rocjitsu {
         // rocjitsu library).
         let Some(lib) = kmd_preload() else {
             tracing::warn!(
-                "rocjitsu: KMD library ({KMD_LIB_NAME}) not found; \
+                "rocjitsu: KMD library ({LIB_NAME}) not found; \
                  not starting daemon"
             );
             return Ok(None);
@@ -272,17 +287,67 @@ pub const RUNTIME_SUBDIR: &str = "rocjitsu";
 /// this directory (see [`kmd_search_dirs`]).
 pub const CONTAINER_LIB_DIR: &str = "/mnt/mirage/lib";
 
-/// Name used for the KMD interposer library on disk.
-pub const KMD_LIB_NAME: &str = "librocjitsu_kmd.so";
-
-/// Name used for the host-side rocjitsu library on disk.
+/// Name used for the rocjitsu library on disk. A single combined
+/// `librocjitsu.so` exports both the KMD interposer (LD_PRELOAD) and the
+/// HSA tools hooks (`HSA_TOOLS_LIB`).
 pub const LIB_NAME: &str = "librocjitsu.so";
 
-/// Library file names accepted for the KMD interposer, in priority
-/// order. The dedicated KMD interposer (`librocjitsu_kmd.so`) is
-/// preferred; `librocjitsu.so` is accepted as a fallback for builds
-/// that ship a single combined library.
-pub const KMD_LIB_NAMES: &[&str] = &[KMD_LIB_NAME, LIB_NAME];
+/// Filename prefix of a rocjitsu runtime plugin shared object. Together
+/// with [`PLUGIN_LIB_SUFFIX`] it brackets the plugin's `<name>`:
+/// `librocjitsu_plugin_<name>.so`. That `<name>` is the key used to
+/// enable and configure the plugin in the config file.
+pub const PLUGIN_LIB_PREFIX: &str = "librocjitsu_plugin_";
+/// Filename suffix of a rocjitsu runtime plugin shared object (see
+/// [`PLUGIN_LIB_PREFIX`]).
+pub const PLUGIN_LIB_SUFFIX: &str = ".so";
+
+/// Names of the rocjitsu plugins whose shared objects sit next to the
+/// interposer `preload` (the `<name>` in `librocjitsu_plugin_<name>.so`),
+/// sorted and de-duplicated. Empty when the directory cannot be read.
+pub fn discover_plugin_names(preload: &std::path::Path) -> Vec<String> {
+    let Some(dir) = preload.parent() else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let file_name = entry.file_name();
+            let file_name = file_name.to_str()?;
+            file_name
+                .strip_prefix(PLUGIN_LIB_PREFIX)?
+                .strip_suffix(PLUGIN_LIB_SUFFIX)
+                .filter(|name| !name.is_empty())
+                .map(str::to_string)
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Shared-object paths for the plugins `plugins` enables that actually
+/// exist next to the interposer `preload`. Used to bind-mount the plugin
+/// `.so`s into a containerised session alongside the interposer so the
+/// in-container plugin loader resolves them (mirage adds the mount dir to
+/// `LD_LIBRARY_PATH`). A requested plugin with no matching `.so` on disk
+/// is omitted; the loader logs and skips it at runtime.
+pub fn enabled_plugin_libs(preload: &std::path::Path, plugins: &PluginsDef) -> Vec<PathBuf> {
+    let Some(dir) = preload.parent() else {
+        return Vec::new();
+    };
+    plugins
+        .keys()
+        .filter_map(|name| {
+            find_lib_in(
+                dir,
+                &format!("{PLUGIN_LIB_PREFIX}{name}{PLUGIN_LIB_SUFFIX}"),
+            )
+        })
+        .collect()
+}
 
 /// Name of the synthesised rocjitsu `SimulationConfig` written into the
 /// per-session directory (`<session>/rj_config.json`).
@@ -322,13 +387,12 @@ pub fn write_config_discovery(config: &std::path::Path) -> Result<PathBuf> {
 /// Searches, in priority order, the in-tree monorepo build output
 /// (relative to the mirage binary), `$ROCM_HOME/lib`, the ROCm SDK
 /// install root reported by `rocm-sdk path --root`, and the in-container
-/// mount directory ([`CONTAINER_LIB_DIR`]). In each location the
-/// dedicated KMD interposer (`librocjitsu_kmd.so`) is preferred, falling
-/// back to `librocjitsu.so` (see [`KMD_LIB_NAMES`]).
+/// mount directory ([`CONTAINER_LIB_DIR`]). In each location it looks
+/// for the combined `librocjitsu.so` (see [`LIB_NAME`]).
 pub fn kmd_preload() -> Option<PathBuf> {
     kmd_search_dirs()
         .iter()
-        .find_map(|dir| find_lib_in(dir, KMD_LIB_NAMES))
+        .find_map(|dir| find_lib_in(dir, LIB_NAME))
 }
 
 /// Directories searched for the KMD interposer, in priority order:
@@ -337,25 +401,22 @@ pub fn kmd_preload() -> Option<PathBuf> {
 /// path --root` (`<root>/lib`), and the in-container mount directory.
 fn kmd_search_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
-    // rocjitsu's in-tree KMD build output, relative to the mirage
-    // binary, so a monorepo `cargo build` finds a fresh build without
-    // extra configuration.
+    // rocjitsu's in-tree build output, relative to the mirage binary, so
+    // a monorepo build finds a fresh `librocjitsu.so` without extra
+    // configuration.
     if let Ok(exe) = std::env::current_exe()
         && let Some(exe_dir) = exe.parent()
     {
         dirs.extend((0..=3).map(|levels| {
             exe_dir
                 .iter()
-                .chain(std::iter::repeat("..".as_ref()).take(levels))
-                .chain(std::iter::once(
-                    "rocjitsu/build/lib/rocjitsu/src/rocjitsu/kmd/linux".as_ref(),
-                ))
+                .chain(std::iter::repeat_n("..".as_ref(), levels))
+                .chain(std::iter::once("rocjitsu/build".as_ref()))
                 .collect::<PathBuf>()
         }));
         // Install layout: a `<prefix>/bin/mirage` finds its sibling
         // `<prefix>/lib/librocjitsu.so` (e.g. both installed to /opt/rocm
-        // by scripts/mirage-docker-build.sh). Searched via KMD_LIB_NAMES,
-        // so a combined `librocjitsu.so` is picked up here too.
+        // by scripts/mirage-docker-build.sh).
         dirs.push(exe_dir.join("..").join("lib"));
     }
     // ROCm install root.
@@ -374,12 +435,37 @@ fn kmd_search_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-/// First existing entry of `names` inside `dir`, if any.
-fn find_lib_in(dir: &std::path::Path, names: &[&str]) -> Option<PathBuf> {
-    names
+/// First existing entry named `name` inside `dir`, if any.
+fn find_lib_in(dir: &std::path::Path, name: &str) -> Option<PathBuf> {
+    let candidate = dir.join(name);
+    candidate.is_file().then_some(candidate)
+}
+
+/// Project the profile's plugin selection ([`PluginsDef`]) onto the JSON
+/// object shape the rocjitsu config's `plugins` section expects: a map
+/// from plugin name to its argument object. mirage's [`SimpleValue`] is
+/// an externally-tagged serde enum, so a plugin argument cannot be
+/// serialized verbatim (it would render as `{"Boolean": true}`); map each
+/// value onto the plain JSON scalar the rocjitsu plugin loader parses.
+fn plugins_to_json(plugins: &PluginsDef) -> serde_json::Value {
+    let object = plugins
         .iter()
-        .map(|name| dir.join(name))
-        .find(|candidate| candidate.is_file())
+        .map(|(name, args)| {
+            let arg_object = args
+                .iter()
+                .map(|(key, value)| {
+                    let scalar = match value {
+                        SimpleValue::String(s) => serde_json::Value::from(s.clone()),
+                        SimpleValue::Number(n) => serde_json::Value::from(*n),
+                        SimpleValue::Boolean(b) => serde_json::Value::from(*b),
+                    };
+                    (key.clone(), scalar)
+                })
+                .collect::<serde_json::Map<String, serde_json::Value>>();
+            (name.clone(), serde_json::Value::Object(arg_object))
+        })
+        .collect::<serde_json::Map<String, serde_json::Value>>();
+    serde_json::Value::Object(object)
 }
 
 /// Synthesise a rocjitsu `SimulationConfig` JSON file from the given
@@ -442,13 +528,25 @@ pub fn kmd_config(def: &EmulatorDef, session: Option<&SessionId>) -> Result<Path
     // the per-node `gpus_per_node` is what the config requests.
     let mut vm = agent.vm;
     vm.gpu.num_gpus = topology.gpus_per_node.max(1);
-    let sim = serde_json::json!({
+    let mut sim = serde_json::json!({
         "max_ticks": 100000u64,
         "num_threads": 1u32,
         "exec_mode": exec_mode,
         "vm": vm,
         "topology": agent.topology,
     });
+    // Carry the profile's plugin selection into the synthesised rocjitsu
+    // config so the interposer (local path) and the per-node daemon both
+    // enable them through the rocjitsu plugin loader. `def.plugins` maps a
+    // plugin name to its argument object — exactly the shape rocjitsu's
+    // `plugins` config section expects. Only emit the key when a plugin is
+    // actually selected so a plugin-free profile still produces a clean,
+    // minimal config (and the near-zero-overhead no-plugin path).
+    if !def.plugins.is_empty()
+        && let serde_json::Value::Object(map) = &mut sim
+    {
+        map.insert("plugins".to_string(), plugins_to_json(&def.plugins));
+    }
     let bytes = serde_json::to_vec_pretty(&sim).map_err(|e| {
         MirageError::Other(format!("rocjitsu kmd_config: serialize sim config: {e}"))
     })?;
@@ -503,5 +601,80 @@ mod tests {
             topology: MaybeRef::Ref("does-not-exist".to_string()),
         };
         assert!(kmd_config(&def, None).is_err());
+    }
+
+    #[test]
+    fn plugins_to_json_projects_simple_values_to_plain_json() {
+        let mut args = SimpleMap::new();
+        args.insert("verbose".to_string(), SimpleValue::Boolean(true));
+        args.insert(
+            "path".to_string(),
+            SimpleValue::String("/tmp/x".to_string()),
+        );
+        args.insert("level".to_string(), SimpleValue::Number(3));
+        let plugins = PluginsDef::from([
+            ("race".to_string(), SimpleMap::new()),
+            ("logging".to_string(), args),
+        ]);
+
+        let json = plugins_to_json(&plugins);
+
+        // An empty-arg plugin renders as an empty object, not null.
+        assert_eq!(json["race"], serde_json::json!({}));
+        // SimpleValue must project onto plain JSON scalars, NOT the
+        // externally-tagged enum form ({"Boolean": true}) that a naive
+        // serialization of SimpleValue would otherwise emit — the rocjitsu
+        // plugin loader parses plain values.
+        assert_eq!(
+            json["logging"],
+            serde_json::json!({"verbose": true, "path": "/tmp/x", "level": 3})
+        );
+    }
+
+    #[test]
+    fn discover_plugin_names_lists_plugin_sos_next_to_interposer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let preload = dir.join(LIB_NAME);
+        std::fs::write(&preload, b"").unwrap();
+
+        // No plugin shared objects present yet.
+        assert!(discover_plugin_names(&preload).is_empty());
+
+        // Two real plugins, a non-plugin sibling sharing the `librocjitsu_`
+        // prefix (ignored), and a degenerate empty-name file (ignored).
+        std::fs::write(dir.join("librocjitsu_plugin_race.so"), b"").unwrap();
+        std::fs::write(dir.join("librocjitsu_plugin_logging.so"), b"").unwrap();
+        std::fs::write(dir.join("librocjitsu_hooks.so"), b"").unwrap();
+        std::fs::write(dir.join("librocjitsu_plugin_.so"), b"").unwrap();
+
+        // Sorted + de-duplicated names, prefix/suffix stripped.
+        assert_eq!(
+            discover_plugin_names(&preload),
+            vec!["logging".to_string(), "race".to_string()]
+        );
+    }
+
+    #[test]
+    fn enabled_plugin_libs_returns_only_existing_enabled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let preload = dir.join(LIB_NAME);
+        std::fs::write(&preload, b"").unwrap();
+        std::fs::write(dir.join("librocjitsu_plugin_race.so"), b"").unwrap();
+
+        // Enable race (present on disk) and logging (absent). Only the
+        // present one is returned for bind-mounting; the loader logs and
+        // skips the missing plugin at runtime.
+        let plugins = PluginsDef::from([
+            ("race".to_string(), SimpleMap::new()),
+            ("logging".to_string(), SimpleMap::new()),
+        ]);
+        let libs = enabled_plugin_libs(&preload, &plugins);
+        assert_eq!(libs.len(), 1);
+        assert_eq!(
+            libs[0].file_name().and_then(|n| n.to_str()),
+            Some("librocjitsu_plugin_race.so")
+        );
     }
 }

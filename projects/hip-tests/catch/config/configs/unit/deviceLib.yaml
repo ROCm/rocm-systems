@@ -398,6 +398,79 @@ deviceLib:
   Unit_ocp_fp4_from_double_full_range_device:
     <<: *level_2
     tags: [types]
+  Unit_ext_ocp_fp8_roundtrip_host:
+    <<: *level_2
+    # Sources compiled only on non-Windows (see unit/deviceLib/CMakeLists.txt)
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp8_known_values_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp8_scaled_decode_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp8x2_scaled_roundtrip_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp8_stochastic_rounding_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp8_fp16_bf16_source_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp8_device_matches_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp4_roundtrip_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp4_known_values_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp4_scaled_roundtrip_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp4_stochastic_rounding_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp4_fp16_bf16_source_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp4_device_matches_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp6_roundtrip_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp6_known_values_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp6_scaled_roundtrip_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp6_fp16_bf16_source_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp6_device_matches_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
   Unit_AtomicAdd_Coherent:
     <<: *level_2
     tags: [atomics]
@@ -503,6 +576,9 @@ deviceLib:
   Unit_hipTestHalfConstexpr_DeviceConstexpr:
     <<: *level_2
     tags: [types]
+  Unit_device_memcpy_async:
+    <<: *level_2
+    tags: [memory]
   Unit_MemcpyToSymbolInParallelWithStreamLaunch:
     <<: *level_3
     tags: [misc]

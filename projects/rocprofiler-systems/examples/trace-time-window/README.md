@@ -63,8 +63,7 @@ rocprof-sys-run -- ./trace-time-window 2
 | `ROCPROFSYS_LOG_LEVEL` | `trace` | Detailed log output |
 
 ```bash
-rocprof-sys-run \
-    -e ROCPROFSYS_TRACE=true \
-    -e ROCPROFSYS_VERBOSE=2 \
-    -- ./trace-time-window 2
+ROCPROFSYS_TRACE=true \
+ROCPROFSYS_VERBOSE=2 \
+rocprof-sys-run -- ./trace-time-window 2
 ```

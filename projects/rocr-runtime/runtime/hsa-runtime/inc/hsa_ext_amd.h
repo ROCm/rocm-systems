@@ -79,9 +79,12 @@
  * - 1.25 - hsa_amd_vmem_export_fabric_handle, hsa_amd_vmem_import_fabric_handle
  * - 1.26 - hsa_amd_queue_create: batch queue creation with descriptor
  * - 1.27 - hsa_amd_queue_signal_external_semaphore, hsa_amd_queue_wait_external_semaphore
+ * - 1.28 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED
+ * - 1.29 - hsa_amd_image_create_v2, hsa_amd_interop_map_buffer_with_size
+ * - 1.30 - hsa_amd_queue_get_info: engine type and SDMA engine ID
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 27
+#define HSA_AMD_INTERFACE_VERSION_MINOR 30
 
 #ifdef __cplusplus
 extern "C" {
@@ -660,6 +663,11 @@ enum {
    * constraints enforced by the command processor).
    */
   HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS = 49,
+
+  /**
+   * Underlying resource is a valid resource, but it is not ready to be used.
+   */
+  HSA_STATUS_ERROR_RESOURCE_NOT_READY = 50,
 };
 
 /** @} */
@@ -970,6 +978,17 @@ typedef enum hsa_amd_agent_info_s {
    * Returns uint32_t. Zero if the device does not support dynamic data prefetch.
    */
   HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS = 0xA123,
+  /**
+   * Queries whether the agent supports virtual memory API operations on
+   * host memory that can be exported as a DMA-BUF file descriptor.
+   * For CPU agents: indicates host memory can be allocated and exported.
+   * For GPU agents: indicates the GPU can access such host-allocated memory.
+   * The type of this attribute is bool.
+   *
+   * @note This query will be deprecated in the future.
+   * Use HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED instead.
+   */
+  HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED = 0xA124,
 } hsa_amd_agent_info_t;
 
 /**
@@ -1588,7 +1607,7 @@ typedef struct hsa_amd_image_descriptor_s {
  *
  * @param agent[in] Agent on which to create the image
  *
- * @param[in] image_descriptor[in] Vendor specific image format
+ * @param[in] image_descriptor Vendor specific image format
  *
  * @param[in] image_data Pointer to image backing store
  *
@@ -1614,6 +1633,42 @@ hsa_status_t HSA_API hsa_amd_image_create(
     hsa_access_permission_t access_permission,
     hsa_ext_image_t *image
 );
+
+/**
+ * @brief Creates an image from an opaque vendor specific image format.
+ * Does not modify data at image_data.  Intended initially for
+ * accessing interop images.
+ *
+ * @param agent[in] Agent on which to create the image
+ *
+ * @param[in] image_descriptor Vendor specific image format
+ *
+ * @param[in] image_layout Opaque vendor-specific image layout descriptor (may be NULL
+ *                         when image metadata is not available from an interop source)
+ *
+ * @param[in] image_data Pointer to image backing store
+ *
+ * @param[in] access_permission Access permissions for the image object
+ *
+ * @param[out] image Created image object.
+ *
+ * @retval HSA_STATUS_SUCCESS Image created successfully
+ *
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED if HSA is not initialized
+ *
+ * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES if there is a failure in allocating
+ * necessary resources
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT Bad or mismatched descriptor,
+ * null image_data, or mismatched access_permission.
+ */
+hsa_status_t HSA_API hsa_amd_image_create_v2(
+    hsa_agent_t agent,
+    const hsa_ext_image_descriptor_v2_t* image_descriptor,
+    const hsa_amd_image_descriptor_t* image_layout,
+    const void* image_data,
+    hsa_access_permission_t access_permission,
+    hsa_ext_image_t* image);
 
 /**
  * @brief Query image limits.
@@ -2341,7 +2396,8 @@ typedef struct hsa_amd_memory_copy_op_s {
  * Each operation is self-describing via its @c type field. A BROADCAST operation
  * is a single op that copies one source to multiple destinations via @c dst_list
  * and @c num_entries. A SWAP operation exchanges two buffers using @c src_size and
- * @c dst_size.
+ * @c dst_size. SWAP operations require addresses to be 64-byte aligned for gfx94x/gfx95x
+ * and 32-byte aligned for gfx1250.
  *
  * @param[in] copy_ops Array of copy operation descriptors.
  *
@@ -2888,6 +2944,55 @@ hsa_status_t HSA_API hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t
                                                 hsa_handle_t interop_handle, uint32_t flags,
                                                 size_t* size, void** ptr, size_t* metadata_size,
                                                 const void** metadata);
+
+/**
+ * @brief Maps an interop object into the HSA flat address space with a
+ * caller-supplied size hint and establishes memory residency.
+ * The metadata pointer is valid during the lifetime of the
+ * map (until hsa_amd_interop_unmap_buffer is called).
+ * Multiple calls to hsa_amd_interop_map_buffer with the same interop_handle
+ * result in multiple mappings with potentially different addresses and
+ * different metadata pointers.  Concurrent operations on these addresses are
+ * not coherent.  Memory must be fenced to system scope to ensure consistency,
+ * between mappings and with any views of this buffer in the originating
+ * software stack.
+ * It is identical to hsa_amd_interop_map_buffer except that @p size_hint provides
+ * the known byte size of the resource to the runtime.  Use this variant when
+ * the resource was created by a foreign API (e.g. D3D11 USAGE_DYNAMIC constant
+ * buffer) whose KMD private data does not encode the allocation size in a
+ * format the runtime can parse.  Pass 0 when the size is unknown and will be deduced.
+ *
+ * @param[in] num_agents Number of agents which require access to the memory
+ *
+ * @param[in] agents List of accessing agents.
+ *
+ * @param[in] interop_handle interop buffer handle (FD on Linux and HANDLE on
+ * Windows)
+ *
+ * @param [in] flags Reserved, must be 0
+ *
+ * @param [in] size_hint the hinted size of the buffer.
+ *
+ * @param[out] size Size in bytes of the mapped object
+ *
+ * @param[out] ptr Base address of the mapped object
+ *
+ * @param[out] metadata_size Size of metadata in bytes, may be NULL
+ *
+ * @param[out] metadata Pointer to metadata, may be NULL
+ *
+ * @retval HSA_STATUS_SUCCESS if successfully mapped
+ *
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED if HSA is not initialized
+ *
+ * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES if there is a failure in allocating
+ * necessary resources
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT all other errors
+ */
+hsa_status_t HSA_API hsa_amd_interop_map_buffer_with_size(
+    uint32_t num_agents, hsa_agent_t* agents, hsa_handle_t interop_handle, uint32_t flags,
+    size_t size_hint, size_t* size, void** ptr, size_t* metadata_size, const void** metadata);
 
 /**
  * @brief Removes a previously mapped interop object from HSA's flat address space.
@@ -3886,7 +3991,7 @@ typedef struct hsa_amd_queue_create_desc_s {
  * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION @p agent does not support
  * queues of the requested type, or a descriptor requested an @c engine_type
  * that is recognised by the API but not yet implemented by the runtime (for
- * example ::HSA_AMD_QUEUE_ENGINE_SDMA or ::HSA_AMD_QUEUE_ENGINE_AIE).
+ * example ::HSA_AMD_QUEUE_ENGINE_AIE).
  */
 hsa_status_t HSA_API hsa_amd_queue_create(
     hsa_agent_t agent,
@@ -4450,7 +4555,7 @@ typedef enum {
  * To minimize internal memory fragmentation, align the size to the recommended allocation granule
  * size, see HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE
  *
- * @param[in] pool memory to use. Only GPU agent pools are supported.
+ * @param[in] pool memory to use.
  * @param[in] size of the memory allocation
  * @param[in] type of memory
  * @param[in] flags - currently unsupported
@@ -4825,6 +4930,18 @@ typedef enum {
    * is true.  The type of this attribute is uint32_t.
    */
   HSA_AMD_QUEUE_INFO_VM_FAULT_REASON,
+  /*
+   * Hardware engine type targeted by this queue.
+   * The type of this attribute is hsa_amd_queue_engine_t.
+   */
+  HSA_AMD_QUEUE_INFO_ENGINE_TYPE,
+  /*
+   * Resolved hardware SDMA engine ID. Automatic SDMA queue creation returns
+   * the selected engine ID, never HSA_AMD_SDMA_ENGINE_ID_ANY. This attribute
+   * is valid only for queues whose engine type is HSA_AMD_QUEUE_ENGINE_SDMA.
+   * The type of this attribute is uint32_t.
+   */
+  HSA_AMD_QUEUE_INFO_SDMA_ENGINE_ID,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,

@@ -621,7 +621,9 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
     imgCreateInfo.swizzledFormat.swizzle = channels;
     imgCreateInfo.mipLevels = (desc_.mipLevels_) ? desc_.mipLevels_ : 1;
     imgCreateInfo.samples = 1;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
     imgCreateInfo.fragments = 1;
+#endif
     Pal::ImageTiling tiling = forceLinear ? Pal::ImageTiling::Linear : Pal::ImageTiling::Optimal;
     uint32_t rowPitch = 0;
 
@@ -863,7 +865,9 @@ bool Resource::CreateInterop(CreateParams* params) {
       imgCreateInfo.swizzledFormat.swizzle = channels;
       imgCreateInfo.mipLevels = 1;
       imgCreateInfo.samples = 1;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
       imgCreateInfo.fragments = 1;
+#endif
       imgCreateInfo.tiling = Pal::ImageTiling::Linear;
       imgCreateInfo.depthPitch = desc().height_ * imgCreateInfo.rowPitch;
 
@@ -1129,6 +1133,12 @@ bool Resource::CreatePinned(CreateParams* params) {
   createInfo.pSysMem = pinAddress;
   createInfo.size = allocSize;
   createInfo.vaRange = Pal::VaRange::Default;
+  // Fine-grain pinning requires bypassing GPU L2 for CPU-GPU coherency.
+  // Coarse-grain (hipExtHostRegisterCoarseGrained, no CL_MEM_SVM_ATOMICS) leaves gl2Uncached=0,
+  // so the GPU can cache in L2; explicit sync is the caller's responsibility.
+  if ((params->owner_ != nullptr) && (params->owner_->getMemFlags() & CL_MEM_SVM_ATOMICS)) {
+    createInfo.flags.gl2Uncached = 1;
+  }
   memRef_ = GpuMemoryReference::Create(dev(), createInfo);
   if (nullptr == memRef_) {
     LogError("Failed PAL memory allocation!");

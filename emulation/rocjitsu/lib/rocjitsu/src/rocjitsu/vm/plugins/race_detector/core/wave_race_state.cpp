@@ -141,7 +141,11 @@ template <typename Pred> void WaveRaceState::resolveWaitCnt(int limit, Pred isTa
       retired++;
       retireEventRegisters(eid);
       detector->markEventWaveComplete(eid);
-      waveCompleteMemoryEvents.push_back(eid);
+      // Trimmable WAVE_COMPLETE events may be removed from the registry
+      // immediately. Only keep non-trimmable events for later barrier retire;
+      // otherwise a later barrier could try to retire stale EventIds.
+      if (!detector->events().isTrimmable(eid))
+        barrierPendingEvents.push_back(eid);
     } else {
       waveMemoryEvents[write++] = eid;
     }
@@ -163,21 +167,46 @@ void WaveRaceState::sWaitCntLgkmcnt(int lgkmcnt) {
   });
 }
 
-void WaveRaceState::flushWaveCompleteMemoryEvents() {
+void WaveRaceState::flushBarrierPendingEvents() {
   ProfileScope ps(*profiler_, "removeEvents");
-  for (EventId eventId : waveCompleteMemoryEvents) {
+  for (EventId eventId : barrierPendingEvents) {
     detector->retireEvent(eventId);
   }
-  waveCompleteMemoryEvents.clear();
+  barrierPendingEvents.clear();
 }
 
 void WaveRaceState::checkVgprRead(int reg, int lane, uint8_t byteMask) const {
+  checkVgprReadLanes(reg, uint64_t{1} << lane, byteMask);
+}
+
+void WaveRaceState::checkVgprReadLanes(int reg, uint64_t laneMask, uint8_t byteMask) const {
+  if (laneMask == 0)
+    return;
   for (EventId eid : vgprMemoryEvents[reg]) {
+    uint64_t conflictMask = laneMask & detector->events().execMask(eid);
     if (isToVgpr(detector->events().type(eid)) &&
-        (detector->events().byteMask(eid) & byteMask) != 0 &&
-        detector->events().isActiveForLane(eid, lane)) {
-      detector->getRaceHandler()(
-          {RaceViolation::Space::VGPR, reg, waveId.value, lane, false, detector->getWorkgroupId()});
+        (detector->events().byteMask(eid) & byteMask) != 0 && conflictMask != 0) {
+      int lane = std::countr_zero(conflictMask);
+      detector->getRaceHandler()({RaceViolation::Space::VGPR, reg, waveId.value, lane, false,
+                                  detector->getWorkgroupId(), eid});
+    }
+  }
+}
+
+void WaveRaceState::checkVgprWrite(int reg, int lane, uint8_t byteMask) const {
+  checkVgprWriteLanes(reg, uint64_t{1} << lane, byteMask);
+}
+
+void WaveRaceState::checkVgprWriteLanes(int reg, uint64_t laneMask, uint8_t byteMask) const {
+  if (laneMask == 0)
+    return;
+  for (EventId eid : vgprMemoryEvents[reg]) {
+    uint64_t conflictMask = laneMask & detector->events().execMask(eid);
+    if (isToVgpr(detector->events().type(eid)) &&
+        (detector->events().byteMask(eid) & byteMask) != 0 && conflictMask != 0) {
+      int lane = std::countr_zero(conflictMask);
+      detector->getRaceHandler()({RaceViolation::Space::VGPR, reg, waveId.value, lane, true,
+                                  detector->getWorkgroupId(), eid});
     }
   }
 }
@@ -192,7 +221,7 @@ void WaveRaceState::checkVgprReadAllLanes(int reg) const {
       if (isToVgpr(detector->events().type(eid)) && (detector->events().byteMask(eid) & 0xF) != 0) {
         int lane = std::countr_zero(detector->events().execMask(eid));
         detector->getRaceHandler()({RaceViolation::Space::VGPR, reg, waveId.value, lane, false,
-                                    detector->getWorkgroupId()});
+                                    detector->getWorkgroupId(), eid});
       }
     }
   }
@@ -213,8 +242,8 @@ void WaveRaceState::checkSgprRead(int reg) const {
   }
   for (EventId eid : sgprMemoryEvents[reg]) {
     if (isToSgpr(detector->events().type(eid))) {
-      detector->getRaceHandler()(
-          {RaceViolation::Space::SGPR, reg, waveId.value, -1, false, detector->getWorkgroupId()});
+      detector->getRaceHandler()({RaceViolation::Space::SGPR, reg, waveId.value, -1, false,
+                                  detector->getWorkgroupId(), eid});
     }
   }
 }

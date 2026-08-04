@@ -7,6 +7,9 @@ on:
         type: string
       projects_to_test:
         type: string
+      test_type:
+        type: string
+        default: "standard"
       package_version:
         type: string
         required: true
@@ -20,7 +23,6 @@ on:
         type: string
         default: "azure-linux-scale-rocm"
 
-
 permissions:
   contents: read
 
@@ -31,8 +33,7 @@ jobs:
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2 # 2026-04-16
-      options: -v /runner/config:/home/awsconfig/
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:a382085df3ba2419b58aa9051350883a0d0b732a4bc0a4ef60458f8161bb08c6 # 2026-06-11
     strategy:
       fail-fast: true
     env:
@@ -40,7 +41,6 @@ jobs:
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       TEATIME_FORCE_INTERACTIVE: 0
-      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
     steps:
       - name: "Checking out repository for rocm-systems"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -50,7 +50,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 177bc45e201c996e1a780e3348fd49ca2c439b8e # 2026-06-25 commit
+          ref: 2e7c190b99caa226a8644eda6eca720b3db102d5 # 2026-07-22
 
       - name: Install python deps
         run: |
@@ -134,11 +134,13 @@ jobs:
   therock-test-linux:
     name: "Test"
     needs: [therock-build-linux]
+    # Skip tests if test_runs_on is empty (build-only mode) or gfx950-dcgpu (capacity)
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    if: ${{ inputs.test_runs_on != '' && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       projects_to_test: ${{ inputs.projects_to_test }}
+      test_type: ${{ inputs.test_type }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"

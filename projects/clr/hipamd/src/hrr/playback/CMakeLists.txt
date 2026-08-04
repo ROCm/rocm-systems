@@ -52,3 +52,7 @@ find_package(Threads REQUIRED)
 target_link_libraries(hrr-playback PRIVATE hrr_reader amdhip64 Threads::Threads)
 
 install(TARGETS hrr-playback RUNTIME DESTINATION bin)
+
+# Crash-truncation recovery is covered by the hip-tests catch suite
+# (projects/hip-tests/catch/unit/hrr/hrr_recovery.cc, run via HrrTest "[hrr]"),
+# so it is part of CI rather than a standalone EXCLUDE_FROM_ALL target.

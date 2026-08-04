@@ -76,7 +76,7 @@ ls "$INSTALL_PREFIX"/include/rocjitsu/
 ls "$INSTALL_PREFIX"/share/rocjitsu/configs/
 
 echo "Dynamic dependencies:"
-ldd "$INSTALL_PREFIX"/lib/librocjitsu_kmd.so
+ldd "$INSTALL_PREFIX"/lib/librocjitsu.so
 '
 
 echo "rocjitsu: installed to $INSTALL_PREFIX inside $IMAGE" >&2

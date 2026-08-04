@@ -11,7 +11,6 @@
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/perf.hpp"
-#include "core/rocpd/data_processor.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/utility.hpp"
@@ -68,10 +67,12 @@
 #include <initializer_list>
 #include <mutex>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 
 #include <pthread.h>
 #include <signal.h>
@@ -1696,7 +1697,7 @@ post_process_timemory(std::int64_t                               _tid,
 
         for(const auto& iitr : itr.m_stack)
         {
-            _data.emplace_back(tim::string_view_t{ iitr.name });
+            _data.emplace_back(std::string_view{ iitr.name });
             _data.back().push(itr.m_tid);
             _data.back().start();
         }
@@ -1734,7 +1735,7 @@ post_process_timemory(std::int64_t                               _tid,
         // generate the instances of the tuple of components and start them
         for(const auto& iitr : itr.m_stack)
         {
-            _data.emplace_back(tim::string_view_t{ iitr.name });
+            _data.emplace_back(std::string_view{ iitr.name });
             _data.back().push(itr.m_tid);
             _data.back().start();
         }
@@ -1798,7 +1799,7 @@ post_process_timemory(std::int64_t                               _tid,
         // generate the instances of the tuple of components and start them
         for(const auto& iitr : itr.m_stack)
         {
-            _data.emplace_back(tim::string_view_t{ iitr.name });
+            _data.emplace_back(std::string_view{ iitr.name });
             _data.back().push(itr.m_tid);
             _data.back().start();
         }
@@ -1825,7 +1826,7 @@ post_process_timemory(std::int64_t                               _tid,
         // generate the instances of the tuple of components and start them
         for(const auto& iitr : itr.m_stack)
         {
-            _data.emplace_back(tim::string_view_t{ iitr.name });
+            _data.emplace_back(std::string_view{ iitr.name });
             _data.back().push(itr.m_tid);
             _data.back().start();
         }
