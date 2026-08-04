@@ -832,7 +832,7 @@ class Device : public NullDevice {
   struct SdmaEngineAllocator {
     amd::Monitor lock_;  //!< Protects the allocation state
     std::unordered_map<VirtualGPU*, uint32_t> vgpu_to_engine_;  //!< VirtualGPU -> engine mask
-    std::atomic<uint32_t> next_rr_engine_{0};  //!< Simple RR counter for future use
+    std::atomic<uint32_t> next_rr_engine_{0};  //!< RR counter for sdma engine selection
     const Device& device_;  //!< Reference to parent device for accessing masks
 
     SdmaEngineAllocator(const Device& device) : device_(device) {}
