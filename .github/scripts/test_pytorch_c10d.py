@@ -3,7 +3,7 @@
 
 This script handles:
   1. Discovering the CI-built librccl.so in the artifact directory
-  2. Verifying that LD_LIBRARY_PATH overrides PyTorch's bundled RCCL
+  2. Replacing PyTorch's pip-bundled librccl.so with the CI-built version
   3. Cloning the matching PyTorch test sources (sparse checkout)
   4. Running pytest on test_c10d_nccl.py
 
@@ -25,11 +25,13 @@ from pathlib import Path
 
 from rccl_ci_utils import (
     find_rccl_library,
+    override_bundled_rccl,
     parse_junit_xml,
+    quarantine_rocm_sysdeps,
+    reconcile_soname_versions,
     send_email_report,
     send_teams_webhook,
     set_github_output,
-    verify_rccl_override,
     write_github_summary,
 )
 
@@ -424,19 +426,30 @@ def main() -> None:
     if args.discover_only:
         return
 
-    # Step 2: Set up LD_LIBRARY_PATH and verify override
-    setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
-    verify_rccl_override(rccl_lib_dir)
+    # Step 2: Create symlinks for soname version mismatches between
+    # CI-built libraries and pip-installed packages (must run before
+    # quarantine so pip dirs get compatibility symlinks)
+    pip_lib_dirs = list(Path(sys.prefix, "lib").rglob("_rocm_sdk_*/lib"))
+    reconcile_soname_versions([rccl_lib_dir] + [d for d in pip_lib_dirs if d.is_dir()])
 
-    # Step 3: Clone PyTorch test sources
+    # Step 3: Quarantine TheRock-bundled libamd_smi and rocm_sysdeps to
+    # prevent the nl_genl destructor crash (SIGSEGV in containers).
+    # After this, libamd_smi resolves from pip dirs (via symlinks above).
+    quarantine_rocm_sysdeps(rccl_lib_dir)
+
+    # Step 4: Replace pip-bundled librccl.so with CI-built version
+    override_bundled_rccl(rccl_lib_dir)
+    setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
+
+    # Step 5: Clone PyTorch test sources
     clone_pytorch_test_sources(args.pytorch_src)
 
-    # Step 4: Patch missing modules, print environment info, and run tests
+    # Step 6: Patch missing modules, print environment info, and run tests
     patch_missing_torch_modules()
     print_environment_info()
     exit_code, summary = run_tests(args.pytorch_src, args.results_log, args.test_scope)
 
-    # Step 5: Generate and distribute summary report
+    # Step 7: Generate and distribute summary report
     report = generate_summary_report(summary, rccl_lib)
     log.info("\n%s", report)
     write_github_summary(report)

@@ -116,8 +116,16 @@ jobs:
           TORCH_NCCL_BLOCKING_WAIT: 1
           TORCH_NCCL_ASYNC_ERROR_HANDLING: 1
           NOTIFY_EMAIL: ${{ inputs.notify_email }}
-          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook }}
+          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook || secrets.RCCL_CI_TEAMS_WEBHOOK }}
         run: |
+          # The dynamic linker caches LD_LIBRARY_PATH at process startup.
+          # PyTorch's import chain (rocm_sdk.preload_libraries -> ctypes.CDLL)
+          # needs _rocm_sdk_core/lib on the path before Python starts.
+          SITE_PKGS=$(python -c "import site; print(site.getsitepackages()[0])")
+          for d in "$SITE_PKGS"/_rocm_sdk_*/lib; do
+            [ -d "$d" ] && export LD_LIBRARY_PATH="${d}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          done
+
           NOTIFY_ARGS=()
           [ -n "$NOTIFY_EMAIL" ] && NOTIFY_ARGS+=(--notify-email "$NOTIFY_EMAIL")
           [ -n "$NOTIFY_WEBHOOK" ] && NOTIFY_ARGS+=(--notify-webhook "$NOTIFY_WEBHOOK")

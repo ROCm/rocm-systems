@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 import smtplib
 import sys
 import urllib.request
@@ -13,6 +14,133 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 SMTP_SERVERS = ["smtp.amd.com", "aussmtp.amd.com", "mail.amd.com", "localhost"]
+
+
+def override_bundled_rccl(rccl_lib_dir: Path) -> None:
+    """Replace the pip-bundled librccl.so with the CI-built version.
+
+    LD_LIBRARY_PATH alone is insufficient because pip-installed wheels
+    embed DT_RPATH/DT_RUNPATH in their shared libraries, and the dynamic
+    linker resolves these before LD_LIBRARY_PATH.  LD_PRELOAD causes
+    LLVM symbol conflicts with PyTorch.  Instead, we physically replace
+    the bundled library files so the wheel's own load path resolves to
+    the CI-built version.
+    """
+    import shutil
+
+    ci_rccl = rccl_lib_dir.resolve() / "librccl.so"
+    if not ci_rccl.exists():
+        log.error("CI-built librccl.so not found at %s", ci_rccl)
+        sys.exit(1)
+    ci_size = ci_rccl.stat().st_size
+    log.info("CI-built RCCL: %s (%d bytes)", ci_rccl, ci_size)
+
+    site_packages = Path(sys.prefix) / "lib"
+    bundled = list(site_packages.rglob("_rocm_sdk_libraries/lib/librccl.so*"))
+    if not bundled:
+        bundled = list(Path(sys.prefix).rglob("librccl.so*"))
+
+    replaced = 0
+    for target in bundled:
+        if target.is_symlink():
+            continue
+        orig_size = target.stat().st_size
+        backup = target.with_suffix(target.suffix + ".pip-original")
+        shutil.copy2(str(target), str(backup))
+        shutil.copy2(str(ci_rccl), str(target))
+        new_size = target.stat().st_size
+        log.info("Replaced %s (%d -> %d bytes)", target, orig_size, new_size)
+        replaced += 1
+
+    if replaced == 0:
+        log.warning("No bundled librccl.so found to replace; LD_LIBRARY_PATH may suffice")
+    else:
+        log.info("Replaced %d bundled librccl.so file(s) with CI-built version", replaced)
+
+
+def quarantine_rocm_sysdeps(artifact_lib_dir: Path) -> None:
+    """Remove TheRock-bundled libamd_smi and rocm_sysdeps from artifact dir.
+
+    The CI-built librccl.so retains RPATH from the TheRock build tree.
+    When resolved, it loads libamd_smi.so from the artifact directory,
+    which transitively loads librocm_sysdeps_nl_genl_3.so.200 via its
+    own RUNPATH ($ORIGIN/rocm_sysdeps/lib/).  That library's destructor
+    calls genl_unregister_family and crashes (SIGSEGV) in containers.
+
+    Quarantining both libamd_smi and rocm_sysdeps forces the linker to
+    fall through the RPATH miss and resolve libamd_smi from the pip
+    environment instead.  reconcile_soname_versions() must run BEFORE
+    this function so that pip dirs already have compatibility symlinks.
+    """
+    sysdeps_dir = artifact_lib_dir / "rocm_sysdeps"
+    if sysdeps_dir.is_dir():
+        quarantined = artifact_lib_dir / "rocm_sysdeps.quarantined"
+        sysdeps_dir.rename(quarantined)
+        log.info("Quarantined: %s -> %s", sysdeps_dir, quarantined)
+
+    for f in sorted(artifact_lib_dir.glob("libamd_smi*")):
+        q = f.parent / (f.name + ".quarantined")
+        f.rename(q)
+        log.info("Quarantined: %s", f.name)
+
+
+_SONAME_RE = re.compile(r"^(lib.+\.so)\.(\d+)$")
+
+
+def reconcile_soname_versions(lib_dirs: list[Path]) -> None:
+    """Create symlinks to resolve soname version mismatches across lib dirs.
+
+    CI-built and pip-installed libraries may ship different soname versions
+    of the same library (e.g., CI artifacts have libamd_smi.so.26 while the
+    pip wheel ships libamd_smi.so.27).  This causes dlopen failures when one
+    side references the other's version — whether via ELF DT_NEEDED or
+    Python-level ctypes.CDLL preloading (rocm_sdk.preload_libraries).
+
+    For every library base name (e.g. libamd_smi.so) that appears with
+    different version suffixes across the directories, we create symlinks
+    in each directory so that every observed version resolves everywhere.
+    """
+    per_dir: dict[Path, dict[str, dict[str, Path]]] = {}
+    all_versions: dict[str, set[str]] = {}
+
+    for d in lib_dirs:
+        if not d.is_dir():
+            continue
+        bases: dict[str, dict[str, Path]] = {}
+        for f in d.iterdir():
+            if f.name.endswith(".pip-original"):
+                continue
+            m = _SONAME_RE.match(f.name)
+            if m:
+                base, ver = m.group(1), m.group(2)
+                bases.setdefault(base, {})[ver] = f
+                all_versions.setdefault(base, set()).add(ver)
+        per_dir[d] = bases
+
+    created = 0
+    for base, versions in sorted(all_versions.items()):
+        if len(versions) < 2:
+            continue
+        for d, bases in per_dir.items():
+            dir_versions = bases.get(base, {})
+            if not dir_versions:
+                continue
+            target_ver = next(iter(dir_versions))
+            target_name = f"{base}.{target_ver}"
+            for ver in versions:
+                if ver in dir_versions:
+                    continue
+                symlink = d / f"{base}.{ver}"
+                if symlink.exists():
+                    continue
+                symlink.symlink_to(target_name)
+                log.info("Symlink: %s.%s -> %s (in %s)", base, ver, target_name, d)
+                created += 1
+
+    if created:
+        log.info("Created %d compatibility symlink(s) for soname mismatches", created)
+    else:
+        log.info("No soname version mismatches found")
 
 
 def find_rccl_library(artifact_dir: Path) -> Path:
