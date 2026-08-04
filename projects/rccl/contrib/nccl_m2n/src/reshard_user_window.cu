@@ -53,6 +53,20 @@
 #define NCCL_RESHARD_GIN_FINAL_FENCE ncclGinFenceLevel::Relaxed
 #endif
 
+/* The cooperative-group types used below (ncclCoopWarp, ncclCoopWarpSpan)
+ * account for threads in units of the target's native warp/wavefront: 64 lanes
+ * on AMD GFX9, 32 on NVIDIA.  The warp partitioning in these kernels must use
+ * that same unit.  A ncclCoopWarpSpan built from 32-thread warps on a 64-lane
+ * wave claims twice as many warps as the span actually holds leaders for, and
+ * its sync() then waits for arrivals that can never happen -> device-side
+ * deadlock on AMD.  Upstream hardcodes 32; use the target's real warp size.
+ */
+#if defined(WARP_SIZE)
+#define NCCL_RESHARD_WARP_SIZE WARP_SIZE
+#else
+#define NCCL_RESHARD_WARP_SIZE 32
+#endif
+
 // ============================================================================
 // Byte-level transpose kernel: [D0, D1, D2] -> [D0, D2, D1]  (row-major)
 // ============================================================================
@@ -99,8 +113,15 @@ __global__ __launch_bounds__(DEFAULT_KERNEL_MAX_NTHREADS, 1) void reshardKernelU
   ncclTeam world = ncclTeamWorld(devComm);
   ncclTeam lsa = ncclTeamLsa(devComm);
 
-  int warpId = threadIdx.x / 32;
-  int laneId = threadIdx.x % 32;
+  int warpId = threadIdx.x / NCCL_RESHARD_WARP_SIZE;
+  int laneId = threadIdx.x % NCCL_RESHARD_WARP_SIZE;
+
+  /* Required before the first ncclCoopWarpSpan::sync() below: where the target
+   * has no hardware named barriers the span is emulated with a shared
+   * sense-reversing barrier whose slots must be zeroed first.  No-op on targets
+   * that do have named barriers.
+   */
+  ncclCoopNamedBarrierInit();
 
   // [USER-WINDOW] Local pointer comes from the GLOBAL window.  Offset is
   // zero by contract but
@@ -130,7 +151,7 @@ __global__ __launch_bounds__(DEFAULT_KERNEL_MAX_NTHREADS, 1) void reshardKernelU
 
   // SOURCE: send data to targets
   if (params.isSource) {
-    int activeSrcWarps = min(MAX_SRC_WARPS, (int)(blockDim.x / 32));
+    int activeSrcWarps = min(MAX_SRC_WARPS, (int)(blockDim.x / NCCL_RESHARD_WARP_SIZE));
     if (warpId < activeSrcWarps) {
       for (int t = warpId; t < params.numTargets; t += activeSrcWarps) {
         ncclReshardTargetInfo& target = params.targets[t];
@@ -177,7 +198,7 @@ __global__ __launch_bounds__(DEFAULT_KERNEL_MAX_NTHREADS, 1) void reshardKernelU
 
   // DEST: receive and replicate
   if (params.isDest && params.numSources > 0) {
-    int warpsPerCta = blockDim.x / 32;
+    int warpsPerCta = blockDim.x / NCCL_RESHARD_WARP_SIZE;
     int activeSources = min(params.numSources, min(warpsPerCta, (int)MAX_WARP_GROUPS));
     int warpsPerSource = warpsPerCta / activeSources;
     if (warpsPerSource < 1) warpsPerSource = 1;
@@ -223,8 +244,8 @@ __global__ __launch_bounds__(DEFAULT_KERNEL_MAX_NTHREADS, 1) void reshardKernelU
         // [USER-WINDOW] LSA fan-out via the global window keyed by
         // world-rank arithmetic.
         if (params.numLocalFollowers > 0 && myStart < totalSize) {
-          int threadsInGroup = warpsPerSource * 32;
-          int threadInGroup = warpInGroup * 32 + laneId;
+          int threadsInGroup = warpsPerSource * NCCL_RESHARD_WARP_SIZE;
+          int threadInGroup = warpInGroup * NCCL_RESHARD_WARP_SIZE + laneId;
 
           char* srcPtr = localBuffer + plan.dstBaseOffset + myStart;
           size_t chunkSize = myEnd - myStart;
@@ -263,8 +284,8 @@ __global__ __launch_bounds__(DEFAULT_KERNEL_MAX_NTHREADS, 1) void reshardKernelU
           // [USER-WINDOW] LSA fan-out via the global window for
           // strided chunks.
           if (params.numLocalFollowers > 0 && thisBytes > 0) {
-            int threadsInGroup = warpsPerSource * 32;
-            int threadInGroup = warpInGroup * 32 + laneId;
+            int threadsInGroup = warpsPerSource * NCCL_RESHARD_WARP_SIZE;
+            int threadInGroup = warpInGroup * NCCL_RESHARD_WARP_SIZE + laneId;
 
             const size_t inner = plan.innerSize;
             size_t lsaIter = byteStart / inner;
@@ -327,8 +348,8 @@ directReshardKernelUserWindow(
 
   ncclTeam world = ncclTeamWorld(devComm);
 
-  int warpId = threadIdx.x / 32;
-  int laneId = threadIdx.x % 32;
+  int warpId = threadIdx.x / NCCL_RESHARD_WARP_SIZE;
+  int laneId = threadIdx.x % NCCL_RESHARD_WARP_SIZE;
 
   __shared__ uint64_t initialSignals[MAX_DIRECT_SOURCES];
   // Compile-time guard: shared-array dim must be at least the prep-side cap
