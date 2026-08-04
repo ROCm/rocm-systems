@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  */
+
 #include "execution_control_common.hh"
 
 #include <hip_test_common.hh>
@@ -32,13 +33,14 @@ HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Basic) {
 
 // Verifies a kernel launch does not block the host: issued on a deliberately
 // blocked stream, it must return before the stream is unblocked.
-// CUDA deadlocks when its first kernel launch targets a blocked null stream.
+// AMD only since it is testing implementation details and it might deadlock
+// on other platforms.
 #if HT_AMD
 HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Synchronization_Behavior) {
   HipTest::BlockingContext b_context{nullptr};
   hipStream_t kernel_stream{nullptr};
 
-  HIP_CHECK(b_context.block_stream());
+  b_context.block_stream();
   REQUIRE(b_context.is_blocked());
 
   HIP_CHECK(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, 1, 1}, nullptr,

@@ -10,7 +10,6 @@
 #include <catch2/catch_all.hpp>
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstring>
 #include <cstdlib>
 #include <iostream>
@@ -710,79 +709,41 @@ template <> struct MemTraits<MemcpyAsync> {
   }
 };
 
-// Heap ownership keeps callback state alive if an assertion unwinds the test.
 class BlockingContext {
-  struct State {
-    std::mutex mutex;
-    std::condition_variable condition;
-    bool blocked = true;
-    bool finished = false;
-  };
+  // The callback shares ownership of the flag so that it stays alive even if an assertion
+  // unwinds the test while the callback is still parked on it.
+  std::shared_ptr<std::atomic_bool> blocked = std::make_shared<std::atomic_bool>(true);
+  hipStream_t stream;
 
  public:
-  explicit BlockingContext(hipStream_t stream) : stream_(stream) {}
+  BlockingContext(hipStream_t s) : stream(s) {}
 
-  ~BlockingContext() {
-    unblock_stream();
-    if (callback_enqueued_) {
-      std::unique_lock<std::mutex> lock(state_->mutex);
-      if (!state_->condition.wait_for(lock, std::chrono::seconds(5),
-                                      [this]() { return state_->finished; })) {
-        WARN("BlockingContext callback did not finish; the stream may be faulted");
-      }
-    }
-  }
+  // Releases the stream so an unwinding test cannot leave the callback parked forever.
+  ~BlockingContext() { unblock_stream(); }
 
   BlockingContext(const BlockingContext&) = delete;
   BlockingContext& operator=(const BlockingContext&) = delete;
-  BlockingContext(BlockingContext&&) = delete;
-  BlockingContext& operator=(BlockingContext&&) = delete;
 
-  hipError_t block_stream() {
-    if (callback_enqueued_) {
-      return hipErrorInvalidValue;
-    }
-    auto* holder = new std::shared_ptr<State>(state_);
+  void block_stream() {
+    auto* callback_flag = new std::shared_ptr<std::atomic_bool>(blocked);
     auto blocking_callback = [](hipStream_t, hipError_t, void* data) {
-      std::unique_ptr<std::shared_ptr<State>> holder(
-          static_cast<std::shared_ptr<State>*>(data));
-      const std::shared_ptr<State>& state = *holder;
-      {
-        std::unique_lock<std::mutex> lock(state->mutex);
-        state->condition.wait(lock, [&state]() { return !state->blocked; });
-        state->finished = true;
+      std::unique_ptr<std::shared_ptr<std::atomic_bool>> blocked(
+          static_cast<std::shared_ptr<std::atomic_bool>*>(data));
+      while ((*blocked)->load()) {
+        // Yield this thread till we are waiting
+        std::this_thread::yield();
       }
-      state->condition.notify_all();
     };
-    const hipError_t status = hipStreamAddCallback(stream_, blocking_callback, holder, 0);
+    const hipError_t status = hipStreamAddCallback(stream, blocking_callback, callback_flag, 0);
     if (status != hipSuccess) {
-      delete holder;
-    } else {
-      callback_enqueued_ = true;
+      delete callback_flag;
     }
-    return status;
+    HIP_CHECK(status);
   }
 
-  void unblock_stream() {
-    {
-      std::lock_guard<std::mutex> lock(state_->mutex);
-      state_->blocked = false;
-    }
-    state_->condition.notify_all();
-  }
+  void unblock_stream() { blocked->store(false); }
 
-  bool is_blocked() const {
-    const hipError_t status = hipStreamQuery(stream_);
-    if (status != hipSuccess && status != hipErrorNotReady) {
-      WARN("hipStreamQuery failed while checking BlockingContext");
-    }
-    return status == hipErrorNotReady;
-  }
-
- private:
-  hipStream_t stream_;
-  std::shared_ptr<State> state_ = std::make_shared<State>();
-  bool callback_enqueued_ = false;
+  bool is_blocked() const { return hipStreamQuery(stream) == hipErrorNotReady; }
 };
 }  // namespace HipTest
 
