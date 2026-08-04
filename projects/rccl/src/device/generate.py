@@ -14,7 +14,7 @@ all_protos    = ["LL","LL128","SIMPLE"]
 all_algos     = ["TREE","RING", "", "", "", "", "PAT"]
 all_accs      = ["0", "1"]
 all_pipelines = ["0", "1"]
-all_unrolls   = ["1", "2", "4", "8", "16", "32"]
+all_unrolls   = ["1", "2", "4"]
 
 all_params = [all_colls, all_algos, all_protos, all_redops, all_tys, all_accs, all_pipelines, all_unrolls]
 
@@ -241,6 +241,7 @@ def calc_unroll_and_pipeline_for_local_arch():
 # if building for local arch only, we only need to build for 1 variant of unroll for most gfx targets,
 # except for gfx950. For gfx950, we also disable pipelining.
 local_unroll, local_pipeline = calc_unroll_and_pipeline_for_local_arch()
+table_unrolls = sorted(set(all_unrolls) | set(local_unroll), key=int)
 
 # rocSHMEM/GDA-based collectives: only generated when ENABLE_ROCSHMEM build is requested
 gda_colls = {"AlltoAllGda", "AlltoAllvGda"}
@@ -413,13 +414,13 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
       out("__device__ void %s();\n" % sym)
   out("\n")
 
-  index = {val: None for val in all_unrolls}
+  index = {val: None for val in table_unrolls}
 
   # Function-pointer table. Only the builds that dispatch through it at RUNTIME
   # emit it: the device-linker build and the legacy indirect-function-call build.
   out("#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)\n")
   out("typedef void(*ncclDevFuncPtr_t)();\n\n")
-  for unroll in all_unrolls:
+  for unroll in table_unrolls:
     index[unroll] = 0
     out("static __device__ ncclDevFuncPtr_t const ncclDevFuncTable_%s[] = {\n" % unroll)
     for fn in primary_funcs:
@@ -440,7 +441,7 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
     # ncclDevFunc_* DIRECTLY BY NAME -- no function-pointer table is referenced,
     # so nothing is address-taken.
     out("#if !defined(USE_INDIRECT_FUNCTION_CALL) && !defined(RCCL_DEVICE_LINKER)\n")
-    for unroll in all_unrolls:
+    for unroll in table_unrolls:
       out(f"template<unsigned short f, unsigned short l>\n"
           f"struct Caller{unroll} {{\n"
           "  static __forceinline__ __device__\n"
@@ -547,6 +548,10 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
   for u in all_unrolls:
     out("  %s, // unroll %s\n" % ("true" if u in local_unroll else "false", u))
   out("};\n")
+  out("\n")
+  for u in ["8", "16", "32"]:
+    if u in local_unroll:
+      out("#define NCCL_HAS_UNROLL_%s\n" % u)
 
 # Maps to .cu filename which implements this func. The only constraint is that
 # "coll" is reflected in the name: formally that no two funcs having different

@@ -605,16 +605,28 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       if (COLL_UNROLL == 1) ncclDevFuncTable_1[ncclShmem.funcId]();
       else if (COLL_UNROLL == 2) ncclDevFuncTable_2[ncclShmem.funcId]();
       else if (COLL_UNROLL == 4) ncclDevFuncTable_4[ncclShmem.funcId]();
+#ifdef NCCL_HAS_UNROLL_8
       else if (COLL_UNROLL == 8) ncclDevFuncTable_8[ncclShmem.funcId]();
+#endif
+#ifdef NCCL_HAS_UNROLL_16
       else if (COLL_UNROLL == 16) ncclDevFuncTable_16[ncclShmem.funcId]();
+#endif
+#ifdef NCCL_HAS_UNROLL_32
       else ncclDevFuncTable_32[ncclShmem.funcId]();
+#endif
 #else
       if (COLL_UNROLL == 1) NCCL_CALL_FUNCTIONS_1(ncclShmem.funcId);
       else if (COLL_UNROLL == 2) NCCL_CALL_FUNCTIONS_2(ncclShmem.funcId);
       else if (COLL_UNROLL == 4) NCCL_CALL_FUNCTIONS_4(ncclShmem.funcId);
+#ifdef NCCL_HAS_UNROLL_8
       else if (COLL_UNROLL == 8) NCCL_CALL_FUNCTIONS_8(ncclShmem.funcId);
+#endif
+#ifdef NCCL_HAS_UNROLL_16
       else if (COLL_UNROLL == 16) NCCL_CALL_FUNCTIONS_16(ncclShmem.funcId);
+#endif
+#ifdef NCCL_HAS_UNROLL_32
       else NCCL_CALL_FUNCTIONS_32(ncclShmem.funcId);
+#endif
 #endif
     }
 
