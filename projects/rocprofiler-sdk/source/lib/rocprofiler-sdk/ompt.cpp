@@ -236,6 +236,9 @@ rocprofiler_ompt_is_finalized(int* status)
 ompt_start_tool_result_t*
 rocprofiler_ompt_start_tool(unsigned int omp_version, const char* /*runtime_version*/)
 {
+    // make sure the SDK is initialized before we query whether any contexts was ompt support
+    ::rocprofiler::registration::initialize();
+
     // log to clog since logging probably won't be initialized here
     auto _init_status = ::rocprofiler::ompt::init_status.load();
     if(_init_status != 0)
