@@ -3007,7 +3007,6 @@ amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_hand
                                           amdsmi_processor_handle processor_handle_dst,
                                           uint64_t* hops, amdsmi_link_type_t* type) {
   AMDSMI_CHECK_INIT();
-
   if (hops == nullptr || type == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
@@ -3460,10 +3459,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(
       if (resource_index >= AMDSMI_MAX_CP_PROFILE_RESOURCES) {
         break;
       }
-      profile_config->resource_profiles[resource_index].profile_index = 0;
       profile_config->resource_profiles[resource_index].resource_type = AMDSMI_ACCELERATOR_MAX;
-      profile_config->resource_profiles[resource_index].partition_resource = 0;
-      profile_config->resource_profiles[resource_index].num_partitions_share_resource = 0;
       status = rsmi_wrapper(rsmi_dev_compute_partition_resource_profile_get, processor_handle, 0,
                             &type, &profile);
       if (status == AMDSMI_STATUS_SUCCESS) {
