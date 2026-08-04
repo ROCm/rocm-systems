@@ -146,11 +146,12 @@ The debugging environment variables in HIP are collected in the following table.
     * - | ``GPU_MAX_HW_QUEUES``
         | The maximum number of hardware queues allocated per device.
       - ``4``
-      - The variable controls how many independent hardware queues HIP runtime can create per process,
-        per device. If an application allocates more HIP streams than this number, then HIP runtime reuses
-        the same hardware queues for the new streams in a round-robin manner. Note that this maximum
-        number does not apply to hardware queues that are created for CU-masked HIP streams, or
-        cooperative queues for HIP Cooperative Groups (single queue per device).
+      - | ``GPU number-1``: If GPU number is greater than 4. 
+        | The variable controls how many independent hardware queues HIP runtime can create per process,
+        | per device. If an application allocates more HIP streams than this number, then HIP runtime reuses
+        | the same hardware queues for the new streams in a round-robin manner. Note that this maximum
+        | number does not apply to hardware queues that are created for CU-masked HIP streams, or
+        | cooperative queues for HIP Cooperative Groups (single queue per device).
 
 HIP memory management related variables
 --------------------------------------------------------------------------------
