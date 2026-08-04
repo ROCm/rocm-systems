@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/perfetto/sinks/single_file_sink.hpp"
-#include "core/perfetto/sinks/io_helpers.hpp"
+#include "core/perfetto/sinks/file_output.hpp"
 
 #include "core/config.hpp"
 #include "core/output_file_registry.hpp"
-#include "core/perfetto/locked_file_append.hpp"
 #include "core/perfetto/packet_framing.hpp"
 #include "logger/debug.hpp"
 
@@ -162,6 +161,9 @@ single_file_sink::finalize()
         return;
     }
 
+    // An explicit output path without append mode never occurs in a configured
+    // runtime, so the rank filter is skipped rather than consulted -- reading the
+    // config before rocprofsys_init_library throws.
     const auto explicit_non_append_output =
         !m_output_filename_override.empty() && !m_append_mode;
     if(!explicit_non_append_output &&
@@ -188,20 +190,15 @@ single_file_sink::finalize()
             append_with_file_lock(filename, m_buffer.data(), m_buffer.size());
         if(status == locked_append_status::success)
         {
-            perfetto_sink_detail::emit_size_line(filename, m_buffer.size());
             m_registry.get().register_file(filename, output_format::perfetto);
         }
         else
         {
-            if(status == locked_append_status::open_failed)
-                perfetto_sink_detail::emit_open_error_line(filename);
             LOG_ERROR("single_file_sink: append-with-flock failed for {} ({})", filename,
                       status_name(status));
         }
     }
-    else if(!perfetto_sink_detail::write_proto_to(filename, m_buffer.data(),
-                                                  m_buffer.size(), m_registry.get(),
-                                                  !explicit_non_append_output))
+    else if(!write_proto_to(filename, m_buffer.data(), m_buffer.size(), m_registry.get()))
     {
         LOG_ERROR("single_file_sink: failed to open '{}'", filename);
     }
