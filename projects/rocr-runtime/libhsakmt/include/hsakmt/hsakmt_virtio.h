@@ -26,7 +26,7 @@
 #ifndef HSAKMT_VIRTIO_H
 #define HSAKMT_VIRTIO_H
 
-#include <kfd_ioctl.h>
+#include "kfd_ioctl.h"
 
 #include "hsakmt/hsakmt.h"
 #include <libdrm/amdgpu.h>
