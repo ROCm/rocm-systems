@@ -872,6 +872,159 @@ TEST(GpuMemoryTest, RegisteredVmidBlockMissUsesClientMemory) {
   EXPECT_TRUE(std::equal(replacement.begin(), replacement.end(), mapping.data + kAccessOffset));
 }
 
+TEST(GpuMemoryTest, VmidReadsDistinguishAllBackingStates) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr size_t kPageSize = KfdProcess::kPageSize;
+  constexpr size_t kMappingSize = 3 * kPageSize;
+  constexpr uint32_t kAccessibleBackingValue = 0x11111111;
+  constexpr uint32_t kAccessibleClientValue = 0xaaaaaaaa;
+  constexpr uint32_t kUnmanagedClientValue = 0x22222222;
+  constexpr uint32_t kInaccessibleClientValue = 0xbbbbbbbb;
+  constexpr uint32_t kInaccessibleSparseValue = 0x33333333;
+
+  void *raw_mapping =
+      mmap(nullptr, kMappingSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw_mapping, MAP_FAILED);
+  struct Mapping {
+    uint8_t *data = nullptr;
+    size_t size = 0;
+    ~Mapping() { munmap(data, size); }
+  } mapping{static_cast<uint8_t *>(raw_mapping), kMappingSize};
+
+  const uint64_t accessible_va = reinterpret_cast<uint64_t>(mapping.data);
+  const uint64_t inaccessible_va = accessible_va + kPageSize;
+  const uint64_t unmanaged_va = inaccessible_va + kPageSize;
+  std::memcpy(mapping.data, &kAccessibleClientValue, sizeof(kAccessibleClientValue));
+  std::memcpy(mapping.data + kPageSize, &kInaccessibleClientValue,
+              sizeof(kInaccessibleClientValue));
+  std::memcpy(mapping.data + 2 * kPageSize, &kUnmanagedClientValue, sizeof(kUnmanagedClientValue));
+
+  std::array<uint8_t, kPageSize> accessible_backing{};
+  std::array<uint8_t, kPageSize> inaccessible_backing{};
+  std::memcpy(accessible_backing.data(), &kAccessibleBackingValue, sizeof(kAccessibleBackingValue));
+
+  KfdProcess process(kPid);
+  {
+    std::lock_guard<std::mutex> lock(process.alloc_mutex_);
+    KfdProcess::GpuAllocation accessible{};
+    accessible.handle = 1;
+    accessible.gpu_va = accessible_va;
+    accessible.size = kPageSize;
+    accessible.host_ptr = accessible_backing.data();
+    accessible.permanent_backing = true;
+    accessible.mapped_to_gpu = true;
+    process.allocations_.emplace(accessible.handle, std::move(accessible));
+
+    KfdProcess::GpuAllocation inaccessible{};
+    inaccessible.handle = 2;
+    inaccessible.gpu_va = inaccessible_va;
+    inaccessible.size = kPageSize;
+    inaccessible.host_ptr = inaccessible_backing.data();
+    inaccessible.permanent_backing = true;
+    process.allocations_.emplace(inaccessible.handle, std::move(inaccessible));
+    process.refresh_backing_ranges_locked();
+  }
+
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  memory.set_process_client_pid(kPid, getpid());
+  memory.set_process_backing_resolver(
+      kPid, [&process](uint64_t gpu_va, size_t size) -> std::optional<KfdProcess::ResolvedBacking> {
+        return process.resolve_backing(gpu_va, size);
+      });
+  memory.write32(inaccessible_va, kInaccessibleSparseValue);
+
+  auto expect_scalar_and_block_read = [&](uint64_t gpu_va, uint32_t expected) {
+    EXPECT_EQ(memory.read32(gpu_va, kPid), expected);
+    uint32_t block_value = 0;
+    memory.read_block(
+        gpu_va, std::span<uint8_t>(reinterpret_cast<uint8_t *>(&block_value), sizeof(block_value)),
+        kPid);
+    EXPECT_EQ(block_value, expected);
+  };
+  expect_scalar_and_block_read(accessible_va, kAccessibleBackingValue);
+  expect_scalar_and_block_read(unmanaged_va, kUnmanagedClientValue);
+  expect_scalar_and_block_read(inaccessible_va, kInaccessibleSparseValue);
+}
+
+TEST(GpuMemoryTest, InaccessibleManagedRangeNeverWritesClientMemory) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr size_t kPageSize = KfdProcess::kPageSize;
+  constexpr size_t kMappingSize = 2 * kPageSize;
+  constexpr uint32_t kClientValue = 0x11111111;
+  constexpr uint32_t kInitialSparseValue = 0x22222222;
+  constexpr uint32_t kScalarWriteValue = 0x33333333;
+  constexpr uint32_t kBlockWriteValue = 0x44444444;
+
+  void *raw_mapping =
+      mmap(nullptr, kMappingSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw_mapping, MAP_FAILED);
+  struct Mapping {
+    uint8_t *data = nullptr;
+    size_t size = 0;
+    ~Mapping() { munmap(data, size); }
+  } mapping{static_cast<uint8_t *>(raw_mapping), kMappingSize};
+  const uint64_t allocation_va = reinterpret_cast<uint64_t>(mapping.data);
+  const uint64_t cross_page_va = allocation_va + kPageSize - 2;
+  std::memcpy(reinterpret_cast<void *>(cross_page_va), &kClientValue, sizeof(kClientValue));
+
+  std::array<uint8_t, kMappingSize> backing{};
+  KfdProcess process(kPid);
+  {
+    std::lock_guard<std::mutex> lock(process.alloc_mutex_);
+    KfdProcess::GpuAllocation allocation{};
+    allocation.handle = 1;
+    allocation.gpu_va = allocation_va;
+    allocation.size = kMappingSize;
+    allocation.host_ptr = backing.data();
+    allocation.permanent_backing = true;
+    process.allocations_.emplace(allocation.handle, std::move(allocation));
+    process.refresh_backing_ranges_locked();
+  }
+
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  memory.set_process_client_pid(kPid, getpid());
+  memory.set_process_backing_resolver(
+      kPid,
+      [&process](uint64_t address, size_t size) -> std::optional<KfdProcess::ResolvedBacking> {
+        return process.resolve_backing(address, size);
+      });
+  memory.write32(cross_page_va, kInitialSparseValue);
+  EXPECT_EQ(memory.read32(cross_page_va, kPid), kInitialSparseValue);
+
+  memory.write32(cross_page_va, kScalarWriteValue, kPid);
+  uint32_t client_value = 0;
+  std::memcpy(&client_value, reinterpret_cast<void *>(cross_page_va), sizeof(client_value));
+  EXPECT_EQ(client_value, kClientValue);
+  EXPECT_EQ(memory.read32(cross_page_va), kScalarWriteValue);
+
+  memory.write_block(cross_page_va,
+                     std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(&kBlockWriteValue),
+                                              sizeof(kBlockWriteValue)),
+                     kPid);
+  std::memcpy(&client_value, reinterpret_cast<void *>(cross_page_va), sizeof(client_value));
+  EXPECT_EQ(client_value, kClientValue);
+  EXPECT_EQ(memory.read32(cross_page_va), kBlockWriteValue);
+
+  std::memcpy(mapping.data, &kClientValue, sizeof(kClientValue));
+  memory.write32(allocation_va, kBlockWriteValue);
+  memory.atomic_rmw(
+      allocation_va, sizeof(uint32_t),
+      [](uint8_t *storage) {
+        uint32_t value = 0;
+        std::memcpy(&value, storage, sizeof(value));
+        ++value;
+        std::memcpy(storage, &value, sizeof(value));
+      },
+      kPid);
+  std::memcpy(&client_value, mapping.data, sizeof(client_value));
+  EXPECT_EQ(client_value, kClientValue);
+  EXPECT_EQ(memory.read32(allocation_va), kBlockWriteValue + 1);
+}
+
 TEST(VmLifecycleTest, CreateAndDestroy) {
   std::string json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"cdna3"},

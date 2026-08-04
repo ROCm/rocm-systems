@@ -160,9 +160,11 @@ public:
   void read_block(uint64_t addr, std::span<uint8_t> dst, uint32_t vmid = 0) const {
     for_each_page_chunk(addr, dst.size(), [&](uint64_t ea, size_t offset, size_t chunk) {
       auto out = dst.subspan(offset, chunk);
-      if (read_mapped(ea, out.data(), chunk, vmid))
+      const HostAccessResult result = read_mapped(ea, out.data(), chunk, vmid);
+      if (result == HostAccessResult::ACCESSED)
         return;
-      if (vmid > 0 && read_client_memory(ea, out.data(), chunk, vmid))
+      if (result == HostAccessResult::UNRESOLVED && vmid > 0 &&
+          read_client_memory(ea, out.data(), chunk, vmid))
         return;
       for (size_t i = 0; i < chunk; ++i)
         out[i] = simdojo::SparseMemory::read8(ea + i);
@@ -175,9 +177,11 @@ public:
   void write_block(uint64_t addr, std::span<const uint8_t> src, uint32_t vmid = 0) {
     for_each_page_chunk(addr, src.size(), [&](uint64_t ea, size_t offset, size_t chunk) {
       auto in = src.subspan(offset, chunk);
-      if (write_mapped(ea, in.data(), chunk, vmid))
+      const HostAccessResult result = write_mapped(ea, in.data(), chunk, vmid);
+      if (result == HostAccessResult::ACCESSED)
         return;
-      if (vmid > 0 && write_client_memory(ea, in.data(), chunk, vmid))
+      if (result == HostAccessResult::UNRESOLVED && vmid > 0 &&
+          write_client_memory(ea, in.data(), chunk, vmid))
         return;
       for (size_t i = 0; i < chunk; ++i)
         simdojo::SparseMemory::write8(ea + i, in[i]);
@@ -225,7 +229,7 @@ public:
         if (backing->gpu_accessible)
           atomic_rmw_mapped(addr, backing->page_base, fn);
         else
-          atomic_rmw_fallback(addr, size, entry.client_pid, fn);
+          atomic_rmw_fallback(addr, size, 0, fn);
         return;
       }
     }
@@ -315,73 +319,125 @@ public:
 
   uint8_t read8(uint64_t addr, uint32_t vmid = 0) const {
     uint8_t val = 0;
-    if (read_mapped(addr, &val, sizeof(val), vmid))
+    const HostAccessResult result = read_mapped(addr, &val, sizeof(val), vmid);
+    if (result == HostAccessResult::ACCESSED)
       return val;
-    if (vmid > 0 && read_client_memory(addr, &val, 1, vmid))
+    if (result == HostAccessResult::UNRESOLVED && vmid > 0 &&
+        read_client_memory(addr, &val, 1, vmid))
       return val;
     return SparseMemory::read8(addr);
   }
 
   uint16_t read16(uint64_t addr, uint32_t vmid = 0) const {
     uint16_t val = 0;
-    if (read_mapped(addr, &val, sizeof(val), vmid))
+    if (read_cross_page(addr, val, vmid))
       return val;
-    if (vmid > 0 && read_client_memory(addr, &val, 2, vmid))
+    const HostAccessResult result = read_mapped(addr, &val, sizeof(val), vmid);
+    if (result == HostAccessResult::ACCESSED)
+      return val;
+    if (result == HostAccessResult::UNRESOLVED && vmid > 0 &&
+        read_client_memory(addr, &val, 2, vmid))
       return val;
     return SparseMemory::read16(addr);
   }
 
   uint32_t read32(uint64_t addr, uint32_t vmid = 0) const {
     uint32_t val = 0;
-    if (read_mapped(addr, &val, sizeof(val), vmid))
+    if (read_cross_page(addr, val, vmid))
       return val;
-    if (vmid > 0 && read_client_memory(addr, &val, 4, vmid))
+    const HostAccessResult result = read_mapped(addr, &val, sizeof(val), vmid);
+    if (result == HostAccessResult::ACCESSED)
+      return val;
+    if (result == HostAccessResult::UNRESOLVED && vmid > 0 &&
+        read_client_memory(addr, &val, 4, vmid))
       return val;
     return SparseMemory::read32(addr);
   }
 
   uint64_t read64(uint64_t addr, uint32_t vmid = 0) const {
     uint64_t val = 0;
-    if (read_mapped(addr, &val, sizeof(val), vmid))
+    if (read_cross_page(addr, val, vmid))
       return val;
-    if (vmid > 0 && read_client_memory(addr, &val, 8, vmid))
+    const HostAccessResult result = read_mapped(addr, &val, sizeof(val), vmid);
+    if (result == HostAccessResult::ACCESSED)
+      return val;
+    if (result == HostAccessResult::UNRESOLVED && vmid > 0 &&
+        read_client_memory(addr, &val, 8, vmid))
       return val;
     return SparseMemory::read64(addr);
   }
 
   void write8(uint64_t addr, uint8_t val, uint32_t vmid = 0) {
-    if (write_mapped(addr, &val, sizeof(val), vmid))
+    const HostAccessResult result = write_mapped(addr, &val, sizeof(val), vmid);
+    if (result == HostAccessResult::ACCESSED)
       return;
-    if (vmid > 0 && write_client_memory(addr, &val, 1, vmid))
+    if (result == HostAccessResult::UNRESOLVED && vmid > 0 &&
+        write_client_memory(addr, &val, 1, vmid))
       return;
     SparseMemory::write8(addr, val);
   }
 
   void write16(uint64_t addr, uint16_t val, uint32_t vmid = 0) {
-    if (write_mapped(addr, &val, sizeof(val), vmid))
+    if (write_cross_page(addr, val, vmid))
       return;
-    if (vmid > 0 && write_client_memory(addr, &val, 2, vmid))
+    const HostAccessResult result = write_mapped(addr, &val, sizeof(val), vmid);
+    if (result == HostAccessResult::ACCESSED)
+      return;
+    if (result == HostAccessResult::UNRESOLVED && vmid > 0 &&
+        write_client_memory(addr, &val, 2, vmid))
       return;
     SparseMemory::write16(addr, val);
   }
 
   void write32(uint64_t addr, uint32_t val, uint32_t vmid = 0) {
-    if (write_mapped(addr, &val, sizeof(val), vmid))
+    if (write_cross_page(addr, val, vmid))
       return;
-    if (vmid > 0 && write_client_memory(addr, &val, 4, vmid))
+    const HostAccessResult result = write_mapped(addr, &val, sizeof(val), vmid);
+    if (result == HostAccessResult::ACCESSED)
+      return;
+    if (result == HostAccessResult::UNRESOLVED && vmid > 0 &&
+        write_client_memory(addr, &val, 4, vmid))
       return;
     SparseMemory::write32(addr, val);
   }
 
   void write64(uint64_t addr, uint64_t val, uint32_t vmid = 0) {
-    if (write_mapped(addr, &val, sizeof(val), vmid))
+    if (write_cross_page(addr, val, vmid))
       return;
-    if (vmid > 0 && write_client_memory(addr, &val, 8, vmid))
+    const HostAccessResult result = write_mapped(addr, &val, sizeof(val), vmid);
+    if (result == HostAccessResult::ACCESSED)
+      return;
+    if (result == HostAccessResult::UNRESOLVED && vmid > 0 &&
+        write_client_memory(addr, &val, 8, vmid))
       return;
     SparseMemory::write64(addr, val);
   }
 
 private:
+  /// @brief Result of attempting to resolve and access VMID-scoped host storage.
+  /// @details Only UNRESOLVED permits client-memory fallback. INACCESSIBLE
+  /// identifies a managed allocation that is not mapped to the GPU.
+  enum class HostAccessResult {
+    ACCESSED,
+    UNRESOLVED,
+    INACCESSIBLE,
+  };
+
+  template <typename T> bool read_cross_page(uint64_t addr, T &value, uint32_t vmid) const {
+    if ((addr & PAGE_MASK) + sizeof(T) <= PAGE_SIZE)
+      return false;
+    read_block(addr, std::span<uint8_t>(reinterpret_cast<uint8_t *>(&value), sizeof(T)), vmid);
+    return true;
+  }
+
+  template <typename T> bool write_cross_page(uint64_t addr, const T &value, uint32_t vmid) {
+    if ((addr & PAGE_MASK) + sizeof(T) <= PAGE_SIZE)
+      return false;
+    write_block(
+        addr, std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(&value), sizeof(T)), vmid);
+    return true;
+  }
+
   // The largest supported atomic is eight bytes, so discard the three byte
   // offset bits before choosing a lock stripe.
   static constexpr unsigned kBackingAtomicGranuleShift = 3;
@@ -539,13 +595,13 @@ private:
   }
 
   template <typename F>
-  bool with_host_ptr(uint64_t addr, size_t size, uint32_t vmid, F &&fn) const {
+  HostAccessResult with_host_ptr(uint64_t addr, size_t size, uint32_t vmid, F &&fn) const {
     if (vmid == 0) {
       auto *page = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
       if (!passthrough_ || addr >= kUserSpaceLimit || page == nullptr)
-        return false;
+        return HostAccessResult::UNRESOLVED;
       fn(page);
-      return true;
+      return HostAccessResult::ACCESSED;
     }
 
     static thread_local PteCache cache;
@@ -559,36 +615,34 @@ private:
           return 1;
         });
     if (page_table_status != 0)
-      return page_table_status > 0;
+      return page_table_status > 0 ? HostAccessResult::ACCESSED : HostAccessResult::UNRESOLVED;
 
     std::optional<KfdProcess::ResolvedBacking> backing = resolve_process_backing(addr, size, vmid);
     if (backing) {
       if (!backing->gpu_accessible)
-        return false;
+        return HostAccessResult::INACCESSIBLE;
       fn(backing->page_base);
-      return true;
+      return HostAccessResult::ACCESSED;
     }
 
     if (!passthrough_ || addr >= kUserSpaceLimit)
-      return false;
+      return HostAccessResult::UNRESOLVED;
     auto *page = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
     if (page == nullptr)
-      return false;
+      return HostAccessResult::UNRESOLVED;
     fn(page);
-    return true;
+    return HostAccessResult::ACCESSED;
   }
 
-  bool read_mapped(uint64_t addr, void *dst, size_t len, uint32_t vmid) const {
-    if ((addr & PAGE_MASK) + len > PAGE_SIZE)
-      return false;
+  HostAccessResult read_mapped(uint64_t addr, void *dst, size_t len, uint32_t vmid) const {
+    assert((addr & PAGE_MASK) + len <= PAGE_SIZE);
     return with_host_ptr(addr, len, vmid, [&](const uint8_t *page) {
       std::memcpy(dst, page + (addr & PAGE_MASK), len);
     });
   }
 
-  bool write_mapped(uint64_t addr, const void *src, size_t len, uint32_t vmid) {
-    if ((addr & PAGE_MASK) + len > PAGE_SIZE)
-      return false;
+  HostAccessResult write_mapped(uint64_t addr, const void *src, size_t len, uint32_t vmid) {
+    assert((addr & PAGE_MASK) + len <= PAGE_SIZE);
     return with_host_ptr(addr, len, vmid,
                          [&](uint8_t *page) { std::memcpy(page + (addr & PAGE_MASK), src, len); });
   }
