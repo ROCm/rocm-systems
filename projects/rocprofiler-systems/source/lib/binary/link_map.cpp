@@ -3,15 +3,10 @@
 
 #include "link_map.hpp"
 #include "common/path.hpp"
-#include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/timemory.hpp"
-
-#include <timemory/utility/filepath.hpp>
 
 #include "logger/debug.hpp"
 
-#include <cstdint>
 #include <dlfcn.h>
 #include <link.h>
 #include <set>
@@ -121,7 +116,7 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
     auto _name = (!_lib) ? config::get_exe_realpath() : std::string{ _lib };
     for(const auto& itr : _fini_chain)
     {
-        LOG_DEBUG("[linkmap][{}]: {}", filepath::basename(_name), itr.real());
+        LOG_DEBUG("[linkmap][{}]: {}", path::filename(_name), itr.real());
     }
 
     for(const auto& itr : _excl_chain)
@@ -147,10 +142,10 @@ link_file::operator<(const link_file& _rhs) const
     return (_lhs_real < _rhs_real);
 }
 
-std::string_view
+std::string
 link_file::base() const
 {
-    return std::string_view{ filepath::basename(name) };
+    return path::filename(name);
 }
 
 std::string

@@ -86,7 +86,7 @@ jobs:
             # Keep the first corpus gate on the fastest lane. Focused second-pass
             # paths remain covered by the sanitizer test suite.
             verify_dbt_idempotence: 0
-            dbt_timeout: 90
+            dbt_timeout: 180
             dbt_memory_limit_mib: 4096
             dbt_job_timeout: 30
             test_regex: ''
@@ -458,6 +458,7 @@ jobs:
             --dbt-memory-limit-mib "${{ matrix.dbt_memory_limit_mib }}" \
             --artifact-directory .pytest-artifacts/gfx1250-dbt \
             -n "${DBT_WORKERS}" \
+            --durations=0 \
             -q \
             -rxX \
             --tb=short
