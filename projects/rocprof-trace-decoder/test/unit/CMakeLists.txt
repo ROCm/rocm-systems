@@ -130,7 +130,8 @@ set(TEST_FILES
     quick_scan_api_test.cpp
     sqttparser_test.cpp
     mi400_test.cpp
-    funcmap_test.cpp)
+    funcmap_test.cpp
+    version_test.cpp)
 
 # Function to create a test executable with specific sanitizer options Re-list library sources for sanitizer builds
 # (must be recompiled with sanitizer flags)
