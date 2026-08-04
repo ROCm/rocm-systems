@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/kfd/dlog_drain.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
+#include "lib/rocprofiler-sdk/kfd/record_pipe.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 
 // Active (v5) dispatch-log profiler ABI. Must be the ONLY kfd ioctl header in
@@ -65,6 +66,24 @@ namespace kfd
 namespace
 {
 constexpr int kEventfdFlags = EFD_CLOEXEC | EFD_NONBLOCK;
+
+// In-flight batches between the copier and the processor. Deep enough to ride out
+// a processor hiccup, small enough that a stalled processor costs bounded memory
+// rather than unbounded growth.
+constexpr size_t kBatchPipeDepth = 16;
+
+// Aging cadences. A deposited result is normally taken within milliseconds; an
+// unmatched start belongs to a dispatch whose eop never arrived.
+constexpr uint64_t kEvictIntervalNs          = 1'000'000'000ull;  // 1 s
+constexpr uint64_t kProcessorEvictIntervalNs = 1'000'000'000ull;  // 1 s
+constexpr uint64_t kStartMaxAgeNs            = 5'000'000'000ull;  // 5 s
+constexpr uint64_t kResultMaxAgeNs           = 5'000'000'000ull;  // 5 s
+
+// Start/eop pairing state, owned exclusively by the processor thread.
+struct processor_state
+{
+    pair_state pairing = {};
+};
 
 // Dispatch-log ring size in bytes. Validated before any sizing math uses it: the
 // result is always a snapped value in [kDlogMinRingBytes, kDlogMaxRingBytes], so it
@@ -133,10 +152,10 @@ struct dlog_session
 
     kfd_dlog_stream_info info = {};
 
-    // Per-pipe drain cursors + unmatched-start bookkeeping. Touched only by the
-    // reader thread, so no lock is needed. The drain logic itself lives in the
-    // header-only drain_pipes() so it can be unit-tested without a GPU.
-    drain_state drain = {};
+    // Ring cursors + loss counters. Touched ONLY by the ring-copier thread, so no
+    // lock is needed. Start/eop pairing state deliberately does NOT live here --
+    // it belongs to the processor thread (see processor_state).
+    ring_cursors cursors = {};
 };
 
 // Reader thread state. Single instance via static_object (ordered teardown). Its
@@ -168,6 +187,13 @@ struct reader_state
     // Bumped once per completed drain pass. A sync point waits for it to advance
     // twice, which proves a whole pass ran after the request.
     std::atomic<uint64_t> drain_epoch = {0};
+
+    // Handoff to the processor. The copier is the sole producer, the processor the
+    // sole consumer, so this is lock-free on both sides and the copier never waits
+    // on the processor.
+    record_pipe<kBatchPipeDepth> pipe = {};
+    std::thread                  processor_thread = {};
+    std::atomic<uint64_t>        batches_dropped  = {0};
 
     reader_state() = default;
     ~reader_state();
@@ -440,46 +466,76 @@ teardown_session(int kfd, dlog_session* s)
     }
 }
 
-// Drain new firmware records via the shared, unit-tested drain_pipes() core. This
-// wrapper supplies the reader-specific bits: the mmap'd ring pointers, the host
-// clock for start aging, and a paired (start,end) deposit into ResultsMap. The key
-// uses the PAGE-RELATIVE doorbell slot (doorbell_off_to_page_slot) so it matches
-// the value the capture side computes from the queue's doorbell pointer; the
-// doorbell->queue binding is established directly at capture, so no per-record bind
-// happens here. See dlog_drain.hpp for the per-pipe ring geometry.
+// STAGE 1, reader thread: copy whatever the ring holds into a batch and get out.
+//
+// This is the ONLY code that touches the volatile mapping, and every microsecond
+// spent here widens the window in which the firmware can lap us -- so it takes no
+// lock, consults no map, and does no pairing or timestamp work. On success the
+// batch is published to the processor; if the processor has fallen a full pipe
+// behind there is no free slot, and we DROP the batch rather than block, because
+// blocking the ring read is what causes the overruns we are trying to avoid.
+//
+// Returns the number of records copied.
 uint64_t
-drain_records(dlog_session* s)
+copy_records(reader_state& st)
 {
-    auto* base     = static_cast<uint8_t*>(s->smap);
-    auto* recs     = base + s->info.records_offset;
-    auto* wptr_arr = reinterpret_cast<volatile uint64_t*>(base + s->info.wptr_offset);
-    auto* rptr_arr = reinterpret_cast<volatile uint64_t*>(base + s->info.rptr_offset);
+    auto* _s       = &st.session;
+    auto* base     = static_cast<uint8_t*>(_s->smap);
+    auto* recs     = base + _s->info.records_offset;
+    auto* wptr_arr = reinterpret_cast<volatile uint64_t*>(base + _s->info.wptr_offset);
+    auto* rptr_arr = reinterpret_cast<volatile uint64_t*>(base + _s->info.rptr_offset);
 
-    return drain_pipes(
-        recs,
-        s->info.num_regions,
-        s->info.region_record_count,
-        wptr_arr,
-        rptr_arr,
-        s->drain,
-        common::timestamp_ns(),
+    auto* _batch = st.pipe.acquire();
+    if(!_batch)
+    {
+        // No free slot. Do NOT read the ring: leaving the records for the next
+        // pass keeps rptr where it is, which is the honest thing to do -- the
+        // producer may lap us, and that shows up as an overrun rather than as a
+        // silent hole.
+        st.batches_dropped.fetch_add(1, std::memory_order_relaxed);
+        return 0;
+    }
+
+    _batch->now_ns = common::timestamp_ns();
+    const auto _n  = copy_pipes(recs,
+                               _s->info.num_regions,
+                               _s->info.region_record_count,
+                               wptr_arr,
+                               rptr_arr,
+                               _s->cursors,
+                               _batch->records);
+
+    // Release-store inside publish() orders the copy above before the processor
+    // can observe the batch.
+    if(_n > 0) st.pipe.publish();
+    return _n;
+}
+
+// STAGE 2, processor thread: everything the reader used to do inline.
+//
+// Pairs start/eop, resolves the doorbell generation, drives the hub, and either
+// hands a proven completion to the task group or deposits a signal-path result.
+// All the lock-taking work lives here, off the ring-reading path. It still runs
+// no client callback itself: hand_off_proven() submits to the task group, which
+// is where invariant 11 puts the callback.
+uint64_t
+process_batch(processor_state& proc, const record_batch& batch)
+{
+    return pair_records(
+        batch.records.data(),
+        batch.records.size(),
+        proc.pairing,
+        batch.now_ns,
         [](const drained_record& rec) {
             uint32_t slot = doorbell_off_to_page_slot(rec.doorbell_off);
             uint32_t gen  = doorbell_map().get_generation(slot);
             auto     key  = correlation_key{slot, rec.dispatch_id, gen};
 
-            // Signal-less dispatch: this EOP IS the completion event (G3). Record
-            // the start (when it survived) on the entry, then claim it -- the hub
-            // decides the single result-vs-loss winner under its own lock and hands
-            // back the owned payload. Both EOP shapes go through here: a matched
-            // pair carries start_ticks, and an EOP whose START was lost proves
-            // completion with the interval unknown, which the finalizer turns into
-            // COMPLETED_NO_TIMING. Under a lossy drain prove_eop refuses, so a
-            // possibly-torn record completes nothing.
-            //
-            // The reader converts nothing, emits nothing, and runs no client
-            // callback; it proves completion and hands off holding no
-            // hub/results/doorbell lock (invariant 11).
+            // Signal-less dispatch: this EOP IS the completion event (G3). Both
+            // shapes route here -- a matched pair carries start_ticks, an EOP whose
+            // START was lost proves completion with the interval unknown. Under a
+            // lossy region prove_eop refuses, so a possibly-torn record completes
+            // nothing.
             if(rec.start_known) signal_less_hub().note_start(key, rec.start_ticks);
             if(auto _proven = signal_less_hub().prove_eop(key, rec.end_ticks, rec.loss_free))
             {
@@ -487,9 +543,6 @@ drain_records(dlog_session* s)
                 hand_off_proven(std::move(*_proven));
                 return;
             }
-            // No pending entry claimed this record. With signal-less active that
-            // means the reader's key does not match the one the enqueue path
-            // registered -- the counter makes that visible instead of silent.
             note_signal_less(signal_less_counter::eop_unmatched);
 
             // Signal-backed dispatch: unchanged rendezvous deposit. An EOP with no
@@ -501,54 +554,34 @@ drain_records(dlog_session* s)
         });
 }
 
-// Loud one-shot overrun report. Reader thread only, so the local static needs no
-// synchronization. Detection/telemetry only: an overrun already dropped records
-// by the time it is observed, and Phase 0 does not change what completes.
-void
-warn_on_overrun(const drain_state& d)
-{
-    static bool warned = false;
-    if(d.overruns == 0 || warned) return;
-    warned = true;
-    ROCP_WARNING << fmt::format(
-        "KFD dispatch-log: ring OVERRUN ({} occurrence(s), at least {} record(s) dropped) -- the "
-        "firmware lapped the reader, so those dispatches have no dispatch-log timestamps. Raise "
-        "the ring with ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB (currently {} KB max).",
-        d.overruns,
-        d.lost_records,
-        kDlogMaxRingKb);
-}
-
-// Signal-less loss policy (P1, leak-and-shout). An overrun means firmware records
-// were permanently lost, and wptr cannot say WHICH dispatches lost them, so every
-// still-matchable pending entry is stranded: no record (P2), correlation id
-// deliberately NOT retired, key tombstoned. Signal-less is then off for the rest
-// of the process because the hub stays LOSS_POISONED, which makes every later
-// batch fail eligibility and take the signal path.
+// Overrun report. The ring lapped us, so those records are gone -- but the data
+// we DID copy is still valid, so this reports and carries on.
 //
-// Distinct from the Phase 0 diagnostic overrun warning above, which stays as-is
-// for the signal path. Reader thread only, so the local static needs no lock; the
-// leaked payloads are released here, and releasing one runs no client code.
+// It deliberately does NOT disable signal-less. The old behavior poisoned the
+// session on the first overrun, which turned a bounded, already-known loss into a
+// process-wide loss of the feature. Dispatches whose records were lapped simply
+// never complete from firmware; everything else keeps working.
+//
+// Rate-limited to one line per escalating episode so a sustained overrun cannot
+// flood the log. Reader thread only, so the statics need no lock.
 void
-poison_signal_less_on_overrun(const drain_state& d)
+report_overrun(const ring_cursors& c, uint64_t batches_dropped)
 {
-    static uint64_t _reported = 0;
-    if(d.overruns == _reported) return;
-    _reported = d.overruns;
+    static uint64_t _reported_overruns = 0;
+    static uint64_t _reported_drops    = 0;
+    if(c.overruns == _reported_overruns && batches_dropped == _reported_drops) return;
 
-    if(signal_less_hub().mode() != session_mode::running) return;
+    _reported_overruns = c.overruns;
+    _reported_drops    = batches_dropped;
 
-    auto _loss = signal_less_hub().poison(session_mode::loss_poisoned);
-    if(_loss.second.dispatches == 0) return;
-
-    note_signal_less_losses();
     ROCP_WARNING << fmt::format(
-        "KFD dispatch-log: ring OVERRUN stranded {} in-flight signal-less dispatch(es) across {} "
-        "correlation id(s). Those dispatches emit no record and their correlation ids are "
-        "deliberately not retired. Signal-less completion is now disabled for this process; "
-        "raise the ring with ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB.",
-        _loss.second.dispatches,
-        _loss.second.correlation_ids);
+        "KFD dispatch-log: ring overrun -- {} lap(s) so far, at least {} record(s) lost, {} "
+        "batch(es) dropped because the processor fell behind. Those dispatches have no "
+        "dispatch-log timestamps; everything else is unaffected and collection continues. Raise "
+        "the ring with ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB if this repeats.",
+        c.overruns,
+        c.lost_records,
+        batches_dropped);
 }
 
 // KFD_DLOG_STREAM_OP_STATUS is DIAGNOSTICS ONLY: the kernel's counters are logged
@@ -585,6 +618,9 @@ stop_reader()
         (void) _;
     }
     if(st.thread.joinable()) st.thread.join();
+    // Reader first: it is the sole producer, so once it is joined the pipe can
+    // only shrink. The processor then drains what is left and exits.
+    if(st.processor_thread.joinable()) st.processor_thread.join();
 
     // Teardown runs without taking setup_mu on purpose: it is only safe because the
     // caller (registration::finalize) tears down queue interception
@@ -635,9 +671,12 @@ disable_reader_in_child()
     // survive the fork, so a child dispatch must not reach it.
     st.setup_failed.store(true, std::memory_order_relaxed);
     st.running = false;  // makes stop_reader() and ~reader_state() no-ops
-    // Abandon the handle of the vanished thread. Not detach(): that would touch a
-    // pthread descriptor fork has already reclaimed in the child.
+    // Abandon the handles of the vanished threads. Not detach(): that would touch
+    // a pthread descriptor fork has already reclaimed in the child. The pipe and
+    // its batches are abandoned in place -- no consumer exists to drain them, and
+    // the child never produces because the reader is disabled above.
     new(&st.thread) std::thread{};
+    new(&st.processor_thread) std::thread{};
     st.wake_fd = -1;
     st.kfd_fd  = -1;
     // Drop ownership of the inherited stream fd / mapping / GTT allocation so the
@@ -645,6 +684,65 @@ disable_reader_in_child()
     st.session.smap      = MAP_FAILED;
     st.session.stream_fd = -1;
     st.session.buffer_va = 0;
+}
+
+// The processor thread. Sole consumer of the pipe; owns all pairing state.
+//
+// It runs until the reader has stopped AND the pipe is empty, so every batch the
+// reader published is processed before teardown continues -- nothing the firmware
+// gave us is dropped just because the process is shutting down.
+void
+processor_loop()
+{
+    auto& st   = state();
+    auto  proc = processor_state{};
+
+    uint64_t last_evict_ns = common::timestamp_ns();
+
+    while(true)
+    {
+        auto* _batch = st.pipe.peek();
+        if(!_batch)
+        {
+            if(st.stop.load(std::memory_order_acquire)) break;
+            // Nothing to do. Sleeping here costs nothing on the ring: the reader
+            // keeps copying regardless of what this thread is doing.
+            std::this_thread::sleep_for(std::chrono::microseconds{200});
+            continue;
+        }
+
+        process_batch(proc, *_batch);
+        st.pipe.pop();
+
+        // Slots whose queue was destroyed: the pairing state is ours, so the purge
+        // happens here rather than on the reader.
+        {
+            auto _slots = std::vector<uint32_t>{};
+            {
+                auto lk = std::lock_guard<std::mutex>{purge_mutex()};
+                _slots.swap(purge_requests());
+            }
+            for(auto _slot : _slots)
+                proc.pairing.erase_slot(_slot, kDoorbellSlotsPerPage);
+        }
+
+        const uint64_t _now = common::timestamp_ns();
+        if(_now - last_evict_ns >= kProcessorEvictIntervalNs)
+        {
+            proc.pairing.evict_stale(_now, kStartMaxAgeNs);
+            last_evict_ns = _now;
+        }
+    }
+
+    // Drain whatever the reader published on its way out.
+    while(auto* _batch = st.pipe.peek())
+    {
+        process_batch(proc, *_batch);
+        st.pipe.pop();
+    }
+
+    ROCP_INFO << fmt::format("KFD dispatch-log processor: exited, {} unmatched EOP(s)",
+                             proc.pairing.unmatched_eops);
 }
 
 void
@@ -658,15 +756,6 @@ reader_loop()
     auto     wake          = pollfd{.fd = st.wake_fd, .events = POLLIN, .revents = 0};
     uint64_t total_seen    = 0;
     uint64_t last_evict_ns = common::timestamp_ns();
-
-    // Age out unpaired starts and un-taken results at most this often (not every
-    // 1 ms poll). A deposited result is normally taken within milliseconds by the
-    // completion path; anything older than kResultMaxAgeNs was never claimed (the
-    // dispatch completed via HSA fallback, or the firmware record was misattributed
-    // to a doorbell no dispatch keyed on) and must be reclaimed to bound memory.
-    constexpr uint64_t kEvictIntervalNs = 1'000'000'000ull;  // 1 s
-    constexpr uint64_t kStartMaxAgeNs   = 5'000'000'000ull;  // 5 s
-    constexpr uint64_t kResultMaxAgeNs  = 5'000'000'000ull;  // 5 s
 
     while(!st.stop.load(std::memory_order_acquire))
     {
@@ -708,26 +797,16 @@ reader_loop()
         {
             uint64_t now_ns = common::timestamp_ns();
 
-            total_seen += drain_records(&st.session);
-            warn_on_overrun(st.session.drain);
-            poison_signal_less_on_overrun(st.session.drain);
-
-            // Purge slots whose queue was destroyed before aging anything else out.
-            {
-                auto _slots = std::vector<uint32_t>{};
-                {
-                    auto lk = std::lock_guard<std::mutex>{purge_mutex()};
-                    _slots.swap(purge_requests());
-                }
-                for(auto _slot : _slots)
-                    st.session.drain.erase_slot(_slot, kDoorbellSlotsPerPage);
-            }
+            // The whole hot path: copy and publish. Everything else the reader
+            // used to do now happens on the processor thread.
+            total_seen += copy_records(st);
+            report_overrun(st.session.cursors,
+                           st.batches_dropped.load(std::memory_order_relaxed));
 
             st.drain_epoch.fetch_add(1, std::memory_order_release);
 
             if(now_ns - last_evict_ns >= kEvictIntervalNs)
             {
-                st.session.drain.evict_stale(now_ns, kStartMaxAgeNs);
                 results_map().evict_stale(now_ns, kResultMaxAgeNs);
                 log_stream_status(st.session);
                 last_evict_ns = now_ns;
@@ -735,12 +814,11 @@ reader_loop()
         }
     }
 
-    // Final drain to catch late records.
+    // Final copy to catch late records; the processor drains the pipe after us.
     if(st.session_ready.load(std::memory_order_acquire))
     {
-        total_seen += drain_records(&st.session);
-        warn_on_overrun(st.session.drain);
-        poison_signal_less_on_overrun(st.session.drain);
+        total_seen += copy_records(st);
+        report_overrun(st.session.cursors, st.batches_dropped.load(std::memory_order_relaxed));
         log_stream_status(st.session);
     }
 
@@ -825,13 +903,20 @@ start_kfd_reader()
     internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
     try
     {
-        st.thread = std::thread{reader_loop};
+        // Processor first: it must be ready to consume before the reader can
+        // publish, otherwise the first batches are dropped for no reason.
+        st.processor_thread = std::thread{processor_loop};
+        st.thread           = std::thread{reader_loop};
     }
     catch(const std::system_error& e)
     {
         // init_kfd_profiler() promises never to throw: the scope guard drops the fds
         // and leaves the dispatch-log unavailable, so dispatches use HSA timestamps.
         internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
+        // If the reader failed after the processor started, stop the processor too
+        // rather than leaving an orphan waiting on a producer that will never run.
+        st.stop.store(true, std::memory_order_release);
+        if(st.processor_thread.joinable()) st.processor_thread.join();
         ROCP_WARNING << fmt::format(
             "KFD dispatch-log reader: thread creation failed ({}), reader not started", e.what());
         return false;

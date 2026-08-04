@@ -81,7 +81,11 @@ enum class entry_state : uint8_t
 enum class session_mode : uint8_t
 {
     running = 0,
-    loss_poisoned,  // ring overrun: signal-less disabled for the process
+    // Retained for the tombstone cap and for reader death -- a ring overrun no
+    // longer poisons the session. An overrun's data is already lost; taking the
+    // whole feature down for the rest of the process turned a bounded loss into a
+    // total one, so the reader now reports it and keeps collecting.
+    loss_poisoned,
     reader_dead,
     stopping,
     child_stale,  // post-fork child
