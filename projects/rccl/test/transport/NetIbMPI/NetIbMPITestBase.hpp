@@ -514,25 +514,48 @@ protected:
         return found;
     }
 
+    // What CreateMergedDevice() tried before giving up. Empty after a success.
+    // Callers put it in their GTEST_SKIP() message, so a skip states which speed
+    // groups existed and why each one was rejected.
+    std::string mergeSkipReason_;
+
+    void AppendMergeSkipReason(const std::string& clause) {
+        if (!mergeSkipReason_.empty()) mergeSkipReason_ += "; ";
+        mergeSkipReason_ += clause;
+    }
+
     // Helper: create a merged device from N physical NICs.
-    // Returns merged device index, or -1 if no suitable group found.
+    // Returns merged device index, or -1 if no suitable group found, in which case
+    // mergeSkipReason_ describes the attempt.
     // Iterates speed groups (fastest-first by enumeration order). Within each
     // group, slides a window of nNicsToMerge; skips windows containing a NIC that
     // cannot carry cross-node RDMA traffic.
     // speedGroupStart: index into physDevs indicating which speed group to try first.
-    // rank: MPI rank of this process
-    int CreateMergedDevice(int nNicsToMerge, int rank, int speedGroupStart = 0)
+    int CreateMergedDevice(int nNicsToMerge, int speedGroupStart = 0)
     {
+        mergeSkipReason_.clear();
+
         if (nNicsToMerge <= 0 || nNicsToMerge > NCCL_NET_MAX_DEVS_PER_NIC) {
-            fprintf(stderr,
-                    "Rank %d requested invalid merge size %d (valid range: 1..%d)\n",
-                    rank, nNicsToMerge, NCCL_NET_MAX_DEVS_PER_NIC);
+            mergeSkipReason_ = "invalid merge size " + std::to_string(nNicsToMerge) +
+                               " (valid range: 1.." + std::to_string(NCCL_NET_MAX_DEVS_PER_NIC) + ")";
             return -1;
         }
 
+        int mergedDev = CreateMergedDeviceFromSpeedGroup(nNicsToMerge, speedGroupStart);
+        if (mergedDev < 0)
+            mergeSkipReason_ = "no group of " + std::to_string(nNicsToMerge) +
+                               " mergeable NICs: " + mergeSkipReason_;
+        return mergedDev;
+    }
+
+    int CreateMergedDeviceFromSpeedGroup(int nNicsToMerge, int speedGroupStart)
+    {
         int ndev = 0;
         RCCL_TEST_CHECK(GetDeviceCount(&ndev));
-        if (ndev <= 0) return -1;
+        if (ndev <= 0) {
+            AppendMergeSkipReason("the plugin reports no devices");
+            return -1;
+        }
 
         std::vector<ncclNetProperties_t> props(ndev);
         std::vector<int> physDevs;
@@ -543,7 +566,13 @@ protected:
                 physDevs.push_back(i);
         }
 
-        if (speedGroupStart >= (int)physDevs.size()) return -1;
+        if (speedGroupStart >= (int)physDevs.size()) {
+            if (mergeSkipReason_.empty())
+                AppendMergeSkipReason(std::to_string(physDevs.size()) +
+                                      " physical NICs, none from index " +
+                                      std::to_string(speedGroupStart) + " on");
+            return -1;
+        }
 
         // Build the speed group starting at speedGroupStart
         int targetSpeed = props[physDevs[speedGroupStart]].speed;
@@ -551,14 +580,24 @@ protected:
         for (int d : physDevs)
             if (props[d].speed == targetSpeed) compat.push_back(d);
 
+        int windowsTried = 0;
+        int windowsUnroutable = 0;
+        int windowsRefused = 0;
+        std::string firstUnroutableNic;
+
         // Try each consecutive window of nNicsToMerge within this speed group
         for (int w = 0; w + nNicsToMerge <= (int)compat.size(); w++) {
+            windowsTried++;
             bool routable = true;
             for (int i = 0; i < nNicsToMerge; i++) {
                 const ncclNetProperties_t& dev = props[compat[w + i]];
-                if (dev.name && !CanRouteCrossNode(dev.name, dev.port)) { routable = false; break; }
+                if (dev.name && !CanRouteCrossNode(dev.name, dev.port)) {
+                    routable = false;
+                    if (firstUnroutableNic.empty()) firstUnroutableNic = dev.name;
+                    break;
+                }
             }
-            if (!routable) continue;
+            if (!routable) { windowsUnroutable++; continue; }
 
             ncclNetVDeviceProps_t vProps;
             memset(&vProps, 0, sizeof(vProps));
@@ -569,7 +608,20 @@ protected:
             int outMergedDev = -1;
             if (MakeVirtualDevice(&outMergedDev, &vProps) == ncclSuccess && outMergedDev >= 0)
                 return outMergedDev;
+            windowsRefused++;
         }
+
+        std::ostringstream clause;
+        if (windowsTried == 0) {
+            clause << compat.size() << " of the " << nNicsToMerge
+                   << " NICs required at speed " << targetSpeed;
+        } else {
+            clause << compat.size() << " NICs at speed " << targetSpeed << ": "
+                   << windowsTried << " windows tried, " << windowsUnroutable << " unroutable";
+            if (!firstUnroutableNic.empty()) clause << " (" << firstUnroutableNic << ")";
+            clause << ", " << windowsRefused << " refused by makeVDevice";
+        }
+        AppendMergeSkipReason(clause.str());
 
         // This speed group exhausted — advance to the next one
         int nextStart = speedGroupStart;
@@ -577,7 +629,7 @@ protected:
                props[physDevs[nextStart]].speed == targetSpeed)
             nextStart++;
 
-        return CreateMergedDevice(nNicsToMerge, rank, nextStart);
+        return CreateMergedDeviceFromSpeedGroup(nNicsToMerge, nextStart);
     }
 
 
