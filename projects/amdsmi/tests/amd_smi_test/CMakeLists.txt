@@ -94,6 +94,12 @@ if(ENABLE_WSL_BACKEND)
     find_library(ROCDXG_LIB rocdxg)
     if(ROCDXG_LIB)
         target_link_libraries(${TEST} ${ROCDXG_LIB})
+    else()
+        # librocdxg is not available at build time (e.g. TheRock CI without
+        # wsl-rocdxg stage). The functional/wsl/smi tests call rocdxg_smi_*
+        # symbols directly and cannot link without it, so exclude them.
+        # unit/wsl tests only exercise the amdsmi API and are kept.
+        list(FILTER functSources EXCLUDE REGEX "/functional/wsl/")
     endif()
 endif()
 target_link_libraries(
