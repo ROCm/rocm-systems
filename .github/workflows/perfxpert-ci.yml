@@ -70,11 +70,25 @@ jobs:
       - name: Fence composition
         run: pytest tests/test_fence -q
 
+      # test_parity_suite_is_not_vacuous.py is what keeps the rest of this
+      # step honest: a parity suite that silently stops exercising anything
+      # passes just as green as one that works, and that guard is the only
+      # check that tells the two apart.
       - name: Air-gap and output parity
-        run: pytest tests/test_parity tests/test_integration/test_airgap_parity.py -q
+        run: |
+          pytest tests/test_parity \
+                 tests/test_integration/test_airgap_parity.py \
+                 tests/test_integration/test_parity_suite_is_not_vacuous.py -q
 
       - name: Red team
         run: pytest tests/test_red_team -q
+
+      # The proposal CLI is the boundary between an unproven proposal and the
+      # catalog, and the demo is the documented way to show that boundary
+      # holding. Both assert refusals, so a regression here is silent unless
+      # they run.
+      - name: Proposal review CLI and demo
+        run: pytest tests/test_cli/test_proposals_cmd.py tests/test_docs_tooling -q
 
       - name: Regression gate false positives
         run: pytest tests/test_regression_gate -q

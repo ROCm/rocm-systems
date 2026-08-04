@@ -133,3 +133,47 @@ def test_a_regressed_attack_cannot_hide_behind_a_scratch_file(dash, tmp_path, mo
     count = dash.collect_red_team()
     assert count == dash.RED_TEAM_ATTACK_COUNT - 1
     assert not dash._metric_pass("red_team_pass_count", count)
+
+
+def test_dashboard_and_red_team_suite_check_the_same_attacks(dash):
+    """Two hand-kept inventories drift, and the drift is silent.
+
+    The dashboard reported the audit verdict from its own 16-entry list while
+    the suite enforced a 14-entry one, so two attacks counted towards a pass
+    without any test requiring them to be defeated.
+    """
+    from tests.test_red_team.attack_registry import ATTACKS
+
+    assert dash.EXPECTED_ATTACK_IDS == frozenset(a.id for a in ATTACKS)
+
+
+# -- Exit codes ------------------------------------------------------------
+
+
+def test_allow_partial_does_not_turn_a_no_go_into_a_pass(dash):
+    """The flag waives metrics that could not run, not metrics that failed.
+
+    Suppressing the NO-GO exit made ``--allow-partial`` a way to ship past a
+    measured failure: a caller who set it once to tolerate a pending nightly
+    metric would keep getting a zero exit through a real regression.
+    """
+    assert dash.exit_code("NO-GO", allow_partial=True) == 2
+    assert dash.exit_code("NO-GO", allow_partial=False) == 2
+
+
+def test_allow_partial_still_waives_a_pending_verdict(dash):
+    assert dash.exit_code("PARTIAL (pending)", allow_partial=True) == 0
+    assert dash.exit_code("PARTIAL (pending)", allow_partial=False) == 1
+
+
+def test_a_go_verdict_exits_clean(dash):
+    assert dash.exit_code("GO", allow_partial=False) == 0
+
+
+def test_main_defers_to_the_shared_exit_rule(dash):
+    """Keeps the rule tested above from being one main() rewrite away."""
+    import inspect
+
+    source = inspect.getsource(dash.main)
+    assert "exit_code(" in source
+    assert "sys.exit(2)" not in source

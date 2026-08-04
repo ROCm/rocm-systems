@@ -26,30 +26,29 @@ RED_TEAM_OUTCOMES = REPO_ROOT / "tests" / "test_red_team" / "_attack_outcomes"
 AIRGAP_PARITY_TESTS = REPO_ROOT / "tests" / "test_integration" / "test_airgap_parity.py"
 FP_AGGREGATE = REPO_ROOT / "tests" / "test_regression_gate" / "_runner_outputs" / "_aggregate.json"
 
-# The red-team attacks that must each be defeated. Naming them rather than
-# counting files matters twice over: the outcome directory also collects
-# gitignored scratch runs (sol_gate_unmocked_*), and a bare count would let a
-# regressed attack hide behind an extra file and still total 14.
-EXPECTED_ATTACK_IDS = frozenset(
-    {
-        "5_consecutive_failures_plateau",
-        "destructive_llm_output",
-        "disallowed_compiler_flag",
-        "disallowed_rocprofv3_flag_or_private_provider_injection",
-        "fabricated_proposal_evidence",
-        "llm_unavailable_airgap_parity",
-        "proposal_lane_promotion",
-        "malformed_patch_compile_fail",
-        "numerical_divergence",
-        "path_traversal_metadata",
-        "shell_metachars_in_kernel_name",
-        "silent_10pct_regression",
-        "silent_tail_regression_weighted_geomean",
-        "sol_fake_1000x_speedup",
-        "symlink_escape",
-        "test_anchor_removal",
-    }
-)
+
+def _expected_attack_ids() -> frozenset:
+    """The attacks that must each be defeated, from the canonical registry.
+
+    Naming them rather than counting files matters twice over: the outcome
+    directory also collects gitignored scratch runs (sol_gate_unmocked_*), and
+    a bare count would let a regressed attack hide behind an extra file and
+    still total correctly.
+
+    Read from ``tests/test_red_team/attack_registry.py`` rather than restated
+    here. A second copy drifts, and a dashboard holding the stale half would
+    report a full pass while an attack nobody wired up went unrun. Missing it
+    is fatal on purpose: this script exists to say whether the audit gate
+    passed, and it cannot answer that without knowing what it is checking.
+    """
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from tests.test_red_team.attack_registry import ATTACKS
+
+    return frozenset(attack.id for attack in ATTACKS)
+
+
+EXPECTED_ATTACK_IDS = _expected_attack_ids()
 RED_TEAM_ATTACK_COUNT = len(EXPECTED_ATTACK_IDS)
 
 # A metric that could not be measured must not read as a pass. "pending" is
@@ -231,10 +230,23 @@ def main() -> None:
     if args.render:
         render_to_terminal(dashboard)
 
-    if verdict == "NO-GO" and not args.allow_partial:
-        sys.exit(2)
-    if verdict == "PARTIAL (pending)" and not args.allow_partial:
-        sys.exit(1)
+    sys.exit(exit_code(verdict, allow_partial=args.allow_partial))
+
+
+def exit_code(verdict: str, *, allow_partial: bool) -> int:
+    """Process status for a verdict.
+
+    ``--allow-partial`` waives metrics that have not been collected yet; it is
+    not a way to ship past a metric that was collected and failed. So a NO-GO
+    always exits non-zero: otherwise a caller who set the flag once to
+    tolerate a pending nightly metric would keep getting a green exit through
+    a real regression.
+    """
+    if verdict == "NO-GO":
+        return 2
+    if verdict == "PARTIAL (pending)" and not allow_partial:
+        return 1
+    return 0
 
 
 def _metric_pass(key: str, val: Any) -> bool:

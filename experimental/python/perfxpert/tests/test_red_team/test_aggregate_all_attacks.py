@@ -1,7 +1,11 @@
-"""Aggregate red-team gate — 100% of 14 attacks must be defeated.
+"""Aggregate red-team gate — every registered attack must be defeated.
 
-Reads per-attack outcome files written by the 14 individual attack tests and
+Reads per-attack outcome files written by the individual attack tests and
 asserts every attack reported 'defeated' (rejected / mitigated / sanitized).
+
+The count comes from the registry rather than a literal: a hard-coded total
+turns adding an attack into a failing build, and the tempting fix is to bump
+the number rather than wire the attack up.
 """
 
 import json
@@ -16,16 +20,18 @@ OUTCOMES_DIR = Path(__file__).parent / "_attack_outcomes"
 
 @pytest.mark.red_team
 def test_every_attack_registered() -> None:
-    assert len(ATTACKS) == 14, (
-        f"Red-team suite requires exactly 14 attacks (spec §5.8); "
+    ids = [a.id for a in ATTACKS]
+    assert len(set(ids)) == len(ids), f"Duplicate attack ids: {ids}"
+    # Spec §5.8 defined the original inventory; the suite may only grow.
+    assert len(ATTACKS) >= 14, (
+        f"Red-team suite requires at least the 14 attacks of spec §5.8; "
         f"got {len(ATTACKS)}"
     )
-    ids = [a.id for a in ATTACKS]
-    assert len(set(ids)) == 14, f"Duplicate attack ids: {ids}"
 
 
 @pytest.mark.red_team
-def test_aggregate_all_14_attacks_defeated() -> None:
+def test_aggregate_all_attacks_defeated() -> None:
+    total = len(ATTACKS)
     OUTCOMES_DIR.mkdir(parents=True, exist_ok=True)
     outcomes = {}
     for attack in ATTACKS:
@@ -40,8 +46,8 @@ def test_aggregate_all_14_attacks_defeated() -> None:
     not_defeated = [aid for aid, o in outcomes.items() if o.get("status") != "defeated"]
 
     assert not not_defeated, (
-        f"Red-team suite FAILED — {len(not_defeated)}/14 attacks succeeded.\n"
+        f"Red-team suite FAILED — {len(not_defeated)}/{total} attacks succeeded.\n"
         f"Not defeated: {not_defeated}\n"
         f"Spec §7 exit criteria requires 100% pass. Audit gate BLOCKED."
     )
-    assert len(defeated) == 14
+    assert len(defeated) == total

@@ -47,11 +47,14 @@ Three verdicts:
 directly. It previously read a snapshot directory that no test wrote, so the
 metric reported `pending` on every run and its gate never blocked anything.
 
-`red_team_pass_count` checks each attack in `EXPECTED_ATTACK_IDS` by ID rather
-than counting files in `_attack_outcomes/`. That directory also accumulates
-gitignored scratch runs (`sol_gate_unmocked_*.json`), which inflated the count
-locally, and a bare count would let a regressed attack hide behind an extra
-file while still totalling the expected number.
+`red_team_pass_count` checks each attack by ID rather than counting files in
+`_attack_outcomes/`. That directory also accumulates gitignored scratch runs
+(`sol_gate_unmocked_*.json`), which inflated the count locally, and a bare
+count would let a regressed attack hide behind an extra file while still
+totalling the expected number. The IDs come from
+`tests/test_red_team/attack_registry.py`, which is the only place the
+inventory is written down — the dashboard and the aggregate gate both read it,
+so neither can be checking a different list than the other.
 
 `per_agent_narrow_scope_violations` sums failures across the three
 per-agent guardrail suites (tool allowlist, fence size, schema field caps),
@@ -94,7 +97,8 @@ original 14 plus `proposal_lane_promotion` and
 [RFC 0001](rfcs/0001-bounded-specialist-creativity.md) because the
 exploratory lane introduced a boundary a model could try to cross. Raising
 the count again requires an RFC + normative update to the spec, and the new
-ID must be added to `EXPECTED_ATTACK_IDS`. Prefer:
+attack must be appended to `tests/test_red_team/attack_registry.py`, which
+both the aggregate gate and the dashboard read. Prefer:
 
 - Parameterizing an existing attack's test (more vectors, same attack class).
 - Adding a fuzz property to `test_sanitizer_fuzz.py` (supplementary, not counted).
