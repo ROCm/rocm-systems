@@ -27,6 +27,13 @@ rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 if(${SANITIZER})
     set(IS_SPM_DISABLED True)
 endif()
+# IS_SPM_DISABLED is unused here; integration tests are hard-disabled via IS_DISABLED below.
+# TODO: When re-enabling on pinned CI (driver >= ROCPROFILER_SPM_MIN_AMDGPU_DRIVER_VERSION),
+# delete the IS_SPM_DISABLED block above and set(IS_DISABLED True) below, then use:
+# rocprofiler_sdk_spm_tests_disabled(IS_DISABLED)
+# if(${SANITIZER})
+#     set(IS_DISABLED True)
+# endif()
 set(IS_DISABLED True)
 
 rocprofiler_add_integration_execute_test(

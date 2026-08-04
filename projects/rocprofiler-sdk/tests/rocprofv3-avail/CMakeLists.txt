@@ -23,6 +23,13 @@ if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
     set(IS_DISABLED ON)
 endif()
 
+# TODO: When driver gating is required for rocprofv3-avail-spm-test-hw-counters, replace
+# rocprofiler_sdk_spm_disabled below with rocprofiler_sdk_spm_tests_disabled (arch + driver),
+# keeping the if(${IS_DISABLED}) override for non-gfx94x/sanitizer builds:
+# rocprofiler_sdk_spm_tests_disabled(IS_SPM_DISABLED)
+# if(${IS_DISABLED})
+#     set(IS_SPM_DISABLED on)
+# endif()
 rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 if(${IS_DISABLED})
     set(IS_SPM_DISABLED on)
