@@ -96,14 +96,23 @@ __launch_bounds__(512)
 
   // Phase 1: publish my payload into every peer's slot[selfRank].
   for (size_t pk = gtid; pk < nPk_rank; pk += stride) {
-    const uint32_t d0 = in[2 * pk];
-    const uint32_t d1 = in[2 * pk + 1];
-
+    uint32_t d0[nRanks], d1[nRanks];
 #pragma unroll
     for (int r = 1; r < nRanks; ++r) {
       const int peer = (selfRank + r) % nRanks;
+      const uint32_t* peer_in = reinterpret_cast<const uint32_t*>(sendbuff) + peer * nPk_rank * 2;
+      d0[r] = peer_in[2 * pk];
+      d1[r] = peer_in[2 * pk + 1];
+    }
+#pragma unroll
+    for (int r = 1; r < nRanks; ++r) {
+      const int peer = (selfRank + r) % nRanks;
+      //const uint32_t* peer_in = reinterpret_cast<const uint32_t*>(sendbuff) + peer * nPk_rank * 2;
+      //const uint32_t d0 = peer_in[2 * pk];
+      //const uint32_t d1 = peer_in[2 * pk + 1];
+
       LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + bankOffsetPkts + (size_t)selfRank * slot;
-      ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[pk]), d0, flag, d1, flag);
+      ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[pk]), d0[r], flag, d1[r], flag);
     }
   }
 
