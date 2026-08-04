@@ -562,7 +562,7 @@ TEST(GpuMemoryTest, ReregisterProcessInvalidatesThreadLocalTranslationCaches) {
   EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::CC);
 }
 
-TEST(GpuMemoryThreadingTest, UnregisterWaitsForBackingResolution) {
+TEST(GpuMemoryThreadingTest, BackingResolutionKeepsVmidAndPageTableLocked) {
   amdgpu::GpuMemory memory("memory");
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kAddr = 0x40000000;
@@ -581,6 +581,11 @@ TEST(GpuMemoryThreadingTest, UnregisterWaitsForBackingResolution) {
 
   std::thread reader([&] { EXPECT_EQ(memory.resolve_host_ptr(kAddr, kPid), nullptr); });
   resolver_entered.arrive_and_wait();
+
+  const bool acquired_page_table_lock = process.page_table_mutex_.try_lock();
+  if (acquired_page_table_lock)
+    process.page_table_mutex_.unlock();
+  EXPECT_FALSE(acquired_page_table_lock);
 
   std::promise<void> unregister_complete;
   std::future<void> unregister_result = unregister_complete.get_future();
