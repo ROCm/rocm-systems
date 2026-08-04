@@ -192,7 +192,7 @@ if(HIP_PLATFORM MATCHES "amd")
   add_custom_target(copyKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
-                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -mcode-object-version=5 -S -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -mcode-object-version=5 --cuda-device-only -S -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
