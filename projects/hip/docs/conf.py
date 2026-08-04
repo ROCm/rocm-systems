@@ -56,8 +56,8 @@ external_projects_current_project = "rocm"
 html_theme = "rocm_docs_theme"
 html_theme_options = {
     "flavor": "rocm",
-    "use_download_button": True,
-    "link_main_doc": False,
+    #"use_download_button": True,
+    #"link_main_doc": False,
     "repository_url": "https://github.com/ROCm/rocm-systems",
     "use_repository_button": True,
     "use_issues_button": True,
