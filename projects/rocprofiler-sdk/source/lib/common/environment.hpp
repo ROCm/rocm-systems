@@ -112,6 +112,15 @@ set_env(std::string_view env_id, Tp&& value, int override = 0)
     return impl::set_env(env_id, std::forward<Tp>(value), override);
 }
 
+// Returns true if the process is running in a "secure" execution context, i.e.
+// the AT_SECURE auxiliary-vector entry is set (setuid/setgid binaries, files
+// with capabilities, etc.). In such contexts, environment variables that are
+// controllable by an unprivileged user must NOT be honored to load code (e.g.
+// dlopen of tool libraries), otherwise a local attacker could inject a library
+// into a privileged process. The result is cached on first call.
+bool
+is_at_secure();
+
 struct env_config
 {
     std::string env_name  = {};

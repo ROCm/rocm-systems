@@ -44,13 +44,14 @@ THE SOFTWARE.
  * The `JpegMarkers` enum defines the common JPEG markers used in a JPEG stream.
  */
 enum JpegMarkers {
-    SOI = 0xD8, /**< Start Of Image */
-    SOF = 0xC0, /**< Start Of Frame for a baseline DCT-based JPEG. */
-    DHT = 0xC4, /**< Define Huffman Table */
-    DQT = 0xDB, /**< Define Quantization Table */
-    DRI = 0xDD, /**< Define Restart Interval */
-    SOS = 0xDA, /**< Start of Scan */
-    EOI = 0xD9, /**< End Of Image */
+    SOI  = 0xD8, /**< Start Of Image */
+    SOF  = 0xC0, /**< Start Of Frame for a baseline DCT-based JPEG. */
+    SOF2 = 0xC2, /**< Start Of Frame for a progressive DCT-based JPEG (not supported). */
+    DHT  = 0xC4, /**< Define Huffman Table */
+    DQT  = 0xDB, /**< Define Quantization Table */
+    DRI  = 0xDD, /**< Define Restart Interval */
+    SOS  = 0xDA, /**< Start of Scan */
+    EOI  = 0xD9, /**< End Of Image */
 };
 
 /**
@@ -263,6 +264,7 @@ class RocJpegStreamParser {
                                                uint8_t c1_v_sampling_factor, uint8_t c2_v_sampling_factor, uint8_t c3_v_sampling_factor);
 
         const uint8_t *stream_; ///< Pointer to the JPEG stream.
+        const uint8_t *stream_start_; ///< Pointer to the start of the JPEG stream (for offset computation).
         const uint8_t *stream_end_; ///< Pointer to the end of the JPEG stream.
         uint32_t stream_length_; ///< Length of the JPEG stream.
         JpegStreamParameters jpeg_stream_parameters_; ///< JPEG stream parameters.

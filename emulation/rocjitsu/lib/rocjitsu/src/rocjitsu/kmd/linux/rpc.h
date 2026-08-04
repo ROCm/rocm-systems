@@ -13,6 +13,8 @@
 /// arrays are inlined after the args. File descriptors (memfds for GPU
 /// memory) are passed via SCM_RIGHTS ancillary messages.
 
+#include "rocjitsu/vm/rj_vm.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -47,7 +49,10 @@ struct RpcHeader {
 };
 
 /// @brief RPC protocol version. Increment when making breaking changes.
-inline constexpr uint32_t kRpcProtocolVersion = 2;
+inline constexpr uint32_t kRpcProtocolVersion = 3;
+
+/// @brief Fixed-size GPU metadata sent during daemon handshake.
+using RpcGpuInfo = ::rj_vm_gpu_info_t;
 
 /// @brief Handshake response payload (sent after RPC_HANDSHAKE).
 struct RpcHandshakeResponse {
@@ -55,6 +60,7 @@ struct RpcHandshakeResponse {
   uint32_t gpu_id;            ///< KFD gpu_id for the simulated device.
   uint32_t topology_path_len; ///< Length of the topology path string that follows.
   uint32_t drm_path_len;      ///< Length of the DRM sysfs path string that follows.
+  RpcGpuInfo gpu_info;        ///< Device metadata for client-side DRM/libdrm emulation.
 };
 
 /// @brief Ioctl request payload (when opcode == RPC_IOCTL).
@@ -86,7 +92,8 @@ struct RpcMunmapRequest {
 };
 
 static_assert(sizeof(RpcHeader) == 16);
-static_assert(sizeof(RpcHandshakeResponse) == 16);
+static_assert(sizeof(RpcGpuInfo) == 312);
+static_assert(sizeof(RpcHandshakeResponse) == 328);
 static_assert(sizeof(RpcIoctlRequest) == 8);
 static_assert(sizeof(RpcMmapRequest) == 32);
 static_assert(sizeof(RpcMmapResponse) == 8);
@@ -233,11 +240,14 @@ inline bool rpc_send_exact(int sock, const void *buffer, size_t total_bytes) {
 /// @brief Per-user runtime directory for rocjitsu state files.
 /// @details Checks $ROCJITSU_RUNTIME_DIR first (used by test infrastructure
 /// for per-process isolation), then $XDG_RUNTIME_DIR/rocjitsu, falling back
-/// to /tmp/rocjitsu-<uid>.
+/// to /tmp/rocjitsu-<uid>. An env var that is SET BUT EMPTY is treated as unset:
+/// returning "" would root every derived path (socket, config, per-PID dirs) at
+/// the filesystem root and make the reapers iterate/delete from "/" or CWD, so we
+/// never return an empty string.
 inline std::string rpc_default_runtime_dir() {
-  if (const char *rj = getenv("ROCJITSU_RUNTIME_DIR"))
+  if (const char *rj = getenv("ROCJITSU_RUNTIME_DIR"); rj && *rj)
     return rj;
-  if (const char *xdg = getenv("XDG_RUNTIME_DIR"))
+  if (const char *xdg = getenv("XDG_RUNTIME_DIR"); xdg && *xdg)
     return std::string(xdg) + "/rocjitsu";
   return "/tmp/rocjitsu-" + std::to_string(getuid());
 }
@@ -248,6 +258,34 @@ inline std::string rpc_default_socket_path() { return rpc_default_runtime_dir() 
 /// @brief Path to the config file written by the CLI for interposer discovery.
 inline std::string rpc_default_config_file_path() {
   return rpc_default_runtime_dir() + "/config_path";
+}
+
+/// @brief Environment variable carrying the resolved per-invocation runtime dir.
+/// @details The CLI exports this before execvp, so every descendant process
+/// (direct children and grandchildren spawned through wrappers like ctest)
+/// inherits the exact directory holding config_path/daemon.sock without
+/// re-deriving it from its own PID. Absent in attach mode, where the interposer
+/// falls back to its own PID-scoped runtime dir (which does not exist, so
+/// connect_to_daemon then uses the well-known socket).
+inline constexpr char kRpcInvocationDirEnv[] = "ROCJITSU_INVOCATION_DIR";
+
+/// @brief Per-invocation runtime directory scoped by PID.
+/// @details The CLI creates <runtime_dir>/<pid>/ before execvp and exports its
+/// path via $ROCJITSU_INVOCATION_DIR so the interposer locates the correct
+/// config/socket without depending on the process-tree shape. All descendants
+/// inherit the same directory through the environment.
+inline std::string rpc_invocation_runtime_dir(pid_t pid) {
+  return rpc_default_runtime_dir() + "/" + std::to_string(pid);
+}
+
+/// @brief Per-invocation daemon socket path scoped by PID.
+inline std::string rpc_invocation_socket_path(pid_t pid) {
+  return rpc_invocation_runtime_dir(pid) + "/daemon.sock";
+}
+
+/// @brief Per-invocation config-path handoff file scoped by PID.
+inline std::string rpc_invocation_config_file_path(pid_t pid) {
+  return rpc_invocation_runtime_dir(pid) + "/config_path";
 }
 
 } // namespace rocjitsu

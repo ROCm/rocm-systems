@@ -34,7 +34,7 @@ Fortran Jacobi solver using Unified Shared Memory (USM) for automatic data migra
 
 Computes a matrix exponential via truncated Taylor series using HIP and rocBLAS, with one GPU stream per OpenMP thread for concurrent DGEMM operations. Demonstrates GPU stream-level parallelism.
 
-**Source files:** `mat_exp.cpp`
+**Source files:** `mat-exp.cpp`
 
 **Dependencies:** HIP, rocBLAS, OpenMP, rocprofiler-sdk-roctx (for markers)
 
@@ -44,7 +44,7 @@ Computes a matrix exponential via truncated Taylor series using HIP and rocBLAS,
 
 Demonstrates compute-communication overlap using separate hardware queues for data transfers and kernel execution, maximizing GPU utilization through pipelined operations.
 
-**Source files:** `compute_comm_overlap.hip`
+**Source files:** `compute-comm-overlap.hip`
 
 **Dependencies:** HIP
 
@@ -101,8 +101,7 @@ rocprof-sys-run -- ./matrix-exponential-streams-sync-hip
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
 
 ```bash
-rocprof-sys-run \
-    -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy \
-    -e ROCPROFSYS_TRACE=true \
-    -- ./jacobi-hip
+ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy \
+ROCPROFSYS_TRACE=true \
+rocprof-sys-run -- ./jacobi-hip
 ```

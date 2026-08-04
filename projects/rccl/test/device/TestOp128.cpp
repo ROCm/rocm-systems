@@ -212,8 +212,8 @@ TEST_F(PackRoundtripTest, CvtaToGlobal) {
   kernelCvtaToGlobal<<<1, 1>>>(d_ptr.ptr, d_addr.ptr);
   syncAndCheck();
 
-  uintptr_t h_addr = d_addr.download();
-  EXPECT_EQ(h_addr, reinterpret_cast<uintptr_t>(d_ptr.ptr));
+  uintptr_t hAddr = d_addr.download();
+  EXPECT_EQ(hAddr, reinterpret_cast<uintptr_t>(d_ptr.ptr));
 }
 
 // ---------------------------------------------------------------------------

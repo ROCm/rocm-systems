@@ -210,9 +210,12 @@ inline bool isPerRankLoggingEnabled()
 /**
  * @brief Path to the per-rank log file used when RCCL_MPI_LOG_ALL_RANKS=1
  *
- * Matches the filename created by setupRankLogging() (current working directory).
- * The file is shared by all tests in the process unless callers use
- * TestLogAssertionContext::isolate_new_output.
+ * Matches the filename created by setupRankLogging(). The name embeds the
+ * --gtest_filter test label when it identifies a single test
+ * (rccl_test_<Label>_rank_<R>_pid<P>.log) so every rank's file can be matched
+ * to the test that produced it; otherwise it falls back to
+ * rccl_test_rank_<R>_pid<P>.log. The file is shared by all tests in the process
+ * unless callers use TestLogAssertionContext::isolate_new_output.
  */
 std::string getRankLogFilePath(int rank);
 
@@ -401,6 +404,52 @@ struct MpiEnvGuard
     MpiEnvGuard(const MpiEnvGuard&)            = delete;
     MpiEnvGuard& operator=(const MpiEnvGuard&) = delete;
 };
+
+/** RAII scoped force-unset of a single env var; restores the previous value
+ *  (or leaves it unset) on destruction.
+ *
+ *  Use this when a test needs to guarantee an env var is absent for the scope
+ *  (e.g. NCCL_DEBUG_SUBSYS, to exercise RCCL's default subsystem mask)
+ *  regardless of whatever ambient value CI or a prior test may have left set.
+ */
+struct MpiEnvUnsetGuard
+{
+    const char* name;
+    std::string saved;
+    bool        had{false};
+
+    explicit MpiEnvUnsetGuard(const char* n) : name(n)
+    {
+        const char* prev = std::getenv(n);
+        had              = (prev != nullptr);
+        if(had)
+        {
+            saved = prev;
+        }
+        ::unsetenv(n);
+    }
+    ~MpiEnvUnsetGuard()
+    {
+        if(had)
+            ::setenv(name, saved.c_str(), 1);
+        else
+            ::unsetenv(name);
+    }
+
+    MpiEnvUnsetGuard(const MpiEnvUnsetGuard&)            = delete;
+    MpiEnvUnsetGuard& operator=(const MpiEnvUnsetGuard&) = delete;
+};
+
+/**
+ * @brief Force RCCL to re-read NCCL_DEBUG / NCCL_DEBUG_SUBSYS / NCCL_DEBUG_FILE on next log call.
+ *
+ * ncclDebugInit() lazily caches its parsed env state process-wide, so changing
+ * these env vars mid-process (e.g. between two TEST_F cases sharing a binary)
+ * has no effect until this is called. Wraps the same dlsym'd
+ * ncclResetDebugInit() used internally by TestLogAssertionContext for
+ * NCCL_DEBUG_FILE changes; safe no-op if the symbol cannot be resolved.
+ */
+void resetNcclDebugState();
 
 } // namespace MPIHelpers
 

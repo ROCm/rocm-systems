@@ -5,11 +5,23 @@
 
 from __future__ import annotations
 
-import warnings
 from typing import Any
 
 import numpy as np
 import pandas as pd
+
+
+def calc_pct_of_peak(
+    value: float | str | None,
+    peak: float | str | None,
+) -> float | None:
+    """Return 100.0 * value / peak, or None on invalid, NaN, or zero-peak input."""
+    if pd.isna(value) or pd.isna(peak):
+        return None
+    try:
+        return float(value) / float(peak) * 100.0
+    except (ValueError, TypeError, ZeroDivisionError):
+        return None
 
 
 def to_min(*args: Any) -> float:
@@ -72,12 +84,11 @@ def to_avg(
 def to_median(a: pd.Series | None) -> float:
     if a is None:
         return np.nan
-    elif isinstance(a, pd.Series):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=RuntimeWarning)
-            return a.median()
-    else:
-        raise Exception("to_median: unsupported type.")
+    if isinstance(a, pd.Series):
+        if a.empty or np.isnan(a).all():
+            return np.nan
+        return a.median()
+    raise Exception("to_median: unsupported type.")
 
 
 def to_std(a: pd.Series) -> float:

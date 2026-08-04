@@ -4,40 +4,34 @@
 #include "rocjitsu/code/rj_code_internal.h"
 
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <cstring>
+#include <unordered_map>
 
 using namespace rocjitsu;
 
 namespace {
 
 Decoder *create_decoder_for_target(rj_code_target_id_t target) {
-  static thread_local std::unique_ptr<Decoder> cdna3_decoder;
-  static thread_local std::unique_ptr<Decoder> cdna4_decoder;
-  static thread_local std::unique_ptr<Decoder> rdna4_decoder;
-  static thread_local std::unique_ptr<Decoder> gfx1250_decoder;
-
-  switch (target) {
-  case ROCJITSU_CODE_TARGET_GFX942:
-    if (!cdna3_decoder)
-      cdna3_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
-    return cdna3_decoder.get();
-  case ROCJITSU_CODE_TARGET_GFX950:
-    if (!cdna4_decoder)
-      cdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
-    return cdna4_decoder.get();
-  case ROCJITSU_CODE_TARGET_GFX1200:
-  case ROCJITSU_CODE_TARGET_GFX1201:
-    if (!rdna4_decoder)
-      rdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
-    return rdna4_decoder.get();
-  case ROCJITSU_CODE_TARGET_GFX1250:
-    if (!gfx1250_decoder)
-      gfx1250_decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
-    return gfx1250_decoder.get();
-  default:
+  const IsaTargetRegistry &registry = default_isa_target_registry();
+  const IsaTargetDescriptor *descriptor = registry.find(target);
+  if (descriptor == nullptr)
     return nullptr;
-  }
+
+  static thread_local std::unordered_map<const IsaTargetDescriptor *, std::unique_ptr<Decoder>>
+      decoders;
+  std::unique_ptr<Decoder> &decoder = decoders[descriptor];
+  if (!decoder)
+    decoder = descriptor->decoder_factory();
+  return decoder.get();
+}
+
+rj_code_arch_t arch_for_target(rj_code_target_id_t target) {
+  const IsaTargetDescriptor *descriptor = default_isa_target_registry().find(target);
+  if (descriptor == nullptr)
+    return ROCJITSU_CODE_ARCH_INVALID;
+  return descriptor->architecture_id;
 }
 
 } // namespace
@@ -93,6 +87,8 @@ rj_status_t rj_code_executable_get_code_object(const rj_code_executable_t *exec,
 
   *obj = new rj_code_object_t{};
   (*obj)->co = co;
+  (*obj)->parent_exec = const_cast<rj_code_executable_t *>(exec);
+  (*obj)->parent_exec->retain();
   (*obj)->retain();
   return ROCJITSU_STATUS_SUCCESS;
 }
@@ -127,9 +123,9 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
 
   auto owned = std::make_unique<rj_code_inst_list_t>();
 
-  // DBT-generated cave bodies live outside .text, but they still need normal
-  // disassembly/validation alongside original text bytes.
-  for (const auto *sec : obj->co->code_sections()) {
+  // DBT local caves are emitted into .text, so instruction-list callers only
+  // need the text sections to see translated code.
+  for (const auto *sec : obj->co->text_sections()) {
     const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
     std::size_t inst_data_size = sec->size() / sizeof(uint32_t);
     // Each executable section owns a separate data buffer, so decoding starts
@@ -176,8 +172,12 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
   if (!decoder)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
+  const rj_code_arch_t arch = arch_for_target(target_id);
+  if (arch == ROCJITSU_CODE_ARCH_INVALID)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+
   auto owned = std::make_unique<rj_code_basic_block_list_t>();
-  owned->blocks = BasicBlock::build(*obj->co, *decoder);
+  owned->blocks = BasicBlock::build(*obj->co, *decoder, arch);
 
   *list = owned.release();
   return ROCJITSU_STATUS_SUCCESS;
@@ -215,6 +215,8 @@ rj_status_t rj_code_basic_block_list_get(const rj_code_basic_block_list_t *list,
 
   *block = new rj_code_basic_block_t{};
   (*block)->block = list->blocks[index].get();
+  (*block)->parent_list = const_cast<rj_code_basic_block_list_t *>(list);
+  (*block)->parent_list->retain();
   (*block)->retain();
   return ROCJITSU_STATUS_SUCCESS;
 }

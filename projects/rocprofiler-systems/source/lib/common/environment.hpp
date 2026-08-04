@@ -4,8 +4,10 @@
 #pragma once
 
 #include "common/defines.h"
-#include "common/join.hpp"
+#include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "logger/debug.hpp"
+#include <spdlog/fmt/fmt.h>
 
 #include <timemory/utility/filepath.hpp>
 
@@ -15,7 +17,6 @@
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
-#include <exception>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -56,6 +57,48 @@ struct posix_env
     static char* getenv(const char* name) { return ::getenv(name); }
 };
 
+/// @brief Parse a string into a boolean.
+///
+/// Leading and trailing whitespace is trimmed before interpretation. All-digit
+/// strings are truthy when non-zero (an overflowing digit string is also truthy);
+/// other values are matched case-insensitively against the false tokens
+/// off/false/no/n/f/0 (anything else is truthy). An empty or all-whitespace string
+/// yields @p fallback.
+/// @param value    The string to interpret.
+/// @param fallback Returned when @p value is empty or all whitespace.
+/// @return The parsed boolean.
+[[nodiscard]] inline bool
+to_bool(std::string_view value, bool fallback = false)
+{
+    // trim leading/trailing whitespace before interpreting
+    constexpr std::string_view whitespace = " \t\n\r\f\v";
+    const auto                 first_pos  = value.find_first_not_of(whitespace);
+    if(first_pos == std::string_view::npos) return fallback;  // empty or all whitespace
+    const auto last_pos = value.find_last_not_of(whitespace);
+    value               = value.substr(first_pos, last_pos - first_pos + 1);
+
+    if(value.find_first_not_of("0123456789") == std::string_view::npos)
+    {
+        std::uint64_t numeric{};
+        const auto*   last   = value.data() + value.size();
+        const auto [ptr, ec] = std::from_chars(value.data(), last, numeric);
+        if(ec == std::errc::result_out_of_range) return true;
+        if(ec == std::errc{} && ptr == last) return numeric != 0;
+        return true;
+    }
+
+    std::string lower{ value };
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char chr) { return std::tolower(chr); });
+
+    constexpr auto false_values = std::array{
+        std::string_view{ "off" }, std::string_view{ "false" }, std::string_view{ "no" },
+        std::string_view{ "n" },   std::string_view{ "f" },
+    };
+    return !std::any_of(false_values.begin(), false_values.end(),
+                        [&lower](std::string_view val) { return lower == val; });
+}
+
 /// @brief Environment variable read/write facade, parameterised over the backend.
 ///
 /// All conversion and parsing logic lives here. Use @c environment<posix_env> (the
@@ -91,31 +134,7 @@ private:
             throw std::runtime_error(
                 std::string{ "No boolean value provided for " }.append(env_id));
         }
-
-        if(env_sv.find_first_not_of("0123456789") == std::string_view::npos)
-        {
-            // Parse with from_chars so a very large all-digit value cannot throw
-            // (std::stoi would throw std::out_of_range). Any non-zero digit string,
-            // including one that overflows, is truthy.
-            std::uint64_t numeric{};
-            const auto*   last   = env_sv.data() + env_sv.size();
-            const auto [ptr, ec] = std::from_chars(env_sv.data(), last, numeric);
-            if(ec == std::errc::result_out_of_range) return true;
-            if(ec == std::errc{} && ptr == last) return numeric != 0;
-            return true;
-        }
-
-        std::string lower{ env_sv };
-        std::transform(lower.begin(), lower.end(), lower.begin(),
-                       [](unsigned char chr) { return std::tolower(chr); });
-
-        constexpr auto false_values = std::array{
-            std::string_view{ "off" }, std::string_view{ "false" },
-            std::string_view{ "no" },  std::string_view{ "n" },
-            std::string_view{ "f" },   std::string_view{ "0" },
-        };
-        return !std::any_of(false_values.begin(), false_values.end(),
-                            [&lower](std::string_view val) { return lower == val; });
+        return to_bool(env_sv, fallback);
     }
 
     template <typename Tp>
@@ -246,16 +265,6 @@ public:
         }
     }
 
-    /// @brief std::string_view / std::string overload of @ref get_env: materialises
-    ///        a null-terminated copy of @p env_id once, then dispatches to the
-    ///        const char* overload.
-    template <typename Tp>
-    static auto get_env(std::string_view env_id, Tp&& value_default)
-    {
-        const std::string name{ env_id };
-        return get_env(name.c_str(), std::forward<Tp>(value_default));
-    }
-
     /// @brief Read environment variable @p env_id as @p Tp, using a
     ///        value-initialised @c Tp{} as the fallback.
     /// @tparam Tp Target type (defaults to std::string).
@@ -263,14 +272,6 @@ public:
     /// @return The parsed value, or @c Tp{} when the variable is unset.
     template <typename Tp = std::string>
     static auto get_env(const char* env_id)
-    {
-        return get_env(env_id, Tp{});
-    }
-
-    /// @brief std::string_view / std::string overload of the single-argument
-    ///        @ref get_env.
-    template <typename Tp = std::string>
-    static auto get_env(std::string_view env_id)
     {
         return get_env(env_id, Tp{});
     }
@@ -288,14 +289,6 @@ public:
         std::stringstream ss_val;
         ss_val << value;
         EnvType::setenv(env_var, ss_val.str().c_str(), override);
-    }
-
-    /// @brief std::string_view / std::string overload of @ref set_env.
-    template <typename Tp>
-    static void set_env(std::string_view env_var, const Tp& value, int override)
-    {
-        const std::string name{ env_var };
-        set_env(name.c_str(), value, override);
     }
 
     /// @brief Read environment variable @p env_id constrained to a set of allowed
@@ -321,15 +314,6 @@ public:
             return value_default;
         }
         return value;
-    }
-
-    /// @brief std::string_view / std::string overload of @ref get_env_choice.
-    template <typename Tp>
-    static auto get_env_choice(std::string_view env_id, Tp value_default,
-                               std::set<Tp> choices)
-    {
-        const std::string name{ env_id };
-        return get_env_choice(name.c_str(), std::move(value_default), std::move(choices));
     }
 };
 
@@ -369,14 +353,6 @@ get_env(const char* env_id, Tp&& value_default)
     return environment<>::get_env(env_id, std::forward<Tp>(value_default));
 }
 
-/// @brief std::string_view / std::string overload of @ref get_env.
-template <typename Tp>
-inline auto
-get_env(std::string_view env_id, Tp&& value_default)
-{
-    return environment<>::get_env(env_id, std::forward<Tp>(value_default));
-}
-
 /// @brief Read environment variable @p env_id as @p Tp, falling back to @c Tp{}.
 /// @tparam Tp Target type (defaults to std::string).
 /// @param env_id Null-terminated variable name.
@@ -384,15 +360,6 @@ get_env(std::string_view env_id, Tp&& value_default)
 template <typename Tp = std::string>
 inline auto
 get_env(const char* env_id)
-{
-    return environment<>::get_env<Tp>(env_id);
-}
-
-/// @brief std::string_view / std::string overload of the single-argument
-///        @ref get_env.
-template <typename Tp = std::string>
-inline auto
-get_env(std::string_view env_id)
 {
     return environment<>::get_env<Tp>(env_id);
 }
@@ -405,14 +372,6 @@ get_env(std::string_view env_id)
 template <typename Tp>
 inline void
 set_env(const char* env_var, const Tp& value, int override)
-{
-    environment<>::set_env(env_var, value, override);
-}
-
-/// @brief std::string_view / std::string overload of @ref set_env.
-template <typename Tp>
-inline void
-set_env(std::string_view env_var, const Tp& value, int override)
 {
     environment<>::set_env(env_var, value, override);
 }
@@ -432,15 +391,6 @@ get_env_choice(const char* env_id, Tp value_default, std::set<Tp> value_choices)
                                          std::move(value_choices));
 }
 
-/// @brief std::string_view / std::string overload of @ref get_env_choice.
-template <typename Tp>
-inline auto
-get_env_choice(std::string_view env_id, Tp value_default, std::set<Tp> value_choices)
-{
-    return environment<>::get_env_choice(env_id, std::move(value_default),
-                                         std::move(value_choices));
-}
-
 // ── Env-vector helpers (operate on std::vector<std::string>, not the real env) ──
 
 /// @brief Remove all "KEY=VALUE" entries for @p env_variable from @p env_list,
@@ -452,7 +402,7 @@ inline void
 remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
            const std::unordered_set<std::string>& original_envs)
 {
-    auto key = join("", env_variable, "=");
+    auto key = fmt::format("{}=", env_variable);
 
     env_list.erase(std::remove_if(env_list.begin(), env_list.end(),
                                   [&key](const std::string& entry) {
@@ -465,6 +415,20 @@ remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
     {
         if(std::string_view{ orig }.find(key) == 0) env_list.emplace_back(orig);
     }
+}
+
+/// @brief Build the default colon-delimited library search-path list.
+///
+/// Concatenates the process's @c ROCPROFSYS_PATH, @c LD_LIBRARY_PATH, @c LIBRARY_PATH and
+/// @c PWD environment variables (in that order), followed by the current
+/// directory @c "." , into a single @c ':' -delimited string.
+/// @return Colon-delimited search paths; never empty (always ends with @c "." ).
+[[nodiscard]] inline std::string
+get_default_lib_search_paths()
+{
+    return fmt::format("{}:{}:{}:{}:.", get_env(env_vars::PATH, ""),
+                       get_env("LD_LIBRARY_PATH", ""), get_env("LIBRARY_PATH", ""),
+                       get_env("PWD", ""));
 }
 
 /// @brief Locate the ROCm LLVM library directory that contains libomptarget.so.
@@ -487,7 +451,7 @@ discover_llvm_libdir_for_ompt()
     const auto rocm_dir  = strip(get_env<std::string>("ROCM_PATH", "/opt/rocm"));
     const auto rocmv_dir = strip(get_env<std::string>("ROCmVersion_DIR", ""));
 
-    const constexpr auto number_of_candidates = 6;
+    const constexpr auto number_of_candidates = 8;
 
     std::vector<std::string> candidates;
     candidates.reserve(number_of_candidates);
@@ -507,6 +471,14 @@ discover_llvm_libdir_for_ompt()
     }
     push_unique(rocm_dir + "/llvm/lib");
     push_unique(rocm_dir + "/lib/llvm/lib");
+
+    const auto llvm_host_triple = strip(std::string{ ROCPROFSYS_ROCM_LLVM_HOST_TRIPLE });
+    if(!llvm_host_triple.empty())
+    {
+        push_unique(rocm_dir + "/lib/llvm/lib/" + llvm_host_triple);
+        push_unique("/opt/rocm/lib/llvm/lib/" + llvm_host_triple);
+    }
+
     push_unique("/opt/rocm/llvm/lib");
     push_unique("/opt/rocm/lib/llvm/lib");
 
@@ -535,10 +507,7 @@ is_python_interpreter(std::string_view executable)
 {
     if(executable.empty()) return false;
 
-    const auto slash_pos = executable.rfind('/');
-    const auto basename  = (slash_pos != std::string_view::npos)
-                               ? executable.substr(slash_pos + 1)
-                               : executable;
+    const auto basename = path::filename(executable);
 
     if(basename == "python" || basename == "python3") return true;
 
@@ -630,7 +599,7 @@ discover_torch_libpath(const std::string& python_binary)
 
     std::string torch_libdir = result + "/lib";
 
-    if(!::tim::filepath::direxists(torch_libdir))
+    if(!path::is_directory(torch_libdir))
     {
         LOG_WARNING("torch lib directory does not exist: {}", torch_libdir);
         return {};
@@ -654,13 +623,14 @@ enum class update_mode : std::uint8_t
 ///        strings pass through.
 /// @return The string representation of @p val.
 template <typename Tp>
+    requires(std::is_same_v<std::decay_t<Tp>, std::string> ||
+             std::is_same_v<std::decay_t<Tp>, const char*> ||
+             std::is_same_v<std::decay_t<Tp>, bool> ||
+             std::is_arithmetic_v<std::decay_t<Tp>>)
 inline std::string
 to_env_string(Tp&& val)
 {
     using T = std::decay_t<Tp>;
-    static_assert(std::is_same_v<T, std::string> || std::is_same_v<T, const char*> ||
-                      std::is_same_v<T, bool> || std::is_arithmetic_v<T>,
-                  "to_env_string: unsupported type. Use string, bool, or numeric types.");
 
     if constexpr(std::is_same_v<T, std::string> || std::is_same_v<T, const char*>)
         return std::string{ val };
@@ -691,7 +661,7 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
     _updated_envs.emplace(updated_value_t{ _env_var });
 
     const auto _env_val_str = to_env_string(std::forward<Tp>(_env_val));
-    const auto _key         = join("", _env_var, "=");
+    const auto _key         = fmt::format("{}=", _env_var);
 
     const auto matches_key = [&_key](const std::string& entry) {
         return std::string_view{ entry }.find(_key) == 0;
@@ -700,7 +670,7 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
     auto first = std::find_if(_environ.begin(), _environ.end(), matches_key);
     if(first == _environ.end())
     {
-        _environ.emplace_back(join('=', _env_var, _env_val_str));
+        _environ.emplace_back(fmt::format("{}={}", _env_var, _env_val_str));
         return;
     }
 
@@ -708,7 +678,7 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
     {
         case update_mode::WEAK:
             if(_original_envs.find(*first) == _original_envs.end()) return;
-            *first = join('=', _env_var, _env_val_str);
+            *first = fmt::format("{}={}", _env_var, _env_val_str);
             return;
 
         case update_mode::PREPEND:
@@ -716,14 +686,15 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
         {
             if(first->find(_env_val_str) != std::string::npos) return;
             auto _val = first->substr(_key.size());
-            *first    = (_mode == update_mode::PREPEND)
-                            ? join('=', _env_var, join(_join_delim, _env_val_str, _val))
-                            : join('=', _env_var, join(_join_delim, _val, _env_val_str));
+            *first =
+                (_mode == update_mode::PREPEND)
+                    ? fmt::format("{}={}{}{}", _env_var, _env_val_str, _join_delim, _val)
+                    : fmt::format("{}={}{}{}", _env_var, _val, _join_delim, _env_val_str);
             return;
         }
 
         case update_mode::REPLACE:
-            *first = join('=', _env_var, _env_val_str);
+            *first = fmt::format("{}={}", _env_var, _env_val_str);
             _environ.erase(std::remove_if(std::next(first), _environ.end(), matches_key),
                            _environ.end());
             return;
@@ -770,7 +741,7 @@ add_torch_library_path(std::vector<std::string>& envp, std::string_view executab
     }
 
     envp.erase(std::remove_if(envp.begin(), envp.end(), is_ld_path), envp.end());
-    envp.emplace_back(join("", ld_prefix, result));
+    envp.emplace_back(fmt::format("{}{}", ld_prefix, result));
 
     updated_envs.emplace(ld_prefix.substr(0, ld_prefix.length() - 1));
 }
@@ -800,8 +771,8 @@ consolidate_env_entries(std::vector<std::string>& envp)
     /// - ROCPROFSYS_SAMPLING_OVERFLOW_EVENT: uses perf::EVENT_NAME syntax
     /// - ROCPROFSYS_ROCM_EVENTS: uses EVENT_NAME:device=N syntax
     auto get_delimiter = [](std::string_view key) -> char {
-        if(key == "ROCPROFSYS_PAPI_EVENTS" ||
-           key == "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT" || key == "ROCPROFSYS_ROCM_EVENTS")
+        if(key == env_vars::PAPI_EVENTS || key == env_vars::SAMPLING_OVERFLOW_EVENT ||
+           key == env_vars::ROCM_EVENTS)
             return ',';
         return ':';
     };

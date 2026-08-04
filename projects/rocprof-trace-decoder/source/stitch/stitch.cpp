@@ -112,11 +112,7 @@ std::pair<size_t, barrier_list_t> Stitcher::stitchWave(class WaveDataInternal& w
             inst_index++;
             continue;
         }
-#ifndef ARCH_MODEL
         else if (bValid(inst.pc))
-#else
-        else if (bValid(inst.pc) || inst_index == 0)
-#endif
         {
             inst_index++;
             next = nullptr;
@@ -152,11 +148,23 @@ std::pair<size_t, barrier_list_t> Stitcher::stitchWave(class WaveDataInternal& w
             }
             continue;
         }
+        else if (gfxip >= 12 && inst_index == 0)
+        {
+            // AM
+            try
+            {
+                next = pctranslator->getcode(inst.pc);
+            }
+            catch (...)
+            {};
+
+            if (!next || next->line.empty()) return {0, barrier_gap};
+        }
 
         line = std::move(next);
         next = nullptr;
 
-        if (!line || inst.category == WaveInstCategory::WAVE_NOT_FINISHED) break;
+        if (!line || line->line.empty() || inst.category == WaveInstCategory::WAVE_NOT_FINISHED) break;
 
         try
         {
@@ -243,7 +251,7 @@ std::pair<size_t, barrier_list_t> Stitcher::stitchWave(class WaveDataInternal& w
             }
             else if (inst.time + inst.duration > next_min_time)
             {
-                // If we cant fit in the trace, then dont increase duration
+                // If we can't fit in the trace, then don't increase duration
                 inst.duration -= 4;
             }
         }
@@ -343,7 +351,7 @@ void insert_gfx12_barrier_wait(WaveDataInternal& wave, const barrier_list_t& bar
             timeline_index++;
         }
 
-        if (wave.timeline.size() && wstates.back().duration >= current_time - inst.time && current_time >= current.time)
+        if (!wstates.empty() && wstates.back().duration >= current_time - inst.time && current_time >= current.time)
         {
             wstates.back().duration -= clamp_to_int32(current_time - inst.time);
             int type = wstates.back().type;
@@ -415,9 +423,4 @@ Stitcher::Stitcher(
     std::shared_ptr<ICodeServicer> service, rocprof_trace_decoder_trace_callback_t _callback, void* _cbdata
 ) :
 codeobj_service(service), callback(_callback), cbdata(_cbdata)
-{
-#ifndef ARCH_MODEL
-    raw_code.push_back(std::make_shared<assemblyLine>());
-    raw_code.at(0)->line = "; Begin ASM";
-#endif
-}
+{}

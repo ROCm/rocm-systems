@@ -39,14 +39,14 @@ extern "C" {
 
 //! Major version should be changed for every header change that breaks ABI
 //! Such as adding/deleting APIs, changing names, fields of structures, etc.
-#define AMDCUID_LIB_VERSION_MAJOR 0
+#define AMDCUID_LIB_VERSION_MAJOR 1
 
 //! Minor version should be updated for each API change, but without changing
 //! headers
-#define AMDCUID_LIB_VERSION_MINOR 2
+#define AMDCUID_LIB_VERSION_MINOR 0
 
 //! Patch version should be updated for each bug fix or non-API change
-#define AMDCUID_LIB_VERSION_PATCH 1
+#define AMDCUID_LIB_VERSION_PATCH 0
 
 /**
  * @brief Retrieve the version of the CUID library.
@@ -60,8 +60,7 @@ extern "C" {
  * @param[out] minor Pointer to store the minor version number.
  * @param[out] patch Pointer to store the patch version number.
  */
-void amdcuid_get_library_version(uint32_t *major, uint32_t *minor,
-                                 uint32_t *patch);
+void amdcuid_get_library_version(uint32_t* major, uint32_t* minor, uint32_t* patch);
 
 /**
  * @brief Retrieve the version string of the CUID library.
@@ -69,41 +68,33 @@ void amdcuid_get_library_version(uint32_t *major, uint32_t *minor,
  * @return A constant character pointer to the version string. The format is
  * "MAJOR.MINOR.PATCH".
  */
-const char *amdcuid_library_version_to_string();
+const char* amdcuid_library_version_to_string(void);
 
 /**
  * @brief Status codes returned by CUID API functions.
  */
 typedef enum {
-  AMDCUID_STATUS_SUCCESS = 0,          ///< Operation completed successfully
-  AMDCUID_STATUS_FILE_NOT_FOUND = 1,   ///< CUID file not found
-  AMDCUID_STATUS_DEVICE_NOT_FOUND = 2, ///< Device(s) not found
-  AMDCUID_STATUS_INVALID_ARGUMENT = 3, ///< Invalid argument passed to function
-  AMDCUID_STATUS_PERMISSION_DENIED =
-      4, ///< Insufficient permissions for operation
-  AMDCUID_STATUS_UNSUPPORTED =
-      5, ///< Operation or device type not supported on system
-  AMDCUID_STATUS_WRONG_DEVICE_TYPE = 6, ///< Incorrect device type for function
-  AMDCUID_STATUS_INSUFFICIENT_SIZE =
-      7, ///< Provided buffer or array is too small
-  AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND =
-      8,                          ///< Hardware fingerprint could not be found
-  AMDCUID_STATUS_KEY_ERROR = 9,   ///< An error occurred related to the hash key
-  AMDCUID_STATUS_HMAC_ERROR = 10, ///< An error occurred during HMAC computation
+  AMDCUID_STATUS_SUCCESS = 0,            ///< Operation completed successfully
+  AMDCUID_STATUS_FILE_NOT_FOUND = 1,     ///< CUID file not found
+  AMDCUID_STATUS_DEVICE_NOT_FOUND = 2,   ///< Device(s) not found
+  AMDCUID_STATUS_INVALID_ARGUMENT = 3,   ///< Invalid argument passed to function
+  AMDCUID_STATUS_PERMISSION_DENIED = 4,  ///< Insufficient permissions for operation
+  AMDCUID_STATUS_UNSUPPORTED = 5,        ///< Operation or device type not supported on system
+  AMDCUID_STATUS_WRONG_DEVICE_TYPE = 6,  ///< Incorrect device type for function
+  AMDCUID_STATUS_INSUFFICIENT_SIZE = 7,  ///< Provided buffer or array is too small
+  AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND = 8,  ///< Hardware fingerprint could not be found
+  AMDCUID_STATUS_KEY_ERROR = 9,                 ///< An error occurred related to the hash key
+  AMDCUID_STATUS_HMAC_ERROR = 10,               ///< An error occurred during HMAC computation
   AMDCUID_STATUS_FILE_ERROR =
-      11, ///< File I/O error occurred when reading or writing the CUID files
-  AMDCUID_STATUS_INVALID_FORMAT =
-      12, ///< Data format given or read is invalid or malformed
-  AMDCUID_STATUS_PCI_ERROR = 13, ///< An error occurred while accessing or
-                                 ///< parsing PCI configuration space
+      11,  ///< File I/O error occurred when reading or writing the CUID files
+  AMDCUID_STATUS_INVALID_FORMAT = 12,  ///< Data format given or read is invalid or malformed
+  AMDCUID_STATUS_PCI_ERROR = 13,       ///< An error occurred while accessing or
+                                       ///< parsing PCI configuration space
   AMDCUID_STATUS_SMBIOS_ERROR =
-      14, ///< An error occurred while accessing or parsing the SMBIOS table
-  AMDCUID_STATUS_ACPI_ERROR =
-      15, ///< An error occurred while accessing or parsing the ACPI table
-  AMDCUID_STATUS_CPUINFO_ERROR =
-      16, ///< An error occurred while accessing or parsing CPUINFO
-  AMDCUID_STATUS_IPC_ERROR =
-      17 ///< An error occurred during IPC communication with the daemon
+      14,  ///< An error occurred while accessing or parsing the SMBIOS table
+  AMDCUID_STATUS_ACPI_ERROR = 15,  ///< An error occurred while accessing or parsing the ACPI table
+  AMDCUID_STATUS_CPUINFO_ERROR = 16,  ///< An error occurred while accessing or parsing CPUINFO
+  AMDCUID_STATUS_IPC_ERROR = 17  ///< An error occurred during IPC communication with the daemon
 } amdcuid_status_t;
 
 /**
@@ -113,7 +104,7 @@ typedef enum {
  * @return A constant character pointer to the string representation of the
  * status code.
  */
-const char *amdcuid_status_to_string(amdcuid_status_t status);
+const char* amdcuid_status_to_string(amdcuid_status_t status);
 
 /**
  * @brief UUIDv8 representation of a CUID.
@@ -139,20 +130,19 @@ typedef struct {
  * @return A constant character pointer to the string representation of the
  * CUID.
  */
-const char *amdcuid_id_to_string(amdcuid_id_t cuid_value);
+const char* amdcuid_id_to_string(amdcuid_id_t cuid_value);
 
 /**
  * @brief Enumeration of device types supported by the AMD CUID library.
  */
 typedef enum {
-  AMDCUID_DEVICE_TYPE_NONE = 0, ///< No device type
-  AMDCUID_DEVICE_TYPE_PLATFORM =
-      0x1,                       ///< Platform device (chassis, motherboard)
-  AMDCUID_DEVICE_TYPE_CPU = 0x2, ///< CPU core
-  AMDCUID_DEVICE_TYPE_GPU = 0x3, ///< GPU
-  AMDCUID_DEVICE_TYPE_NIC = 0x4, ///< NIC (Network Interface Controller)
-  AMDCUID_DEVICE_TYPE_NPU = 0x5, ///< NPU (Neural Processing Unit, e.g. RyzenAI)
-  AMDCUID_DEVICE_TYPE_LAST = 0x5 ///< Last valid device type
+  AMDCUID_DEVICE_TYPE_NONE = 0,        ///< No device type
+  AMDCUID_DEVICE_TYPE_PLATFORM = 0x1,  ///< Platform device (chassis, motherboard)
+  AMDCUID_DEVICE_TYPE_CPU = 0x2,       ///< CPU core
+  AMDCUID_DEVICE_TYPE_GPU = 0x3,       ///< GPU
+  AMDCUID_DEVICE_TYPE_NIC = 0x4,       ///< NIC (Network Interface Controller)
+  AMDCUID_DEVICE_TYPE_NPU = 0x5,       ///< NPU (Neural Processing Unit, e.g. RyzenAI)
+  AMDCUID_DEVICE_TYPE_LAST = 0x5       ///< Last valid device type
 } amdcuid_device_type_t;
 
 /**
@@ -170,8 +160,7 @@ typedef enum {
  * @return AMDCUID_STATUS_SUCCESS on success,
  *         AMDCUID_STATUS_UNSUPPORTED if no supported devices are found
  */
-amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t *handles,
-                                         uint32_t *count);
+amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t* handles, uint32_t* count);
 
 /**
  * @brief Retrieve the CUID handle for a device based on its device path and
@@ -192,10 +181,9 @@ amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t *handles,
  * the specified path AMDCUID_STATUS_UNSUPPORTED if the device type is not
  * supported
  */
-amdcuid_status_t
-amdcuid_get_handle_by_dev_path(const char *dev_path,
-                               amdcuid_device_type_t device_type,
-                               amdcuid_id_t *handle);
+amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
+                                                amdcuid_device_type_t device_type,
+                                                amdcuid_id_t* handle);
 
 /**
  * @brief Retrieve the CUID handle for a device based on its PCI BDF and type.
@@ -218,9 +206,8 @@ amdcuid_get_handle_by_dev_path(const char *dev_path,
  * supported, AMDCUID_STATUS_WRONG_DEVICE_TYPE if the device type is
  * inappropriate for BDF lookup (e.g., CPU or platform devices)
  */
-amdcuid_status_t amdcuid_get_handle_by_bdf(const char *bdf,
-                                           amdcuid_device_type_t device_type,
-                                           amdcuid_id_t *handle);
+amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_t device_type,
+                                           amdcuid_id_t* handle);
 
 /**
  * @brief Retrieve the CUID handle for a device based on its file descriptor and
@@ -246,9 +233,8 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(const char *bdf,
  * is not supported, AMDCUID_STATUS_WRONG_DEVICE_TYPE if the device type is
  * inappropriate for file descriptor lookup
  */
-amdcuid_status_t amdcuid_get_handle_by_fd(int fd,
-                                          amdcuid_device_type_t device_type,
-                                          amdcuid_id_t *handle);
+amdcuid_status_t amdcuid_get_handle_by_fd(int fd, amdcuid_device_type_t device_type,
+                                          amdcuid_id_t* handle);
 
 /**
  * @brief Refresh the CUID device registry by rediscovering devices on the
@@ -259,8 +245,7 @@ amdcuid_status_t amdcuid_get_handle_by_fd(int fd,
  * or removed.
  *
  * @return AMDCUID_STATUS_SUCCESS on success,
- *         AMDCUID_STATUS_PERMISSION_DENIED if insufficient permissions to
- * perform discovery, AMDCUID_STATUS_DEVICE_NOT_FOUND if no devices are found
+ *         AMDCUID_STATUS_DEVICE_NOT_FOUND if no devices are found
  * during discovery
  */
 amdcuid_status_t amdcuid_refresh();
@@ -272,42 +257,46 @@ amdcuid_status_t amdcuid_refresh();
  * types will support all properties.
  */
 typedef enum {
-  AMDCUID_QUERY_NONE = 0, ///< No query
+  AMDCUID_QUERY_NONE = 0,  ///< No query
   AMDCUID_QUERY_PRIMARY_CUID =
-      1, ///< Query the primary CUID (amdcuid_id_t). The bits will be formatted
-         ///< in the UUIDv8 format. Requires elevated permissions.
+      1,  ///< Query the primary CUID (amdcuid_id_t). The bits will be formatted
+          ///< in the UUIDv8 format. Requires elevated permissions.
   AMDCUID_QUERY_DERIVED_CUID =
-      2, ///< Query the derived CUID (amdcuid_id_t). The bits will be formatted
-         ///< in the UUIDv8 format. This is the user visible CUID in most cases.
+      2,  ///< Query the derived CUID (amdcuid_id_t). The bits will be formatted
+          ///< in the UUIDv8 format. This is the user visible CUID in most cases.
   AMDCUID_QUERY_HARDWARE_FINGERPRINT =
-      3, ///< Query the hardware fingerprint (aka serial number/id) (uint64_t).
-         ///< Requires elevated permissions.
-  AMDCUID_QUERY_DEVICE_PATH = 4, ///< Query the device path (string).
-  AMDCUID_QUERY_DEVICE_TYPE =
-      5, ///< Query the device type (amdcuid_device_type_t).
-  AMDCUID_QUERY_VENDOR_ID =
-      6, ///< Query the vendor ID (uint16_t). Supported by all device types.
-  AMDCUID_QUERY_DEVICE_ID = 7, ///< Query the device ID (uint16_t). Supported by
-                               ///< GPU, NIC, and CPU device types.
-  AMDCUID_QUERY_REVISION_ID =
-      8, ///< Query the revision ID (uint16_t). Supported by GPU, NIC, and CPU
-         ///< device types.
-  AMDCUID_QUERY_UNIT_ID = 9, ///< Query the unit ID (uint16_t). Supported by GPU
-                             ///< and CPU device type.
-  AMDCUID_QUERY_FAMILY =
-      10, ///< Query the CPU family (uint16_t). Supported by CPU device type.
-  AMDCUID_QUERY_MODEL =
-      11, ///< Query the CPU model (uint16_t). Supported by CPU device type.
-  AMDCUID_QUERY_CORE_ID =
-      12, ///< Query the core ID (uint16_t). Supported by CPU device type.
-  AMDCUID_QUERY_PHYSICAL_ID = 13, ///< Query the physical package ID (uint16_t).
-                                  ///< Supported by CPU device type.
-  AMDCUID_QUERY_PCI_CLASS = 14,   ///< Query the PCI class (uint16_t). Supported
-                                  ///< by GPU and NIC device types.
-  AMDCUID_QUERY_BDF =
-      15, ///< Query the PCI BDF (string in format "bus:device.function", e.g.
-          ///< "0000:03:00.0"). Supported by GPU and NIC device types.
-  AMDCUID_QUERY_LAST = 15
+      3,  ///< Query the hardware fingerprint (aka serial number/id) (uint64_t).
+          ///< Requires elevated permissions.
+  AMDCUID_QUERY_DEVICE_PATH = 4,  ///< Query the device path (string).
+  AMDCUID_QUERY_DEVICE_TYPE = 5,  ///< Query the device type (amdcuid_device_type_t).
+  AMDCUID_QUERY_VENDOR_ID = 6,  ///< Query the vendor ID (uint16_t). Supported by all device types.
+  AMDCUID_QUERY_DEVICE_ID = 7,  ///< Query the device ID (uint16_t). Supported by
+                                ///< GPU, NIC, and CPU device types.
+  AMDCUID_QUERY_REVISION_ID = 8,  ///< Query the revision ID (uint16_t). Supported by GPU, NIC, and
+                                  ///< CPU device types.
+  AMDCUID_QUERY_UNIT_ID = 9,      ///< Query the unit ID (uint16_t). Supported by GPU
+                                  ///< and CPU device type.
+  AMDCUID_QUERY_FAMILY = 10,   ///< Query the CPU family (uint16_t). Supported by CPU device type.
+  AMDCUID_QUERY_MODEL = 11,    ///< Query the CPU model (uint16_t). Supported by CPU device type.
+  AMDCUID_QUERY_CORE_ID = 12,  ///< Query the core ID (uint16_t). Supported by CPU device type.
+  AMDCUID_QUERY_PHYSICAL_ID = 13,  ///< Query the physical package ID (uint16_t).
+                                   ///< Supported by CPU device type.
+  AMDCUID_QUERY_PCI_CLASS = 14,    ///< Query the PCI class (uint16_t). Supported
+                                   ///< by GPU and NIC device types.
+  AMDCUID_QUERY_BDF = 15,  ///< Query the PCI BDF (string in format "bus:device.function", e.g.
+                           ///< "0000:03:00.0"). Supported by GPU and NIC device types.
+  AMDCUID_QUERY_TEMPORARY_CUID =
+      16,  ///< Query to determine if a CUID is temporary (bool). This is true if
+           ///< the CUID is not derived from a hardware fingerprint that is not
+           ///< stable or accessible, and thus the library generated a CUID based
+           ///< on non unique device information. Temporary CUIDs will be clearly
+           ///< indicated as such when converted to strings by
+           ///< amdcuid_id_to_string() to warn users that the CUID may not be
+           ///< unique or stable. Users should not rely on temporary CUIDs for
+           ///< use cases that require uniqueness or stability, as they may
+           ///< change or may not be unique if devices are shifted around within
+           ///< a system.
+  AMDCUID_QUERY_LAST
 } amdcuid_query_t;
 
 /**
@@ -330,9 +319,8 @@ typedef enum {
  * type is invalid, AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND if the hardware
  * fingerprint could not be found.
  */
-amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
-                                               amdcuid_query_t query,
-                                               void *data, uint32_t *length);
+amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_query_t query,
+                                               void* data, uint32_t* length);
 
 /**
  * @brief Set the hash key used for HMAC computations on CUIDs.
@@ -369,4 +357,4 @@ amdcuid_status_t amdcuid_generate_hash_key(uint8_t key[32]);
 }
 #endif
 
-#endif // AMD_CUID_H
+#endif  // AMD_CUID_H

@@ -427,7 +427,7 @@ public:
 #endif
     }
 
-    // SQ Counter Control enable perfomance counter in graphics pipeline stages
+    // SQ Counter Control enable performance counter in graphics pipeline stages
     static uint32_t sq_control_enable_value()
     {
         uint32_t sq_perfcounter_ctrl = SET_REG_FIELD_BITS(SQ_PERFCOUNTER_CTRL, PS_EN, 0x1) |

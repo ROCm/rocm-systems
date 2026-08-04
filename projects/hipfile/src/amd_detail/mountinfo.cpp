@@ -85,19 +85,19 @@ LibMountHelper::getMountInfo(dev_t dev) const
     MountInfo mountinfo{};
 
     const char *fstype{libmount->mnt_fs_get_fstype(mnt_fs)};
-    if (!strcmp(fstype, "ext4")) {
+    if (fstype && !strcmp(fstype, "ext4")) {
         mountinfo.type = FilesystemType::ext4;
 
         char *value;
         switch (libmount->mnt_fs_get_option(mnt_fs, "data", &value, nullptr)) {
             case 0: // option found
-                if (!strcmp(value, "ordered")) {
+                if (value && !strcmp(value, "ordered")) {
                     mountinfo.options.ext4.journaling_mode = ExtJournalingMode::ordered;
                 }
-                else if (!strcmp(value, "journal")) {
+                else if (value && !strcmp(value, "journal")) {
                     mountinfo.options.ext4.journaling_mode = ExtJournalingMode::journal;
                 }
-                else if (!strcmp(value, "writeback")) {
+                else if (value && !strcmp(value, "writeback")) {
                     mountinfo.options.ext4.journaling_mode = ExtJournalingMode::writeback;
                 }
                 else {
@@ -112,7 +112,7 @@ LibMountHelper::getMountInfo(dev_t dev) const
                 throw std::runtime_error("libmount: Could not get mount option: data");
         }
     }
-    else if (!strcmp(fstype, "xfs")) {
+    else if (fstype && !strcmp(fstype, "xfs")) {
         mountinfo.type = FilesystemType::xfs;
     }
     else {

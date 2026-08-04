@@ -7,7 +7,7 @@
 /// @file Address calculation helpers for gfx1250 memory instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
-#include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/isa/arch/amdgpu/mtype.h"
 
 #include <cstdint>
 
@@ -18,7 +18,8 @@ struct VectorMemState;
 
 namespace rocjitsu::gfx1250 {
 
-uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf);
+uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
+                                uint32_t access_size_bytes);
 
 void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d);

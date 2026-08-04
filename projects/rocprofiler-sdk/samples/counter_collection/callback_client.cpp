@@ -173,7 +173,7 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
         }
     }
 
-    // Create a colleciton profile for the counters
+    // Create a collection profile for the counters
     rocprofiler_counter_config_id_t profile = {.handle = 0};
     ROCPROFILER_CALL(rocprofiler_create_counter_config(dispatch_data.dispatch_info.agent_id,
                                                        collect_counters.data(),

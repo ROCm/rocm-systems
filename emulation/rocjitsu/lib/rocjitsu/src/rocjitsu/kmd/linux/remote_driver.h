@@ -12,6 +12,7 @@
 /// passed through SCM_RIGHTS. The client mmaps these memfds locally at the
 /// addresses ROCR's FMM expects.
 
+#include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/driver.h"
 
 #include <atomic>
@@ -40,16 +41,35 @@ public:
   /// @brief Get the daemon's DRM sysfs directory path.
   [[nodiscard]] const std::string &drm_path() const { return drm_path_; }
 
+  /// @brief Get GPU metadata received from the daemon handshake.
+  [[nodiscard]] const Sysfs::GpuInfo *gpu_info() const {
+    return has_gpu_info_ ? &gpu_info_ : nullptr;
+  }
+
+  /// @brief Outcome of find_memfd_for_addr(): distinguishes "no matching range"
+  /// from "range matched but the memfd dup failed".
+  /// @details The caller must treat these differently: kNotFound means fall back
+  /// to the normal (anonymous) mapping; kDupFailed means a daemon-shared range
+  /// DID cover the address but we could not hand out a descriptor for it (e.g.
+  /// EMFILE/ENFILE), so falling back to an anonymous mapping would silently break
+  /// the shared-memory invariant — the caller should fail the mmap instead.
+  enum class MemfdLookup { kNotFound, kFound, kDupFailed };
+
   /// @brief Find a stored memfd that covers the given GPUVM address.
   /// @details Used by the interposer to intercept anonymous MAP_FIXED at
   /// addresses that have daemon-shared memfd mappings.
   /// @param addr The target address to look up.
   /// @param length The mapping length.
-  /// @param[out] memfd_out The memfd covering this address.
-  /// @param[out] memfd_offset The offset within the memfd.
-  /// @returns true if a matching allocation was found.
-  [[nodiscard]] bool find_memfd_for_addr(void *addr, size_t length, int *memfd_out,
-                                         off_t *memfd_offset);
+  /// @param[out] memfd_out On kFound, a NEWLY DUP'd memfd covering this address.
+  ///             The caller OWNS this descriptor and MUST close() it after use;
+  ///             it is a dup (taken under the RPC lock) so its lifetime is
+  ///             independent of this RemoteDriver and a concurrent close() cannot
+  ///             invalidate it mid-use.
+  /// @param[out] memfd_offset On kFound, the offset within the memfd.
+  /// @returns kFound if a range matched and the dup succeeded; kDupFailed if a
+  ///          range matched but the dup failed; kNotFound if no range matched.
+  [[nodiscard]] MemfdLookup find_memfd_for_addr(void *addr, size_t length, int *memfd_out,
+                                                off_t *memfd_offset);
 
   /// @brief Perform the RPC handshake with the daemon.
   /// @details Sends RPC_HANDSHAKE, receives the topology path and gpu_id,
@@ -57,6 +77,14 @@ public:
   /// @retval >=0 Synthetic KFD fd on success.
   /// @retval -1 Handshake failed (socket error or daemon rejected).
   int open() override;
+
+  /// @brief Mint a fresh synthetic KFD fd WITHOUT reconnecting or re-handshaking.
+  /// @details Used when the interposer's cached primary fd number was lost (e.g.
+  /// dup2 overwrote it) but the RPC connection is still live and must keep a
+  /// valid primary fd number to hand back to open("/dev/kfd"). Unlike open(),
+  /// this performs no RPC and does not disturb the connection/metadata.
+  /// @retval >=0 A new synthetic KFD fd. @retval -1 memfd creation failed.
+  [[nodiscard]] int reissue_synthetic_kfd_fd();
 
   /// @brief Send RPC_CLOSE to the daemon.
   /// @retval 0 Success.
@@ -97,6 +125,8 @@ private:
   uint32_t next_id_ = 0;             ///< Monotonic request ID counter (for debugging).
   std::string topology_path_;        ///< Daemon's sysfs topology directory path.
   std::string drm_path_;             ///< Daemon's DRM sysfs directory path.
+  Sysfs::GpuInfo gpu_info_{};        ///< GPU metadata received from daemon handshake.
+  bool has_gpu_info_ = false;        ///< True when gpu_info_ is valid.
   std::atomic<bool> closing_{false}; ///< Set by close() to break WAIT_EVENTS loops.
   int shutdown_efd_ = -1;            ///< eventfd written by close() to wake WAIT_EVENTS pollers.
 

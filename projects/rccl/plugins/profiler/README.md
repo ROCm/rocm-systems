@@ -15,6 +15,14 @@ functions.
 
 # Plugin architecture
 
+## RCCL proxy-trace plugin (`plugins/profiler/proxytrace`)
+
+The historical **ProxyTrace** implementation (FIFO-style proxy counters and `ncclCommDump` text)
+is shipped as **`librccl-profiler-proxytrace.so`**, a **profiler v6** plugin (`ncclProfiler_v6`; RCCL extends
+`ncclProfilerEventDescr_v6_t` for proxy trace). RCCL core records a
+single hot path via `ncclProfileProxyDiag` and `ncclProfilerProxyDiagUpdate`. See
+`plugins/profiler/proxytrace/README.md` for build and `RCCL_ENABLE_PROXY_TRACE` auto-load behavior.
+
 ## Plugin name and supporting multiple profiler plugins
 
 When NCCL is initialized, it will look for a `librccl-profiler.so` library and dynamically load
@@ -42,7 +50,7 @@ would still work.
 ## Headers management
 
 To help users build plugins effortlessly, plugins should copy the `ncclProfiler_vX` definitions
-they support to their internal includes. An example is shown in `ext-profiler/example` where we
+they support to their internal includes. An example is shown in `plugins/profiler/example` where we
 keep all headers in the `nccl/` directory and provide thin layers to implement old version on top
 of newer ones.
 
@@ -423,7 +431,7 @@ typedef union {
 } ncclProfilerEventStateArgs_v5_t;
 ```
 
-The example profiler in `ext-profiler/example` contains details on how to capture and use the events above.
+The example profiler in `plugins/profiler/example` contains details on how to capture and use the events above.
 
 ### Event hierarchy
 

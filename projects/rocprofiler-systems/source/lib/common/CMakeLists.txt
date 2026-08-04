@@ -14,6 +14,42 @@ add_library(
     ALIAS rocprofiler-systems-common-library
 )
 
+# Query clang for host target triple for defines.h
+# This is useful when LLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON and
+# the openmp libraries are installed one level deeper in lib/<host-target-triple>.
+find_program(
+    amdclang_EXECUTABLE
+    NAMES amdclang
+    HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
+    ENV ROCM_PATH
+    /opt/rocm
+    PATH_SUFFIXES bin llvm/bin lib/llvm/bin
+)
+mark_as_advanced(amdclang_EXECUTABLE)
+set(LLVM_HOST_TRIPLE "")
+if(amdclang_EXECUTABLE)
+    execute_process(
+        COMMAND "${amdclang_EXECUTABLE}" --print-target-triple
+        OUTPUT_VARIABLE LLVM_HOST_TRIPLE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _llvm_host_triple_result
+    )
+    if(NOT _llvm_host_triple_result EQUAL 0)
+        set(LLVM_HOST_TRIPLE "")
+        rocprofiler_systems_message(
+            FATAL_ERROR
+            "'${amdclang_EXECUTABLE} --print-target-triple' failed (exit code ${_llvm_host_triple_result})"
+            "This toolchain may be broken."
+        )
+    endif()
+else()
+    rocprofiler_systems_message(
+        WARNING
+        "Could not find amdclang to determine the LLVM host triple; "
+        "libomptarget discovery for LLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON may not work."
+    )
+endif()
+
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/defines.h.in
     ${CMAKE_CURRENT_BINARY_DIR}/defines.h
@@ -31,10 +67,10 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/md5sum.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/path.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/setup.hpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/span.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/static_object.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/synchronized.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/traits.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/units.hpp
 )
 
 get_filename_component(COMMON_SOURCE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)

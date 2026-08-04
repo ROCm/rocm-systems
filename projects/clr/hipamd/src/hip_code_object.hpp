@@ -188,8 +188,11 @@ class StatCO : public CodeObject {
   // Resize device-specific data structures for all registered functions and variables
   void ResizeForDevices(size_t device_count);
 
+  // Iterate all registered fat binary data pointers — for HRR capture post-registration sweep.
+  void ForEachFatBinaryBlob(void (*cb)(const void*)) const;
+
  private:
-  std::recursive_mutex sclock_;            //!< Guards Static Code object
+  mutable std::recursive_mutex sclock_;    //!< Guards Static Code object
   const PlatformState& owner_;             //!< Reference to owning PlatformState
   //! Populated during __hipRegisterFatBinary
   std::unordered_map<const void*, FatBinaryInfo*> modules_;

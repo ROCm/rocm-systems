@@ -1,5 +1,4 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-#
+# Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.20)
@@ -27,11 +26,13 @@ option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
 option(BUILD_UNIT_TESTS "Build unit tests" ON)
 option(BUILD_PERF_TESTS "Build perf tests" OFF)
 option(BUILD_STRESS_TESTS "Build stress tests" OFF)
+option(BUILD_CONTRACT_TESTS "Build semantic contract tests" ON)
 option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
 option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
 option(ENABLE_SPIRV "Build hip-tests for SPIRV" OFF)
 option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON)
 option(STANDALONE_TESTS "Generate standalone executable per source file" OFF)
+option(ENABLE_OOB_TESTS "Build OOB tests, deliberately wrong inputs" ON)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -123,7 +124,9 @@ if(NOT DEFINED THEROCK_SANITIZER)
 endif()
 
 set(ASAN_CONFIG_DEF)
+set(HIP_TESTS_ASAN_ENABLED OFF)
 if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+  set(HIP_TESTS_ASAN_ENABLED ON)
   message(STATUS "Building catch tests with Address Sanitizer options")
   # If user is building hip-tests standalone (without TheRock) and wants to turn on sanitizer
   # We append the flags manually, otherwise we use TheRock's CXX flags which already should have
@@ -310,10 +313,19 @@ string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
 separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
   "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
 list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
+
+# -fsanitize=address does not work with SPIR-V targets so keep a SPIR-V-specific
+# copy of the device build flags.
+set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH})
 if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "-fsanitize=address")
-  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "-fno-omit-frame-pointer")
-  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "-shared-libasan")
+  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-fsanitize=address")
+  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-fno-omit-frame-pointer")
+  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-shared-libasan")
+endif()
+
+# ASan is not supported by SPIR-V, so ASan-related device flags must be dropped in those cases.
+if(ENABLE_SPIRV)
+  set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV})
 endif()
 
 # get hip-tests commit short hash
@@ -349,9 +361,20 @@ set(_catchInfo ${_catchInfo} "HIP_PLATFORM=${HIP_PLATFORM}\n")
 set(_catchInfo ${_catchInfo} "HIP_TESTS_GITHASH=${HIP_TESTS_GITHASH}\n")
 set(_catchInfo ${_catchInfo} "ARCHS=${HIP_GPU_ARCH_LIST}\n")
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/catchInfo.txt ${_catchInfo})
-# allows user to run ctest from catch_tests level
+
+# Let `ctest` run from catch_tests/. CMake only writes CTestTestfile.cmake and
+# DartConfiguration.tcl to the build root, so provide both under catch_tests/:
+# write a CTestTestfile.cmake that redirects to the parent, and copy
+# DartConfiguration.tcl so ctest's configuration (default timeout, etc.) applies.
 set(_subdirs ${_autogen} "subdirs(..)\n")
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/CTestTestfile.cmake ${_subdirs})
+
+if(EXISTS "${CMAKE_BINARY_DIR}/DartConfiguration.tcl")
+  configure_file(
+    "${CMAKE_BINARY_DIR}/DartConfiguration.tcl"
+    "${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/DartConfiguration.tcl"
+    COPYONLY)
+endif()
 
 set(CATCH_SCRIPT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/script)
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hip-tests.cmake
@@ -382,11 +405,17 @@ add_custom_target(build_tests ALL)
 add_dependencies(build_tests hip_tests_config)
 
 # Tests folder
+# kernels and hipTestMain provide the KERNELS and Main_Object object libraries
+# referenced by hip_add_exe_to_target. They are required by every test
+# executable built through hip_add_exe_to_target (unit, contract, perf, and
+# stress), so add them once when any of those test groups is enabled.
+if(BUILD_UNIT_TESTS OR BUILD_CONTRACT_TESTS OR BUILD_PERF_TESTS OR BUILD_STRESS_TESTS)
+  add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
+  add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
+endif()
 if(BUILD_UNIT_TESTS)
   add_subdirectory(unit ${CATCH_BUILD_DIR}/unit)
   add_subdirectory(ABM ${CATCH_BUILD_DIR}/ABM)
-  add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
-  add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
   add_subdirectory(TypeQualifiers ${CATCH_BUILD_DIR}/TypeQualifiers)
   if(UNIX)
     add_subdirectory(multiproc ${CATCH_BUILD_DIR}/multiproc)
@@ -397,6 +426,9 @@ if(BUILD_PERF_TESTS)
 endif()
 if(BUILD_STRESS_TESTS)
   add_subdirectory(stress ${CATCH_BUILD_DIR}/stress)
+endif()
+if(BUILD_CONTRACT_TESTS)
+  add_subdirectory(contract ${CATCH_BUILD_DIR}/contract)
 endif()
 
 add_custom_target(gen_coverage

@@ -22,6 +22,7 @@ class validation_rule:
         error_message,
         requires=None,
         expected_result_max=None,
+        gpu_category_to_skip=None,
     ):
         self.description = description
         self.query = query
@@ -30,6 +31,7 @@ class validation_rule:
         self.error_message = error_message
         self.requires = requires
         self.expected_result_max = expected_result_max
+        self.gpu_category_to_skip = gpu_category_to_skip or []
 
     def __repr__(self):
         return f"validation_rule(description={self.description}, query={self.query})"
@@ -117,6 +119,9 @@ def print_help():
 
     OPTIONAL ARGUMENTS:
         -r, --validation_rules PATH [PATH ...]  One or more JSON rules files (default: default_rules.json)
+        --gpu-category-to-skip CAT [CAT ...]    Skip validation queries tagged with these GPU
+                                                categories in the rules JSON via
+                                                "gpu_category_to_skip" (e.g. apu). Default: none.
         -h, --help                  Show this help message and exit
 
     EXAMPLES:
@@ -128,6 +133,9 @@ def print_help():
 
         # Validate database with multiple rules files
         {os.path.basename(__file__)} --database my_profile.db -r validation_rules.json amd_smi_rules.json
+
+        # Skip queries tagged for APUs (e.g. when shared HBM means no PAGE_MIGRATE events)
+        {os.path.basename(__file__)} --database my_profile.db --gpu-category-to-skip apu
 
     VALIDATION FEATURES:
         - Checks for presence of required tables
@@ -145,7 +153,18 @@ def print_help():
     """)
 
 
-def validate_table(cursor, rule, tables, available_metrics=None) -> bool:
+def _query_skip_categories(
+    query_gpu_category_to_skip: list[str], gpu_category_to_skip: set[str]
+) -> list[str]:
+    """Return GPU categories that validation query should be skipped for."""
+    if not query_gpu_category_to_skip or not gpu_category_to_skip:
+        return []
+    return sorted(set(query_gpu_category_to_skip) & gpu_category_to_skip)
+
+
+def validate_table(
+    cursor, rule, tables, available_metrics=None, gpu_category_to_skip=None
+) -> bool:
     """
     Validates a database table against a set of rules.
     This function checks if a table specified by `rule` exists in the provided `tables` list,
@@ -161,6 +180,9 @@ def validate_table(cursor, rule, tables, available_metrics=None) -> bool:
         bool: True if table is found in the database and if all validation queries pass,
               False if any validation fails or matching table not found in database.
     """
+
+    if gpu_category_to_skip is None:
+        gpu_category_to_skip = set()
 
     matching_tables = []
 
@@ -235,6 +257,16 @@ def validate_table(cursor, rule, tables, available_metrics=None) -> bool:
                     )
                     continue
 
+                matched_categories = _query_skip_categories(
+                    validation_query.gpu_category_to_skip, gpu_category_to_skip
+                )
+                if matched_categories:
+                    print(
+                        f"⏭️  Skipping '{validation_query.description}' on '{table_name}' "
+                        f"(gpu_category_to_skip: matched {matched_categories})"
+                    )
+                    continue
+
                 try:
                     query = validation_query.query.replace("{table_name}", table_name)
                     cursor.execute(query)
@@ -276,7 +308,9 @@ def validate_table(cursor, rule, tables, available_metrics=None) -> bool:
     return all_tables_passed
 
 
-def validate_rocpd(cursor, rules, tables, available_metrics=None) -> bool:
+def validate_rocpd(
+    cursor, rules, tables, available_metrics=None, gpu_category_to_skip=None
+) -> bool:
     """
     Validation of a ROCPD database by applying a set of validation rules to specified tables.
     It iterates through each rule, validates the corresponding table, and provides feedback on the validation status.
@@ -296,7 +330,9 @@ def validate_rocpd(cursor, rules, tables, available_metrics=None) -> bool:
 
     for rule in rules:
         print(f"\nValidating table: {rule.get_table_identifier()}")
-        table_valid = validate_table(cursor, rule, tables, available_metrics)
+        table_valid = validate_table(
+            cursor, rule, tables, available_metrics, gpu_category_to_skip
+        )
         db_valid = db_valid and table_valid
 
     if db_valid:
@@ -346,6 +382,7 @@ def load_validation_rules(validation_rules) -> list:
                             error_message=vq["error_message"],
                             requires=vq.get("requires", None),
                             expected_result_max=vq.get("expected_result_max"),
+                            gpu_category_to_skip=vq.get("gpu_category_to_skip", []),
                         )
                         validation_queries.append(validation_query_obj)
 
@@ -391,6 +428,16 @@ if __name__ == "__main__":
                 f"{os.path.dirname(os.path.abspath(__file__))}/rocpd-validation-rules/default-rules.json"
             )
         ],
+    )
+
+    parser.add_argument(
+        "--gpu-category-to-skip",
+        nargs="*",
+        default=[],
+        help=(
+            "GPU categories to skip tagged validation queries for "
+            "(e.g. apu instinct). Passed from pytest tests after detect_gpu()."
+        ),
     )
 
     parser.add_argument(
@@ -444,6 +491,11 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Warning: Could not detect GPU metrics ({e}), running all queries")
 
+    gpu_category_to_skip = set(args.gpu_category_to_skip)
+    if gpu_category_to_skip:
+        categories = ", ".join(sorted(gpu_category_to_skip))
+        print(f"GPU category to skip: {categories}")
+
     print(f"Validating ROCPD. Database file: {args.database}")
 
     db_path = args.database
@@ -468,7 +520,9 @@ if __name__ == "__main__":
         cursor.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view');")
         tables = cursor.fetchall()
 
-        validation_result = validate_rocpd(cursor, rules, tables, available_metrics)
+        validation_result = validate_rocpd(
+            cursor, rules, tables, available_metrics, gpu_category_to_skip
+        )
 
         conn.close()
 

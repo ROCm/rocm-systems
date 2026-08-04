@@ -32,8 +32,6 @@
 extern "C" {
 #endif
 
-typedef struct _HsaKFDContext HsaKFDContext;
-
 /**
   The context-aware version for openning the kfd device.
 
@@ -683,7 +681,7 @@ hsaKmtMapMemoryToGPUNodesCtx(
     void*             MemoryAddress,         //IN (page-aligned)
     HSAuint64         MemorySizeInBytes,     //IN (page-aligned)
     HSAuint64*        AlternateVAGPU,        //OUT (page-aligned)
-    HsaMemMapFlags    MemMapFlags,           //IN
+    HsaMemFlags       MemFlags,              //IN
     HSAuint64         NumberOfNodes,         //IN
     HSAuint32*        NodeArray              //IN
     );

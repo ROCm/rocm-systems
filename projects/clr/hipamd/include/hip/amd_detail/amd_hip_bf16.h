@@ -126,6 +126,7 @@
 #define HIPRT_NAN_BF16 __ushort_as_bfloat16((unsigned short)0x7FFFU)
 #define HIPRT_NEG_ZERO_BF16 __ushort_as_bfloat16((unsigned short)0x8000U)
 
+#if defined(__clang__)
 // Since we are using unsigned short to represent data in bfloat16, it can be of different sizes on
 // different machines. These naive checks should prevent some undefined behavior on systems which
 // have different sizes for basic types.
@@ -1288,7 +1289,7 @@ __BF16_HOST_DEVICE_STATIC__ bool __hgeu(const __hip_bfloat16 a, const __hip_bflo
  * \brief Compare two bfloat162 values - not equal
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hne(const __hip_bfloat16 a, const __hip_bfloat16 b) {
-  return (__bf16)a != (__bf16)b;
+  return ((__bf16)a < (__bf16)b) || ((__bf16)a > (__bf16)b);
 }
 
 /**
@@ -1562,7 +1563,7 @@ __BF16_HOST_DEVICE_STATIC__ bool operator==(const __hip_bfloat16& l, const __hip
  * \brief Operator to perform a not equal on two __hip_bfloat16 numbers
  */
 __BF16_HOST_DEVICE_STATIC__ bool operator!=(const __hip_bfloat16& l, const __hip_bfloat16& r) {
-  return __hne(l, r);
+  return __hneu(l, r);
 }
 
 /**
@@ -1941,7 +1942,8 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address,
     __hip_bfloat162_raw bf162_raw;
     vec_short2 vs2;
   } u{static_cast<__hip_bfloat162_raw>(value)};
-  u.vs2 = __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)address, u.vs2);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2bf16))
+    u.vs2 = __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)address, u.vs2);
   return static_cast<__hip_bfloat162>(u.bf162_raw);
 #else
   static_assert(sizeof(unsigned int) == sizeof(__hip_bfloat162_raw));
@@ -1984,5 +1986,10 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 unsafeAtomicAdd(__hip_bfloat16* address,
   return __high2bfloat16(out);
 }
 #endif  // defined(__clang__) && defined(__HIP__)
+#elif defined(__GNUC__) || defined(_MSC_VER)
+#if !defined(__HIPCC_RTC__)
+#include "amd_hip_bf16_gcc.h"
+#endif
+#endif
 #pragma pop_macro("MAYBE_UNDEF")
 #endif

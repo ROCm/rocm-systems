@@ -6,11 +6,8 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
-#include <iomanip>
 #include <string_view>
 #include <type_traits>
-
-#include "traits.hpp"
 
 namespace rocprofsys
 {
@@ -21,7 +18,6 @@ class md5sum
 {
 public:
     using size_type                = std::uint32_t;  // must be 32bit
-    using raw_digest_t             = std::array<std::uint8_t, 16>;
     static constexpr int blocksize = 64;
 
     template <typename Tp, typename... Args>
@@ -35,19 +31,15 @@ public:
     md5sum& operator=(const md5sum&) = default;
     md5sum& operator=(md5sum&&)      = default;
 
-    md5sum&      update(std::string_view inp);
-    md5sum&      update(const unsigned char* buf, size_type length);
-    md5sum&      update(const char* buf, size_type length);
-    md5sum&      finalize();
-    std::string  hexdigest() const;
-    std::string  hexliteral() const;
-    raw_digest_t rawdigest() const { return digest; }
+    md5sum&     update(std::string_view inp);
+    md5sum&     update(const unsigned char* buf, size_type length);
+    md5sum&     update(const char* buf, size_type length);
+    md5sum&     finalize();
+    std::string hexdigest() const;
 
-    template <typename Tp,
-              typename Up = std::enable_if_t<std::is_arithmetic<Tp>::value, int>>
+    template <typename Tp>
+        requires std::is_arithmetic_v<Tp>
     md5sum& update(Tp inp);
-
-    friend std::ostream& operator<<(std::ostream&, md5sum md5);
 
 private:
     void transform(const std::uint8_t block[blocksize]);
@@ -79,25 +71,12 @@ md5sum::md5sum(Tp&& arg, Args&&... args)
     finalize();
 }
 
-template <typename Tp, typename Up>
+template <typename Tp>
+    requires std::is_arithmetic_v<Tp>
 md5sum&
 md5sum::update(Tp inp)
 {
-    static_assert(std::is_arithmetic<Tp>::value, "expected arithmetic type");
     return update(reinterpret_cast<const char*>(&inp), sizeof(Tp));
-}
-
-template <template <typename, typename...> class ContainerT, typename Tp,
-          typename... TailT>
-std::string
-compute_md5sum(const ContainerT<Tp, TailT...>& inp,
-               std::enable_if_t<traits::is_string_literal<Tp>(), int>)
-{
-    auto _val = md5sum{};
-    for(const auto& itr : inp)
-        _val.update(std::string_view{ inp });
-    _val.finalize();
-    return _val.hexdigest();
 }
 
 namespace
@@ -431,31 +410,6 @@ md5sum::hexdigest() const
     buf[32] = '\0';
 
     return std::string(buf);
-}
-
-std::string
-md5sum::hexliteral() const
-{
-    if(!finalized) return std::string{};
-
-    auto _oss = std::ostringstream{};
-    _oss << "X'";
-    for(auto itr : rawdigest())
-        _oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(itr);
-    _oss << "'";
-    return _oss.str();
-}
-
-std::ostream&
-operator<<(std::ostream& out, md5sum md5)
-{
-    return out << md5.hexdigest();
-}
-
-std::string
-compute_md5sum(std::string_view inp)
-{
-    return md5sum{ inp }.finalize().hexdigest();
 }
 
 }  // namespace common

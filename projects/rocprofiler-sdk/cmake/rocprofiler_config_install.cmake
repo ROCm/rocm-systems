@@ -49,8 +49,8 @@ install(
     FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/rocprofiler-sdk-custom-compilation.cmake
           ${PROJECT_SOURCE_DIR}/cmake/Modules/rocprofiler-sdk-utilities.cmake
           ${PROJECT_SOURCE_DIR}/cmake/Modules/Findlibdw.cmake
-          ${PROJECT_SOURCE_DIR}/cmake/Modules/FindrocDecode.cmake
-          ${PROJECT_SOURCE_DIR}/cmake/Modules/FindrocJPEG.cmake
+          ${PROJECT_SOURCE_DIR}/cmake/Modules/Findrocdecode.cmake
+          ${PROJECT_SOURCE_DIR}/cmake/Modules/Findrocjpeg.cmake
           ${PROJECT_SOURCE_DIR}/cmake/Modules/Findrocprofiler_sdk_pytest.cmake
           ${PROJECT_SOURCE_DIR}/cmake/Modules/rocprofiler_sdk_PytestAddTests.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/Modules

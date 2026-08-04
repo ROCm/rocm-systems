@@ -1,0 +1,138 @@
+# ---------------------------------------------------------------------------
+# AMD-SMI manylinux Python wheel build.
+#
+# Builds portable AMD-SMI Python wheels (manylinux_2_28, RPM + Debian) and
+# smoke-tests the import.
+#
+# Unlike TheRock CI, which builds native rpm/deb packages, this produces
+# pip-installable wheels. No GPU required.
+# ---------------------------------------------------------------------------
+
+name: AMDSMI Manylinux Wheels
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/**'
+      - '!projects/amdsmi/docs/**'
+      - '!projects/amdsmi/**/*.md'
+      - '!projects/amdsmi/**/*.rst'
+      - '.github/workflows/amdsmi-manylinux-build.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/**'
+      - '!projects/amdsmi/docs/**'
+      - '!projects/amdsmi/**/*.md'
+      - '!projects/amdsmi/**/*.rst'
+      - '.github/workflows/amdsmi-manylinux-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-amdsmi-wheels:
+    name: ${{matrix.target.name}}
+    runs-on: ${{matrix.target.runs-on}}
+    container: ${{matrix.target.container}}
+    # Build directory for build_wheel.py's CMake tree. This mirrors
+    # build_wheel.py's own default (/tmp/amdsmi-build); it is set explicitly
+    # here so the build step and the SONAME conflict check, which reads both
+    # libraries back from it, stay coupled to one value.
+    env:
+      AMDSMI_WHEEL_BUILD_DIR: /tmp/amdsmi-build
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - id: rpm
+            name: Build RPM Wheels (AlmaLinux 8 / manylinux_2_28)
+            runs-on: ubuntu-22.04
+            container: quay.io/pypa/manylinux_2_28_x86_64
+            python-bin: /opt/python/cp310-cp310/bin/python3
+            os-variant: AlmaLinux8
+            repair-flag: '--repair'
+            release-flag: '--release'
+            artifact-prefix: amdsmi-rpm-wheels
+          - id: debian
+            name: Build Debian Wheels (Ubuntu 22.04)
+            runs-on: ubuntu-22.04
+            container: ''
+            python-bin: python3
+            os-variant: Ubuntu22
+            repair-flag: ''
+            release-flag: ''
+            artifact-prefix: amdsmi-debian-wheels
+
+    steps:
+      # rocm-systems is a large monorepo; the wheel build only needs the amdsmi
+      # project, so sparse-checkout keeps the fetch cheap.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          sparse-checkout: |
+            projects/amdsmi
+            .github/workflows
+
+      - name: Install Debian build prerequisites
+        if: matrix.target.id == 'debian'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git make gcc g++ cmake ninja-build libssl-dev libdrm-dev \
+            libnl-3-dev libnl-genl-3-dev libmnl-dev
+
+      - name: Install RPM build prerequisites
+        if: matrix.target.id == 'rpm'
+        run: |
+          dnf install -y libnl3-devel libmnl-devel
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Build wheels
+        run: |
+          ${{matrix.target.python-bin}} \
+            "$GITHUB_WORKSPACE/projects/amdsmi/tools/build_wheel.py" \
+            --project-dir "$GITHUB_WORKSPACE/projects/amdsmi" \
+            --build-dir "$AMDSMI_WHEEL_BUILD_DIR" \
+            --output-dir "$GITHUB_WORKSPACE/wheels" \
+            --os-variant ${{matrix.target.os-variant}} \
+            ${{matrix.target.repair-flag}} ${{matrix.target.release-flag}}
+
+      - name: Verify wheels exist
+        run: |
+          ls -al "$GITHUB_WORKSPACE/wheels"
+          if ! ls "$GITHUB_WORKSPACE"/wheels/*.whl >/dev/null 2>&1; then
+            echo "No wheels found; failing."
+            exit 1
+          fi
+
+      - name: Verify system/wheel SONAMEs are distinct
+        run: |
+          ${{matrix.target.python-bin}} \
+            "$GITHUB_WORKSPACE/projects/amdsmi/tests/run_amdsmi_pkg_conflict_test.py" \
+            --build-root "$AMDSMI_WHEEL_BUILD_DIR"
+
+      - name: Smoke test (install + import)
+        run: |
+          ${{matrix.target.python-bin}} -m pip install --upgrade pip
+          ${{matrix.target.python-bin}} -m pip install "$GITHUB_WORKSPACE"/wheels/*.whl
+          # Prove the installed wheel is what imports (resolves under pip's
+          # location), not some other amdsmi on the path.
+          ${{matrix.target.python-bin}} -c "import os, subprocess, amdsmi; out = subprocess.check_output(['${{matrix.target.python-bin}}', '-m', 'pip', 'show', 'amdsmi'], text=True); loc = next((l.split(':', 1)[1].strip() for l in out.splitlines() if l.startswith('Location:')), ''); p = os.path.realpath(amdsmi.__file__); print('import from', p, 'pip loc', loc); assert loc and p.startswith(os.path.realpath(loc)), 'wheel is not the imported amdsmi'; print('amdsmi import OK')"
+          # The wheel must ship with the system-library fallback disabled, so a
+          # build-step ordering regression that leaves it enabled fails here
+          # rather than shipping a wheel that can silently load a system .so.
+          ${{matrix.target.python-bin}} -c "import amdsmi.amdsmi_wrapper as w; assert not w._AMDSMI_ALLOW_SYSTEM_FALLBACK, 'wheel shipped with system fallback enabled'; print('fallback disabled OK')"
+
+      # Not consumed by any downstream job; kept so a reviewer can download the
+      # built wheel from a run. Named by commit SHA for traceability.
+      - name: Upload wheels
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{matrix.target.artifact-prefix}}-${{github.sha}}
+          path: ${{github.workspace}}/wheels/*.whl
+          if-no-files-found: error
+          retention-days: 30

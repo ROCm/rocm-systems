@@ -5,6 +5,13 @@
 #==================================================================================================
 cmake_minimum_required(VERSION 3.16)
 
+# Locate the shared rocm-systems tree so standalone RCCL builds can pick up
+# shared/ctest/TestCategories.cmake (the test-categories block in test/CMakeLists.txt
+# is gated on ROCM_SYSTEMS_ROOT and is otherwise silently skipped).
+if(NOT DEFINED ROCM_SYSTEMS_ROOT)
+  set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # Determine version from makefiles/version.mk (NCCL-style version variables)
 #==================================================================================================
 file(READ makefiles/version.mk version_mk_text)
@@ -77,26 +84,32 @@ option(BUILD_BFD                               "Enable custom backtrace (if bfd.
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
 option(BUILD_TESTS                             "Build unit test programs"                      OFF)
-option(BUILD_EXT_EXAMPLES                      "Build ext-{net,tuner,profiler} example plugins" OFF)
-option(COLLTRACE                               "Collective Trace Option"                       ON)
+option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env)" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
-option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
+option(BUILD_NCCL4PY                           "Build the nccl4py Python bindings wheel"       OFF)
+# Move .hip_fatbin to the end of librccl.so so that small-code-model host
+# relocations (PC32/PLT32/GOTPCRELX/32S) between .text and the read-only /
+# writable data clusters stay in range even when the bundled device fat
+# binary exceeds ~2 GiB.  Default ON; disable only to reproduce the prior
+# layout for diagnostics.  See cmake/linker_scripts/hip_fatbin_tail.ld.
+option(RCCL_HIP_FATBIN_AT_TAIL                 "Place .hip_fatbin at the end of librccl.so"    ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
-option(PROFILE                                 "Enable profiling"                              OFF)
 option(TIMETRACE                               "Enable time-trace during compilation"          OFF)
 option(TRACE                                   "Enable additional tracing"                     OFF)
 option(QP_TRACKING                             "Enable per-device QP tracking"                 OFF)
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
-option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
+option(ENABLE_ROCSHMEM                         "Link librocshmem.a into librccl.so (full rocSHMEM device+host integration)" OFF)
+option(ENABLE_ROCSHMEM_GIN                     "Compile GIN rocshmem plugins; symbols resolved at runtime by the executable" OFF)
+option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device unit tests with ENABLE_ROCSHMEM on test targets only (no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 
 # Default GPU architectures to build
@@ -127,7 +140,7 @@ include(GNUInstallDirs)
 include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
 include(cmake/CheckSymbolExistsNoWarn.cmake)
 # Include rocSHMEM build module only if enabled
-if(ENABLE_ROCSHMEM)
+if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   include(cmake/ROCSHMEM.cmake)
 endif()
 
@@ -149,8 +162,6 @@ endif()
 # Determine which GPU architectures to build for
 set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 
-# ROCM NetIB patch
-include(cmake/rocmIb.cmake)
 
 # Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
 if (BUILD_ADDRESS_SANITIZER)
@@ -289,8 +300,16 @@ endif()
 if(EXPLICIT_ROCM_VERSION)
   set(rocm_version_string "${EXPLICIT_ROCM_VERSION}")
 elseif(ROCMCORE_PATH)
-  message(STATUS "Reading ROCM version from ${ROCMCORE_PATH}/.info/version")
-  file(READ "${ROCMCORE_PATH}/.info/version" rocm_version_string)
+  # Use .info/version directly, or under the 'core' symlink for multi-arch installs.
+  set(rocm_info_version_file "${ROCMCORE_PATH}/.info/version")
+  if(NOT EXISTS "${rocm_info_version_file}")
+    set(rocm_info_version_file "${ROCMCORE_PATH}/core/.info/version")
+  endif()
+  if(NOT EXISTS "${rocm_info_version_file}")
+    message(FATAL_ERROR "Could not determine ROCm version: expected '${ROCMCORE_PATH}/.info/version' or '${ROCMCORE_PATH}/core/.info/version' (set EXPLICIT_ROCM_VERSION or set ROCMCORE_PATH to a valid installation)")
+  endif()
+  message(STATUS "Reading ROCM version from ${rocm_info_version_file}")
+  file(READ "${rocm_info_version_file}" rocm_version_string)
 else()
   message(FATAL_ERROR "Could not determine ROCM version (set EXPLICIT_ROCM_VERSION or set ROCM_PATH to a valid installation)")
 endif()
@@ -338,6 +357,19 @@ check_cxx_source_compiles("
 ### Check for hipMemcpyBatchAsync support (Copy Engine batch API)
 check_symbol_exists("hipMemcpyBatchAsync" "hip/hip_runtime_api.h" HIP_MEMCPY_BATCH_ASYNC)
 
+### Check for cuMem VMM DMA-BUF export support (driver-level dmabuf export).
+check_symbol_exists("hipMemGetHandleForAddressRange" "hip/hip_runtime_api.h" HIP_MEM_GET_HANDLE_FOR_ADDR_RANGE)
+
+### Check for uncached VMM allocation type (hipMemAllocationTypeUncached).
+check_cxx_source_compiles("
+  #include <hip/hip_runtime_api.h>
+  int main() {
+    hipMemAllocationType t = hipMemAllocationTypeUncached;
+    (void)t;
+    return 0;
+  }
+" HIP_VMM_UNCACHED_MEMORY_AVAILABLE)
+
 unset(CMAKE_REQUIRED_LIBRARIES)
 
 ### Check for indirect function call support
@@ -370,6 +402,15 @@ if(HIP_MEMCPY_BATCH_ASYNC)
 else()
   set(CE_ENABLED OFF)
   message(STATUS "Copy Engine (CE) batch API disabled - hipMemcpyBatchAsync not found in hip/hip_runtime_api.h")
+endif()
+
+## Check for cuMem VMM DMA-BUF export support
+if(HIP_MEM_GET_HANDLE_FOR_ADDR_RANGE)
+  set(CUMEM_DMABUF_EXPORT_ENABLED ON)
+  message(STATUS "cuMem DMA-BUF export enabled - hipMemGetHandleForAddressRange found")
+else()
+  set(CUMEM_DMABUF_EXPORT_ENABLED OFF)
+  message(STATUS "cuMem DMA-BUF export disabled - hipMemGetHandleForAddressRange not found in hip/hip_runtime_api.h")
 endif()
 
 ## Check for hsa-runtime64
@@ -623,6 +664,21 @@ if(EMIT_LLVM_IR)
   add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
 endif()
 
+# nccl4py Python bindings (opt-in)
+#==================================================================================================
+# When BUILD_NCCL4PY=ON, expose the `uv`-driven wheel/dev targets defined in
+# bindings/nccl4py/CMakeLists.txt. This is opt-in (OFF by default) so a normal
+# RCCL build never requires `uv` or a managed Python toolchain. The wheel build
+# itself is CUDA/HIP-header free (see bindings/nccl4py/setup.py); librccl.so is
+# resolved at runtime via dlopen, so we only add a build-order dependency on the
+# rccl target for convenience when running the bindings against a fresh build.
+if(BUILD_NCCL4PY)
+  add_subdirectory(bindings/nccl4py)
+  if(TARGET nccl4py AND TARGET rccl)
+    add_dependencies(nccl4py rccl)
+  endif()
+endif()
+
 # Install settings
 #==================================================================================================
 ## Specify install targets
@@ -707,12 +763,14 @@ endif()
 rocm_install(TARGETS rcclras)
 
 if(BUILD_TESTS)
+  enable_testing()
   rocm_package_setup_component(clients)
   rocm_package_setup_client_component(tests PACKAGE_NAME unittests)
-  if(BUILD_EXT_EXAMPLES)
+  if(BUILD_PLUGIN_EXAMPLES)
     add_subdirectory(plugins/net/example)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)
+    add_subdirectory(plugins/profiler/proxytrace)
   endif()
   add_subdirectory(test)
 

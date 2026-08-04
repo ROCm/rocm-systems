@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: MIT
 
 include(AISAddExecutable)
-include(AISUseGTest)
 
 set(SHARED_SOURCE_FILES
     common/magic-word.cpp
@@ -37,23 +36,36 @@ if(AIS_BUILD_NVIDIA_DETAIL)
     list(APPEND TEST_SYSINCLS ${HIPFILE_NVIDIA_SOURCE_PATH})
 else()
     list(APPEND SYSTEM_TEST_SOURCE_FILES system/amd/io.cpp)
+    list(APPEND SHARED_SOURCE_FILES common/ais-capability.cpp)
     list(APPEND TEST_SYSINCLS ${HIPFILE_AMD_SOURCE_PATH})
 endif()
 
-ais_add_test_executable(
-    NAME hipfile_tests
-    DEPS hipfile
-    SRCS ${UNIT_TEST_SOURCE_FILES} ${SHARED_SOURCE_FILES}
-    SYSINCLS ${TEST_SYSINCLS}
-)
-target_link_libraries(hipfile_tests PRIVATE GTest::gtest)
-target_link_libraries(hipfile_tests PRIVATE GTest::gtest_main)
+# hipfile_tests holds the platform-portable unit tests. Today those sources only
+# exist for NVIDIA (cufile-api-compat); on AMD the unit tests live entirely in
+# test/amd_detail (internal_tests), so this target would have zero gtest cases.
+# Only define it when it will actually contain tests -- gating on the source list
+# (rather than the platform) means the target reappears automatically if a
+# portable unit test is later added to UNIT_TEST_SOURCE_FILES.
+if(UNIT_TEST_SOURCE_FILES)
+    ais_add_test_executable(
+        NAME hipfile_tests
+        DEPS hipfile
+        SRCS ${UNIT_TEST_SOURCE_FILES} ${SHARED_SOURCE_FILES}
+        SYSINCLS ${TEST_SYSINCLS}
+    )
+    target_link_libraries(hipfile_tests PRIVATE GTest::gtest)
+    target_link_libraries(hipfile_tests PRIVATE GTest::gtest_main)
+    # -pthread is critical for sanitizer builds via TheRock
+    # NEVER REMOVE IT
+    target_compile_options(hipfile_tests PRIVATE -pthread)
+    target_link_options(hipfile_tests PRIVATE -pthread)
 
-ais_gtest_discover_tests(
-    hipfile_tests
-    PROPERTIES "LABELS;unit;LABELS;hipfile"
-    TEST_LIST hipfile_unit_tests
-)
+    ais_gtest_discover_tests(
+        hipfile_tests
+        PROPERTIES "LABELS;unit;LABELS;hipfile"
+        TEST_LIST hipfile_unit_tests
+    )
+endif()
 
 ais_add_test_executable(
     NAME hipfile_system_tests
@@ -62,11 +74,21 @@ ais_add_test_executable(
     SYSINCLS ${TEST_SYSINCLS}
 )
 target_link_libraries(hipfile_system_tests PRIVATE GTest::gtest)
+# -pthread is critical for sanitizer builds via TheRock
+# NEVER REMOVE IT
+target_compile_options(hipfile_system_tests PRIVATE -pthread)
+target_link_options(hipfile_system_tests PRIVATE -pthread)
+
+set(_allow_skip_arg "")
+if(HIPFILE_ALLOW_SKIP_FASTPATH_TESTS)
+    set(_allow_skip_arg --allow-skip-fastpath)
+endif()
 
 ais_gtest_discover_tests(
     hipfile_system_tests
-    EXTRA_ARGS --ais-capable-dir ${AIS_CAPABLE_DIR}
-    PROPERTIES "LABELS;system;LABELS;hipfile"
+    EXTRA_ARGS --ais-capable-dir ${AIS_CAPABLE_DIR} ${_allow_skip_arg}
+    # Keep this marker synchronized with the GTEST_SKIP message in system/amd/io.cpp.
+    PROPERTIES "LABELS;system;LABELS;hipfile;SKIP_REGULAR_EXPRESSION;fastpath not available"
     TEST_LIST hipfile_system_tests
 )
 

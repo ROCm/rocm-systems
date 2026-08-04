@@ -130,8 +130,7 @@ fn report_path() -> PathBuf {
     std::env::var("MIRAGE_BENCH_REPORT")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("target/emulator-benchmark/report.md")
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/emulator-benchmark/report.md")
         })
 }
 
@@ -204,7 +203,7 @@ impl Stats {
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let sum: f64 = sorted.iter().sum();
         let mean = sum / n as f64;
-        let median = if n % 2 == 0 {
+        let median = if n.is_multiple_of(2) {
             (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
         } else {
             sorted[n / 2]
@@ -244,6 +243,7 @@ fn benchmark_emulators_and_write_report() {
 
     let env = Env::new();
     let registry = env.registry();
+    let has_physical_gpu = !mirage_core::hardware::gpu_gfx_versions().is_empty();
 
     // Build the workload once; shared by every backend.
     let bin_dir = tempfile::tempdir().unwrap();
@@ -259,8 +259,9 @@ fn benchmark_emulators_and_write_report() {
         let skip = match row {
             None => Some("not present in the registry".to_string()),
             Some(r) if !r.installed => Some("not installed".to_string()),
-            Some(r) if !r.support.supported => {
-                Some(format!("unsupported: {}", r.support.reason))
+            Some(r) if !r.support.supported => Some(format!("unsupported: {}", r.support.reason)),
+            Some(_) if emu == "noop" && !has_physical_gpu => {
+                Some("unsupported for GPU benchmark: no physical GPU detected".to_string())
             }
             Some(_) => None,
         };
@@ -336,7 +337,8 @@ fn benchmark_emulators_and_write_report() {
     );
     for r in ran {
         assert_eq!(
-            r.correct, r.runs,
+            r.correct,
+            r.runs,
             "emulator `{}` produced an incorrect result in {}/{} runs \
              (accuracy regression)",
             r.name,
@@ -468,7 +470,11 @@ fn render_report(results: &[EmulatorResult], n: usize) -> String {
         "| Emulator | Min | Mean | Median | Max | Stddev | Overhead (median) | Workload Δ (median) |"
     )
     .unwrap();
-    writeln!(s, "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |").unwrap();
+    writeln!(
+        s,
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+    )
+    .unwrap();
     for r in results {
         match (&r.workload, &r.overhead) {
             (Some(w), Some(o)) => {

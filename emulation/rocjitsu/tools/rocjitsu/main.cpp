@@ -9,306 +9,370 @@
 ///   rocjitsu --daemon --config foo.json -- ./app  (daemon mode: fork daemon + launch app)
 ///   rocjitsu --daemon --config foo.json           (daemon-only: run daemon server)
 
-#include "rocjitsu/vm/rj_vm.h"
+#include "rocjitsu/daemon/rj_daemon.h"
 
+#include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/version.h"
 
+#include "embedded_schema.h"
+#include "launch_preload.h"
+#include "rocm_visibility.h"
+
+#include <algorithm>
+#include <cctype>
 #include <cerrno>
+#include <charconv>
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <iostream>
-#include <stop_token>
+#include <iterator>
+#include <optional>
+#include <poll.h>
 #include <string_view>
-#include <sys/mman.h>
 #include <sys/prctl.h>
-#include <sys/socket.h>
-#include <sys/un.h>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 using namespace rocjitsu;
 
-static void handle_client(int client_fd, rj_vm_t *vm, std::stop_token stop) {
-  uint32_t process_id = 0;
-  bool connected = true;
+namespace {
 
-  while (!stop.stop_requested() && connected) {
-    RpcHeader hdr{};
-    if (!rpc_recv_exact(client_fd, &hdr, sizeof(hdr)))
-      break;
+constexpr int kDaemonReadyTimeoutMs = 30'000;
 
-    switch (hdr.opcode) {
-    case RPC_HANDSHAKE: {
-      auto open_rc = rj_vm_device_open(vm, &process_id);
-      if (open_rc != ROCJITSU_STATUS_SUCCESS) {
-        RpcHeader resp{};
-        resp.request_id = hdr.request_id;
-        resp.result = -1;
-        rpc_send_exact(client_fd, &resp, sizeof(resp));
-        connected = false;
-        break;
-      }
+int run_daemon_server(const char *config_path, const std::string &socket_path = {},
+                      int ready_fd = -1) {
+  sigset_t daemon_signals;
+  sigemptyset(&daemon_signals);
+  sigaddset(&daemon_signals, SIGINT);
+  sigaddset(&daemon_signals, SIGTERM);
+  sigset_t previous_signals;
+  if (sigprocmask(SIG_BLOCK, &daemon_signals, &previous_signals) != 0) {
+    std::cerr << std::format("rocjitsu: failed to block daemon signals: {}\n", strerror(errno));
+    if (ready_fd >= 0)
+      close(ready_fd);
+    return 1;
+  }
 
-      uint32_t gpu_id = 0;
-      rj_vm_gpu_id(vm, &gpu_id);
+  rj_daemon_t *daemon = nullptr;
+  const std::string resolved_socket_path =
+      socket_path.empty() ? rpc_default_socket_path() : socket_path;
+  std::ifstream config_stream(config_path);
+  const std::string json((std::istreambuf_iterator<char>(config_stream)),
+                         std::istreambuf_iterator<char>());
+  if (!config_stream) {
+    std::cerr << std::format("rocjitsu: failed to read daemon configuration from {}\n",
+                             config_path);
+    if (ready_fd >= 0)
+      close(ready_fd);
+    sigprocmask(SIG_SETMASK, &previous_signals, nullptr);
+    return 1;
+  }
+  if (rj_daemon_start(json.c_str(), resolved_socket_path.c_str(), &daemon) !=
+      ROCJITSU_STATUS_SUCCESS) {
+    std::cerr << std::format("rocjitsu: failed to start daemon from {} at {}\n", config_path,
+                             resolved_socket_path);
+    if (ready_fd >= 0)
+      close(ready_fd);
+    sigprocmask(SIG_SETMASK, &previous_signals, nullptr);
+    return 1;
+  }
 
-      const char *topo = nullptr;
-      rj_vm_topology_path(vm, &topo);
-      auto topo_len = topo ? std::strlen(topo) : 0;
-
-      const char *drm = nullptr;
-      rj_vm_drm_path(vm, &drm);
-      auto drm_len = drm ? std::strlen(drm) : 0;
-
-      RpcHeader resp{};
-      resp.request_id = hdr.request_id;
-
-      RpcHandshakeResponse hs{};
-      hs.version = kRpcProtocolVersion;
-      hs.gpu_id = gpu_id;
-      hs.topology_path_len = static_cast<uint32_t>(topo_len);
-      hs.drm_path_len = static_cast<uint32_t>(drm_len);
-
-      resp.payload_bytes = sizeof(hs) + hs.topology_path_len + hs.drm_path_len;
-      rpc_send_exact(client_fd, &resp, sizeof(resp));
-      rpc_send_exact(client_fd, &hs, sizeof(hs));
-      if (topo_len > 0)
-        rpc_send_exact(client_fd, topo, topo_len);
-      if (drm_len > 0)
-        rpc_send_exact(client_fd, drm, drm_len);
-      break;
-    }
-
-    case RPC_CLOSE: {
-      rj_vm_device_close(vm, process_id);
-      process_id = 0;
-      RpcHeader resp{};
-      resp.request_id = hdr.request_id;
-      rpc_send_exact(client_fd, &resp, sizeof(resp));
-      connected = false;
-      break;
-    }
-
-    case RPC_MMAP: {
-      RpcMmapRequest mreq{};
-      if (!rpc_recv_exact(client_fd, &mreq, sizeof(mreq))) {
-        connected = false;
-        break;
-      }
-
-      rj_vm_map_t map{};
-      map.addr = mreq.addr;
-      map.length = mreq.length;
-      map.prot = static_cast<uint32_t>(mreq.prot);
-      map.flags = static_cast<uint32_t>(mreq.flags);
-      map.offset = mreq.offset;
-      rj_vm_device_map_as(vm, process_id, &map);
-
-      RpcHeader resp{};
-      resp.request_id = hdr.request_id;
-      resp.result = (reinterpret_cast<void *>(map.mapped_addr) == MAP_FAILED) ? -errno : 0;
-      resp.payload_bytes = sizeof(RpcMmapResponse);
-
-      RpcMmapResponse mresp{.mapped_addr = map.mapped_addr};
-
-      uint8_t response_buffer[sizeof(resp) + sizeof(mresp)];
-      std::memcpy(response_buffer, &resp, sizeof(resp));
-      std::memcpy(response_buffer + sizeof(resp), &mresp, sizeof(mresp));
-
-      rj_handle_t backing_memfd = -1;
-      rj_vm_get_shared_mem_as(vm, process_id, mreq.offset, &backing_memfd);
-      if (backing_memfd >= 0)
-        rpc_send_msg(client_fd, response_buffer, sizeof(response_buffer), &backing_memfd, 1);
-      else
-        rpc_send_exact(client_fd, response_buffer, sizeof(response_buffer));
-      break;
-    }
-
-    case RPC_MUNMAP: {
-      RpcMunmapRequest mreq{};
-      if (!rpc_recv_exact(client_fd, &mreq, sizeof(mreq))) {
-        connected = false;
-        break;
-      }
-
-      rj_vm_unmap_t unmap{.addr = mreq.addr, .length = mreq.length};
-      rj_vm_device_unmap_as(vm, process_id, &unmap);
-
-      RpcHeader resp{};
-      resp.request_id = hdr.request_id;
-      rpc_send_exact(client_fd, &resp, sizeof(resp));
-      break;
-    }
-
-    case RPC_IOCTL: {
-      constexpr uint32_t kMaxPayloadBytes = 16 * 1024 * 1024;
-      if (hdr.payload_bytes > kMaxPayloadBytes || hdr.payload_bytes < sizeof(RpcIoctlRequest)) {
-        connected = false;
-        break;
-      }
-      std::vector<uint8_t> payload(hdr.payload_bytes);
-      if (!rpc_recv_exact(client_fd, payload.data(), hdr.payload_bytes)) {
-        connected = false;
-        break;
-      }
-      auto *ioctl_request = reinterpret_cast<RpcIoctlRequest *>(payload.data());
-
-      rj_vm_cmd_t cmd{};
-      cmd.cmd = ioctl_request->ioctl_cmd;
-      cmd.buf = payload.data() + sizeof(RpcIoctlRequest);
-      cmd.buf_size = ioctl_request->args_bytes;
-      cmd.shared_handle = -1;
-      rj_vm_execute_as(vm, process_id, &cmd);
-
-      RpcHeader resp{};
-      resp.opcode = RPC_IOCTL;
-      resp.request_id = hdr.request_id;
-      resp.result = cmd.result;
-      resp.payload_bytes = static_cast<uint32_t>(cmd.buf_size);
-
-      if (cmd.shared_handle >= 0) {
-        std::vector<uint8_t> response_buffer(sizeof(resp) + cmd.buf_size);
-        std::memcpy(response_buffer.data(), &resp, sizeof(resp));
-        if (cmd.buf_size > 0)
-          std::memcpy(response_buffer.data() + sizeof(resp), cmd.buf, cmd.buf_size);
-        rpc_send_msg(client_fd, response_buffer.data(), response_buffer.size(), &cmd.shared_handle,
-                     1);
-      } else {
-        rpc_send_exact(client_fd, &resp, sizeof(resp));
-        if (cmd.buf_size > 0)
-          rpc_send_exact(client_fd, cmd.buf, cmd.buf_size);
-      }
-      break;
-    }
-
-    default:
-      connected = false;
-      break;
+  if (ready_fd >= 0) {
+    const uint8_t ready = 1;
+    ssize_t written = 0;
+    do {
+      written = write(ready_fd, &ready, sizeof(ready));
+    } while (written < 0 && errno == EINTR);
+    close(ready_fd);
+    if (written != static_cast<ssize_t>(sizeof(ready))) {
+      rj_daemon_stop(daemon);
+      sigprocmask(SIG_SETMASK, &previous_signals, nullptr);
+      return 1;
     }
   }
 
-  if (process_id != 0)
-    rj_vm_device_close(vm, process_id);
-  ::close(client_fd);
+  while (rj_daemon_status(daemon) == RJ_DAEMON_STATUS_RUNNING) {
+    const timespec timeout{.tv_sec = 0, .tv_nsec = 100'000'000};
+    const int signal = sigtimedwait(&daemon_signals, nullptr, &timeout);
+    if (signal == SIGINT || signal == SIGTERM)
+      break;
+    if (signal < 0 && errno != EAGAIN && errno != EINTR)
+      break;
+  }
+
+  const bool failed = rj_daemon_status(daemon) == RJ_DAEMON_STATUS_ERROR;
+  rj_daemon_stop(daemon);
+  if (!socket_path.empty()) {
+    std::error_code remove_error;
+    std::filesystem::remove(std::filesystem::path(socket_path).parent_path(), remove_error);
+  }
+  sigprocmask(SIG_SETMASK, &previous_signals, nullptr);
+  return failed ? 1 : 0;
 }
 
-static volatile sig_atomic_t g_listen_fd = -1;
-
-static int run_daemon_server(const char *config_path) {
-  rj_vm_t *vm = nullptr;
-  if (rj_vm_create(config_path, RJ_VM_MODE_DAEMON, &vm) != ROCJITSU_STATUS_SUCCESS) {
-    std::cerr << std::format("rocjitsu: failed to create VM from {}\n", config_path);
-    return 1;
+std::optional<std::filesystem::path> current_executable_path() {
+  std::vector<char> buffer(256);
+  for (;;) {
+    ssize_t n = readlink("/proc/self/exe", buffer.data(), buffer.size());
+    if (n < 0)
+      return std::nullopt;
+    if (static_cast<size_t>(n) < buffer.size())
+      return std::filesystem::path(std::string(buffer.data(), static_cast<size_t>(n)));
+    buffer.resize(buffer.size() * 2);
   }
-
-  std::jthread engine_thread([vm]() { rj_vm_run(vm, nullptr); });
-
-  auto sock_path = rpc_default_socket_path();
-  std::filesystem::create_directories(std::filesystem::path(sock_path).parent_path());
-  unlink(sock_path.c_str());
-
-  int listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (listen_fd < 0)
-    return 1;
-  g_listen_fd = listen_fd;
-
-  sockaddr_un addr{};
-  addr.sun_family = AF_UNIX;
-  sock_path.copy(addr.sun_path, sizeof(addr.sun_path) - 1);
-
-  if (bind(listen_fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0 ||
-      listen(listen_fd, 16) != 0) {
-    ::close(listen_fd);
-    return 1;
-  }
-
-  std::stop_source stop_source;
-  std::vector<std::jthread> client_threads;
-  std::vector<int> active_client_fds;
-  std::mutex client_threads_mutex;
-
-  std::signal(SIGINT, [](int) {
-    int fd = g_listen_fd;
-    g_listen_fd = -1;
-    if (fd >= 0)
-      shutdown(fd, SHUT_RDWR);
-  });
-  std::signal(SIGTERM, [](int) {
-    int fd = g_listen_fd;
-    g_listen_fd = -1;
-    if (fd >= 0)
-      shutdown(fd, SHUT_RDWR);
-  });
-
-  while (g_listen_fd >= 0) {
-    int client = accept(listen_fd, nullptr, nullptr);
-    if (client < 0)
-      break;
-
-    std::lock_guard<std::mutex> lock(client_threads_mutex);
-    active_client_fds.push_back(client);
-    client_threads.emplace_back(handle_client, client, vm, stop_source.get_token());
-  }
-
-  stop_source.request_stop();
-  {
-    std::lock_guard<std::mutex> lock(client_threads_mutex);
-    for (int fd : active_client_fds)
-      shutdown(fd, SHUT_RDWR);
-    client_threads.clear();
-  }
-  ::close(listen_fd);
-  unlink(sock_path.c_str());
-
-  rj_vm_request_exit(vm, "daemon shutdown");
-  engine_thread.join();
-  rj_vm_destroy(vm);
-  return 0;
 }
 
-static std::string find_interposer_lib() {
-  char self[4096];
-  auto n = readlink("/proc/self/exe", self, sizeof(self) - 1);
-  if (n <= 0)
+std::string canonical_existing_path(const std::filesystem::path &candidate) {
+  std::error_code ec;
+  if (!std::filesystem::exists(candidate, ec) || ec)
     return {};
-  self[n] = '\0';
-  auto bin_dir = std::filesystem::path(self).parent_path();
-  // Installed layout: <prefix>/bin/rocjitsu → <prefix>/lib/librocjitsu_kmd.so
-  // Build layout: build/tools/rocjitsu/rocjitsu → build/lib/.../librocjitsu_kmd.so
-  for (auto &candidate : {
-           bin_dir / ".." / "lib" / "librocjitsu_kmd.so",
-           bin_dir / ".." / ".." / "lib" / "rocjitsu" / "src" / "rocjitsu" / "kmd" / "linux" /
-               "librocjitsu_kmd.so",
+
+  // The launcher should keep probing candidate layouts when a path disappears
+  // or cannot be canonicalized, rather than letting a filesystem exception
+  // terminate the process before exec.
+  std::filesystem::path canonical = std::filesystem::canonical(candidate, ec);
+  return ec ? std::string{} : canonical.string();
+}
+
+std::string find_runtime_lib(std::string_view lib_name) {
+  auto self = current_executable_path();
+  if (!self)
+    return {};
+  auto bin_dir = self->parent_path();
+  const std::filesystem::path library_name{std::string(lib_name)};
+
+  // Installed layouts use <prefix>/lib or <prefix>/lib64. CMake build trees may
+  // place shared libraries either at the build root or under target directories,
+  // so use the same ordered probe list for both the interposer and HSA hooks.
+  for (const auto &candidate : {
+           bin_dir / ".." / "lib" / library_name,
+           bin_dir / ".." / "lib64" / library_name,
+           bin_dir / ".." / ".." / library_name,
+           bin_dir / ".." / ".." / "lib" / "rocjitsu" / "src" / "rocjitsu" / "hooks" / library_name,
+           bin_dir / ".." / ".." / "lib64" / "rocjitsu" / "src" / "rocjitsu" / "hooks" /
+               library_name,
        }) {
-    if (std::filesystem::exists(candidate))
-      return std::filesystem::canonical(candidate).string();
+    if (std::string path = canonical_existing_path(candidate); !path.empty())
+      return path;
   }
   return {};
 }
 
-static bool write_config_file(const std::string &config_path) {
-  auto cfg_file = rpc_default_config_file_path();
-  std::filesystem::create_directories(std::filesystem::path(cfg_file).parent_path());
-  std::ofstream ofs(cfg_file);
-  if (!ofs)
+std::string find_interposer_lib() { return find_runtime_lib("librocjitsu.so"); }
+
+std::string find_hooks_lib() { return find_runtime_lib("librocjitsu_hooks.so"); }
+
+void cleanup_runtime_files(pid_t pid) {
+  std::error_code error;
+  std::filesystem::remove_all(rpc_invocation_runtime_dir(pid), error);
+}
+
+// Best-effort reap of per-PID runtime dirs left behind by prior invocations that
+// exited via execvp (which never returns, so cleanup_runtime_files does not run).
+// Each numeric <pid> subdir of the runtime root is removed if that PID is no
+// longer alive, so a recycled PID cannot inherit a stale config_path/daemon.sock.
+void reap_stale_runtime_dirs() {
+  // Never iterate an empty root: directory_iterator("") scans the CWD, which would
+  // let this reaper remove_all unrelated numeric directories. rpc_default_runtime_dir()
+  // already treats a set-but-empty $ROCJITSU_RUNTIME_DIR as unset, but guard here too
+  // since the loop body deletes.
+  const std::string root = rpc_default_runtime_dir();
+  if (root.empty())
+    return;
+  // Advance the iterator with an error_code (not the throwing operator++): another
+  // launcher may remove_all an entry concurrently, and a throw here would abort the
+  // launcher before exec. Best-effort — any filesystem error just ends the scan.
+  std::error_code error;
+  std::filesystem::directory_iterator it(root, error);
+  const std::filesystem::directory_iterator end;
+  for (; !error && it != end; it.increment(error)) {
+    // Only real per-PID directories are reapable. Use symlink_status() (which does
+    // NOT follow the link) and require a plain directory: is_directory() follows
+    // symlinks, so a numeric symlink pointing at a directory would otherwise pass
+    // and have its target remove_all'd — never chase a symlink out of the runtime
+    // root.
+    std::error_code status_error;
+    auto status = std::filesystem::symlink_status(it->path(), status_error);
+    if (status_error || status.type() != std::filesystem::file_type::directory)
+      continue;
+    const std::string name = it->path().filename().string();
+    if (!std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isdigit(c); }))
+      continue;
+    pid_t pid = 0;
+    auto [ptr, parse_error] = std::from_chars(name.data(), name.data() + name.size(), pid);
+    if (parse_error != std::errc{} || ptr != name.data() + name.size() || pid <= 0)
+      continue;
+    // kill(pid, 0) probes existence without signalling: ESRCH means the process
+    // is gone and its runtime dir is safe to reclaim. EPERM/success mean it is
+    // still alive (possibly another user's PID), so leave it alone.
+    if (kill(pid, 0) != 0 && errno == ESRCH) {
+      std::error_code remove_error;
+      std::filesystem::remove_all(it->path(), remove_error);
+    }
+  }
+}
+
+using KfdGpuOrdinal = rocjitsu::cli::VisibleGpu;
+
+std::optional<uint32_t> parse_u32(std::string_view text) {
+  uint32_t value = 0;
+  auto *begin = text.data();
+  auto *end = text.data() + text.size();
+  auto [ptr, err] = std::from_chars(begin, end, value);
+  if (err != std::errc{} || ptr != end)
+    return std::nullopt;
+  return value;
+}
+
+std::optional<uint32_t> read_u32_file(const std::filesystem::path &path) {
+  std::ifstream in(path);
+  uint32_t value = 0;
+  if (!(in >> value))
+    return std::nullopt;
+  return value;
+}
+
+std::optional<uint32_t> read_u32_property(const std::filesystem::path &path, std::string_view key) {
+  std::ifstream in(path);
+  std::string name;
+  uint64_t value = 0;
+  while (in >> name >> value) {
+    if (name == key)
+      return static_cast<uint32_t>(value);
+  }
+  return std::nullopt;
+}
+
+std::optional<uint64_t> read_u64_property(const std::filesystem::path &path, std::string_view key) {
+  std::ifstream in(path);
+  std::string name;
+  uint64_t value = 0;
+  while (in >> name >> value) {
+    if (name == key)
+      return value;
+  }
+  return std::nullopt;
+}
+
+std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
+  std::filesystem::path nodes_dir = "/sys/devices/virtual/kfd/kfd/topology/nodes";
+  if (!std::filesystem::exists(nodes_dir))
+    nodes_dir = "/sys/class/kfd/kfd/topology/nodes";
+
+  struct KfdNodeInfo {
+    uint32_t node_id = 0;
+    uint32_t gpu_id = 0;
+    uint32_t gfx_target_version = 0;
+    uint64_t unique_id = 0;
+  };
+
+  std::vector<KfdNodeInfo> nodes;
+  std::error_code ec;
+  for (const auto &entry : std::filesystem::directory_iterator(nodes_dir, ec)) {
+    if (!entry.is_directory(ec))
+      continue;
+
+    std::string name = entry.path().filename().string();
+    auto node_id = parse_u32(name);
+    if (!node_id)
+      continue;
+
+    auto gpu_id = read_u32_file(entry.path() / "gpu_id");
+    if (gpu_id && *gpu_id != 0) {
+      const std::filesystem::path properties = entry.path() / "properties";
+      uint32_t gfx_target_version = read_u32_property(properties, "gfx_target_version").value_or(0);
+      uint64_t unique_id = read_u64_property(properties, "unique_id").value_or(0);
+      nodes.push_back({*node_id, *gpu_id, gfx_target_version, unique_id});
+    }
+  }
+
+  std::sort(nodes.begin(), nodes.end(),
+            [](const auto &lhs, const auto &rhs) { return lhs.node_id < rhs.node_id; });
+
+  std::vector<KfdGpuOrdinal> gpus;
+  gpus.reserve(nodes.size());
+  for (uint32_t ordinal = 0; ordinal < nodes.size(); ++ordinal)
+    gpus.push_back({ordinal, nodes[ordinal].gpu_id, nodes[ordinal].gfx_target_version,
+                    nodes[ordinal].unique_id});
+  return rocjitsu::cli::enumerate_kfd_gpus(gpus);
+}
+
+std::optional<std::string_view> environment_value(const char *name) {
+  const char *value = std::getenv(name);
+  return value == nullptr ? std::nullopt : std::optional<std::string_view>(value);
+}
+
+/// @brief Resolve automatic host selection once for every DBT runtime layer.
+bool resolve_host_gpu(rocjitsu::config::DbtGuestConfig *dbt_guest,
+                      const std::vector<KfdGpuOrdinal> &topology) {
+  const std::vector<KfdGpuOrdinal> visible_gpus = rocjitsu::cli::effective_visible_gpus(
+      topology, environment_value("ROCR_VISIBLE_DEVICES"), environment_value("HIP_VISIBLE_DEVICES"),
+      environment_value("CUDA_VISIBLE_DEVICES"));
+
+  std::optional<uint32_t> target_version =
+      rocjitsu::kmd::gfx_target_version_from_name(dbt_guest->host.isa);
+  if (!target_version) {
+    std::cerr << std::format("rocjitsu: unrecognized dbt_guest.host_isa '{}'\n",
+                             dbt_guest->host.isa);
     return false;
-  ofs << config_path << '\n';
-  return ofs.good();
+  }
+
+  const rocjitsu::cli::HostSelection selection =
+      rocjitsu::cli::select_host_gpu(visible_gpus, dbt_guest->host.gpu_id, *target_version);
+  if (selection.status == rocjitsu::cli::HostSelectionStatus::Selected) {
+    dbt_guest->host.gpu_id = selection.gpu_id;
+    return true;
+  }
+  if (selection.status == rocjitsu::cli::HostSelectionStatus::ExplicitGpuHidden) {
+    std::cerr << std::format(
+        "rocjitsu: dbt_guest.host_gpu_id {} is hidden by ROCm device visibility settings\n",
+        dbt_guest->host.gpu_id);
+    return false;
+  }
+  if (selection.status == rocjitsu::cli::HostSelectionStatus::ExplicitGpuIsaMismatch) {
+    std::cerr << std::format("rocjitsu: dbt_guest.host_gpu_id {} does not match host_isa '{}'\n",
+                             dbt_guest->host.gpu_id, dbt_guest->host.isa);
+    return false;
+  }
+
+  std::cerr << std::format("rocjitsu: no host GPU matches dbt_guest.host_isa '{}'\n",
+                           dbt_guest->host.isa);
+  return false;
 }
 
-static void cleanup_runtime_files() {
-  auto cfg_file = rpc_default_config_file_path();
-  unlink(cfg_file.c_str());
-  auto sock_file = rpc_default_socket_path();
-  unlink(sock_file.c_str());
+std::vector<KfdGpuOrdinal>
+dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
+                           const rocjitsu::config::DbtGuestConfig &dbt_guest) {
+  if (dbt_guest.host.backend == rocjitsu::config::DbtExecutionBackend::Hardware)
+    return real_kfd_gpu_ordinals();
+
+  const std::string host_config_path = rocjitsu::config::resolve_dbt_host_config_path(
+      dbt_config_path, dbt_guest.host.simulator_config_path);
+  rocjitsu::config::LoadedConfig loaded =
+      rocjitsu::config::load_config(host_config_path, rocjitsu::kEmbeddedSchema);
+  std::vector<rocjitsu::config::KfdDeviceConfig> devices = loaded.devices;
+  if (devices.empty() && loaded.device.present)
+    devices.push_back(loaded.device);
+
+  std::vector<KfdGpuOrdinal> gpus;
+  for (uint32_t ordinal = 0; ordinal < devices.size(); ++ordinal) {
+    const auto &device = devices[ordinal];
+    gpus.push_back({ordinal, device.gpu_id, device.gfx_target_version, device.unique_id});
+  }
+  return rocjitsu::cli::enumerate_kfd_gpus(gpus);
 }
 
-static void print_usage() {
+void print_usage() {
   std::cerr
       << "Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]\n"
          "\n"
@@ -316,8 +380,15 @@ static void print_usage() {
          "  rocjitsu --config foo.json -- ./app          Local mode (in-process simulation)\n"
          "  rocjitsu --daemon --config foo.json -- ./app Daemon mode (fork daemon + launch app)\n"
          "  rocjitsu --daemon --config foo.json          Daemon-only (run server)\n"
-         "  rocjitsu --attach --config foo.json -- ./app Attach to running daemon\n";
+         "  rocjitsu --attach --config foo.json -- ./app Attach to running daemon\n"
+         "\n"
+         "Options:\n"
+         "  --config <path>   Simulation config JSON (required)\n"
+         "  --version, -v     Print version and exit\n"
+         "  --help, -h        Print this help and exit\n";
 }
+
+} // namespace
 
 int main(int argc, char *argv[]) {
   std::signal(SIGPIPE, SIG_IGN);
@@ -342,6 +413,9 @@ int main(int argc, char *argv[]) {
     } else if (arg == "--help" || arg == "-h") {
       print_usage();
       return 0;
+    } else if (arg == "--version" || arg == "-v") {
+      std::cout << "rocjitsu " << ROCJITSU_VERSION << "\n";
+      return 0;
     } else {
       std::cerr << std::format("rocjitsu: unknown option: {}\n", arg);
       print_usage();
@@ -361,7 +435,27 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  rocjitsu::config::DbtGuestConfig dbt_guest_config;
+  try {
+    dbt_guest_config = rocjitsu::config::load_dbt_guest_config_from_file(abs_config);
+    if (!dbt_guest_config.enabled)
+      (void)rocjitsu::config::load_config(abs_config, rocjitsu::kEmbeddedSchema);
+  } catch (const std::exception &e) {
+    std::cerr << std::format("rocjitsu: failed to parse config: {}\n", e.what());
+    return 1;
+  }
+  const bool dbt_guest_mode = dbt_guest_config.enabled;
+  if (dbt_guest_mode && (daemon_mode || attach_mode)) {
+    std::cerr << "rocjitsu: dbt_guest mode currently supports local launch only\n";
+    return 1;
+  }
+
   bool has_app = (separator_idx >= 0 && separator_idx + 1 < argc);
+
+  // Reclaim per-PID runtime dirs orphaned by prior runs (execvp never returns, so
+  // those invocations could not clean up after themselves). Done for every mode,
+  // including daemon-only, before this invocation creates its own directory.
+  reap_stale_runtime_dirs();
 
   if (daemon_mode && !has_app)
     return run_daemon_server(abs_config.c_str());
@@ -376,9 +470,33 @@ int main(int argc, char *argv[]) {
 
   auto lib_path = find_interposer_lib();
   if (lib_path.empty()) {
-    std::cerr << "rocjitsu: could not find librocjitsu_kmd.so\n";
+    std::cerr << "rocjitsu: could not find librocjitsu.so\n";
     return 1;
   }
+
+  std::string hooks_path;
+  std::vector<KfdGpuOrdinal> dbt_execution_gpus;
+  if (dbt_guest_mode) {
+    if (dbt_guest_config.guest_isa.empty() || dbt_guest_config.host.isa.empty()) {
+      std::cerr << "rocjitsu: dbt_guest requires guest_isa and host_isa\n";
+      return 1;
+    }
+    try {
+      dbt_execution_gpus = dbt_execution_gpu_ordinals(abs_config, dbt_guest_config);
+    } catch (const std::exception &e) {
+      std::cerr << std::format("rocjitsu: failed to load DBT execution topology: {}\n", e.what());
+      return 1;
+    }
+    if (!resolve_host_gpu(&dbt_guest_config, dbt_execution_gpus))
+      return 1;
+    hooks_path = find_hooks_lib();
+    if (hooks_path.empty()) {
+      std::cerr << "rocjitsu: could not find librocjitsu_hooks.so\n";
+      return 1;
+    }
+  }
+
+  pid_t my_pid = getpid();
 
   if (attach_mode) {
     auto sock_path = rpc_default_socket_path();
@@ -387,40 +505,90 @@ int main(int argc, char *argv[]) {
       return 1;
     }
   } else if (daemon_mode) {
+    auto socket_path = rpc_invocation_socket_path(my_pid);
+    std::error_code directory_error;
+    std::filesystem::create_directories(rpc_invocation_runtime_dir(my_pid), directory_error);
+    if (directory_error) {
+      std::cerr << std::format("rocjitsu: failed to create runtime directory: {}\n",
+                               directory_error.message());
+      return 1;
+    }
+
+    int ready_pipe[2];
+    if (pipe(ready_pipe) != 0) {
+      std::cerr << std::format("rocjitsu: pipe failed: {}\n", strerror(errno));
+      cleanup_runtime_files(my_pid);
+      return 1;
+    }
+
     pid_t daemon_pid = fork();
     if (daemon_pid < 0) {
       std::cerr << std::format("rocjitsu: fork failed: {}\n", strerror(errno));
+      close(ready_pipe[0]);
+      close(ready_pipe[1]);
+      cleanup_runtime_files(my_pid);
       return 1;
     }
 
     if (daemon_pid == 0) {
+      close(ready_pipe[0]);
       prctl(PR_SET_PDEATHSIG, SIGTERM);
-      return run_daemon_server(abs_config.c_str());
+      return run_daemon_server(abs_config.c_str(), socket_path, ready_pipe[1]);
     }
 
-    auto sock_path = rpc_default_socket_path();
-    for (int i = 0; i < 300; ++i) {
-      if (std::filesystem::exists(sock_path))
-        break;
-      usleep(10000);
-    }
-    if (!std::filesystem::exists(sock_path)) {
-      std::cerr << "rocjitsu: daemon socket did not appear\n";
-      kill(daemon_pid, SIGTERM);
+    close(ready_pipe[1]);
+    pollfd ready_poll{.fd = ready_pipe[0], .events = POLLIN | POLLHUP, .revents = 0};
+    int poll_result = 0;
+    do {
+      poll_result = poll(&ready_poll, 1, kDaemonReadyTimeoutMs);
+    } while (poll_result < 0 && errno == EINTR);
+    uint8_t ready = 0;
+    const ssize_t ready_bytes = poll_result > 0 ? read(ready_pipe[0], &ready, sizeof(ready)) : -1;
+    close(ready_pipe[0]);
+    if (ready_bytes != static_cast<ssize_t>(sizeof(ready)) || ready != 1) {
+      std::cerr << "rocjitsu: daemon did not become ready\n";
+      kill(daemon_pid, SIGKILL);
       waitpid(daemon_pid, nullptr, 0);
+      cleanup_runtime_files(my_pid);
       return 1;
     }
   } else {
-    if (!write_config_file(abs_config)) {
+    if (!rocjitsu::config::write_dbt_runtime_config_handoff(abs_config, dbt_guest_config, my_pid)) {
       std::cerr << "rocjitsu: failed to write config file\n";
+      cleanup_runtime_files(my_pid);
       return 1;
     }
   }
 
-  setenv("LD_PRELOAD", lib_path.c_str(), 1);
-  execvp(app_argv[0], app_argv);
+  rocjitsu::cli::LaunchEnvironment launch_environment;
+  rocjitsu::cli::prepend_launch_preloads(launch_environment, lib_path);
+  if (dbt_guest_mode) {
+    std::optional<std::string_view> child_rocr_visible = environment_value("ROCR_VISIBLE_DEVICES");
+    std::optional<std::string> expanded_rocr_visible =
+        rocjitsu::cli::expanded_rocr_visible_devices(dbt_execution_gpus, child_rocr_visible);
+    if (expanded_rocr_visible) {
+      launch_environment.set("ROCR_VISIBLE_DEVICES", *expanded_rocr_visible);
+      child_rocr_visible = *expanded_rocr_visible;
+    }
+    if (std::optional<rocjitsu::cli::VisibilityOverride> client_visible =
+            rocjitsu::cli::normalized_client_visible_devices(
+                dbt_execution_gpus, child_rocr_visible, environment_value("HIP_VISIBLE_DEVICES"),
+                environment_value("CUDA_VISIBLE_DEVICES"), dbt_guest_config.host.gpu_id))
+      launch_environment.set(client_visible->name, client_visible->value);
+    // The HSA hook still uses the legacy tools callback path. Disable only the
+    // rocprofiler-register table-delivery path so it cannot validate an
+    // unshadowed table before rocjitsu installs guest-agent wrappers.
+    launch_environment.set("HSA_TOOLS_DISABLE_REGISTER", "1");
+    launch_environment.set("HSA_TOOLS_LIB", hooks_path);
+  }
+  // Export the invocation runtime dir so every descendant (including grandchild
+  // processes spawned through wrappers like ctest) inherits the exact directory
+  // holding config_path/daemon.sock. Attach mode creates no such dir.
+  if (!attach_mode)
+    launch_environment.set(rocjitsu::kRpcInvocationDirEnv, rpc_invocation_runtime_dir(my_pid));
+  rocjitsu::cli::execvp_with_environment(app_argv[0], app_argv, launch_environment);
 
   std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));
-  cleanup_runtime_files();
+  cleanup_runtime_files(my_pid);
   return 1;
 }

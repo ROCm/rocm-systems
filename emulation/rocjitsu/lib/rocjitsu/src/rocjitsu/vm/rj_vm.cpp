@@ -5,24 +5,35 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
-#include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/kmd/linux/simulated_kfd.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
+#include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "util/log.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
+#include <cerrno>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <vector>
 
 using namespace rocjitsu;
 
 namespace {
+
+void shutdown_plugin_group(rj_vm_t *vm) {
+  if (vm && vm->soc && vm->plugin_group_active.exchange(false, std::memory_order_acq_rel))
+    vm->soc->plugin_group().onShutdown();
+}
 
 rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, rj_vm_t **handle) {
   if (!loaded.soc())
@@ -31,6 +42,24 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
   auto s = std::make_unique<rj_vm_t>();
   s->soc = loaded.soc();
   auto num_xcds = s->soc->num_xcds();
+  std::vector<SoC *> partition_socs;
+  partition_socs.reserve(loaded.extra_gpu_builds.size() + 1);
+  partition_socs.push_back(s->soc);
+  if (loaded.num_gpus > 1) {
+    for (auto &eb : loaded.extra_gpu_builds) {
+      if (auto *extra_soc = dynamic_cast<SoC *>(eb.root.get()))
+        partition_socs.push_back(extra_soc);
+    }
+  }
+  // XCD partitions (config num_threads): run each XCD on its own engine
+  // partition/thread so the XCDs execute concurrently across their separate L2s.
+  const uint32_t num_threads_requested = loaded.engine_config.num_threads;
+  const uint32_t num_threads_used =
+      amdgpu::clamp_xcd_partition_count(partition_socs, num_threads_requested);
+  if (num_threads_used != num_threads_requested)
+    util::Logger::warn("num_threads clamped: requested=", num_threads_requested,
+                       ", effective=", num_threads_used);
+  loaded.engine_config.num_threads = num_threads_used;
 
   bool serve = (mode == RJ_VM_MODE_LOCAL || mode == RJ_VM_MODE_DAEMON);
   bool daemon = (mode == RJ_VM_MODE_DAEMON);
@@ -64,11 +93,21 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     auto vm_ptr = std::make_unique<VirtualMachine>(std::move(socs), std::move(gpu_ids), daemon);
     s->vm = vm_ptr.get();
     s->engine->topology().set_root(std::move(vm_ptr));
+
+    auto prefix_specs = [](std::vector<simdojo::LinkSpec> &specs, const std::string &pfx) {
+      for (auto &ls : specs) {
+        ls.src = pfx + ls.src;
+        ls.dst = pfx + ls.dst;
+      }
+    };
+    prefix_specs(loaded.build_result.link_specs, "gpu0.");
     loaded.wire_links(s->engine->topology());
     s->soc->wire_backing(s->engine->topology());
-    for (auto &eb : loaded.extra_gpu_builds) {
+    for (size_t i = 0; i < loaded.extra_gpu_builds.size(); ++i) {
+      auto &eb = loaded.extra_gpu_builds[i];
+      prefix_specs(eb.link_specs, "gpu" + std::to_string(i + 1) + ".");
       s->engine->topology().wire_links(eb.link_specs, loaded.exec_mode);
-      auto *extra_soc = dynamic_cast<SoC *>(s->vm->soc());
+      auto *extra_soc = s->vm->soc(static_cast<uint32_t>(i + 1));
       if (extra_soc)
         extra_soc->wire_backing(s->engine->topology());
     }
@@ -81,7 +120,22 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     loaded.wire_links(s->engine->topology());
     s->soc->wire_backing(s->engine->topology());
   }
-  s->engine->build();
+  if (num_threads_used > 1 && !amdgpu::partition_topology_by_xcds(
+                                  s->engine->topology(), partition_socs, num_threads_used)) {
+    throw std::invalid_argument("multi-threaded VM requires at least one XCD");
+  }
+  s->engine->create();
+
+  // dispatch_wf() cannot enqueue work while a restored component tree is
+  // detached from an engine. Once create() has assigned partitions and event
+  // queues, resume any resident waves reconstructed from a checkpoint. The
+  // schedule_work() guards make this a no-op for ordinary idle configurations.
+  for (uint32_t i = 0; i < s->vm->num_socs(); ++i) {
+    for (auto *cu : s->vm->soc(i)->all_cus()) {
+      if (!cu->is_idle())
+        cu->schedule_work();
+    }
+  }
 
   if (serve) {
     s->engine->register_as_primary();
@@ -118,6 +172,20 @@ void reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, siz
     args->kfd_process_device_apertures_ptr = reinterpret_cast<uint64_t>(extra);
     break;
   }
+  case AMDKFD_IOC_DBG_TRAP: {
+    auto *args = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+    switch (args->op) {
+    case KFD_IOC_DBG_TRAP_ENABLE:
+      args->enable.rinfo_ptr = reinterpret_cast<uint64_t>(extra);
+      break;
+    case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+      args->device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(extra);
+      break;
+    default:
+      break;
+    }
+    break;
+  }
   default:
     break;
   }
@@ -131,7 +199,8 @@ rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode, rj_vm_t **vm)
   try {
     auto loaded = config::load_config(json_path, rocjitsu::kEmbeddedSchema);
     return create_from_loaded(loaded, mode, vm);
-  } catch (const std::exception &) {
+  } catch (const std::exception &e) {
+    util::Logger::warn("rj_vm_create failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_FILE;
   }
 }
@@ -142,8 +211,27 @@ rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode, rj_vm_
   try {
     auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
     return create_from_loaded(loaded, mode, vm);
-  } catch (const std::exception &) {
+  } catch (const std::exception &e) {
+    util::Logger::warn("rj_vm_create_from_string failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
+}
+
+rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char *plugin_dir) {
+  if (!vm || !config_json)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  if (!vm->soc)
+    return ROCJITSU_STATUS_ERROR;
+  try {
+    auto group = PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "",
+                                                      vm->engine_config);
+    shutdown_plugin_group(vm);
+    vm->soc->set_plugin_group(group);
+    group->onInit();
+    vm->plugin_group_active.store(true, std::memory_order_release);
+    return ROCJITSU_STATUS_SUCCESS;
+  } catch (const std::exception &) {
+    return ROCJITSU_STATUS_ERROR;
   }
 }
 
@@ -162,6 +250,7 @@ void rj_vm_release(rj_vm_t *vm) {
 void rj_vm_destroy(rj_vm_t *vm) {
   if (!vm)
     return;
+  shutdown_plugin_group(vm);
   if (vm->destroy())
     delete vm;
 }
@@ -171,6 +260,8 @@ rj_status_t rj_vm_step(rj_vm_t *vm, int *active) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   if (!vm->soc)
     return ROCJITSU_STATUS_ERROR;
+  if (vm->engine_config.num_threads != 1)
+    return ROCJITSU_STATUS_UNSUPPORTED;
 
   bool any_active = vm->engine->step();
   if (active)
@@ -190,6 +281,7 @@ rj_status_t rj_vm_run(rj_vm_t *vm, uint64_t *ticks_executed) {
     *ticks_executed = exit.tick;
 
   vm->engine->shutdown();
+  shutdown_plugin_group(vm);
   return (exit.code == 0) ? ROCJITSU_STATUS_SUCCESS : ROCJITSU_STATUS_ERROR;
 }
 
@@ -225,12 +317,43 @@ rj_status_t rj_vm_restore_checkpoint(const char *path, rj_vm_t **vm) {
 
 namespace {
 
-rj_status_t execute_impl(SimulatedDriver *driver, uint32_t process_id, rj_vm_cmd_t *cmd) {
+rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t *cmd) {
   auto arg_size = _IOC_SIZE(cmd->cmd);
   reconstruct_embedded_pointers(cmd->cmd, cmd->buf, arg_size, cmd->buf_size);
 
+  // For DBG_TRAP ENABLE the debugger's notifier pipe arrives as an SCM_RIGHTS
+  // fd in cmd->in_handle (already in the daemon's fd space). Substitute it for
+  // the client-side fd number in the payload so the driver signals the right
+  // pipe when a wave stops (the kernel receives the same fd via the ioctl). On
+  // success the debug session takes ownership (cmd->in_handle cleared so the
+  // transport does not close it); otherwise the transport reclaims it. Only
+  // daemon mode transfers the fd; local mode passes the debugger's own fd
+  // through the interposer and leaves cmd->in_handle at -1.
+  //
+  // The client-supplied dbg_fd is a number in the *client's* fd table and is
+  // never trusted in the daemon's namespace. Overwrite it unconditionally for
+  // ENABLE: with the transferred fd when one arrived via SCM_RIGHTS, otherwise
+  // with KFD_INVALID_FD so the handler's fcntl() check rejects it. Leaving the
+  // client's integer in place would let a client that omits the ancillary fd
+  // point the session at an arbitrary daemon-owned descriptor (a confused-deputy
+  // fd substitution).
+  bool adopting_notifier = false;
+  if (driver->daemon_mode() && cmd->cmd == AMDKFD_IOC_DBG_TRAP) {
+    auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(cmd->buf);
+    if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE) {
+      if (cmd->in_handle >= 0) {
+        dbg->enable.dbg_fd = static_cast<uint32_t>(cmd->in_handle);
+        adopting_notifier = true;
+      } else {
+        dbg->enable.dbg_fd = KFD_INVALID_FD;
+      }
+    }
+  }
+
   cmd->result = driver->ioctl(process_id, cmd->cmd, cmd->buf);
   cmd->shared_handle = -1;
+  if (adopting_notifier && cmd->result == 0)
+    cmd->in_handle = -1;
 
   if (cmd->cmd == AMDKFD_IOC_ALLOC_MEMORY_OF_GPU && cmd->result == 0) {
     auto *alloc_args = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(cmd->buf);
@@ -260,13 +383,17 @@ rj_status_t rj_vm_execute_as(rj_vm_t *vm, uint32_t process_id, rj_vm_cmd_t *cmd)
   return execute_impl(vm->vm->driver(), process_id, cmd);
 }
 
-rj_status_t rj_vm_device_open(rj_vm_t *vm, uint32_t *process_id) {
+rj_status_t rj_vm_device_open(rj_vm_t *vm, rj_client_pid_t client_pid, uint32_t *process_id) {
   if (!vm || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  auto *drv = dynamic_cast<SimulatedDriver *>(vm->vm->driver());
+  auto *drv = dynamic_cast<SimulatedKfd *>(vm->vm->driver());
   if (!drv)
     return ROCJITSU_STATUS_ERROR;
-  uint32_t pid = drv->open_process();
+  // client_pid == 0 (local mode) maps to SimulatedKfd::open_process()'s
+  // default; a nonzero client_pid enables daemon-mode process reuse and
+  // cross-process memory access. Narrow the fixed-width public type to the
+  // platform pid_t at the Linux daemon boundary.
+  uint32_t pid = drv->open_process(static_cast<pid_t>(client_pid));
   if (pid == 0)
     return ROCJITSU_STATUS_ERROR;
   if (process_id)
@@ -281,6 +408,13 @@ rj_status_t rj_vm_device_close(rj_vm_t *vm, uint32_t process_id) {
     vm->vm->driver()->close();
   else
     vm->vm->driver()->close(process_id);
+  return ROCJITSU_STATUS_SUCCESS;
+}
+
+rj_status_t rj_vm_close_all_devices(rj_vm_t *vm) {
+  if (!vm || !vm->vm || !vm->vm->driver())
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  vm->vm->driver()->close_all_processes();
   return ROCJITSU_STATUS_SUCCESS;
 }
 
@@ -301,6 +435,10 @@ rj_status_t rj_vm_device_map_as(rj_vm_t *vm, uint32_t process_id, rj_vm_map_t *m
   auto *result = vm->vm->driver()->mmap(
       process_id, reinterpret_cast<void *>(map->addr), static_cast<size_t>(map->length),
       static_cast<int>(map->prot), static_cast<int>(map->flags), static_cast<off_t>(map->offset));
+  // Capture errno HERE, immediately after the driver mmap, before any bookkeeping
+  // syscall on the way back out can clobber it. Callers (the daemon RPC path) relay
+  // this to the client rather than reading their own errno across the API boundary.
+  map->map_errno = (result == MAP_FAILED) ? errno : 0;
   map->mapped_addr = reinterpret_cast<uint64_t>(result);
   return ROCJITSU_STATUS_SUCCESS;
 }
@@ -343,6 +481,63 @@ rj_status_t rj_vm_drm_path(rj_vm_t *vm, const char **path) {
   static thread_local std::string cached_drm;
   cached_drm = vm->vm->driver()->topology().drm_path();
   *path = cached_drm.c_str();
+  return ROCJITSU_STATUS_SUCCESS;
+}
+
+rj_status_t rj_vm_gpu_info(rj_vm_t *vm, rj_vm_gpu_info_t *info) {
+  if (!vm || !info || !vm->vm || !vm->vm->driver())
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+
+  const auto &gpu = vm->vm->driver()->topology().gpu_info();
+  *info = {};
+  info->present = 1;
+  info->gpu_id = gpu.gpu_id;
+  info->gfx_target_version = gpu.gfx_target_version;
+  info->vendor_id = gpu.vendor_id;
+  info->device_id = gpu.device_id;
+  info->family_id = gpu.family_id;
+  info->unique_id = gpu.unique_id;
+  info->location_id = gpu.location_id;
+  info->domain = gpu.domain;
+  info->hive_id = gpu.hive_id;
+  info->drm_render_minor = gpu.drm_render_minor;
+  info->revision_id = gpu.revision_id;
+  info->pci_revision_id = gpu.pci_revision_id;
+  info->simd_count = gpu.simd_count;
+  info->max_waves_per_simd = gpu.max_waves_per_simd;
+  info->num_shader_engines = gpu.num_shader_engines;
+  info->num_shader_arrays_per_engine = gpu.num_shader_arrays_per_engine;
+  info->num_cu_per_sh = gpu.num_cu_per_sh;
+  info->simd_per_cu = gpu.simd_per_cu;
+  info->wave_front_size = gpu.wave_front_size;
+  info->num_xcc = gpu.num_xcc;
+  info->max_slots_scratch_cu = gpu.max_slots_scratch_cu;
+  info->local_mem_size = gpu.local_mem_size;
+  info->vram_type = gpu.vram_type;
+  info->lds_size_kb = gpu.lds_size_kb;
+  info->mem_width = gpu.mem_width;
+  info->mem_clk_max = gpu.mem_clk_max;
+  info->l1_size_kb = gpu.l1_size_kb;
+  info->l1_line_size = gpu.l1_line_size;
+  info->l1_assoc = gpu.l1_assoc;
+  info->l2_size_kb = gpu.l2_size_kb;
+  info->l2_line_size = gpu.l2_line_size;
+  info->l2_assoc = gpu.l2_assoc;
+  info->num_sdma_engines = gpu.num_sdma_engines;
+  info->num_sdma_xgmi_engines = gpu.num_sdma_xgmi_engines;
+  info->num_cp_queues = gpu.num_cp_queues;
+  info->max_engine_clk_fcompute = gpu.max_engine_clk_fcompute;
+  info->capability = gpu.capability;
+  info->capability2 = gpu.capability2;
+  info->debug_prop = gpu.debug_prop;
+  info->fw_version = gpu.fw_version;
+  info->sdma_fw_version = gpu.sdma_fw_version;
+
+  size_t name_len = gpu.marketing_name.size();
+  if (name_len >= sizeof(info->marketing_name))
+    name_len = sizeof(info->marketing_name) - 1;
+  std::memcpy(info->marketing_name, gpu.marketing_name.data(), name_len);
+  info->marketing_name[name_len] = '\0';
   return ROCJITSU_STATUS_SUCCESS;
 }
 

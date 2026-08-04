@@ -14,9 +14,11 @@
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -36,6 +38,7 @@ template <typename FlatInst>
 void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, VectorMemState &d) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
+  RegisterAccess regs(cu);
   d.lane_mask = exec;
   d.exec_mask = exec;
   d.wf_size = wf.wf_size();
@@ -43,7 +46,11 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
   // Compute signed 13-bit offset for GLOBAL/SCRATCH, unsigned 12-bit for FLAT.
   int64_t offset;
   if (inst.seg != 0) {
-    uint32_t raw = inst.offset | (inst.pad_12 << 12);
+    uint32_t raw;
+    if constexpr (requires { inst.pad_12; })
+      raw = inst.offset | (inst.pad_12 << 12);
+    else
+      raw = inst.offset;
     offset = static_cast<int64_t>(static_cast<int32_t>(raw << 19) >> 19);
   } else {
     offset = inst.offset & 0xFFF;
@@ -59,20 +66,24 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     uint32_t saddr_val = 0;
     if (inst.saddr != 0x7F) {
       uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
-      saddr_val = cu.read_sgpr(sb);
+      saddr_val = amdgpu::RegisterAccess(cu).read_sgpr(sb);
     }
     uint32_t lane_stride = wf.scratch_lane_size();
     bool has_vaddr = true;
     if constexpr (requires { inst.sve; })
       has_vaddr = (inst.sve == 1);
+    else if (inst.seg == 1)
+      has_vaddr = (inst.lds == 1);
+    uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
+    std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
+    if (has_vaddr)
+      vaddr_region.emplace(regs.read_vgpr_region(vbase, 1, exec));
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
       uint32_t vaddr = 0;
-      if (has_vaddr) {
-        uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
-        vaddr = cu.read_vgpr(vbase, lane);
-      }
+      if (has_vaddr)
+        vaddr = vaddr_region->lane(0, lane);
       d.per_lane_addr[lane] =
           scratch_base + static_cast<uint64_t>(lane) * lane_stride + vaddr + saddr_val + offset;
     }
@@ -82,31 +93,42 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     uint64_t saddr_val = 0;
     if (inst.saddr != 0x7F) {
       uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
-      saddr_val = (static_cast<uint64_t>(cu.read_sgpr(sb + 1)) << 32) | cu.read_sgpr(sb);
+      saddr_val = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sb + 1)) << 32) |
+                  amdgpu::RegisterAccess(cu).read_sgpr(sb);
     }
+    uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
+    auto vaddr_region = regs.read_vgpr_region(vbase, inst.saddr != 0x7F ? 1 : 2, exec);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
       uint64_t vaddr;
       if (inst.saddr != 0x7F) {
         vaddr = static_cast<uint64_t>(static_cast<int64_t>(
-            static_cast<int32_t>(cu.read_vgpr(vbase, lane)))); // sign-extended 32-bit offset
+            static_cast<int32_t>(vaddr_region.lane(0, lane)))); // sign-extended 32-bit offset
       } else {
-        vaddr = (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) |
-                cu.read_vgpr(vbase, lane); // 64-bit VGPR pair
+        vaddr = vaddr_region.lane64(0, lane); // 64-bit VGPR pair
       }
       d.per_lane_addr[lane] = saddr_val + vaddr + offset;
     }
   } else {
     // FLAT: 64-bit VGPR pair + unsigned 12-bit offset.
+    // Real hardware checks the address against private/shared apertures and
+    // routes accordingly. We perform the same conversion here so that private
+    // (scratch) accesses reach the mapped scratch buffer instead of the
+    // unmapped aperture VA range.
+    uint32_t priv_hi = static_cast<uint32_t>(wf.private_aperture_base() >> 32);
+    uint64_t scratch_base = wf.scratch_base();
+    uint32_t lane_stride = wf.scratch_lane_size();
+    uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
+    auto vaddr_region = regs.read_vgpr_region(vbase, 2, exec);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
-      uint64_t vaddr =
-          (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) | cu.read_vgpr(vbase, lane);
-      d.per_lane_addr[lane] = vaddr + offset;
+      uint64_t vaddr = vaddr_region.lane64(0, lane);
+      uint64_t addr = vaddr + offset;
+      if (priv_hi != 0 && static_cast<uint32_t>(addr >> 32) == priv_hi)
+        addr = scratch_base + static_cast<uint64_t>(lane) * lane_stride + (addr & 0xFFFFFFFFULL);
+      d.per_lane_addr[lane] = addr;
     }
   }
 }

@@ -11,6 +11,7 @@
 #include "platform/ndrange.hpp"
 #include "devprogram.hpp"
 #include "devkernel.hpp"
+#include "hotswap.hpp"
 #include "utils/macros.hpp"
 #include "utils/options.hpp"
 #include "comgrctx.hpp"
@@ -1780,9 +1781,19 @@ bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
     }
 
     if (!amd::Isa::isCompatible(*binaryIsa, device().isa())) {
-      buildLog_ += "Error: The program ISA " + std::string(binaryIsaName.data());
-      buildLog_ += " is not compatible with the device ISA " + device().isa().isaName() + "\n";
-      return false;
+      // HotSwap: let a supported foreign source ISA past the gate; loader transpiles downstream.
+      const std::string binaryIsaNameStr(binaryIsaName.data());
+      const bool hotswap_ok =
+          amd::hotswap::Enabled() &&
+          amd::hotswap::IsSupportedPair(binaryIsa->processorName(),
+                                        device().isa().processorName());
+      if (!hotswap_ok) {
+        buildLog_ += "Error: The program ISA " + binaryIsaNameStr;
+        buildLog_ += " is not compatible with the device ISA " + device().isa().isaName() + "\n";
+        return false;
+      }
+      buildLog_ += "HotSwap: allowing foreign program ISA " + binaryIsaNameStr +
+                   " for transpilation to " + device().isa().isaName() + "\n";
     }
   }
 

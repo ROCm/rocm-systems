@@ -9,7 +9,7 @@ project(
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
-find_package(rocDecode)
+find_package(rocdecode)
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
 
@@ -19,7 +19,7 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 set(rocdecode-tracing-env "${PRELOAD_ENV}")
 
 file(GLOB_RECURSE ROCDECODE_VIDEO_FILE
-     "${rocDecode_ROOT_DIR}/share/rocdecode/video/*AMD_driving_virtual_20-H265.265")
+     "${rocdecode_ROOT_DIR}/share/rocdecode/video/*AMD_driving_virtual_20-H265.265")
 if(TARGET rocdecode-demo AND NOT EXISTS "${ROCDECODE_VIDEO_FILE}")
     message(
         WARNING "Unable to find video file for rocdecode tests: ${ROCDECODE_VIDEO_FILE}")
@@ -30,7 +30,7 @@ if(NOT TARGET rocdecode-demo)
     set(IS_DISABLED ON)
 endif()
 
-# rocDecode tracing test
+# rocdecode tracing test
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocdecode-tracing
     COMMAND

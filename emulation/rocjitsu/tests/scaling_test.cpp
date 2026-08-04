@@ -5,12 +5,14 @@
 // and matmul_mfma across 1..8 threads (one per XCD). Outputs CSV to stdout.
 
 #include "aql_queue.h"
+#include "test_paths.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -28,17 +30,14 @@ RJ_DIAGNOSTIC_POP
 #include <iostream>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #ifdef HAS_DEVICE_KERNELS
 
 using namespace rocjitsu;
 
-static const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
-static std::string kernel_path(const char *name) {
-  return std::string(KERNEL_DIR) + "/" + name + ".o";
-}
+static const std::string CONFIG_PATH = test::config_path("gfx950_cdna4.json");
+using test::kernel_path;
 
 static constexpr uint32_t TOTAL_XCDS = 8;
 static constexpr uint32_t CUS_PER_XCD = 32;
@@ -78,22 +77,9 @@ double run_kernel(const char *kernel_name, uint32_t N, uint32_t num_threads) {
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
 
-  if (num_threads > 1) {
-    std::unordered_map<simdojo::Component *, simdojo::PartitionID> xcd_map;
-    for (uint32_t i = 0; i < soc->num_xcds(); ++i)
-      xcd_map[soc->xcd(i)] = i % num_threads;
-    engine->topology().partition_manual(
-        num_threads, [&](simdojo::Component *c) -> simdojo::PartitionID {
-          for (auto *p = static_cast<simdojo::Component *>(c); p != nullptr;
-               p = static_cast<simdojo::Component *>(p->parent())) {
-            auto it = xcd_map.find(p);
-            if (it != xcd_map.end())
-              return it->second;
-          }
-          return 0;
-        });
-  }
-  engine->build();
+  if (num_threads > 1 && !amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads))
+    return -1;
+  engine->create();
 
   memory->load_image(reinterpret_cast<const uint8_t *>(co->image_data()), co->image_size(),
                      KD_ADDR);

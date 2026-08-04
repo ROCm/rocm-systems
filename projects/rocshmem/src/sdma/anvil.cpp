@@ -27,21 +27,48 @@
 
 #include <fstream>
 #include <cstring>
+#include <cstdio>
+#include <stdexcept>
+#include <cctype>
 
 #include "sdma_pkt_struct.h"
 #include "sdma_pkt_struct_mi4.h"
 
-namespace rocshmem {
-namespace anvil {
+namespace sdma_anvil {
+
 
 #define CHECK_HSAKMT_SUCCESS(call, msg) do {                                  \
   if ((call) != HSAKMT_STATUS_SUCCESS)                                        \
     LOG_ERROR_EXIT("%s", #call);                                              \
 } while (0)
 
-// HSA agents
+// HSA agents discovered via hsa_iterate_agents (unordered).
 std::vector<hsa_agent_t> cpuAgents_;
 std::vector<hsa_agent_t> gpuAgents_;
+
+static bool hsaAgentIsValid(const hsa_agent_t& agent) { return agent.handle != 0; }
+
+static std::string hsaAgentBusId(const hsa_agent_t& agent) {
+  uint32_t domain = 0;
+  uint32_t bdfid = 0;
+  if (hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DOMAIN), &domain) !=
+      HSA_STATUS_SUCCESS) {
+    return {};
+  }
+  if (hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_BDFID), &bdfid) !=
+      HSA_STATUS_SUCCESS) {
+    return {};
+  }
+  const unsigned bus = (bdfid >> 8) & 0xff;
+  const unsigned dev = (bdfid >> 3) & 0x1f;
+  const unsigned fn = bdfid & 0x7;
+  char busId[32];
+  std::snprintf(busId, sizeof(busId), "%04x:%02x:%02x.%x", domain, bus, dev, fn);
+  for (char* p = busId; *p != '\0'; ++p) {
+    *p = static_cast<char>(std::tolower(static_cast<unsigned char>(*p)));
+  }
+  return std::string(busId);
+}
 
 hsa_status_t rocm_hsa_agent_callback(hsa_agent_t agent, hsa_device_type_t target_device_type,
                                      [[maybe_unused]] void* vector) {
@@ -90,8 +117,8 @@ static const std::string getBusId(int deviceId) {
   return std::string(busIdChar);
 }
 
-SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId, hsa_agent_t& localAgent,
-                     uint32_t engineId)
+SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId,
+                     const hsa_agent_t& localAgent, uint32_t engineId)
     : remoteDeviceId_(remoteDeviceId) {
   int originalDeviceId;
 
@@ -149,6 +176,13 @@ SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId, hsa
 
   ANVIL_CHECK_HIP_ERROR(
       hipMemcpy(deviceHandle_, &handle, sizeof(SdmaQueueDeviceHandle), hipMemcpyHostToDevice));
+
+  ANVIL_CHECK_HIP_ERROR(hipMalloc(&singleProducerDeviceHandle_,
+                                  sizeof(SdmaQueueSingleProducerDeviceHandle)));
+  ANVIL_CHECK_HIP_ERROR(hipMemcpy(singleProducerDeviceHandle_, &handle,
+                                  sizeof(SdmaQueueSingleProducerDeviceHandle),
+                                  hipMemcpyHostToDevice));
+
   ANVIL_CHECK_HIP_ERROR(hipMemcpy(cachedWptr_, &cachedWptr, sizeof(uint64_t), hipMemcpyHostToDevice));
   ANVIL_CHECK_HIP_ERROR(
       hipMemcpy(committedWptr_, &committedWptr, sizeof(uint64_t), hipMemcpyHostToDevice));
@@ -157,6 +191,7 @@ SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId, hsa
 SdmaQueue::~SdmaQueue() {
   CHECK_HSAKMT_SUCCESS(hsaKmtDestroyQueue(queue_.QueueId), "Failed to destroy queue.");
   ANVIL_CHECK_HIP_ERROR(hipFree(deviceHandle_));
+  if (singleProducerDeviceHandle_) ANVIL_CHECK_HIP_ERROR(hipFree(singleProducerDeviceHandle_));
   ANVIL_CHECK_HIP_ERROR(hipFree(cachedWptr_));
   ANVIL_CHECK_HIP_ERROR(hipFree(committedWptr_));
   CHECK_HSAKMT_SUCCESS(hsaKmtUnmapMemoryToGPU(queueBuffer_), "Failed");
@@ -164,6 +199,10 @@ SdmaQueue::~SdmaQueue() {
 }
 
 SdmaQueueDeviceHandle* SdmaQueue::deviceHandle() const { return deviceHandle_; }
+
+SdmaQueueSingleProducerDeviceHandle* SdmaQueue::singleProducerDeviceHandle() const {
+  return singleProducerDeviceHandle_;
+}
 
 void SdmaQueue::dump(std::ofstream& logFile) {
   logFile << "Queue -> device " << remoteDeviceId_ << ": "
@@ -284,8 +323,74 @@ AnvilLib::~AnvilLib() {
   }
 }
 
+void AnvilLib::buildGpuAgentMap() {
+  int hipCount = 0;
+  ANVIL_CHECK_HIP_ERROR(hipGetDeviceCount(&hipCount));
+  gpuAgentsByHipDev_.assign(static_cast<size_t>(hipCount), hsa_agent_t{});
+
+  for (const hsa_agent_t& agent : gpuAgents_) {
+    const std::string agentBusId = hsaAgentBusId(agent);
+    if (agentBusId.empty()) continue;
+
+    for (int hipDev = 0; hipDev < hipCount; ++hipDev) {
+      if (hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(hipDev)])) continue;
+      if (getBusId(hipDev) != agentBusId) continue;
+      gpuAgentsByHipDev_[static_cast<size_t>(hipDev)] = agent;
+      LOG_TRACE("anvil: HIP device %d -> HSA agent (bus %s)", hipDev, agentBusId.c_str());
+      break;
+    }
+  }
+
+  for (int hipDev = 0; hipDev < hipCount; ++hipDev) {
+    if (!hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(hipDev)])) {
+      LOG_WARN("anvil: no HSA GPU agent for HIP device %d (bus %s)", hipDev,
+               getBusId(hipDev).c_str());
+    }
+  }
+}
+
+hsa_agent_t AnvilLib::getHipGpuAgent(int hipDeviceId) const {
+  if (hipDeviceId < 0 || hipDeviceId >= static_cast<int>(gpuAgentsByHipDev_.size()) ||
+      !hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(hipDeviceId)])) {
+    LOG_ERROR_EXIT("anvil: no HSA agent mapped for HIP device %d", hipDeviceId);
+  }
+  return gpuAgentsByHipDev_[static_cast<size_t>(hipDeviceId)];
+}
+
+void AnvilLib::querySdmaEngineCounts() {
+  hsa_agent_t agent{};
+  for (const hsa_agent_t& hipAgent : gpuAgentsByHipDev_) {
+    if (hsaAgentIsValid(hipAgent)) {
+      agent = hipAgent;
+      break;
+    }
+  }
+  if (!hsaAgentIsValid(agent)) {
+    LOG_WARN("anvil: no mapped HIP GPU agents; SDMA engine count unknown");
+    return;
+  }
+  hsa_status_t status = hsa_agent_get_info(
+      agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SDMA_ENG), &numSdmaEngines_);
+  if (status != HSA_STATUS_SUCCESS) {
+    LOG_WARN("anvil: HSA_AMD_AGENT_INFO_NUM_SDMA_ENG query failed: %#x", status);
+    numSdmaEngines_ = 0;
+  }
+
+  status = hsa_agent_get_info(
+      agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SDMA_XGMI_ENG),
+      &numSdmaXgmiEngines_);
+  if (status != HSA_STATUS_SUCCESS) {
+    LOG_WARN("anvil: HSA_AMD_AGENT_INFO_NUM_SDMA_XGMI_ENG query failed: %#x", status);
+    numSdmaXgmiEngines_ = 0;
+  }
+
+  numSdmaEnginesTotal_ = numSdmaEngines_ + numSdmaXgmiEngines_;
+  LOG_TRACE("anvil: SDMA engines host=%u xgmi=%u total=%u", numSdmaEngines_, numSdmaXgmiEngines_,
+            numSdmaEnginesTotal_);
+}
+
 void AnvilLib::init() {
-  std::call_once(init_flag, []() {
+  std::call_once(init_flag, [this]() {
     // HSA
     hsa_status_t status{hsa_init()};
     if (status != HSA_STATUS_SUCCESS) {
@@ -300,6 +405,9 @@ void AnvilLib::init() {
       LOG_TRACE("Failure to iterate HSA CPU agents: %#x", status);
     }
 
+    buildGpuAgentMap();
+    querySdmaEngineCounts();
+
     SetUpKFD();
     s_kfd_opened = true;
   });
@@ -308,8 +416,8 @@ void AnvilLib::init() {
 SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
                                      int* channelIdx) {
   auto& vec = sdma_channels_[dstDeviceId];
-  vec.emplace_back(
-      std::make_unique<SdmaQueue>(srcDeviceId, dstDeviceId, gpuAgents_[srcDeviceId], engineId));
+  vec.emplace_back(std::make_unique<SdmaQueue>(srcDeviceId, dstDeviceId,
+                                               getHipGpuAgent(srcDeviceId), engineId));
   if (channelIdx != nullptr) {
     *channelIdx = static_cast<int>(vec.size() - 1);
   }
@@ -360,20 +468,59 @@ int AnvilLib::getOamId(int deviceId) {
   int xgmi_physical_id;
   if (file.is_open()) {
     if (!(file >> xgmi_physical_id)) {
-      throw std::runtime_error("Failed to read xGMI physical id from file: " + file_str);
+      LOG_ERROR_EXIT("anvil: failed to read xGMI physical id from %s", file_str.c_str());
     }
   } else {
-    throw std::runtime_error("Failed to open file: " + file_str);
+    LOG_ERROR_EXIT("anvil: failed to open file: %s", file_str.c_str());
   }
   return xgmi_physical_id;
 }
 
-int AnvilLib::getSdmaEngineId(int srcDeviceId, int dstDeviceId) {
-  int srcOamId = getOamId(srcDeviceId);
-  int dstOamId = getOamId(dstDeviceId);
+int AnvilLib::getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId) {
+  auto normalizeOamId = [](int oamId) {
+    if (oamId < 0) return 0;
+    return oamId % static_cast<int>(AnvilLib::kMi300xOamMapDim);
+  };
 
-  // Use even engines only
-  return mi300xOamMap[srcOamId][dstOamId] * 2;
+  const int srcOamId = normalizeOamId(getOamId(srcDeviceId));
+  const int dstOamId = normalizeOamId(getOamId(dstDeviceId));
+
+  // Use even engines only (MI300X xGMI SDMA layout).
+  int engineId =
+      mi300xOamMap[static_cast<size_t>(srcOamId)][static_cast<size_t>(dstOamId)] * 2;
+
+  if (numSdmaEnginesTotal_ > 0 &&
+      static_cast<uint32_t>(engineId) >= numSdmaEnginesTotal_) {
+    LOG_WARN("anvil: legacy OAM-map engine %d >= total %u", engineId, numSdmaEnginesTotal_);
+  }
+  return engineId;
+}
+
+int AnvilLib::getSdmaEngineId(int srcDeviceId, int dstDeviceId) {
+  if (srcDeviceId >= 0 && dstDeviceId >= 0 &&
+      srcDeviceId < static_cast<int>(gpuAgentsByHipDev_.size()) &&
+      dstDeviceId < static_cast<int>(gpuAgentsByHipDev_.size()) &&
+      hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(srcDeviceId)]) &&
+      hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(dstDeviceId)])) {
+    uint32_t engineMask = 0;
+    const hsa_agent_t srcAgent = gpuAgentsByHipDev_[static_cast<size_t>(srcDeviceId)];
+    const hsa_agent_t dstAgent = gpuAgentsByHipDev_[static_cast<size_t>(dstDeviceId)];
+    const hsa_status_t status = hsa_amd_memory_get_preferred_copy_engine(
+        dstAgent, srcAgent, &engineMask);
+    if (status == HSA_STATUS_SUCCESS && engineMask != 0) {
+      const int engineId = __builtin_ctz(engineMask);
+      if (engineId >= 0 && (numSdmaEnginesTotal_ == 0 ||
+                            static_cast<uint32_t>(engineId) < numSdmaEnginesTotal_)) {
+        LOG_TRACE("SDMA: HSA preferred engine %d for %d -> %d (mask=0x%x)", engineId, srcDeviceId,
+                  dstDeviceId, engineMask);
+        return engineId;
+      }
+      LOG_WARN("anvil: HSA preferred engine %d out of range (total=%u), using OAM map", engineId,
+               numSdmaEnginesTotal_);
+    }
+  }
+
+  return getSdmaEngineIdFromOamMap(srcDeviceId, dstDeviceId);
 }
 
 AnvilLib& anvil = anvil.getInstance();
@@ -396,5 +543,5 @@ void shutdownEndpoint() {
   // no-op: HSA/KFD teardown happens in AnvilLib::~AnvilLib at process exit.
 }
 
-}  // namespace anvil
-}  // namespace rocshmem
+
+}  // namespace sdma_anvil

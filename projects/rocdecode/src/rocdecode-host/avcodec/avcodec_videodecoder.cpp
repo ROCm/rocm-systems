@@ -161,7 +161,7 @@ AvcodecVideoDecoder::~AvcodecVideoDecoder() {
  * @return rocDecStatus 
  */
 rocDecStatus AvcodecVideoDecoder::InitializeDecoder() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     if (!decoder_) decoder_ = avcodec_find_decoder(RocDecVideoCodec2AVCodec(decoder_create_info_.codec_type));
     if(!decoder_) {
         CriticalLog(g_rocdec_logger, "rocDecode<FFMpeg>:: Codec not supported by FFMpeg ");
@@ -231,7 +231,7 @@ rocDecStatus AvcodecVideoDecoder::InitializeDecoder() {
 }
 
 rocDecStatus AvcodecVideoDecoder::SubmitDecode(RocdecPicParamsHost *pPicParams) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(pPicParams));
     decoded_pic_cnt_ = 0;
     if (end_of_stream_) {
         avcodec_flush_buffers(dec_context_);
@@ -291,7 +291,7 @@ rocDecStatus AvcodecVideoDecoder::SubmitDecode(RocdecPicParamsHost *pPicParams) 
 }
 
 rocDecStatus AvcodecVideoDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus *decode_status) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx) + ", " + RocDecFmtPtr(decode_status));
     if (p_disp_frame_ && p_disp_frame_->picture_index == pic_idx) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_SUCCESS;
@@ -302,7 +302,8 @@ rocDecStatus AvcodecVideoDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatu
 }
 
 rocDecStatus AvcodecVideoDecoder::GetVideoFrame(int pic_idx, void **frame_ptr, uint32_t *line_size, RocdecProcParams *vid_postproc_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx) + ", " + RocDecFmtPtr(frame_ptr) + ", " +
+                             RocDecFmtPtr(line_size) + ", " + RocDecFmtPtr(vid_postproc_params));
     if (p_disp_frame_ == nullptr) {
         ErrorLog(g_rocdec_logger, "GetVideoFrame: No frame available to display");
         FunctionExitLog(g_rocdec_logger);
@@ -327,7 +328,7 @@ rocDecStatus AvcodecVideoDecoder::GetVideoFrame(int pic_idx, void **frame_ptr, u
 
 
 rocDecStatus AvcodecVideoDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo *preconfig_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(preconfig_params));
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     if (preconfig_params == nullptr) {
         FunctionExitLog(g_rocdec_logger);
@@ -345,7 +346,7 @@ rocDecStatus AvcodecVideoDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInf
 }
 
 void AvcodecVideoDecoder::DecodeThread() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     AVPacket *pkt;
     do {
         pkt = PopPacket();
@@ -355,7 +356,7 @@ void AvcodecVideoDecoder::DecodeThread() {
 }
 
 int AvcodecVideoDecoder::DecodeAvFrame(AVPacket *av_pkt, AVFrame *p_frame) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(av_pkt) + ", " + RocDecFmtPtr(p_frame));
     int status;
     //send packet to av_codec
     status = avcodec_send_packet(dec_context_, av_pkt);
@@ -401,7 +402,7 @@ int AvcodecVideoDecoder::DecodeAvFrame(AVPacket *av_pkt, AVFrame *p_frame) {
 }
 
 rocDecStatus AvcodecVideoDecoder::NotifyNewSequence(AVFrame *p_frame) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_frame));
     if (!p_frame) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
@@ -439,7 +440,7 @@ rocDecStatus AvcodecVideoDecoder::NotifyNewSequence(AVFrame *p_frame) {
 }
 
 rocDecStatus AvcodecVideoDecoder::SendSeiMsgPayload(AVFrame *p_frame) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_frame));
 #if 0 //todo
     sei_message_info_params_.sei_message_count = sei_message_count_;
     sei_message_info_params_.sei_message = sei_message_list_.data();
@@ -454,7 +455,7 @@ rocDecStatus AvcodecVideoDecoder::SendSeiMsgPayload(AVFrame *p_frame) {
 }
 
 rocDecStatus AvcodecVideoDecoder::NotifyPictureDisplay() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     int num_frames_to_display = decoded_pic_cnt_;
     while (num_frames_to_display) {
         p_disp_frame_ = GetDisplayFrame();

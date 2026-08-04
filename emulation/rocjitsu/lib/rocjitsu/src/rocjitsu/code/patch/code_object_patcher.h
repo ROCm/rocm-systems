@@ -3,12 +3,13 @@
 
 #pragma once
 
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <string>
 #include <string_view>
 #include <vector>
 
@@ -16,6 +17,61 @@ namespace rocjitsu {
 
 class AmdGpuCodeObject;
 struct KdTranslation;
+
+/// @brief One exact source-to-target offset mapping inside `.text`.
+///
+/// @details DBT supplies instruction starts and block ends after final kernel
+/// placement. The ELF patcher uses these mappings to keep local labels and
+/// function symbols attached to relocated code without interpreting the ISA.
+struct TextOffsetRelocation {
+  uint64_t source_offset = 0;
+  uint64_t target_offset = 0;
+};
+
+/// @brief One relocated literal64 PC builder whose target is outside `.text`.
+struct PcRelativeDataRelocation {
+  uint64_t target_getpc_offset = 0;
+  uint64_t target_literal_offset = 0;
+  uint64_t source_target_vaddr = 0;
+};
+
+/// @brief Section-relative location of an address in allocated non-executable storage.
+struct AllocatedDataSectionAddress {
+  size_t section_index = 0;
+  uint64_t section_offset = 0;
+};
+
+/// @brief Resolve a data address, including a nonempty section's one-past-end value.
+///
+/// @details Returns the first allocated, non-executable, nonempty section that contains @p vaddr or
+/// ends there. Empty sections do not own an endpoint. If two sections meet at @p vaddr, callers
+/// must not rely on which one is returned.
+[[nodiscard]] std::optional<AllocatedDataSectionAddress>
+resolve_allocated_data_section_address(std::span<const Elf64_Shdr> sections, uint64_t vaddr);
+
+/// @brief Resolve a PC-relative data target without reclassifying an address inside source text.
+[[nodiscard]] std::optional<AllocatedDataSectionAddress>
+resolve_pc_relative_data_section_address(std::span<const Elf64_Shdr> sections, uint64_t vaddr,
+                                         uint64_t text_vaddr, uint64_t text_size);
+
+/// @brief One relocated literal64 PC builder whose target is inside `.text`.
+///
+/// @details Separate from PcRelativeDataRelocation because the target is named by a final `.text`
+/// offset rather than a virtual address: a code target moves with the body that holds it, so it
+/// cannot be resolved by locating the section that contains a fixed address. The literal is
+/// recomputed as @c target_text_offset - (target_getpc_offset + 4), the distance an `s_get_pc_i64`
+/// leaves to be made up, using only offsets within the emitted text.
+struct PcRelativeTextRelocation {
+  uint64_t target_getpc_offset = 0;
+  uint64_t target_literal_offset = 0;
+  uint64_t target_text_offset = 0;
+};
+
+/// @brief Location of a sidecar kernel descriptor appended into a loaded ELF segment.
+struct AppendedSidecarDescriptor {
+  uint64_t file_offset = 0;
+  uint64_t vaddr = 0;
+};
 
 class CodeObjectPatcher {
 public:
@@ -25,10 +81,45 @@ public:
   std::span<const uint8_t> text_bytes() const;
 
   std::span<const uint8_t> image_bytes() const { return {image_.data(), image_.size()}; }
+  /// @brief Validated raw section headers, including SHT_NOBITS entries.
+  [[nodiscard]] std::vector<Elf64_Shdr> section_headers() const;
   uint64_t text_offset() const { return text_offset_; }
   uint64_t text_size() const { return text_size_; }
 
-  void overwrite_text(std::span<const uint8_t> new_text);
+  /// @brief Replace the original .text payload with DBT-relocated code.
+  ///
+  /// @details Updates the .text section size, shifts later file contents, grows
+  /// the executable LOAD segment that contains .text, preserves LOAD alignment,
+  /// updates moved symbols and relocation places, and keeps descriptor-relative
+  /// entries coherent with explicit descriptor patches applied by DBT.
+  [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text,
+                                  std::span<const TextOffsetRelocation> text_relocations = {},
+                                  std::span<const PcRelativeDataRelocation> data_relocations = {},
+                                  std::span<const PcRelativeTextRelocation> code_relocations = {},
+                                  bool require_every_text_symbol_mapped = false);
+
+  /// @brief True if any relocation's place (r_offset) falls inside .text.
+  ///
+  /// @details DBT compacts/expands/moves instructions within .text but does not
+  /// remap relocation places that land in .text — replace_text() only shifts
+  /// relocation offsets for whole sections moved *after* .text. An in-.text
+  /// relocation would therefore be applied to the wrong translated bytes.
+  /// BinaryTranslator uses this to fail closed instead of miscompiling. Real
+  /// AMDHSA kernel code objects carry no such relocations, so this rejects only
+  /// genuinely unsupported inputs.
+  [[nodiscard]] bool has_relocations_within_text() const;
+
+  /// @brief True if any relocation references .text in a form DBT cannot remap.
+  ///
+  /// @details DBT can remap zero-addend RELA references to ordinary symbols
+  /// defined in .text by updating the symbol value, and symbol-less
+  /// R_AMDGPU_RELATIVE64 references by updating their explicit addend. Section
+  /// symbols, REL records with implicit addends, and named-symbol references
+  /// with nonzero addends require relocation-specific address reconstruction
+  /// that is not implemented. BinaryTranslator uses this predicate to reject
+  /// only those unsupported forms while allowing relocation-backed function
+  /// tables that the text offset map can update safely.
+  [[nodiscard]] bool has_unsupported_relocation_to_text() const;
 
   void update_elf_flags(uint32_t new_flags);
 
@@ -37,21 +128,35 @@ public:
 
   /// @brief Apply a descriptor translation plan to the in-memory ELF image.
   ///
-  /// KernelDescriptorTranslator owns the resource/ABI decision. The patcher
-  /// owns the byte-level descriptor update, cave placement, and entry redirect.
+  /// KernelDescriptorTranslator owns the resource/ABI decision. BinaryTranslator
+  /// owns text relocation and any local prologue layout. The patcher only
+  /// mutates descriptor bytes and redirects the descriptor to the already-known
+  /// relocated entry offset.
   [[nodiscard]] bool apply_kernel_descriptor_translation(const KdTranslation &translation,
                                                          rj_code_arch_t target_arch);
 
-  /// @brief Append descriptor-derived instructions and return their .text offset.
+  /// @brief Append non-symbolized sidecar descriptors in loaded memory after .text.
   ///
-  /// The descriptor translator owns the ABI policy and emits @p prologue_words.
-  /// The patcher owns the byte-level placement: it puts those words in the code
-  /// cave at a 256-byte-aligned launch address and appends a branch into the
-  /// original kernel entry. The caller then redirects the kernel descriptor to
-  /// the returned offset.
-  [[nodiscard]] std::optional<uint64_t>
-  append_kernel_entry_prologue(uint64_t entry_text_offset, std::span<const uint32_t> prologue_words,
-                               rj_code_arch_t arch);
+  /// @details Sidecar descriptors must be visible to the GPU loader, but they
+  /// do not need to be discoverable through the AMDHSA symbol table. The patcher
+  /// therefore places descriptor bytes in the executable LOAD tail immediately
+  /// after the translated .text payload, without growing the .text section
+  /// itself. Runtime metadata records the returned virtual addresses.
+  [[nodiscard]] std::optional<std::vector<AppendedSidecarDescriptor>>
+  append_sidecar_descriptor_translations(std::span<const KdTranslation> translations,
+                                         rj_code_arch_t target_arch, uint64_t alignment = 64);
+
+  /// @brief Append a named, non-allocated ELF section without moving loadable bytes.
+  ///
+  /// @details DBT runtime metadata must not perturb code-object load addresses:
+  /// ROCR and the kernel descriptor ABI have already consumed those addresses.
+  /// This helper appends the payload, a copied section-string table, and a new
+  /// section-header table at EOF. Program headers and allocated sections are
+  /// left untouched, so the new section is available to tools and rocjitsu's
+  /// own loader-side metadata parser but is not mapped into GPU code memory.
+  [[nodiscard]] bool append_nonalloc_section(std::string_view name,
+                                             std::span<const uint8_t> contents,
+                                             uint64_t alignment = 1);
 
   /// @brief Redirect one kernel descriptor from @p old_entry_text_offset to @p
   /// new_entry_text_offset.
@@ -63,41 +168,15 @@ public:
                                            uint64_t old_entry_text_offset,
                                            uint64_t new_entry_text_offset);
 
-  void append_cave_body(std::span<const uint32_t> words);
-
-  uint64_t cave_body_size() const { return cave_body_.size(); }
-
-  /// @brief Materialize the accumulated cave body as an executable ELF section.
-  ///
-  /// The section data is inserted immediately after the original .text bytes so
-  /// all cave offsets are still expressible as .text-relative byte offsets:
-  /// original .text occupies [0, text_size_) and this section starts at
-  /// text_size_. The caller must therefore set cave_start() to text_size()
-  /// before emitting branch stubs.
-  ///
-  /// @returns true if there was no cave body to emit or the section was
-  ///          materialized successfully; false if the original .text section
-  ///          header could not be found.
-  [[nodiscard]] bool append_cave_section(std::string_view section_name = ".rj_translations");
-
-  /// @brief Set the .text-relative byte offset where the cave body will be placed.
-  /// This must be called before any apply_semantic() calls so branch offsets
-  /// are computed correctly.
-  void set_cave_start(uint64_t offset) { cave_start_ = offset; }
-
-  /// @brief Get the .text-relative cave start offset.
-  uint64_t cave_start() const { return cave_start_; }
-
-  std::span<const uint8_t> cave_body() const { return cave_body_; }
-
-  std::vector<uint8_t> emit() const;
+  std::vector<uint8_t> emit() const &;
+  std::vector<uint8_t> emit() &&;
 
 private:
   std::vector<uint8_t> image_;
   uint64_t text_offset_;
   uint64_t text_size_;
-  std::vector<uint8_t> cave_body_;
-  uint64_t cave_start_ = 0;
+  uint64_t text_vaddr_;
+  uint64_t text_tail_size_;
 };
 
 } // namespace rocjitsu

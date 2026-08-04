@@ -28,6 +28,9 @@ hipError_t capturehipModuleLaunchKernel(hipStream_t& stream, hipFunction_t& f, u
                                         uint32_t& sharedMemBytes, void**& kernelParams,
                                         void**& extra);
 
+hipError_t capturehipDrvLaunchKernelEx(hipStream_t& stream, const HIP_LAUNCH_CONFIG*& config,
+                                       hipFunction_t& f, void**& kernelParams, void**& extra);
+
 hipError_t capturehipModuleLaunchCooperativeKernel(hipStream_t& stream, hipFunction_t& f,
                                                    uint32_t& gridDimX, uint32_t& gridDimY,
                                                    uint32_t& gridDimZ, uint32_t& blockDimX,
@@ -98,4 +101,20 @@ hipError_t capturehipMallocAsync(hipStream_t stream, hipMemPool_t mem_pool, size
                                  void** dev_ptr);
 
 hipError_t capturehipFreeAsync(hipStream_t stream, void* dev_ptr);
+
+hipError_t capturehipStreamBatchMemOp(hipStream_t& stream, unsigned int& count,
+                                      hipStreamBatchMemOpParams*& paramArray,
+                                      unsigned int& flags);
+
+hipError_t capturehipStreamWaitValue32(hipStream_t& stream, void*& ptr, uint32_t& value,
+                                       unsigned int& flags, uint32_t& mask);
+
+hipError_t capturehipStreamWaitValue64(hipStream_t& stream, void*& ptr, uint64_t& value,
+                                       unsigned int& flags, uint64_t& mask);
+
+hipError_t capturehipStreamWriteValue32(hipStream_t& stream, void*& ptr, uint32_t& value,
+                                        unsigned int& flags);
+
+hipError_t capturehipStreamWriteValue64(hipStream_t& stream, void*& ptr, uint64_t& value,
+                                        unsigned int& flags);
 }  // namespace hip

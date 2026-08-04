@@ -111,6 +111,7 @@ The ``create_decoder()`` function sets the decoder parameters and passes them to
   
   void create_decoder(DecoderInfo& dec_info) {
     RocDecoderCreateInfo create_info = {};
+    create_info.device_id = static_cast<uint8_t>(dec_info.dec_device_id);
     create_info.codec_type = dec_info.rocdec_codec_id;     // user specified codec_type for raw files
     [...]
     CHECK(rocDecCreateDecoder(&dec_info.decoder, &create_info));
@@ -242,6 +243,14 @@ From the ``rocdecdecode.cpp`` sample:
   }
 
 Once decoding is complete, ``rocDecDestroyVideoParser()`` needs to be called to destroy the parser, and either ``rocDecDestroyDecoderHost()`` or ``rocDecDestroyDecoder()`` needs to be called to destroy the decoder.
+
+.. note:: 
+
+  To run the sample, you'll need to set the ``ROCM_PATH`` environment variable to point to the location of your ROCm installation:
+
+  .. code:: shell
+
+    export ROCM_PATH=path_to_rocm_installation
 
 .. |rocdecdecode| replace:: ``rocdecdecode``
 .. _rocdecdecode: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples/rocdecDecode/README.md

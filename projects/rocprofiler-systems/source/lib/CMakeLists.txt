@@ -41,7 +41,6 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sqlite3>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-logger>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
@@ -65,6 +64,7 @@ target_link_libraries(
 
 add_subdirectory(common)
 add_subdirectory(core)
+add_subdirectory(backends)
 add_subdirectory(binary)
 add_subdirectory(logger)
 

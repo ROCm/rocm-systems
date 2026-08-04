@@ -211,7 +211,7 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
     }
 
     size_t offset = 0;
-    memory = getMemoryObject(dev_ptr, offset);
+    memory = getMemoryObject(device_, dev_ptr, offset);
     // Saves the current device id so that it can be accessed later
     memory->getUserData().deviceId = device_->deviceId();
 

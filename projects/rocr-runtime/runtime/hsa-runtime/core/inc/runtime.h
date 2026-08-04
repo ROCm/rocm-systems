@@ -45,8 +45,10 @@
 #ifndef HSA_RUNTME_CORE_INC_RUNTIME_H_
 #define HSA_RUNTME_CORE_INC_RUNTIME_H_
 
+#include <cstdint>
 #include <vector>
 #include <map>
+#include <unordered_map>
 #include <memory>
 #include <tuple>
 #include <utility>
@@ -92,6 +94,24 @@
 #endif
 #endif
 
+inline bool operator==(const hsa_amd_vmem_alloc_handle_t& lhs,
+                       const hsa_amd_vmem_alloc_handle_t& rhs) {
+  return lhs.handle == rhs.handle;
+}
+
+inline bool operator!=(const hsa_amd_vmem_alloc_handle_t& lhs,
+                       const hsa_amd_vmem_alloc_handle_t& rhs) {
+  return !(lhs == rhs);
+}
+
+namespace std {
+template <> struct hash<hsa_amd_vmem_alloc_handle_t> {
+  size_t operator()(const hsa_amd_vmem_alloc_handle_t& x) const {
+    return hash<uint64_t>()(x.handle);
+  }
+};
+}  // namespace std
+
 //---------------------------------------------------------------------------//
 //    Constants                                                              //
 //---------------------------------------------------------------------------//
@@ -101,11 +121,11 @@
 #define HSA_PACKET_ALIGN_BYTES 64
 #define HSA_MAX_DEP_SIGNALS 5
 
-//Avoids include
+// Avoids include
 namespace rocr {
 namespace AMD {
-  class MemoryRegion;
-} // namespace amd
+class MemoryRegion;
+}  // namespace AMD
 
 namespace core {
 extern bool g_use_interrupt_wait;
@@ -122,7 +142,8 @@ extern bool g_use_mwaitx;
 /// - maintain loader state.
 /// - monitor asynchronous event from agent.
 class Runtime {
- friend class AMD::MemoryRegion;
+  friend class AMD::MemoryRegion;
+
  public:
   /// @brief Structure to describe connectivity between agents.
   struct LinkInfo {
@@ -186,9 +207,8 @@ class Runtime {
   /// @param [in] node_id_to Node id of the destination node.
   /// @param [in] link_info The link information between source and destination
   /// nodes.
-  void RegisterLinkInfo(uint32_t node_id_from, uint32_t node_id_to,
-                        uint32_t num_hop, uint32_t rec_sdma_eng_id_mask,
-                        hsa_amd_memory_pool_link_info_t& link_info);
+  void RegisterLinkInfo(uint32_t node_id_from, uint32_t node_id_to, uint32_t num_hop,
+                        uint32_t rec_sdma_eng_id_mask, hsa_amd_memory_pool_link_info_t& link_info);
 
   /// @brief Query link information between two nodes.
   /// @param [in] node_id_from Node id of the source node.
@@ -204,9 +224,7 @@ class Runtime {
   ///
   /// @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
   /// agent returns ::HSA_STATUS_SUCCESS.
-  hsa_status_t IterateAgent(hsa_status_t (*callback)(hsa_agent_t agent,
-                                                     void* data),
-                            void* data);
+  hsa_status_t IterateAgent(hsa_status_t (*callback)(hsa_agent_t agent, void* data), void* data);
 
   /// @brief Allocate memory on a particular region.
   ///
@@ -217,8 +235,8 @@ class Runtime {
   ///
   /// @retval ::HSA_STATUS_SUCCESS If allocation is successful.
   hsa_status_t AllocateMemory(const MemoryRegion* region, size_t size,
-                              MemoryRegion::AllocateFlags alloc_flags,
-                              void** address, int agent_node_id = 0);
+                              MemoryRegion::AllocateFlags alloc_flags, void** address,
+                              int agent_node_id = 0);
 
   /// @brief Free memory previously allocated with AllocateMemory.
   ///
@@ -229,19 +247,43 @@ class Runtime {
   /// @retval ::HSA_STATUS_SUCCESS if @p ptr is successfully released.
   hsa_status_t FreeMemory(void* ptr);
 
+  /// @brief Resolve a pointer to the driver handle usable by a requesting agent.
+  ///
+  /// Looks up the allocation in @ref allocation_map_ or @ref mapped_handle_map_ that contains
+  /// @p ptr and returns its base address and a DriverMemoryHandle whose native id is meaningful to
+  /// @p requesting_agent's driver. Lets a driver recover the native allocation id, e.g. a BO
+  /// handle, from a virtual address without maintaining its own address table.
+  ///
+  /// The handle word is driver-specific (a virtual address for KFD, a GEM BO for XDNA), so the
+  /// resolved handle must match the requesting agent's driver:
+  /// - Same driver as the owner: returns the owner's allocation handle.
+  /// - Different driver (vmem only): returns the per-agent handle imported for
+  ///   @p requesting_agent by @ref hsa_amd_vmem_set_access. If @p ptr was not shared to that
+  ///   agent, resolution fails.
+  ///
+  /// @param[in] ptr Address within an allocation (need not be the base).
+  /// @param[in] requesting_agent Agent whose driver will consume the handle.
+  /// @param[out] base Base address of the containing allocation.
+  /// @param[out] handle Driver handle of the containing allocation.
+  /// @retval ::HSA_STATUS_SUCCESS if a containing allocation accessible to @p requesting_agent
+  /// was found.
+  /// @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION otherwise.
+  hsa_status_t FindDriverMemoryHandle(const void* ptr, const Agent* requesting_agent, void** base,
+                                      DriverMemoryHandle* handle);
+
   hsa_status_t RegisterReleaseNotifier(void* ptr, hsa_amd_deallocation_callback_t callback,
                                        void* user_data);
 
   hsa_status_t DeregisterReleaseNotifier(void* ptr, hsa_amd_deallocation_callback_t callback);
 
-  /// @brief Blocking memory copy from src to dst.
-  ///
-  /// @param [in] dst Memory address of the destination.
-  /// @param [in] src Memory address of the source.
-  /// @param [in] size Copy size in bytes.
-  ///
-  /// @retval ::HSA_STATUS_SUCCESS if memory copy is successful and completed.
-  #undef CopyMemory
+/// @brief Blocking memory copy from src to dst.
+///
+/// @param [in] dst Memory address of the destination.
+/// @param [in] src Memory address of the source.
+/// @param [in] size Copy size in bytes.
+///
+/// @retval ::HSA_STATUS_SUCCESS if memory copy is successful and completed.
+#undef CopyMemory
   hsa_status_t CopyMemory(void* dst, const void* src, size_t size);
 
   /// @brief Non-blocking memory copy from src to dst.
@@ -280,9 +322,10 @@ class Runtime {
   /// @retval ::HSA_STATUS_SUCCESS if copy command has been submitted
   /// successfully to the agent DMA queue.
   hsa_status_t CopyMemoryOnEngine(void* dst, core::Agent* dst_agent, const void* src,
-                          core::Agent* src_agent, size_t size,
-                          std::vector<core::Signal*>& dep_signals, core::Signal& completion_signal,
-                          hsa_amd_sdma_engine_id_t  engine_id, bool force_copy_on_sdma);
+                                  core::Agent* src_agent, size_t size,
+                                  std::vector<core::Signal*>& dep_signals,
+                                  core::Signal& completion_signal,
+                                  hsa_amd_sdma_engine_id_t engine_id, bool force_copy_on_sdma);
 
   /// @brief Return SDMA availability status for copy direction
   ///
@@ -293,7 +336,7 @@ class Runtime {
   /// @retval HSA_STATUS_SUCCESS DMA engines are available
   /// @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES DMA engines are not available
   hsa_status_t CopyMemoryStatus(core::Agent* dst_agent, core::Agent* src_agent,
-                                uint32_t *engine_ids_mask);
+                                uint32_t* engine_ids_mask);
 
   /// @brief Get preferred SDMA engine for the copy direction
   ///
@@ -305,14 +348,14 @@ class Runtime {
   hsa_status_t GetPreferredEngine(core::Agent* dst_agent, core::Agent* src_agent,
                                   uint32_t* recommended_ids_mask);
 
-  /// @brief Fill the first @p count of uint32_t in ptr with value.
-  ///
-  /// @param [in] ptr Memory address to be filled.
-  /// @param [in] value The value/pattern that will be used to set @p ptr.
-  /// @param [in] count Number of uint32_t element to be set.
-  ///
-  /// @retval ::HSA_STATUS_SUCCESS if memory fill is successful and completed.
-  #undef FillMemory
+/// @brief Fill the first @p count of uint32_t in ptr with value.
+///
+/// @param [in] ptr Memory address to be filled.
+/// @param [in] value The value/pattern that will be used to set @p ptr.
+/// @param [in] count Number of uint32_t element to be set.
+///
+/// @retval ::HSA_STATUS_SUCCESS if memory fill is successful and completed.
+#undef FillMemory
   hsa_status_t FillMemory(void* ptr, uint32_t value, size_t count);
 
   /// @brief Set agents as the whitelist to access ptr.
@@ -324,8 +367,7 @@ class Runtime {
   ///
   /// @retval ::HSA_STATUS_SUCCESS The whitelist has been configured
   /// successfully and all agents in the @p agents could start accessing @p ptr.
-  hsa_status_t AllowAccess(uint32_t num_agents, const hsa_agent_t* agents,
-                           const void* ptr);
+  hsa_status_t AllowAccess(uint32_t num_agents, const hsa_agent_t* agents, const void* ptr);
 
   /// @brief Query system information.
   ///
@@ -347,13 +389,12 @@ class Runtime {
   /// handler.
   ///
   /// @retval ::HSA_STATUS_SUCCESS Registration is successful.
-  hsa_status_t SetAsyncSignalHandler(hsa_signal_t signal,
-                                     hsa_signal_condition_t cond,
-                                     hsa_signal_value_t value,
-                                     hsa_amd_signal_handler handler, void* arg);
+  hsa_status_t SetAsyncSignalHandler(hsa_signal_t signal, hsa_signal_condition_t cond,
+                                     hsa_signal_value_t value, hsa_amd_signal_handler handler,
+                                     void* arg);
 
   hsa_status_t InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
-                          hsa_interop_map_flag_t flags, size_t* size, void** ptr,
+                          hsa_interop_map_flag_t flags, size_t size_hint, size_t* size, void** ptr,
                           size_t* metadata_size, const void** metadata);
 
   hsa_status_t InteropUnmap(void* ptr);
@@ -386,22 +427,20 @@ class Runtime {
   hsa_status_t SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent, uint32_t num_dep_signals,
                            const hsa_signal_t* dep_signals, hsa_signal_t completion_signal);
 
-  hsa_status_t SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count,
-                                        uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
-                                        hsa_signal_t completion_signal);
+  hsa_status_t SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count, uint32_t num_dep_signals,
+                               const hsa_signal_t* dep_signals, hsa_signal_t completion_signal);
 
-  hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf,
-                                            uint64_t* offset, uint64_t flags);
+  hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf, uint64_t* offset,
+                            uint64_t flags);
 
-  hsa_status_t DmaBufClose(int dmabuf);
-
-  hsa_status_t VMemoryAddressReserve(void** ptr, size_t size, uint64_t address, uint64_t alignment, uint64_t flags);
+  hsa_status_t VMemoryAddressReserve(void** ptr, size_t size, uint64_t address, uint64_t alignment,
+                                     uint64_t flags);
 
   hsa_status_t VMemoryAddressFree(void* ptr, size_t size);
 
   hsa_status_t VMemoryHandleCreate(const MemoryRegion* region, size_t size,
-                                   MemoryRegion::AllocateFlags alloc_flags,
-                                   uint64_t flags, hsa_amd_vmem_alloc_handle_t* memoryHandle);
+                                   MemoryRegion::AllocateFlags alloc_flags, uint64_t flags,
+                                   hsa_amd_vmem_alloc_handle_t* memoryHandle);
 
   hsa_status_t VMemoryHandleRelease(hsa_amd_vmem_alloc_handle_t memoryHandle);
 
@@ -428,16 +467,20 @@ class Runtime {
   hsa_status_t VMemoryGetAllocPropertiesFromHandle(const hsa_amd_vmem_alloc_handle_t memoryHandle,
                                                    const core::MemoryRegion** mem_region,
                                                    hsa_amd_memory_type_t* type);
+  hsa_status_t VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_handle,
+                                         hsa_amd_vmem_alloc_handle_t handle, uint64_t flags);
+  hsa_status_t VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handle,
+                                         hsa_amd_vmem_alloc_handle_t* handle);
 
   hsa_status_t EnableLogging(uint8_t* flags, void* file);
 
-  hsa_status_t GetSignalEventId(hsa_signal_t signal, uint32_t *event_id);
+  hsa_status_t GetSignalEventId(hsa_signal_t signal, uint32_t* event_id);
 
   const std::vector<Agent*>& cpu_agents() { return cpu_agents_; }
 
   const std::vector<Agent*>& gpu_agents() { return gpu_agents_; }
 
-  const std::vector<Agent *> &aie_agents() { return aie_agents_; }
+  const std::vector<Agent*>& aie_agents() { return aie_agents_; }
 
   const std::vector<Agent*>& disabled_gpu_agents() { return disabled_gpu_agents_; }
 
@@ -465,7 +508,7 @@ class Runtime {
   // to lightweight coredump filter
   void IterateCodeObjectAllocations(std::function<void(uint64_t start, size_t size)> cb) {
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
-    for(auto& alloc: allocation_map_) {
+    for (auto& alloc : allocation_map_) {
       if (alloc.second.alloc_flags & core::MemoryRegion::AllocateCodeObject) {
         // add this address range to MemoryRegionFilter map
         cb(reinterpret_cast<uint64_t>(alloc.first), alloc.second.size);
@@ -473,14 +516,13 @@ class Runtime {
     }
   }
 
-  std::function<void*(size_t size, size_t align, MemoryRegion::AllocateFlags flags, int agent_node_id)>&
+  std::function<void*(size_t size, size_t align, MemoryRegion::AllocateFlags flags,
+                      int agent_node_id)>&
   system_allocator() {
     return system_allocator_;
   }
 
-  std::function<void(void*)>& system_deallocator() {
-    return system_deallocator_;
-  }
+  std::function<void(void*)>& system_deallocator() { return system_deallocator_; }
 
   const Flag& flag() const { return flag_; }
   Flag& flag() { return flag_; }
@@ -489,8 +531,7 @@ class Runtime {
 
   ExtensionEntryPoints extensions_;
 
-  hsa_status_t SetCustomSystemEventHandler(hsa_amd_system_event_callback_t callback,
-                                           void* data);
+  hsa_status_t SetCustomSystemEventHandler(hsa_amd_system_event_callback_t callback, void* data);
 
   hsa_status_t SetInternalQueueCreateNotifier(hsa_amd_runtime_queue_notifier callback,
                                               void* user_data);
@@ -505,8 +546,7 @@ class Runtime {
 
   void KfdVersion(const HsaVersionInfo& version) {
     kfd_version.version = version;
-    if (version.KernelInterfaceMajorVersion == 1 &&
-      version.KernelInterfaceMinorVersion >= 14)
+    if (version.KernelInterfaceMajorVersion == 1 && version.KernelInterfaceMinorVersion >= 14)
       kfd_version.supports_event_age = true;
 
     if (thunkLoader()->IsDXG()) {
@@ -515,8 +555,7 @@ class Runtime {
 
     kfd_version.supports_metadata_prefetch = false;
     if (version.KernelInterfaceMajorVersion > 1 ||
-        (version.KernelInterfaceMajorVersion == 1 &&
-        version.KernelInterfaceMinorVersion >= 19))
+        (version.KernelInterfaceMajorVersion == 1 && version.KernelInterfaceMinorVersion >= 19))
       kfd_version.supports_metadata_prefetch = true;
   }
 
@@ -533,13 +572,12 @@ class Runtime {
   bool AqlProfileAvailable() const { return (aqlprofile_lib_ != nullptr); }
   os::LibHandle AqlProfileLib() const { return aqlprofile_lib_; }
 
-  Driver &AgentDriver(DriverType drv_type) {
-    auto is_drv_type = [&](const std::unique_ptr<Driver> &d) {
+  Driver& AgentDriver(DriverType drv_type) {
+    auto is_drv_type = [&](const std::unique_ptr<Driver>& d) {
       return d->kernel_driver_type_ == drv_type;
     };
 
-    auto driver(std::find_if(agent_drivers_.begin(), agent_drivers_.end(),
-                             is_drv_type));
+    auto driver(std::find_if(agent_drivers_.begin(), agent_drivers_.end(), is_drv_type));
 
     if (driver == agent_drivers_.end()) {
       throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
@@ -571,15 +609,20 @@ class Runtime {
           size_requested(0),
           alloc_flags(core::MemoryRegion::AllocateNoFlags),
           user_ptr(nullptr),
-          thunk_bo(nullptr) {}
+          thunk_bo(nullptr),
+          thunk_node_id(-1) {}
+
     AllocationRegion(const MemoryRegion* region_arg, size_t size_arg, size_t size_requested,
-                     MemoryRegion::AllocateFlags alloc_flags)
+                     MemoryRegion::AllocateFlags alloc_flags,
+                     DriverMemoryHandle driver_handle_arg = {})
         : region(region_arg),
           size(size_arg),
           size_requested(size_requested),
           alloc_flags(alloc_flags),
           user_ptr(nullptr),
-          thunk_bo(nullptr) {}
+          thunk_bo(nullptr),
+          thunk_node_id(-1),
+          driver_handle(driver_handle_arg) {}
 
     struct notifier_t {
       void* ptr;
@@ -594,26 +637,27 @@ class Runtime {
     void* user_ptr;
     std::unique_ptr<std::vector<notifier_t>> notifiers;
     HsaMemoryObjectHandle thunk_bo;
+    HSAuint32 thunk_node_id;
+    DriverMemoryHandle driver_handle;
   };
 
   struct AsyncEventsInfo;
   struct AsyncEventsControl {
-    AsyncEventsControl(AsyncEventsInfo *asyncInfo);
+    AsyncEventsControl(AsyncEventsInfo* asyncInfo);
     void Start();
     void Shutdown();
 
     hsa_signal_t wake;
-    bool exit;
+    std::atomic<bool> exit;
 
-    private:
+   private:
     AsyncEventsInfo* info_;
     os::Thread thread_;
- };
+  };
 
   struct AsyncEvents {
-    void PushBack(hsa_signal_t signal, hsa_signal_condition_t cond,
-                  hsa_signal_value_t value, hsa_amd_signal_handler handler,
-                  void* arg);
+    void PushBack(hsa_signal_t signal, hsa_signal_condition_t cond, hsa_signal_value_t value,
+                  hsa_amd_signal_handler handler, void* arg);
 
     void CopyIndex(size_t dst, size_t src);
 
@@ -627,9 +671,16 @@ class Runtime {
     std::vector<hsa_signal_condition_t> cond_;
     std::vector<hsa_signal_value_t> value_;
     std::vector<hsa_amd_signal_handler> handler_;
-    std::vector<HsaEvent*> hsa_events_; //!< A list of HSA events for KFD wait
-    std::vector<uint64_t> age_;         //!< The age list for KFD wait
+    std::vector<HsaEvent*> hsa_events_;  //!< A list of HSA events for KFD wait
+    std::vector<uint64_t> age_;          //!< The age list for KFD wait
     std::vector<void*> arg_;
+    //! Last-known KFD event_age, keyed by the HSA event. The hsa_events_/age_
+    //! arrays above form a compacted, per-iteration view whose slot indices do
+    //! not track a given event across reordering of the async list (handler
+    //! removal swap-removes entries, registration appends them). This map keeps
+    //! each event's baseline so the KFD wait stays edge-triggered instead of
+    //! being re-primed to 1 and spinning.
+    std::unordered_map<HsaEvent*, uint64_t> age_by_event_;
   };
 
   // Event item structure to hold all signal information
@@ -642,24 +693,35 @@ class Runtime {
     HsaEvent* hsa_event;  //!< A list of HSA events for KFD wait
     uint64_t age;         //!< The age list for KFD wait
 
-    AsyncEventItem() : signal{0}, cond(HSA_SIGNAL_CONDITION_EQ), value(0),
-                      handler(nullptr), arg(nullptr), hsa_event(nullptr), age(0) {}
+    AsyncEventItem()
+        : signal{0},
+          cond(HSA_SIGNAL_CONDITION_EQ),
+          value(0),
+          handler(nullptr),
+          arg(nullptr),
+          hsa_event(nullptr),
+          age(0) {}
 
     AsyncEventItem(hsa_signal_t sig, hsa_signal_condition_t c, hsa_signal_value_t val,
-                    hsa_amd_signal_handler h, void* a)
-        : signal(sig), cond(c), value(val), handler(h), arg(a),
-          hsa_event(nullptr), age(0) {}
+                   hsa_amd_signal_handler h, void* a)
+        : signal(sig), cond(c), value(val), handler(h), arg(a), hsa_event(nullptr), age(0) {}
 
     AsyncEventItem(const AsyncEventItem& other)
-        : signal(other.signal), cond(other.cond), value(other.value),
-          handler(other.handler), arg(other.arg), hsa_event(other.hsa_event), age(other.age) {}
+        : signal(other.signal),
+          cond(other.cond),
+          value(other.value),
+          handler(other.handler),
+          arg(other.arg),
+          hsa_event(other.hsa_event),
+          age(other.age) {}
 
-    void init(hsa_signal_t sig, hsa_signal_condition_t c, hsa_signal_value_t v, hsa_amd_signal_handler h, void* a) {
-        signal = sig;
-        cond = c;
-        value = v;
-        handler = h;
-        arg = a;
+    void init(hsa_signal_t sig, hsa_signal_condition_t c, hsa_signal_value_t v,
+              hsa_amd_signal_handler h, void* a) {
+      signal = sig;
+      cond = c;
+      value = v;
+      handler = h;
+      arg = a;
     }
     // Helper operator to convert signal to Signal* for easier access
     Signal* operator->() {
@@ -671,29 +733,29 @@ class Runtime {
   };
 
   class AsyncEventsPool : private BaseShared {
-    public:
-      AsyncEventsPool() : block_size_(preallocblocks_ * minblock_) {}
-      ~AsyncEventsPool() { clear(); }
+   public:
+    AsyncEventsPool() : block_size_(preallocblocks_ * minblock_) {}
+    ~AsyncEventsPool() { clear(); }
 
-      AsyncEventItem* alloc();
-      void free(AsyncEventItem* item);
-      void clear();
+    AsyncEventItem* alloc();
+    void free(AsyncEventItem* item);
+    void clear();
 
-    private:
-      static const size_t minblock_ = 4096 / sizeof(AsyncEventItem);
-      static const size_t preallocblocks_ = 512;
-      static const size_t maxblocksize_ = 1ULL << 28;
-      HybridMutex lock_;
-      std::vector<AsyncEventItem*> free_list_;
-      std::vector<std::pair<void*, size_t>> block_list_;
-      size_t block_size_;
+   private:
+    static const size_t minblock_ = 4096 / sizeof(AsyncEventItem);
+    static const size_t preallocblocks_ = 512;
+    static const size_t maxblocksize_ = 1ULL << 28;
+    HybridMutex lock_;
+    std::vector<AsyncEventItem*> free_list_;
+    std::vector<std::pair<void*, size_t>> block_list_;
+    size_t block_size_;
   };
   // New concurrent events structure using lock-free queue
   struct ConcurrentAsyncEvents {
     ConcurrentAsyncEvents() {}
 
-    void PushBack(hsa_signal_t signal, hsa_signal_condition_t cond,
-                  hsa_signal_value_t value, hsa_amd_signal_handler handler, void* arg);
+    void PushBack(hsa_signal_t signal, hsa_signal_condition_t cond, hsa_signal_value_t value,
+                  hsa_amd_signal_handler handler, void* arg);
 
     void Clear();
 
@@ -709,8 +771,9 @@ class Runtime {
 
     //! Add events back to queue (for events that need to be kept)
     void AddEventsBack(const std::vector<AsyncEventItem>& events);
-  private:
-    //AsyncEventItem Queue
+
+   private:
+    // AsyncEventItem Queue
     ::rocr::MPSCQueue<AsyncEventItem*> event_queue_;
     AsyncEventsPool asyncEventPool_;
   };
@@ -782,6 +845,9 @@ class Runtime {
   /// loaded library.
   void LoadTools();
 
+  /// @brief Load the rocjitsu hotswap backend as the first HSA tool.
+  hsa_status_t LoadHotswapTool();
+
   /// @brief Call OnUnload method of each tool library.
   void UnloadTools();
 
@@ -828,13 +894,13 @@ class Runtime {
   std::vector<Agent*> gpu_agents_;
 
   // Agent list containing all compatible AIE agents in the platform.
-  std::vector<Agent *> aie_agents_;
+  std::vector<Agent*> aie_agents_;
 
   // Agent list containing incompletely initialized GPU agents not to be used by the process.
   std::vector<Agent*> disabled_gpu_agents_;
 
   // Agent map containing all agents indexed by their KFD node IDs.
-  std::map<uint32_t, std::vector<Agent*> > agents_by_node_;
+  std::map<uint32_t, std::vector<Agent*>> agents_by_node_;
 
   // Agent map containing all agents indexed by their KFD gpuid.
   std::map<uint32_t, Agent*> agents_by_gpuid_;
@@ -868,7 +934,9 @@ class Runtime {
   prefetch_map_t prefetch_map_;
 
   // Allocator using ::system_region_
-  std::function<void*(size_t size, size_t align, MemoryRegion::AllocateFlags flags, int agent_node_id)> system_allocator_;
+  std::function<void*(size_t size, size_t align, MemoryRegion::AllocateFlags flags,
+                      int agent_node_id)>
+      system_allocator_;
 
   // Deallocator using ::system_region_
   std::function<void(void*)> system_deallocator_;
@@ -933,9 +1001,9 @@ class Runtime {
   // first (AqlQueue::MarkVMFaulted), then signals this condvar so that
   // VMFaultHandler can stamp the fault address/reason onto the correct queue
   // before the system-event callback fires.
-  std::mutex              vm_fault_mutex_;
+  std::mutex vm_fault_mutex_;
   std::condition_variable vm_fault_cv_;
-  bool                    vm_fault_signaled_{false};
+  bool vm_fault_signaled_{false};
 
  public:
   /// @brief Signal that a per-queue ExceptionHandler has marked a queue as
@@ -962,9 +1030,11 @@ class Runtime {
   std::map<uint64_t, size_t> ipc_sock_server_conns_;
   std::mutex ipc_sock_server_lock_;
   os::Thread ipc_sock_server_thread_;
+  bool ipc_sock_server_shutdown_in_progress_;
 
   lazy_ptr<AsyncEventsInfo> asyncSignals_;
   lazy_ptr<AsyncEventsInfo> asyncExceptions_;
+
  private:
   void CheckVirtualMemApiSupport();
 
@@ -977,10 +1047,11 @@ class Runtime {
 
   struct AddressHandle {
     AddressHandle() : os_addr(nullptr), size(0), use_count(0), registered(false) {}
-    AddressHandle(void* addr, size_t _size, bool _registered) : os_addr(addr), size(_size), use_count(0), registered(_registered) {}
+    AddressHandle(void* addr, size_t _size, bool _registered)
+        : os_addr(addr), size(_size), use_count(0), registered(_registered) {}
 
     // Address returned by OS. May be different from user address when adjusted for alignment
-    void *os_addr;
+    void* os_addr;
     size_t size;
     int use_count;
     bool registered;
@@ -988,35 +1059,47 @@ class Runtime {
   std::map<const void*, AddressHandle> reserved_address_map_;  // Indexed by VA
 
   struct MemoryHandle {
-    MemoryHandle(const MemoryRegion* region, size_t size, uint64_t flags_unused,
-                 ThunkHandle thunk_handle, MemoryRegion::AllocateFlags alloc_flag)
-        : region(region),
-          size(size),
-          ref_count(1),
-          use_count(0),
-          thunk_handle(thunk_handle),
-          alloc_flag(alloc_flag) {}
+    MemoryHandle(const MemoryRegion* region, uint64_t flags_unused,
+                 DriverMemoryHandle driver_handle, MemoryRegion::AllocateFlags alloc_flag);
+    MemoryHandle(int dmabuf_fd);
+    MemoryHandle(hsa_fabric_handle_t fabric_handle);
+    ~MemoryHandle();
 
-    static __forceinline hsa_amd_vmem_alloc_handle_t Convert(ThunkHandle handle) {
+    static __forceinline hsa_amd_vmem_alloc_handle_t Convert(MemoryHandle* memHandle) {
       hsa_amd_vmem_alloc_handle_t ret_handle = {
-          static_cast<uint64_t>(reinterpret_cast<uintptr_t>(handle))};
+          .handle = static_cast<uint64_t>(reinterpret_cast<uint64_t>(memHandle))};
       return ret_handle;
     }
 
-    static __forceinline ThunkHandle Convert(hsa_amd_vmem_alloc_handle_t handle) {
-      return reinterpret_cast<void*>(handle.handle);
+    static __forceinline MemoryHandle* Convert(hsa_amd_vmem_alloc_handle_t handle) {
+      return reinterpret_cast<MemoryHandle*>(handle.handle);
     }
 
     __forceinline core::Agent* agentOwner() const { return region->owner(); }
 
+    /**
+     * @brief For host owned memory, resolve to the GPU agent that imported the memory.
+     * For device owned memory, return the agent that owns the memory.
+     */
+    __forceinline core::Agent* drmAgent() const { return drm_owner ? drm_owner : agentOwner(); }
+
     const MemoryRegion* region;
-    size_t size;
     int ref_count;
     int use_count;
-    ThunkHandle thunk_handle;  // handle returned by Driver::Allocate(NoAddress = 1)
+    DriverMemoryHandle driver_handle;  // handle returned by Driver::Allocate(NoAddress = 1)
+    bool imported;                     // True if this BO was imported from another process
+    bool is_fabric_handle;
     MemoryRegion::AllocateFlags alloc_flag;
+    core::Agent* drm_owner;  // Gpu agent used for import of host memory, NULL for device
+                             // memory/imported handles
   };
-  std::map<ThunkHandle, MemoryHandle> memory_handle_map_;
+  // hsa_amd_vmem_alloc_handle_t (MemoryHandle*) to MemoryHandle mapping. Owns MemoryHandle
+  // lifetime. Uniqueness is guaranteed by the runtime, independent of any driver-supplied
+  // identifier.
+  std::unordered_map<hsa_amd_vmem_alloc_handle_t, std::unique_ptr<MemoryHandle>> memory_handles;
+
+  MemoryHandle* FindMemoryHandle(MemoryHandle* handle);
+  void ReleaseMemoryHandle(MemoryHandle* handle);
 
   struct MappedHandle;
   struct MappedHandleAllowedAgent {
@@ -1032,23 +1115,21 @@ class Runtime {
     Agent* targetAgent;
     hsa_access_permission_t permissions;
     MappedHandle* mappedHandle;
-    ShareableHandle shareable_handle;
+    DriverMemoryHandle driver_handle;
+    // False when driver_handle is borrowed from MemoryHandle::driver_handle (drm_owner reuse path)
+    bool owns_driver_handle = true;
   };
 
   struct MappedHandle {
-    MappedHandle(MemoryHandle* mem_handle, AddressHandle* address_handle, void* va,
-                 uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
-                 hsa_access_permission_t perm, ShareableHandle shareable_handle);
+    MappedHandle(MemoryHandle* mem_handle, AddressHandle* address_handle, void* va, uint64_t offset,
+                 size_t size, hsa_access_permission_t perm);
 
-    __forceinline core::Agent* agentOwner() const { return mem_handle->region->owner(); }
+    __forceinline core::Agent* agentOwner() const { return mem_handle->agentOwner(); }
 
     MemoryHandle* mem_handle;
     AddressHandle* address_handle;
     uint64_t offset;
     size_t size;
-    int drm_fd;
-    void* drm_cpu_addr;  // CPU Buffer address
-    ShareableHandle shareable_handle;
     std::map<Agent*, MappedHandleAllowedAgent> allowed_agents;
   };
   std::map<const void*, MappedHandle> mapped_handle_map_;  // Indexed by VA
@@ -1057,21 +1138,17 @@ class Runtime {
   hsa_status_t VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, void* (*alloc)(size_t),
                               uint32_t* num_agents_accessible, hsa_agent_t** accessible);
 
-  hsa_status_t VMemoryMapAllowAccess(const void *va,
-                                     hsa_access_permission_t perm,
-                                     const hsa_agent_t *agents,
-                                     size_t num_agents);
-  hsa_status_t
-  VMemorySetAccessPerHandle(void *va, MappedHandle &MappedHandle,
-                            const hsa_amd_memory_access_desc_t *desc,
-                            const size_t desc_cnt);
+  hsa_status_t VMemoryMapAllowAccess(const void* va, hsa_access_permission_t perm,
+                                     const hsa_agent_t* agents, size_t num_agents);
+  hsa_status_t VMemorySetAccessPerHandle(void* va, MappedHandle& MappedHandle,
+                                         const hsa_amd_memory_access_desc_t* desc,
+                                         const size_t desc_cnt);
 
   void InitIPCDmaBufSupport();
   bool ipc_dmabuf_supported_;
-  int  IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
-                       unsigned int numNodes, HSAuint32 *nodes,
-                       void **importAddress, HSAuint64 *importSize,
-                       bool isdmabufSysmem, uint32_t shared_handle);
+  int IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, unsigned int numNodes,
+                      HSAuint32* nodes, void** importAddress, HSAuint64* importSize,
+                      bool isdmabufSysmem, uint32_t shared_handle);
 };
 
 }  // namespace core

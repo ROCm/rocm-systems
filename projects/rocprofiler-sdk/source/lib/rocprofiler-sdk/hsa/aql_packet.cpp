@@ -27,7 +27,8 @@
 #include "lib/rocprofiler-sdk/spm/interface.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
+#include <cstddef>
 #include <cstdlib>
 #include <iostream>
 
@@ -269,6 +270,10 @@ SQTTBufferingPackets::query_buffer_status()
     query.gpu_full = ret.is_too_late;
     query.packet   = buffer_swap.at(ret.num_swaps % buffer_swap.size());
 
+    constexpr auto read_offset_size =
+        offsetof(aqlprofile_att_buffer_status_t, read_offset) + sizeof(ret.read_offset);
+    if(ret._size >= read_offset_size) query.read_offset = ret.read_offset;
+
     return query;
 }
 
@@ -484,6 +489,8 @@ SPMPacket::kfd_stop()
 
 SPMPacket::~SPMPacket()
 {
+    if(!sym) return;
+
     running.wlock([&](auto& _running) {
         if(_running == false) return;
         auto status = sym->spm_stop(this->handle);
@@ -491,6 +498,12 @@ SPMPacket::~SPMPacket()
             << "spm_stop failed with HSA status: " << status;
         _running = false;
     });
+
+    if(handle.handle != 0 && sym->spm_delete_packets)
+    {
+        sym->spm_delete_packets(this->handle);
+        handle.handle = 0;
+    }
 }
 }  // namespace hsa
 }  // namespace rocprofiler

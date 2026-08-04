@@ -4,12 +4,17 @@
 /// @file rj_dbt_translate_smoke_test.cpp
 /// @brief End-to-end smoke test for the rj_dbt_translate command-line tool.
 
+#include "dbt_translate.h"
+#include "dbt_translate_cli.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
+#include "scoped_temp.h"
 
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -17,6 +22,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -30,15 +36,18 @@ namespace {
 
 std::filesystem::path g_translate_tool;
 
-struct TempDir {
-  std::filesystem::path path;
+rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput>
+synthetic_idempotence_mismatch(const rocjitsu::tools::TranslateOptions &options) {
+  EXPECT_TRUE(options.verify_idempotence);
 
-  explicit TempDir(std::filesystem::path temp_path) : path(std::move(temp_path)) {
-    std::filesystem::create_directories(path);
-  }
-
-  ~TempDir() { std::filesystem::remove_all(path); }
-};
+  rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput> result;
+  result.value.idempotence_checked = true;
+  result.errors.push_back(
+      {.exit_code = 5,
+       .message =
+           "translation output is not byte-idempotent: section '.text' first differs at 0x4"});
+  return result;
+}
 
 uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
@@ -52,12 +61,23 @@ uint64_t align_up(uint64_t value, uint64_t alignment) {
   return remainder == 0 ? value : value + alignment - remainder;
 }
 
-std::vector<uint8_t> make_smoke_code_object() {
+void write_bytes(std::vector<uint8_t> &image, uint64_t offset, const void *src, size_t size) {
+  assert(offset <= image.size());
+  assert(size <= image.size() - offset);
+  std::memcpy(image.data() + offset, src, size);
+}
+
+template <typename T> void write_value(std::vector<uint8_t> &image, uint64_t offset, T value) {
+  write_bytes(image, offset, &value, sizeof(value));
+}
+
+std::vector<uint8_t> make_smoke_code_object(uint32_t elf_mach,
+                                            std::span<const uint32_t> text_words) {
   using namespace rocjitsu;
 
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
-  constexpr uint64_t text_size = 8;
+  const uint64_t text_size = text_words.size_bytes();
   constexpr uint64_t load_align = 0x1000;
   constexpr uint64_t kernel_descriptor_size = 64;
 
@@ -83,57 +103,52 @@ std::vector<uint8_t> make_smoke_code_object() {
 
   std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
 
-  Elf64_Ehdr ehdr{};
-  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
-  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
-  ehdr.e_ident[EI_DATA] = 1;
-  ehdr.e_ident[EI_VERSION] = 1;
-  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
-  ehdr.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
-  ehdr.e_type = ET_DYN;
-  ehdr.e_machine = EM_AMDGPU;
-  ehdr.e_version = 1;
-  ehdr.e_phoff = sizeof(Elf64_Ehdr);
-  ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
-  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
-  ehdr.e_phentsize = sizeof(Elf64_Phdr);
-  ehdr.e_phnum = phdr_count;
-  ehdr.e_shentsize = sizeof(Elf64_Shdr);
-  ehdr.e_shnum = section_count;
-  ehdr.e_shstrndx = 5;
-  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+  write_bytes(image, offsetof(Elf64_Ehdr, e_ident), EI_MAGIC, EI_MAGIC_SIZE);
+  image[offsetof(Elf64_Ehdr, e_ident) + EI_CLASS] = ELFCLASS64;
+  image[offsetof(Elf64_Ehdr, e_ident) + EI_DATA] = 1;
+  image[offsetof(Elf64_Ehdr, e_ident) + EI_VERSION] = 1;
+  image[offsetof(Elf64_Ehdr, e_ident) + EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  image[offsetof(Elf64_Ehdr, e_ident) + EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_type), ET_DYN);
+  write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_machine), EM_AMDGPU);
+  write_value<uint32_t>(image, offsetof(Elf64_Ehdr, e_version), 1);
+  write_value<uint64_t>(image, offsetof(Elf64_Ehdr, e_phoff), sizeof(Elf64_Ehdr));
+  write_value<uint64_t>(image, offsetof(Elf64_Ehdr, e_shoff), shoff);
+  write_value<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags), elf_mach);
+  write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_ehsize), sizeof(Elf64_Ehdr));
+  write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_phentsize), sizeof(Elf64_Phdr));
+  write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_phnum), phdr_count);
+  write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_shentsize), sizeof(Elf64_Shdr));
+  write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_shnum), section_count);
+  write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_shstrndx), 5);
 
-  std::array<Elf64_Phdr, phdr_count> phdrs{};
-  phdrs[0].p_type = PT_LOAD;
-  phdrs[0].p_flags = 0x5; // PF_R | PF_X
-  phdrs[0].p_offset = text_offset;
-  phdrs[0].p_vaddr = text_vaddr;
-  phdrs[0].p_paddr = text_vaddr;
-  phdrs[0].p_filesz = text_size;
-  phdrs[0].p_memsz = text_size;
-  phdrs[0].p_align = load_align;
+  const uint64_t phdr0 = sizeof(Elf64_Ehdr);
+  write_value<uint32_t>(image, phdr0 + offsetof(Elf64_Phdr, p_type), PT_LOAD);
+  write_value<uint32_t>(image, phdr0 + offsetof(Elf64_Phdr, p_flags), 0x5); // PF_R | PF_X
+  write_value<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_offset), text_offset);
+  write_value<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_vaddr), text_vaddr);
+  write_value<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_paddr), text_vaddr);
+  write_value<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_filesz), text_size);
+  write_value<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_memsz), text_size);
+  write_value<uint64_t>(image, phdr0 + offsetof(Elf64_Phdr, p_align), load_align);
 
-  phdrs[1].p_type = PT_LOAD;
-  phdrs[1].p_flags = 0x4; // PF_R
-  phdrs[1].p_offset = rodata_offset;
-  phdrs[1].p_vaddr = rodata_vaddr;
-  phdrs[1].p_paddr = rodata_vaddr;
-  phdrs[1].p_filesz = kernel_descriptor_size;
-  phdrs[1].p_memsz = kernel_descriptor_size;
-  phdrs[1].p_align = load_align;
-  std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
+  const uint64_t phdr1 = phdr0 + sizeof(Elf64_Phdr);
+  write_value<uint32_t>(image, phdr1 + offsetof(Elf64_Phdr, p_type), PT_LOAD);
+  write_value<uint32_t>(image, phdr1 + offsetof(Elf64_Phdr, p_flags), 0x4); // PF_R
+  write_value<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_offset), rodata_offset);
+  write_value<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_vaddr), rodata_vaddr);
+  write_value<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_paddr), rodata_vaddr);
+  write_value<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_filesz), kernel_descriptor_size);
+  write_value<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_memsz), kernel_descriptor_size);
+  write_value<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_align), load_align);
 
-  // Use a CDNA4 waitcnt that lowers to split RDNA4 wait instructions so the
-  // diff report is guaranteed to contain a shown source/target pair.
-  const std::array<uint32_t, 2> text_words = {0xbf8cc07fu, 0xbf810000u};
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
 
   // The DBT pipeline translates kernel entry offsets through AMDHSA kernel
   // descriptors. For this smoke fixture only the entry offset must be valid;
   // the remaining descriptor fields can stay zero.
   constexpr size_t kernel_code_entry_byte_offset_offset = 16;
-  std::array<uint8_t, kernel_descriptor_size> kernel_descriptor{};
+  std::vector<uint8_t> kernel_descriptor(kernel_descriptor_size, 0);
   const int64_t entry_offset =
       static_cast<int64_t>(text_vaddr) - static_cast<int64_t>(rodata_vaddr);
   std::memcpy(kernel_descriptor.data() + kernel_code_entry_byte_offset_offset, &entry_offset,
@@ -141,55 +156,106 @@ std::vector<uint8_t> make_smoke_code_object() {
   std::memcpy(image.data() + rodata_offset, kernel_descriptor.data(), kernel_descriptor.size());
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
 
-  std::array<Elf64_Sym, sym_count> syms{};
-  syms[1].st_name = kd_symbol_name;
-  syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
-  syms[1].st_shndx = 2;
-  syms[1].st_value = rodata_vaddr;
-  syms[1].st_size = kernel_descriptor.size();
-  std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
+  const uint64_t sym1 = symtab_offset + sizeof(Elf64_Sym);
+  write_value<uint32_t>(image, sym1 + offsetof(Elf64_Sym, st_name), kd_symbol_name);
+  write_value<unsigned char>(image, sym1 + offsetof(Elf64_Sym, st_info),
+                             elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject));
+  write_value<uint16_t>(image, sym1 + offsetof(Elf64_Sym, st_shndx), 2);
+  write_value<uint64_t>(image, sym1 + offsetof(Elf64_Sym, st_value), rodata_vaddr);
+  write_value<uint64_t>(image, sym1 + offsetof(Elf64_Sym, st_size), kernel_descriptor.size());
 
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
 
-  std::array<Elf64_Shdr, section_count> shdrs{};
-  shdrs[1].sh_name = text_name;
-  shdrs[1].sh_type = SHT_PROGBITS;
-  shdrs[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
-  shdrs[1].sh_addr = text_vaddr;
-  shdrs[1].sh_offset = text_offset;
-  shdrs[1].sh_size = text_size;
-  shdrs[1].sh_addralign = sizeof(uint32_t);
+  const auto write_shdr = [&](uint64_t index, uint32_t name, uint32_t type, uint64_t flags,
+                              uint64_t addr, uint64_t offset, uint64_t size, uint32_t link,
+                              uint32_t info, uint64_t addralign, uint64_t entsize) {
+    const uint64_t base = shoff + index * sizeof(Elf64_Shdr);
+    write_value<uint32_t>(image, base + offsetof(Elf64_Shdr, sh_name), name);
+    write_value<uint32_t>(image, base + offsetof(Elf64_Shdr, sh_type), type);
+    write_value<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_flags), flags);
+    write_value<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_addr), addr);
+    write_value<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_offset), offset);
+    write_value<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_size), size);
+    write_value<uint32_t>(image, base + offsetof(Elf64_Shdr, sh_link), link);
+    write_value<uint32_t>(image, base + offsetof(Elf64_Shdr, sh_info), info);
+    write_value<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_addralign), addralign);
+    write_value<uint64_t>(image, base + offsetof(Elf64_Shdr, sh_entsize), entsize);
+  };
+  write_shdr(1, text_name, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, text_vaddr, text_offset,
+             text_size, 0, 0, sizeof(uint32_t), 0);
+  write_shdr(2, rodata_name, SHT_PROGBITS, SHF_ALLOC, rodata_vaddr, rodata_offset,
+             kernel_descriptor_size, 0, 0, 64, 0);
+  write_shdr(3, symtab_name, SHT_SYMTAB, 0, 0, symtab_offset, sym_count * sizeof(Elf64_Sym), 4, 1,
+             8, sizeof(Elf64_Sym));
+  write_shdr(4, strtab_name, SHT_STRTAB, 0, 0, strtab_offset, strtab.size(), 0, 0, 1, 0);
+  write_shdr(5, shstrtab_name, SHT_STRTAB, 0, 0, shstrtab_offset, shstrtab.size(), 0, 0, 1, 0);
+  return image;
+}
 
-  shdrs[2].sh_name = rodata_name;
-  shdrs[2].sh_type = SHT_PROGBITS;
-  shdrs[2].sh_flags = SHF_ALLOC;
-  shdrs[2].sh_addr = rodata_vaddr;
-  shdrs[2].sh_offset = rodata_offset;
-  shdrs[2].sh_size = kernel_descriptor_size;
-  shdrs[2].sh_addralign = 64;
+std::vector<uint8_t> make_smoke_code_object() {
+  // Use a CDNA4 waitcnt that lowers to split RDNA4 wait instructions so the
+  // diff report is guaranteed to contain a shown source/target pair.
+  constexpr std::array<uint32_t, 2> text_words = {0xbf8cc07fu, 0xbf810000u};
+  return make_smoke_code_object(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950, text_words);
+}
 
-  shdrs[3].sh_name = symtab_name;
-  shdrs[3].sh_type = SHT_SYMTAB;
-  shdrs[3].sh_offset = symtab_offset;
-  shdrs[3].sh_size = syms.size() * sizeof(Elf64_Sym);
-  shdrs[3].sh_link = 4;
-  shdrs[3].sh_info = 1;
-  shdrs[3].sh_addralign = 8;
-  shdrs[3].sh_entsize = sizeof(Elf64_Sym);
+std::vector<uint8_t> make_gfx1250_smoke_code_object(std::span<const uint32_t> text_words) {
+  return make_smoke_code_object(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250, text_words);
+}
 
-  shdrs[4].sh_name = strtab_name;
-  shdrs[4].sh_type = SHT_STRTAB;
-  shdrs[4].sh_offset = strtab_offset;
-  shdrs[4].sh_size = strtab.size();
-  shdrs[4].sh_addralign = 1;
+std::vector<uint8_t> make_gfx1250_smoke_code_object() {
+  // B0-to-A0 replaces s_clause with s_nop, giving the first pass real work while
+  // leaving the translated instruction stable on the verification pass.
+  constexpr std::array<uint32_t, 2> text_words = {0xbf850004u, 0xbfb00000u};
+  return make_gfx1250_smoke_code_object(text_words);
+}
 
-  shdrs[5].sh_name = shstrtab_name;
-  shdrs[5].sh_type = SHT_STRTAB;
-  shdrs[5].sh_offset = shstrtab_offset;
-  shdrs[5].sh_size = shstrtab.size();
-  shdrs[5].sh_addralign = 1;
+void clear_smoke_kernel_descriptor_symbol(std::vector<uint8_t> &image) {
+  rocjitsu::Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
 
-  std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+  auto section_offset = [&](size_t index) {
+    return header.e_shoff + index * sizeof(rocjitsu::Elf64_Shdr);
+  };
+  rocjitsu::Elf64_Shdr symtab{};
+  std::memcpy(&symtab, image.data() + section_offset(3), sizeof(symtab));
+  rocjitsu::Elf64_Sym descriptor{};
+  std::memcpy(&descriptor, image.data() + symtab.sh_offset + sizeof(rocjitsu::Elf64_Sym),
+              sizeof(descriptor));
+  descriptor.st_name = 0;
+  descriptor.st_info = 0;
+  descriptor.st_shndx = rocjitsu::SHN_UNDEF;
+  descriptor.st_value = 0;
+  descriptor.st_size = 0;
+  std::memcpy(image.data() + symtab.sh_offset + sizeof(rocjitsu::Elf64_Sym), &descriptor,
+              sizeof(descriptor));
+}
+
+std::vector<uint8_t> make_descriptorless_code_object() {
+  constexpr std::array<uint32_t, 2> text_words = {0xbf800000u, 0};
+  auto image = make_gfx1250_smoke_code_object(text_words);
+  clear_smoke_kernel_descriptor_symbol(image);
+  return image;
+}
+
+std::vector<uint8_t> make_empty_text_code_object() {
+  auto image = make_descriptorless_code_object();
+
+  rocjitsu::Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+
+  rocjitsu::Elf64_Phdr executable_load{};
+  std::memcpy(&executable_load, image.data() + header.e_phoff, sizeof(executable_load));
+  executable_load.p_filesz = 0;
+  executable_load.p_memsz = 0;
+  std::memcpy(image.data() + header.e_phoff, &executable_load, sizeof(executable_load));
+
+  const uint64_t text_section = header.e_shoff + sizeof(rocjitsu::Elf64_Shdr);
+  rocjitsu::Elf64_Shdr text{};
+  std::memcpy(&text, image.data() + text_section, sizeof(text));
+  text.sh_size = 0;
+  std::memcpy(image.data() + text_section, &text, sizeof(text));
+
   return image;
 }
 
@@ -218,16 +284,143 @@ bool command_succeeded(int status) {
   return status != -1 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
+bool command_exited_with(int status, int exit_code) {
+  return status != -1 && WIFEXITED(status) && WEXITSTATUS(status) == exit_code;
+}
+
 } // namespace
 
-TEST(RjDbtTranslate, Smoke) {
-  const TempDir temp_dir(
-      std::filesystem::temp_directory_path() /
-      ("rj_dbt_translate_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+TEST(RjDbtTranslateIdempotence, DescribesChangedByteAndSize) {
+  constexpr std::array<uint8_t, 2> first = {0x10, 0x20};
+  constexpr std::array<uint8_t, 3> second = {0x10, 0x21, 0x22};
 
-  const auto input = temp_dir.path / "smoke_gfx950.co";
-  const auto output = temp_dir.path / "stdout.txt";
-  const auto error = temp_dir.path / "stderr.txt";
+  EXPECT_EQ(rocjitsu::tools::detail::describe_byte_difference(first, second, "section '.text'"),
+            "section '.text' first differs at 0x1 (first=0x20, second=0x21); size 2 -> 3 bytes");
+}
+
+TEST(RjDbtTranslateIdempotence, DescribesPureSizeChange) {
+  constexpr std::array<uint8_t, 2> first = {0x10, 0x20};
+  constexpr std::array<uint8_t, 3> second = {0x10, 0x20, 0x30};
+
+  EXPECT_EQ(rocjitsu::tools::detail::describe_byte_difference(first, second, "ELF image"),
+            "ELF image size changed from 2 to 3 bytes");
+}
+
+TEST(RjDbtTranslateIdempotence, LocalizesExecutableSectionDifference) {
+  using rocjitsu::tools::detail::ExecutableSectionBytes;
+
+  constexpr std::array<uint8_t, 2> first_text = {0x10, 0x20};
+  constexpr std::array<uint8_t, 2> second_text = {0x10, 0x21};
+  constexpr std::array<uint8_t, 2> first_elf = {0x01, 0x02};
+  constexpr std::array<uint8_t, 2> second_elf = {0x01, 0x03};
+  const std::array first_sections = {ExecutableSectionBytes{".text", first_text}};
+  const std::array second_sections = {ExecutableSectionBytes{".text", second_text}};
+
+  EXPECT_EQ(rocjitsu::tools::detail::find_idempotence_difference(first_sections, second_sections,
+                                                                 first_elf, second_elf),
+            "section '.text' first differs at 0x1 (first=0x20, second=0x21)");
+}
+
+TEST(RjDbtTranslateIdempotence, FallsBackToWholeElfDifference) {
+  using rocjitsu::tools::detail::ExecutableSectionBytes;
+
+  constexpr std::array<uint8_t, 2> text = {0x10, 0x20};
+  constexpr std::array<uint8_t, 2> first_elf = {0x01, 0x02};
+  constexpr std::array<uint8_t, 2> second_elf = {0x01, 0x03};
+  const std::array first_sections = {ExecutableSectionBytes{".text", text}};
+  const std::array second_sections = {ExecutableSectionBytes{".text", text}};
+
+  EXPECT_EQ(rocjitsu::tools::detail::find_idempotence_difference(first_sections, second_sections,
+                                                                 first_elf, second_elf),
+            "ELF image first differs at 0x1 (first=0x02, second=0x03)");
+}
+
+TEST(RjDbtTranslateIdempotence, ReportsExecutableSectionSetAndOrderChanges) {
+  using rocjitsu::tools::detail::ExecutableSectionBytes;
+
+  constexpr std::array<uint8_t, 1> bytes = {0x10};
+  constexpr std::array<uint8_t, 1> first_elf = {0x01};
+  constexpr std::array<uint8_t, 1> second_elf = {0x02};
+  const std::array first_sections = {
+      ExecutableSectionBytes{".text", bytes},
+      ExecutableSectionBytes{".init", bytes},
+  };
+  const std::array renamed_sections = {
+      ExecutableSectionBytes{".text", bytes},
+      ExecutableSectionBytes{".fini", bytes},
+  };
+  const std::array reordered_sections = {
+      ExecutableSectionBytes{".init", bytes},
+      ExecutableSectionBytes{".text", bytes},
+  };
+  const std::array added_sections = {
+      ExecutableSectionBytes{".text", bytes},
+      ExecutableSectionBytes{".init", bytes},
+      ExecutableSectionBytes{".fini", bytes},
+  };
+
+  EXPECT_EQ(rocjitsu::tools::detail::find_idempotence_difference(first_sections, renamed_sections,
+                                                                 first_elf, second_elf),
+            "executable sections changed: removed '.init', added '.fini'");
+  EXPECT_EQ(rocjitsu::tools::detail::find_idempotence_difference(first_sections, reordered_sections,
+                                                                 first_elf, second_elf),
+            "executable sections were reordered at index 0: first='.text', second='.init'");
+  EXPECT_EQ(rocjitsu::tools::detail::find_idempotence_difference(first_sections, added_sections,
+                                                                 first_elf, second_elf),
+            "executable section '.fini' was added");
+}
+
+TEST(RjDbtTranslateIdempotence, VerificationDiagnosticsDoNotInvalidateFirstPassOutput) {
+  rocjitsu::tools::TranslateOutput output;
+  rocjitsu::TranslationDiagnostic diagnostic;
+  diagnostic.severity = rocjitsu::DiagnosticSeverity::Error;
+  output.idempotence_diagnostics.push_back(std::move(diagnostic));
+
+  EXPECT_TRUE(output.ok());
+  EXPECT_TRUE(output.dispatchable());
+}
+
+TEST(RjDbtTranslateIdempotence, ReportsSyntheticMismatchThroughCli) {
+  std::array arguments = {
+      std::string("rj_dbt_translate"),
+      std::string("synthetic.co"),
+      std::string("--input-target"),
+      std::string("gfx1250"),
+      std::string("--input-revision"),
+      std::string("b0"),
+      std::string("--output-target"),
+      std::string("gfx1250"),
+      std::string("--output-revision"),
+      std::string("a0"),
+      std::string("--verify-idempotence"),
+      std::string("--output-mode"),
+      std::string("diff"),
+  };
+  std::vector<char *> argv;
+  argv.reserve(arguments.size());
+  for (std::string &argument : arguments)
+    argv.push_back(argument.data());
+
+  testing::internal::CaptureStdout();
+  testing::internal::CaptureStderr();
+  const int status = rocjitsu::tools::detail::run_dbt_translate_cli(
+      static_cast<int>(argv.size()), argv.data(), synthetic_idempotence_mismatch);
+  const std::string stderr_text = testing::internal::GetCapturedStderr();
+  const std::string stdout_text = testing::internal::GetCapturedStdout();
+
+  EXPECT_EQ(status, 5);
+  EXPECT_TRUE(contains(stdout_text, "idempotence: not-verified")) << stdout_text;
+  EXPECT_TRUE(contains(stderr_text, "translation output is not byte-idempotent")) << stderr_text;
+  EXPECT_TRUE(contains(stderr_text, "section '.text' first differs at 0x4")) << stderr_text;
+}
+
+TEST(RjDbtTranslate, Smoke) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_smoke_");
+  const std::filesystem::path temp_path(temp_dir.path());
+
+  const auto input = temp_path / "smoke_gfx950.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
 
   {
     const auto image = make_smoke_code_object();
@@ -250,15 +443,285 @@ TEST(RjDbtTranslate, Smoke) {
                                          << stdout_text;
   EXPECT_TRUE(stderr_text.empty()) << stderr_text;
 
-  const std::array<std::string_view, 5> expected = {
-      "rj_dbt_translate: ok", "source_words: bf8cc07f", "source: s_waitcnt",
-      "target_words:",        "target: s_wait",
+  const std::array<std::string_view, 6> expected = {
+      "rj_dbt_translate: ok",   "source_code_object_id: fnv1a64:",
+      "source_words: bf8cc07f", "source: s_waitcnt",
+      "target_words:",          "target: s_wait",
   };
   for (const std::string_view needle : expected) {
     EXPECT_TRUE(contains(stdout_text, needle))
         << "missing expected output fragment: " << needle << "\noutput:\n"
         << stdout_text;
   }
+}
+
+TEST(RjDbtTranslate, EmptyTextSameArchWarnsAndCopiesInput) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_empty_text_");
+  const std::filesystem::path temp_path(temp_dir.path());
+
+  const auto input = temp_path / "data_only_gfx1250.co";
+  const auto output = temp_path / "translated.co";
+  const auto error = temp_path / "stderr.txt";
+  const auto image = make_empty_text_code_object();
+
+  {
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string command = shell_quote(g_translate_tool.string()) + " " +
+                              shell_quote(input.string()) +
+                              " --input-target gfx1250 --input-revision b0 --output-target gfx1250 "
+                              "--output-revision a0 --output-mode code-object > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string output_bytes = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << stderr_text;
+  EXPECT_EQ(output_bytes, std::string(reinterpret_cast<const char *>(image.data()), image.size()));
+  EXPECT_TRUE(contains(stderr_text, "warning: data-only: code object has no executable sections, "
+                                    "segments, or callable symbols; leaving unchanged"))
+      << stderr_text;
+}
+
+TEST(RjDbtTranslate, DescriptorlessExecutableWarnsAndCopiesInput) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_descriptorless_");
+  const std::filesystem::path temp_path(temp_dir.path());
+
+  const auto input = temp_path / "descriptorless_gfx1250.co";
+  const auto output = temp_path / "translated.co";
+  const auto error = temp_path / "stderr.txt";
+  const auto image = make_descriptorless_code_object();
+
+  {
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string command = shell_quote(g_translate_tool.string()) + " " +
+                              shell_quote(input.string()) +
+                              " --input-target gfx1250 --input-revision b0 --output-target gfx1250 "
+                              "--output-revision a0 --output-mode code-object > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string output_bytes = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << stderr_text;
+  EXPECT_EQ(output_bytes, std::string(reinterpret_cast<const char *>(image.data()), image.size()));
+  EXPECT_TRUE(contains(stderr_text,
+                       "warning: nothing-to-translate: code object has no kernel descriptors; "
+                       "leaving executable text unchanged"))
+      << stderr_text;
+}
+
+TEST(RjDbtTranslate, RequiresRevisionsOnlyForGfx1250) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_revision_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const auto input = temp_path / "smoke.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
+
+  {
+    const auto image = make_smoke_code_object();
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string missing_input_revision_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx1250 --output-target gfx1250 > " + shell_quote(output.string()) + " 2> " +
+      shell_quote(error.string());
+  int status = std::system(missing_input_revision_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--input-revision is required when --input-target is gfx1250"));
+
+  const std::string missing_output_revision_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx1250 --input-revision b0 --output-target gfx1250 > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  status = std::system(missing_output_revision_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--output-revision is required when --output-target is gfx1250"));
+
+  const std::string unsupported_input_revision_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx950 --input-revision b0 --output-target gfx1200 > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  status = std::system(unsupported_input_revision_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--input-revision is only valid when --input-target is gfx1250"));
+
+  const std::string unsupported_output_revision_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx950 --output-target gfx1200 --output-revision a0 > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  status = std::system(unsupported_output_revision_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--output-revision is only valid when --output-target is gfx1250"));
+
+  const std::string reverse_revision_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx1250 --input-revision a0 --output-target gfx1250 "
+      "--output-revision b0 > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  status = std::system(reverse_revision_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error), "gfx1250 A0-to-B0 translation is not supported"));
+}
+
+TEST(RjDbtTranslate, VerifiesGfx1250B0ToA0Idempotence) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_idempotence_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "smoke_gfx1250.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+
+  {
+    const std::vector<uint8_t> image = make_gfx1250_smoke_code_object();
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string command = shell_quote(g_translate_tool.string()) + " " +
+                              shell_quote(input.string()) +
+                              " --input-target gfx1250 --input-revision b0 --output-target gfx1250 "
+                              "--output-revision a0 --verify-idempotence --output-mode diff > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "idempotence: verified")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "idempotence_diagnostics: 0")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "changed=1")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "source: s_clause 4")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "target: s_nop 0")) << stdout_text;
+}
+
+TEST(RjDbtTranslate, VerifiesNonGfx1250SameArchitectureTranslation) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_non_gfx_idempotence_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "smoke_gfx950.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+
+  {
+    const std::vector<uint8_t> image = make_smoke_code_object();
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx950 --output-target gfx950 --verify-idempotence --output-mode diff > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "idempotence: verified")) << stdout_text;
+}
+
+TEST(RjDbtTranslate, RejectsInvalidIdempotenceOptionCombinations) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_idempotence_options_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "smoke_gfx950.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+
+  {
+    const std::vector<uint8_t> image = make_smoke_code_object();
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string different_arch_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx950 --output-target gfx1200 --verify-idempotence > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  int status = std::system(different_arch_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--verify-idempotence requires matching input and output architectures"));
+
+  const std::string skip_failed_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx950 --output-target gfx950 --verify-idempotence "
+      "--skip-failed-kernels > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  status = std::system(skip_failed_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--verify-idempotence cannot be combined with --skip-failed-kernels"));
+
+  const std::string list_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --list-code-objects --verify-idempotence > " + shell_quote(output.string()) + " 2> " +
+      shell_quote(error.string());
+  status = std::system(list_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--verify-idempotence cannot be combined with --list-code-objects"));
+}
+
+TEST(RjDbtTranslate, VerifiesGfx1250ClusterLoadIdempotence) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_cluster_load_idempotence_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "cluster_load_gfx1250.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+
+  // The first pass wraps the cluster load with an M0 save/clear/restore. The
+  // second pass recognizes the canonical same-block clear and preserves it.
+  constexpr std::array<uint32_t, 4> text_words = {0xee19c07cu, 0x00000001u, 0x00000002u,
+                                                  0xbfb00000u};
+  {
+    const std::vector<uint8_t> image = make_gfx1250_smoke_code_object(text_words);
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string command = shell_quote(g_translate_tool.string()) + " " +
+                              shell_quote(input.string()) +
+                              " --input-target gfx1250 --input-revision b0 --output-target gfx1250 "
+                              "--output-revision a0 --verify-idempotence --output-mode diff > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "idempotence: verified")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "idempotence_diagnostics: 0")) << stdout_text;
 }
 
 int main(int argc, char **argv) {

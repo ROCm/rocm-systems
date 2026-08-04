@@ -9,6 +9,7 @@
 #include <bit>
 #include <cassert>
 #include <limits>
+#include <optional>
 #include <type_traits>
 
 namespace util {
@@ -247,6 +248,55 @@ template <typename T>
 constexpr inline T align_up(T val, T alignment) {
   assert(std::has_single_bit(alignment));
   return (val + alignment - 1) & ~(alignment - 1);
+}
+
+/// @brief Divide @p numerator by @p divisor, rounding up.
+/// @details Asserts that @p divisor is non-zero; this is the strict,
+/// general-purpose form. Call sites that must tolerate a zero divisor from
+/// untrusted guest input should use ceil_div_or_one() instead.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline T ceil_div(T numerator, T divisor) {
+  assert(divisor != 0);
+  return numerator / divisor + (numerator % divisor != 0 ? T{1} : T{0});
+}
+
+/// @brief Divide @p numerator by @p divisor, rounding up, returning 1 when
+/// @p divisor is 0.
+/// @details Tolerant variant for paths that parse malformed guest input (e.g.
+/// a dispatch packet with a zero workgroup dimension): the emulator must not
+/// abort on bad guest data, so a zero divisor yields 1 rather than asserting.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline T ceil_div_or_one(T numerator, T divisor) {
+  return divisor == 0 ? T{1} : ceil_div(numerator, divisor);
+}
+
+/// @brief Add two unsigned integers when the result is representable.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline std::optional<T> checked_add(T lhs, T rhs) {
+  if (rhs > std::numeric_limits<T>::max() - lhs)
+    return std::nullopt;
+  return lhs + rhs;
+}
+
+/// @brief Multiply two unsigned integers when the result is representable.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline std::optional<T> checked_mul(T lhs, T rhs) {
+  if (lhs != 0 && rhs > std::numeric_limits<T>::max() / lhs)
+    return std::nullopt;
+  return lhs * rhs;
+}
+
+/// @brief Return true when @p val is aligned to @p alignment.
+/// @param alignment Must be a power of 2.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline bool is_aligned(T val, T alignment) {
+  assert(std::has_single_bit(alignment));
+  return (val & (alignment - 1)) == 0;
 }
 
 } // namespace util
