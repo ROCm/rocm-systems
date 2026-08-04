@@ -79,7 +79,6 @@
 #include <fmt/format.h>
 
 #include <dlfcn.h>
-#include <elf.h>
 #include <link.h>
 #include <unistd.h>
 #include <atomic>
@@ -318,12 +317,10 @@ get_forced_configures()
     return _v;
 }
 
-std::vector<std::pair<std::string, uintptr_t>>
+std::vector<std::string>
 get_link_map()
 {
-    // each entry pairs the library path with its load bias (l_addr) so callers can compute a
-    // symbol's runtime address as (l_addr + st_value) without dlopen/dlsym
-    auto  chain  = std::vector<std::pair<std::string, uintptr_t>>{};
+    auto  chain  = std::vector<std::string>{};
     void* handle = dlopen(nullptr, RTLD_LAZY | RTLD_NOLOAD);
 
     if(handle)
@@ -335,37 +332,13 @@ get_link_map()
         {
             if(next_link->l_name != nullptr && !std::string_view{next_link->l_name}.empty())
             {
-                chain.emplace_back(next_link->l_name, static_cast<uintptr_t>(next_link->l_addr));
+                chain.emplace_back(next_link->l_name);
             }
             next_link = next_link->l_next;
         }
     }
 
     return chain;
-}
-
-// Resolve an exported function's runtime address as (load_bias + st_value) from the parsed ELF
-// symbol table, without dlopen/dlsym touching loader state (a dlopen here can re-run a pending
-// DT_INIT and deadlock; see find_clients). Returns nullptr, so the caller skips the library, when
-// the symbol is absent, undefined here, or not a plain function definition (e.g. STT_GNU_IFUNC).
-template <typename FuncT>
-FuncT
-resolve_symbol_no_dlopen(const common::elf_utils::ElfInfo& _elf,
-                         uintptr_t                         _load_bias,
-                         std::string_view                  _symname)
-{
-    for(const auto& sym : _elf.dynamic_symbol_entries)
-    {
-        if(sym.section_index == SHN_UNDEF) continue;  // undefined import, not a definition here
-        if(sym.type != STT_FUNC) continue;            // refuse IFUNC/exotic symbol types
-        if(sym.value == 0) continue;
-        if(sym.name != _symname) continue;
-        auto  _addr      = _load_bias + static_cast<uintptr_t>(sym.value);
-        FuncT _fn        = nullptr;
-        *(void**) (&_fn) = reinterpret_cast<void*>(_addr);  // NOLINT(performance-no-int-to-ptr)
-        return _fn;
-    }
-    return nullptr;
 }
 
 struct client_library
@@ -626,42 +599,11 @@ find_clients()
     // libraries
     if(_default_configure)
     {
-        // resolve configure symbols from the ELF symbol table + load bias instead of dlopen/dlsym.
-        // a dlopen here (even RTLD_NOLOAD) can re-run a pending DT_INIT and deadlock, so this path
-        // is used on the OMPT path or when forced via ROCPROFILER_FIND_CLIENTS_AVOID_DLOPEN. it
-        // bypasses the library's DT_INIT_ARRAY (global C++ constructors).
-        const bool avoid_dlopen =
-            ompt_init_active() || common::get_env("ROCPROFILER_FIND_CLIENTS_AVOID_DLOPEN", false);
-        ROCP_WARNING_IF(avoid_dlopen)
-            << "rocprofiler-sdk is discovering client tools via ELF symbol resolution instead of "
-               "dlopen. Client libraries whose rocprofiler_configure relies on global static "
-               "initialization (DT_INIT_ARRAY) may be affected.";
-
-        for(const auto& [itr, load_bias] : get_link_map())
+        for(const auto& itr : get_link_map())
         {
             ROCP_INFO << "searching " << itr << " for 'rocprofiler_configure' symbol...";
 
-            if(!(fs::exists(itr) && resolved_exists(itr)))
-            {
-                ROCP_INFO << fmt::format(
-                    "Shared library '{}' either does not exist or is a broken symbolic link", itr);
-                continue;
-            }
-
-            decltype(::rocprofiler_configure)*        _sym        = nullptr;
-            decltype(::rocprofiler_configure_attach)* _attach_sym = nullptr;
-            void*                                     handle      = nullptr;
-
-            if(avoid_dlopen)
-            {
-                // resolve without invoking the loader (see resolve_symbol_no_dlopen)
-                auto elfinfo = common::elf_utils::read(itr, optimize_elf_parsing);
-                _sym         = resolve_symbol_no_dlopen<decltype(::rocprofiler_configure)*>(
-                    elfinfo, load_bias, "rocprofiler_configure");
-                _attach_sym = resolve_symbol_no_dlopen<decltype(::rocprofiler_configure_attach)*>(
-                    elfinfo, load_bias, "rocprofiler_configure_attach");
-            }
-            else
+            if(fs::exists(itr) && resolved_exists(itr))
             {
                 auto elfinfo = common::elf_utils::read(itr, optimize_elf_parsing);
                 if(!elfinfo.has_symbol([](std::string_view symname) {
@@ -674,15 +616,21 @@ find_clients()
                         itr);
                     continue;
                 }
-
-                ROCP_INFO << "dlopening " << itr << " for 'rocprofiler_configure' symbol...";
-
-                handle = dlopen(itr.c_str(), RTLD_LAZY | RTLD_NOLOAD);
-                ROCP_ERROR_IF(handle == nullptr) << "error dlopening " << itr;
-
-                _sym        = rocprofiler_configure_dlsym(handle);
-                _attach_sym = rocprofiler_configure_attach_dlsym(handle);
             }
+            else
+            {
+                ROCP_INFO << fmt::format(
+                    "Shared library '{}' either does not exist or is a broken symbolic link", itr);
+                continue;
+            }
+
+            ROCP_INFO << "dlopening " << itr << " for 'rocprofiler_configure' symbol...";
+
+            void* handle = dlopen(itr.c_str(), RTLD_LAZY | RTLD_NOLOAD);
+            ROCP_ERROR_IF(handle == nullptr) << "error dlopening " << itr;
+
+            auto* _sym        = rocprofiler_configure_dlsym(handle);
+            auto* _attach_sym = rocprofiler_configure_attach_dlsym(handle);
 
             // symbol not found
             if(!_sym)
@@ -1087,13 +1035,6 @@ get_client_offset()
             std::numeric_limits<uint32_t>::max() - std::numeric_limits<uint8_t>::max()};
         return rng(gen);
     }();
-    return _v;
-}
-
-bool&
-ompt_init_active()
-{
-    static thread_local bool _v = false;
     return _v;
 }
 

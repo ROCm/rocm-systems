@@ -4956,4 +4956,24 @@ rocprofv3_main(int argc, char** argv, char** envp)
     ROCP_INFO << "rocprofv3 finished. exit code: " << ret;
     return ret;
 }
+
+ompt_start_tool_result_t*
+ompt_start_tool(unsigned int omp_version, const char* runtime_version) ROCPROFILER_PUBLIC_API;
+
+ompt_start_tool_result_t*
+ompt_start_tool(unsigned int omp_version, const char* runtime_version)
+{
+    initialize_logging();
+
+    ROCP_WARNING << fmt::format(
+        "ompt_start_tool(omp_version={}, runtime_version=\"{}\") was invoked in rocprofv3 tool... "
+        "returning rocprofiler_ompt_start_tool(...) result",
+        omp_version,
+        runtime_version);
+
+    initialize_rocprofv3();
+
+    // test force configure
+    return rocprofiler_ompt_start_tool(omp_version, runtime_version);
+}
 }
