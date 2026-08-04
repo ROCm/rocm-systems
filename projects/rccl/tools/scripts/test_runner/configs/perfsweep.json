@@ -1,0 +1,3971 @@
+{
+  "system_configurations": {
+    "name": "RCCL-PerfSweep-1P4G",
+    "description": "Single-node 4-GPU rccl-tests perf sweep (1KB-16GB): channel-count and unroll-factor sweeps per collective, plus symmetric-memory and SDMA variants. ReduceScatter runs last."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-/opt/ompi}",
+    "test_binary_dir": "${RCCL_TEST_BIN_DIR:-${RCCL_TESTS_DIR:-$HOME/rccl-tests}/build}"
+  },
+  "env_variables": {
+    "NCCL_DEBUG": "VERSION"
+  },
+  "mpi_args": [
+    "--mca pml ob1",
+    "--mca btl ^openib",
+    "-x PATH"
+  ],
+  "build_configuration": {
+    "build_type": "release",
+    "install_flags": [
+      "-t",
+      "-l",
+      "--no_clean"
+    ],
+    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=gfx1250",
+    "parallel_jobs": 64
+  },
+  "rccl_tests_build_configuration": {
+    "enabled": true,
+    "source_dir": "${RCCL_TESTS_DIR:-${WORKDIR}/../rccl-tests}",
+    "install_script": "install.sh",
+    "install_flags": [
+      "--mpi",
+      "--enable-device-api",
+      "--gpu_targets",
+      "gfx1250"
+    ],
+    "rccl_home": "${RCCL_HOME:-${WORKDIR}/build/${RCCL_BUILD_TYPE:-release}}",
+    "env_variables": {}
+  },
+  "test_configurations": {
+    "sweep_base": {
+      "is_gtest": false,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "num_ranks": 4,
+      "timeout": 3600,
+      "command_args": "-b 1K -e 16G -f 2 -g 1 -n 100 -w 50"
+    },
+    "channel_sweep_base": {
+      "extends": "sweep_base",
+      "description": "Channel-count / unroll-factor sweep; saturates the P2P channel count so NCCL_P2P_*_NCHANNELS takes effect.",
+      "env_variables": {
+        "RCCL_SATURATE_P2P_NCHANNELS": "1"
+      }
+    },
+    "all_reduce_default": {
+      "extends": "channel_sweep_base",
+      "binary": "all_reduce_perf",
+      "tests": [
+        {
+          "name": "AllReduce_float_nCh256_unroll32",
+          "description": "AllReduce 1KB-16GB, float, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_float_nCh256_unroll16",
+          "description": "AllReduce 1KB-16GB, float, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_float_nCh256_unroll8",
+          "description": "AllReduce 1KB-16GB, float, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_float_nCh256_unroll4",
+          "description": "AllReduce 1KB-16GB, float, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_float_nCh128_unroll32",
+          "description": "AllReduce 1KB-16GB, float, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_float_nCh128_unroll16",
+          "description": "AllReduce 1KB-16GB, float, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_float_nCh128_unroll8",
+          "description": "AllReduce 1KB-16GB, float, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_float_nCh128_unroll4",
+          "description": "AllReduce 1KB-16GB, float, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_float_nCh64_unroll32",
+          "description": "AllReduce 1KB-16GB, float, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_float_nCh64_unroll16",
+          "description": "AllReduce 1KB-16GB, float, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_float_nCh64_unroll8",
+          "description": "AllReduce 1KB-16GB, float, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_float_nCh64_unroll4",
+          "description": "AllReduce 1KB-16GB, float, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_float_nCh32_unroll32",
+          "description": "AllReduce 1KB-16GB, float, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_float_nCh32_unroll16",
+          "description": "AllReduce 1KB-16GB, float, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_float_nCh32_unroll8",
+          "description": "AllReduce 1KB-16GB, float, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_float_nCh32_unroll4",
+          "description": "AllReduce 1KB-16GB, float, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_bfloat16_nCh256_unroll32",
+          "description": "AllReduce 1KB-16GB, bfloat16, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_bfloat16_nCh256_unroll16",
+          "description": "AllReduce 1KB-16GB, bfloat16, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_bfloat16_nCh256_unroll8",
+          "description": "AllReduce 1KB-16GB, bfloat16, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_bfloat16_nCh256_unroll4",
+          "description": "AllReduce 1KB-16GB, bfloat16, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_bfloat16_nCh128_unroll32",
+          "description": "AllReduce 1KB-16GB, bfloat16, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_bfloat16_nCh128_unroll16",
+          "description": "AllReduce 1KB-16GB, bfloat16, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_bfloat16_nCh128_unroll8",
+          "description": "AllReduce 1KB-16GB, bfloat16, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_bfloat16_nCh128_unroll4",
+          "description": "AllReduce 1KB-16GB, bfloat16, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_bfloat16_nCh64_unroll32",
+          "description": "AllReduce 1KB-16GB, bfloat16, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_bfloat16_nCh64_unroll16",
+          "description": "AllReduce 1KB-16GB, bfloat16, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_bfloat16_nCh64_unroll8",
+          "description": "AllReduce 1KB-16GB, bfloat16, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_bfloat16_nCh64_unroll4",
+          "description": "AllReduce 1KB-16GB, bfloat16, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_bfloat16_nCh32_unroll32",
+          "description": "AllReduce 1KB-16GB, bfloat16, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_bfloat16_nCh32_unroll16",
+          "description": "AllReduce 1KB-16GB, bfloat16, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_bfloat16_nCh32_unroll8",
+          "description": "AllReduce 1KB-16GB, bfloat16, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_bfloat16_nCh32_unroll4",
+          "description": "AllReduce 1KB-16GB, bfloat16, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_fp8_e4m3_nCh256_unroll32",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_fp8_e4m3_nCh256_unroll16",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_fp8_e4m3_nCh256_unroll8",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_fp8_e4m3_nCh256_unroll4",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_fp8_e4m3_nCh128_unroll32",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_fp8_e4m3_nCh128_unroll16",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_fp8_e4m3_nCh128_unroll8",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_fp8_e4m3_nCh128_unroll4",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_fp8_e4m3_nCh64_unroll32",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_fp8_e4m3_nCh64_unroll16",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_fp8_e4m3_nCh64_unroll8",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_fp8_e4m3_nCh64_unroll4",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_fp8_e4m3_nCh32_unroll32",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_fp8_e4m3_nCh32_unroll16",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_fp8_e4m3_nCh32_unroll8",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_fp8_e4m3_nCh32_unroll4",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        }
+      ]
+    },
+    "all_reduce_no_dda": {
+      "extends": "channel_sweep_base",
+      "binary": "all_reduce_perf",
+      "env_variables": {
+        "RCCL_DDA_ENABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "AllReduce_noDDA_float_nCh256_unroll32",
+          "description": "AllReduce 1KB-16GB, float, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), DDA disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_float_nCh256_unroll16",
+          "description": "AllReduce 1KB-16GB, float, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), DDA disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_float_nCh256_unroll8",
+          "description": "AllReduce 1KB-16GB, float, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), DDA disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_float_nCh256_unroll4",
+          "description": "AllReduce 1KB-16GB, float, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), DDA disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_float_nCh128_unroll32",
+          "description": "AllReduce 1KB-16GB, float, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), DDA disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_float_nCh128_unroll16",
+          "description": "AllReduce 1KB-16GB, float, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), DDA disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_float_nCh128_unroll8",
+          "description": "AllReduce 1KB-16GB, float, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), DDA disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_float_nCh128_unroll4",
+          "description": "AllReduce 1KB-16GB, float, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), DDA disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_float_nCh64_unroll32",
+          "description": "AllReduce 1KB-16GB, float, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), DDA disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_float_nCh64_unroll16",
+          "description": "AllReduce 1KB-16GB, float, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), DDA disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_float_nCh64_unroll8",
+          "description": "AllReduce 1KB-16GB, float, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), DDA disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_float_nCh64_unroll4",
+          "description": "AllReduce 1KB-16GB, float, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), DDA disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_float_nCh32_unroll32",
+          "description": "AllReduce 1KB-16GB, float, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), DDA disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_float_nCh32_unroll16",
+          "description": "AllReduce 1KB-16GB, float, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), DDA disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_float_nCh32_unroll8",
+          "description": "AllReduce 1KB-16GB, float, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), DDA disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_float_nCh32_unroll4",
+          "description": "AllReduce 1KB-16GB, float, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), DDA disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_bfloat16_nCh256_unroll32",
+          "description": "AllReduce 1KB-16GB, bfloat16, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), DDA disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_bfloat16_nCh256_unroll16",
+          "description": "AllReduce 1KB-16GB, bfloat16, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), DDA disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_bfloat16_nCh256_unroll8",
+          "description": "AllReduce 1KB-16GB, bfloat16, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), DDA disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_bfloat16_nCh256_unroll4",
+          "description": "AllReduce 1KB-16GB, bfloat16, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), DDA disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_bfloat16_nCh128_unroll32",
+          "description": "AllReduce 1KB-16GB, bfloat16, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), DDA disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_bfloat16_nCh128_unroll16",
+          "description": "AllReduce 1KB-16GB, bfloat16, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), DDA disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_bfloat16_nCh128_unroll8",
+          "description": "AllReduce 1KB-16GB, bfloat16, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), DDA disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_bfloat16_nCh128_unroll4",
+          "description": "AllReduce 1KB-16GB, bfloat16, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), DDA disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_bfloat16_nCh64_unroll32",
+          "description": "AllReduce 1KB-16GB, bfloat16, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), DDA disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_bfloat16_nCh64_unroll16",
+          "description": "AllReduce 1KB-16GB, bfloat16, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), DDA disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_bfloat16_nCh64_unroll8",
+          "description": "AllReduce 1KB-16GB, bfloat16, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), DDA disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_bfloat16_nCh64_unroll4",
+          "description": "AllReduce 1KB-16GB, bfloat16, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), DDA disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_bfloat16_nCh32_unroll32",
+          "description": "AllReduce 1KB-16GB, bfloat16, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), DDA disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_bfloat16_nCh32_unroll16",
+          "description": "AllReduce 1KB-16GB, bfloat16, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), DDA disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_bfloat16_nCh32_unroll8",
+          "description": "AllReduce 1KB-16GB, bfloat16, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), DDA disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_bfloat16_nCh32_unroll4",
+          "description": "AllReduce 1KB-16GB, bfloat16, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), DDA disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_fp8_e4m3_nCh256_unroll32",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), DDA disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_fp8_e4m3_nCh256_unroll16",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), DDA disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_fp8_e4m3_nCh256_unroll8",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), DDA disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_fp8_e4m3_nCh256_unroll4",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), DDA disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_fp8_e4m3_nCh128_unroll32",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), DDA disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_fp8_e4m3_nCh128_unroll16",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), DDA disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_fp8_e4m3_nCh128_unroll8",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), DDA disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_fp8_e4m3_nCh128_unroll4",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), DDA disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_fp8_e4m3_nCh64_unroll32",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), DDA disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_fp8_e4m3_nCh64_unroll16",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), DDA disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_fp8_e4m3_nCh64_unroll8",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), DDA disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_fp8_e4m3_nCh64_unroll4",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), DDA disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_fp8_e4m3_nCh32_unroll32",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), DDA disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_fp8_e4m3_nCh32_unroll16",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), DDA disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_fp8_e4m3_nCh32_unroll8",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), DDA disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noDDA_fp8_e4m3_nCh32_unroll4",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), DDA disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        }
+      ]
+    },
+    "all_reduce_no_cumem_mnnvl": {
+      "extends": "channel_sweep_base",
+      "binary": "all_reduce_perf",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "0",
+        "NCCL_MNNVL_ENABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "AllReduce_noCumemMnnvl_float_nCh256_unroll32",
+          "description": "AllReduce 1KB-16GB, float, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_float_nCh256_unroll16",
+          "description": "AllReduce 1KB-16GB, float, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_float_nCh256_unroll8",
+          "description": "AllReduce 1KB-16GB, float, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_float_nCh256_unroll4",
+          "description": "AllReduce 1KB-16GB, float, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_float_nCh128_unroll32",
+          "description": "AllReduce 1KB-16GB, float, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_float_nCh128_unroll16",
+          "description": "AllReduce 1KB-16GB, float, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_float_nCh128_unroll8",
+          "description": "AllReduce 1KB-16GB, float, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_float_nCh128_unroll4",
+          "description": "AllReduce 1KB-16GB, float, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_float_nCh64_unroll32",
+          "description": "AllReduce 1KB-16GB, float, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_float_nCh64_unroll16",
+          "description": "AllReduce 1KB-16GB, float, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_float_nCh64_unroll8",
+          "description": "AllReduce 1KB-16GB, float, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_float_nCh64_unroll4",
+          "description": "AllReduce 1KB-16GB, float, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_float_nCh32_unroll32",
+          "description": "AllReduce 1KB-16GB, float, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_float_nCh32_unroll16",
+          "description": "AllReduce 1KB-16GB, float, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_float_nCh32_unroll8",
+          "description": "AllReduce 1KB-16GB, float, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_float_nCh32_unroll4",
+          "description": "AllReduce 1KB-16GB, float, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_bfloat16_nCh256_unroll32",
+          "description": "AllReduce 1KB-16GB, bfloat16, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_bfloat16_nCh256_unroll16",
+          "description": "AllReduce 1KB-16GB, bfloat16, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_bfloat16_nCh256_unroll8",
+          "description": "AllReduce 1KB-16GB, bfloat16, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_bfloat16_nCh256_unroll4",
+          "description": "AllReduce 1KB-16GB, bfloat16, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_bfloat16_nCh128_unroll32",
+          "description": "AllReduce 1KB-16GB, bfloat16, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_bfloat16_nCh128_unroll16",
+          "description": "AllReduce 1KB-16GB, bfloat16, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_bfloat16_nCh128_unroll8",
+          "description": "AllReduce 1KB-16GB, bfloat16, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_bfloat16_nCh128_unroll4",
+          "description": "AllReduce 1KB-16GB, bfloat16, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_bfloat16_nCh64_unroll32",
+          "description": "AllReduce 1KB-16GB, bfloat16, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_bfloat16_nCh64_unroll16",
+          "description": "AllReduce 1KB-16GB, bfloat16, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_bfloat16_nCh64_unroll8",
+          "description": "AllReduce 1KB-16GB, bfloat16, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_bfloat16_nCh64_unroll4",
+          "description": "AllReduce 1KB-16GB, bfloat16, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_bfloat16_nCh32_unroll32",
+          "description": "AllReduce 1KB-16GB, bfloat16, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_bfloat16_nCh32_unroll16",
+          "description": "AllReduce 1KB-16GB, bfloat16, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_bfloat16_nCh32_unroll8",
+          "description": "AllReduce 1KB-16GB, bfloat16, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_bfloat16_nCh32_unroll4",
+          "description": "AllReduce 1KB-16GB, bfloat16, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_fp8_e4m3_nCh256_unroll32",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_fp8_e4m3_nCh256_unroll16",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_fp8_e4m3_nCh256_unroll8",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_fp8_e4m3_nCh256_unroll4",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_fp8_e4m3_nCh128_unroll32",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_fp8_e4m3_nCh128_unroll16",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_fp8_e4m3_nCh128_unroll8",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_fp8_e4m3_nCh128_unroll4",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_fp8_e4m3_nCh64_unroll32",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_fp8_e4m3_nCh64_unroll16",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_fp8_e4m3_nCh64_unroll8",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_fp8_e4m3_nCh64_unroll4",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_fp8_e4m3_nCh32_unroll32",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_fp8_e4m3_nCh32_unroll16",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_fp8_e4m3_nCh32_unroll8",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllReduce_noCumemMnnvl_fp8_e4m3_nCh32_unroll4",
+          "description": "AllReduce 1KB-16GB, fp8_e4m3, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d fp8_e4m3",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        }
+      ]
+    },
+    "all_gather_default": {
+      "extends": "channel_sweep_base",
+      "binary": "all_gather_perf",
+      "tests": [
+        {
+          "name": "AllGather_bfloat16_nCh256_unroll32",
+          "description": "AllGather 1KB-16GB, bfloat16, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllGather_bfloat16_nCh256_unroll16",
+          "description": "AllGather 1KB-16GB, bfloat16, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllGather_bfloat16_nCh256_unroll8",
+          "description": "AllGather 1KB-16GB, bfloat16, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllGather_bfloat16_nCh256_unroll4",
+          "description": "AllGather 1KB-16GB, bfloat16, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllGather_bfloat16_nCh128_unroll32",
+          "description": "AllGather 1KB-16GB, bfloat16, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllGather_bfloat16_nCh128_unroll16",
+          "description": "AllGather 1KB-16GB, bfloat16, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllGather_bfloat16_nCh128_unroll8",
+          "description": "AllGather 1KB-16GB, bfloat16, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllGather_bfloat16_nCh128_unroll4",
+          "description": "AllGather 1KB-16GB, bfloat16, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllGather_bfloat16_nCh64_unroll32",
+          "description": "AllGather 1KB-16GB, bfloat16, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllGather_bfloat16_nCh64_unroll16",
+          "description": "AllGather 1KB-16GB, bfloat16, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllGather_bfloat16_nCh64_unroll8",
+          "description": "AllGather 1KB-16GB, bfloat16, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllGather_bfloat16_nCh64_unroll4",
+          "description": "AllGather 1KB-16GB, bfloat16, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllGather_bfloat16_nCh32_unroll32",
+          "description": "AllGather 1KB-16GB, bfloat16, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllGather_bfloat16_nCh32_unroll16",
+          "description": "AllGather 1KB-16GB, bfloat16, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllGather_bfloat16_nCh32_unroll8",
+          "description": "AllGather 1KB-16GB, bfloat16, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllGather_bfloat16_nCh32_unroll4",
+          "description": "AllGather 1KB-16GB, bfloat16, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        }
+      ]
+    },
+    "all_gather_no_cumem_mnnvl": {
+      "extends": "channel_sweep_base",
+      "binary": "all_gather_perf",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "0",
+        "NCCL_MNNVL_ENABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "AllGather_noCumemMnnvl_bfloat16_nCh256_unroll32",
+          "description": "AllGather 1KB-16GB, bfloat16, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllGather_noCumemMnnvl_bfloat16_nCh256_unroll16",
+          "description": "AllGather 1KB-16GB, bfloat16, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllGather_noCumemMnnvl_bfloat16_nCh256_unroll8",
+          "description": "AllGather 1KB-16GB, bfloat16, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllGather_noCumemMnnvl_bfloat16_nCh256_unroll4",
+          "description": "AllGather 1KB-16GB, bfloat16, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllGather_noCumemMnnvl_bfloat16_nCh128_unroll32",
+          "description": "AllGather 1KB-16GB, bfloat16, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllGather_noCumemMnnvl_bfloat16_nCh128_unroll16",
+          "description": "AllGather 1KB-16GB, bfloat16, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllGather_noCumemMnnvl_bfloat16_nCh128_unroll8",
+          "description": "AllGather 1KB-16GB, bfloat16, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllGather_noCumemMnnvl_bfloat16_nCh128_unroll4",
+          "description": "AllGather 1KB-16GB, bfloat16, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllGather_noCumemMnnvl_bfloat16_nCh64_unroll32",
+          "description": "AllGather 1KB-16GB, bfloat16, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllGather_noCumemMnnvl_bfloat16_nCh64_unroll16",
+          "description": "AllGather 1KB-16GB, bfloat16, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllGather_noCumemMnnvl_bfloat16_nCh64_unroll8",
+          "description": "AllGather 1KB-16GB, bfloat16, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllGather_noCumemMnnvl_bfloat16_nCh64_unroll4",
+          "description": "AllGather 1KB-16GB, bfloat16, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AllGather_noCumemMnnvl_bfloat16_nCh32_unroll32",
+          "description": "AllGather 1KB-16GB, bfloat16, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AllGather_noCumemMnnvl_bfloat16_nCh32_unroll16",
+          "description": "AllGather 1KB-16GB, bfloat16, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AllGather_noCumemMnnvl_bfloat16_nCh32_unroll8",
+          "description": "AllGather 1KB-16GB, bfloat16, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AllGather_noCumemMnnvl_bfloat16_nCh32_unroll4",
+          "description": "AllGather 1KB-16GB, bfloat16, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        }
+      ]
+    },
+    "alltoall_default": {
+      "extends": "channel_sweep_base",
+      "binary": "alltoall_perf",
+      "tests": [
+        {
+          "name": "AlltoAll_bfloat16_nCh256_unroll32",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AlltoAll_bfloat16_nCh256_unroll16",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AlltoAll_bfloat16_nCh256_unroll8",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AlltoAll_bfloat16_nCh256_unroll4",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AlltoAll_bfloat16_nCh128_unroll32",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AlltoAll_bfloat16_nCh128_unroll16",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AlltoAll_bfloat16_nCh128_unroll8",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AlltoAll_bfloat16_nCh128_unroll4",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AlltoAll_bfloat16_nCh64_unroll32",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AlltoAll_bfloat16_nCh64_unroll16",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AlltoAll_bfloat16_nCh64_unroll8",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AlltoAll_bfloat16_nCh64_unroll4",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AlltoAll_bfloat16_nCh32_unroll32",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AlltoAll_bfloat16_nCh32_unroll16",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AlltoAll_bfloat16_nCh32_unroll8",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AlltoAll_bfloat16_nCh32_unroll4",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        }
+      ]
+    },
+    "alltoall_no_cumem_mnnvl": {
+      "extends": "channel_sweep_base",
+      "binary": "alltoall_perf",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "0",
+        "NCCL_MNNVL_ENABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "AlltoAll_noCumemMnnvl_bfloat16_nCh256_unroll32",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AlltoAll_noCumemMnnvl_bfloat16_nCh256_unroll16",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AlltoAll_noCumemMnnvl_bfloat16_nCh256_unroll8",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AlltoAll_noCumemMnnvl_bfloat16_nCh256_unroll4",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AlltoAll_noCumemMnnvl_bfloat16_nCh128_unroll32",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AlltoAll_noCumemMnnvl_bfloat16_nCh128_unroll16",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AlltoAll_noCumemMnnvl_bfloat16_nCh128_unroll8",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AlltoAll_noCumemMnnvl_bfloat16_nCh128_unroll4",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AlltoAll_noCumemMnnvl_bfloat16_nCh64_unroll32",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AlltoAll_noCumemMnnvl_bfloat16_nCh64_unroll16",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AlltoAll_noCumemMnnvl_bfloat16_nCh64_unroll8",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AlltoAll_noCumemMnnvl_bfloat16_nCh64_unroll4",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "AlltoAll_noCumemMnnvl_bfloat16_nCh32_unroll32",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "AlltoAll_noCumemMnnvl_bfloat16_nCh32_unroll16",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "AlltoAll_noCumemMnnvl_bfloat16_nCh32_unroll8",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "AlltoAll_noCumemMnnvl_bfloat16_nCh32_unroll4",
+          "description": "AlltoAll 1KB-16GB, bfloat16, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        }
+      ]
+    },
+    "broadcast_default": {
+      "extends": "channel_sweep_base",
+      "binary": "broadcast_perf",
+      "tests": [
+        {
+          "name": "Broadcast_bfloat16_nCh256_unroll32",
+          "description": "Broadcast 1KB-16GB, bfloat16, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "Broadcast_bfloat16_nCh256_unroll16",
+          "description": "Broadcast 1KB-16GB, bfloat16, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "Broadcast_bfloat16_nCh256_unroll8",
+          "description": "Broadcast 1KB-16GB, bfloat16, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "Broadcast_bfloat16_nCh256_unroll4",
+          "description": "Broadcast 1KB-16GB, bfloat16, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "Broadcast_bfloat16_nCh128_unroll32",
+          "description": "Broadcast 1KB-16GB, bfloat16, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "Broadcast_bfloat16_nCh128_unroll16",
+          "description": "Broadcast 1KB-16GB, bfloat16, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "Broadcast_bfloat16_nCh128_unroll8",
+          "description": "Broadcast 1KB-16GB, bfloat16, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "Broadcast_bfloat16_nCh128_unroll4",
+          "description": "Broadcast 1KB-16GB, bfloat16, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "Broadcast_bfloat16_nCh64_unroll32",
+          "description": "Broadcast 1KB-16GB, bfloat16, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "Broadcast_bfloat16_nCh64_unroll16",
+          "description": "Broadcast 1KB-16GB, bfloat16, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "Broadcast_bfloat16_nCh64_unroll8",
+          "description": "Broadcast 1KB-16GB, bfloat16, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "Broadcast_bfloat16_nCh64_unroll4",
+          "description": "Broadcast 1KB-16GB, bfloat16, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "Broadcast_bfloat16_nCh32_unroll32",
+          "description": "Broadcast 1KB-16GB, bfloat16, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "Broadcast_bfloat16_nCh32_unroll16",
+          "description": "Broadcast 1KB-16GB, bfloat16, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "Broadcast_bfloat16_nCh32_unroll8",
+          "description": "Broadcast 1KB-16GB, bfloat16, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "Broadcast_bfloat16_nCh32_unroll4",
+          "description": "Broadcast 1KB-16GB, bfloat16, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        }
+      ]
+    },
+    "broadcast_no_cumem_mnnvl": {
+      "extends": "channel_sweep_base",
+      "binary": "broadcast_perf",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "0",
+        "NCCL_MNNVL_ENABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "Broadcast_noCumemMnnvl_bfloat16_nCh256_unroll32",
+          "description": "Broadcast 1KB-16GB, bfloat16, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "Broadcast_noCumemMnnvl_bfloat16_nCh256_unroll16",
+          "description": "Broadcast 1KB-16GB, bfloat16, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "Broadcast_noCumemMnnvl_bfloat16_nCh256_unroll8",
+          "description": "Broadcast 1KB-16GB, bfloat16, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "Broadcast_noCumemMnnvl_bfloat16_nCh256_unroll4",
+          "description": "Broadcast 1KB-16GB, bfloat16, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "Broadcast_noCumemMnnvl_bfloat16_nCh128_unroll32",
+          "description": "Broadcast 1KB-16GB, bfloat16, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "Broadcast_noCumemMnnvl_bfloat16_nCh128_unroll16",
+          "description": "Broadcast 1KB-16GB, bfloat16, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "Broadcast_noCumemMnnvl_bfloat16_nCh128_unroll8",
+          "description": "Broadcast 1KB-16GB, bfloat16, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "Broadcast_noCumemMnnvl_bfloat16_nCh128_unroll4",
+          "description": "Broadcast 1KB-16GB, bfloat16, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "Broadcast_noCumemMnnvl_bfloat16_nCh64_unroll32",
+          "description": "Broadcast 1KB-16GB, bfloat16, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "Broadcast_noCumemMnnvl_bfloat16_nCh64_unroll16",
+          "description": "Broadcast 1KB-16GB, bfloat16, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "Broadcast_noCumemMnnvl_bfloat16_nCh64_unroll8",
+          "description": "Broadcast 1KB-16GB, bfloat16, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "Broadcast_noCumemMnnvl_bfloat16_nCh64_unroll4",
+          "description": "Broadcast 1KB-16GB, bfloat16, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "Broadcast_noCumemMnnvl_bfloat16_nCh32_unroll32",
+          "description": "Broadcast 1KB-16GB, bfloat16, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "Broadcast_noCumemMnnvl_bfloat16_nCh32_unroll16",
+          "description": "Broadcast 1KB-16GB, bfloat16, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "Broadcast_noCumemMnnvl_bfloat16_nCh32_unroll8",
+          "description": "Broadcast 1KB-16GB, bfloat16, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "Broadcast_noCumemMnnvl_bfloat16_nCh32_unroll4",
+          "description": "Broadcast 1KB-16GB, bfloat16, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        }
+      ]
+    },
+    "all_gather_symmetric": {
+      "extends": "sweep_base",
+      "binary": "all_gather_perf",
+      "tests": [
+        {
+          "name": "AllGather_symMem_ctas64",
+          "description": "AllGather 1KB-16GB, bfloat16, symmetric memory with 64 CTAs",
+          "command_args": "-d bfloat16 -R 2",
+          "env_variables": {
+            "NCCL_SYM_CTAS": "64"
+          }
+        },
+        {
+          "name": "AllGather_symMem_ctas32",
+          "description": "AllGather 1KB-16GB, bfloat16, symmetric memory with 32 CTAs",
+          "command_args": "-d bfloat16 -R 2",
+          "env_variables": {
+            "NCCL_SYM_CTAS": "32"
+          }
+        },
+        {
+          "name": "AllGather_symMem_ctas16",
+          "description": "AllGather 1KB-16GB, bfloat16, symmetric memory with 16 CTAs",
+          "command_args": "-d bfloat16 -R 2",
+          "env_variables": {
+            "NCCL_SYM_CTAS": "16"
+          }
+        }
+      ]
+    },
+    "alltoall_symmetric": {
+      "extends": "sweep_base",
+      "binary": "alltoall_perf",
+      "tests": [
+        {
+          "name": "AlltoAll_symMem_ctas64",
+          "description": "AlltoAll 1KB-16GB, bfloat16, symmetric memory with 64 CTAs",
+          "command_args": "-d bfloat16 -R 2",
+          "env_variables": {
+            "NCCL_SYM_CTAS": "64"
+          }
+        },
+        {
+          "name": "AlltoAll_symMem_ctas32",
+          "description": "AlltoAll 1KB-16GB, bfloat16, symmetric memory with 32 CTAs",
+          "command_args": "-d bfloat16 -R 2",
+          "env_variables": {
+            "NCCL_SYM_CTAS": "32"
+          }
+        },
+        {
+          "name": "AlltoAll_symMem_ctas16",
+          "description": "AlltoAll 1KB-16GB, bfloat16, symmetric memory with 16 CTAs",
+          "command_args": "-d bfloat16 -R 2",
+          "env_variables": {
+            "NCCL_SYM_CTAS": "16"
+          }
+        }
+      ]
+    },
+    "all_gather_sdma": {
+      "extends": "sweep_base",
+      "binary": "all_gather_perf",
+      "tests": [
+        {
+          "name": "AllGather_sdma",
+          "description": "AllGather 1KB-16GB, bfloat16, symmetric memory over SDMA",
+          "command_args": "-d bfloat16 -R 2 -x 2"
+        }
+      ]
+    },
+    "alltoall_sdma": {
+      "extends": "sweep_base",
+      "binary": "alltoall_perf",
+      "tests": [
+        {
+          "name": "AlltoAll_sdma",
+          "description": "AlltoAll 1KB-16GB, bfloat16, symmetric memory over SDMA",
+          "command_args": "-d bfloat16 -R 2 -x 2"
+        }
+      ]
+    },
+    "reduce_scatter_default": {
+      "extends": "channel_sweep_base",
+      "binary": "reduce_scatter_perf",
+      "tests": [
+        {
+          "name": "ReduceScatter_float_nCh256_unroll32",
+          "description": "ReduceScatter 1KB-16GB, float, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "ReduceScatter_float_nCh256_unroll16",
+          "description": "ReduceScatter 1KB-16GB, float, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "ReduceScatter_float_nCh256_unroll8",
+          "description": "ReduceScatter 1KB-16GB, float, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "ReduceScatter_float_nCh256_unroll4",
+          "description": "ReduceScatter 1KB-16GB, float, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "ReduceScatter_float_nCh128_unroll32",
+          "description": "ReduceScatter 1KB-16GB, float, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "ReduceScatter_float_nCh128_unroll16",
+          "description": "ReduceScatter 1KB-16GB, float, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "ReduceScatter_float_nCh128_unroll8",
+          "description": "ReduceScatter 1KB-16GB, float, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "ReduceScatter_float_nCh128_unroll4",
+          "description": "ReduceScatter 1KB-16GB, float, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "ReduceScatter_float_nCh64_unroll32",
+          "description": "ReduceScatter 1KB-16GB, float, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "ReduceScatter_float_nCh64_unroll16",
+          "description": "ReduceScatter 1KB-16GB, float, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "ReduceScatter_float_nCh64_unroll8",
+          "description": "ReduceScatter 1KB-16GB, float, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "ReduceScatter_float_nCh64_unroll4",
+          "description": "ReduceScatter 1KB-16GB, float, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "ReduceScatter_float_nCh32_unroll32",
+          "description": "ReduceScatter 1KB-16GB, float, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "ReduceScatter_float_nCh32_unroll16",
+          "description": "ReduceScatter 1KB-16GB, float, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "ReduceScatter_float_nCh32_unroll8",
+          "description": "ReduceScatter 1KB-16GB, float, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "ReduceScatter_float_nCh32_unroll4",
+          "description": "ReduceScatter 1KB-16GB, float, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "ReduceScatter_bfloat16_nCh256_unroll32",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "ReduceScatter_bfloat16_nCh256_unroll16",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "ReduceScatter_bfloat16_nCh256_unroll8",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "ReduceScatter_bfloat16_nCh256_unroll4",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "ReduceScatter_bfloat16_nCh128_unroll32",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "ReduceScatter_bfloat16_nCh128_unroll16",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "ReduceScatter_bfloat16_nCh128_unroll8",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "ReduceScatter_bfloat16_nCh128_unroll4",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "ReduceScatter_bfloat16_nCh64_unroll32",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "ReduceScatter_bfloat16_nCh64_unroll16",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "ReduceScatter_bfloat16_nCh64_unroll8",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "ReduceScatter_bfloat16_nCh64_unroll4",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "ReduceScatter_bfloat16_nCh32_unroll32",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "ReduceScatter_bfloat16_nCh32_unroll16",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "ReduceScatter_bfloat16_nCh32_unroll8",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "ReduceScatter_bfloat16_nCh32_unroll4",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2)",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        }
+      ]
+    },
+    "reduce_scatter_no_cumem_mnnvl": {
+      "extends": "channel_sweep_base",
+      "binary": "reduce_scatter_perf",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "0",
+        "NCCL_MNNVL_ENABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "ReduceScatter_noCumemMnnvl_float_nCh256_unroll32",
+          "description": "ReduceScatter 1KB-16GB, float, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_float_nCh256_unroll16",
+          "description": "ReduceScatter 1KB-16GB, float, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_float_nCh256_unroll8",
+          "description": "ReduceScatter 1KB-16GB, float, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_float_nCh256_unroll4",
+          "description": "ReduceScatter 1KB-16GB, float, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_float_nCh128_unroll32",
+          "description": "ReduceScatter 1KB-16GB, float, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_float_nCh128_unroll16",
+          "description": "ReduceScatter 1KB-16GB, float, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_float_nCh128_unroll8",
+          "description": "ReduceScatter 1KB-16GB, float, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_float_nCh128_unroll4",
+          "description": "ReduceScatter 1KB-16GB, float, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_float_nCh64_unroll32",
+          "description": "ReduceScatter 1KB-16GB, float, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_float_nCh64_unroll16",
+          "description": "ReduceScatter 1KB-16GB, float, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_float_nCh64_unroll8",
+          "description": "ReduceScatter 1KB-16GB, float, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_float_nCh64_unroll4",
+          "description": "ReduceScatter 1KB-16GB, float, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_float_nCh32_unroll32",
+          "description": "ReduceScatter 1KB-16GB, float, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_float_nCh32_unroll16",
+          "description": "ReduceScatter 1KB-16GB, float, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_float_nCh32_unroll8",
+          "description": "ReduceScatter 1KB-16GB, float, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_float_nCh32_unroll4",
+          "description": "ReduceScatter 1KB-16GB, float, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d float",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_bfloat16_nCh256_unroll32",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 256 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_bfloat16_nCh256_unroll16",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 256 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_bfloat16_nCh256_unroll8",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 256 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_bfloat16_nCh256_unroll4",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 256 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "256",
+            "NCCL_MAX_NCHANNELS": "256",
+            "NCCL_P2P_MIN_NCHANNELS": "256",
+            "NCCL_P2P_MAX_NCHANNELS": "256",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_bfloat16_nCh128_unroll32",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 128 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_bfloat16_nCh128_unroll16",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 128 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_bfloat16_nCh128_unroll8",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 128 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_bfloat16_nCh128_unroll4",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 128 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "128",
+            "NCCL_MAX_NCHANNELS": "128",
+            "NCCL_P2P_MIN_NCHANNELS": "128",
+            "NCCL_P2P_MAX_NCHANNELS": "128",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_bfloat16_nCh64_unroll32",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 64 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_bfloat16_nCh64_unroll16",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 64 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_bfloat16_nCh64_unroll8",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 64 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_bfloat16_nCh64_unroll4",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 64 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_P2P_MIN_NCHANNELS": "64",
+            "NCCL_P2P_MAX_NCHANNELS": "64",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_bfloat16_nCh32_unroll32",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 32 channels, unroll factor 32 (RCCL_UNROLL_FACTOR=5), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "5"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_bfloat16_nCh32_unroll16",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 32 channels, unroll factor 16 (RCCL_UNROLL_FACTOR=4), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "4"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_bfloat16_nCh32_unroll8",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 32 channels, unroll factor 8 (RCCL_UNROLL_FACTOR=3), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "3"
+          }
+        },
+        {
+          "name": "ReduceScatter_noCumemMnnvl_bfloat16_nCh32_unroll4",
+          "description": "ReduceScatter 1KB-16GB, bfloat16, 32 channels, unroll factor 4 (RCCL_UNROLL_FACTOR=2), cuMem/MNNVL disabled",
+          "command_args": "-d bfloat16",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_P2P_MIN_NCHANNELS": "32",
+            "NCCL_P2P_MAX_NCHANNELS": "32",
+            "RCCL_UNROLL_FACTOR": "2"
+          }
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "Perf - AllReduce (channel/unroll sweep)",
+      "description": "AllReduce 1KB-16GB across 4 channel counts x 4 unroll factors x 3 datatype(s)",
+      "config": "all_reduce_default",
+      "enabled": true
+    },
+    {
+      "name": "Perf - AllReduce noDDA (channel/unroll sweep)",
+      "description": "AllReduce 1KB-16GB across 4 channel counts x 4 unroll factors x 3 datatype(s), DDA disabled",
+      "config": "all_reduce_no_dda",
+      "enabled": true
+    },
+    {
+      "name": "Perf - AllReduce noCumemMnnvl (channel/unroll sweep)",
+      "description": "AllReduce 1KB-16GB across 4 channel counts x 4 unroll factors x 3 datatype(s), cuMem/MNNVL disabled",
+      "config": "all_reduce_no_cumem_mnnvl",
+      "enabled": true
+    },
+    {
+      "name": "Perf - AllGather (channel/unroll sweep)",
+      "description": "AllGather 1KB-16GB across 4 channel counts x 4 unroll factors x 1 datatype(s)",
+      "config": "all_gather_default",
+      "enabled": true
+    },
+    {
+      "name": "Perf - AllGather noCumemMnnvl (channel/unroll sweep)",
+      "description": "AllGather 1KB-16GB across 4 channel counts x 4 unroll factors x 1 datatype(s), cuMem/MNNVL disabled",
+      "config": "all_gather_no_cumem_mnnvl",
+      "enabled": true
+    },
+    {
+      "name": "Perf - AlltoAll (channel/unroll sweep)",
+      "description": "AlltoAll 1KB-16GB across 4 channel counts x 4 unroll factors x 1 datatype(s)",
+      "config": "alltoall_default",
+      "enabled": true
+    },
+    {
+      "name": "Perf - AlltoAll noCumemMnnvl (channel/unroll sweep)",
+      "description": "AlltoAll 1KB-16GB across 4 channel counts x 4 unroll factors x 1 datatype(s), cuMem/MNNVL disabled",
+      "config": "alltoall_no_cumem_mnnvl",
+      "enabled": true
+    },
+    {
+      "name": "Perf - Broadcast (channel/unroll sweep)",
+      "description": "Broadcast 1KB-16GB across 4 channel counts x 4 unroll factors x 1 datatype(s)",
+      "config": "broadcast_default",
+      "enabled": true
+    },
+    {
+      "name": "Perf - Broadcast noCumemMnnvl (channel/unroll sweep)",
+      "description": "Broadcast 1KB-16GB across 4 channel counts x 4 unroll factors x 1 datatype(s), cuMem/MNNVL disabled",
+      "config": "broadcast_no_cumem_mnnvl",
+      "enabled": true
+    },
+    {
+      "name": "Perf - AllGather symmetric memory (CTA sweep)",
+      "description": "AllGather 1KB-16GB, bfloat16, symmetric memory across 3 NCCL_SYM_CTAS values",
+      "config": "all_gather_symmetric",
+      "enabled": true
+    },
+    {
+      "name": "Perf - AlltoAll symmetric memory (CTA sweep)",
+      "description": "AlltoAll 1KB-16GB, bfloat16, symmetric memory across 3 NCCL_SYM_CTAS values",
+      "config": "alltoall_symmetric",
+      "enabled": true
+    },
+    {
+      "name": "Perf - AllGather SDMA",
+      "description": "AllGather 1KB-16GB, bfloat16, symmetric memory over SDMA",
+      "config": "all_gather_sdma",
+      "enabled": true
+    },
+    {
+      "name": "Perf - AlltoAll SDMA",
+      "description": "AlltoAll 1KB-16GB, bfloat16, symmetric memory over SDMA",
+      "config": "alltoall_sdma",
+      "enabled": true
+    },
+    {
+      "name": "Perf - ReduceScatter (channel/unroll sweep)",
+      "description": "ReduceScatter 1KB-16GB across 4 channel counts x 4 unroll factors x 2 datatype(s)",
+      "config": "reduce_scatter_default",
+      "enabled": true
+    },
+    {
+      "name": "Perf - ReduceScatter noCumemMnnvl (channel/unroll sweep)",
+      "description": "ReduceScatter 1KB-16GB across 4 channel counts x 4 unroll factors x 2 datatype(s), cuMem/MNNVL disabled",
+      "config": "reduce_scatter_no_cumem_mnnvl",
+      "enabled": true
+    }
+  ]
+}
