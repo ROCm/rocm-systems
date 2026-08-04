@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -20,9 +21,7 @@ using counter_track = perfetto_counter_track<metrics>;
 enabled_metrics
 make_enabled(std::uint32_t value)
 {
-    enabled_metrics result{};
-    result.value = value;
-    return result;
+    return enabled_metrics{ .value = value };
 }
 
 // perfetto_counter_track<metrics> keeps process-wide static storage that has no
@@ -131,31 +130,36 @@ TEST_F(NicPerfettoPolicyTest, MetricBitConstants_MatchBitfieldLayout)
     };
 
     const bit_case cases[] = {
-        { "rx_rdma_ucast_bytes",
-          [](enabled_metrics& m) { m.bits.rx_rdma_ucast_bytes = 1; },
-          RX_RDMA_UCAST_BYTES_VALUE },
-        { "tx_rdma_ucast_bytes",
-          [](enabled_metrics& m) { m.bits.tx_rdma_ucast_bytes = 1; },
-          TX_RDMA_UCAST_BYTES_VALUE },
-        { "rx_rdma_ucast_pkts", [](enabled_metrics& m) { m.bits.rx_rdma_ucast_pkts = 1; },
-          RX_RDMA_UCAST_PKTS_VALUE },
-        { "tx_rdma_ucast_pkts", [](enabled_metrics& m) { m.bits.tx_rdma_ucast_pkts = 1; },
-          TX_RDMA_UCAST_PKTS_VALUE },
-        { "rx_rdma_cnp_pkts", [](enabled_metrics& m) { m.bits.rx_rdma_cnp_pkts = 1; },
-          RX_RDMA_CNP_PKTS_VALUE },
-        { "tx_rdma_cnp_pkts", [](enabled_metrics& m) { m.bits.tx_rdma_cnp_pkts = 1; },
-          TX_RDMA_CNP_PKTS_VALUE },
-        { "tx_rdma_ack_timeout",
-          [](enabled_metrics& m) { m.bits.tx_rdma_ack_timeout = 1; },
-          TX_RDMA_ACK_TIMEOUT_VALUE },
-        { "resp_tx_pkt_seq_err",
-          [](enabled_metrics& m) { m.bits.resp_tx_pkt_seq_err = 1; },
-          RESP_TX_PKT_SEQ_ERR_VALUE },
-        { "req_rx_pkt_seq_err", [](enabled_metrics& m) { m.bits.req_rx_pkt_seq_err = 1; },
-          REQ_RX_PKT_SEQ_ERR_VALUE },
-        { "req_rx_impl_nak_seq_err",
-          [](enabled_metrics& m) { m.bits.req_rx_impl_nak_seq_err = 1; },
-          REQ_RX_IMPL_NAK_SEQ_ERR_VALUE },
+        { .name = "rx_rdma_ucast_bytes",
+          .set  = [](enabled_metrics& m) { m.bits.rx_rdma_ucast_bytes = 1; },
+          .expected        = RX_RDMA_UCAST_BYTES_VALUE },
+        { .name = "tx_rdma_ucast_bytes",
+          .set  = [](enabled_metrics& m) { m.bits.tx_rdma_ucast_bytes = 1; },
+          .expected        = TX_RDMA_UCAST_BYTES_VALUE },
+        { .name = "rx_rdma_ucast_pkts",
+          .set  = [](enabled_metrics& m) { m.bits.rx_rdma_ucast_pkts = 1; },
+          .expected        = RX_RDMA_UCAST_PKTS_VALUE },
+        { .name = "tx_rdma_ucast_pkts",
+          .set  = [](enabled_metrics& m) { m.bits.tx_rdma_ucast_pkts = 1; },
+          .expected        = TX_RDMA_UCAST_PKTS_VALUE },
+        { .name = "rx_rdma_cnp_pkts",
+          .set  = [](enabled_metrics& m) { m.bits.rx_rdma_cnp_pkts = 1; },
+          .expected        = RX_RDMA_CNP_PKTS_VALUE },
+        { .name = "tx_rdma_cnp_pkts",
+          .set  = [](enabled_metrics& m) { m.bits.tx_rdma_cnp_pkts = 1; },
+          .expected        = TX_RDMA_CNP_PKTS_VALUE },
+        { .name = "tx_rdma_ack_timeout",
+          .set  = [](enabled_metrics& m) { m.bits.tx_rdma_ack_timeout = 1; },
+          .expected        = TX_RDMA_ACK_TIMEOUT_VALUE },
+        { .name = "resp_tx_pkt_seq_err",
+          .set  = [](enabled_metrics& m) { m.bits.resp_tx_pkt_seq_err = 1; },
+          .expected        = RESP_TX_PKT_SEQ_ERR_VALUE },
+        { .name = "req_rx_pkt_seq_err",
+          .set  = [](enabled_metrics& m) { m.bits.req_rx_pkt_seq_err = 1; },
+          .expected        = REQ_RX_PKT_SEQ_ERR_VALUE },
+        { .name = "req_rx_impl_nak_seq_err",
+          .set  = [](enabled_metrics& m) { m.bits.req_rx_impl_nak_seq_err = 1; },
+          .expected        = REQ_RX_IMPL_NAK_SEQ_ERR_VALUE },
     };
 
     for(const auto& tc : cases)

@@ -8,6 +8,7 @@
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
+#include <cstddef>
 #include <cstdint>
 
 #include <map>
@@ -43,16 +44,26 @@ inline const std::map<std::uint32_t, nic_track_description>&
 make_default_nic_tracks()
 {
     static const std::map<std::uint32_t, nic_track_description> tracks = {
-        { RX_RDMA_UCAST_BYTES_VALUE, { "RX RDMA BYTES", "bytes" } },
-        { TX_RDMA_UCAST_BYTES_VALUE, { "TX RDMA BYTES", "bytes" } },
-        { RX_RDMA_UCAST_PKTS_VALUE, { "RX RDMA PACKETS", "packets" } },
-        { TX_RDMA_UCAST_PKTS_VALUE, { "TX RDMA PACKETS", "packets" } },
-        { RX_RDMA_CNP_PKTS_VALUE, { "RX CNP PACKETS", "packets" } },
-        { TX_RDMA_CNP_PKTS_VALUE, { "TX CNP PACKETS", "packets" } },
-        { TX_RDMA_ACK_TIMEOUT_VALUE, { "TX ACK TIMEOUT", "timeouts" } },
-        { RESP_TX_PKT_SEQ_ERR_VALUE, { "RESP TX PKT SEQ ERR", "errors" } },
-        { REQ_RX_PKT_SEQ_ERR_VALUE, { "REQ RX PKT SEQ ERR", "errors" } },
-        { REQ_RX_IMPL_NAK_SEQ_ERR_VALUE, { "REQ RX IMPL NAK SEQ ERR", "errors" } },
+        { RX_RDMA_UCAST_BYTES_VALUE,
+          { .track_name = "RX RDMA BYTES", .units = "bytes" } },
+        { TX_RDMA_UCAST_BYTES_VALUE,
+          { .track_name = "TX RDMA BYTES", .units = "bytes" } },
+        { RX_RDMA_UCAST_PKTS_VALUE,
+          { .track_name = "RX RDMA PACKETS", .units = "packets" } },
+        { TX_RDMA_UCAST_PKTS_VALUE,
+          { .track_name = "TX RDMA PACKETS", .units = "packets" } },
+        { RX_RDMA_CNP_PKTS_VALUE,
+          { .track_name = "RX CNP PACKETS", .units = "packets" } },
+        { TX_RDMA_CNP_PKTS_VALUE,
+          { .track_name = "TX CNP PACKETS", .units = "packets" } },
+        { TX_RDMA_ACK_TIMEOUT_VALUE,
+          { .track_name = "TX ACK TIMEOUT", .units = "timeouts" } },
+        { RESP_TX_PKT_SEQ_ERR_VALUE,
+          { .track_name = "RESP TX PKT SEQ ERR", .units = "errors" } },
+        { REQ_RX_PKT_SEQ_ERR_VALUE,
+          { .track_name = "REQ RX PKT SEQ ERR", .units = "errors" } },
+        { REQ_RX_IMPL_NAK_SEQ_ERR_VALUE,
+          { .track_name = "REQ RX IMPL NAK SEQ ERR", .units = "errors" } },
     };
     return tracks;
 }
@@ -173,7 +184,8 @@ struct perfetto_policy
         auto it = perfetto_policy::bundle.find(device_index);
         if(it != perfetto_policy::bundle.end())
         {
-            it->second->emplace_back(nic_perfetto_sample{ timestamp, metric_values });
+            it->second->emplace_back(nic_perfetto_sample{
+                .timestamp = timestamp, .metric_values = metric_values });
         }
     }
 
