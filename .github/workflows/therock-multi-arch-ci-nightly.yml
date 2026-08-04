@@ -53,9 +53,6 @@ jobs:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
     with:
       build_variant: "release"
-      # nightly release_type makes tests comprehensive on any trigger (schedule or
-      # manual dispatch), and gives artifacts nightly versioning/bucket rather than ci/dev.
-      release_type: "nightly"
       # Limit GPU families for nightly CI: gfx94X, gfx950, gfx125X (Linux) and gfx1151 (Windows)
       linux_amdgpu_families: 'gfx94X,gfx950,gfx125X'
       windows_amdgpu_families: 'gfx1151'
