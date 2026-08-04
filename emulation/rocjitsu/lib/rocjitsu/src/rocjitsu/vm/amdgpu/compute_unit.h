@@ -107,6 +107,12 @@ public:
   ///          or insufficient register space.
   Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, uint32_t num_vgprs);
 
+  /// @brief Activate a specific idle wavefront slot.
+  /// @details Used by checkpoint restoration when hardware slot identity is
+  /// execution state. Returns nullptr when the requested slot is invalid or busy.
+  Wavefront *dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
+                            uint32_t num_vgprs);
+
   /// @brief Advance every RUNNING wavefront by one instruction, then report
   /// residency.
   /// @details Issues one instruction to each wavefront currently in the RUNNING
@@ -149,7 +155,8 @@ public:
   void request_functional_yield() { functional_yield_requested_ = true; }
 
   /// @brief Schedule the tick event if the CU is not already executing.
-  /// Called from dispatch_wf() and the cpl_ port handler.
+  /// Called from dispatch_wf(), the cpl_ port handler, and single-threaded VM
+  /// initialization after engine creation but before simulation workers start.
   virtual void schedule_work() = 0;
 
   /// @brief Check whether this CU has no active wavefronts.
@@ -497,19 +504,11 @@ public:
   virtual uint8_t *raw_vgpr_data(uint32_t base) = 0;
 
   /// @brief Read a VGPR lane directly from physical storage.
-  /// @details This deliberately bypasses plugin observation. It is for VM
-  /// completion and internal destination-preservation merges, where retained
-  /// destination bytes are storage state rather than instruction-visible
-  /// source operands.
+  /// @details This deliberately bypasses plugin observation and is reserved
+  /// for VM storage operations. Instruction code receives
+  /// `InstructionComputeUnitView`, which does not expose this API.
   uint32_t read_vgpr_storage(uint32_t reg_idx, uint32_t lane) const {
     return reinterpret_cast<const uint32_t *>(raw_vgpr_data(reg_idx))[lane];
-  }
-
-  /// @brief Write a VGPR lane directly to physical storage.
-  /// @details This deliberately bypasses plugin observation and is reserved
-  /// for VM completion and internal destination-preservation merges.
-  void write_vgpr_storage(uint32_t reg_idx, uint32_t lane, uint32_t value) {
-    reinterpret_cast<uint32_t *>(raw_vgpr_data(reg_idx))[lane] = value;
   }
 
   /// @brief Number of physical VGPR registers in one allocation block.
@@ -713,12 +712,12 @@ public:
     // Waking the CU then would run an empty tick with no wave to issue — pure waste.
     // Work is scheduled only when there is work to do.
     //
-    // ENGINE-THREAD ONLY: executing_ and tick_event_ are touched without
-    // synchronization, and schedule_event() pushes to the partition's event queue
-    // non-thread-safely. All callers (dispatch_wf(), the cpl_ port handler, and the
-    // CP on the same partition) run on this CU's owning partition engine thread. A
-    // cross-partition schedule_work() would be an executing_ data race plus an
-    // unsynchronized event-queue push.
+    // When simulation is running, executing_ and tick_event_ are engine-thread
+    // only: dispatch_wf(), the cpl_ handler, and the CP all run on this CU's owning
+    // partition. VM creation may also call this after engine attachment but before
+    // any simulation worker starts, when it has exclusive access to the queues. A
+    // cross-partition call during execution would be an executing_ data race plus
+    // an unsynchronized event-queue push.
     if (executing_ || !this->engine() || !this->has_active_wfs())
       return;
     executing_ = true;

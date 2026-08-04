@@ -27,6 +27,13 @@ jobs:
   trigger-rtd:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout docs-config only
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .github/docs-config.json
+          sparse-checkout-cone-mode: false
+
       - name: Get changed files using GitHub REST API
         id: diff
         env:

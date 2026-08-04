@@ -1,5 +1,7 @@
 [build-system]
-# nanobind is the binding backend (used by TheRock).
+# Keep in sync with TheRock's authoritative build recipe:
+#   https://github.com/ROCm/TheRock/blob/main/comm-libs/CMakeLists.txt
+#   https://github.com/ROCm/TheRock/blob/main/comm-libs/artifact-rocshmem.toml
 requires = [
     "setuptools>=40.8.0",
     "wheel",

@@ -461,8 +461,8 @@ void VPkMinimum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     };
     float rlo = ieee_min(ieee_min(a_lo, b_lo), c_lo);
     float rhi = ieee_min(ieee_min(a_hi, b_hi), c_hi);
-    amdgpu::RegisterAccess(wf).write_lane(
-        vdst, lane,
+    amdgpu::sdwa::write_lane<true>(
+        *this, wf, vdst, lane,
         util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) |
             (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));
   }
@@ -530,8 +530,8 @@ void VPkMaximum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     };
     float rlo = ieee_max(ieee_max(a_lo, b_lo), c_lo);
     float rhi = ieee_max(ieee_max(a_hi, b_hi), c_hi);
-    amdgpu::RegisterAccess(wf).write_lane(
-        vdst, lane,
+    amdgpu::sdwa::write_lane<true>(
+        *this, wf, vdst, lane,
         util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) |
             (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));
   }
@@ -827,8 +827,8 @@ void VAccvgprReadVop3p::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::RegisterAccess(wf).write_lane(vdst, lane,
-                                          amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane,
+                                    amdgpu::RegisterAccess(wf).read_lane(src0, lane));
   }
 }
 
@@ -848,8 +848,8 @@ void VAccvgprWriteVop3p::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::RegisterAccess(wf).write_lane(vdst, lane,
-                                          amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane,
+                                    amdgpu::RegisterAccess(wf).read_lane(src0, lane));
   }
 }
 
