@@ -10,6 +10,8 @@
 #include <cctype>
 #include <cstddef>
 #include <initializer_list>
+#include <iterator>
+#include <ranges>
 #include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
@@ -118,38 +120,37 @@ public:
     static std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
     get_buffered_domains();
 
-    static std::vector<std::int32_t> get_operations(
-        typename SdkBackend::callback_tracing_kind_t kindv);
+    template <typename TracingKind>
+        requires concepts::tracing_kind_for<SdkBackend, TracingKind>
+    static std::vector<std::int32_t> get_operations(TracingKind kindv);
 
-    static std::vector<std::int32_t> get_operations(
-        typename SdkBackend::buffer_tracing_kind_t kindv);
-
-    static std::unordered_set<std::int32_t> get_backtrace_operations(
-        typename SdkBackend::callback_tracing_kind_t kindv);
-
-    static std::unordered_set<std::int32_t> get_backtrace_operations(
-        typename SdkBackend::buffer_tracing_kind_t kindv);
+    template <typename TracingKind>
+        requires concepts::tracing_kind_for<SdkBackend, TracingKind>
+    static std::unordered_set<std::int32_t> get_backtrace_operations(TracingKind kindv);
 
 private:
     static constexpr version_info compile_time_sdk_version =
         version_info::from_formatted(SdkBackend::compile_time_version);
 
-    static std::vector<std::int32_t> filter_operations(
-        const std::unordered_set<std::int32_t>& complete,
-        const std::unordered_set<std::int32_t>& include,
-        const std::unordered_set<std::int32_t>& exclude);
-
     template <typename Tp>
     static std::string to_lower(const Tp& val);
 
+    /// @brief Every named operation id+name for a kind, excluding the "none" placeholder.
     template <typename TracingKind>
         requires concepts::tracing_kind_for<SdkBackend, TracingKind>
-    static std::unordered_set<std::int32_t> parse_operation_string(
-        TracingKind tracing_kind, const std::string& operations_setting = {});
+    static std::vector<std::pair<std::int32_t, std::string>> all_operation_items_for_kind(
+        TracingKind tracing_kind);
 
-    template <typename OperationItems>
-    static std::unordered_set<std::int32_t> operation_ids_for_tracing_kind(
-        const std::string& operations_setting, const OperationItems& operation_items);
+    /// @brief Compile every delimited pattern in an operations-filter setting into a
+    /// case-insensitive regex, paired with its source text (for logging matches).
+    static std::vector<std::pair<std::string, std::regex>> compile_operation_patterns(
+        const std::string& operations_setting_env_name);
+
+    /// @brief True if operation_name matches any one of patterns (patterns are
+    /// alternatives, not simultaneous constraints).
+    static bool matches_any_operation_pattern(
+        std::string_view operations_setting_env_name, const std::string& operation_name,
+        const std::vector<std::pair<std::string, std::regex>>& patterns);
 
     [[noreturn]] static void finalize_and_throw(std::string_view exception_message);
 
@@ -158,10 +159,17 @@ private:
         std::string operations_include_env_name            = {};
         std::string operations_exclude_env_name            = {};
         std::string operations_annotate_backtrace_env_name = {};
+
+        bool is_empty() const
+        {
+            return operations_annotate_backtrace_env_name.empty() &&
+                   operations_exclude_env_name.empty() &&
+                   operations_include_env_name.empty();
+        }
     };
 
     /// @brief Pure: nullopt if not filterable, else the three formatted env names.
-    [[nodiscard]] static std::optional<operation_options_env_names>
+    [[nodiscard]] static operation_options_env_names
     assemble_operation_env_names_for_domain(std::string_view domain_name,
                                             bool             has_operations);
 
@@ -169,8 +177,8 @@ private:
     /// table, applying the MARKER_CORE_API -> "MARKER_API" alias.
     template <typename TracingKind>
         requires concepts::tracing_kind_for<SdkBackend, TracingKind>
-    static std::optional<operation_options_env_names>
-    assemble_operation_env_names_for_kind(TracingKind kind);
+    static operation_options_env_names assemble_operation_env_names_for_kind(
+        TracingKind kind);
 
     struct kfd_runtime_support
     {
@@ -242,14 +250,13 @@ sdk_tracing_config<SdkBackend, Externals>::finalize_and_throw(
 
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-std::optional<
-    typename sdk_tracing_config<SdkBackend, Externals>::operation_options_env_names>
+typename sdk_tracing_config<SdkBackend, Externals>::operation_options_env_names
 sdk_tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_domain(
     std::string_view domain_name, bool has_operations)
 {
     if(!has_operations || s_domains_to_skip.contains(to_lower(domain_name)))
     {
-        return std::nullopt;
+        return {};
     }
 
     return operation_options_env_names{
@@ -263,8 +270,7 @@ template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 template <typename TracingKind>
     requires concepts::tracing_kind_for<SdkBackend, TracingKind>
-std::optional<
-    typename sdk_tracing_config<SdkBackend, Externals>::operation_options_env_names>
+typename sdk_tracing_config<SdkBackend, Externals>::operation_options_env_names
 sdk_tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind(
     TracingKind kind)
 {
@@ -285,125 +291,86 @@ sdk_tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind
     }
 }
 
-// ─── operation_ids_for_tracing_kind (tracing kind + optional setting) ────────
-template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
-template <typename OperationItems>
-std::unordered_set<std::int32_t>
-sdk_tracing_config<SdkBackend, Externals>::operation_ids_for_tracing_kind(
-    const std::string& operations_setting_env_name, const OperationItems& operation_items)
-{
-    // maybe delete this
-    if(operations_setting_env_name.empty())
-    {
-        std::unordered_set<std::int32_t> all_operation_ids{};
-        for(const auto& [operation_id, operation_name] : operation_items)
-        {
-            if(operation_name && *operation_name != "none")
-            {
-                all_operation_ids.insert(operation_id);
-            }
-        }
-        return all_operation_ids;
-    }
-
-    auto operations_filter = Externals::get_setting_value(operations_setting_env_name);
-    if(!operations_filter)
-    {
-        finalize_and_throw(fmt::format(
-            "sdk_tracing_config::operation_ids_for_tracing_kind: no registered setting "
-            "'{}'",
-            operations_setting_env_name));
-    }
-
-    if(operations_filter->empty())
-    {
-        return {};
-    }
-
-    std::vector<std::pair<std::int32_t, std::string_view>> operations_by_name{};
-    for(const auto& [operation_id, operation_name] : operation_items)
-    {
-        if(operation_name)
-        {
-            operations_by_name.emplace_back(operation_id,
-                                            std::string_view{ *operation_name });
-        }
-    }
-
-    std::unordered_set<std::int32_t> matched_operation_ids{};
-    matched_operation_ids.reserve(operations_by_name.size());
-
-    constexpr std::string_view operation_filter_delimiters{ " ,;:\n\t" };
-    for(const auto& pattern :
-        rocprofsys::delimit(*operations_filter, operation_filter_delimiters))
-    {
-        const std::regex case_insensitive_pattern{ pattern, std::regex_constants::icase };
-        for(const auto& [operation_id, operation_label] : operations_by_name)
-        {
-            if(!std::regex_search(operation_label.begin(), operation_label.end(),
-                                  case_insensitive_pattern))
-            {
-                continue;
-            }
-
-            LOG_DEBUG("{} ('{}') matched: {}", operations_setting_env_name, pattern,
-                      operation_label);
-            matched_operation_ids.insert(operation_id);
-        }
-    }
-    return matched_operation_ids;
-}
-
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 template <typename TracingKind>
     requires concepts::tracing_kind_for<SdkBackend, TracingKind>
-std::unordered_set<std::int32_t>
-sdk_tracing_config<SdkBackend, Externals>::parse_operation_string(
-    TracingKind tracing_kind, const std::string& operations_setting_env_name)
+std::vector<std::pair<std::int32_t, std::string>>
+sdk_tracing_config<SdkBackend, Externals>::all_operation_items_for_kind(
+    TracingKind tracing_kind)
 {
-    if constexpr(std::same_as<TracingKind, typename SdkBackend::callback_tracing_kind_t>)
-    {
-        return operation_ids_for_tracing_kind(
-            operations_setting_env_name,
-            SdkBackend::get_callback_tracing_names()[tracing_kind].items());
-    }
-    else
-    {
-        return operation_ids_for_tracing_kind(
-            operations_setting_env_name,
-            SdkBackend::get_buffer_tracing_names()[tracing_kind].items());
-    }
+    auto items = [&] {
+        if constexpr(std::same_as<TracingKind,
+                                  typename SdkBackend::callback_tracing_kind_t>)
+        {
+            return SdkBackend::get_callback_tracing_names()[tracing_kind].items();
+        }
+        else
+        {
+            return SdkBackend::get_buffer_tracing_names()[tracing_kind].items();
+        }
+    }();
+
+    auto named_items =
+        items | std::views::filter([](const auto& item) {
+            return item.second && *item.second != "none";
+        }) |
+        std::views::transform([](const auto& item) {
+            return std::pair<std::int32_t, std::string>{ item.first,
+                                                         std::string{ *item.second } };
+        });
+
+    return std::vector<std::pair<std::int32_t, std::string>>{ named_items.begin(),
+                                                              named_items.end() };
 }
 
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-std::vector<std::int32_t>
-sdk_tracing_config<SdkBackend, Externals>::filter_operations(
-    const std::unordered_set<std::int32_t>& complete_set,
-    const std::unordered_set<std::int32_t>& to_include,
-    const std::unordered_set<std::int32_t>& to_exclude)
+std::vector<std::pair<std::string, std::regex>>
+sdk_tracing_config<SdkBackend, Externals>::compile_operation_patterns(
+    const std::string& operations_setting_env_name)
 {
-    auto convert_to_vector = [](const std::unordered_set<std::int32_t>& set_to_convert) {
-        auto result_vector =
-            std::vector<std::int32_t>(set_to_convert.begin(), set_to_convert.end());
-        std::ranges::sort(result_vector);
-        return result_vector;
-    };
-
-    if(to_include.empty() && to_exclude.empty())
+    const auto setting_value = Externals::get_setting_value(operations_setting_env_name);
+    if(!setting_value)
     {
-        return convert_to_vector(complete_set);
+        finalize_and_throw(fmt::format(
+            "sdk_tracing_config::compile_operation_patterns: no registered setting '{}'",
+            operations_setting_env_name));
     }
 
-    auto result = to_include.empty() ? complete_set : to_include;
-    for(auto itr : to_exclude)
-    {
-        result.erase(itr);
-    }
+    constexpr std::string_view operation_filter_delimiters{ " ,;:\n\t" };
 
-    return convert_to_vector(result);
+    const auto delimited_patterns =
+        rocprofsys::delimit(*setting_value, operation_filter_delimiters);
+
+    auto compiled_patterns =
+        delimited_patterns | std::views::transform([](const std::string& pattern_text) {
+            return std::pair<std::string, std::regex>{
+                pattern_text, std::regex{ pattern_text, std::regex_constants::icase }
+            };
+        });
+
+    return std::vector<std::pair<std::string, std::regex>>{ compiled_patterns.begin(),
+                                                            compiled_patterns.end() };
+}
+
+template <typename SdkBackend, typename Externals>
+    requires concepts::sdk_tracing_config_externals<Externals>
+bool
+sdk_tracing_config<SdkBackend, Externals>::matches_any_operation_pattern(
+    std::string_view operations_setting_env_name, const std::string& operation_name,
+    const std::vector<std::pair<std::string, std::regex>>& patterns)
+{
+    return std::ranges::any_of(patterns, [&](const auto& pattern_entry) {
+        const auto& [pattern_text, pattern] = pattern_entry;
+        const bool matched                  = std::regex_search(operation_name, pattern);
+        if(matched)
+        {
+            LOG_DEBUG("{} ('{}') matched: {}", operations_setting_env_name, pattern_text,
+                      operation_name);
+        }
+        return matched;
+    });
 }
 
 // ─── Public method implementations ───────────────────────────────────────────
@@ -499,15 +466,15 @@ sdk_tracing_config<SdkBackend, Externals>::operation_settings()
                                      const auto&      domain_operations) {
         const auto names = assemble_operation_env_names_for_domain(
             domain_name, !domain_operations.empty());
-        if(!names)
+        if(names.is_empty())
         {
             return;
         }
 
         result.push_back(operation_setting_spec{
-            names->operations_include_env_name,
-            names->operations_exclude_env_name,
-            names->operations_annotate_backtrace_env_name,
+            names.operations_include_env_name,
+            names.operations_exclude_env_name,
+            names.operations_annotate_backtrace_env_name,
             { domain_operations.begin(), domain_operations.end() } });
     };
 
@@ -924,90 +891,107 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domains()
 
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
+template <typename TracingKind>
+    requires concepts::tracing_kind_for<SdkBackend, TracingKind>
 std::vector<std::int32_t>
-sdk_tracing_config<SdkBackend, Externals>::get_operations(
-    typename SdkBackend::callback_tracing_kind_t kind)
+sdk_tracing_config<SdkBackend, Externals>::get_operations(TracingKind kind)
 {
     const auto names = assemble_operation_env_names_for_kind(kind);
-    if(!names)
+    if(names.is_empty())
     {
-        finalize_and_throw(
-            fmt::format("sdk_tracing_config::get_operations: no options registered for "
-                        "callback tracing kind {}",
-                        static_cast<int>(kind)));
+        if constexpr(std::same_as<TracingKind,
+                                  typename SdkBackend::callback_tracing_kind_t>)
+        {
+            finalize_and_throw(fmt::format(
+                "sdk_tracing_config::get_operations: no options registered for "
+                "callback tracing kind {}",
+                static_cast<int>(kind)));
+        }
+        else
+        {
+            finalize_and_throw(fmt::format(
+                "sdk_tracing_config::get_operations: no options registered for "
+                "buffer tracing kind {}",
+                static_cast<int>(kind)));
+        }
     }
 
-    const auto complete_set = parse_operation_string(kind);
-    const auto include_operations =
-        parse_operation_string(kind, names->operations_include_env_name);
-    const auto exclude_operations =
-        parse_operation_string(kind, names->operations_exclude_env_name);
+    const auto include_patterns =
+        compile_operation_patterns(names.operations_include_env_name);
+    const auto exclude_patterns =
+        compile_operation_patterns(names.operations_exclude_env_name);
 
-    return filter_operations(complete_set, include_operations, exclude_operations);
+    auto operations = all_operation_items_for_kind(kind);
+
+    if(!include_patterns.empty())
+    {
+        std::erase_if(operations, [&](const auto& operation) {
+            return !matches_any_operation_pattern(names.operations_include_env_name,
+                                                  operation.second, include_patterns);
+        });
+    }
+    if(!exclude_patterns.empty())
+    {
+        std::erase_if(operations, [&](const auto& operation) {
+            return matches_any_operation_pattern(names.operations_exclude_env_name,
+                                                 operation.second, exclude_patterns);
+        });
+    }
+
+    std::vector<std::int32_t> operation_ids{};
+    operation_ids.reserve(operations.size());
+    std::ranges::transform(operations, std::back_inserter(operation_ids),
+                           [](const auto& operation) { return operation.first; });
+    std::ranges::sort(operation_ids);
+
+    return operation_ids;
 }
 
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-std::vector<std::int32_t>
-sdk_tracing_config<SdkBackend, Externals>::get_operations(
-    typename SdkBackend::buffer_tracing_kind_t kind)
-{
-    const auto names = assemble_operation_env_names_for_kind(kind);
-    if(!names)
-    {
-        finalize_and_throw(
-            fmt::format("sdk_tracing_config::get_operations: no options registered for "
-                        "buffer tracing kind {}",
-                        static_cast<int>(kind)));
-    }
-
-    const auto complete_set = parse_operation_string(kind);
-    const auto include_operations =
-        parse_operation_string(kind, names->operations_include_env_name);
-    const auto exclude_operations =
-        parse_operation_string(kind, names->operations_exclude_env_name);
-
-    return filter_operations(complete_set, include_operations, exclude_operations);
-}
-
-template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+template <typename TracingKind>
+    requires concepts::tracing_kind_for<SdkBackend, TracingKind>
 std::unordered_set<std::int32_t>
-sdk_tracing_config<SdkBackend, Externals>::get_backtrace_operations(
-    typename SdkBackend::callback_tracing_kind_t kind)
+sdk_tracing_config<SdkBackend, Externals>::get_backtrace_operations(TracingKind kind)
 {
     const auto names = assemble_operation_env_names_for_kind(kind);
-    if(!names)
+    if(names.is_empty())
     {
-        finalize_and_throw(fmt::format(
-            "sdk_tracing_config::get_backtrace_operations: no options registered for "
-            "callback tracing kind {}",
-            static_cast<int>(kind)));
+        if constexpr(std::same_as<TracingKind,
+                                  typename SdkBackend::callback_tracing_kind_t>)
+        {
+            finalize_and_throw(fmt::format(
+                "sdk_tracing_config::get_backtrace_operations: no options registered for "
+                "callback tracing kind {}",
+                static_cast<int>(kind)));
+        }
+        else
+        {
+            finalize_and_throw(fmt::format(
+                "sdk_tracing_config::get_backtrace_operations: no options registered for "
+                "buffer tracing kind {}",
+                static_cast<int>(kind)));
+        }
     }
 
-    const auto result =
-        parse_operation_string(kind, names->operations_annotate_backtrace_env_name);
-    return { result.begin(), result.end() };
-}
+    const auto patterns =
+        compile_operation_patterns(names.operations_annotate_backtrace_env_name);
 
-template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
-std::unordered_set<std::int32_t>
-sdk_tracing_config<SdkBackend, Externals>::get_backtrace_operations(
-    typename SdkBackend::buffer_tracing_kind_t kind)
-{
-    const auto names = assemble_operation_env_names_for_kind(kind);
-    if(!names)
+    std::unordered_set<std::int32_t> matched_operation_ids{};
+    if(!patterns.empty())
     {
-        finalize_and_throw(fmt::format(
-            "sdk_tracing_config::get_backtrace_operations: no options registered for "
-            "buffer tracing kind {}",
-            static_cast<int>(kind)));
+        for(const auto& [operation_id, operation_name] :
+            all_operation_items_for_kind(kind))
+        {
+            if(matches_any_operation_pattern(names.operations_annotate_backtrace_env_name,
+                                             operation_name, patterns))
+            {
+                matched_operation_ids.insert(operation_id);
+            }
+        }
     }
 
-    const auto result =
-        parse_operation_string(kind, names->operations_annotate_backtrace_env_name);
-    return { result.begin(), result.end() };
+    return matched_operation_ids;
 }
 
 }  // namespace rocprofsys::rocprofiler_sdk
