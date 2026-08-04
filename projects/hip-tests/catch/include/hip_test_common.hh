@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  */
+
 #pragma once
 #pragma clang diagnostic ignored "-Wsign-compare"
 #include "hip_test_context.hh"
@@ -14,7 +15,6 @@
 #include <cstdlib>
 #include <iostream>
 #include <iomanip>
-#include <memory>
 #include <mutex>
 #include <cstdlib>
 #include <thread>
@@ -710,40 +710,50 @@ template <> struct MemTraits<MemcpyAsync> {
 };
 
 class BlockingContext {
-  // The callback shares ownership of the flag so that it stays alive even if an assertion
-  // unwinds the test while the callback is still parked on it.
-  std::shared_ptr<std::atomic_bool> blocked = std::make_shared<std::atomic_bool>(true);
+  std::atomic_bool blocked{true};
   hipStream_t stream;
 
  public:
-  BlockingContext(hipStream_t s) : stream(s) {}
+  BlockingContext(hipStream_t s) : blocked(true), stream(s) {}
 
-  // Releases the stream so an unwinding test cannot leave the callback parked forever.
-  ~BlockingContext() { unblock_stream(); }
+  BlockingContext(const BlockingContext& in) {
+    blocked = in.blocked_val();
+    stream = in.stream_val();
+  }
 
-  BlockingContext(const BlockingContext&) = delete;
-  BlockingContext& operator=(const BlockingContext&) = delete;
+  BlockingContext(const BlockingContext&& in) {
+    blocked = in.blocked_val();
+    stream = in.stream_val();
+  }
+
+  void reset() { blocked = true; }
+
+  BlockingContext& operator=(const BlockingContext& in) {
+    blocked = in.blocked_val();
+    stream = in.stream_val();
+    return *this;
+  }
 
   void block_stream() {
-    auto* callback_flag = new std::shared_ptr<std::atomic_bool>(blocked);
+    blocked = true;
     auto blocking_callback = [](hipStream_t, hipError_t, void* data) {
-      std::unique_ptr<std::shared_ptr<std::atomic_bool>> blocked(
-          static_cast<std::shared_ptr<std::atomic_bool>*>(data));
-      while ((*blocked)->load()) {
+      auto blocked = reinterpret_cast<std::atomic_bool*>(data);
+      while (blocked->load()) {
         // Yield this thread till we are waiting
         std::this_thread::yield();
       }
     };
-    const hipError_t status = hipStreamAddCallback(stream, blocking_callback, callback_flag, 0);
-    if (status != hipSuccess) {
-      delete callback_flag;
-    }
-    HIP_CHECK(status);
+    HIP_CHECK(hipStreamAddCallback(stream, blocking_callback, (void*)&blocked, 0));
   }
 
-  void unblock_stream() { blocked->store(false); }
+  void unblock_stream() {
+    blocked = false;
+  }
 
   bool is_blocked() const { return hipStreamQuery(stream) == hipErrorNotReady; }
+
+  bool blocked_val() const { return blocked.load(); }
+  hipStream_t stream_val() const { return stream; }
 };
 }  // namespace HipTest
 
