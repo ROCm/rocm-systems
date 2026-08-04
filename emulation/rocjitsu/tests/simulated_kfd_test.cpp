@@ -251,6 +251,86 @@ TEST_F(SimulatedKfdTest, PermanentVramBackingTracksPartialAndCrossRangeCpuUnmaps
   EXPECT_EQ(t.driver()->close(), 0);
 }
 
+TEST_F(SimulatedKfdTest, SpanningMunmapCannotConsumeDoorbellPage) {
+  TestVM t = create_test_vm();
+  ASSERT_NE(t.driver(), nullptr);
+  ASSERT_GE(t.driver()->open(), 0);
+  const uint32_t process_id = t.driver()->local_process_id();
+  std::shared_ptr<rocjitsu::KfdProcess> process = t.driver()->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+
+  constexpr size_t kPageSize = rocjitsu::KfdProcess::kPageSize;
+  uint8_t *reservation = static_cast<uint8_t *>(
+      ::mmap(nullptr, 2 * kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(reservation, MAP_FAILED);
+  uint8_t *doorbell_page = reservation + kPageSize;
+  const off_t doorbell_offset = static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL |
+                                                   rocjitsu::kfd_mmap_gpu_id(t.driver()->gpu_id()));
+  ASSERT_EQ(t.driver()->mmap(doorbell_page, kPageSize, PROT_READ | PROT_WRITE,
+                             MAP_SHARED | MAP_FIXED, doorbell_offset),
+            doorbell_page);
+  {
+    std::lock_guard<std::mutex> lock(process->alloc_mutex_);
+    process->cpu_mappings_.emplace(reinterpret_cast<uintptr_t>(reservation),
+                                   reinterpret_cast<uintptr_t>(doorbell_page));
+  }
+
+  errno = 0;
+  const int spanning_result = t.driver()->munmap(reservation, 2 * kPageSize);
+  EXPECT_EQ(spanning_result, -1);
+  EXPECT_EQ(errno, EPERM);
+  {
+    std::lock_guard<std::mutex> lock(process->alloc_mutex_);
+    EXPECT_EQ(process->cpu_mappings_.size(), 1u);
+    EXPECT_EQ(process->gpu(0).doorbell_page, doorbell_page);
+  }
+
+  process->event_state_.notify_closing();
+  EXPECT_EQ(t.driver()->munmap(doorbell_page, kPageSize), 0);
+  process->event_state_.reset();
+  if (spanning_result != 0)
+    EXPECT_EQ(t.driver()->munmap(reservation, kPageSize), 0);
+  EXPECT_EQ(t.driver()->close(), 0);
+}
+
+TEST_F(SimulatedKfdTest, SpanningMunmapCannotConsumeEventPage) {
+  TestVM t = create_test_vm();
+  ASSERT_NE(t.driver(), nullptr);
+  ASSERT_GE(t.driver()->open(), 0);
+  const uint32_t process_id = t.driver()->local_process_id();
+  std::shared_ptr<rocjitsu::KfdProcess> process = t.driver()->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+
+  constexpr size_t kPageSize = rocjitsu::KfdProcess::kPageSize;
+  uint8_t *reservation = static_cast<uint8_t *>(
+      ::mmap(nullptr, 2 * kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(reservation, MAP_FAILED);
+  uint8_t *event_page = reservation + kPageSize;
+  ASSERT_EQ(t.driver()->mmap(event_page, kPageSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                             static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_EVENTS)),
+            event_page);
+  {
+    std::lock_guard<std::mutex> lock(process->alloc_mutex_);
+    process->cpu_mappings_.emplace(reinterpret_cast<uintptr_t>(reservation),
+                                   reinterpret_cast<uintptr_t>(event_page));
+  }
+
+  errno = 0;
+  const int spanning_result = t.driver()->munmap(reservation, 2 * kPageSize);
+  EXPECT_EQ(spanning_result, -1);
+  EXPECT_EQ(errno, EPERM);
+  {
+    std::lock_guard<std::mutex> lock(process->alloc_mutex_);
+    EXPECT_EQ(process->cpu_mappings_.size(), 1u);
+  }
+  EXPECT_EQ(process->event_state_.page, event_page);
+
+  EXPECT_EQ(t.driver()->munmap(event_page, kPageSize), 0);
+  if (spanning_result != 0)
+    EXPECT_EQ(t.driver()->munmap(reservation, kPageSize), 0);
+  EXPECT_EQ(t.driver()->close(), 0);
+}
+
 TEST_F(SimulatedKfdTest, PermanentVramBackingImportsAcrossPartialMappings) {
   TestVM t = create_test_vm();
   ASSERT_NE(t.driver(), nullptr);

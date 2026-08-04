@@ -1327,6 +1327,15 @@ int SimulatedKfd::munmap(uint32_t process_id, void *addr, size_t length) {
 }
 
 int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
+  const uintptr_t unmap_begin = reinterpret_cast<uintptr_t>(addr);
+  std::optional<uint64_t> rounded_length = checked_page_aligned_size(length);
+  if (length == 0 || !rounded_length || (unmap_begin & (KfdProcess::kPageSize - 1)) != 0 ||
+      *rounded_length > UINTPTR_MAX - unmap_begin) {
+    errno = EINVAL;
+    return -1;
+  }
+  const uintptr_t unmap_end = unmap_begin + static_cast<uintptr_t>(*rounded_length);
+
   {
     uint32_t doorbell_ord = 0;
     size_t doorbell_page_size = 0;
@@ -1335,7 +1344,7 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
       std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
       for (size_t ord = 0; ord < proc.gpu_state_.size(); ++ord) {
         auto &gs = proc.gpu(ord);
-        if (gs.doorbell_page == addr) {
+        if (gs.doorbell_page == addr && gs.doorbell_page_size == length) {
           if (!proc.event_state_.is_closing()) {
             errno = EPERM;
             return -1;
@@ -1375,22 +1384,30 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
       return 0;
     }
   }
-  // release_page() clears page/page_size under EventState::mutex_, the same lock
-  // the CP interrupt thread holds when reading them in signal_interrupt, so the
-  // munmap below cannot race a concurrent signal writing into the mapping.
-  if (proc.event_state_.release_page(addr)) {
+  // release_page() classifies and clears page/page_size under EventState::mutex_,
+  // the same lock the CP interrupt thread holds when reading them.
+  const EventState::PageReleaseResult event_page = proc.event_state_.release_page(addr, length);
+  if (event_page == EventState::PageReleaseResult::kOverlap) {
+    errno = EPERM;
+    return -1;
+  }
+  if (event_page == EventState::PageReleaseResult::kReleased) {
     libc_passthrough().munmap(addr, length);
     return 0;
   }
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
-  const uintptr_t unmap_begin = reinterpret_cast<uintptr_t>(addr);
-  std::optional<uint64_t> rounded_length = checked_page_aligned_size(length);
-  if (length == 0 || !rounded_length || (unmap_begin & (KfdProcess::kPageSize - 1)) != 0 ||
-      *rounded_length > UINTPTR_MAX - unmap_begin) {
-    errno = EINVAL;
-    return -1;
+  for (const KfdProcess::PerGpuState &gpu_state : proc.gpu_state_) {
+    if (!gpu_state.doorbell_page || gpu_state.doorbell_page_size == 0)
+      continue;
+    const uintptr_t doorbell_begin = reinterpret_cast<uintptr_t>(gpu_state.doorbell_page);
+    std::optional<uint64_t> doorbell_length =
+        checked_page_aligned_size(gpu_state.doorbell_page_size);
+    if (!doorbell_length || *doorbell_length > UINTPTR_MAX - doorbell_begin ||
+        (unmap_begin < doorbell_begin + *doorbell_length && unmap_end > doorbell_begin)) {
+      errno = EPERM;
+      return -1;
+    }
   }
-  const uintptr_t unmap_end = unmap_begin + static_cast<uintptr_t>(*rounded_length);
 
   std::map<uintptr_t, uintptr_t>::iterator mapping = proc.cpu_mappings_.lower_bound(unmap_begin);
   if (mapping != proc.cpu_mappings_.begin()) {
