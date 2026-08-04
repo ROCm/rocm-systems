@@ -1138,6 +1138,35 @@ static bool hrr_replay_zero_init() {
     return g_enabled;
 }
 
+// Zero-initialise a host-synchronous replay allocation, ordered.
+//
+// ROCM-27985. hipMalloc is host-synchronous by contract, so the recorded
+// program is free to use the returned pointer immediately from any stream
+// without establishing an ordering edge. The zero-init injected here must
+// therefore be complete before the allocation handler returns.
+//
+// A bare hipMemset does not give that. ihipMemset() promotes a memset on a
+// fresh, non-offset device allocation to asynchronous ("spec says hipMemset
+// will be asynchronous when destination memory is device memory and pointer is
+// non-offseted"), so it is only enqueued on the null stream and the host
+// returns immediately. Streams the capture created with hipStreamNonBlocking do
+// not synchronize with the null stream, so a later replayed H2D restore or
+// kernel launch on such a stream races the zero-init. When the zero-init lands
+// last it overwrites the restored input with zeros and the consuming kernel
+// computes from zeros, which surfaces downstream as a replay D2H validation
+// mismatch against the captured output.
+//
+// Draining after the H2D restore (hrr_sync_after_replayed_h2d) does not fix
+// this: it waits for both operations to finish but does not order them. The
+// ordering edge has to be established here, at the allocation.
+static void hrr_zero_init_alloc(PlaybackContext& ctx, void* live, size_t sz) {
+    if (!live || sz == 0) return;  // nothing written, so nothing to order
+    if (!hrr_zero_init_needs_drain(hrr_replay_zero_init(), ctx.in_graph_capture))
+        return;
+    if (hipMemsetAsync(live, 0, sz, nullptr) != hipSuccess) return;
+    (void)hipStreamSynchronize(nullptr);
+}
+
 // ---- Divergence-abort guard -------------------------------------------------
 // Replaying a numerically-unstable workload (e.g. a model emitting degenerate
 // output) cannot reproduce bit-identical results from nondeterministic GPU
@@ -1225,13 +1254,10 @@ static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
         // hipMalloc does NOT guarantee zeroed memory (only first-touch pages are
         // scrubbed; reused allocations carry stale bytes). Zero so replay is
         // deterministic and matches first-touch-zeroed assumptions. See
-        // hrr_replay_zero_init().
-        // Skip the zero-init memset while a graph capture is active: the original
-        // run never issued it, and an injected synchronous device memset during
-        // capture is illegal and invalidates the capture (HIP 901) for every
-        // subsequent op in the graph.
-        if (hrr_replay_zero_init() && !ctx.in_graph_capture)
-            (void)hipMemset(live, 0, pad_sz);
+        // hrr_replay_zero_init(). The zero-init is skipped during graph capture,
+        // where the original run never issued it and an injected memset would
+        // invalidate the capture (HIP 901) for every subsequent op in the graph.
+        hrr_zero_init_alloc(ctx, live, pad_sz);
         ctx.record_alloc(a->ptr, live, pad_sz);
         if (ctx.verbose && pad_sz > orig_sz)
             fprintf(stderr, "[HRR] hipMalloc 0x%llx: orig=%zu padded=%zu\n",
@@ -1261,8 +1287,7 @@ hipError_t playback_hipExtMallocWithFlags(PlaybackContext& ctx, const uint8_t* p
     void* live = nullptr;
     hipError_t r = hipExtMallocWithFlags(&live, pad_sz, a->flags);
     if (r == hipSuccess) {
-        if (hrr_replay_zero_init() && !ctx.in_graph_capture)
-            (void)hipMemset(live, 0, pad_sz);
+        hrr_zero_init_alloc(ctx, live, pad_sz);
         ctx.record_alloc(a->ptr, live, pad_sz);
         if (ctx.verbose && pad_sz > orig_sz)
             fprintf(stderr, "[HRR] hipExtMallocWithFlags 0x%llx: orig=%zu padded=%zu\n",
@@ -1277,6 +1302,12 @@ hipError_t playback_hipExtMallocWithFlags(PlaybackContext& ctx, const uint8_t* p
 // ---------------------------------------------------------------------------
 // hipMallocAsync:  ret(4) dev_ptr(8) size(8) stream(8)
 // hipMallocFromPoolAsync: ret(4) dev_ptr(8) size(8) mem_pool(8) stream(8)
+//
+// These do not need hrr_zero_init_alloc()'s drain (ROCM-27985): the zero-init is
+// enqueued on the allocating stream, and stream-ordered allocations are only
+// usable on that stream until the recorded program itself establishes an
+// ordering edge to another stream. Replaying that edge carries the zero-init
+// with it, so it is already ordered ahead of every recorded use.
 
 hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
                                    const uint8_t* pl) {
