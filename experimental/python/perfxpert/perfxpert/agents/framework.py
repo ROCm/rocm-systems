@@ -15,9 +15,13 @@ Construction-time guardrails:
 
 Runtime guardrails:
 - Tool dispatch rejects out-of-allowlist calls
-- Token budget per agent (provided by agent definitions)
+- Token budget per agent (provided by agent definitions; enforced on the SDK
+  path via ModelSettings — the opencode backend has no output-token limit to
+  forward it to and logs that the ceiling is unenforced)
 - Structured output validated against declared Pydantic schema
-- Session turn budget (carried by RunPolicy, owned by agents.runtime)
+- Session turn budget (carried by RunPolicy, owned by agents.runtime): the
+  session's remaining allowance becomes the SDK's own max_turns, so a run is
+  charged the turns it spends rather than one unit per invocation
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ import inspect
 import json
 import logging
 import os
+import threading
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import Enum
@@ -131,14 +136,44 @@ class RunPolicy:
 
     max_session_turns: int = 100
     turns_used: int = 0
+    # Check-then-increment across two statements let two threads sharing one
+    # session both pass a budget with a single turn left. The lock makes the
+    # reservation the indivisible step.
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock, repr=False, compare=False
+    )
+
+    def reserve_turns(self, agent_name: str, requested: int) -> int:
+        """Atomically claim up to ``requested`` turns; return the number granted.
+
+        A single SDK call may run several turns, so the budget has to be
+        claimed up front and handed to the SDK as its own ceiling. Charging one
+        unit per invocation would let a session with one turn left run the full
+        per-run cap.
+        """
+        if requested < 1:
+            requested = 1
+        with self._lock:
+            remaining = self.max_session_turns - self.turns_used
+            if remaining <= 0:
+                raise SessionTurnBudgetExceeded(
+                    f"session exhausted its {self.max_session_turns}-turn LLM budget "
+                    f"while dispatching {agent_name}"
+                )
+            granted = min(requested, remaining)
+            self.turns_used += granted
+            return granted
+
+    def release_turns(self, count: int) -> None:
+        """Hand back turns that were reserved but not spent."""
+        if count <= 0:
+            return
+        with self._lock:
+            self.turns_used = max(0, self.turns_used - count)
 
     def consume_turn(self, agent_name: str) -> None:
-        if self.turns_used >= self.max_session_turns:
-            raise SessionTurnBudgetExceeded(
-                f"session exhausted its {self.max_session_turns}-turn LLM budget "
-                f"while dispatching {agent_name}"
-            )
-        self.turns_used += 1
+        """Reserve exactly one turn. Retained for callers that drive turns themselves."""
+        self.reserve_turns(agent_name, 1)
 
 
 # The session's policy travels in a context variable rather than through every
@@ -158,6 +193,22 @@ def active_policy(policy: Optional[RunPolicy]) -> Iterator[None]:
         yield
     finally:
         _ACTIVE_POLICY.reset(token)
+
+
+# How many turns the session granted this invocation. Travels by context var
+# for the same reason the policy does: ``_sdk_invoke`` is monkeypatched
+# wholesale by many tests, so widening its signature would break every stub.
+_ACTIVE_TURN_GRANT: ContextVar[Optional[int]] = ContextVar(
+    "perfxpert_turn_grant", default=None
+)
+
+
+def _per_run_turn_cap() -> int:
+    """The per-conversation turn ceiling, from ``PERFXPERT_AGENTS_MAX_TURNS``."""
+    try:
+        return max(1, int(os.environ.get("PERFXPERT_AGENTS_MAX_TURNS", "10")))
+    except ValueError:
+        return 10
 
 
 # -- Fence composition ----------------------------------------------------
@@ -200,6 +251,9 @@ class FakeProviderResponse:
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
     structured_output: Optional[Dict[str, Any]] = None
     handoff: Optional[str] = None
+    # SDK turns this response actually cost. Defaults to one so a scripted
+    # stub is charged the same as the single-turn call it stands in for.
+    turns_used: int = 1
 
 
 @dataclass(frozen=True)
@@ -722,10 +776,17 @@ def _opencode_invoke(agent: "Agent", input_payload: Any) -> FakeProviderResponse
     model = os.environ.get("PERFXPERT_AGENTS_MODEL_OPENCODE") or os.environ.get(
         "PERFXPERT_LLM_MODEL"
     )
+    # The budget is passed so the ceiling is expressed at every call site, but
+    # the opencode CLI exposes no output-token limit, so the provider cannot
+    # enforce it and says so once per process. Truncating the reply after the
+    # fact would bound neither cost nor runtime, which is the whole point of
+    # the ceiling, so this backend is documented as unable to honour it rather
+    # than given a limit that only looks real.
     response = OpencodeProvider().complete(
         [{"role": "user", "content": _serialize_input(input_payload)}],
         system=instructions,
         model=model,
+        max_tokens=agent.token_budget,
     )
     return FakeProviderResponse(
         text=response.content,
@@ -777,11 +838,9 @@ def _sdk_invoke(agent: "Agent", input_payload: Any, provider: str) -> FakeProvid
     except Exception as exc:  # pragma: no cover - defensive
         raise RuntimeError(f"framework: failed to construct SDK Agent: {exc}") from exc
 
-    max_turns_env = os.environ.get("PERFXPERT_AGENTS_MAX_TURNS", "10")
-    try:
-        max_turns = max(1, int(max_turns_env))
-    except ValueError:
-        max_turns = 10
+    # The session grants the ceiling when one is active, so the SDK cannot run
+    # more turns than the session still has budget for.
+    max_turns = _ACTIVE_TURN_GRANT.get() or _per_run_turn_cap()
 
     input_str = _serialize_input(input_payload)
 
@@ -806,7 +865,23 @@ def _sdk_invoke(agent: "Agent", input_payload: Any, provider: str) -> FakeProvid
         tool_calls=_extract_tool_calls(run_result),
         structured_output=_final_output_structured(run_result),
         handoff=None,
+        turns_used=_turns_from_run_result(run_result, max_turns),
     )
+
+
+def _turns_from_run_result(run_result: Any, granted: int) -> int:
+    """How many SDK turns a run actually spent.
+
+    One model response is one turn. When the SDK version does not expose them,
+    assume the whole grant was spent: over-charging keeps the session inside
+    its budget, whereas guessing low would let it run past.
+    """
+    raw = getattr(run_result, "raw_responses", None)
+    try:
+        used = len(raw)  # type: ignore[arg-type]
+    except TypeError:
+        return granted
+    return min(max(used, 1), granted)
 
 
 # -- Runtime --------------------------------------------------------------
@@ -873,10 +948,25 @@ def run_agent(
         return _render_airgap_template(agent, input_payload)
 
     effective_policy = policy if policy is not None else _ACTIVE_POLICY.get()
-    if effective_policy is not None:
-        effective_policy.consume_turn(agent.name)
+    if effective_policy is None:
+        resp = _sdk_invoke(agent, input_payload, provider)
+    else:
+        # Claim the whole per-run allowance up front and pass it to the SDK as
+        # its own ceiling, then hand back whatever the run did not spend. A
+        # single charge here would only bound invocations, and one invocation
+        # can be many turns.
+        granted = effective_policy.reserve_turns(agent.name, _per_run_turn_cap())
+        grant_token = _ACTIVE_TURN_GRANT.set(granted)
+        try:
+            resp = _sdk_invoke(agent, input_payload, provider)
+        finally:
+            _ACTIVE_TURN_GRANT.reset(grant_token)
+        # Reached only on success, so a failed call keeps its whole
+        # reservation: it consumed provider work of unknown size, and
+        # refunding it would let a retry loop run unbounded.
+        spent = min(max(int(getattr(resp, "turns_used", 1) or 1), 1), granted)
+        effective_policy.release_turns(granted - spent)
 
-    resp = _sdk_invoke(agent, input_payload, provider)
     accepted, rejection = validate_structured_output(agent, resp.structured_output)
     if rejection is not None:
         _LOG.warning(
@@ -892,6 +982,10 @@ def run_agent(
         "structured_output": accepted,
         "output_rejected": rejection,
         "handoff": resp.handoff,
+        # Resolved here rather than read back from the response, so what gets
+        # recorded as the answering model is what the runtime selected and not
+        # something the response could claim.
+        "model": _resolve_model(provider),
     }
 
 

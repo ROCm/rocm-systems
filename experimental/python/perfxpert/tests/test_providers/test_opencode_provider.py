@@ -96,6 +96,52 @@ def test_binary_path_from_bundled_launcher(monkeypatch):
         assert cmd[0] == "/pkg/perfxpert/_bundled/opencode"
 
 
+def test_token_ceiling_is_declared_unenforceable_rather_than_dropped(
+    monkeypatch, caplog
+):
+    """A limit that is silently ignored is worse than one that is refused.
+
+    ``complete()`` takes ``max_tokens`` for interface parity, but the opencode
+    CLI has no output-token flag to forward it to, so callers were getting a
+    ceiling that did nothing while the framework recorded one as applied.
+    Trimming the reply afterwards would bound neither spend nor runtime, so
+    the backend says plainly that it cannot honour it.
+    """
+    monkeypatch.delenv("PERFXPERT_IN_OPENCODE_SESSION", raising=False)
+    import perfxpert.providers.opencode_provider as ocp
+    from perfxpert.providers.opencode_provider import OpencodeProvider
+
+    monkeypatch.setattr(ocp, "_TOKEN_CEILING_WARNED", False)
+    with patch(
+        "perfxpert.providers.opencode_provider.subprocess.run",
+        return_value=_fake_completed(stdout="ok"),
+    ):
+        with caplog.at_level("WARNING"):
+            OpencodeProvider(opencode_path="/custom/opencode").complete(
+                [{"role": "user", "content": "hi"}], max_tokens=256
+            )
+
+    assert "cannot enforce" in caplog.text
+
+
+def test_no_token_ceiling_warning_when_none_was_asked_for(monkeypatch, caplog):
+    monkeypatch.delenv("PERFXPERT_IN_OPENCODE_SESSION", raising=False)
+    import perfxpert.providers.opencode_provider as ocp
+    from perfxpert.providers.opencode_provider import OpencodeProvider
+
+    monkeypatch.setattr(ocp, "_TOKEN_CEILING_WARNED", False)
+    with patch(
+        "perfxpert.providers.opencode_provider.subprocess.run",
+        return_value=_fake_completed(stdout="ok"),
+    ):
+        with caplog.at_level("WARNING"):
+            OpencodeProvider(opencode_path="/custom/opencode").complete(
+                [{"role": "user", "content": "hi"}]
+            )
+
+    assert "cannot enforce" not in caplog.text
+
+
 def test_no_binary_found_raises(monkeypatch):
     monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
     monkeypatch.delenv("PERFXPERT_IN_OPENCODE_SESSION", raising=False)

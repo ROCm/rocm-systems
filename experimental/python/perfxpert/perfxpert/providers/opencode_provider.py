@@ -11,6 +11,7 @@ Binary resolution order:
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from typing import Any, Dict, List, Optional, Union
@@ -53,8 +54,34 @@ def _flatten_messages(messages: List[Dict[str, Any]], system: str) -> str:
     return "\n\n".join(parts)
 
 
+_TOKEN_CEILING_WARNED = False
+
+
+def _warn_token_ceiling_unenforceable() -> None:
+    """Say once that this backend cannot honour a caller's token ceiling.
+
+    ``complete()`` accepts ``max_tokens`` for interface parity with the other
+    providers, but the opencode CLI takes no output-token limit, so there is
+    nothing to forward it to. Trimming the reply afterwards would bound
+    neither spend nor runtime. Callers that need an enforced ceiling have to
+    use a provider that can apply one.
+    """
+    global _TOKEN_CEILING_WARNED
+    if _TOKEN_CEILING_WARNED:
+        return
+    _TOKEN_CEILING_WARNED = True
+    logging.getLogger(__name__).warning(
+        "[opencode] max_tokens was requested but this backend cannot enforce an "
+        "output-token ceiling; the limit is not applied"
+    )
+
+
 class OpencodeProvider(Provider):
-    """Run a completion via the opencode subprocess CLI."""
+    """Run a completion via the opencode subprocess CLI.
+
+    Note: ``max_tokens`` is accepted but cannot be enforced — see
+    :func:`_warn_token_ceiling_unenforceable`.
+    """
 
     def __init__(
         self,
@@ -82,6 +109,9 @@ class OpencodeProvider(Provider):
                 "[opencode] recursion guard tripped — "
                 "cannot invoke opencode provider inside an opencode session"
             )
+
+        if max_tokens is not None:
+            _warn_token_ceiling_unenforceable()
 
         prompt = _flatten_messages(sanitize_messages(messages), redact_paths(system))
         cmd = [self._binary, "run", "--no-color"]

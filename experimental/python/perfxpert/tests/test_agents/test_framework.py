@@ -1,6 +1,7 @@
 """Tests for perfxpert.agents.framework — the SDK facade."""
 
 import inspect
+import threading
 from functools import partial
 from types import SimpleNamespace
 from typing import Any, Dict, List
@@ -989,6 +990,116 @@ def test_airgap_run_does_not_consume_a_turn():
     run_agent(agent, {}, airgap=True, policy=policy)
     run_agent(agent, {}, airgap=True, policy=policy)
     assert policy.turns_used == 0
+
+
+def test_concurrent_reservations_cannot_oversubscribe_the_budget():
+    """Two threads must not both win the last turn.
+
+    A check followed by an increment is two steps, and a second thread can
+    read the same remaining count in between. With a single turn on offer,
+    exactly one caller may come away with it.
+    """
+    policy = framework.RunPolicy(max_session_turns=1)
+    start = threading.Barrier(8)
+    granted: list[int] = []
+    refused: list[BaseException] = []
+    lock = threading.Lock()
+
+    def _claim() -> None:
+        start.wait()
+        try:
+            got = policy.reserve_turns("T", 1)
+        except framework.SessionTurnBudgetExceeded as exc:
+            with lock:
+                refused.append(exc)
+            return
+        with lock:
+            granted.append(got)
+
+    threads = [threading.Thread(target=_claim) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert sum(granted) == 1, f"budget oversubscribed: granted {granted}"
+    assert len(refused) == 7
+    assert policy.turns_used == 1
+
+
+def test_budget_charges_the_turns_a_run_spends_not_one_per_call(monkeypatch):
+    """One invocation can be many SDK turns, and the session pays for each."""
+    monkeypatch.setattr(
+        framework,
+        "_sdk_invoke",
+        lambda a, p, prov: framework.FakeProviderResponse(
+            structured_output={}, turns_used=4
+        ),
+    )
+    agent = Agent(
+        name="T", layer=1, fence_path=None, input_schema=dict,
+        output_schema=dict, tools=[],
+    )
+    policy = framework.RunPolicy(max_session_turns=10)
+    run_agent(agent, {}, provider="openai", airgap=False, policy=policy)
+    assert policy.turns_used == 4
+
+
+def test_sdk_ceiling_is_the_budget_the_session_can_still_afford(monkeypatch):
+    """A session with 3 turns left must not hand the SDK a cap of 10."""
+    monkeypatch.setenv("PERFXPERT_AGENTS_MAX_TURNS", "10")
+    seen = {}
+
+    def _capture(agent, payload, provider):
+        seen["grant"] = framework._ACTIVE_TURN_GRANT.get()
+        return framework.FakeProviderResponse(structured_output={}, turns_used=1)
+
+    monkeypatch.setattr(framework, "_sdk_invoke", _capture)
+    agent = Agent(
+        name="T", layer=1, fence_path=None, input_schema=dict,
+        output_schema=dict, tools=[],
+    )
+    policy = framework.RunPolicy(max_session_turns=3)
+    run_agent(agent, {}, provider="openai", airgap=False, policy=policy)
+    assert seen["grant"] == 3
+
+
+def test_unspent_reservation_is_returned_to_the_session(monkeypatch):
+    """Claiming the allowance up front must not spend it all."""
+    monkeypatch.setenv("PERFXPERT_AGENTS_MAX_TURNS", "10")
+    monkeypatch.setattr(
+        framework,
+        "_sdk_invoke",
+        lambda a, p, prov: framework.FakeProviderResponse(
+            structured_output={}, turns_used=1
+        ),
+    )
+    agent = Agent(
+        name="T", layer=1, fence_path=None, input_schema=dict,
+        output_schema=dict, tools=[],
+    )
+    policy = framework.RunPolicy(max_session_turns=100)
+    for _ in range(5):
+        run_agent(agent, {}, provider="openai", airgap=False, policy=policy)
+    assert policy.turns_used == 5
+
+
+def test_run_reports_the_model_the_runtime_selected(monkeypatch):
+    """Provenance records the resolved model, not one the response could claim."""
+    monkeypatch.setenv("PERFXPERT_AGENTS_MODEL_OPENAI", "some-pinned-model")
+    monkeypatch.setattr(
+        framework,
+        "_sdk_invoke",
+        lambda a, p, prov: framework.FakeProviderResponse(
+            structured_output={}, text="{}"
+        ),
+    )
+    agent = Agent(
+        name="T", layer=1, fence_path=None, input_schema=dict,
+        output_schema=dict, tools=[],
+    )
+    raw = run_agent(agent, {}, provider="openai", airgap=False)
+    assert raw["model"] == "some-pinned-model"
 
 
 # -- Tool allowlist on the live SDK path (Phase 11A) -----------------------
