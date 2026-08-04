@@ -1128,3 +1128,36 @@ TEST(dlog_drain, an_overrun_on_one_ring_does_not_affect_another)
         EXPECT_TRUE(r.loss_free) << "the clean ring's records stay usable";
     }
 }
+
+// A queue-destroy purge names one GPU, and only that GPU's pairing state may
+// lose its retained starts. Slot numbers repeat across GPUs, so purging every one
+// would drop starts belonging to a queue that is still running elsewhere.
+TEST(dlog_drain, a_slot_purge_touches_only_the_owning_gpus_pairing_state)
+{
+    // Two GPUs, each retaining a START on the SAME page slot.
+    pair_state gpu_a;
+    pair_state gpu_b;
+
+    const uint64_t on_slot_7 = (uint64_t{7} << 32) | 1;
+    gpu_a.pending_starts[on_slot_7] = pair_state::pending_start{100, 1000};
+    gpu_b.pending_starts[on_slot_7] = pair_state::pending_start{200, 1000};
+
+    // Destroying GPU A's queue on slot 7 purges A only -- this is what the
+    // processor does with the (gpu_id, slot) request it dequeues.
+    EXPECT_EQ(gpu_a.erase_slot(/*page_slot=*/7, /*slots_per_page=*/1024), 1u);
+
+    EXPECT_EQ(gpu_a.pending_starts.count(on_slot_7), 0u);
+    EXPECT_EQ(gpu_b.pending_starts.count(on_slot_7), 1u)
+        << "another GPU's retained START on the same slot must survive";
+    EXPECT_EQ(gpu_b.pending_starts[on_slot_7].start_ticks, 200u);
+
+    // And B still pairs its own EOP afterwards.
+    auto     rec  = recorder{};
+    auto     eop  = copied_record{};
+    eop.rec.record_type  = kRecEop;
+    eop.rec.doorbell_off = 7;
+    eop.rec.dispatch_id  = 1;
+    eop.rec.ts_lo        = 400;
+    EXPECT_EQ(pair_records(&eop, 1, gpu_b, 2000, rec.on_record()), 1u);
+    EXPECT_EQ(rec.pairs[std::make_pair(7u, 1u)].first, 200u);
+}

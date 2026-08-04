@@ -832,16 +832,24 @@ processor_loop()
         st.pipe.pop();
 
         // Slots whose queue was destroyed: the pairing state is ours, so the purge
-        // happens here rather than on the reader.
+        // happens here rather than on the reader. Each request names the GPU it
+        // belongs to, and only that GPU's pairing state is touched -- slot numbers
+        // repeat across GPUs, so purging every one would drop live retained starts
+        // belonging to a queue that is still running.
         {
-            auto _slots = std::vector<uint32_t>{};
+            auto _reqs = std::vector<std::pair<uint32_t, uint32_t>>{};
             {
                 auto lk = std::lock_guard<std::mutex>{purge_mutex()};
-                _slots.swap(purge_requests());
+                _reqs.swap(purge_requests());
             }
-            for(auto _slot : _slots)
-                for(auto& _itr : proc.by_gpu)
-                    _itr.second.erase_slot(_slot, kDoorbellSlotsPerPage);
+            for(const auto& _req : _reqs)
+            {
+                // A GPU that has not paired anything yet has no entry, and there
+                // is nothing to erase for it.
+                auto _it = proc.by_gpu.find(_req.first);
+                if(_it != proc.by_gpu.end())
+                    _it->second.erase_slot(_req.second, kDoorbellSlotsPerPage);
+            }
         }
 
         const uint64_t _now = common::timestamp_ns();
