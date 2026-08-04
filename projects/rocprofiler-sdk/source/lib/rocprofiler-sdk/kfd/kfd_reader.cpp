@@ -803,6 +803,22 @@ processor_loop()
         proc.pairing.unmatched_eops,
         proc.pairing.starts_overwritten,
         proc.pairing.pending_starts.size());
+
+    // Per-doorbell breakdown. The pairing key is (doorbell_off, dispatch_id), so
+    // a doorbell carrying STARTs but no EOPs alongside one carrying EOPs but no
+    // STARTs means the two record types disagree about the doorbell -- which no
+    // change to the pairing scope could fix.
+    for(const auto& itr : proc.pairing.per_doorbell)
+    {
+        ROCP_WARNING_IF(proc.pairing.eops_seen > 0) << fmt::format(
+            "KFD dispatch-log per-doorbell: doorbell_off={} (page_slot={}) starts={} eops={} "
+            "unmatched_eops={}",
+            itr.first,
+            doorbell_off_to_page_slot(itr.first),
+            itr.second.starts,
+            itr.second.eops,
+            itr.second.unmatched);
+    }
 }
 
 void

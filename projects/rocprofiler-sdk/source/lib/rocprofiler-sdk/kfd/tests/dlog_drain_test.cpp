@@ -995,3 +995,47 @@ TEST(dlog_drain, copied_records_carry_their_region)
     recorder   rec;
     EXPECT_EQ(pair_records(batch.data(), batch.size(), pairing, 1000, rec.on_record()), 1u);
 }
+
+// The per-doorbell tally is what separates "pairing dropped it" from "the two
+// record types disagree about the doorbell". Pairing is region-agnostic and
+// session-lived, so a START and its EOP can only miss each other if their keys
+// differ -- this reproduces that shape and shows how it reads out.
+TEST(dlog_drain, per_doorbell_tally_exposes_start_eop_doorbell_disagreement)
+{
+    fake_ring   ring(2, 2048);
+    drain_state st;
+    recorder    rec0;
+    run_drain(ring, st, rec0);
+
+    // Doorbell A pairs normally.
+    ring.put(0, 0, kRecStart, 1, 4102, 10);
+    ring.put(0, 1, kRecEop, 1, 4102, 20);
+    // A dispatch whose START was recorded on 4102 but whose EOP says 4098: the
+    // exact shape the hardware census showed.
+    ring.put(0, 2, kRecStart, 23, 4102, 30);
+    ring.wptr[0] = 3;
+    ring.put(1, 0, kRecEop, 23, 4098, 40);
+    ring.wptr[1] = 1;
+
+    recorder rec;
+    EXPECT_EQ(run_drain(ring, st, rec), 1u);  // only the consistent pair matched
+
+    // The disagreeing dispatch shows up as an orphaned EOP on one doorbell and a
+    // retained START on the other -- never as a mismatched pair.
+    EXPECT_EQ(st.pairing.unmatched_eops, 1u);
+    EXPECT_EQ(st.pairing.starts_overwritten, 0u);
+
+    const auto& a = st.pairing.per_doorbell.at(4102);
+    const auto& b = st.pairing.per_doorbell.at(4098);
+    EXPECT_EQ(a.starts, 2u);
+    EXPECT_EQ(a.eops, 1u);
+    EXPECT_EQ(a.unmatched, 0u);
+    EXPECT_EQ(b.starts, 0u);  // no STARTs ever claimed this doorbell
+    EXPECT_EQ(b.eops, 1u);
+    EXPECT_EQ(b.unmatched, 1u);
+
+    // Crucially the orphan is NOT paired to the wrong dispatch: the retained
+    // START stays retained rather than being handed to a foreign EOP.
+    EXPECT_EQ(st.pairing.pending_starts.size(), 1u);
+    EXPECT_EQ(st.pairing.starts_with_doorbell(4102).second, 23u);
+}

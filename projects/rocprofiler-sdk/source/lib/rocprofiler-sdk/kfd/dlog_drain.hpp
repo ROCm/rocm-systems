@@ -35,6 +35,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -191,6 +192,20 @@ struct pair_state
     uint64_t starts_seen       = 0;
     uint64_t eops_seen         = 0;
     uint64_t starts_overwritten = 0;  // a START replaced a retained START on the same key
+
+    // Per-doorbell tally. The pairing key is (doorbell_off, dispatch_id) and the
+    // map is region-agnostic and session-lived, so a START and its EOP can only
+    // fail to meet if they carry DIFFERENT keys. Counting each record type per
+    // doorbell shows that directly: a doorbell with starts but no eops, paired
+    // with one that has eops but no starts, means the two record types disagree
+    // about which doorbell a dispatch belongs to.
+    struct doorbell_tally
+    {
+        uint64_t starts    = 0;
+        uint64_t eops      = 0;
+        uint64_t unmatched = 0;
+    };
+    std::map<uint32_t, doorbell_tally> per_doorbell = {};
 
     // Drop retained starts belonging to a page-relative doorbell slot whose queue
     // was destroyed, so a stale start cannot pair with a record from whatever
@@ -354,6 +369,7 @@ pair_records(const copied_record* records,
         if(rec.record_type == kRecStart)
         {
             ++state.starts_seen;
+            ++state.per_doorbell[rec.doorbell_off].starts;
             // Overwrite: dispatch_id is only low-32, so a key can recur; a
             // collision means the prior start is stale. Counted, because a burst
             // of overwrites would mean concurrent dispatches are colliding on the
@@ -364,6 +380,7 @@ pair_records(const copied_record* records,
         }
         if(rec.record_type != kRecEop) continue;
         ++state.eops_seen;
+        ++state.per_doorbell[rec.doorbell_off].eops;
 
         auto out         = drained_record{};
         out.doorbell_off = rec.doorbell_off;
@@ -384,6 +401,7 @@ pair_records(const copied_record* records,
             // The START was lost (shape ii): the EOP still proves the kernel
             // finished, it just carries no interval.
             ++state.unmatched_eops;
+            ++state.per_doorbell[rec.doorbell_off].unmatched;
         }
         on_record(out);
     }
