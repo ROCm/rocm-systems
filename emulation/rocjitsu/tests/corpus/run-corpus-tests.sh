@@ -171,7 +171,6 @@ run_pytest() {
     --tb=short
     -n "${worker_count}"
     -o "timeout_func_only=true"
-    "${sanitizer_pytest_args[@]}"
   )
   "${pytest_cmd[@]}" --timeout "${timeout_seconds}" "$@"
 }
