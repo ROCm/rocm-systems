@@ -294,6 +294,9 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   ncclIbMergedDev tmp;
   memset(&tmp, 0, sizeof(tmp));
   bool used[MAX_IB_DEVS] = {0};
+  tmp.railId = ncclIbDevs[props->devs[0]].railId;
+  // Set the virtual bit on to avoid collision with physical planes when multiple planes are merged.
+  tmp.planeId = (props->ndevs > 1) ? NCCL_IB_PLANE_VIRT_BIT : ncclIbDevs[props->devs[0]].planeId;
 
   for (int i = 0; i < props->ndevs; i++) {
     if (props->devs[i] < 0 || props->devs[i] >= ncclNIbDevs) {
@@ -305,6 +308,10 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
     if (tmp.vProps.ndevs == NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidUsage;
     tmp.vProps.devs[tmp.vProps.ndevs++] = props->devs[i];
     tmp.speed += dev->speed;
+    // rail ID of a fused device with different rails is undefined.
+    if (dev->railId == NCCL_NET_ID_UNDEF || tmp.railId != dev->railId) tmp.railId = NCCL_NET_ID_UNDEF;
+    // Only set the bit if multiple devs are merged, otherwise keep the initial value
+    if (props->ndevs > 1) tmp.planeId |= (0x1 << dev->planeIdx);
     // Each successive time, copy the name '+' new name
     if (tmp.vProps.ndevs > 1) {
       size_t off = strlen(tmp.devName);
@@ -356,8 +363,8 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   }
   ncclIbMergedDevs[ncclNMergedIbDevs] = tmp;
   *d = ncclNMergedIbDevs++;
-  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, tmp.devName, tmp.speed,
-       tmp.vProps.ndevs);
+  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d rail=%d plane=%d", *d, tmp.devName,
+       tmp.speed, tmp.vProps.ndevs, tmp.railId, tmp.planeId);
   return ncclSuccess;
 }
 
