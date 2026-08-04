@@ -272,8 +272,7 @@ class TestExecutor:
         self.build_config = config_processor.get_build_config()
         self.rccl_tests_build_config = config_processor.get_rccl_tests_build_config()
 
-        # RCCL build flavor ("debug"/"release"); the config processor has already
-        # applied the --rccl-build-type override.
+        # Already has the --rccl-build-type override applied.
         self.rccl_build_type = config_processor.get_rccl_build_type()
         self.runs_rccl_tests, self.runs_gtest = config_processor.get_test_kinds()
 
@@ -330,8 +329,8 @@ class TestExecutor:
         # Determine build directory (priority: --build-dir > env var > default)
         custom_rccl_path = os.environ.get('RCCL_LIB_PATH') or os.environ.get('RCCL_BUILD_DIR')
 
-        # --build-dir / RCCL_LIB_PATH point at an already-built tree, so an explicit
-        # build-type selection cannot be honored: warn instead of silently ignoring it.
+        # A prebuilt tree can't honor a build-type selection; say so rather than
+        # ignoring the flag silently.
         if getattr(self.args, "rccl_build_type", None) and (self.args.build_dir or custom_rccl_path):
             print(f"NOTE: --rccl-build-type {self.args.rccl_build_type} ignored for the build "
                   "directory; a custom RCCL library path takes precedence "
@@ -609,12 +608,11 @@ class TestExecutor:
         """
         Refuse to benchmark rccl-tests against a Debug build of RCCL.
 
-        Perf numbers from a Debug build are not representative, so this is an
-        error for a config whose suites run nothing but rccl-tests -- such a
-        config defaults to Release, and can only reach Debug through an explicit
-        build_type or --rccl-build-type. Configs that also run gtest suites are
-        only warned: rccl-UnitTestsMPI and rccl-UnitTestsFixturesDebug do not
-        exist in a Release build, so Debug is genuinely required there.
+        A config running nothing but rccl-tests defaults to Release, so reaching
+        Debug takes an explicit build_type or --rccl-build-type: treat it as an
+        error. Configs that also run gtest suites are only warned, because
+        rccl-UnitTestsMPI and rccl-UnitTestsFixturesDebug are not built in
+        Release and those suites genuinely need Debug.
 
         Returns:
             bool: False if the run should abort
@@ -622,7 +620,7 @@ class TestExecutor:
         if not self.runs_rccl_tests or self.rccl_build_type != "debug":
             return True
 
-        # A custom lib/build dir is used verbatim, so the resolved flavor says
+        # A custom build dir is used verbatim, so the resolved flavor says
         # nothing about what it actually contains.
         if self.using_custom_lib:
             return True
@@ -655,11 +653,9 @@ class TestExecutor:
         """
         Reconcile install.sh flags with the selected RCCL build flavor.
 
-        install.sh defaults to Release and switches to Debug only when --debug or
-        --debug-fast is passed, so the flags have to agree with self.rccl_build_type
-        or the library would land in the other build/<flavor> directory. For a
-        Release build the debug-only flags are dropped -- install.sh hard-errors on
-        --enable-mpi-tests without --debug.
+        install.sh switches to Debug only when --debug/--debug-fast is passed, so
+        the flags must agree with self.rccl_build_type or the library lands in
+        the other build/<flavor> directory.
 
         Args:
             install_flags: Flags from build_configuration.install_flags
@@ -686,8 +682,7 @@ class TestExecutor:
         Build RCCL using install.sh with configurable build settings.
 
         The build_configuration in the JSON config specifies:
-        - build_type: "debug" or "release" (overridden by --rccl-build-type); selects
-          the build/<flavor> output directory and reconciles install_flags with it
+        - build_type: "debug" or "release" (overridden by --rccl-build-type)
         - install_flags: List of install.sh command-line flags
         - cmake_options: Optional CMake options, either a string (e.g. "-DFOO=BAR") or a
           dict (e.g. {"FOO": "BAR"}); dicts are converted to "-DKEY=VAL" form (passed via --cmake-options)
@@ -878,11 +873,9 @@ class TestExecutor:
         # RCCL to link against: explicit rccl_home, else the RCCL build_dir we built.
         rccl_home = _expand(cfg.get("rccl_home", self.build_dir))
 
-        # Configs written before build_type existed hardcode rccl_home to
-        # "${WORKDIR}/build/debug". Left alone, a release run would link rccl-tests
-        # against a stale debug librccl.so from the sibling directory, which is
-        # invisible in the results. Only the sibling flavor of the same workdir is
-        # redirected, so genuinely custom rccl_home values are still honored.
+        # Configs predating build_type hardcode the other flavor's directory here,
+        # which would silently link a stale librccl.so. Only that exact sibling
+        # path is redirected, so genuinely custom rccl_home values still apply.
         other_flavor = "debug" if self.rccl_build_type == "release" else "release"
         sibling_build_dir = os.path.join(workdir, "build", other_flavor)
         if not self.using_custom_lib and os.path.normpath(rccl_home) == os.path.normpath(sibling_build_dir):
