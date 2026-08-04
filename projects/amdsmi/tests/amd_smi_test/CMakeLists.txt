@@ -59,6 +59,15 @@ file(GLOB_RECURSE functSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/fun
 if(NOT ENABLE_WSL_BACKEND)
     list(FILTER unitSources EXCLUDE REGEX "/unit/wsl/")
     list(FILTER functSources EXCLUDE REGEX "/functional/wsl/")
+elseif(ENABLE_WSL_BACKEND)
+    # functional/wsl/smi tests directly link rocdxg_smi_* symbols and require
+    # librocdxg at build time. Drop them when librocdxg is not staged yet (e.g.
+    # TheRock CI compiler-runtime stage, which builds before wsl-rocdxg).
+    # unit/wsl tests only use the amdsmi API and are kept regardless.
+    find_library(ROCDXG_LIB rocdxg)
+    if(NOT ROCDXG_LIB)
+        list(FILTER functSources EXCLUDE REGEX "/functional/wsl/")
+    endif()
 endif()
 
 set(TEST "amdsmitst")
@@ -91,15 +100,8 @@ target_compile_definitions(${TEST} PRIVATE AMDSMI_TEST_MOCK_DIR="${CMAKE_CURRENT
 if(ENABLE_WSL_BACKEND)
     target_compile_definitions(${TEST} PRIVATE ENABLE_WSL_BACKEND)
     target_include_directories(${TEST} PRIVATE ${PROJECT_SOURCE_DIR}/../rocr-runtime/libhsakmt/include)
-    find_library(ROCDXG_LIB rocdxg)
     if(ROCDXG_LIB)
         target_link_libraries(${TEST} ${ROCDXG_LIB})
-    else()
-        # librocdxg is not available at build time (e.g. TheRock CI without
-        # wsl-rocdxg stage). The functional/wsl/smi tests call rocdxg_smi_*
-        # symbols directly and cannot link without it, so exclude them.
-        # unit/wsl tests only exercise the amdsmi API and are kept.
-        list(FILTER functSources EXCLUDE REGEX "/functional/wsl/")
     endif()
 endif()
 target_link_libraries(
