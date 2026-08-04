@@ -52,15 +52,15 @@
 #define NCCL_CE_BATCH_ASYNC_VERSION_SUPPORTED(v) \
   (NCCL_VER_GE(v, ROCM_VER_7_12_0) || NCCL_VER_IN(v, ROCM_VER_7_0_2_2, ROCM_VER_7_0_3_0))
 
-// === Capability gates: prefer the CMake symbol probe, fall back to version ==
-// Method 1 (preferred): CMake sets RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED when
-//   check_symbol_exists(hipMemGetHandleForAddressRange ...) succeeds.
-// Method 2 (fallback): the version predicate above, for builds where the probe
-//   did not run / was not wired in.
+// === Capability gate: both the symbol probe and the version must agree =====
+// CMake sets RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED when
+// check_symbol_exists(hipMemGetHandleForAddressRange ...) succeeds. The symbol
+// is declared in headers on backport builds outside the supported window too,
+// so it cannot gate the feature on its own: the version predicate has to agree.
 #if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
-#define NCCL_CUMEM_DMABUF_EXPORT_GATE 1
-#else
 #define NCCL_CUMEM_DMABUF_EXPORT_GATE NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
+#else
+#define NCCL_CUMEM_DMABUF_EXPORT_GATE 0
 #endif
 
 // HIP: implemented in rma_proxy_launch.cc (hipStreamBatchMemOp + old-HIP fallback).

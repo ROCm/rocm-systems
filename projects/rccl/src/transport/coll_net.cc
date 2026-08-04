@@ -561,20 +561,21 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
     needReg = false;
   }
 peermem_send:
-#else
-  if (resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf &&
+#endif
+#if defined(__HIP_PLATFORM_AMD__)
+  if (needReg && resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf &&
       proxyState->ncclCollNet->regMrDmaBuf) {
     uint64_t offset;
     HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)mapMem->cpuPtr, mapMem->size, &dmabuf_fd, &offset), ret,
-                 peermem_send);
+                 peermem_send_hsa);
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
                                                        NCCL_PTR_CUDA, offset, dmabuf_fd,
                                                        &resources->sendMhandles[NCCL_PROTO_SIMPLE]),
-                  ret, peermem_send);
+                  ret, peermem_send_hsa);
     (void)close(dmabuf_fd);
     needReg = false;
   }
-peermem_send:
+peermem_send_hsa:
 #endif
   if (needReg) {
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMr(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
@@ -673,20 +674,21 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
     needReg = false;
   }
 peermem_recv:
-#else
-  if (resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf &&
+#endif
+#if defined(__HIP_PLATFORM_AMD__)
+  if (needReg && resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf &&
       proxyState->ncclCollNet->regMrDmaBuf) {
     uint64_t offset;
     HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)mapMem->cpuPtr, mapMem->size, &dmabuf_fd, &offset), ret,
-                 peermem_recv);
+                 peermem_recv_hsa);
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
                                                        NCCL_PTR_CUDA, offset, dmabuf_fd,
                                                        &resources->mhandles[NCCL_PROTO_SIMPLE]),
-                  ret, peermem_recv);
+                  ret, peermem_recv_hsa);
     (void)close(dmabuf_fd);
     needReg = false;
   }
-peermem_recv:
+peermem_recv_hsa:
 #endif
   if (needReg) {
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMr(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
@@ -1492,20 +1494,21 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
     needReg = false;
   }
 peermem:
-#else
-  if (resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf &&
+#endif
+#if defined(__HIP_PLATFORM_AMD__)
+  if (needReg && resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf &&
       proxyState->ncclCollNet->regMrDmaBuf) {
     uint64_t offset;
     HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret,
-                 peermem);
+                 peermem_hsa);
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, (void*)info->buffer, info->size,
                                                        NCCL_PTR_CUDA, offset, dmabuf_fd, &handle),
-                  ret, peermem);
+                  ret, peermem_hsa);
     (void)close(dmabuf_fd);
     dmabuf_fd = -1;
     needReg = false;
   }
-peermem:
+peermem_hsa:
 #endif
   if (needReg) {
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMr(resources->collNetComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA,
@@ -1554,20 +1557,21 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
     needReg = false;
   }
 peermem:
-#else
-  if (resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf &&
+#endif
+#if defined(__HIP_PLATFORM_AMD__)
+  if (needReg && resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf &&
       proxyState->ncclCollNet->regMrDmaBuf) {
     uint64_t offset;
     HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret,
-                 peermem);
+                 peermem_hsa);
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, (void*)info->buffer, info->size,
                                                        NCCL_PTR_CUDA, offset, dmabuf_fd, &handle),
-                  ret, peermem);
+                  ret, peermem_hsa);
     (void)close(dmabuf_fd);
     dmabuf_fd = -1;
     needReg = false;
   }
-peermem:
+peermem_hsa:
 #endif
   if (needReg) {
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMr(resources->collNetComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA,
