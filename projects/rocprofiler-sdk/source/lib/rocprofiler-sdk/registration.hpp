@@ -53,12 +53,6 @@ init_logging();
 void
 initialize();
 
-// true while initialization is driven by the OMPT entry point, where libomp holds its init lock
-// and find_clients() must avoid dlopen. Returns a reference so callers can scope it with
-// common::scope_destructor.
-bool&
-ompt_init_active();
-
 // finalize the clients
 void
 finalize();
