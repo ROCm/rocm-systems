@@ -32,6 +32,8 @@ HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Basic) {
 
 // Verifies a kernel launch does not block the host: issued on a deliberately
 // blocked stream, it must return before the stream is unblocked.
+// CUDA deadlocks when its first kernel launch targets a blocked null stream.
+#if HT_AMD
 HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Synchronization_Behavior) {
   HipTest::BlockingContext b_context{nullptr};
   hipStream_t kernel_stream{nullptr};
@@ -47,6 +49,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Synchronization_Behavior) {
   HIP_CHECK(hipDeviceSynchronize());
   REQUIRE(hipStreamQuery(kernel_stream) == hipSuccess);
 }
+#endif  // HT_AMD
 
 HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Parameters) {
   SECTION("blockDim.x == maxBlockDimX") {
