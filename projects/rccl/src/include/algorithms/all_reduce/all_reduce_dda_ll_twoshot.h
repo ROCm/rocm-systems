@@ -139,6 +139,23 @@ __launch_bounds__(512)
     }
   }
 
+  // Phase 3: poll my slots for the other ranks, read data and write to output.
+  myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts_next;
+  for (size_t pk = gtid; pk < nPk_rank; pk += stride) {
+    #pragma unroll
+    for (int r = 1; r < nRanks; ++r) {
+      const int peer = (selfRank + r) % nRanks;
+      uint32_t *peer_out = reinterpret_cast<uint32_t*>(recvbuff) + peer * nPk_rank * 2;
+      volatile LLPacket16* src = myBase + (size_t)peer * slot;
+      uint32_t d0, f0, d1, f1;
+      do {
+        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
+      } while (f0 != flag || f1 != flag);
+      peer_out[2 * pk] = d0;
+      peer_out[2 * pk + 1] = d1;
+    }
+  }
+
   if (threadIdx.x == 0) {
     for (int e = flatBlockId; e < epochLen; e += total) {
       epochDev[e] = flag;
