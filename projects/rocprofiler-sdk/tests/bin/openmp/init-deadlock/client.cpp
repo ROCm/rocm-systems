@@ -27,6 +27,7 @@
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -62,8 +63,39 @@ tool_fini(void*)
 }  // namespace
 
 extern "C" rocprofiler_tool_configure_result_t*
-rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*)
+rocprofiler_configure(uint32_t                 version,
+                      const char*              runtime_version,
+                      uint32_t                 priority,
+                      rocprofiler_client_id_t* id)
 {
+    // set the client name
+    id->name = "OpenMP-Init-Deadlock-Client";
+
+    // compute major/minor/patch version info
+    uint32_t major = version / 10000;
+    uint32_t minor = (version % 10000) / 100;
+    uint32_t patch = version % 100;
+
+    auto _version = rocprofiler_version_triplet_t{};
+    rocprofiler_get_version_triplet(&_version);
+
+    printf("[%s] (priority=%i) is using rocprofiler-sdk v%u.%u.%u | %s | %u.%u.%u (compiled "
+           "against rocprofiler-sdk v%u.%u.%u)\n",
+           id->name,
+           priority,
+           major,
+           minor,
+           patch,
+           runtime_version,
+           _version.major,
+           _version.minor,
+           _version.patch,
+           ROCPROFILER_VERSION_MAJOR,
+           ROCPROFILER_VERSION_MINOR,
+           ROCPROFILER_VERSION_PATCH);
+
+    fflush(stdout);
+
     static auto cfg = rocprofiler_tool_configure_result_t{
         sizeof(rocprofiler_tool_configure_result_t), &tool_init, &tool_fini, nullptr};
     return &cfg;
