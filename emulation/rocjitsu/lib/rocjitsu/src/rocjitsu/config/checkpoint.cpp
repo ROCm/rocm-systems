@@ -23,6 +23,8 @@ flatbuffers::Offset<fb::SimulationConfig>
 serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
                  const simdojo::SimulationEngine::Config &engine_config) {
   auto arch_str = builder.CreateString(arch_to_string(soc.arch()));
+  auto exec_mode_str = builder.CreateString(
+      soc.exec_mode() == simdojo::ExecMode::CLOCKED ? "clocked" : "functional");
 
   // Extract configuration from the live component tree.
   uint32_t num_xcds = soc.num_xcds();
@@ -50,8 +52,8 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
   auto fb_gpu = fb::CreateAmdgpuConfig(builder, num_xcds, num_iods, fb_xcd);
   auto fb_vm = fb::CreateVirtualMachineConfig(builder, arch_str, fb_gpu);
 
-  return fb::CreateSimulationConfig(builder, engine_config.max_ticks, engine_config.num_threads, 0,
-                                    fb_vm);
+  return fb::CreateSimulationConfig(builder, engine_config.max_ticks, engine_config.num_threads,
+                                    exec_mode_str, fb_vm);
 }
 
 /// @brief Reconstruct a VirtualMachine::Config from a stored FlatBuffer config.
@@ -66,6 +68,8 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
     vm_config.soc.arch = parse_arch(vm->arch()->str());
   if (vm_config.soc.arch == ROCJITSU_CODE_ARCH_INVALID)
     throw std::runtime_error("Checkpoint has missing or invalid architecture");
+  vm_config.soc.exec_mode =
+      parse_exec_mode(fb_config->exec_mode() ? fb_config->exec_mode()->str() : "");
 
   if (auto *gpu = vm->gpu()) {
     vm_config.soc.num_xcds = gpu->num_xcds();
@@ -183,9 +187,10 @@ LoadedConfig restore_checkpoint(const std::string &path) {
   if (!f.read(reinterpret_cast<char *>(buf.data()), static_cast<std::streamsize>(size)))
     throw std::runtime_error("Failed to read checkpoint file: " + path);
 
-  auto *checkpoint = fb::GetSimulationCheckpoint(buf.data());
-  if (!checkpoint)
+  flatbuffers::Verifier verifier(buf.data(), buf.size());
+  if (!fb::VerifySimulationCheckpointBuffer(verifier))
     throw std::runtime_error("Invalid checkpoint format: " + path);
+  auto *checkpoint = fb::GetSimulationCheckpoint(buf.data());
 
   // Rebuild SoC and engine config from the stored configuration.
   if (!checkpoint->config())
@@ -234,9 +239,10 @@ LoadedConfig restore_checkpoint(const std::string &path) {
               wf_state->sgprs() ? wf_state->sgprs()->size() : cu->config().sgprs_per_wf;
           uint32_t num_vgprs = cu->config().vgprs_per_wf;
 
-          auto *wf = cu->dispatch_wf(wf_state->wg_id(), wf_state->pc(), num_sgprs, num_vgprs);
+          auto *wf = cu->dispatch_wf_at(wf_state->wf_id(), wf_state->wg_id(), wf_state->pc(),
+                                        num_sgprs, num_vgprs);
           if (!wf)
-            throw std::runtime_error("Failed to dispatch wavefront during checkpoint restoration");
+            throw std::runtime_error("Failed to restore wavefront into its recorded slot");
 
           wf->set_exec_raw(wf_state->exec());
           wf->set_vcc(wf_state->vcc());
@@ -269,6 +275,7 @@ LoadedConfig restore_checkpoint(const std::string &path) {
   // Return the same root shape as the JSON configuration loader.
   LoadedConfig result;
   result.engine_config = engine_config;
+  result.exec_mode = vm_config.soc.exec_mode;
   result.build_result.root = std::move(soc);
   result.build_result.memory = mem_ptr;
   return result;

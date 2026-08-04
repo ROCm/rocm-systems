@@ -86,6 +86,9 @@ rj_code_arch_t parse_arch(const std::string &arch_str);
 /// @brief Convert an rj_code_arch_t enum to its string name.
 const char *arch_to_string(rj_code_arch_t arch);
 
+/// @brief Parse an execution mode name, defaulting to FUNCTIONAL.
+simdojo::ExecMode parse_exec_mode(const std::string &mode_str);
+
 /// @brief Load simulation config from a JSON file.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).

@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/vm/rj_vm.h"
+#include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
@@ -739,7 +740,7 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
 }
 
 TEST(CheckpointTest, SaveAndRestoreMemory) {
-  const char *json = R"({"max_ticks":10000,"num_threads":1,
+  const char *json = R"({"max_ticks":10000,"num_threads":1,"exec_mode":"clocked",
     "vm":{"arch":"cdna3"},
     "topology":{
       "root":{
@@ -769,6 +770,10 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
 
   auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
+  auto *source_cp = soc->xcd(0)->command_processor();
+  ASSERT_NE(source_cp, nullptr);
+  EXPECT_TRUE(source_cp->packed_tid());
+  EXPECT_EQ(soc->exec_mode(), simdojo::ExecMode::CLOCKED);
 
   soc->memory()->write32(0x1000, 0xDEADBEEF);
   soc->memory()->write64(0x2000, 0x0123456789ABCDEFULL);
@@ -780,6 +785,9 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
   auto restored = config::restore_checkpoint(checkpoint.path());
   EXPECT_EQ(restored.memory()->read32(0x1000), 0xDEADBEEFu);
   EXPECT_EQ(restored.memory()->read64(0x2000), 0x0123456789ABCDEFULL);
+  EXPECT_EQ(restored.exec_mode, simdojo::ExecMode::CLOCKED);
+  EXPECT_EQ(restored.soc()->exec_mode(), simdojo::ExecMode::CLOCKED);
+  EXPECT_TRUE(restored.soc()->xcd(0)->command_processor()->packed_tid());
 }
 
 TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
@@ -795,7 +803,7 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
             {"name":"cp","type":"command_processor"},
             {"name":"se0","type":"shader_engine","children":[
               {"name":"cu[0:1]","type":"compute_unit","config":[
-                {"key":"num_wf_slots","value":"1"},
+                {"key":"num_wf_slots","value":"4"},
                 {"key":"sgprs_per_wf","value":"104"},
                 {"key":"vgprs_per_wf","value":"256"},
                 {"key":"lds_size_kb","value":"64"}
@@ -815,8 +823,12 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
 
-  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  auto *lower_wf = cu->dispatch_wf(0, 0x1000, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(lower_wf, nullptr);
+  auto *wf = cu->dispatch_wf(1, 0x2000, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_id(), 1u);
+  lower_wf->halt();
   const uint32_t acc0 = wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET;
   const uint32_t acc_last = acc0 + cdna3::Isa::MAX_ACC_VGPRS_PER_WF - 1;
   cu->write_vgpr(acc0, 0, 0xA55A0001u);
@@ -831,8 +843,13 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   ASSERT_NE(restored_soc, nullptr);
   auto *restored_cu = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(restored_cu, nullptr);
-  auto *restored_wf = restored_cu->wf(0);
+  EXPECT_TRUE(restored_cu->wf(0)->is_halted());
+  auto *restored_wf = restored_cu->wf(1);
   ASSERT_NE(restored_wf, nullptr);
+  EXPECT_FALSE(restored_wf->is_halted());
+  EXPECT_EQ(restored_wf->wf_id(), 1u);
+  EXPECT_EQ(restored_wf->wg_id(), 1u);
+  EXPECT_EQ(restored_wf->pc, 0x2000u);
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET, 0),
             0xA55A0001u);
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET +
@@ -886,6 +903,9 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   auto restored = config::restore_checkpoint(checkpoint.path());
   auto *restored_soc = restored.soc();
   ASSERT_NE(restored_soc, nullptr);
+  auto *restored_cp = restored_soc->xcd(0)->command_processor();
+  ASSERT_NE(restored_cp, nullptr);
+  EXPECT_EQ(restored_cp->sdma_packet_dialect(), amdgpu::SdmaPacketDialect::Gfx11Plus);
   auto *restored_wf = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
   ASSERT_NE(restored_wf, nullptr);
   EXPECT_EQ(restored_wf->exec(), 0xFULL);
@@ -991,6 +1011,15 @@ TEST(CApiTest, CheckpointRoundTrip) {
   ASSERT_NE(raw_source, nullptr);
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw_source, &rj_vm_destroy);
 
+  constexpr uint64_t kCodeAddress = 0x1000;
+  constexpr uint32_t kSEndpgm = 0xBF810000u;
+  source->soc->memory()->write32(kCodeAddress, kSEndpgm);
+  auto *source_cu = source->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(source_cu, nullptr);
+  auto *source_wf = source_cu->dispatch_wf(0, kCodeAddress, source_cu->config().sgprs_per_wf,
+                                           source_cu->config().vgprs_per_wf);
+  ASSERT_NE(source_wf, nullptr);
+
   test::ScopedTempFile checkpoint("rocjitsu-c-api-checkpoint-");
   ASSERT_EQ(rj_vm_save_checkpoint(source.get(), checkpoint.path().c_str(), 42),
             ROCJITSU_STATUS_SUCCESS);
@@ -1001,7 +1030,42 @@ TEST(CApiTest, CheckpointRoundTrip) {
   ASSERT_NE(raw_restored, nullptr);
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> restored(raw_restored, &rj_vm_destroy);
 
-  EXPECT_EQ(rj_vm_step(restored.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+  auto *restored_cu = restored->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(restored_cu, nullptr);
+  ASSERT_EQ(restored_cu->num_wfs(), 1u);
+
+  int active = 1;
+  EXPECT_EQ(rj_vm_step(restored.get(), &active), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(restored_cu->num_wfs(), 0u);
+}
+
+TEST(CApiTest, RejectsMalformedCheckpoints) {
+  test::ScopedTempFile junk("rocjitsu-junk-checkpoint-");
+  junk.write(std::string(512, static_cast<char>(0xA5)));
+
+  rj_vm_t *restored = nullptr;
+  EXPECT_EQ(rj_vm_restore_checkpoint(junk.path().c_str(), &restored), ROCJITSU_STATUS_INVALID_FILE);
+  EXPECT_EQ(restored, nullptr);
+
+  rj_vm_t *raw_source = nullptr;
+  ASSERT_EQ(rj_vm_create((CONFIG_DIR_PATH + "/gfx942_cdna3.json").c_str(), RJ_VM_MODE_DEFAULT,
+                         &raw_source),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_source, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw_source, &rj_vm_destroy);
+
+  test::ScopedTempFile valid("rocjitsu-valid-checkpoint-");
+  ASSERT_EQ(rj_vm_save_checkpoint(source.get(), valid.path().c_str(), 42), ROCJITSU_STATUS_SUCCESS);
+  std::ifstream input(valid.path(), std::ios::binary);
+  std::string bytes{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+  ASSERT_GT(bytes.size(), 8u);
+  bytes.resize(bytes.size() / 2);
+
+  test::ScopedTempFile truncated("rocjitsu-truncated-checkpoint-");
+  truncated.write(bytes);
+  EXPECT_EQ(rj_vm_restore_checkpoint(truncated.path().c_str(), &restored),
+            ROCJITSU_STATUS_INVALID_FILE);
+  EXPECT_EQ(restored, nullptr);
 }
 
 TEST(CApiTest, PluginLifecycleDispatchesProfiledShutdownThroughBaseGroup) {

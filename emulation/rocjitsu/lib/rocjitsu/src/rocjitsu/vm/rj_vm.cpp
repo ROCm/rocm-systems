@@ -101,6 +101,17 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
   }
   s->engine->create();
 
+  // dispatch_wf() cannot enqueue work while a restored component tree is
+  // detached from an engine. Once create() has assigned partitions and event
+  // queues, resume any resident waves reconstructed from a checkpoint. The
+  // schedule_work() guards make this a no-op for ordinary idle configurations.
+  for (uint32_t i = 0; i < s->vm->num_socs(); ++i) {
+    for (auto *cu : s->vm->soc(i)->all_cus()) {
+      if (!cu->is_idle())
+        cu->schedule_work();
+    }
+  }
+
   if (serve) {
     s->engine->register_as_primary();
     if (loaded.num_gpus > 1 && !loaded.devices.empty())
