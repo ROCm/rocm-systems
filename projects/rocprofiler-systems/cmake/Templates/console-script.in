@@ -14,8 +14,6 @@ run-script()
     eval $@
 }
 
-# Asking the interpreter beats deriving its package directories from the
-# executable path
 python_site_dirs()
 {
     ${PYTHON_EXECUTABLE} -c 'import sysconfig; print("\n".join({sysconfig.get_paths()[k] for k in ("purelib", "platlib")}))' 2>/dev/null || true

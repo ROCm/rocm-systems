@@ -842,7 +842,13 @@ def python_versions_unavailable_reason(rocprof_config: RocprofsysConfig) -> Opti
 def pytorch_unavailable_reason(
     rocprof_config: RocprofsysConfig, python_version: Optional[str]
 ) -> Optional[str]:
-    """Torch is installed per interpreter, so ask the version under test."""
+    """Torch is installed per interpreter, so ask the version under test.
+
+    There is no version to ask for when python_versions found no interpreter at
+    all, or when the test is not parametrized by one.
+    """
+    if python_version is None:
+        return None
     try:
         executable = rocprof_config.capabilities.get_python_executable(python_version)
     except FileNotFoundError:
