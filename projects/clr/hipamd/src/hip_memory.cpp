@@ -3089,10 +3089,12 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
   }
 
   if (attrs != nullptr && !stream.device().settings().sdma_indirect_supported_) {
-    const unsigned int kIndirectMask =
+    const unsigned int kBothIndirect =
         hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
     for (size_t i = 0; i < numAttrs; ++i) {
-      if (attrs[i].flags & kIndirectMask) {
+      // Single-sided indirect (Src XOR Dst) can fall back to the shader path;
+      // dual-sided indirect still requires HW SDMA indirect support.
+      if ((attrs[i].flags & kBothIndirect) == kBothIndirect) {
         return hipErrorNotSupported;
       }
     }

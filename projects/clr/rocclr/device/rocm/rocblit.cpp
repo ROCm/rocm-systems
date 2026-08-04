@@ -2761,6 +2761,14 @@ struct CopyBufferBatchDescriptor {
   uint32_t trailing_byte_count;
 };
 
+// This layout must match the struct in blitcl.cpp
+struct IndirectCopyBufferBatchDescriptor {
+  uint64_t source_address;
+  uint64_t destination_address;
+  uint64_t size;
+  uint32_t indirect_mode;
+};
+
 // ================================================================================================
 bool KernelBlitManager::useShaderCopyBufferPath(const Memory& srcMemory, const Memory& dstMemory,
                                                 size_t size, amd::CopyMetadata copyMetadata,
@@ -3139,6 +3147,134 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
 }
 
 // ================================================================================================
+bool KernelBlitManager::useShaderIndirectPath(size_t size, const amd::CopyMetadata& metadata) const {
+  const bool isSdmaPref =
+      metadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA;
+  const bool isBlitPref =
+      metadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT;
+  if (!dev().settings().sdma_indirect_supported_) return true;  // no HW indirect -> shader always
+
+  if (isSdmaPref) return false;                             // explicit CE   -> SDMA
+  if (isBlitPref) return true;                              // explicit BLIT -> shader
+  return size <= dev().settings().sdmaIndirectThreshold_;    // else size-based
+}
+
+// ================================================================================================
+bool KernelBlitManager::ShaderIndirectCopyBufferBatch(
+    const std::vector<amd::BatchCopyOp>& copy_operations) const {
+  std::scoped_lock transfer_operations_lock(lockXferOps_);
+
+  constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
+  constexpr uint32_t kLocalWorkSize = 512;
+  const uint32_t max_workgroups_per_copy = std::max<uint32_t>(
+      dev().settings().limit_blit_wg_ / copy_operations.size(), 1);
+  const size_t descriptor_bytes =
+      copy_operations.size() * sizeof(IndirectCopyBufferBatchDescriptor);
+  void* descriptor_buffer = gpu().allocKernArg(descriptor_bytes, kCBAlignment);
+  IndirectCopyBufferBatchDescriptor* descriptors =
+      static_cast<IndirectCopyBufferBatchDescriptor*>(descriptor_buffer);
+  size_t descriptor_index = 0;
+  uint64_t max_aligned_element_count = 0;
+  bool needs_system_scope = false;
+  bool attach_signal = false;
+
+  for (const auto& copy_operation : copy_operations) {
+    device::Memory* source_device_memory =
+        copy_operation.srcMemory->getDeviceMemory(
+            *copy_operation.srcMemory->getContext().devices()[0]);
+    device::Memory* destination_device_memory =
+        copy_operation.dstMemory->getDeviceMemory(
+            *copy_operation.dstMemory->getContext().devices()[0]);
+
+    // Holder VA on the indirect side, real VA on the direct side -- identical
+    // address contract to the SDMA indirect path: the kernel dereferences the
+    // holder itself, on-device, so the value stored host-side is used verbatim.
+    const uint64_t source_address =
+        source_device_memory->virtualAddress() + copy_operation.srcOffset;
+    const uint64_t destination_address =
+        destination_device_memory->virtualAddress() + copy_operation.dstOffset;
+
+    // indirect_mode bit0 = src indirect, bit1 = dst indirect (matches blitcl.cpp).
+    // v1 routing only ever produces IndirectSrc/IndirectDst, but map SrcDst too
+    // since the kernel and descriptor already support it as a trivial future add.
+    uint32_t indirect_mode = 0;
+    switch (copy_operation.metadata.copyOpType_) {
+      case amd::CopyMetadata::kCopyOpIndirectSrc:
+        indirect_mode = 1;
+        break;
+      case amd::CopyMetadata::kCopyOpIndirectDst:
+        indirect_mode = 2;
+        break;
+      case amd::CopyMetadata::kCopyOpIndirectSrcDst:
+        indirect_mode = 3;
+        break;
+      default:
+        break;
+    }
+
+    const bool source_svm_atomics =
+        (source_device_memory->owner()->getMemFlags() & CL_MEM_SVM_ATOMICS) != 0;
+    const bool destination_svm_atomics =
+        (destination_device_memory->owner()->getMemFlags() & CL_MEM_SVM_ATOMICS) != 0;
+    // Same formula as ShaderSwapBufferBatch, evaluated on (holder, real) memory
+    // for the current IndirectSrc/IndirectDst-only routing. This is provably
+    // always true today -- the indirect side's holder must satisfy
+    // isHostMemDirectAccess() to be a valid device-usable VA under the address
+    // contract -- but it is kept in this general form so it stays correct if
+    // IndirectSrcDst / relaxed H<->D narrowing is added later and both sides can
+    // be plain device buffers.
+    needs_system_scope |=
+        (!source_svm_atomics && source_device_memory->isHostMemDirectAccess()) ||
+        (!destination_svm_atomics && destination_device_memory->isHostMemDirectAccess()) ||
+        !copy_operation.metadata.isAsync_;
+    attach_signal |= !copy_operation.metadata.isAsync_;
+
+    // Grid sizing is optimistic (assume kMaxAlignment(16)-byte elements): the
+    // real alignment is only knowable on-device, after the holder is
+    // dereferenced. Unaligned copies still complete correctly through the
+    // strided loop in the kernel; they just do more serialized work per thread.
+    const uint64_t optimistic_aligned_element_count =
+        std::max<uint64_t>(copy_operation.size / kMaxAlignment, 1);
+    max_aligned_element_count =
+        std::max(max_aligned_element_count, optimistic_aligned_element_count);
+
+    descriptors[descriptor_index++] = {
+        source_address, destination_address, copy_operation.size, indirect_mode};
+  }
+
+  uint32_t workgroup_count = static_cast<uint32_t>(
+      std::min<uint64_t>(max_workgroups_per_copy,
+                         amd::alignUp(max_aligned_element_count,
+                                      static_cast<uint64_t>(kLocalWorkSize)) /
+                             kLocalWorkSize));
+  workgroup_count = std::max<uint32_t>(workgroup_count, 1);
+  const uint32_t copy_stride = workgroup_count * kLocalWorkSize;
+
+  amd::Kernel* const kernel = kernels_[BlitCopyBufferBatchIndirect];
+  constexpr bool kDirectVa = true;
+  setArgument(kernel, 0, sizeof(cl_mem), descriptor_buffer, 0, nullptr,
+              kDirectVa);
+
+  setArgument(kernel, 1, sizeof(kLocalWorkSize), &kLocalWorkSize);
+  setArgument(kernel, 2, sizeof(copy_stride), &copy_stride);
+
+  size_t global_work_size[2] = {copy_stride, copy_operations.size()};
+  size_t local_work_size[2] = {kLocalWorkSize, 1};
+  amd::NDRangeContainer nd_range(2, nullptr, global_work_size, local_work_size);
+
+  address parameters = captureArguments(kernel);
+  if (needs_system_scope) {
+    gpu().addSystemScope();
+  }
+  bool submit_result =
+      gpu().submitKernelInternal(nd_range, *kernel, parameters, nullptr, 0,
+                                 nullptr, nullptr, attach_signal);
+  releaseArguments(parameters);
+
+  return submit_result;
+}
+
+// ================================================================================================
 bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOps) const {
   if (copyOps.empty()) {
     return true;
@@ -3156,6 +3292,7 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   // Partition into intra-device (kernel blit) and inter-device (DMA batch) groups.
   std::vector<amd::BatchCopyOp> d2dCopyOps;
   std::vector<amd::BatchCopyOp> p2pCopyOps;
+  std::vector<amd::BatchCopyOp> indirectShaderOps;
 
   for (const auto& op : copyOps) {
     device::Memory* srcDevMem = op.srcMemory->getDeviceMemory(
@@ -3171,11 +3308,16 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
     const Memory& srcMem = gpuMem(*srcDevMem);
     const Memory& dstMem = gpuMem(*dstDevMem);
     bool isLinearCopyOp = op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpLinear;
-    // ShaderCopyBufferBatch only describes linear copies; route swap/other ops through DMA.
-    bool useShaderCopyPath =
-        isLinearCopyOp && useShaderCopyBufferPath(srcMem, dstMem, op.size, op.metadata);
+    // kCopyOpIndirectSrcDst is not shader-routed in v1 (unreachable via the current
+    // H<->D holder narrowing anyway); it falls through to the p2p/SDMA path below.
+    // TODO: Develop indirect src dst shader support
+    bool isIndirectOp = op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpIndirectSrc ||
+                        op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpIndirectDst;
 
-    if (useShaderCopyPath) {
+    if (isIndirectOp && useShaderIndirectPath(op.size, op.metadata)) {
+      indirectShaderOps.push_back(op);
+    } else if (isLinearCopyOp && useShaderCopyBufferPath(srcMem, dstMem, op.size, op.metadata)) {
+      // ShaderCopyBufferBatch only describes linear copies; route swap/other ops through DMA.
       d2dCopyOps.push_back(op);
     } else {
       p2pCopyOps.push_back(op);
@@ -3189,18 +3331,25 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   if (!p2pCopyOps.empty()) {
     // Always pass prior wait events to maintain stream ordering for the batch.
     if (!hsaCopyBatch(p2pCopyOps, &priorWaitEvents, &batchSignals)) {
-      // Swap ops cannot fall back to shader copy (it only does one-directional
-      // copy, not a bidirectional swap). Fail the entire batch if any swap op
-      // was in the SDMA batch that failed.
-      bool hasSwap = false;
+      // Swap and indirect ops cannot fall back to plain copyBuffer:
+      //  - Swap: bidirectional exchange; copyBuffer only does a
+      //    one-directional copy, will cause a race condition if you use two.
+      //  - Indirect: srcMemory or dstMemory is a pointer holding a pointer to
+      //    the actual memory. So we cannot fall back to a general memory copy
+      // Fail the entire batch if any such op was in the SDMA batch that failed.
+      bool hasNonFallbackableOp = false;
       for (const auto& op : p2pCopyOps) {
-        if (op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpSwap) {
-          hasSwap = true;
+        if (op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpSwap ||
+            op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpIndirectSrc ||
+            op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpIndirectDst ||
+            op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpIndirectSrcDst) {
+          hasNonFallbackableOp = true;
           break;
         }
       }
-      if (hasSwap) {
-        LogError("KernelBlitManager::copyBufferBatch: SDMA batch with swap ops failed");
+      if (hasNonFallbackableOp) {
+        LogError(
+            "KernelBlitManager::copyBufferBatch: SDMA batch with swap/indirect ops failed");
         return false;
       }
       LogWarning(
@@ -3212,10 +3361,10 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
     }
   }
 
-  // Dispatch intra-device copies for overlap with SDMA.
+  // Dispatch intra-device copies and shader indirect ops for overlap with SDMA.
   // Set engine to Compute so WaitingSignal(Compute) inside copyBuffer does not
   // see an engine switch and does not add the batch's current_id_ as a dependency.
-  if (!d2dCopyOps.empty()) {
+  if (!d2dCopyOps.empty() || !indirectShaderOps.empty()) {
     gpu().Barriers().SetActiveEngine(HwQueueEngine::Compute);
     // Re-add priorSignal as external so intra copies depend on prior stream operations.
     if (priorSignal != nullptr) {
@@ -3233,6 +3382,20 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
       if (!ShaderCopyBufferBatch(copy_ops_by_size)) {
         LogError("KernelBlitManager::ShaderCopyBufferBatch: Intra-device batch "
                  "copy failed!");
+        return false;
+      }
+    }
+
+    std::map<size_t, std::vector<amd::BatchCopyOp>, std::greater<size_t>>
+        indirect_ops_by_size;
+    for (const auto& op : indirectShaderOps) {
+      indirect_ops_by_size[op.size].push_back(op);
+    }
+
+    for (const auto& entry : indirect_ops_by_size) {
+      if (!ShaderIndirectCopyBufferBatch(entry.second)) {
+        LogError("KernelBlitManager::ShaderIndirectCopyBufferBatch: Intra-device batch "
+                 "indirect copy failed!");
         return false;
       }
     }

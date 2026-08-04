@@ -178,6 +178,8 @@ release(uint, HIP_HIDDEN_FREE_MEM, 0,                                         \
         "0 = Disable")                                                        \
 release(size_t, GPU_FORCE_BLIT_COPY_SIZE, 16,                                 \
         "Use Blit until this size(in KB) for copies")                         \
+release(size_t, GPU_FORCE_BLIT_INDIRECT_SIZE, 16,                             \
+        "Use shader blit for batch indirect copies until this size (in KB)")  \
 release(uint, ROC_ACTIVE_WAIT_TIMEOUT, 0,                                     \
         "Forces active wait of GPU interrup for the timeout(us)")             \
 release(bool, ROC_ENABLE_LARGE_BAR, true,                                     \

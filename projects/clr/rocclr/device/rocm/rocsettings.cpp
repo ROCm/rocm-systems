@@ -47,6 +47,7 @@ Settings::Settings() {
       flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) ? 64 * Ki : GPU_PINNED_MIN_XFER_SIZE * Mi;
 
   sdmaCopyThreshold_ = GPU_FORCE_BLIT_COPY_SIZE * Ki;
+  sdmaIndirectThreshold_ = GPU_FORCE_BLIT_INDIRECT_SIZE * Ki;
 
   // Don't support Denormals for single precision by default
   singleFpDenorm_ = false;

@@ -58,8 +58,9 @@ class Settings : public device::Settings {
   size_t pinnedXferSize_;     //!< Pinned buffer size for transfer
   size_t pinnedMinXferSize_;  //!< Minimal buffer size for pinned transfer
 
-  size_t sdmaCopyThreshold_;   //!< Use SDMA to copy above this size
-  size_t sdma_p2p_threshold_;  //!< Use SDMA in P2P above this size
+  size_t sdmaCopyThreshold_;      //!< Use SDMA to copy above this size
+  size_t sdmaIndirectThreshold_;  //!< Use SDMA for batch indirect copies above this size
+  size_t sdma_p2p_threshold_;     //!< Use SDMA in P2P above this size
 
   uint32_t hmmFlags_;       //!< HMM functionality control flags
   uint32_t limit_blit_wg_;  //!< The number of workgroups for blit execution
