@@ -3,6 +3,7 @@
 
 #include "aql_queue.h"
 #include "halt_snapshot_plugin.h"
+#include "long_path_handoff.h"
 #include "scoped_temp.h"
 
 #include "embedded_schema.h"
@@ -12,6 +13,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
@@ -32,6 +34,7 @@ RJ_DIAGNOSTIC_POP
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -377,6 +380,11 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
 TEST(ConfigLoaderTest, LoadsDbtGuestSiliconRevisions) {
   // gfx1250 A0 and B0 share an ELF machine ID, so the configured revisions
   // select the B0-to-A0 translation profile.
+  //
+  // This also pins guest_isa == host_isa as a legal configuration. The hook
+  // layer resolves the resulting agent-role overlap by matching the host first
+  // (only the host carries the node-id constraint) rather than by rejecting the
+  // config here, which would foreclose this profile.
   const auto file = write_temp_config(R"({
       "dbt_guest": {
         "enabled": true,
@@ -539,6 +547,208 @@ TEST(ConfigLoaderTest, LoadsExplicitHardwareDbtBackendConfig) {
   auto dbt = config::load_dbt_guest_config_from_file(file.path());
 
   EXPECT_EQ(dbt.host.backend, config::DbtExecutionBackend::Hardware);
+}
+
+TEST(ConfigLoaderTest, AppliesResolvedDbtHostGpuId) {
+  config::DbtGuestConfig automatic;
+  automatic.enabled = true;
+  automatic.host.backend = config::DbtExecutionBackend::Hardware;
+  config::DbtGuestConfig explicit_id = automatic;
+  explicit_id.host.gpu_id = 8716;
+  config::DbtGuestConfig simulator = automatic;
+  simulator.host.backend = config::DbtExecutionBackend::Simulator;
+
+  config::apply_resolved_dbt_host_gpu_id(automatic, "28851");
+  config::apply_resolved_dbt_host_gpu_id(explicit_id, "28851");
+  config::apply_resolved_dbt_host_gpu_id(simulator, "28851");
+
+  EXPECT_EQ(automatic.host.gpu_id, 28851u);
+  EXPECT_EQ(explicit_id.host.gpu_id, 8716u);
+  EXPECT_EQ(simulator.host.gpu_id, 28851u);
+}
+
+TEST(ConfigLoaderTest, RejectsInvalidResolvedDbtHostGpuId) {
+  const std::array<std::string_view, 5> invalid_values = {"", "0", "not-a-number", "28851 trailing",
+                                                          "4294967296"};
+  for (std::string_view value : invalid_values) {
+    config::DbtGuestConfig dbt;
+    dbt.enabled = true;
+    EXPECT_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, value), std::runtime_error) << value;
+  }
+}
+
+TEST(ConfigLoaderTest, ExplicitDbtHostGpuIdOverridesResolvedHandoff) {
+  config::DbtGuestConfig dbt;
+  dbt.enabled = true;
+  dbt.host.gpu_id = 8716;
+
+  EXPECT_NO_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, "invalid-but-ignored"));
+  EXPECT_EQ(dbt.host.gpu_id, 8716u);
+}
+
+TEST(ConfigLoaderTest, ParsesRuntimeConfigHandoff) {
+  const auto dbt = config::parse_dbt_runtime_config_handoff("/tmp/config.json\r\n28851\r\n");
+  ASSERT_TRUE(dbt);
+  EXPECT_EQ(dbt->config_path, "/tmp/config.json");
+  ASSERT_TRUE(dbt->resolved_gpu_id);
+  EXPECT_EQ(*dbt->resolved_gpu_id, "28851");
+
+  const auto non_dbt = config::parse_dbt_runtime_config_handoff("/tmp/config.json");
+  ASSERT_TRUE(non_dbt);
+  EXPECT_EQ(non_dbt->config_path, "/tmp/config.json");
+  EXPECT_FALSE(non_dbt->resolved_gpu_id);
+
+  const auto newline_terminated = config::parse_dbt_runtime_config_handoff("/tmp/config.json\n");
+  ASSERT_TRUE(newline_terminated);
+  EXPECT_FALSE(newline_terminated->resolved_gpu_id);
+  EXPECT_FALSE(config::parse_dbt_runtime_config_handoff("\n28851\n"));
+}
+
+TEST(ConfigLoaderTest, RoundTripsRuntimeConfigHandoff) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-round-trip-");
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  config::DbtGuestConfig dbt;
+  dbt.enabled = true;
+  dbt.host.gpu_id = 28851;
+
+  ASSERT_TRUE(config::write_dbt_runtime_config_handoff("/tmp/config.json", dbt, getpid()));
+  std::ifstream handoff(rocjitsu::rpc_invocation_config_file_path(getpid()));
+  const std::string contents((std::istreambuf_iterator<char>(handoff)),
+                             std::istreambuf_iterator<char>());
+  const auto parsed = config::parse_dbt_runtime_config_handoff(contents);
+
+  ASSERT_TRUE(parsed);
+  EXPECT_EQ(parsed->config_path, "/tmp/config.json");
+  ASSERT_TRUE(parsed->resolved_gpu_id);
+  EXPECT_EQ(*parsed->resolved_gpu_id, "28851");
+}
+
+TEST(ConfigLoaderTest, RejectsUnresolvedAutomaticDbtHandoffWrite) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-unresolved-");
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  config::DbtGuestConfig dbt;
+  dbt.enabled = true;
+
+  EXPECT_FALSE(config::write_dbt_runtime_config_handoff("/tmp/config.json", dbt, getpid()));
+  EXPECT_FALSE(std::filesystem::exists(rocjitsu::rpc_invocation_config_file_path(getpid())));
+}
+
+TEST(ConfigLoaderTest, RuntimeConfigHandoffReportsDirectoryCreationFailure) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-write-failure-");
+  const std::filesystem::path blocked_root = std::filesystem::path(runtime.path()) / "blocked";
+  std::ofstream(blocked_root) << "not a directory";
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", blocked_root.string());
+  config::DbtGuestConfig dbt;
+  dbt.enabled = true;
+  dbt.host.gpu_id = 28851;
+
+  EXPECT_FALSE(config::write_dbt_runtime_config_handoff("/tmp/config.json", dbt, getpid()));
+}
+
+TEST(ConfigLoaderTest, RejectsEmptyResolvedGpuIdLineForEnabledDbt) {
+  const auto handoff = config::parse_dbt_runtime_config_handoff("/tmp/config.json\n\n");
+  ASSERT_TRUE(handoff);
+  ASSERT_TRUE(handoff->resolved_gpu_id);
+
+  config::DbtGuestConfig dbt;
+  dbt.enabled = true;
+  EXPECT_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, *handoff->resolved_gpu_id),
+               std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, LoadsDbtRuntimeConfigHandoffFromInvocationDirectory) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-handoff-");
+  const auto config_file = write_temp_config(R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx942"
+        }
+      })");
+  {
+    std::ofstream handoff(std::filesystem::path(runtime.path()) / "config_path");
+    handoff << config_file.path() << "\n28851\n";
+  }
+  test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
+
+  const std::optional<config::DbtGuestConfig> loaded =
+      config::load_dbt_guest_config_from_runtime_config();
+
+  ASSERT_TRUE(loaded);
+  EXPECT_TRUE(loaded->enabled);
+  EXPECT_EQ(loaded->host.gpu_id, 28851u);
+}
+
+// The HSA-hook half of a pair. GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes drives
+// the same oversized handoff through the other consumer -- the KFD interposer's raw read loop,
+// which is where a fixed 4096-byte read once truncated it. This reader has always been an
+// unbounded std::ifstream, so the case is coverage rather than a fix; what it locks down is that
+// the two independent readers agree. Both are built by install_oversized_handoff() and both
+// assert test::kOversizedHandoffHostGpuId, so a reader that starts resolving a different host
+// GPU from identical bytes fails here or there instead of silently splitting the two layers
+// onto different GPUs on a multi-GPU host.
+TEST(ConfigLoaderTest, ReadsRuntimeHandoffLargerThan4095Bytes) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-oversized-");
+
+  // Same treatment as the KFD-side test: a temp directory already deeper than the path being
+  // built is a limit of where the test runs, not a defect in the reader, so it must skip.
+  const test::LongPathHandoff handoff = test::install_oversized_handoff(runtime.path(), R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx942"
+        }
+      })");
+  if (handoff.status() == test::LongPathHandoff::Status::kSkip)
+    GTEST_SKIP() << "cannot build the oversized handoff here: " << handoff.reason();
+  ASSERT_TRUE(handoff.status() == test::LongPathHandoff::Status::kOk) << handoff.reason();
+
+  const test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv,
+                                                       runtime.path());
+  const std::optional<config::DbtGuestConfig> loaded =
+      config::load_dbt_guest_config_from_runtime_config();
+
+  ASSERT_TRUE(loaded);
+  EXPECT_TRUE(loaded->enabled);
+  EXPECT_EQ(loaded->host.gpu_id, test::kOversizedHandoffHostGpuId);
+}
+
+TEST(ConfigLoaderTest, RejectsPathOnlyHandoffForAutomaticDbtHost) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-automatic-");
+  const auto config_file = write_temp_config(R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx942"
+        }
+      })");
+  {
+    std::ofstream handoff(std::filesystem::path(runtime.path()) / "config_path");
+    handoff << config_file.path() << '\n';
+  }
+  test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_runtime_config(), std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, AllowsPathOnlyHandoffWithoutAutomaticDbtHost) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-path-only-");
+  test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
+
+  for (const std::string_view dbt_guest : {
+           R"("dbt_guest": {"enabled": true, "host_gpu_id": 28851})",
+           R"("dbt_guest": {"enabled": false})",
+       }) {
+    const auto config_file = write_temp_config("{" + std::string(dbt_guest) + "}");
+    {
+      std::ofstream handoff(std::filesystem::path(runtime.path()) / "config_path");
+      handoff << config_file.path() << '\n';
+    }
+
+    const auto loaded = config::load_dbt_guest_config_from_runtime_config();
+    ASSERT_TRUE(loaded);
+    EXPECT_EQ(loaded->host.gpu_id, dbt_guest.find("28851") == std::string_view::npos ? 0u : 28851u);
+  }
 }
 
 TEST(ConfigLoaderTest, RejectsEmptyDbtExecutionBackend) {
