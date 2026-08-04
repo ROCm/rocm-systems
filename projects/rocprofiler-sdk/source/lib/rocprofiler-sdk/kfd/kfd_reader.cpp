@@ -119,7 +119,7 @@ ring_bytes()
 }
 
 // fw_record, the 20-byte record layout, the kRec* type constants, kFwRecBytes, the
-// drain_state cursor bookkeeping, and the drain_pipes() logic all live in the
+// ring_cursors bookkeeping, and the copy_pipes()/pair_records() logic all live in the
 // header-only dlog_drain.hpp so the drain is unit-testable without a GPU.
 static_assert(kFwRecBytes == KFD_DISPATCH_LOG_FW_RECORD_BYTES,
               "dlog_drain.hpp fw record size must match the UAPI");
@@ -203,7 +203,7 @@ struct reader_state
 };
 
 // Slots whose queue was destroyed, waiting for the reader to purge its retained
-// starts. Written by destroying app threads, drained by the reader; drain_state
+// starts. Written by destroying app threads, consumed by the processor; pair_state
 // itself therefore stays reader-owned and is never touched cross-thread.
 std::mutex&
 purge_mutex()
@@ -367,7 +367,7 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
     }
     s->info = sinfo.info;
 
-    // Reject any geometry drain_pipes() would silently refuse to drain (record
+    // Reject any geometry copy_pipes() would silently refuse to drain (record
     // size, region count beyond the cursor storage, non-power-of-two slot count),
     // so setup fails loudly instead of reporting ready and draining nothing.
     const uint32_t rrc = s->info.region_record_count;
