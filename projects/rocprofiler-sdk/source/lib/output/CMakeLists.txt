@@ -66,6 +66,7 @@ target_link_libraries(
     rocprofiler-sdk-output-library
     PUBLIC rocprofiler-sdk::rocprofiler-sdk-rocpd-library
            rocprofiler-sdk::rocprofiler-sdk-aqlprofile
+           rocprofiler-sdk::rocprofiler-sdk-sqlite3-nolink
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
             rocprofiler-sdk::rocprofiler-sdk-build-flags
             rocprofiler-sdk::rocprofiler-sdk-sanitizer

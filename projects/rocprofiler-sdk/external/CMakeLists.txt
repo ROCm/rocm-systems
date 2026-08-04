@@ -4,6 +4,7 @@
 #
 #
 include(rocprofiler_utilities)
+include(rocprofiler_config_nolink_target)
 
 cmake_policy(PUSH)
 cmake_policy(SET CMP0077 NEW) # option() honors normal variables
@@ -287,8 +288,19 @@ if(ROCPROFILER_BUILD_SQLITE3)
     add_dependencies(rocprofiler-sdk-sqlite3 rocprofiler-sdk-sqlite-build)
 else()
     find_package(SQLite3 REQUIRED)
-    target_link_libraries(rocprofiler-sdk-sqlite3 INTERFACE SQLite::SQLite3)
+    if(TARGET SQLite::SQLite3)
+        target_link_libraries(rocprofiler-sdk-sqlite3 INTERFACE SQLite::SQLite3)
+    elseif(TARGET SQLite3::SQLite3)
+        target_link_libraries(rocprofiler-sdk-sqlite3 INTERFACE SQLite3::SQLite3)
+    else()
+        target_link_libraries(rocprofiler-sdk-sqlite3 INTERFACE ${SQLite3_LIBRARIES})
+        target_include_directories(rocprofiler-sdk-sqlite3 SYSTEM
+                                   INTERFACE ${SQLite3_INCLUDE_DIRS})
+    endif()
 endif()
+
+rocprofiler_config_nolink_target(rocprofiler-sdk-sqlite3-nolink
+                                 rocprofiler-sdk::rocprofiler-sdk-sqlite3)
 
 #
 # PyBind11

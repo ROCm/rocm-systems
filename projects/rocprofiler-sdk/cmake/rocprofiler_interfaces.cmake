@@ -119,3 +119,6 @@ rocprofiler_add_nolink_interface_library(
 rocprofiler_add_nolink_interface_library(
     rocprofiler-sdk-hipfile-nolink "hipFILE headers without linking to hipFILE library"
     IMPORTED)
+rocprofiler_add_nolink_interface_library(
+    rocprofiler-sdk-sqlite3-nolink "SQLite3 headers without linking to SQLite3 library"
+    IMPORTED)
