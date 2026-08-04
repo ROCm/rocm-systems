@@ -26,6 +26,45 @@ THE SOFTWARE.
 #include <cctype>
 #include <stdlib.h>
 
+#ifdef ROCJPEG_USE_DLOPEN_VA
+// ---------------------------------------------------------------------------
+// VA-API call redirection through the per-instance dlopen vtable.
+// All va*() calls in this translation unit are macro-redirected through
+// g_va_loader->fn.*, resolving to the isolated librocm_sysdeps_va.so.2
+// loaded with RTLD_LOCAL | RTLD_DEEPBIND.  This prevents system libva.so.2
+// (e.g. loaded by libavcodec) from intercepting rocjpeg's VA calls.
+// Macros are expanded at invocation time, so vaErrorStr inside error-logging
+// calls is also transparently redirected.
+// ---------------------------------------------------------------------------
+static RocJpegVaapiLoader *g_va_loader = nullptr;
+
+// clang-format off
+#define vaGetDisplayDRM(...)          (g_va_loader->fn.vaGetDisplayDRM(__VA_ARGS__))
+#define vaInitialize(...)             (g_va_loader->fn.vaInitialize(__VA_ARGS__))
+#define vaTerminate(...)              (g_va_loader->fn.vaTerminate(__VA_ARGS__))
+#define vaSetInfoCallback(...)        (g_va_loader->fn.vaSetInfoCallback(__VA_ARGS__))
+#define vaQueryVendorString(...)      (g_va_loader->fn.vaQueryVendorString(__VA_ARGS__))
+#define vaErrorStr(...)               (g_va_loader->fn.vaErrorStr(__VA_ARGS__))
+#define vaMaxNumEntrypoints(...)      (g_va_loader->fn.vaMaxNumEntrypoints(__VA_ARGS__))
+#define vaQueryConfigEntrypoints(...) (g_va_loader->fn.vaQueryConfigEntrypoints(__VA_ARGS__))
+#define vaGetConfigAttributes(...)    (g_va_loader->fn.vaGetConfigAttributes(__VA_ARGS__))
+#define vaCreateConfig(...)           (g_va_loader->fn.vaCreateConfig(__VA_ARGS__))
+#define vaDestroyConfig(...)          (g_va_loader->fn.vaDestroyConfig(__VA_ARGS__))
+#define vaQuerySurfaceAttributes(...) (g_va_loader->fn.vaQuerySurfaceAttributes(__VA_ARGS__))
+#define vaCreateSurfaces(...)         (g_va_loader->fn.vaCreateSurfaces(__VA_ARGS__))
+#define vaDestroySurfaces(...)        (g_va_loader->fn.vaDestroySurfaces(__VA_ARGS__))
+#define vaCreateContext(...)          (g_va_loader->fn.vaCreateContext(__VA_ARGS__))
+#define vaDestroyContext(...)         (g_va_loader->fn.vaDestroyContext(__VA_ARGS__))
+#define vaCreateBuffer(...)           (g_va_loader->fn.vaCreateBuffer(__VA_ARGS__))
+#define vaDestroyBuffer(...)          (g_va_loader->fn.vaDestroyBuffer(__VA_ARGS__))
+#define vaBeginPicture(...)           (g_va_loader->fn.vaBeginPicture(__VA_ARGS__))
+#define vaRenderPicture(...)          (g_va_loader->fn.vaRenderPicture(__VA_ARGS__))
+#define vaEndPicture(...)             (g_va_loader->fn.vaEndPicture(__VA_ARGS__))
+#define vaSyncSurface(...)            (g_va_loader->fn.vaSyncSurface(__VA_ARGS__))
+#define vaExportSurfaceHandle(...)    (g_va_loader->fn.vaExportSurfaceHandle(__VA_ARGS__))
+// clang-format on
+#endif // ROCJPEG_USE_DLOPEN_VA
+
 /**
  * @brief Default constructor for RocJpegVaapiMemoryPool class.
  *
@@ -346,7 +385,12 @@ bool RocJpegVaapiMemoryPool::SetSurfaceAsIdle(VASurfaceID surface_id) {
 RocJpegVappiDecoder::RocJpegVappiDecoder(int device_id) : device_id_{device_id}, drm_fd_{-1}, min_picture_width_{64}, min_picture_height_{64},
     max_picture_width_{4096}, max_picture_height_{4096}, default_surface_width_{3840}, default_surface_height_{2160}, supports_modifiers_{false}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_{VAProfileJPEGBaseline},
     vaapi_mem_pool_(std::make_unique<RocJpegVaapiMemoryPool>()), current_vcn_jpeg_spec_{}, va_picture_parameter_buf_id_{0}, va_quantization_matrix_buf_id_{0}, va_huffmantable_buf_id_{0},
-    va_slice_param_buf_id_{0}, va_slice_data_buf_id_{0} {};
+    va_slice_param_buf_id_{0}, va_slice_data_buf_id_{0} {
+#ifdef ROCJPEG_USE_DLOPEN_VA
+    va_loader_ = std::make_unique<RocJpegVaapiLoader>();
+    g_va_loader = va_loader_.get();
+#endif
+};
 
 /**
  * @brief Destructor for the RocJpegVappiDecoder class.
@@ -386,6 +430,10 @@ RocJpegVappiDecoder::~RocJpegVappiDecoder() {
         }
 
     }
+#ifdef ROCJPEG_USE_DLOPEN_VA
+    g_va_loader = nullptr;
+    va_loader_.reset();
+#endif
 }
 
 /**

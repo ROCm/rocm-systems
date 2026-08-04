@@ -43,6 +43,9 @@ THE SOFTWARE.
 #include <va/va.h>
 #include <va/va_drm.h>
 #include <va/va_drmcommon.h>
+#ifdef ROCJPEG_USE_DLOPEN_VA
+#include "rocjpeg_vaapi_loader.h"
+#endif
 #include "rocjpeg_commons.h"
 #include "rocjpeg_parser.h"
 #include "../api/rocjpeg/rocjpeg.h"
@@ -336,6 +339,10 @@ public:
      */
     RocJpegStatus SetSurfaceAsIdle(VASurfaceID surface_id);
 private:
+#ifdef ROCJPEG_USE_DLOPEN_VA
+    // Owns the dlopen handle and all VA function pointers for this decoder instance.
+    std::unique_ptr<RocJpegVaapiLoader> va_loader_;
+#endif
     int device_id_; // The ID of the device
     int drm_fd_; // The file descriptor for the DRM device
     uint32_t min_picture_width_; // The minimum width of the picture
