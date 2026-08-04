@@ -18,6 +18,13 @@ from utils import mem_chart_gfx9, mem_chart_gfx11
 
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
 
+
+def render_gfx9_chart(metrics):
+    return common.strip_ansi(
+        mem_chart_gfx9.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
+    )
+
+
 # =============================================================================
 # Tests for format_bw_human_readable function (gfx11)
 # =============================================================================
@@ -564,21 +571,14 @@ class TestPlotMemChartGfx9:
 
     def test_full_sample_metrics_render_without_na_placeholders(self):
         """Render complete gfx9 metrics without N/A placeholders."""
-        output = common.strip_ansi(
-            mem_chart_gfx9.plot_mem_chart(
-                common.GFX9_SAMPLE_METRICS,
-                chart_title=DEFAULT_TITLE,
-            )
-        )
+        output = render_gfx9_chart(common.GFX9_SAMPLE_METRICS)
         assert isinstance(output, str)
         assert len(output) > 0
         assert "N/A" not in output
 
     def test_empty_metrics_render_expected_placeholders(self):
         """Render 54 N/A placeholders when no gfx9 metrics are provided."""
-        output = common.strip_ansi(
-            mem_chart_gfx9.plot_mem_chart({}, chart_title=DEFAULT_TITLE)
-        )
+        output = render_gfx9_chart({})
         assert isinstance(output, str)
         assert len(output) > 0
 
@@ -589,9 +589,7 @@ class TestPlotMemChartGfx9:
     def test_partial_metrics_render_values_and_placeholders(self):
         """Render supplied gfx9 values and placeholders for missing metrics."""
         partial = {"HBM Rd": 100}
-        output = common.strip_ansi(
-            mem_chart_gfx9.plot_mem_chart(partial, chart_title=DEFAULT_TITLE)
-        )
+        output = render_gfx9_chart(partial)
         assert isinstance(output, str)
         assert len(output) > 0
         assert "Rd:  100" in output
@@ -599,12 +597,7 @@ class TestPlotMemChartGfx9:
 
     def test_contains_complete_cdna_architecture(self):
         """CDNA output contains every component enabled by the renderer."""
-        output = common.strip_ansi(
-            mem_chart_gfx9.plot_mem_chart(
-                common.GFX9_SAMPLE_METRICS,
-                chart_title=DEFAULT_TITLE,
-            )
-        )
+        output = render_gfx9_chart(common.GFX9_SAMPLE_METRICS)
         expected_components = (
             "Instr Buff",
             "Instr Dispatch",
@@ -626,12 +619,7 @@ class TestPlotMemChartGfx9:
 
     def test_gfx9_heading_outside_chart_and_directional_connectors(self):
         """CDNA output prints the heading once outside the chart, with connectors."""
-        output = common.strip_ansi(
-            mem_chart_gfx9.plot_mem_chart(
-                common.GFX9_SAMPLE_METRICS,
-                chart_title=DEFAULT_TITLE,
-            )
-        )
+        output = render_gfx9_chart(common.GFX9_SAMPLE_METRICS)
         output_lines = output.splitlines()
 
         assert output_lines[0] == DEFAULT_TITLE
@@ -655,6 +643,54 @@ class TestPlotMemChartGfx9:
             "expected_column_slice",
         ),
         [
+            pytest.param(
+                "SALU",
+                7101,
+                "SALU: 7101",
+                6,
+                slice(38, 58),
+                id="salu-instruction",
+            ),
+            pytest.param(
+                "SMEM",
+                7102,
+                "SMEM: 7102",
+                9,
+                slice(38, 58),
+                id="smem-instruction",
+            ),
+            pytest.param(
+                "VGPR",
+                7201,
+                "RVGPRseq:  7201",
+                11,
+                slice(58, 78),
+                id="vgpr-allocation",
+            ),
+            pytest.param(
+                "SGPR",
+                7202,
+                "SGPRs:  7202",
+                14,
+                slice(58, 78),
+                id="sgpr-allocation",
+            ),
+            pytest.param(
+                "Wavefronts",
+                7301,
+                "7301",
+                28,
+                slice(58, 78),
+                id="wavefront-count",
+            ),
+            pytest.param(
+                "Workgroups",
+                7302,
+                "7302",
+                32,
+                slice(58, 78),
+                id="workgroup-count",
+            ),
             pytest.param(
                 "LDS Req",
                 1234,
@@ -694,6 +730,22 @@ class TestPlotMemChartGfx9:
                 29,
                 slice(140, 165),
                 id="l2-write-latency",
+            ),
+            pytest.param(
+                "VL1 Rd",
+                7401,
+                "Rd: 7401",
+                15,
+                slice(78, 95),
+                id="vector-l1-read",
+            ),
+            pytest.param(
+                "VL1 Wr",
+                7402,
+                "Wr: 7402",
+                17,
+                slice(78, 95),
+                id="vector-l1-write",
             ),
             pytest.param(
                 "VL1 Hit",
@@ -746,20 +798,13 @@ class TestPlotMemChartGfx9:
         expected_column_slice,
     ):
         """Place each gfx9 metric in the expected chart region."""
-        output_lines = common.strip_ansi(
-            mem_chart_gfx9.plot_mem_chart(
-                {metric_name: metric_value},
-                chart_title=DEFAULT_TITLE,
-            )
-        ).splitlines()
+        output_lines = render_gfx9_chart({metric_name: metric_value}).splitlines()
 
         assert expected_text in output_lines[expected_row_index][expected_column_slice]
 
     def test_empty_placeholders_do_not_render_metric_suffixes(self):
         """Omit percentage and cycle suffixes from N/A placeholders."""
-        output = common.strip_ansi(
-            mem_chart_gfx9.plot_mem_chart({}, chart_title=DEFAULT_TITLE)
-        )
+        output = render_gfx9_chart({})
 
         assert re.search(r"N/A[ \t]*(?:%|cycles)", output) is None
 
