@@ -19,18 +19,19 @@ using LaunchLateManagedVariable = hipError_t (*)(int*, hipStream_t, int);
 __global__ void IncrementInitialManagedValue() { ++initialManagedValue; }
 
 void LoadVerifyAndUnloadLateManagedVariable() {
+  dlerror();
   void* handle = dlopen("./libLateManagedVariable.so", RTLD_NOW);
-  const char* loadError = dlerror();
+  const char* loadError = (handle == nullptr) ? dlerror() : nullptr;
   INFO("dlopen failed: " << (loadError == nullptr ? "" : loadError));
   REQUIRE(handle != nullptr);
 
+  dlerror();
   auto launch = reinterpret_cast<LaunchLateManagedVariable>(
       dlsym(handle, "launchLateManagedVariable"));
   const char* symbolError = dlerror();
   INFO("dlsym failed: " << (symbolError == nullptr ? "" : symbolError));
   REQUIRE(symbolError == nullptr);
   REQUIRE(launch != nullptr);
-
   // The library writes its managed variable on the host and reads it from a
   // kernel, proving that late registration initialized its device pointer.
   constexpr int kExpectedValue = 42;
