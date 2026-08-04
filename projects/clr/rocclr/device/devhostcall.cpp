@@ -334,7 +334,13 @@ class HostcallListener {
 #endif
   class Thread : public amd::Thread {
    public:
+#if defined(_WIN32)
+    // Bounds the per-queue threads that exist while direct dispatch is off.
     Thread() : amd::Thread("Hostcall Listener Thread", CQ_THREAD_STACK_SIZE) {}
+#else
+    // glibc carves static TLS out of the requested stack, so an undersized request is refused.
+    Thread() : amd::Thread("Hostcall Listener Thread") {}
+#endif
 
     //! The hostcall listener thread entry point.
     void run(void* data) {
