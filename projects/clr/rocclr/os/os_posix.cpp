@@ -39,6 +39,7 @@
 #include <string>
 #include <sstream>
 #include <cstring>  // for strncmp
+#include <cerrno>
 #include <cstdlib>
 #include <cstdio>  // for tempnam
 #include <limits.h>
@@ -453,13 +454,15 @@ const void* Os::createOsThread(amd::Thread* thread) {
   pthread_attr_t threadAttr;
   ::pthread_attr_init(&threadAttr);
 
+  size_t stackSize = 0;
   if (thread->stackSize_ != 0) {
     size_t guardsize = 0;
     if (0 != ::pthread_attr_getguardsize(&threadAttr, &guardsize)) {
       fatal("pthread_attr_getguardsize() failed");
     }
 
-    if (0 != ::pthread_attr_setstacksize(&threadAttr, thread->stackSize_ + guardsize)) {
+    stackSize = thread->stackSize_ + guardsize;
+    if (0 != ::pthread_attr_setstacksize(&threadAttr, stackSize)) {
       fatal("pthread_attr_setstacksize() failed");
     }
   }
@@ -470,9 +473,29 @@ const void* Os::createOsThread(amd::Thread* thread) {
   }
 
   pthread_t handle = 0;
-  if (0 != ::pthread_create(&handle, &threadAttr, (void* (*)(void*)) & Thread::entry, thread)) {
+  int status = ::pthread_create(&handle, &threadAttr, (void* (*)(void*)) & Thread::entry, thread);
+
+  // If the stack size is rejected, use the default stack size, which always accounts for static TLS.
+  if (status == EINVAL && stackSize != 0) {
+    ClPrint(amd::LOG_WARNING, amd::LOG_INIT,
+            "%zu byte stack rejected for \"%s\"; using the default stack size instead", stackSize,
+            thread->name().c_str());
+
+    // A stack size cannot be unset, so rebuild the attributes from scratch.
+    ::pthread_attr_destroy(&threadAttr);
+    ::pthread_attr_init(&threadAttr);
+    if (0 != ::pthread_attr_setdetachstate(&threadAttr, PTHREAD_CREATE_DETACHED)) {
+      fatal("pthread_attr_setdetachstate() failed");
+    }
+    status = ::pthread_create(&handle, &threadAttr, (void* (*)(void*)) & Thread::entry, thread);
+  }
+
+  if (status != 0) {
     thread->setState(Thread::FAILED);
-    guarantee(false, "pthread_create() failed");
+    ClPrint(amd::LOG_ERROR, amd::LOG_INIT, "pthread_create() failed for \"%s\": %s (%d)",
+            thread->name().c_str(), strerror(status), status);
+    ::pthread_attr_destroy(&threadAttr);
+    return nullptr;
   }
 
   if (0 != ::pthread_attr_destroy(&threadAttr)) {
