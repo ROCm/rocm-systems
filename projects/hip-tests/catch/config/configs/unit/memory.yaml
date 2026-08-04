@@ -902,6 +902,9 @@ memory:
   Unit_hipMemcpyBatchAsync_MixedAttributes_DefaultSwapIndirect:
     <<: *level_2
     tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Indirect_Src_UnalignedMatrix: *level_2
+  Unit_hipMemcpyBatchAsync_Indirect_Dst_UnalignedMatrix: *level_2
+  Unit_hipMemcpyBatchAsync_Indirect_MultiOp: *level_2
   Unit_hipMemsetD2D8_BasicFunctional:
     <<: *level_2
     disabled: [amd_wsl]
