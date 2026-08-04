@@ -1,5 +1,10 @@
 # Waitcheck and ConSan quick start
 
+[![sanitizer artifacts](https://github.com/ROCm/rocm-systems/actions/workflows/rocjitsu-sanitizer-artifacts.yml/badge.svg?branch=shared%2Frocjitsu%2Fsanitizers)](https://github.com/ROCm/rocm-systems/actions/workflows/rocjitsu-sanitizer-artifacts.yml?query=branch%3Ashared%2Frocjitsu%2Fsanitizers)
+
+The badge tracks the latest build of the sanitizer integration branch. Click it
+for prebuilt binaries, or jump to [Download a prebuilt build](#download-a-prebuilt-build).
+
 RocJITsu's combined HSA-tools hook runs two stages in order whenever an AMDGPU
 code object is loaded:
 
@@ -50,6 +55,49 @@ build/tools/rj_waitcheck
 
 See [Building RocJITsu](building.md) for dependencies and additional build
 options.
+
+## Download a prebuilt build
+
+Every push to `shared/rocjitsu/sanitizers` publishes those same two artifacts
+through the
+[`rocjitsu-sanitizer-artifacts`](https://github.com/ROCm/rocm-systems/actions/workflows/rocjitsu-sanitizer-artifacts.yml?query=branch%3Ashared%2Frocjitsu%2Fsanitizers)
+workflow, so you can skip the build entirely:
+
+```sh
+python3 emulation/rocjitsu/scripts/download_sanitizer_artifacts.py
+```
+
+That fetches the newest successful build. Pass `--run <id>` for a specific
+build, `--branch` for a different branch, `--list` to inspect a run without
+downloading, and `--dest` to choose the output directory. The script needs only
+the Python standard library.
+
+GitHub does not serve Actions artifacts anonymously, so a token with
+`actions:read` scope is required even though the repository is public. The
+script reads `--token`, then `$GITHUB_TOKEN`, then `$GH_TOKEN`, and finally
+falls back to `gh auth token`; running `gh auth login` once is usually enough.
+
+The bundle unpacks to a flattened layout and its SHA-256 digests are verified
+on download:
+
+```text
+rocjitsu-sanitizers/
+├── bin/rj_waitcheck
+├── lib/librocjitsu_dbi_hooks.so
+├── MANIFEST.json      # commit, run ID, build type, compiler, glibc baseline
+└── sha256sums.txt
+```
+
+Point the steps below at those paths instead of a local `build/` tree:
+
+```sh
+export ROCJITSU_SANITIZER_HOOK="$PWD/rocjitsu-sanitizers/lib/librocjitsu_dbi_hooks.so"
+```
+
+The binaries are built on Ubuntu 24.04 with `libstdc++` linked statically, so
+they only require a host `glibc` at least as new as the `minimum_glibc` value
+recorded in `MANIFEST.json`. Artifacts are retained for 30 days; build from
+source for anything older.
 
 ## Run waitcheck and ConSan together
 

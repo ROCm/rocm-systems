@@ -1,0 +1,193 @@
+# Prebuilt waitcheck and ConSan artifacts for emulation/rocjitsu/.
+#
+# Publishes the two binaries documented in
+# emulation/rocjitsu/docs/sanitizers.md so users can try the combined
+# HSA-tools hook without building the project. The build needs no ROCm SDK:
+# the HSA/KFD headers are vendored under lib/rocjitsu/external_headers.
+#
+# Download a bundle with emulation/rocjitsu/scripts/download_sanitizer_artifacts.py.
+name: "rocjitsu-sanitizer-artifacts"
+
+on:
+  push:
+    branches:
+      - shared/rocjitsu/sanitizers
+    paths:
+      - "emulation/rocjitsu/**"
+      - ".github/workflows/rocjitsu-sanitizer-artifacts.yml"
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "CMake build type for the published artifacts"
+        type: choice
+        default: "Release"
+        options:
+          - Release
+          - RelWithDebInfo
+      retention_days:
+        description: "Days to retain the uploaded artifact"
+        default: "30"
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/emulation/rocjitsu
+  ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
+  ROCJITSU_STAGE_DIR: ${{ github.workspace }}/stage
+  BUILD_TYPE: ${{ inputs.build_type || 'Release' }}
+  RETENTION_DAYS: ${{ inputs.retention_days || '30' }}
+
+jobs:
+  build:
+    name: build sanitizer artifacts
+    # Ubuntu 24.04 supplies CMake 3.28 and Clang 18, which satisfy the
+    # CMake 3.22+ / C++20 requirements in docs/building.md.
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang \
+            cmake \
+            jq \
+            libzstd-dev \
+            ninja-build \
+            zlib1g-dev
+
+      - name: Checkout rocm-systems
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # The C++ build reads nothing outside emulation/rocjitsu; the shared
+          # ISA tree is only needed by the Python amdisa tests.
+          sparse-checkout: |
+            emulation/rocjitsu
+            .github
+
+      - name: Configure
+        working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
+        run: |
+          # Link libstdc++ statically so the published binaries run on hosts
+          # with an older toolchain than the runner, matching the approach in
+          # scripts/rocjitsu-docker-build.sh. Symbols stay hidden: both targets
+          # already link with --exclude-libs,ALL.
+          cmake -S . -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_SHARED_LINKER_FLAGS="-static-libstdc++" \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++" \
+            -DBUILD_TESTING=OFF
+
+      - name: Build
+        run: |
+          # Halve the worker count to stay clear of the runner's memory ceiling.
+          cmake --build "${ROCJITSU_BUILD_DIR}" \
+            --target rocjitsu_dbi_hooks rj_waitcheck \
+            -j "$(( ($(nproc) + 1) / 2 ))"
+
+      - name: Stage bundle
+        id: stage
+        run: |
+          set -euo pipefail
+          HOOK="${ROCJITSU_BUILD_DIR}/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
+          WAITCHECK="${ROCJITSU_BUILD_DIR}/tools/rj_waitcheck"
+          test -f "${HOOK}"
+          test -f "${WAITCHECK}"
+
+          mkdir -p "${ROCJITSU_STAGE_DIR}/lib" "${ROCJITSU_STAGE_DIR}/bin"
+          cp "${HOOK}" "${ROCJITSU_STAGE_DIR}/lib/"
+          cp "${WAITCHECK}" "${ROCJITSU_STAGE_DIR}/bin/"
+
+          # Record enough provenance to tie a downloaded bundle back to a commit
+          # and to the toolchain baseline the binaries were linked against.
+          GLIBC_VERSION="$(ldd --version | head -1 | awk '{print $NF}')"
+          COMPILER_VERSION="$(clang++ --version | head -1)"
+          jq -n \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --arg ref "${GITHUB_REF_NAME}" \
+            --arg commit "${GITHUB_SHA}" \
+            --arg run_id "${GITHUB_RUN_ID}" \
+            --arg run_number "${GITHUB_RUN_NUMBER}" \
+            --arg run_attempt "${GITHUB_RUN_ATTEMPT}" \
+            --arg build_type "${BUILD_TYPE}" \
+            --arg compiler "${COMPILER_VERSION}" \
+            --arg glibc "${GLIBC_VERSION}" \
+            --arg runner "${ImageOS:-ubuntu24}" \
+            '{
+              repository: $repository,
+              branch: $ref,
+              commit: $commit,
+              run_id: $run_id,
+              run_number: $run_number,
+              run_attempt: $run_attempt,
+              build_type: $build_type,
+              compiler: $compiler,
+              minimum_glibc: $glibc,
+              runner_image: $runner,
+              run_url: "https://github.com/\($repository)/actions/runs/\($run_id)"
+            }' > "${ROCJITSU_STAGE_DIR}/MANIFEST.json"
+
+          cd "${ROCJITSU_STAGE_DIR}"
+          # Digests are relative to the bundle root so the download script can
+          # verify them after extraction.
+          find bin lib -type f -print0 \
+            | sort -z \
+            | xargs -0 sha256sum > sha256sums.txt
+
+          echo "artifact_name=rocjitsu-sanitizers-${BUILD_TYPE}-${GITHUB_SHA::12}" >> "${GITHUB_OUTPUT}"
+
+      - name: Smoke test staged binaries
+        working-directory: ${{ env.ROCJITSU_STAGE_DIR }}
+        run: |
+          set -euo pipefail
+          # Confirm the tool starts and the hook resolves every symbol it needs
+          # before publishing binaries that users download unbuilt.
+          ./bin/rj_waitcheck --help > /dev/null
+
+          # `ldd -r` reports unresolved symbols on stdout but still exits 0,
+          # so inspect its output rather than trusting the status.
+          ldd -r ./lib/librocjitsu_dbi_hooks.so > ldd.txt 2>&1
+          cat ldd.txt
+          if grep -q "undefined symbol" ldd.txt; then
+            echo "::error::librocjitsu_dbi_hooks.so has unresolved symbols"
+            exit 1
+          fi
+          rm -f ldd.txt
+
+          sha256sum --check --quiet sha256sums.txt
+          echo "--- MANIFEST.json ---"
+          cat MANIFEST.json
+
+      - name: Upload sanitizer artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.stage.outputs.artifact_name }}
+          path: ${{ env.ROCJITSU_STAGE_DIR }}
+          if-no-files-found: error
+          retention-days: ${{ env.RETENTION_DAYS }}
+
+      - name: Summarize
+        run: |
+          {
+            echo "### rocjitsu sanitizer artifacts"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Artifact | \`${{ steps.stage.outputs.artifact_name }}\` |"
+            echo "| Build type | \`${BUILD_TYPE}\` |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            echo "| Retention | ${RETENTION_DAYS} days |"
+            echo
+            echo "Download with:"
+            echo
+            echo '```sh'
+            echo "python3 emulation/rocjitsu/scripts/download_sanitizer_artifacts.py --run ${GITHUB_RUN_ID}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
