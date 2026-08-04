@@ -40,8 +40,19 @@ BottleneckType = Literal["compute", "memory_transfer", "latency", "api_overhead"
 class EvidenceItem(_FrozenModel):
     """One reference supporting a proposal.
 
-    ``ref`` is checked against a manifest of what actually ran, so a model
-    cannot cite a tool it never called.
+    The two fields carry different weight and must not be read as one.
+
+    ``ref`` is attested: it is checked against a manifest of what actually
+    ran, so a model cannot cite a tool it never called or a kernel that was
+    never measured.
+
+    ``observation`` is not attested. It is the model's own account of what
+    that reference showed, and nothing compares it against the tool's real
+    output. It can be wrong, and a reader must treat it as a claim to check
+    rather than a measurement. The runtime holds the line at the reference so
+    a proposal is always anchored to something that happened; verifying the
+    prose would mean re-deriving every metric the model might mention, which
+    is what ``verification`` asks a human to do instead.
     """
 
     kind: Literal["tool", "kernel", "catalog"]

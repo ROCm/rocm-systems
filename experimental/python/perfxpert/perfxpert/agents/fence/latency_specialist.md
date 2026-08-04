@@ -99,7 +99,10 @@ Each proposal must give:
   measured workload, and the hardware or software mechanism you expect.
 - `evidence` — every entry must reference a tool you actually called in
   this run or a kernel that was actually measured. Anything else is
-  rejected. Do not cite a tool you did not call.
+  rejected. Do not cite a tool you did not call. The `ref` is checked; the
+  `observation` beside it is not, and it is shown to reviewers as an
+  unverified claim, so quote what the output actually said rather than
+  restating your hypothesis as if it were a reading.
 - `target_kernel` — must be one of the measured kernels, or omitted.
 - `expected_effects` and `verification.metrics` — how a human would confirm
   or refute this.
