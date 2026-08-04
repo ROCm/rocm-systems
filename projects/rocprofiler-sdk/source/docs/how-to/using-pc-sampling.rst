@@ -469,8 +469,9 @@ The following tables are written when PC sampling is enabled:
   - ``dispatch_id``: Dispatch ID of the kernel being sampled
   - ``correlation_id``: Internal correlation ID of the PC sample record (the
     user-assigned external ID is on the linked ``rocpd_event`` row)
-  - ``exec_mask``: Active SIMD lanes at sample time (stored as TEXT to preserve
-    the full 64-bit mask)
+  - ``exec_mask``: Active SIMD lanes at sample time, stored as TEXT holding a
+    ``0x``-prefixed hex mask zero-padded to 16 digits (for example
+    ``0x00000000ffffffff``)
   - ``code_object_id``: ID of the loaded code object
   - ``code_object_offset``: Byte offset within the code object (the PC value)
   - ``agent_id``: GPU agent on which the sample was collected

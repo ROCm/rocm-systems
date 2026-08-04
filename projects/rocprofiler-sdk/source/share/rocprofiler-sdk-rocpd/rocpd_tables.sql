@@ -291,7 +291,12 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (sample_id) REFERENCES `rocpd_sample{{uuid}}` (id) ON UPDATE CASCADE
     );
 
--- GPU PC sampling data (common fields + event_id correlation to rocpd_blob_event)
+-- GPU PC sampling data (common fields + event_id correlation to rocpd_blob_event).
+-- exec_mask is TEXT holding a "0x"-prefixed, 16-digit zero-padded hex mask (for
+-- example 0x00000000ffffffff): SQLite cannot store a uint64 above INT64_MAX as
+-- INTEGER, and the fixed width keeps lexicographic ordering equal to numeric
+-- ordering.  Use CAST(exec_mask AS INTEGER) sparingly -- SQLite does not parse
+-- hex text; prefer bit tests in the consuming application.
 CREATE TABLE IF NOT EXISTS
     `rocpd_gpu_pc_sample{{uuid}}` (
         "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,

@@ -2840,7 +2840,9 @@ write_rocpd(
                         insert_value("event_id", static_cast<int64_t>(sample_event_id)),
                         insert_value("dispatch_id", record.dispatch_id),
                         insert_value("correlation_id", record.correlation_id.internal),
-                        insert_value("exec_mask", record.exec_mask),
+                        // Zero-padded to the full 64-bit width so lexicographic ordering of
+                        // the TEXT column matches numeric ordering of the mask.
+                        insert_value("exec_mask", fmt::format("{:#018x}", record.exec_mask)),
                         insert_value("code_object_id", record.pc.code_object_id),
                         insert_value("code_object_offset", record.pc.code_object_offset),
                         insert_nullable_value("wave_issued", wave_issued),

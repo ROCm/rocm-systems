@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import re
 import sys
 
 import pytest
@@ -61,6 +62,13 @@ _HW_ID_FIELDS = [
     "queue_id",
     "microengine_id",
 ]
+
+# Columns the database stores as "0x"-prefixed hex text rather than a number, so the
+# JSON oracle's integer value must be compared against a base-16 parse.
+_HEX_COLUMNS = {"exec_mask"}
+
+# exec_mask is written zero-padded to the full 64-bit width.
+_HEX_MASK_PATTERN = re.compile(r"^0x[0-9a-f]{16}$")
 
 # Arbiter pipes tracked by the gfx9 stochastic snapshot.
 _ARB_PIPES = [
@@ -159,6 +167,26 @@ def test_rocpd_tables_populated(rocpd_connection):
     assert _count_rows(rocpd_connection, "rocpd_info_blob_field") > 0
 
 
+def test_rocpd_exec_mask_is_hex_text(rocpd_connection):
+    # exec_mask is stored as "0x"-prefixed hex text zero-padded to 16 digits.  Assert
+    # both the SQLite storage class (a numeric value would come back as int/float and
+    # would mean the writer stopped formatting it) and the exact textual form.
+    rows = rocpd_connection.execute(
+        "SELECT typeof(exec_mask), exec_mask FROM rocpd_gpu_pc_sample"
+    ).fetchall()
+    assert len(rows) > 0
+    for storage_class, value in rows:
+        assert storage_class == "text", f"exec_mask stored as {storage_class}: {value!r}"
+        assert _HEX_MASK_PATTERN.match(
+            value
+        ), f"exec_mask {value!r} is not 0x-prefixed 64-bit hex"
+    # The fixed width must preserve ordering: the lexicographic min/max have to be the
+    # numeric min/max too, which is the property the zero-padding exists for.
+    masks = [value for _, value in rows]
+    assert min(masks) == min(masks, key=lambda mask: int(mask, 16))
+    assert max(masks) == max(masks, key=lambda mask: int(mask, 16))
+
+
 def test_rocpd_sample_count_matches_json(rocpd_connection, json_data):
     # Independent oracle: the ROCPD row count must equal the number of PC-sample
     # records emitted to JSON from the same generators.
@@ -244,12 +272,19 @@ def test_rocpd_vs_json_all_fields(rocpd_connection, json_data):
                     assert str(actual) == str(
                         expected
                     ), f"{method_key}[{index}].{column}: DB={actual!r} JSON={expected!r}"
+                elif column in _HEX_COLUMNS:
+                    assert _HEX_MASK_PATTERN.match(
+                        str(actual)
+                    ), f"{method_key}[{index}].{column}: DB={actual!r} is not 64-bit hex"
+                    assert int(str(actual), 16) == int(
+                        expected
+                    ), f"{method_key}[{index}].{column}: DB={actual} JSON={expected}"
                 elif isinstance(actual, float):
                     # SQLite has no unsigned-64-bit integer storage: a uint64
                     # value above INT64_MAX bound to a numeric-affinity column
                     # (the BIGINT timestamp is the only PC-sample field that can
-                    # exceed it; exec_mask uses a TEXT column precisely to avoid
-                    # this) is coerced to REAL and comes back as a float.  Compare
+                    # exceed it; exec_mask avoids this by using hex TEXT) is
+                    # coerced to REAL and comes back as a float.  Compare
                     # with the same rounding SQLite applied -- values SQLite can
                     # store exactly are returned as ints and checked exactly below.
                     assert float(actual) == float(
