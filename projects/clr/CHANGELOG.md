@@ -6,7 +6,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Added
 * New HIP APIs
-    - Stream Ordered Memory Allocator: support for the API for parity with corresponding CUDA API.
+    - Stream Ordered Memory Allocator: support for API parity with corresponding CUDA API.
       * `hipMemGetDefaultMemPool` returns the default memory pool for the specified location and allocation type
     - Cooperative Groups scan functions are now supported, providing feature parity with CUDA.
       * `cooperative_groups::exclusive_scan` performs an exclusive prefix scan across the threads in a cooperative group. For each thread, the result is computed from the values of all preceding threads using a binary operation (addition by default), excluding the current thread's own value.
