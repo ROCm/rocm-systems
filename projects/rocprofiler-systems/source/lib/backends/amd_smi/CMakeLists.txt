@@ -15,13 +15,6 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-rocm
 )
 
-if(ROCPROFSYS_BUILD_AINIC)
-    target_compile_definitions(
-        rocprofiler-systems-amd-smi-backend
-        INTERFACE ROCPROFSYS_BUILD_AINIC=1
-    )
-endif()
-
 if(ROCPROFSYS_BUILD_TESTING)
     add_subdirectory(tests)
 endif()

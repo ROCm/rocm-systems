@@ -210,6 +210,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     case TeamBroadcastTestType:
     case BroadcastWaveTestType:
     case AllToAllWaveTestType:
+    case ReduceWaveTestType:
       min_msg_size = 8;
       break;
     case TeamCtxInfraTestType:
@@ -291,6 +292,8 @@ void TesterArguments::get_arguments() {
     case FcollectWaveTestType:
     case TeamReductionTestType:
     case TeamReduceScatterTestType:
+    case ReduceWaveTestType:
+    case TeamReduceScatterWaveTestType:
     case TeamBroadcastTestType:
     case PingAllTestType:
     case TeamBarrierTestType:

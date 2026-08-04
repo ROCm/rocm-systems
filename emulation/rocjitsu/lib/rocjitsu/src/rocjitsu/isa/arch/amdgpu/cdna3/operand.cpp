@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/operand.h"
 #include "rocjitsu/isa/isa_operand_simd_inl.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <format>
 #include <optional>
@@ -768,6 +769,16 @@ std::string Operand::name() const {
 std::optional<RegisterRef> Operand::to_register_ref() const {
   if (size_bits_ == 0)
     return std::nullopt;
+  // A fieldless operand (no MR ISA encoding field: a hardwired
+  // register/side effect like VCC/EXEC/SCC, or the fieldless image
+  // address) never denotes a def-use-tracked register: its
+  // encoding value is a fixed placeholder, not a decoded index, so
+  // mapping it to a RegisterRef would fabricate a spurious def/use.
+  // Making this explicit keeps every fieldless operand inert by
+  // design (not by per-type coincidence) if it is placed in the
+  // operand arrays.
+  if (fieldless_)
+    return std::nullopt;
   // Liveness tracks operands as contiguous 32-bit register lanes.
   const auto reg_width = static_cast<uint8_t>(size_bits_ > 32 ? size_bits_ / 32 : 1);
   switch (opr_type_) {
@@ -1018,13 +1029,13 @@ uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {
   if (ev == 103)
     return static_cast<uint32_t>(wf.scratch_base() >> 32);
   if (ev <= 105)
-    return wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+    return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
   if (ev == 106)
     return static_cast<uint32_t>(wf.vcc());
   if (ev == 107)
     return static_cast<uint32_t>(wf.vcc() >> 32);
   if (ev >= 108 && ev <= 123)
-    return wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+    return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
   if (ev == 124)
     return wf.m0();
   if (ev == 126)
@@ -1121,15 +1132,19 @@ uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {
   if (ev == 102)
     return wf.scratch_base();
   if (ev <= 105) {
-    uint32_t lo = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
-    uint32_t hi = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
+    uint32_t lo =
+        amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+    uint32_t hi =
+        amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
     return static_cast<uint64_t>(hi) << 32 | lo;
   }
   if (ev == 106)
     return wf.vcc();
   if (ev >= 108 && ev <= 122) {
-    uint32_t lo = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
-    uint32_t hi = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
+    uint32_t lo =
+        amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+    uint32_t hi =
+        amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
     return static_cast<uint64_t>(hi) << 32 | lo;
   }
   if (ev == 124)
@@ -1183,7 +1198,7 @@ void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {
     return;
   }
   if (ev <= 105) {
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
     return;
   }
   if (ev == 106) {
@@ -1195,7 +1210,7 @@ void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {
     return;
   }
   if (ev >= 108 && ev <= 123) {
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
     return;
   }
   if (ev == 124) {
@@ -1219,10 +1234,10 @@ void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {
     return;
   }
   if (ev <= 105) {
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
-                       static_cast<uint32_t>(val));
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
-                       static_cast<uint32_t>(val >> 32));
+    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
+                                          static_cast<uint32_t>(val));
+    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
+                                          static_cast<uint32_t>(val >> 32));
     return;
   }
   if (ev == 106) {
@@ -1230,10 +1245,10 @@ void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {
     return;
   }
   if (ev >= 108 && ev <= 122) {
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
-                       static_cast<uint32_t>(val));
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
-                       static_cast<uint32_t>(val >> 32));
+    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
+                                          static_cast<uint32_t>(val));
+    amdgpu::RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
+                                          static_cast<uint32_t>(val >> 32));
     return;
   }
   if (ev == 124)
@@ -1324,7 +1339,13 @@ uint32_t Isa::simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_
 
 uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
   if (delegate())
-    return delegate()->read_scalar(wf);
+    return amdgpu::RegisterAccess(wf).read_scalar(*delegate());
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!reads_value())
+    return 0u;
   if (has_literal64_)
     return static_cast<uint32_t>(literal64_value_);
   if (is_immediate_type(opr_type_))
@@ -1334,11 +1355,17 @@ uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
 
 uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
   if (delegate())
-    return delegate()->read_lane(wf, lane);
+    return amdgpu::RegisterAccess(wf).read_lane(*delegate(), lane);
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!reads_value())
+    return 0u;
   int ev = encoding_value_;
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
-    return wf.cu().read_vgpr(wf.vgpr_alloc().base + voff, lane);
+    return amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane);
   }
   if (is_immediate_type(opr_type_))
     return static_cast<uint32_t>(ev);
@@ -1348,13 +1375,25 @@ uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
 }
 
 void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!is_writable())
+    return;
   resolve_dst_write(wf, encoding_value_, val);
 }
 
 void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!is_writable())
+    return;
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, encoding_value_)) {
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
-    wf.cu().write_vgpr(wf.vgpr_alloc().base + voff, lane, val);
+    amdgpu::RegisterAccess(wf.cu()).write_vgpr(wf.vgpr_alloc().base + voff, lane, val);
     return;
   }
   throw std::logic_error("write_lane called on non-VGPR operand type");
@@ -1362,14 +1401,18 @@ void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) con
 
 uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {
   if (delegate())
-    return delegate()->read_lane64(wf, lane);
+    return amdgpu::RegisterAccess(wf).read_lane64(*delegate(), lane);
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!reads_value())
+    return 0;
   int ev = encoding_value_;
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
     uint32_t idx = wf.vgpr_alloc().base + voff;
-    uint32_t lo = wf.cu().read_vgpr(idx, lane);
-    uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);
-    return static_cast<uint64_t>(hi) << 32 | lo;
+    return amdgpu::RegisterAccess(wf.cu()).read_vgpr64(idx, lane);
   }
   if (has_literal64_)
     return literal64_value_;
@@ -1379,17 +1422,28 @@ uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const 
 }
 
 void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!is_writable())
+    return;
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, encoding_value_)) {
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
     uint32_t idx = wf.vgpr_alloc().base + voff;
-    wf.cu().write_vgpr(idx, lane, static_cast<uint32_t>(val));
-    wf.cu().write_vgpr(idx + 1, lane, static_cast<uint32_t>(val >> 32));
+    amdgpu::RegisterAccess(wf.cu()).write_vgpr64(idx, lane, val);
     return;
   }
   throw std::logic_error("write_lane64 called on non-VGPR operand type");
 }
 
 uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!reads_value())
+    return 0;
   if (has_literal64_)
     return literal64_value_;
   if (is_immediate_type(opr_type_))
@@ -1398,6 +1452,12 @@ uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
 }
 
 void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {
+  // Fieldless operands whose capability policy makes this
+  // accessor inert (reads yield a benign 0, writes are no-ops).
+  // Driven by the construction-time capability flags applied
+  // via apply_fieldless_caps() (see fieldless_policy.py).
+  if (!is_writable())
+    return;
   resolve_dst_write64(wf, encoding_value_, val);
 }
 

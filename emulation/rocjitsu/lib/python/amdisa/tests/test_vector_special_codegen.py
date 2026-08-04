@@ -76,36 +76,39 @@ def test_arch_local_execute_bodies_are_not_shared():
 
 
 def test_vop3_f16_simd_probes_split_true16_from_generic():
-    assert simd_probe_line('v_add_f16_vop3').startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_BINARY_F16'
-    )
-    assert simd_probe_line('v_add_f16_vop3', true16_vop3=True).startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16'
-    )
-    assert simd_probe_line('v_rcp_f16_vop3').startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16'
-    )
-    assert simd_probe_line('v_rcp_f16_vop3', true16_vop3=True).startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16'
-    )
-    assert simd_probe_line('v_fma_f16_vop3').startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16'
-    )
-    assert simd_probe_line('v_fma_f16_vop3', true16_vop3=True).startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16'
-    )
-    assert simd_probe_line('v_div_fixup_f16_vop3').startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16'
-    )
-    assert simd_probe_line('v_div_fixup_f16_vop3', true16_vop3=True).startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16'
-    )
-    assert simd_probe_line('v_fmac_f16_vop3').startswith(
-        '  ROCJITSU_TRY_SIMD_FMAC_VOP3_FP16'
-    )
-    assert simd_probe_line('v_fmac_f16_vop3', true16_vop3=True).startswith(
-        '  ROCJITSU_TRY_SIMD_FMAC_VOP3_TRUE16_FP16'
-    )
+    add_generic = simd_probe_line('v_add_f16_vop3')
+    add_true16 = simd_probe_line('v_add_f16_vop3', true16_vop3=True)
+    rcp_generic = simd_probe_line('v_rcp_f16_vop3')
+    rcp_true16 = simd_probe_line('v_rcp_f16_vop3', true16_vop3=True)
+
+    assert 'if (wf.fp16_ovfl())' in add_generic
+    assert 'util::f32_to_f16_ovfl_simd' in add_generic
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_F16' in add_generic
+    assert 'if (wf.fp16_ovfl())' in add_true16
+    assert 'util::f32_to_f16_ovfl_simd' in add_true16
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' in add_true16
+    assert 'if (!wf.fp16_ovfl())' not in rcp_generic
+    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16' in rcp_generic
+    assert 'if (!wf.fp16_ovfl())' not in rcp_true16
+    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' in rcp_true16
+    fma_generic = simd_probe_line('v_fma_f16_vop3')
+    fma_true16 = simd_probe_line('v_fma_f16_vop3', true16_vop3=True)
+    assert 'if (!wf.fp16_ovfl())' not in fma_generic
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in fma_generic
+    assert 'if (!wf.fp16_ovfl())' not in fma_true16
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in fma_true16
+    div_fixup = simd_probe_line('v_div_fixup_f16_vop3')
+    assert 'if (!wf.fp16_ovfl())' not in div_fixup
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in div_fixup
+    div_fixup_true16 = simd_probe_line('v_div_fixup_f16_vop3', true16_vop3=True)
+    assert 'if (!wf.fp16_ovfl())' not in div_fixup_true16
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup_true16
+    fmac_generic = simd_probe_line('v_fmac_f16_vop3')
+    fmac_true16 = simd_probe_line('v_fmac_f16_vop3', true16_vop3=True)
+    assert 'if (!wf.fp16_ovfl())' not in fmac_generic
+    assert 'ROCJITSU_TRY_SIMD_FMAC_VOP3_FP16' in fmac_generic
+    assert 'if (!wf.fp16_ovfl())' not in fmac_true16
+    assert 'ROCJITSU_TRY_SIMD_FMAC_VOP3_TRUE16_FP16' in fmac_true16
     assert simd_probe_line('v_cmp_class_f16_vop3').startswith(
         '  ROCJITSU_TRY_SIMD_VOP3_CLASS_B32'
     )
@@ -331,7 +334,7 @@ def test_vop3_mad_32_16_uses_true16_sources_for_src0_src1_only():
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
     assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
     assert 'read_vop3_true16_src(src2' not in body
-    assert 'uint32_t s2 = src2.read_lane(wf, lane);' in body
+    assert 'uint32_t s2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);' in body
 
 
 def test_vop3_div_fixup_f16_uses_true16_sources_and_destination():
@@ -342,7 +345,9 @@ def test_vop3_div_fixup_f16_uses_true16_sources_and_destination():
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
     assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
-    assert 'uint32_t result_bits = util::f32_to_f16(result);' in body
+    assert (
+        'uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());' in body
+    )
     assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true)' in body
     assert 'std::bit_cast<float>(src0.read_lane' not in body
 
@@ -388,6 +393,6 @@ def test_true16_special_vop3_simd_routes_use_true16_glue():
     assert simd_probe_line('v_cvt_pk_norm_i16_f16_vop3').startswith(
         '  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC'
     )
-    assert simd_probe_line('v_div_fixup_f16_vop3').startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16'
-    )
+    div_fixup = simd_probe_line('v_div_fixup_f16_vop3')
+    assert 'if (!wf.fp16_ovfl())' not in div_fixup
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in div_fixup

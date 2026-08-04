@@ -29,12 +29,12 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_RDNA_ISA_BASE_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_RDNA_ISA_BASE_H_
 
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-
 #include <cstdint>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+class Wavefront;
 
 /// @brief Shared ISA base struct for all RDNA ISAs (GFX10/11/12 family, Wave32 default).
 ///
@@ -55,6 +55,7 @@ struct RdnaIsaBase {
   static constexpr uint32_t MAX_ACC_VGPRS_PER_WF = 0; ///< No AccVGPR file on any RDNA ISA.
   static constexpr bool SRAM_ECC = false;             ///< RDNA does not alter D16 for ECC.
   static constexpr uint8_t WAITCNT_LGKMCNT_MASK = 0;  ///< 0 = no monolithic S_WAITCNT.
+  static constexpr bool MODE_HAS_GPR_IDX_EN = false;  ///< RDNA MODE[27] is DISABLE_PERF.
 
   using Context = amdgpu::Wavefront;
 };

@@ -214,6 +214,17 @@ TEST(InstructionBuilder, BuildSSwappcB64) {
   EXPECT_EQ(build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_GFX1250), 0xBE9E4900u);
 }
 
+TEST(InstructionBuilder, BuildSCallB64UsesGfx1250SCallI64Opcode) {
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr int16_t kOffsetDwords = -2;
+  constexpr auto expected =
+      gfx1250::build_sopk(gfx1250::kSCallI64Sopk, {.simm16 = static_cast<uint16_t>(kOffsetDwords),
+                                                   .sdst = static_cast<uint8_t>(kReturnSreg)});
+
+  EXPECT_EQ(build_s_call_b64(kReturnSreg, kOffsetDwords, ROCJITSU_CODE_ARCH_GFX1250), expected[0]);
+  EXPECT_EQ(expected[0], 0xBA1EFFFEu);
+}
+
 TEST(InstructionBuilder, BuildSCselectB32) {
   // SOP2; opcode 0x0A on GFX9/GFX10, 0x30 on GFX11+. ssrc0 = inline 1, ssrc1 = inline 0.
   EXPECT_EQ(build_s_cselect_b32(/*sdst=*/2, scalar_positive_inline_u32(1),

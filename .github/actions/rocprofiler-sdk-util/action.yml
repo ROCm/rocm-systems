@@ -37,6 +37,10 @@ inputs:
     description: 'Enable ROCJPEG build'
     required: false
     default: 'false'
+  enable-hipfile-build:
+    description: 'Enable hipFILE build'
+    required: false
+    default: 'false'
   enable-rocprof-trace-decoder-build:
     description: 'Enable rocprof-trace-decoder build'
     required: false
@@ -128,6 +132,8 @@ runs:
         cmake \
           -DHIP_COMMON_DIR=$HIP_DIR \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_C_COMPILER=${{ inputs.rocm-path }}/llvm/bin/clang \
+          -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/llvm/bin/clang++ \
           -DHIP_PLATFORM=amd \
           -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm' \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
@@ -160,6 +166,40 @@ runs:
         cmake --build build-rocprofiler-register --target all --parallel ${{ inputs.build-jobs }}
         cmake --build build-rocprofiler-register --target install
         echo "✅ ROCProfiler-Register Installation complete!"
+
+    - name: Build and Install hipFILE
+      if: ${{ inputs.enable-hipfile-build == 'true' }}
+      shell: bash
+      working-directory: projects/hipfile
+      run: |
+        export ROCM_PATH=${{ inputs.rocm-path }}
+        export HIP_PLATFORM=amd
+        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/lib/rocm_sysdeps/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
+        # Temporary workaround until hipFILE adds the ROCm sysdeps include path for libmount.
+        if [ -f "${ROCM_PATH}/lib/rocm_sysdeps/include/libmount/libmount.h" ]; then
+          install -D -m 0644 \
+            "${ROCM_PATH}/lib/rocm_sysdeps/include/libmount/libmount.h" \
+            "${ROCM_PATH}/include/libmount/libmount.h"
+        fi
+        echo "Install hipFILE..."
+        cmake -B build-hipfile \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/llvm/bin/amdclang++ \
+          -DCMAKE_HIP_PLATFORM=amd \
+          -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm;${{ inputs.rocm-path }}/lib/rocm_sysdeps' \
+          -DCMAKE_LIBRARY_PATH=${{ inputs.rocm-path }}/lib/rocm_sysdeps/lib \
+          -DCMAKE_INCLUDE_PATH=${{ inputs.rocm-path }}/lib/rocm_sysdeps/include \
+          -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
+          -DBUILD_TESTING=OFF \
+          -DAIS_INSTALL_EXAMPLES=OFF \
+          -DAIS_INSTALL_TOOLS=OFF \
+          .
+        cmake --build build-hipfile --target hipfile --parallel ${{ inputs.build-jobs }}
+        cmake --build build-hipfile --target install
+        echo "✅ hipFILE Installation complete!"
 
     - name: Build and Install Aqlprofile
       if: ${{ inputs.enable-aqlprofile-build == 'true' }}

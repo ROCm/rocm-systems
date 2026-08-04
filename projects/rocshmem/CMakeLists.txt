@@ -50,21 +50,18 @@ option(USE_GDA "Enable GDA conduit" OFF)
 option(USE_SDMA "Enable SDMA transport (MI300X+)" OFF)
 option(USE_THREADS "Enable workgroup threads to share network queues" OFF)
 option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
-option(USE_HEAP_DEVICE_FINEGRAIN "Heap uses GPU memory in finegrain mode" ON)
-option(USE_HEAP_DEVICE_UNCACHED "Heap uses GPU memory in uncached mode" OFF)
-option(USE_HEAP_DEVICE_COARSEGRAIN "Heap uses GPU memory in coarsegrain mode" OFF)
-option(USE_HEAP_DEVICE_VMM_POSIX "Heap uses GPU memory with VMM and POSIX FD IPC (requires ROCm 7.0+)" OFF)
-option(USE_HEAP_DEVICE_VMM_FABRIC "Heap uses GPU memory with VMM and Fabric handles (requires ROCm 7.next)" OFF)
 option(USE_FUNC_CALL "Force compiler to use function calls on library API" OFF)
 option(USE_SHARED_CTX "Request support for shared ctx between WG" OFF)
 option(USE_SINGLE_NODE "Enable single node support only." OFF)
 option(USE_HDP_FLUSH "Force flush the HDP cache." OFF)
 option(USE_HDP_FLUSH_HOST_SIDE "Use a polling thread to flush the HDP cache on the host." OFF)
+option(USE_ROCPROFILER_REGISTER "Register rocSHMEM API tables with rocprofiler-register so rocprofiler-sdk tools can trace host-stream APIs." ON)
 
 option(BUILD_FUNCTIONAL_TESTS "Build the functional tests (uses MPI if available, otherwise SLR)" OFF)
 option(BUILD_EXAMPLES "Build the examples" OFF)
 option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
 option(BUILD_PYTHON_TESTS "Install rocshmem4py test assets (RO execution requires MPI launcher, Python, pip)" OFF)
+option(BUILD_PYTHON_BINDING "Build and install the rocshmem4py Python binding" OFF)
 option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
 option(BUILD_CTESTS "Register tests with CTest for tier-based execution" ON)
@@ -108,15 +105,6 @@ include(ROCMInstallTargets)
 include(ROCMCheckTargetIds)
 
 rocm_setup_version(VERSION ${VERSION_STRING})
-
-#############################################################################
-# VALIDATE VMM POSIX ALLOCATOR OPTION
-#############################################################################
-if(USE_HEAP_DEVICE_VMM_POSIX)
-  if(${ROCM_MAJOR_VERSION} LESS 7)
-    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_POSIX requires ROCm 7.0 or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
-  endif()
-endif()
 
 #############################################################################
 # DETECT POD CAPABILITY
@@ -164,25 +152,6 @@ if(TARGET amd_smi)
   endif()
 else()
   message(STATUS "AMD SMI library not found - disabling pod-based IPC capability detection")
-endif()
-
-#############################################################################
-# VALIDATE VMM FABRIC ALLOCATOR OPTION
-#############################################################################
-if(USE_HEAP_DEVICE_VMM_FABRIC)
-  if(${ROCM_MAJOR_VERSION} LESS 7)
-    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires ROCm 7.next or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
-  endif()
-
-  # VMM Fabric allocator requires both AMD SMI fabric info and HIP fabric handle support
-  if(NOT HAVE_AMDSMI_GPU_FABRIC_INFO)
-    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires both:\n"
-                        "  1. AMD SMI library with amdsmi_get_gpu_fabric_info support\n"
-                        "  2. HIP runtime with hipMemFabricHandle_t support (ROCm 7.14+)\n"
-                        "Either update to ROCm 7.14 or newer, or disable USE_HEAP_DEVICE_VMM_FABRIC.")
-  endif()
-
-  message(STATUS "USE_HEAP_DEVICE_VMM_FABRIC enabled with full fabric handle support")
 endif()
 
 #############################################################################
@@ -309,8 +278,9 @@ if (NOT BUILD_TESTS_ONLY)
       endif()
     endif()
 
-    if(USE_GDA AND NOT TARGET numa::numa)
-      message(STATUS "libnuma not found. Unable to build GDA")
+    if(NOT TARGET numa::numa AND (USE_GDA OR USE_SDMA))
+      message(WARNING "libnuma not found. Unable to build GDA or SDMA")
+      set(USE_SDMA OFF)
       set(USE_GDA OFF)
       set(GDA_IONIC OFF)
       set(GDA_BNXT OFF)
@@ -343,6 +313,28 @@ if (NOT BUILD_TESTS_ONLY)
 
   if (USE_SDMA)
     find_package(hsakmt REQUIRED)
+    # Workaround for RoCM 7.13/14
+    # hsakmtTargets.cmake contains paths baked in from the ROCm RHEL CI build:
+    #   /usr/lib64/libc.so      — bare libc path instead of -lc (always implicit)
+    #   -L/__w/rockrel/...      — hardcoded CI search path for libdrm/libdrm_amdgpu
+    # Strip both and inject the correct search path for libdrm.
+    get_target_property(_hsakmt_iface_libs hsakmt::hsakmt INTERFACE_LINK_LIBRARIES)
+    list(FILTER _hsakmt_iface_libs EXCLUDE REGEX "(/libc\\.so|/__w/)")
+    find_library(_DRM_LIB drm HINTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+    if(_DRM_LIB)
+      get_filename_component(_drm_dir "${_DRM_LIB}" DIRECTORY)
+      list(PREPEND _hsakmt_iface_libs "-L${_drm_dir}")
+      unset(_drm_dir)
+    endif()
+    set_target_properties(hsakmt::hsakmt PROPERTIES INTERFACE_LINK_LIBRARIES "${_hsakmt_iface_libs}")
+    unset(_hsakmt_iface_libs)
+  endif()
+
+  if(USE_ROCPROFILER_REGISTER)
+    find_package(rocprofiler-register QUIET)
+    if(NOT rocprofiler-register_FOUND)
+      message(STATUS "rocprofiler-register not found - rocSHMEM tracing disabled.")
+    endif()
   endif()
 
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
@@ -455,7 +447,8 @@ if (NOT BUILD_TESTS_ONLY)
       -fgpu-rdc
       $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
       $<$<BOOL:${USE_SDMA}>:hsakmt::hsakmt>
-      $<$<BOOL:${USE_GDA}>:numa::numa>
+    PRIVATE
+      $<$<OR:$<BOOL:${USE_GDA}>,$<BOOL:${USE_SDMA}>>:numa::numa>
   )
 
   target_link_options(
@@ -474,6 +467,11 @@ if (NOT BUILD_TESTS_ONLY)
       PUBLIC
         -Wl,-rpath,${ASAN_RUNTIME_DIR}
     )
+  endif()
+
+  if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
+    target_link_libraries(${PROJECT_NAME}
+                          PRIVATE rocprofiler-register::rocprofiler-register)
   endif()
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
@@ -519,11 +517,72 @@ if (NOT BUILD_TESTS_ONLY)
       rocm-dev
   )
 
+  set(_rocshmem_export_deps)
+  if(USE_SDMA AND TARGET hsakmt::hsakmt)
+    list(APPEND _rocshmem_export_deps PACKAGE hsakmt)
+  endif()
+  if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
+    list(APPEND _rocshmem_export_deps PACKAGE rocprofiler-register)
+  endif()
+
+  # ROCm 7.13+ ships NUMAConfig.cmake in rocm_sysdeps so find_dependency(NUMA)
+  # works cleanly for consumers. On older ROCm, bake the resolved paths into an
+  # included file since no config-mode NUMA package exists.
+  # For ROCm >= 7.13 NUMAConfig.cmake ships in rocm_sysdeps alongside the ROCm
+  # install. Inject a CMAKE_PREFIX_PATH prepend into the generated config using
+  # the hip package location (stable relative to rocm_sysdeps) so internal
+  # find_dependency(NUMA) resolves without requiring downstream project awareness.
+  # For older ROCm, bake the resolved numa::numa target directly.
+  set(_rocshmem_numa_include)
+  if(${ROCM_MAJOR_VERSION} GREATER 7 OR
+     (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 13))
+    if(USE_GDA OR USE_SDMA)
+      list(APPEND _rocshmem_export_deps PACKAGE NUMA)
+    endif()
+  elseif(TARGET numa::numa)
+    # Older ROCm: bake resolved paths so consumers need no FindNUMA.cmake.
+    get_target_property(_numa_lib numa::numa IMPORTED_LOCATION)
+    get_target_property(_numa_inc numa::numa INTERFACE_INCLUDE_DIRECTORIES)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/rocshmem-numa-targets.cmake"
+      "if(NOT TARGET numa::numa)\n"
+      "  add_library(numa::numa SHARED IMPORTED)\n"
+      "  set_target_properties(numa::numa PROPERTIES\n"
+      "    IMPORTED_LOCATION \"${_numa_lib}\"\n"
+      "    INTERFACE_INCLUDE_DIRECTORIES \"${_numa_inc}\")\n"
+      "endif()\n"
+      "set(NUMA_FOUND TRUE)\n")
+    unset(_numa_lib)
+    unset(_numa_inc)
+    set(_rocshmem_numa_include "${CMAKE_CURRENT_BINARY_DIR}/rocshmem-numa-targets.cmake")
+  endif()
+
+  set(_rocshmem_include_arg)
+  if(_rocshmem_numa_include)
+    set(_rocshmem_include_arg INCLUDE "${_rocshmem_numa_include}")
+  endif()
   rocm_export_targets(
     TARGETS roc::rocshmem
     NAMESPACE roc::
-    DEPENDS PACKAGE NUMA
+    DEPENDS ${_rocshmem_export_deps}
+    ${_rocshmem_include_arg}
   )
+  unset(_rocshmem_include_arg)
+  unset(_rocshmem_export_deps)
+  # Patch the generated config to expand CMAKE_PREFIX_PATH with rocm_sysdeps
+  # before find_dependency(NUMA) so NUMAConfig.cmake is found on ROCm >= 7.13
+  # without consumers needing to add rocm_sysdeps to their CMAKE_PREFIX_PATH.
+  if(${ROCM_MAJOR_VERSION} GREATER 7 OR
+     (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 13))
+    set(_config_out "${CMAKE_CURRENT_BINARY_DIR}/rocshmem-config.cmake")
+    file(READ "${_config_out}" _config_content)
+    string(REPLACE
+      "find_dependency(NUMA)"
+      "string(REGEX REPLACE \"/lib/cmake/hip$\" \"\" _rocshmem_rocm_root \"\${hip_DIR}\")\nlist(APPEND CMAKE_PREFIX_PATH \"\${_rocshmem_rocm_root}/lib/rocm_sysdeps\")\nunset(_rocshmem_rocm_root)\nfind_dependency(NUMA)\nlist(REMOVE_AT CMAKE_PREFIX_PATH -1)"
+      _config_content "${_config_content}")
+    file(WRITE "${_config_out}" "${_config_content}")
+    unset(_config_out)
+    unset(_config_content)
+  endif()
   include(ROCMPackageConfigHelpers)
   include(ROCMClients)
   rocm_package_setup_component(clients)
@@ -553,5 +612,17 @@ add_subdirectory(tests)
 
 if (BUILD_EXAMPLES)
   add_subdirectory(examples)
+endif()
+
+###############################################################################
+# PYTHON BINDING (rocshmem4py)
+#
+# Opt-in build of the rocshmem4py Python extension as a sub-project. Decoupled
+# from BUILD_PYTHON_TESTS so packagers (e.g. TheRock) can ship the binding
+# without test assets, and vice versa. python/CMakeLists.txt detects sub-
+# project mode and links against the in-tree `rocshmem` target directly.
+###############################################################################
+if (BUILD_PYTHON_BINDING AND NOT BUILD_TESTS_ONLY)
+  add_subdirectory(python)
 endif()
 

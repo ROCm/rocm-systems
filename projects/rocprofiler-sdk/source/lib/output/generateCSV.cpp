@@ -762,8 +762,9 @@ generate_csv(const output_config&                                           cfg,
     }
 }
 
-// NOTE: OMPT is rocpd-only; it is exported to CSV via `rocpd convert`, so there is
-// intentionally no generate_csv() overload for OMPT.
+// NOTE: OMPT and rocSHMEM are not emitted to CSV directly. Both are written to the rocpd
+// database (rocSHMEM is additionally emitted to JSON) and exported to CSV via
+// `rocpd convert`, so there is intentionally no generate_csv() overload for either.
 
 void
 generate_csv(const output_config&                                                    cfg,

@@ -72,6 +72,8 @@ public:
   void wire_backing(simdojo::Topology &topo);
   void set_arch(rj_code_arch_t a) { arch_ = a; }
   rj_code_arch_t arch() const { return arch_; }
+  void set_exec_mode(simdojo::ExecMode mode) { exec_mode_ = mode; }
+  simdojo::ExecMode exec_mode() const { return exec_mode_; }
 
   /// @brief Wire topology links between XCDs, IODs, and memory.
   void initialize() override;
@@ -159,8 +161,6 @@ public:
 
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
-
-  void run_to_idle();
 
   const std::vector<amdgpu::ComputeUnitCore *> &all_cus();
 

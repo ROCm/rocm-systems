@@ -16,6 +16,8 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unistd.h>
+#include <vector>
 
 namespace rocjitsu {
 namespace config {
@@ -29,6 +31,18 @@ DbtExecutionBackend execution_backend_from_fb(fb::DbtExecutionBackend backend) {
     return DbtExecutionBackend::Simulator;
   }
   throw std::runtime_error("dbt_guest.execution_backend is invalid");
+}
+
+DbtSiliconRevision silicon_revision_from_fb(fb::DbtSiliconRevision revision) {
+  switch (revision) {
+  case fb::DbtSiliconRevision_unspecified:
+    return DbtSiliconRevision::Unspecified;
+  case fb::DbtSiliconRevision_gfx1250_a0:
+    return DbtSiliconRevision::Gfx1250A0;
+  case fb::DbtSiliconRevision_gfx1250_b0:
+    return DbtSiliconRevision::Gfx1250B0;
+  }
+  throw std::runtime_error("dbt_guest silicon revision is invalid");
 }
 
 void validate_guest_device_geometry(const KfdDeviceConfig &device) {
@@ -95,6 +109,8 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
   config.log_level = guest->log_level();
   config.signal_backtrace = guest->signal_backtrace();
   config.guest_device = kfd_device_from_fb(guest->guest_device());
+  config.guest_revision = silicon_revision_from_fb(guest->guest_revision());
+  config.host_revision = silicon_revision_from_fb(guest->host_revision());
   validate_guest_device_geometry(config.guest_device);
   if (config.enabled && config.host.backend == DbtExecutionBackend::Hardware &&
       !config.host.simulator_config_path.empty())
@@ -135,7 +151,28 @@ DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
 }
 
 std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
-  std::ifstream file(rocjitsu::rpc_default_config_file_path());
+  // Try the handoff tiers in priority order, opening the first that exists:
+  //   1. $ROCJITSU_INVOCATION_DIR/config_path — the launcher exports this dir before
+  //      execvp so every descendant (incl. grandchildren via ctest, whose PID differs)
+  //      finds it. Treat an empty value as unset (dir && *dir), matching interposer
+  //      init(); an empty value would otherwise build "/config_path".
+  //   2. this process's PID-scoped path (execvp preserves the launcher's PID for the
+  //      direct child) — also the fallback if the env var is set but stale/misdirected.
+  //   3. the well-known location for attach / daemon-only scenarios.
+  // Falling straight from tier 1 to tier 3 (skipping tier 2) would miss a valid
+  // per-PID handoff when the env var is set but its config_path is absent.
+  std::vector<std::string> candidates;
+  if (const char *dir = getenv(rocjitsu::kRpcInvocationDirEnv); dir && *dir)
+    candidates.push_back(std::string(dir) + "/config_path");
+  candidates.push_back(rocjitsu::rpc_invocation_config_file_path(getpid()));
+  candidates.push_back(rocjitsu::rpc_default_config_file_path());
+
+  std::ifstream file;
+  for (const auto &candidate : candidates) {
+    file.open(candidate);
+    if (file.is_open())
+      break;
+  }
   if (!file.is_open())
     return std::nullopt;
 

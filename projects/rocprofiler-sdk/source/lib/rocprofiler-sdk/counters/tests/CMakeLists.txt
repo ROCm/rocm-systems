@@ -61,7 +61,7 @@ target_link_libraries(
 
 set(ROCPROFILER_LIB_COUNTER_TEST_SOURCES
     metrics_test.cpp evaluate_ast_test.cpp dimension.cpp core.cpp code_object_loader.cpp
-    device_counting.cpp firmware_restrictions.cpp)
+    device_counting.cpp firmware_restrictions_test.cpp)
 set(ROCPROFILER_LIB_COUNTER_TEST_HEADERS code_object_loader.hpp device_counting.hpp)
 
 add_executable(counter-tests)
@@ -82,7 +82,7 @@ target_link_libraries(
             GTest::gtest_main)
 
 set(_ROCPROFILER_SHARE_DIR
-    "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
 
 # unstable counter collection test: Generates HW exception leading to GPU hang or memory
 # access fault

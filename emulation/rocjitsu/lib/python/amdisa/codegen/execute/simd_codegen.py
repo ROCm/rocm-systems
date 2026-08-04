@@ -241,22 +241,22 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         ' return util::f32_to_f16_simd('
         'util::stdx::fmin(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b))); }',
     ),
-    # v_cvt_pkrtz_f16_f32 (both spellings): pack two f32 -> two f16 (round toward
-    # zero is what f32_to_f16/f32_to_f16_simd implement; proven bit-identical).
+    # v_cvt_pkrtz_f16_f32 (both spellings): pack two f32 -> two f16 with
+    # round-toward-zero narrowing; proven bit-identical to the scalar helper.
     # Inputs arrive as raw u32 lanes, bit_cast to f32. The VOP3 twins carry no
     # modifiers (verified) so they auto-route to VOP3_BINARY_INT with this functor.
     'v_cvt_pkrtz_f16_f32_vop2': (
         'uint32_t',
         '[](auto a, auto b) {'
-        ' auto lo = util::f32_to_f16_simd(std::bit_cast<util::native<float>>(a));'
-        ' auto hi = util::f32_to_f16_simd(std::bit_cast<util::native<float>>(b));'
+        ' auto lo = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(a));'
+        ' auto hi = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b));'
         ' return lo | (hi << 16); }',
     ),
     'v_cvt_pk_rtz_f16_f32_vop2': (
         'uint32_t',
         '[](auto a, auto b) {'
-        ' auto lo = util::f32_to_f16_simd(std::bit_cast<util::native<float>>(a));'
-        ' auto hi = util::f32_to_f16_simd(std::bit_cast<util::native<float>>(b));'
+        ' auto lo = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(a));'
+        ' auto hi = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b));'
         ' return lo | (hi << 16); }',
     ),
     # --- f16 binary (low 16 bits f16, result zero-extended). Same f32
@@ -839,12 +839,23 @@ SIMD_VOP2_CARRY: dict[str, str] = {
 # shapes, all built on the single-rounded fused multiply-add (the scalar bodies
 # use std::fma). The functor is invoked as
 #   fma_op(simd<T> src0, simd<T> vsrc1, simd<T> vdst, simd<T> k) -> simd<T>
-# inside try_execute_ternary_vop2_simd; `k` is the broadcast inline literal
-# (`k_literal_expr`, an inst.-qualified expression, or "0u" when there is none).
+# inside try_execute_ternary_vop2_simd for literal forms, or
+# try_execute_ternary_vop2_acc_simd for dst-accumulate forms; `k` is the
+# broadcast inline literal (`k_literal_expr`, an inst.-qualified expression, or
+# "0u" when there is none).
 # Shapes:
 #   dst-accumulate (fmac/mac):     fma(s0, s1, dvst)        -- ignores k
 #   literal addend (fmaak/madak):  fma(s0, s1, k)           -- ignores dvst
 #   literal mult  (fmamk/madmk):   fma(s0, k, s1)           -- ignores dvst
+# The inline-literal entries read K through the RegisterAccess facade
+# (`read_scalar(inst.simm32)`), matching the scalar FMA-K executors so read-
+# observation plugins see the literal. read_scalar on the fieldless OPR_SIMM32
+# returns the literal's encoding bits and broadcast<T> bit-casts them, so this is
+# value-identical to a raw `inst.simm32.encoding_value_` read. The operand name
+# is hard-coded to `simm32` (correct for every ISA shared here; gfx1250 names its
+# field-bearing literal `literal` and is kept out of this path by the sharing
+# preflight). `simd_ternary_literal_operand_name()` below exposes that assumption
+# so the generator can assert it per ISA.
 # f16 forms (lane type uint32_t) convert each operand via f16_to_f32_simd and
 # round the result with f32_to_f16_simd (single final round, matching scalar).
 # util::stdx::fma is bit-identical to std::fma for all finite/Inf inputs
@@ -852,10 +863,8 @@ SIMD_VOP2_CARRY: dict[str, str] = {
 # conversions are already bit-exact, so the f16 forms match by composition. When
 # an input is NaN the packed and scalar FMA may pick a different NaN operand to
 # propagate (toolchain-dependent payload); that NaN-payload divergence is
-# accepted (the result is a NaN either way). Note the two
-# distinct literal members: fmaak/fmamk use inst.simm32_, while madak/madmk use
-# inst.simm32.encoding_value_ (matching the scalar bodies). v_fmac_f64 is
-# excluded (64-bit / 2-VGPR lanes — a separate width).
+# accepted (the result is a NaN either way).
+# v_fmac_f64 is excluded (64-bit / 2-VGPR lanes — a separate width).
 _FMA_ACC_F32 = '[](auto a, auto b, auto d, auto) { return util::stdx::fma(a, b, d); }'
 _FMA_ADDK_F32 = '[](auto a, auto b, auto, auto k) { return util::stdx::fma(a, b, k); }'
 _FMA_MULK_F32 = '[](auto a, auto b, auto, auto k) { return util::stdx::fma(a, k, b); }'
@@ -874,27 +883,62 @@ _FMA_MULK_F16 = (
     ' return util::f32_to_f16_simd(util::stdx::fma('
     'util::f16_to_f32_simd(a), util::f16_to_f32_simd(k), util::f16_to_f32_simd(b))); }'
 )
+# Inline-literal K read, routed through the RegisterAccess facade (see comment
+# above). Hard-coded operand name `simm32`; simd_ternary_literal_operand_name()
+# parses it back out for the generator's per-ISA assertion.
+_FMA_K_READ = 'amdgpu::RegisterAccess(wf).read_scalar(inst.simm32)'
+
 SIMD_VOP2_TERNARY: dict[str, tuple[str, str, str]] = {
     # --- f32 dst-accumulate ---
     'v_fmac_f32_vop2': ('float32_t', '0u', _FMA_ACC_F32),
     'v_fmac_dx9_zero_f32_vop2': ('float32_t', '0u', _FMA_ACC_F32),
     'v_mac_f32_vop2': ('float32_t', '0u', _FMA_ACC_F32),
     # --- f32 inline literal ---
-    'v_fmaak_f32_vop2': ('float32_t', 'inst.simm32_', _FMA_ADDK_F32),
-    'v_madak_f32_vop2': ('float32_t', 'inst.simm32.encoding_value_', _FMA_ADDK_F32),
-    'v_fmamk_f32_vop2': ('float32_t', 'inst.simm32_', _FMA_MULK_F32),
-    'v_madmk_f32_vop2': ('float32_t', 'inst.simm32.encoding_value_', _FMA_MULK_F32),
+    'v_fmaak_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_ADDK_F32),
+    'v_madak_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_ADDK_F32),
+    'v_fmamk_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_MULK_F32),
+    'v_madmk_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_MULK_F32),
     # --- f16 dst-accumulate ---
     'v_fmac_f16_vop2': ('uint32_t', '0u', _FMA_ACC_F16),
     'v_mac_f16_vop2': ('uint32_t', '0u', _FMA_ACC_F16),
     # --- f16 inline literal ---
-    'v_madak_f16_vop2': ('uint32_t', 'inst.simm32.encoding_value_', _FMA_ADDK_F16),
-    'v_fmamk_f16_vop2': ('uint32_t', 'inst.simm32_', _FMA_MULK_F16),
-    'v_madmk_f16_vop2': ('uint32_t', 'inst.simm32.encoding_value_', _FMA_MULK_F16),
-    # v_fmaak_f16 (RDNA only): dst = fma(s0, s1, K), K = f16(simm32_). Same f16
-    # FMA functor as v_madak_f16, differing only in the literal field (simm32_ vs
-    # simm32.encoding_value_); the SIMD path is identical to the tested madak_f16.
-    'v_fmaak_f16_vop2': ('uint32_t', 'inst.simm32_', _FMA_ADDK_F16),
+    'v_madak_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_ADDK_F16),
+    'v_fmamk_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_MULK_F16),
+    'v_madmk_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_MULK_F16),
+    # v_fmaak_f16 (RDNA only): dst = fma(s0, s1, K), K = f16(simm32).
+    # Same f16 FMA functor as v_madak_f16.
+    'v_fmaak_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_ADDK_F16),
+}
+
+
+def simd_ternary_literal_operand_name(template_name: str) -> str | None:
+    """Return the C++ operand name a shared SIMD ternary template reads its
+    inline literal from, or None if it has none.
+
+    Inline-literal FMA entries render ``k`` from
+    ``amdgpu::RegisterAccess(wf).read_scalar(inst.<name>)``, hard-coding
+    ``<name>`` (today always ``simm32``). The generator asserts the instruction
+    carries that operand, so an ISA whose literal is named differently fails at
+    generation instead of emitting non-compiling C++. Dst-accumulate forms
+    (``k`` == ``"0u"``) return None.
+    """
+    spec = SIMD_VOP2_TERNARY.get(template_name)
+    if spec is None:
+        return None
+    k_expr = spec[1]
+    prefix = 'amdgpu::RegisterAccess(wf).read_scalar(inst.'
+    suffix = ')'
+    if k_expr.startswith(prefix) and k_expr.endswith(suffix):
+        return k_expr[len(prefix) : -len(suffix)]
+    return None
+
+
+SIMD_VOP2_TERNARY_ACCUMULATE = {
+    'v_fmac_f16_vop2',
+    'v_fmac_f32_vop2',
+    'v_fmac_dx9_zero_f32_vop2',
+    'v_mac_f16_vop2',
+    'v_mac_f32_vop2',
 }
 
 
@@ -1268,11 +1312,11 @@ SIMD_VOP3P_DOT_INT: dict[str, str] = {
 # v_dot2_f32_{f16,bf16} — two half-precision products + an f32 accumulator into
 # one f32 lane. op_sel half-select (gated default), neg/neg_hi sign flips,
 # optional clamp to [0,1]. Functorless / fixed-op. The set spans BOTH 16-bit
-# float formats: v_dot2_f32_bf16's generated scalar body is byte-identical to the
-# f16 form (it widens each half via util::f16_to_f32 with the same
-# op_sel/neg/clamp handling, verified by diff), so both route through the same
-# glue. Named _F16_OR_BF16 to make that span explicit (the emitted macro keeps
-# the shorter ROCJITSU_TRY_SIMD_VOP3P_DOT_F16 name — the widening path is shared).
+# float formats, which share the entire dot2 structure but differ in how each
+# half is widened to f32 (f16 has a 5-bit exponent with denormal renormalization;
+# bf16 has an 8-bit exponent and is a pure left-shift). Both route through the
+# same ROCJITSU_TRY_SIMD_VOP3P_DOT_F16 glue, which takes the format as an
+# argument so it selects util::{f16,bf16}_to_f32_simd accordingly.
 SIMD_VOP3P_DOT_F16_OR_BF16: set[str] = {
     'v_dot2_f32_f16_vop3p',
     'v_dot2_f32_bf16_vop3p',
@@ -2533,6 +2577,24 @@ SIMD_VOP3_CARRY_CIN.update(
 )
 
 
+def _indent_probe(probe: str) -> str:
+    return '\n'.join(('  ' + line) if line else line for line in probe.splitlines())
+
+
+def _mode_aware_f16_result_simd_probe(default_probe: str, ovfl_probe: str) -> str:
+    default_body = _indent_probe(default_probe)
+    ovfl_body = _indent_probe(ovfl_probe)
+    return f'  if (wf.fp16_ovfl()) {{\n{ovfl_body}\n  }} else {{\n{default_body}\n  }}'
+
+
+def _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op: str) -> bool:
+    return 'f32_to_f16_simd' in cpp_op
+
+
+def _fp16_ovfl_cpp_op(cpp_op: str) -> str:
+    return cpp_op.replace('f32_to_f16_simd', 'f32_to_f16_ovfl_simd')
+
+
 def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | None:
     """Return the SIMD fast-path probe block for a kernel, or None."""
     if template_name in SIMD_VOP3_TRUE16_UNSAFE:
@@ -2548,18 +2610,35 @@ def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | N
     spec2 = SIMD_VOP2_BINARY.get(template_name)
     if spec2 is not None:
         cpp_t, cpp_op = spec2
-        return f'  ROCJITSU_TRY_SIMD_VOP2_BINARY({cpp_t}, {cpp_op});'
+        probe = f'  ROCJITSU_TRY_SIMD_VOP2_BINARY({cpp_t}, {cpp_op});'
+        if _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op):
+            ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP2_BINARY({cpp_t}, {_fp16_ovfl_cpp_op(cpp_op)});'
+            return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
+        return probe
     spec1 = SIMD_VOP1_UNARY.get(template_name)
     if spec1 is not None:
         cpp_tin, cpp_tout, cpp_op = spec1
-        return f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});'
+        probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});'
+        if _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op):
+            ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {_fp16_ovfl_cpp_op(cpp_op)});'
+            return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
+        return probe
     specc = SIMD_VOP2_CARRY.get(template_name)
     if specc is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP2_CARRY({specc});'
     spect = SIMD_VOP2_TERNARY.get(template_name)
     if spect is not None:
         cpp_t, k_expr, cpp_op = spect
-        return f'  ROCJITSU_TRY_SIMD_VOP2_TERNARY({cpp_t}, {k_expr}, {cpp_op});'
+        macro = (
+            'ROCJITSU_TRY_SIMD_VOP2_TERNARY_ACC'
+            if template_name in SIMD_VOP2_TERNARY_ACCUMULATE
+            else 'ROCJITSU_TRY_SIMD_VOP2_TERNARY'
+        )
+        probe = f'  {macro}({cpp_t}, {k_expr}, {cpp_op});'
+        if _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op):
+            ovfl_probe = f'  {macro}({cpp_t}, {k_expr}, {_fp16_ovfl_cpp_op(cpp_op)});'
+            return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
+        return probe
     specf64 = SIMD_VOP2_FMA_F64.get(template_name)
     if specf64 is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP2_FMA_F64({specf64});'
@@ -2716,7 +2795,8 @@ def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | N
     if specdot is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP3P_DOT_INT({specdot});'
     if template_name in SIMD_VOP3P_DOT_F16_OR_BF16:
-        return '  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16();'
+        fmt = 'BF16' if template_name == 'v_dot2_f32_bf16_vop3p' else 'F16'
+        return f'  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16({fmt});'
     # VOP3P mixed-sign integer dots (dot4 iu8, dot8 iu4).
     specdotm = SIMD_VOP3P_DOT_INT_MIXED.get(template_name)
     if specdotm is not None:
@@ -2845,10 +2925,18 @@ def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | N
                     if true16_vop3
                     else 'ROCJITSU_TRY_SIMD_VOP3_BINARY_F16'
                 )
-                return f'  {macro}({cpp_t}, {cpp_op});'
+                probe = f'  {macro}({cpp_t}, {cpp_op});'
+                if _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op):
+                    ovfl_probe = f'  {macro}({cpp_t}, {_fp16_ovfl_cpp_op(cpp_op)});'
+                    return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
+                return probe
             if true16_vop3:
                 return None
-            return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
+            probe = f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
+            if _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op):
+                ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {_fp16_ovfl_cpp_op(cpp_op)});'
+                return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
+            return probe
         # VOP3-encoded twins of the SIMD VOP1 unary ops. The plain int/cvt forms
         # apply no modifiers and read the same src0/vdst operands as VOP1, so they
         # reuse the VOP1 unary path verbatim. The f32 forms (and the float-domain
@@ -2871,7 +2959,11 @@ def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | N
                 return None
             if base in _VOP3_UNARY_FP_F32:
                 return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, {cpp_op});'
-            return f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});'
+            probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});'
+            if _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op):
+                ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {_fp16_ovfl_cpp_op(cpp_op)});'
+                return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
+            return probe
         # VOP3 twins of the mixed-width f64<->b32 cvt ops. Their generated VOP3
         # bodies drop the abs/neg/omod/clamp modifier reads (verified per-op),
         # so routing through the existing cvt glue is bit-exact. (A symmetric
@@ -2907,13 +2999,12 @@ def simd_probe_arch_portable(
     compare on `inst.src0` / `inst.vsrc1` / `inst.vdst`), so an ISA whose
     operand/field signature kept it out of the shared plan can still safely
     delegate to the one shared template — the body is identical. The exception
-    is the inline-literal FMA family (v_fmaak/fmamk/madak/madmk): those read the
-    32-bit literal through an ISA-divergent member (`simm32_` on some ISAs vs a
-    `simm32` Operand with `.encoding_value_` on others), so a single shared body
-    cannot satisfy every ISA. Those are identified by a non-``"0u"`` literal
-    expression in SIMD_VOP2_TERNARY and are left to the genuine shared plan;
-    the dst-accumulate forms (literal ``"0u"``: v_fmac/v_mac, and v_fmac_f64)
-    are portable.
+    is the inline-literal FMA family (v_fmaak/fmamk/madak/madmk): those carry
+    instruction-local literal state and are left to the genuine shared plan
+    instead of being force-routed into a shared SIMD probe. They are identified
+    by a non-``"0u"`` literal expression in SIMD_VOP2_TERNARY; the
+    dst-accumulate forms (literal ``"0u"``: v_fmac/v_mac, and v_fmac_f64) are
+    portable.
 
     A second non-portable family is VOP3P: the shared VOP3P execute template
     reads the op_sel field by its canonical member name (``op_sel`` /
