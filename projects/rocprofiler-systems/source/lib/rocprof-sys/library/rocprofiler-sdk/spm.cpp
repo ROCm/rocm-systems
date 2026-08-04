@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <string_view>
 
 #if defined(ROCPROFSYS_DISABLE_SPM_RUNTIME)
@@ -38,7 +39,6 @@
 #    include <array>
 #    include <atomic>
 #    include <charconv>
-#    include <cstdint>
 #    include <functional>
 #    include <iterator>
 #    include <numeric>

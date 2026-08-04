@@ -370,6 +370,39 @@ ROCprofiler-SDK, use the SDK tool:
 
    rocprofv3-avail list --spm
 
+Sample output (one counter on one GPU; the full listing covers every
+SPM-capable counter on each agent):
+
+.. code-block:: text
+
+   GPU:0
+   Name:gfx942
+   Counter_Name        : SQ_WAVES
+   Description         : Count number of waves sent to distributed sequencers (SQs).
+   Block               : SQ
+   SPM                 : Supported
+   Dimensions          : DIMENSION_INSTANCE[0:0] DIMENSION_SHADER_ENGINE[0:3] DIMENSION_XCC[0:7]
+
+To check the supported SPM interval range, use the SDK tool:
+
+.. code-block:: shell
+
+   rocprofv3-avail info --spm-config
+
+Sample output (truncated to one GPU):
+
+.. code-block:: text
+
+   GPU     : 0
+   Name    : gfx942
+   configs :
+      Type                : SAMPLE_INTERVAL_SCLK_CYCLES
+      Minimum_Interval    : 32
+      Maximum_Interval    : 65504
+
+The exact counter list, dimensions, and interval ranges depend on the installed
+ROCprofiler-SDK and GPU architecture.
+
 ROCPROFSYS_ROCM_GROUP_BY_QUEUE
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
