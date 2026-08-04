@@ -271,3 +271,31 @@ void TestFabricRead::Run(void) {
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 }
+
+// amdsmi_fabric_telem_id_to_string() is a pure lookup over a static id->name
+// table built from the IFOE_TELEM_ID_* definitions in the vendored telemetry
+// headers, so these cases need no device and run without hardware. They guard
+// the id->name mapping against drift when the vendored headers are re-synced.
+
+// IFOE_TELEM_ID_IFOE_SDP_TX_PACK_WR_REQ, the first entry of the telemetry id
+// table; kept as a literal so the test depends only on the public API.
+static constexpr uint64_t kKnownTelemId = 0x1;
+
+TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringMapsKnownId) {
+  const char* name = nullptr;
+  amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(kKnownTelemId, &name);
+  ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
+  ASSERT_STREQ(name, "IFOE_SDP_TX_PACK_WR_REQ");
+}
+
+TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringRejectsNullName) {
+  amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(kKnownTelemId, nullptr);
+  ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+}
+
+TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringUnknownIdReportsUnknown) {
+  const char* name = nullptr;
+  amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(UINT64_MAX, &name);
+  ASSERT_EQ(err, AMDSMI_STATUS_NOT_FOUND);
+  ASSERT_STREQ(name, "UNKNOWN");
+}
