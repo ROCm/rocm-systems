@@ -103,8 +103,11 @@ def run_memory_specialist(
     # schema is model-supplied, so the call was made and its result discarded
     # in full -- paying tokens, latency, and a failure surface for a run the
     # model cannot contribute to.
+    # Resolved once and reused below, so the tier that decided whether to
+    # consult the model is the tier its proposals are judged against.
     airgapped = airgap_enabled(airgap)
-    if creativity.effective_tier(agent, airgap=airgapped) is not CreativityTier.EXPLORATORY:
+    tier = creativity.effective_tier(agent, airgap=airgapped)
+    if tier is not CreativityTier.EXPLORATORY:
         return schemas.MemorySpecialistOutput(
             techniques=techniques,
             confidence=0.6,
@@ -127,6 +130,7 @@ def run_memory_specialist(
             raw,
             specialist="memory",
             airgap=airgapped,
+            tier=tier,
             manifest=creativity.manifest_from_run(
                 agent,
                 raw,
@@ -134,6 +138,10 @@ def run_memory_specialist(
                 catalog_entries=[t.get("name", "") for t in techniques],
             ),
             provider=provider,
+            trace_fingerprint=creativity.workload_fingerprint(
+                payload.gfx_id, [k.get("name", "") for k in payload.hot_kernels]
+            ),
+            catalog=catalog,
         ),
     )
 

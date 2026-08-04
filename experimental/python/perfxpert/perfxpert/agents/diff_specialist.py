@@ -140,6 +140,13 @@ def run_diff_specialist(
         ),
         provider=provider,
         field_path=("kernel_deltas", "exploratory_proposals"),
+        # Diff's workload is the pair of runs being compared, so the pair is
+        # what a proposal's identity is scoped to.
+        trace_fingerprint=creativity.workload_fingerprint(
+            payload.baseline_db,
+            payload.new_db,
+            _measured_kernel_names(regressions, improvements),
+        ),
     )
 
     return schemas.DiffSpecialistOutput(

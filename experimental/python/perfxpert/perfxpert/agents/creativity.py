@@ -28,11 +28,13 @@ and a strict session never reaches proposal construction at all.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
+from contextvars import ContextVar
 from enum import Enum
-from typing import Any, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 from perfxpert.agents import schemas
 from perfxpert.agents.framework import AgentCapability
@@ -125,12 +127,52 @@ class EvidenceManifest:
 # -- Deterministic identity -----------------------------------------------
 
 
-def compute_proposal_id(draft: "schemas.ExploratoryProposalDraft", *, specialist: str) -> str:
-    """Derive a stable ID from proposal content.
+def _digest_text(text: str) -> str:
+    """Full-length digest of a text artefact, or empty when there is none."""
+    if not text:
+        return ""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _digest_json(value: Any) -> str:
+    """Full-length digest of a JSON-serialisable artefact, or empty."""
+    if value is None:
+        return ""
+    try:
+        payload = json.dumps(value, sort_keys=True, default=str, separators=(",", ":"))
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return ""
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def workload_fingerprint(*parts: Any) -> str:
+    """Stable digest of the workload a set of proposals was made about.
+
+    Two runs over the same workload produce the same value, and two different
+    workloads do not. What goes in is up to the caller, but it must be
+    measured input rather than anything the model can influence, or the
+    identity it feeds becomes forgeable.
+    """
+    payload = json.dumps(parts, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def compute_proposal_id(
+    draft: "schemas.ExploratoryProposalDraft",
+    *,
+    specialist: str,
+    trace_fingerprint: str = "",
+) -> str:
+    """Derive a stable ID from proposal content and the workload it targets.
 
     Content-addressed so the same proposal for the same workload keeps one
     identity across runs, which is what lets Recommendation deduplicate and
     what a human reviewer promotes against. The model does not supply it.
+
+    The workload is part of the material because the same sentence about two
+    different workloads is two different claims: without it, a proposal made
+    against one trace would collapse into a proposal made against another and
+    a reviewer's decision on one would silently apply to the other.
     """
     material = {
         "specialist": specialist,
@@ -138,6 +180,7 @@ def compute_proposal_id(draft: "schemas.ExploratoryProposalDraft", *, specialist
         "hypothesis": draft.hypothesis,
         "mechanism": draft.mechanism,
         "target_kernel": draft.target_kernel,
+        "trace_fingerprint": trace_fingerprint,
     }
     payload = json.dumps(material, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
@@ -184,7 +227,11 @@ def build_proposal(
     """Validate a draft and construct the runtime-owned proposal."""
     validate_draft(draft, manifest=manifest)
     return schemas.ExploratoryProposal(
-        proposal_id=compute_proposal_id(draft, specialist=specialist),
+        proposal_id=compute_proposal_id(
+            draft,
+            specialist=specialist,
+            trace_fingerprint=provenance.trace_fingerprint,
+        ),
         status="exploratory",
         specialist=specialist,
         title=draft.title,
@@ -273,13 +320,38 @@ def dedupe_proposals(
 # -- Runtime entry point --------------------------------------------------
 
 
+# The ceiling the running session resolved at build time. A session reads
+# configuration once and publishes the result here, so every agent in that
+# session is judged against the same ceiling. Without it each call re-reads
+# config and a mid-session edit could move a specialist from strict to
+# exploratory between its own gate check and its proposal extraction.
+_ACTIVE_CEILING: ContextVar[Optional[CreativityTier]] = ContextVar(
+    "perfxpert_creativity_ceiling", default=None
+)
+
+
+@contextlib.contextmanager
+def active_ceiling(ceiling: Optional[CreativityTier]) -> Iterator[None]:
+    """Pin the creativity ceiling for every agent run in this context."""
+    token = _ACTIVE_CEILING.set(ceiling)
+    try:
+        yield
+    finally:
+        _ACTIVE_CEILING.reset(token)
+
+
 def configured_ceiling() -> CreativityTier:
-    """Session ceiling from configuration.
+    """Ceiling for the current session, from the session or else configuration.
 
     Deliberately not a function argument anywhere it is used: the ceiling is
     a deployment decision, and a parameter would give a calling model a
-    handle to raise its own limit.
+    handle to raise its own limit. A session's captured value wins over a
+    fresh config read so the ceiling cannot move while a session is in
+    flight; only calls made outside any session read configuration directly.
     """
+    session_ceiling = _ACTIVE_CEILING.get()
+    if session_ceiling is not None:
+        return session_ceiling
     try:
         from perfxpert.config import load_config
 
@@ -332,6 +404,9 @@ def proposals_from_response(
     manifest: EvidenceManifest,
     provider: str = "",
     field_path: Sequence[str] = ("exploratory_proposals",),
+    tier: Optional[CreativityTier] = None,
+    trace_fingerprint: str = "",
+    catalog: Any = None,
 ) -> List["schemas.ExploratoryProposal"]:
     """Turn a model response's drafts into validated proposals.
 
@@ -340,12 +415,18 @@ def proposals_from_response(
     ``kernel_deltas``, and a draft the model emits somewhere the schema does
     not declare is discarded by output validation before it gets here.
 
+    ``tier`` is the caller's already-resolved tier. Callers that gate on the
+    tier before invoking the model should pass the value they gated on, so the
+    decision to consult the model and the decision to keep its proposals are
+    one decision rather than two reads that could disagree.
+
     Returns an empty list whenever the effective tier is strict, which is
     every current configuration. Any failure here yields no proposals rather
     than propagating: the exploratory lane is an addition, so it must never
     be able to break a run that would otherwise have succeeded.
     """
-    if effective_tier(agent, airgap=airgap) is not CreativityTier.EXPLORATORY:
+    resolved = tier if tier is not None else effective_tier(agent, airgap=airgap)
+    if resolved is not CreativityTier.EXPLORATORY:
         return []
 
     node: Any = raw.get("structured_output") or {}
@@ -357,9 +438,16 @@ def proposals_from_response(
     if not isinstance(drafts, list) or not drafts:
         return []
 
+    # Every field here is stamped from what the runtime knows, never from the
+    # response. Together they let a reviewer reproduce the conditions a
+    # proposal was made under: which model said it, about which workload,
+    # under which fence text, against which catalog.
     provenance = schemas.ProposalProvenance(
         provider=provider,
-        model=str(raw.get("model", "")),
+        model=str(raw.get("model", "") or ""),
+        trace_fingerprint=trace_fingerprint,
+        fence_sha256=_digest_text(getattr(agent, "fence_text", "") or ""),
+        catalog_sha256=_digest_json(catalog),
     )
     try:
         accepted, rejected = build_proposals(
@@ -380,8 +468,10 @@ def proposals_from_response(
 __all__ = [
     "AgentCapability",
     "CreativityTier",
+    "active_ceiling",
     "configured_ceiling",
     "effective_tier",
+    "workload_fingerprint",
     "manifest_from_run",
     "proposals_from_response",
     "EvidenceManifest",

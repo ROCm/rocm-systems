@@ -275,6 +275,115 @@ def test_proposals_never_leak_into_the_vetted_lane(
     assert [t["name"] for t in result.techniques] == ["coalesce_loads", "use_lds_tiling"]
 
 
+def test_tier_cannot_change_between_the_gate_and_the_proposals(
+    fake_provider, memory_catalog, monkeypatch
+):
+    """The tier that let the model speak is the tier its output is judged by.
+
+    The specialist used to resolve the tier twice — once to decide whether to
+    call the model, once to decide whether to keep what it said — with the
+    call itself in the gap. Anything that edited configuration during that
+    window made the run pay for a model call and then discard the answer, or
+    the reverse, depending only on when the write landed.
+    """
+    monkeypatch.setenv("PERFXPERT_AGENT_CREATIVITY", "exploratory")
+
+    def _flip_tier_mid_call(*args, **kwargs):
+        monkeypatch.setenv("PERFXPERT_AGENT_CREATIVITY", "strict")
+        return FakeProviderResponse(
+            structured_output={"exploratory_proposals": [_draft()]},
+            tool_calls=[{"name": "unified_memory.analyze_paging", "arguments": {}}],
+        )
+
+    fake_provider.side_effect = _flip_tier_mid_call
+    result = ms_module.run_memory_specialist(_memory_input(), provider="anthropic")
+    assert len(result.exploratory_proposals) == 1
+
+
+def test_session_ceiling_outranks_a_config_change_mid_session(
+    fake_provider, memory_catalog, monkeypatch
+):
+    """A session resolves its ceiling once and every agent is held to it."""
+    from perfxpert.agents import creativity
+    from perfxpert.agents.creativity import CreativityTier
+
+    fake_provider.return_value = FakeProviderResponse(
+        structured_output={"exploratory_proposals": [_draft()]},
+        tool_calls=[{"name": "unified_memory.analyze_paging", "arguments": {}}],
+    )
+    monkeypatch.setenv("PERFXPERT_AGENT_CREATIVITY", "exploratory")
+    with creativity.active_ceiling(CreativityTier.STRICT):
+        result = ms_module.run_memory_specialist(_memory_input(), provider="anthropic")
+    assert result.exploratory_proposals == []
+
+
+def test_provenance_records_what_the_proposal_came_from(
+    exploratory, fake_provider, memory_catalog, monkeypatch
+):
+    """Empty provenance fields record nothing and cannot be checked later.
+
+    A reviewer looking at a proposal months later needs to know which model
+    said it, about which workload, under which fence and catalog; all four
+    were declared and then left blank on every proposal ever built.
+    """
+    monkeypatch.setenv("PERFXPERT_AGENTS_MODEL_ANTHROPIC", "a-pinned-model")
+    fake_provider.return_value = FakeProviderResponse(
+        structured_output={"exploratory_proposals": [_draft()]},
+        tool_calls=[{"name": "unified_memory.analyze_paging", "arguments": {}}],
+    )
+    result = ms_module.run_memory_specialist(_memory_input(), provider="anthropic")
+    provenance = result.exploratory_proposals[0].provenance
+
+    assert provenance.provider == "anthropic"
+    assert "a-pinned-model" in provenance.model
+    assert len(provenance.trace_fingerprint) == 16
+    assert len(provenance.fence_sha256) == 64
+    assert len(provenance.catalog_sha256) == 64
+
+
+def test_same_proposal_about_a_different_workload_is_a_different_proposal(
+    exploratory, fake_provider, memory_catalog
+):
+    """Identity is per workload, or a review decision leaks across traces.
+
+    The id hashed only the proposal's own text, so the same sentence written
+    about two unrelated runs collapsed to one id — and a reviewer who accepted
+    or dismissed it on one run silently answered for the other.
+    """
+    fake_provider.return_value = FakeProviderResponse(
+        structured_output={"exploratory_proposals": [_draft()]},
+        tool_calls=[{"name": "unified_memory.analyze_paging", "arguments": {}}],
+    )
+    first = ms_module.run_memory_specialist(_memory_input(), provider="anthropic")
+
+    other_workload = schemas.MemorySpecialistInput(
+        gfx_id="gfx90a", hot_kernels=[{"name": "[K1]", "pct": 0.4}]
+    )
+    second = ms_module.run_memory_specialist(other_workload, provider="anthropic")
+
+    assert first.exploratory_proposals[0].title == second.exploratory_proposals[0].title
+    assert (
+        first.exploratory_proposals[0].proposal_id
+        != second.exploratory_proposals[0].proposal_id
+    )
+
+
+def test_the_same_workload_keeps_one_proposal_id_across_runs(
+    exploratory, fake_provider, memory_catalog
+):
+    """Cross-run stability is what deduplication and promotion rely on."""
+    fake_provider.return_value = FakeProviderResponse(
+        structured_output={"exploratory_proposals": [_draft()]},
+        tool_calls=[{"name": "unified_memory.analyze_paging", "arguments": {}}],
+    )
+    first = ms_module.run_memory_specialist(_memory_input(), provider="anthropic")
+    second = ms_module.run_memory_specialist(_memory_input(), provider="anthropic")
+    assert (
+        first.exploratory_proposals[0].proposal_id
+        == second.exploratory_proposals[0].proposal_id
+    )
+
+
 def test_malformed_drafts_do_not_break_the_run(
     exploratory, fake_provider, memory_catalog
 ):

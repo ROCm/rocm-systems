@@ -33,7 +33,7 @@ from perfxpert.agents import (
     root,
     schemas,
 )
-from perfxpert.agents.creativity import CreativityTier, resolve_tier
+from perfxpert.agents.creativity import CreativityTier, active_ceiling, resolve_tier
 from perfxpert.agents.framework import RunPolicy, active_policy
 from perfxpert.runtime import ensure_not_recursive
 
@@ -156,7 +156,7 @@ class AnalysisSession:
             candidate_key = self.api_key if provider == self.provider else None
             try:
                 with _override_provider_env(provider, candidate_key):
-                    with active_policy(self.policy):
+                    with active_policy(self.policy), active_ceiling(self.creativity):
                         return fn(provider)
             except (RateLimitError, TransientError) as exc:
                 last_retryable = exc

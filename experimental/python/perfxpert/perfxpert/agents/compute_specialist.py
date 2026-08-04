@@ -131,8 +131,12 @@ def run_compute_specialist(
     ranked = _rank_compute_catalog(catalog, payload)
     techniques = attach_predictions_to_techniques(ranked, payload)
 
+    # Resolved once and reused below: the tier that decided whether to consult
+    # the model is the tier its proposals are judged against, so a config or
+    # environment change during the call cannot land between the two.
     airgapped = airgap_enabled(airgap)
-    if creativity.effective_tier(agent, airgap=airgapped) is not CreativityTier.EXPLORATORY:
+    tier = creativity.effective_tier(agent, airgap=airgapped)
+    if tier is not CreativityTier.EXPLORATORY:
         return schemas.ComputeSpecialistOutput(
             techniques=techniques,
             confidence=0.6,
@@ -155,6 +159,7 @@ def run_compute_specialist(
             raw,
             specialist="compute",
             airgap=airgapped,
+            tier=tier,
             manifest=creativity.manifest_from_run(
                 agent,
                 raw,
@@ -162,6 +167,10 @@ def run_compute_specialist(
                 catalog_entries=[t.get("name", "") for t in techniques],
             ),
             provider=provider,
+            trace_fingerprint=creativity.workload_fingerprint(
+                payload.gfx_id, [k.get("name", "") for k in payload.hot_kernels]
+            ),
+            catalog=catalog,
         ),
     )
 
