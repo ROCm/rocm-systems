@@ -4,13 +4,12 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_ISA_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_GFX1250_ISA_H_
 
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
+#include "rocjitsu/isa/arch/amdgpu/vgpr_msb.h"
 #include "rocjitsu/isa/isa_traits.h"
-#include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 #include "util/bitfield.h"
 
 #include <cstdint>
@@ -71,6 +70,9 @@ struct Isa : amdgpu::RdnaIsaBase {
   using StatusReg = rocjitsu::gfx1250::StatusReg;
 
   static constexpr uint32_t WF_SIZE_MAX = 32; ///< gfx1250 is Wave32-only.
+  // gfx1250 uses the RDNA base decoder shape, but its MODE[27] enables VGPR
+  // high-bank indexing rather than RDNA4 DISABLE_PERF.
+  static constexpr bool MODE_HAS_GPR_IDX_EN = true;
   static constexpr uint32_t MAX_ADDRESSABLE_VGPRS_PER_WF =
       isa_properties(ROCJITSU_CODE_ARCH_GFX1250).max_addressable_vgprs_per_wf;
 

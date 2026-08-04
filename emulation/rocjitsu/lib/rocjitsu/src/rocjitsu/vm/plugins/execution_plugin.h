@@ -39,6 +39,8 @@ namespace rocjitsu {
 class ExecutionPlugin {
 public:
   static constexpr uint8_t kFullByteMask = 0xF;
+  static constexpr uint8_t kLowHalfByteMask = 0b0011u;
+  static constexpr uint8_t kHighHalfByteMask = 0b1100u;
 
   explicit ExecutionPlugin(std::string name) : name_(std::move(name)) {}
   virtual ~ExecutionPlugin() = default;
@@ -112,6 +114,20 @@ public:
   virtual void onAmdgpuReadVgprLanes(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/,
                                      uint64_t /*lane_mask*/,
                                      uint8_t /*byte_mask*/ = kFullByteMask) {}
+
+  /// Called when a VGPR is written during instruction execution.
+  /// Memory pipeline completions write raw VGPR storage and do not fire this
+  /// hook; this is for instruction-level destination writes.
+  ///
+  /// Internal storage operations do not produce additional architectural
+  /// callbacks.
+  /// @param wf Owning wavefront, or nullptr if the register is unallocated.
+  /// @param physical_reg Physical register index in the VGPR file.
+  /// @param lane_mask Bit mask of lanes written by the instruction.
+  /// @param byte_mask Sub-dword byte mask (kFullByteMask = full dword).
+  virtual void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/,
+                                      uint64_t /*lane_mask*/,
+                                      uint8_t /*byte_mask*/ = kFullByteMask) {}
 
   /// Called when an SGPR is read during instruction execution.
   /// @param wf Owning wavefront, or nullptr if the register is unallocated.

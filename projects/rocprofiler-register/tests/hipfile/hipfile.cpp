@@ -30,8 +30,8 @@
 #include <string_view>
 
 #define ROCP_REG_VERSION                                                                 \
-    ROCPROFILER_REGISTER_COMPUTE_VERSION_3(HIPFILE_ROCP_REG_VERSION_MAJOR,              \
-                                           HIPFILE_ROCP_REG_VERSION_MINOR,              \
+    ROCPROFILER_REGISTER_COMPUTE_VERSION_3(HIPFILE_ROCP_REG_VERSION_MAJOR,               \
+                                           HIPFILE_ROCP_REG_VERSION_MINOR,               \
                                            HIPFILE_ROCP_REG_VERSION_PATCH)
 
 ROCPROFILER_REGISTER_DEFINE_IMPORT(hipFile, ROCP_REG_VERSION)
@@ -69,14 +69,14 @@ register_profiler_impl()
 
     void* _profiler_api_table_v = static_cast<void*>(&_profiler_api_table);
 
-    auto lib_id  = rocprofiler_register_library_indentifier_t{};
-    auto success = rocprofiler_register_library_api_table(
-        "hipFile",
-        &ROCPROFILER_REGISTER_IMPORT_FUNC(hipFile),
-        ROCP_REG_VERSION,
-        &_profiler_api_table_v,
-        1,
-        &lib_id);
+    auto lib_id = rocprofiler_register_library_indentifier_t{};
+    auto success =
+        rocprofiler_register_library_api_table("hipFile",
+                                               &ROCPROFILER_REGISTER_IMPORT_FUNC(hipFile),
+                                               ROCP_REG_VERSION,
+                                               &_profiler_api_table_v,
+                                               1,
+                                               &lib_id);
 
     if(success == 0)
     {
@@ -168,7 +168,6 @@ extern "C" {
 hipFileError_t
 hipFileGetVersion(unsigned* major, unsigned* minor, unsigned* patch)
 {
-    return hipFile::get_hipfile_api_table()->pfn_hipfile_get_version(
-        major, minor, patch);
+    return hipFile::get_hipfile_api_table()->pfn_hipfile_get_version(major, minor, patch);
 }
 }
