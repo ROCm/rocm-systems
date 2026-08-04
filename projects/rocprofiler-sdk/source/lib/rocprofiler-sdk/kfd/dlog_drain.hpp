@@ -142,6 +142,7 @@ struct drained_record
 struct copied_record
 {
     fw_record rec       = {};
+    uint32_t  region    = 0;
     bool      loss_free = true;
 };
 
@@ -183,6 +184,14 @@ struct pair_state
 
     uint64_t unmatched_eops = 0;  // EOPs whose START was lost (shape ii)
 
+    // Pairing census. If starts_seen is far below eops_seen the firmware is not
+    // giving us a pairable START for every dispatch; if they match but eops go
+    // unmatched anyway, the two record types disagree on the key. Those are
+    // different bugs, so the counts are kept apart.
+    uint64_t starts_seen       = 0;
+    uint64_t eops_seen         = 0;
+    uint64_t starts_overwritten = 0;  // a START replaced a retained START on the same key
+
     // Drop retained starts belonging to a page-relative doorbell slot whose queue
     // was destroyed, so a stale start cannot pair with a record from whatever
     // reuses the slot. Reader-thread only, like the rest of this state.
@@ -204,6 +213,23 @@ struct pair_state
             }
         }
         return removed;
+    }
+
+    // Retained starts sharing a doorbell, with one example dispatch id. Asked
+    // after an orphaned EOP: if starts DO exist for the same doorbell but under
+    // other ids, START and EOP disagree about the id rather than the START being
+    // missing.
+    std::pair<size_t, uint32_t> starts_with_doorbell(uint32_t doorbell_off) const
+    {
+        size_t   count   = 0;
+        uint32_t example = 0;
+        for(const auto& itr : pending_starts)
+        {
+            if(static_cast<uint32_t>(itr.first >> 32) != doorbell_off) continue;
+            if(count == 0) example = static_cast<uint32_t>(itr.first & 0xFFFFFFFFu);
+            ++count;
+        }
+        return {count, example};
     }
 
     // Age out unmatched starts (queue died mid-dispatch, ring overwrite) so the
@@ -286,6 +312,7 @@ copy_pipes(const uint8_t*           records_base,
                 static_cast<uint64_t>(p) * region_slots + (idx & (region_slots - 1));
             auto _out = copied_record{};
             std::memcpy(&_out.rec, records_base + slot * kFwRecBytes, sizeof(_out.rec));
+            _out.region    = p;
             _out.loss_free = !lossy;
             out.emplace_back(_out);
             ++copied;
@@ -326,12 +353,17 @@ pair_records(const copied_record* records,
 
         if(rec.record_type == kRecStart)
         {
+            ++state.starts_seen;
             // Overwrite: dispatch_id is only low-32, so a key can recur; a
-            // collision means the prior start is stale.
+            // collision means the prior start is stale. Counted, because a burst
+            // of overwrites would mean concurrent dispatches are colliding on the
+            // key rather than recurring over time.
+            if(state.pending_starts.count(key) != 0) ++state.starts_overwritten;
             state.pending_starts[key] = pair_state::pending_start{ts, now_ns};
             continue;
         }
         if(rec.record_type != kRecEop) continue;
+        ++state.eops_seen;
 
         auto out         = drained_record{};
         out.doorbell_off = rec.doorbell_off;

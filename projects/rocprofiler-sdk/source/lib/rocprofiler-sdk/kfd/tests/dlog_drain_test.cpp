@@ -924,3 +924,74 @@ TEST(record_pipe, spsc_threads_lose_and_duplicate_nothing)
     EXPECT_EQ(produced.load(), kBatches);
     EXPECT_TRUE(pipe.empty());
 }
+
+// The pairing census has to be trustworthy: it is what will separate "the
+// firmware never emitted a START" from "a START was emitted but not matched".
+TEST(dlog_drain, pairing_census_counts_starts_eops_and_overwrites)
+{
+    fake_ring   ring(1, 2048);
+    drain_state st;
+    recorder    rec0;
+    run_drain(ring, st, rec0);
+
+    const uint32_t db = 4100;
+    // Two clean pairs, one EOP with no START, and a START overwritten on a live
+    // key before its EOP arrives.
+    ring.put(0, 0, kRecStart, 1, db, 10);
+    ring.put(0, 1, kRecEop, 1, db, 20);
+    ring.put(0, 2, kRecStart, 2, db, 30);
+    ring.put(0, 3, kRecEop, 2, db, 40);
+    ring.put(0, 4, kRecEop, 9, db, 50);      // orphan: no START ever
+    ring.put(0, 5, kRecStart, 7, db, 60);    // retained
+    ring.put(0, 6, kRecStart, 7, db, 70);    // overwrites the live key
+    ring.wptr[0] = 7;
+
+    recorder rec;
+    EXPECT_EQ(run_drain(ring, st, rec), 2u);
+
+    EXPECT_EQ(st.pairing.starts_seen, 4u);
+    EXPECT_EQ(st.pairing.eops_seen, 3u);
+    EXPECT_EQ(st.pairing.unmatched_eops, 1u);
+    EXPECT_EQ(st.pairing.starts_overwritten, 1u);
+    EXPECT_EQ(st.pairing.pending_starts.size(), 1u);  // id 7 still waiting
+
+    // The orphan near-miss query: id 7 is retained on this doorbell, so an
+    // orphaned EOP would report a non-zero count here -- the signal that START
+    // and EOP disagree on the id rather than the START being absent.
+    auto near = st.pairing.starts_with_doorbell(db);
+    EXPECT_EQ(near.first, 1u);
+    EXPECT_EQ(near.second, 7u);
+
+    // A doorbell with nothing retained reports zero.
+    EXPECT_EQ(st.pairing.starts_with_doorbell(9999).first, 0u);
+}
+
+// The region each record came from is preserved through the copy, so a raw dump
+// can show whether a dispatch's START and EOP were written to different regions.
+TEST(dlog_drain, copied_records_carry_their_region)
+{
+    fake_ring    ring(2, 2048);
+    ring_cursors cursors;
+    auto         batch = std::vector<copied_record>{};
+    copy_pipes(ring.records.data(), 2, ring.rrc, ring.wptr.data(), ring.rptr.data(), cursors,
+               batch);
+    batch.clear();
+
+    ring.put(0, 0, kRecStart, 1, 4100, 10);
+    ring.wptr[0] = 1;
+    ring.put(1, 0, kRecEop, 1, 4100, 20);
+    ring.wptr[1] = 1;
+
+    ASSERT_EQ(copy_pipes(ring.records.data(), 2, ring.rrc, ring.wptr.data(), ring.rptr.data(),
+                         cursors, batch),
+              2u);
+    ASSERT_EQ(batch.size(), 2u);
+    EXPECT_EQ(batch[0].region, 0u);
+    EXPECT_EQ(batch[1].region, 1u);
+
+    // Region 0 is copied before region 1 within a batch, so a START in region 0
+    // still pairs with an EOP in region 1 in the same pass.
+    pair_state pairing;
+    recorder   rec;
+    EXPECT_EQ(pair_records(batch.data(), batch.size(), pairing, 1000, rec.on_record()), 1u);
+}

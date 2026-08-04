@@ -518,15 +518,68 @@ copy_records(reader_state& st)
 // All the lock-taking work lives here, off the ring-reading path. It still runs
 // no client callback itself: hand_off_proven() submits to the task group, which
 // is where invariant 11 puts the callback.
+// Env-gated raw dump of what the firmware actually wrote. Capped, and off unless
+// ROCPROFILER_KFD_DISPATCH_LOG_TRACE=1. This is the decisive check for an
+// orphaned EOP: it shows whether a START with the same (doorbell, dispatch_id)
+// appears in the stream at all, and which region each record came from.
+void
+trace_raw_records(const record_batch& batch)
+{
+    static const bool _trace  = common::get_env("ROCPROFILER_KFD_DISPATCH_LOG_TRACE", false);
+    static auto       _logged = std::atomic<int>{0};
+    if(!_trace) return;
+
+    for(const auto& _r : batch.records)
+    {
+        if(_logged.fetch_add(1, std::memory_order_relaxed) >= 40) return;
+        const char* _type = _r.rec.record_type == kRecStart  ? "START"
+                            : _r.rec.record_type == kRecEop  ? "EOP  "
+                                                             : "PAD  ";
+        ROCP_WARNING << fmt::format(
+            "KFD raw record: {} region={} doorbell_off={} (page_slot={}) dispatch_id={} ts={} "
+            "loss_free={}",
+            _type,
+            _r.region,
+            _r.rec.doorbell_off,
+            doorbell_off_to_page_slot(_r.rec.doorbell_off),
+            _r.rec.dispatch_id,
+            (static_cast<uint64_t>(_r.rec.ts_hi) << 32) | _r.rec.ts_lo,
+            _r.loss_free);
+    }
+}
+
 uint64_t
 process_batch(processor_state& proc, const record_batch& batch)
 {
+    trace_raw_records(batch);
+
     return pair_records(
         batch.records.data(),
         batch.records.size(),
         proc.pairing,
         batch.now_ns,
-        [](const drained_record& rec) {
+        [&proc](const drained_record& rec) {
+            // An orphaned EOP: report whether retained STARTs exist for the SAME
+            // doorbell under a DIFFERENT id, which would mean the two record types
+            // disagree about the id rather than the START being absent.
+            if(!rec.start_known)
+            {
+                static const bool _trace =
+                    common::get_env("ROCPROFILER_KFD_DISPATCH_LOG_TRACE", false);
+                static auto _logged = std::atomic<int>{0};
+                if(_trace && _logged.fetch_add(1, std::memory_order_relaxed) < 10)
+                {
+                    auto _near = proc.pairing.starts_with_doorbell(rec.doorbell_off);
+                    ROCP_WARNING << fmt::format(
+                        "KFD orphaned EOP: doorbell_off={} dispatch_id={} -- {} retained START(s) "
+                        "on this doorbell (example id={}), {} retained overall",
+                        rec.doorbell_off,
+                        rec.dispatch_id,
+                        _near.first,
+                        _near.second,
+                        proc.pairing.pending_starts.size());
+                }
+            }
             uint32_t slot = doorbell_off_to_page_slot(rec.doorbell_off);
             uint32_t gen  = doorbell_map().get_generation(slot);
             auto     key  = correlation_key{slot, rec.dispatch_id, gen};
@@ -741,8 +794,15 @@ processor_loop()
         st.pipe.pop();
     }
 
-    ROCP_INFO << fmt::format("KFD dispatch-log processor: exited, {} unmatched EOP(s)",
-                             proc.pairing.unmatched_eops);
+    ROCP_WARNING_IF(proc.pairing.eops_seen > 0) << fmt::format(
+        "KFD dispatch-log pairing census: {} START record(s) drained, {} EOP record(s) drained, {} "
+        "EOP(s) unmatched, {} START(s) overwritten on a live key, {} START(s) still retained at "
+        "exit",
+        proc.pairing.starts_seen,
+        proc.pairing.eops_seen,
+        proc.pairing.unmatched_eops,
+        proc.pairing.starts_overwritten,
+        proc.pairing.pending_starts.size());
 }
 
 void

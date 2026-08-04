@@ -634,7 +634,7 @@ no_signal_finalize(kfd::signal_less_hub_t::proven&& proven)
 
             ROCP_WARNING << fmt::format(
                 "KFD signal-less REJECT[{}]: key(slot={} idx={} gen={}) submit_index={} "
-                "dispatch_id={} start_ticks={} end_ticks={} converted={} start_ns={} end_ns={} "
+                "sdk_seq_id={} start_ticks={} end_ticks={} converted={} start_ns={} end_ns={} "
                 "enqueue_ts={} now={} delta_start_minus_enqueue={} delta_now_minus_end={} "
                 "clause(start<end={} start>=enqueue={} end<=now+slack={})",
                 _reason_name(_detail.reason),
