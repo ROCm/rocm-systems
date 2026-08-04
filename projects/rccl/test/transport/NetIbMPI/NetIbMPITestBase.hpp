@@ -484,10 +484,10 @@ protected:
         if (!linkLayerFile) return true;
 
         char linkLayer[32] = {};
-        fscanf(linkLayerFile, "%31s", linkLayer);
+        bool linkLayerRead = (fscanf(linkLayerFile, "%31s", linkLayer) == 1);
         fclose(linkLayerFile);
 
-        if (strcmp(linkLayer, "Ethernet") != 0) return true;
+        if (!linkLayerRead || strcmp(linkLayer, "Ethernet") != 0) return true;
 
         snprintf(path, sizeof(path), "/sys/class/infiniband/%s/ports/%d/gids", devName, port);
 
@@ -503,8 +503,9 @@ protected:
             FILE* f = fopen(gidPath, "r");
             if (!f) continue;
             char gid[64] = {};
-            fscanf(f, "%63s", gid);
+            bool gidRead = (fscanf(f, "%63s", gid) == 1);
             fclose(f);
+            if (!gidRead) continue;
             // Skip all-zero GIDs and link-local (fe80::) GIDs
             bool allZero = (strcmp(gid, "0000:0000:0000:0000:0000:0000:0000:0000") == 0);
             bool linkLocal = (strncmp(gid, "fe80:", 5) == 0);
