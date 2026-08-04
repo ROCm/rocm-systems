@@ -115,7 +115,7 @@ table_at_address(std::span<const RelocationFunctionTable> tables, uint64_t vaddr
 void transfer_instruction(PairState &state, const Instruction &inst,
                           std::span<const RelocationFunctionTable> tables, uint64_t text_vaddr,
                           std::vector<RelocationTableDispatch> *dispatches,
-                          std::vector<PcRelativeAddressBuilder> *address_builders = nullptr) {
+                          std::vector<PcRelativeAddressBuilder> *address_builders) {
   const std::string_view mnemonic = inst.mnemonic();
   // Only getpc can create a tracked fact from an empty state. Large linked
   // objects contain millions of unrelated instructions, so avoid decoding
@@ -257,8 +257,7 @@ meet_predecessors(const BasicBlock &block,
   return nullptr;
 }
 
-/// @brief Shared getpc/add fixed point. Both public entry points need the same lattice; only what
-/// they collect from the final pass differs, so the worklist itself is written once.
+/// @brief Shared getpc/add fixed point that collects both result kinds after convergence.
 void run_pair_dataflow(std::span<const std::unique_ptr<BasicBlock>> blocks,
                        std::span<const RelocationFunctionTable> tables, uint64_t text_vaddr,
                        std::vector<RelocationTableDispatch> *dispatches,
@@ -398,42 +397,35 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object) {
   return tables;
 }
 
-std::vector<RelocationTableDispatch>
-discover_relocation_table_dispatches(std::span<const std::unique_ptr<BasicBlock>> blocks,
-                                     std::span<const RelocationFunctionTable> tables,
-                                     uint64_t text_vaddr) {
-  if (blocks.empty() || tables.empty())
-    return {};
-  std::vector<RelocationTableDispatch> dispatches;
-  run_pair_dataflow(blocks, tables, text_vaddr, &dispatches, nullptr);
-  std::ranges::sort(dispatches, [](const auto &lhs, const auto &rhs) {
+RelocationPairAnalysis analyze_relocation_pairs(std::span<const std::unique_ptr<BasicBlock>> blocks,
+                                                std::span<const RelocationFunctionTable> tables,
+                                                uint64_t text_vaddr) {
+  RelocationPairAnalysis result;
+  if (blocks.empty())
+    return result;
+
+  run_pair_dataflow(blocks, tables, text_vaddr, &result.dispatches, &result.address_builders);
+  std::ranges::sort(result.dispatches, [](const auto &lhs, const auto &rhs) {
     if (lhs.source_call_offset != rhs.source_call_offset)
       return lhs.source_call_offset < rhs.source_call_offset;
     return lhs.table_index < rhs.table_index;
   });
-  dispatches.erase(std::ranges::unique(dispatches, {},
-                                       [](const RelocationTableDispatch &item) {
-                                         return std::pair{item.source_call_offset,
-                                                          item.table_index};
-                                       })
-                       .begin(),
-                   dispatches.end());
-  return dispatches;
-}
+  result.dispatches.erase(std::ranges::unique(result.dispatches, {},
+                                              [](const RelocationTableDispatch &item) {
+                                                return std::pair{item.source_call_offset,
+                                                                 item.table_index};
+                                              })
+                              .begin(),
+                          result.dispatches.end());
 
-std::vector<PcRelativeAddressBuilder>
-discover_pc_relative_address_builders(std::span<const std::unique_ptr<BasicBlock>> blocks,
-                                      uint64_t text_vaddr) {
-  if (blocks.empty())
-    return {};
-  std::vector<PcRelativeAddressBuilder> builders;
-  run_pair_dataflow(blocks, {}, text_vaddr, nullptr, &builders);
-  std::ranges::sort(builders, {}, &PcRelativeAddressBuilder::source_address_add_offset);
-  builders.erase(
-      std::ranges::unique(builders, {}, &PcRelativeAddressBuilder::source_address_add_offset)
+  std::ranges::sort(result.address_builders, {},
+                    &PcRelativeAddressBuilder::source_address_add_offset);
+  result.address_builders.erase(
+      std::ranges::unique(result.address_builders, {},
+                          &PcRelativeAddressBuilder::source_address_add_offset)
           .begin(),
-      builders.end());
-  return builders;
+      result.address_builders.end());
+  return result;
 }
 
 namespace {
@@ -481,7 +473,7 @@ void run_pair_dataflow(std::span<const std::unique_ptr<BasicBlock>> blocks,
     PairState next_in = meet_predecessors(*block, positions, out, initialized);
     PairState next_out = next_in;
     for (const Instruction &inst : block->instructions())
-      transfer_instruction(next_out, inst, tables, text_vaddr, nullptr);
+      transfer_instruction(next_out, inst, tables, text_vaddr, nullptr, nullptr);
 
     const bool changed = !initialized[index] || next_in != in[index] || next_out != out[index];
     initialized[index] = true;

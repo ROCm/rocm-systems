@@ -64,7 +64,7 @@ struct RelocationFunctionTable {
 /// the call and the PC-relative address builder that must remain pointed at the
 /// same data object after `.text` grows.
 struct RelocationTableDispatch {
-  /// Index into the table vector passed to `discover_relocation_table_dispatches()`.
+  /// Index into the table span passed to `analyze_relocation_pairs()`.
   size_t table_index = 0;
 
   /// Original `.text`-relative offset of the `s_swap_pc_i64` call instruction.
@@ -105,15 +105,28 @@ struct PcRelativeAddressBuilder {
   uint64_t target_vaddr = 0;
 };
 
-/// @brief Discover every proven `s_get_pc_i64` + literal-add address materialization.
+/// @brief Results collected by the shared SGPR-pair dataflow.
+struct RelocationPairAnalysis {
+  /// Dispatches sorted by `(source_call_offset, table_index)` and unique on that key.
+  std::vector<RelocationTableDispatch> dispatches;
+
+  /// Address builders sorted and unique by `source_address_add_offset`.
+  /// This complete set is independent of the supplied relocation tables.
+  std::vector<PcRelativeAddressBuilder> address_builders;
+};
+
+/// @brief Discover table dispatches and address builders in one dataflow pass.
 ///
-/// @details Shares the dataflow that resolves table dispatches, so the same guarantees apply: a
-/// chained second add, a write to either half, or a CFG join whose predecessors disagree all leave
-/// the pair untracked rather than reported. Callers decide what a target means; this reports the
-/// address arithmetic only.
-[[nodiscard]] std::vector<PcRelativeAddressBuilder>
-discover_pc_relative_address_builders(std::span<const std::unique_ptr<BasicBlock>> blocks,
-                                      uint64_t text_vaddr);
+/// @details The analysis propagates a small SGPR-pair lattice. An
+/// `s_get_pc_i64` plus literal add produces an address builder; a builder is
+/// reported before its value can be reclassified as a known table base, so
+/// `tables` affects only `dispatches`. A chained second add, a write to either
+/// half, or a CFG join whose predecessors disagree leaves the pair unreported.
+/// A table or GOT address followed by an indexed load and `s_swap_pc_i64`
+/// produces a dispatch only when every step is proven.
+[[nodiscard]] RelocationPairAnalysis
+analyze_relocation_pairs(std::span<const std::unique_ptr<BasicBlock>> blocks,
+                         std::span<const RelocationFunctionTable> tables, uint64_t text_vaddr);
 
 /// @brief Discover finite device-call tables from ELF symbols and relocations.
 ///
@@ -130,20 +143,5 @@ discover_pc_relative_address_builders(std::span<const std::unique_ptr<BasicBlock
 /// not returned.
 [[nodiscard]] std::vector<RelocationFunctionTable>
 discover_relocation_function_tables(const AmdGpuCodeObject &object);
-
-/// @brief Resolve decoded dynamic calls back to relocation-discovered tables.
-///
-/// @details The analysis propagates only a small SGPR-pair lattice:
-/// `s_get_pc_i64 + s_add_nc_u64 literal64` produces an address. That address
-/// may name the table directly or a GOT slot whose zero-offset load produces
-/// the table base. A subsequent indexed `s_load_b64` produces an entry value,
-/// and a dispatch is reported only when that value reaches `s_swap_pc_i64`.
-/// Writes to either SGPR half kill the fact, and CFG joins retain only facts
-/// that agree on every initialized predecessor, so unproven calls remain
-/// unresolved rather than acquiring speculative table edges.
-[[nodiscard]] std::vector<RelocationTableDispatch>
-discover_relocation_table_dispatches(std::span<const std::unique_ptr<BasicBlock>> blocks,
-                                     std::span<const RelocationFunctionTable> tables,
-                                     uint64_t text_vaddr);
 
 } // namespace rocjitsu
