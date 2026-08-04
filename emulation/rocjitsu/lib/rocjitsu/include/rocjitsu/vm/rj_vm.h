@@ -161,7 +161,7 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_
 
 /// @brief Load and attach the execution plugins declared in a config to a VM.
 ///
-/// @details Parses the `plugins`, `sinks`, and `profiled` sections of the
+/// @details Parses the `plugins` and `sinks` sections of the
 /// config and attaches the resulting plugin group to the VM's SoC. This is the
 /// C-API equivalent of what the LD_PRELOAD interposer and the rocjitsu CLI do
 /// through the C++ PluginLoader, so a C-API host (e.g. the mirage daemon) can

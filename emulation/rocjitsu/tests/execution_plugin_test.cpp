@@ -48,7 +48,6 @@ RJ_DIAGNOSTIC_POP
 
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
-#include "rocjitsu/vm/plugins/profiled_execution_plugin.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
 #include <gtest/gtest.h>
@@ -794,13 +793,11 @@ TEST(ExecutionPluginTest, NoPluginNoCrash) {
   f.run_kernel(code, 2);
 }
 
-TEST(ExecutionPluginTest, GroupCapabilitiesComeFromContainedPlugins) {
+TEST(ExecutionPluginTest, HotHookPolicyComesFromContainedPlugins) {
   ExecutionPluginGroup group(PluginSinkConfig{});
-  EXPECT_FALSE(group.has_hooks());
   EXPECT_FALSE(group.requires_serial_execution());
 
   ASSERT_TRUE(group.add(std::make_unique<ParallelSafePlugin>()));
-  EXPECT_TRUE(group.has_hooks());
   EXPECT_FALSE(group.requires_serial_execution());
 
   ASSERT_TRUE(group.add(std::make_unique<OrderingPlugin>()));
@@ -811,7 +808,7 @@ TEST(ExecutionPluginTest, GroupCapabilitiesComeFromContainedPlugins) {
 }
 
 TEST(ExecutionPluginTest, InfrequentHooksSerializeAtGroupBoundary) {
-  ExecutionPluginGroup group;
+  ExecutionPluginGroup group(PluginSinkConfig{});
   auto probe = std::make_unique<ConcurrencyProbePlugin>(false);
   auto *probe_ptr = probe.get();
   ASSERT_TRUE(group.add(std::move(probe)));
@@ -822,7 +819,7 @@ TEST(ExecutionPluginTest, InfrequentHooksSerializeAtGroupBoundary) {
 }
 
 TEST(ExecutionPluginTest, HighFrequencyHooksRunConcurrentlyByDefault) {
-  ExecutionPluginGroup group;
+  ExecutionPluginGroup group(PluginSinkConfig{});
   auto probe = std::make_unique<ConcurrencyProbePlugin>(false);
   auto *probe_ptr = probe.get();
   ASSERT_TRUE(group.add(std::move(probe)));
@@ -834,7 +831,7 @@ TEST(ExecutionPluginTest, HighFrequencyHooksRunConcurrentlyByDefault) {
 }
 
 TEST(ExecutionPluginTest, HighFrequencyHooksHonorSerialOptIn) {
-  ExecutionPluginGroup group;
+  ExecutionPluginGroup group(PluginSinkConfig{});
   auto probe = std::make_unique<ConcurrencyProbePlugin>(true);
   auto *probe_ptr = probe.get();
   ASSERT_TRUE(group.add(std::move(probe)));
@@ -843,42 +840,6 @@ TEST(ExecutionPluginTest, HighFrequencyHooksHonorSerialOptIn) {
   run_two_threads([&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
 
   EXPECT_EQ(probe_ptr->hot_max_active(), 1);
-}
-
-TEST(ExecutionPluginTest, ProfileDecoratorIsAConservativePlugin) {
-  auto nested = std::make_unique<ExecutionPluginGroup>(PluginSinkConfig{});
-  nested->add(std::make_unique<ParallelSafePlugin>());
-
-  ExecutionPluginGroup group(PluginSinkConfig{});
-  auto *profile = ProfiledExecutionPlugin::add_to(group, std::move(nested));
-  ASSERT_NE(profile, nullptr);
-  EXPECT_TRUE(group.has_hooks());
-  EXPECT_TRUE(profile->requires_serial_execution());
-  EXPECT_TRUE(group.requires_serial_execution());
-}
-
-TEST(ExecutionPluginTest, NestedProfileDecoratorsShareWavefrontStateSlots) {
-  auto leaf = std::make_unique<ExecutionPluginGroup>(PluginSinkConfig{});
-  auto inner_plugin = std::make_unique<ParallelSafePlugin>();
-  auto *inner = inner_plugin.get();
-  ASSERT_TRUE(leaf->add(std::move(inner_plugin)));
-
-  auto middle = std::make_unique<ExecutionPluginGroup>(PluginSinkConfig{});
-  auto *inner_profile = ProfiledExecutionPlugin::add_to(*middle, std::move(leaf));
-  ASSERT_NE(inner_profile, nullptr);
-
-  ExecutionPluginGroup outer(PluginSinkConfig{});
-  auto *outer_profile = ProfiledExecutionPlugin::add_to(outer, std::move(middle));
-  ASSERT_NE(outer_profile, nullptr);
-
-  auto outer_plugin = std::make_unique<ExecutionPlugin>("outer");
-  auto *outer_member = outer_plugin.get();
-  ASSERT_TRUE(outer.add(std::move(outer_plugin)));
-
-  EXPECT_EQ(inner->slot_index(), 0u);
-  EXPECT_EQ(inner_profile->slot_index(), 1u);
-  EXPECT_EQ(outer_profile->slot_index(), 2u);
-  EXPECT_EQ(outer_member->slot_index(), 3u);
 }
 
 TEST(ExecutionPluginTest, ValuSimdReadObservationUsesActiveExecMask) {

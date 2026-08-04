@@ -31,13 +31,11 @@
 
 namespace rocjitsu {
 
-class ProfiledExecutionPlugin;
-
 /// @brief Deleter for owned plugin instances.
 ///
 /// Every plugin instance is freed through a destroy function, so allocation and
-/// deallocation always stay on the same side of the plugin ABI boundary. For
-/// plugins loaded across the C ABI, @c destroyFn is the plugin library's
+/// deallocation always stay on the same side of the plugin library boundary. For
+/// dynamically loaded plugins, @c destroyFn is the plugin library's
 /// `rocjitsu_plugin_destroy` export. For in-tree plugins created with `new`, it
 /// is a small host trampoline that `delete`s the instance (see
 /// delete_execution_plugin()). The pointer is only ever handed back to the
@@ -92,7 +90,7 @@ public:
     for (const auto &existing : plugins_)
       if (existing.plugin->name() == p->name())
         return false;
-    p->slot_index_ = slot_allocator_->next++;
+    p->slot_index_ = static_cast<uint32_t>(plugins_.size());
     serialize_hot_hooks_ |= p->requires_serial_execution();
     SinkBundle sink = build_sink_bundle(p->name() + ".log");
     if (auto *configured_sink = sink.get())
@@ -109,23 +107,20 @@ public:
   uint32_t num_plugins() const { return static_cast<uint32_t>(plugins_.size()); }
   bool empty() const { return plugins_.empty(); }
 
-  /// Compute units only need to dispatch hooks when the group owns plugins.
-  bool has_hooks() const { return !empty(); }
-
   /// Whether high-frequency callbacks are serialized for this group. Plugin
   /// policy is sampled when each plugin is added so hot dispatch stays O(1).
   bool requires_serial_execution() const { return serialize_hot_hooks_; }
 
   // -- Lifecycle (non-virtual) --
   void onInit() {
-    dispatch_serialized([&]() {
+    dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onInit();
     });
   }
 
   void onShutdown() {
-    dispatch_serialized([&]() {
+    dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onShutdown();
     });
@@ -134,7 +129,7 @@ public:
   // -- AMDGPU (non-virtual) --
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                         amdgpu::Wavefront &wf) {
-    dispatch_hot([&]() {
+    dispatch_with_optional_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
     });
@@ -142,35 +137,35 @@ public:
 
   void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
                                        amdgpu::Wavefront &wf) {
-    dispatch_hot([&]() {
+    dispatch_with_optional_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuAfterExecuteInstruction(pc, inst, wf);
     });
   }
 
   void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) {
-    dispatch_hot([&]() {
+    dispatch_with_optional_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuRouteMemoryInstruction(inst, wf);
     });
   }
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) {
-    dispatch_serialized([&]() {
+    dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuDispatchPacketProcessed(info);
     });
   }
 
   void onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
-    dispatch_serialized([&]() {
+    dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuDispatchExecutionBegin(dispatch_id);
     });
   }
 
   void onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
-    dispatch_serialized([&]() {
+    dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuDispatchExecutionEnd(dispatch_id);
     });
@@ -179,7 +174,7 @@ public:
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
                                    uint32_t physical_vgpr_count, uint32_t sgpr_count,
                                    std::span<amdgpu::Wavefront *> wavefronts) {
-    dispatch_serialized([&]() {
+    dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, physical_vgpr_count,
                                                   sgpr_count, wavefronts);
@@ -187,21 +182,21 @@ public:
   }
 
   void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {
-    dispatch_serialized([&]() {
+    dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
     });
   }
 
   void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
-    dispatch_serialized([&]() {
+    dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuWavefrontDispatched(wf);
     });
   }
 
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
-    dispatch_serialized([&]() {
+    dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuWavefrontHalted(wf);
     });
@@ -209,7 +204,7 @@ public:
 
   void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
-    dispatch_hot([&]() {
+    dispatch_with_optional_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuReadVgprLanes(wf, physical_reg, lane_mask, byte_mask);
     });
@@ -218,21 +213,21 @@ public:
   void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
                               uint64_t lane_mask,
                               uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
-    dispatch_hot([&]() {
+    dispatch_with_optional_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuWriteVgprLanes(wf, physical_reg, lane_mask, byte_mask);
     });
   }
 
   void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) {
-    dispatch_hot([&]() {
+    dispatch_with_optional_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuReadSgpr(wf, physical_reg);
     });
   }
 
   void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) {
-    dispatch_serialized([&]() {
+    dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuBarrierResolved(wavefronts);
     });
@@ -258,30 +253,20 @@ public:
   }
 
 private:
-  friend class ProfiledExecutionPlugin;
-
-  template <typename Callback> void dispatch_serialized(Callback &&callback) {
+  template <typename Callback> void dispatch_with_plugin_lock(Callback &&callback) {
     std::lock_guard<std::mutex> lock(callback_mutex_);
     std::forward<Callback>(callback)();
   }
 
-  template <typename Callback> void dispatch_hot(Callback &&callback) {
+  template <typename Callback> void dispatch_with_optional_plugin_lock(Callback &&callback) {
     if (serialize_hot_hooks_)
-      dispatch_serialized(std::forward<Callback>(callback));
+      dispatch_with_plugin_lock(std::forward<Callback>(callback));
     else
       std::forward<Callback>(callback)();
   }
 
   std::mutex callback_mutex_;
   bool serialize_hot_hooks_ = false;
-
-  struct SlotAllocator {
-    uint32_t next = 0;
-  };
-
-  // Nested decorator groups share one allocator so every plugin in the tree
-  // receives a distinct Wavefront::plugin_states_ slot.
-  std::shared_ptr<SlotAllocator> slot_allocator_ = std::make_shared<SlotAllocator>();
 
   /// Internal fanout over sinks whose lifetime is guaranteed by the owning
   /// group or SinkBundle. It is deliberately not part of the public sink API.

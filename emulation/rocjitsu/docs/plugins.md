@@ -70,14 +70,13 @@ Each `--plugin` enables the plugin with its schema defaults. Plugins that
 take required arguments, or runs that need custom sink settings, are
 configured through a profile or an explicit `--config <file>`.
 
-### Plugin ABI
+### Plugin loader contract
 
-The plugin boundary is a C-shaped ABI. Each plugin `.so` exports three
-`extern "C"` functions:
+Each same-build plugin `.so` exports three `extern "C"` functions:
 
 - `const PluginMetadata *rocjitsu_plugin_metadata()` — returns a pointer
-  to static metadata: `abi` version, `name`, `contact`, `version`, and a
-  `config_schema` JSON string.
+  to static metadata: `name`, `contact`, `version`, and a `config_schema`
+  JSON string.
 - `PluginHandle rocjitsu_plugin_create(const char *config_json)` —
   constructs the plugin from its resolved JSON configuration string and
   returns an opaque handle.
@@ -88,7 +87,9 @@ Allocation and deallocation stay on the plugin side of the boundary: the
 host destroys each instance through the plugin's own
 `rocjitsu_plugin_destroy` export. Use the `ROCJITSU_DEFINE_PLUGIN` macro
 from `plugin_abi.h` to emit all three functions. The host validates the
-reported `abi` against the loader's expected version before use.
+required exports before use. There is deliberately no ABI versioning or
+backward-compatibility check: rocjitsu and its tightly coupled plugins must be
+built together from matching headers and toolchains.
 
 ### Config schema
 
@@ -127,18 +128,6 @@ sink-related environment variables.
 When `file` is in `types`, each plugin writes to
 `<dir>/<plugin_name>.log`. Plugin names are fixed:
 `race` for `RaceDetectorPlugin`, `logging` for `KernelLoggingPlugin`.
-
-### Profiled execution
-
-Set the top-level `"profiled": true` key to wrap the plugins in a
-profiled execution decorator, which emits per-hook timing data
-(`HOOK_PROFILE` lines) to the configured sinks. With the default sink, timing
-data goes to stderr; stdout sends it to stdout, and file sinks write it to
-`<dir>/profile.log`.
-
-Profiled execution requires the simulation engine to use `"num_threads": 1`.
-Multithreaded configurations are rejected because the profiling counters are
-not synchronized.
 
 ### Examples
 
@@ -239,11 +228,6 @@ when the plugin is added and then takes the same group mutex around every
 high-frequency callback, serializing it with the infrequent callbacks without a
 per-instruction scan of the plugin list. Plugins that protect their own shared
 state should retain the parallel default.
-
-Hook profiling is implemented as `ProfiledExecutionPlugin`, a serial decorator
-around another plugin group. Its shared counters opt high-frequency callbacks
-into group serialization.
-
 
 ## Adding a new plugin
 

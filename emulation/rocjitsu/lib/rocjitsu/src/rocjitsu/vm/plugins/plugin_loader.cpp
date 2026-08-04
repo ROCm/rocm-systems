@@ -6,7 +6,6 @@
 #include "rocjitsu/vm/plugins/plugin_abi.h"
 #include "rocjitsu/vm/plugins/plugin_config_resolver.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
-#include "rocjitsu/vm/plugins/profiled_execution_plugin.h"
 
 #include "util/dynamic_loader.h"
 #include "util/log.h"
@@ -91,15 +90,14 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
   auto create_fn = util::lookup_symbol<PluginCreateFn>(handle, kPluginCreateSymbol);
   auto destroy_fn = util::lookup_symbol<PluginDestroyFn>(handle, kPluginDestroySymbol);
   if (!meta_fn || !create_fn || !destroy_fn) {
-    util::Logger::warn("plugin '", name, "': ", soname, " is missing required ABI exports");
+    util::Logger::warn("plugin '", name, "': ", soname, " is missing required exports");
     util::close_library(handle);
     return false;
   }
 
   const PluginMetadata *meta = meta_fn();
-  if (!meta || meta->abi != kPluginAbiVersion) {
-    util::Logger::warn("plugin '", name, "': ABI version mismatch (got ", meta ? meta->abi : -1,
-                       ", expected ", kPluginAbiVersion, ")");
+  if (!meta) {
+    util::Logger::warn("plugin '", name, "': metadata export returned null");
     util::close_library(handle);
     return false;
   }
@@ -122,7 +120,7 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
   }
 
   // Own the instance through the plugin's own destroy export so allocation and
-  // deallocation stay on the same side of the ABI boundary. Keep `handle` open
+  // deallocation stay on the same side of the dynamic-library boundary. Keep `handle` open
   // for the whole lifetime of `owned`: on the rejection path the instance is
   // destroyed via its PluginDeleter (the plugin's destroy_fn), which lives in
   // this library, so the library must still be loaded when that happens.
@@ -226,17 +224,8 @@ PluginLoader::configure_plugin_group(const std::string &config_json,
   bool parsed = flexbuffer_from_json(config_json, root_fbb);
   auto root = parsed ? flexbuffers::GetRoot(root_fbb.GetBuffer()) : flexbuffers::Reference();
 
-  bool profiled =
-      root.IsMap() && root.AsMap()["profiled"].IsBool() && root.AsMap()["profiled"].AsBool();
-
-  auto plugins = std::make_unique<ExecutionPluginGroup>(parse_sink_config(root));
-  load_from_config(config_json, *plugins, plugin_dir);
-
-  if (!profiled)
-    return std::shared_ptr<ExecutionPluginGroup>(std::move(plugins));
-
   auto group = std::make_shared<ExecutionPluginGroup>(parse_sink_config(root));
-  ProfiledExecutionPlugin::add_to(*group, std::move(plugins));
+  load_from_config(config_json, *group, plugin_dir);
   return group;
 }
 

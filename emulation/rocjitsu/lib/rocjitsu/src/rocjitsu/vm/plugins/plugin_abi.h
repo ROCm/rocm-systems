@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file plugin_abi.h
-/// @brief In-tree toolchain contract for runtime-loadable execution plugins.
+/// @brief Same-build loader contract for runtime-loadable execution plugins.
 ///
 /// This is a toolchain contract, not a stable ABI: it only supports plugins
 /// built in-tree, from the same source tree and toolchain as the host (see
@@ -20,8 +20,8 @@
 /// destruction of its instance via its own allocator.
 ///
 ///   1. `rocjitsu_plugin_metadata` — returns a pointer to a static
-///      ::rocjitsu::PluginMetadata describing the plugin (contract version,
-///      name, contact, version, and a JSON config schema).
+///      ::rocjitsu::PluginMetadata describing the plugin (name, contact,
+///      version, and a JSON config schema).
 ///
 ///   2. `rocjitsu_plugin_create` — constructs a plugin instance from a JSON
 ///      configuration string and returns it as an opaque
@@ -37,10 +37,9 @@
 /// The opaque handle is an ::rocjitsu::ExecutionPlugin subclass instance; the
 /// host calls its virtual hooks directly. Plugins must therefore be built
 /// in-tree with the same toolchain and standard library as the host, against a
-/// matching ::rocjitsu::ExecutionPlugin layout. The contract version below
-/// only guards against mismatched in-tree builds (e.g. a stale plugin built
-/// against an older header); it is not a stable ABI and provides no
-/// cross-toolchain or cross-release compatibility guarantee.
+/// matching ::rocjitsu::ExecutionPlugin layout. There is deliberately no ABI
+/// versioning or stale-build compatibility check: the host and all plugins
+/// must be rebuilt together whenever this interface changes.
 ///
 /// Use the ROCJITSU_DEFINE_PLUGIN() helper to emit all three exports.
 
@@ -53,13 +52,6 @@
 #include <exception>
 
 namespace rocjitsu {
-
-/// @brief Toolchain-contract version. Bump on any incompatible change to the
-/// plugin interface (this header, ExecutionPlugin's hook signatures, etc.).
-/// This is not a stable ABI version: it only detects mismatched in-tree
-/// builds, not compatibility across toolchains or releases (see the
-/// "Toolchain contract" note above).
-inline constexpr int kPluginAbiVersion = 3;
 
 /// @brief Opaque handle to a plugin instance returned by the create export.
 ///
@@ -75,10 +67,6 @@ using PluginHandle = void *;
 /// plugin shared object; they remain valid for as long as the library is
 /// loaded.
 struct PluginMetadata {
-  /// Toolchain-contract version; must equal ::rocjitsu::kPluginAbiVersion.
-  /// The loader rejects mismatches. Not a stable ABI version — see the
-  /// "Toolchain contract" note above.
-  int abi;
   /// Plugin name. Must match the `<name>` in `librocjitsu_plugin_<name>.so`
   /// and the key used to configure the plugin in the config file.
   const char *name;
@@ -137,8 +125,7 @@ inline constexpr const char *kPluginDestroySymbol = "rocjitsu_plugin_destroy";
 /// @endcode
 #define ROCJITSU_DEFINE_PLUGIN(PluginClass, NAME, CONTACT, VERSION, CONFIG_SCHEMA)                 \
   extern "C" ROCJITSU_PLUGIN_EXPORT const ::rocjitsu::PluginMetadata *rocjitsu_plugin_metadata() { \
-    static const ::rocjitsu::PluginMetadata kMetadata{::rocjitsu::kPluginAbiVersion, NAME,         \
-                                                      CONTACT, VERSION, CONFIG_SCHEMA};            \
+    static const ::rocjitsu::PluginMetadata kMetadata{NAME, CONTACT, VERSION, CONFIG_SCHEMA};      \
     return &kMetadata;                                                                             \
   }                                                                                                \
   extern "C" ROCJITSU_PLUGIN_EXPORT ::rocjitsu::PluginHandle rocjitsu_plugin_create(               \

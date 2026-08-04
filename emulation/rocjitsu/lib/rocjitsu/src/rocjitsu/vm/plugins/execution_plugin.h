@@ -47,71 +47,85 @@ public:
 
   const std::string &name() const { return name_; }
 
-  /// Index into Wavefront::plugin_states_. Groups in one nested decorator tree
-  /// share an allocator, so every plugin receives a distinct slot.
+  /// Index into Wavefront::plugin_states_, assigned by the group on add().
   uint32_t slot_index() const { return slot_index_; }
 
   /// Output sink for this plugin. Use sink().write("msg") for all output.
   PluginSink &sink() { return *sink_; }
 
-  /// Whether high-frequency instruction and register callbacks must be
-  /// serialized for this plugin. They run concurrently by default because each
-  /// callback is scoped to one wavefront. Override after identifying shared
-  /// mutable state that cannot be protected within the plugin. Infrequent
+  /// Whether high-frequency instruction, memory-routing, and register callbacks
+  /// must be serialized for this plugin. They run concurrently by default
+  /// because each callback is scoped to one wavefront. Override after identifying
+  /// shared mutable state that cannot be protected within the plugin. Infrequent
   /// lifecycle and topology callbacks are always serialized by the group.
   virtual bool requires_serial_execution() const { return false; }
 
   // -- Lifecycle hooks ------------------------------------------------------
 
   /// Called when the emulated driver opens (simulation is ready to accept work).
+  /// Serialized by ExecutionPluginGroup.
   virtual void onInit() {}
 
   /// Called when the emulated driver closes (simulation is shutting down).
   /// All simulation state is still valid during this callback.
+  /// Serialized by ExecutionPluginGroup.
   virtual void onShutdown() {}
 
   // -- AMDGPU hooks --------------------------------------------------------
 
   /// Called before every AMDGPU instruction is executed.
   /// Wavefront state reflects the state prior to the instruction's effects.
+  /// May run concurrently across simulation partitions unless
+  /// requires_serial_execution() returns true.
   virtual void onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
                                                 amdgpu::Wavefront & /*wf*/) {}
 
   /// Called after every AMDGPU instruction is executed.
   /// Wavefront state (wait targets, PC, etc.) reflects the instruction's effects.
+  /// May run concurrently across simulation partitions unless
+  /// requires_serial_execution() returns true.
   virtual void onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
                                                amdgpu::Wavefront & /*wf*/) {}
 
   /// Called when an AMDGPU memory instruction is routed to a pipeline.
+  /// May run concurrently across simulation partitions unless
+  /// requires_serial_execution() returns true.
   virtual void onAmdgpuRouteMemoryInstruction(const Instruction & /*inst*/,
                                               amdgpu::Wavefront & /*wf*/) {}
 
   /// Called when the command processor has parsed an AQL kernel dispatch packet
   /// and created a DispatchEntry. Fires during packet fetching, before any
   /// workgroups are placed. Multiple packets may be parsed in a single fetch.
+  /// Serialized by ExecutionPluginGroup.
   virtual void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo & /*info*/) {}
 
   /// Called when the command processor begins executing a dispatch — barriers
   /// are satisfied and workgroup placement is about to start.
+  /// Serialized by ExecutionPluginGroup.
   virtual void onAmdgpuDispatchExecutionBegin(uint32_t /*dispatch_id*/) {}
 
   /// Called when all workgroups of a dispatch have completed execution.
+  /// Serialized by ExecutionPluginGroup.
   virtual void onAmdgpuDispatchExecutionEnd(uint32_t /*dispatch_id*/) {}
 
   /// Called after a workgroup's wavefronts have been dispatched to a CU.
   /// @param physical_vgpr_count Physical VGPR allocation block size per wavefront.
+  /// Serialized by ExecutionPluginGroup.
   virtual void onAmdgpuWorkgroupDispatched(uint32_t /*dispatch_id*/, uint32_t /*wg_id*/,
                                            uint32_t /*physical_vgpr_count*/,
                                            uint32_t /*sgpr_count*/,
                                            std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
 
   /// Called when the last wavefront of a workgroup has halted.
+  /// Serialized by ExecutionPluginGroup.
   virtual void onAmdgpuWorkgroupCompleted(uint32_t /*dispatch_id*/, uint32_t /*wg_id*/) {}
 
   /// Called after a wavefront is initialized and before its first instruction.
+  /// Serialized by ExecutionPluginGroup.
   virtual void onAmdgpuWavefrontDispatched(amdgpu::Wavefront & /*wf*/) {}
 
   /// Called when a wavefront halts, before its resources are freed.
+  /// Serialized by ExecutionPluginGroup.
   virtual void onAmdgpuWavefrontHalted(amdgpu::Wavefront & /*wf*/) {}
 
   /// Called when a VGPR is read during instruction execution.
@@ -119,6 +133,8 @@ public:
   /// @param physical_reg Physical register index in the VGPR file.
   /// @param lane_mask Bit mask of lanes read by the instruction.
   /// @param byte_mask Sub-dword byte mask (kFullByteMask = full dword).
+  /// May run concurrently across simulation partitions unless
+  /// requires_serial_execution() returns true.
   virtual void onAmdgpuReadVgprLanes(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/,
                                      uint64_t /*lane_mask*/,
                                      uint8_t /*byte_mask*/ = kFullByteMask) {}
@@ -133,6 +149,8 @@ public:
   /// @param physical_reg Physical register index in the VGPR file.
   /// @param lane_mask Bit mask of lanes written by the instruction.
   /// @param byte_mask Sub-dword byte mask (kFullByteMask = full dword).
+  /// May run concurrently across simulation partitions unless
+  /// requires_serial_execution() returns true.
   virtual void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/,
                                       uint64_t /*lane_mask*/,
                                       uint8_t /*byte_mask*/ = kFullByteMask) {}
@@ -140,9 +158,12 @@ public:
   /// Called when an SGPR is read during instruction execution.
   /// @param wf Owning wavefront, or nullptr if the register is unallocated.
   /// @param physical_reg Physical register index in the SGPR file.
+  /// May run concurrently across simulation partitions unless
+  /// requires_serial_execution() returns true.
   virtual void onAmdgpuReadSgpr(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/) {}
 
   /// Called when all waves in a workgroup have reached s_barrier.
+  /// Serialized by ExecutionPluginGroup.
   virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
 
 private:
