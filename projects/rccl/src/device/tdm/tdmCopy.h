@@ -38,6 +38,13 @@ THE SOFTWARE.
 /// - Participation: block-collective (all warps) vs. tdmCopyByTeam() (a
 ///   contiguous warp range, leaving the other warps free to compute).
 ///
+/// \par One-way transfers
+/// asyncLoadToLDS() / asyncStoreFromLDS() move a single leg (global -> LDS or
+/// LDS -> global) for one warp, for callers that want to keep or produce the
+/// data in LDS rather than round-trip it. They mirror the identically named
+/// primitives in asyncCopy.h, which implement the same interface on top of the
+/// async-to/from-LDS builtins instead of the tensor data mover.
+///
 /// \par Availability
 /// TDM is a hardware feature present on some architectures only. On a target
 /// without it, every entry point is `= delete`d: including the header is always
@@ -54,6 +61,7 @@ THE SOFTWARE.
 #include <stddef.h>
 
 #include "cachePolicy.h"   // shared CachePolicy encoding (same as asyncCopy.h)
+#include "syncPolicy.h"    // shared SyncPolicy encoding  (same as asyncCopy.h)
 
 // ============================================================================
 //  AVAILABILITY
@@ -253,6 +261,51 @@ __device__ TDM_API void tdmCopyAsyncByTeam(void* dst, const void* src, size_t si
 ///       __threadfence_block() so those ordinary global stores are observed.
 __device__ TDM_API void tdmWait() TDM_DELETED;
 
+// ============================================================================
+//  ONE-WAY GLOBAL <-> LDS TRANSFERS
+// ----------------------------------------------------------------------------
+// The copies above stage HBM->LDS->HBM and hand the LDS window back untouched.
+// The two entry points below expose a single leg of that journey, so the caller
+// can keep (or produce) the data in LDS. They carry the SAME names, signatures
+// and semantics as the global-scope asyncLoadToLDS()/asyncStoreFromLDS() in
+// asyncCopy.h -- these are simply the tensor-data-mover implementation of the
+// same primitive, so the two are drop-in replacements for one another.
+// ============================================================================
+
+/// \brief Warp-level transfer of \p sizeInBytes from global memory into LDS.
+///
+/// The ENTIRE warp calls this with identical arguments; the descriptor lives in
+/// SGPRs, so the pointers and size must be wave-uniform (no per-lane offsets).
+///
+/// \param globalSrc   Source in global memory (HBM).
+/// \param ldsDst      Destination in LDS (shared memory).
+/// \param sizeInBytes Number of bytes to transfer.
+///
+/// \tparam sp      SyncPolicy::Sync drains before returning; SyncPolicy::Async
+///                 leaves the transfer in flight to overlap with the caller's
+///                 next work, to be completed with tdmWait().
+/// \tparam cp      Compile-time cache policy baked into the tensor load as its
+///                 immediate cpol operand; see cachePolicy.h.
+/// \tparam Aligned Pass true only when \p globalSrc and \p ldsDst are both known
+///                 to be 128-byte aligned; this compiles out the head peel.
+///
+/// \warning \p globalSrc and \p ldsDst must share the same sub-128B alignment
+///          (the head is peeled against the global pointer and the same offset
+///          is applied to the LDS side). RCCL's LDS staging buffers are
+///          128-byte aligned, which satisfies this for an aligned source.
+template<SyncPolicy sp = DEFAULT_SYNC_POLICY, CachePolicy cp = DEFAULT_CACHE_POLICY,
+         bool Aligned = false>
+__device__ TDM_API void asyncLoadToLDS(const uint8_t* globalSrc, uint8_t* ldsDst,
+                                       size_t sizeInBytes) TDM_DELETED;
+
+/// \brief Warp-level transfer of \p sizeInBytes from LDS out to global memory.
+/// \see asyncLoadToLDS for the calling convention, template parameters and the
+///      matching-alignment requirement (peeled against \p globalDst here).
+template<SyncPolicy sp = DEFAULT_SYNC_POLICY, CachePolicy cp = DEFAULT_CACHE_POLICY,
+         bool Aligned = false>
+__device__ TDM_API void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* globalDst,
+                                          size_t sizeInBytes) TDM_DELETED;
+
 } // namespace tdm
 
 #undef TDM_API
@@ -410,6 +463,86 @@ __device__ inline void issueRow1d(uint64_t src, uint32_t lds, uint64_t dst,
     store<cp>(g0s, g1);  waitTensor0();       // WAR: drain store before window reuse
 }
 
+// ---- one-way global <-> LDS transfer of a byte range, by ONE warp -----------
+// Direction of a single leg: the first pointer is always the global-memory side
+// and the second the LDS side, which keeps the tile helpers below symmetric.
+enum struct LdsDir { Load, Store };
+
+constexpr uint32_t TILE_DIM_MAX = 0xFFFFu;   // tile_dim0/tile_dim1 are 16-bit fields
+constexpr uint32_t LINE         = 128;       // alignment the head peel targets
+
+template<LdsDir DIR, CachePolicy cp>
+__device__ inline void ldsIssue(const gfx1250_TDM_GROUP0& g0,
+                                const gfx1250_TDM_GROUP1& g1) {
+    if constexpr (DIR == LdsDir::Load) load<cp>(g0, g1);
+    else                               store<cp>(g0, g1);
+}
+
+// One 1-D tile at BYTE granularity, for the ragged head/tail. Exact length, so
+// it works at any alignment; `nbytes` must be <= TILE_DIM_MAX.
+template<LdsDir DIR, CachePolicy cp>
+__device__ inline void ldsTileBytes(uint64_t global, uint32_t lds, uint32_t nbytes) {
+    gfx1250_TDM_GROUP1 g1;
+    g1.dataSize(DS1);
+    g1.tileDim0(nbytes);   g1.tileDim1(1);
+    g1.tensorDim0(nbytes); g1.tensorDim1(1);
+    g1.tensorDim0Stride(nbytes);
+    gfx1250_TDM_GROUP0 g0(lds, global);
+    ldsIssue<DIR, cp>(g0, g1);
+}
+
+// One 2-D tile of `rows` back-to-back 256B rows -- the bulk shape, chosen for
+// bandwidth exactly as in issueRows(). `rows` must be <= TILE_DIM_MAX.
+template<LdsDir DIR, CachePolicy cp>
+__device__ inline void ldsTileRows(uint64_t global, uint32_t lds, uint32_t rows) {
+    gfx1250_TDM_GROUP1 g1;
+    g1.dataSize(DS4);
+    g1.tileDim0(TD0);   g1.tileDim1(rows);
+    g1.tensorDim0(TD0); g1.tensorDim1(rows);
+    g1.tensorDim0Stride(TD0);                // rows back-to-back (contiguous)
+    gfx1250_TDM_GROUP0 g0(lds, global);
+    ldsIssue<DIR, cp>(g0, g1);
+}
+
+// Split [0, sizeInBytes) into [head][ aligned 256B rows ][tail], mirroring the
+// layout detail::issue() uses for the round trip. The pieces target disjoint LDS
+// and global ranges, so unlike the round trip they need NO waits between them --
+// the whole range is issued back-to-back and the caller drains once (or not at
+// all, under SyncPolicy::Async).
+//
+// `head` brings the GLOBAL pointer up to a 128B boundary and the same offset is
+// applied to the LDS side, so the bulk's 4-byte elements stay naturally aligned
+// only when the two pointers start with the same sub-128B offset -- the contract
+// documented on the public entry points. `Aligned` asserts that offset is zero
+// for both and compiles the peel out entirely.
+template<LdsDir DIR, CachePolicy cp, bool Aligned>
+__device__ inline void warpLdsCopy(uint64_t global, uint32_t lds, size_t sizeInBytes) {
+    if (sizeInBytes == 0) return;            // a zero-extent tile is not a valid descriptor
+
+    size_t off = 0;
+    if constexpr (!Aligned) {
+        uint32_t head = static_cast<uint32_t>((LINE - (global & (LINE - 1))) & (LINE - 1));
+        if (head > sizeInBytes) head = static_cast<uint32_t>(sizeInBytes);
+        if (head) {
+            ldsTileBytes<DIR, cp>(global, lds, head);
+            off = head;
+        }
+    }
+
+    // Bulk: whole 256B rows, split across as many tiles as the 16-bit row count needs.
+    size_t rows = (sizeInBytes - off) / WIDTH;
+    while (rows) {
+        const uint32_t chunk = rows < TILE_DIM_MAX ? static_cast<uint32_t>(rows) : TILE_DIM_MAX;
+        ldsTileRows<DIR, cp>(global + off, lds + static_cast<uint32_t>(off), chunk);
+        off  += static_cast<size_t>(chunk) * WIDTH;
+        rows -= chunk;
+    }
+
+    // Tail: the < 256B sub-row remainder, again at byte granularity.
+    const uint32_t tail = static_cast<uint32_t>(sizeInBytes - off);
+    if (tail) ldsTileBytes<DIR, cp>(global + off, lds + static_cast<uint32_t>(off), tail);
+}
+
 // ---- core: partition + issue the whole copy for the team [start, stop). -----
 // NO final wait. Work + LDS partition by rank within the team (warpId - start),
 // so each team indexes its own `ldsBuffer` from zero. Safe to call collectively
@@ -526,6 +659,32 @@ __device__ inline void tdmCopyByTeam(void* dst, const void* src, size_t sizeByte
                                      uint32_t startWarpId, uint32_t stopWarpId) {
     detail::issue<cp>(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, startWarpId, stopWarpId);
     tdmWait();   // no-op on any warp that issued nothing / is off-team
+}
+
+// The TDM descriptor holds the LDS side as a 32-bit address. A generic pointer
+// into shared memory carries the LDS offset in its low 32 bits (the aperture
+// occupies the high half), so the truncation below is the same conversion the
+// copy path uses for its ldsBuffer argument.
+namespace detail {
+__device__ inline uint32_t ldsAddrOf(const void* p) {
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p));
+}
+}  // namespace detail
+
+template<SyncPolicy sp, CachePolicy cp, bool Aligned>
+__device__ inline void asyncLoadToLDS(const uint8_t* globalSrc, uint8_t* ldsDst,
+                                      size_t sizeInBytes) {
+    detail::warpLdsCopy<detail::LdsDir::Load, cp, Aligned>(
+        reinterpret_cast<uint64_t>(globalSrc), detail::ldsAddrOf(ldsDst), sizeInBytes);
+    if constexpr (sp == SyncPolicy::Sync) tdmWait();
+}
+
+template<SyncPolicy sp, CachePolicy cp, bool Aligned>
+__device__ inline void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* globalDst,
+                                         size_t sizeInBytes) {
+    detail::warpLdsCopy<detail::LdsDir::Store, cp, Aligned>(
+        reinterpret_cast<uint64_t>(globalDst), detail::ldsAddrOf(ldsSrc), sizeInBytes);
+    if constexpr (sp == SyncPolicy::Sync) tdmWait();
 }
 
 #endif // TDM_SUPPORTED

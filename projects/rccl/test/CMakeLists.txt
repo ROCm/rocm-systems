@@ -243,6 +243,7 @@ if(BUILD_TESTS)
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestAsyncCopy.cpp
+      device/TestLdsTransfer.cpp
       device/GinDeviceTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp

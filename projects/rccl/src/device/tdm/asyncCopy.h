@@ -25,13 +25,7 @@ THE SOFTWARE.
 
 #include "tdm.h"
 #include "cachePolicy.h"
-
-enum struct SyncPolicy : uint32_t {
-    Async,
-    Sync,
-};
-
-constexpr SyncPolicy DEFAULT_SYNC_POLICY = SyncPolicy::Async;
+#include "syncPolicy.h"   // shared SyncPolicy encoding (same as tdmCopy.h)
 
 // Used for setting TDM descriptor fields and arguments to the async load/store builtins
 using __rccl_int32x2 = int32_t __attribute__((__vector_size__(8)));
