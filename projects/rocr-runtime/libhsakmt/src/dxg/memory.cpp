@@ -793,12 +793,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDeregisterMemory(void *MemoryAddress) {
       delete gpu_mem;
       return HSAKMT_STATUS_SUCCESS;
     }
-    if (it->second.userptr) {
-      allocation_map_->erase((void*)it->second.gpu_addr);
-      allocation_map_->erase(it);
-      delete gpu_mem;
-      return HSAKMT_STATUS_SUCCESS;
-    }
   }
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -809,15 +803,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
 
   HSAuint64 NumberOfNodes = 1;
   HSAuint32 NodeArray[] = {dxg_runtime->default_node};
-  HsaMemMapFlags MemMapFlags;
-  MemMapFlags.Value = 0;
+  HsaMemFlags MemFlags;
+  MemFlags.Value = 0;
+  MemFlags.ui32.CoarseGrain = 1;
 
   return hsaKmtMapMemoryToGPUNodes(MemoryAddress, MemorySizeInBytes, AlternateVAGPU,
-    MemMapFlags, NumberOfNodes, NodeArray);
+    MemFlags, NumberOfNodes, NodeArray);
 }
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
     void *MemoryAddress, HSAuint64 MemorySizeInBytes, HSAuint64 *AlternateVAGPU,
-    HsaMemMapFlags MemMapFlags, HSAuint64 NumberOfNodes, HSAuint32 *NodeArray) {
+    HsaMemFlags MemFlags, HSAuint64 NumberOfNodes, HSAuint32 *NodeArray) {
   CHECK_DXG_OPEN();
 
   if (!MemoryAddress || !AlternateVAGPU) {
@@ -875,15 +871,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
       }
     }
 
-    // userptr mem
-    it = FindAllocation(MemoryAddress, aligned_size);
-    if (it != nullptr) {
-      if (it->userptr && it->size >= MemorySizeInBytes) {
-        *AlternateVAGPU =
-            (uintptr_t)it->gpu_addr +
-            ((uintptr_t)MemoryAddress - (uintptr_t)it->cpu_addr);
-        return HSAKMT_STATUS_SUCCESS;
-      }
+    // Reuse the user-pointer mapping already registered for this address.
+    auto *allocation = FindAllocation(MemoryAddress, aligned_size);
+    if (allocation != nullptr && allocation->userptr) {
+      wsl::thunk::GpuMemory::Convert(allocation->handle)->IncMappingCount();
+      *AlternateVAGPU = (uintptr_t)allocation->gpu_addr +
+          ((uintptr_t)MemoryAddress - (uintptr_t)allocation->cpu_addr);
+      return HSAKMT_STATUS_SUCCESS;
     }
   }
 
@@ -899,7 +893,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
   create_info.domain = Wkmi::kUserMemory;
   create_info.size = aligned_size;
   create_info.user_ptr = aligned_ptr;
-
+  // create_info.mem_flags = 0 means coarse grain by default
+  if (!MemFlags.ui32.CoarseGrain) {
+    create_info.mem_flags = Wkmi::kFineGrain;
+  }
   auto code = dev->CreateGpuMemory(create_info, &gpu_mem);
   if (code == ErrorCode::Success) {
     addr = gpu_mem->GpuAddress();
@@ -962,6 +959,15 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
         return HSAKMT_STATUS_ERROR;
       gpu_mem->Evict();
 
+      return HSAKMT_STATUS_SUCCESS;
+    }
+
+    if (it->second.userptr) {
+      if (gpu_mem->DecMappingCount() == 0) {
+        allocation_map_->erase((void*)it->second.gpu_addr);
+        allocation_map_->erase(it);
+        delete gpu_mem;
+      }
       return HSAKMT_STATUS_SUCCESS;
     }
   }
@@ -1287,7 +1293,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandl
   return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtGetAmdGPUDeviceFd(HsaAMDGPUDeviceHandle DeviceHandle, HSAint32* fd) 
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetAmdGPUDeviceFd(HsaAMDGPUDeviceHandle DeviceHandle, HSAint32* fd)
 {
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }

@@ -45,7 +45,7 @@ class AMDSmiAINICDevice : public AMDSmiProcessor {
     amdsmi_nic_bus_info_t bus;
     amdsmi_nic_driver_info_t driver;
     amdsmi_nic_numa_info_t numa;
-    amdsmi_nic_fw_t versions;
+    amdsmi_nic_fw_entry_t versions;
     amdsmi_nic_port_info_t port;
     amdsmi_nic_rdma_devices_info_t rdma_dev;
   };
