@@ -43,26 +43,27 @@ env:
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/emulation/rocjitsu
   ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
   ROCJITSU_STAGE_DIR: ${{ github.workspace }}/stage
+  ZSTD_SHIM_DIR: ${{ github.workspace }}/cmake-shims/zstd
+  # Keep in sync with the job's container image; Actions has no YAML anchors.
+  BUILD_IMAGE: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:a382085df3ba2419b58aa9051350883a0d0b732a4bc0a4ef60458f8161bb08c6
   BUILD_TYPE: ${{ inputs.build_type || 'Release' }}
   RETENTION_DAYS: ${{ inputs.retention_days || '30' }}
 
 jobs:
   build:
     name: build sanitizer artifacts
-    # Ubuntu 24.04 supplies CMake 3.28 and Clang 18, which satisfy the
-    # CMake 3.22+ / C++20 requirements in docs/building.md.
-    runs-on: ubuntu-24.04
+    # Build in the same manylinux image the rest of the ROCm builds use. It is
+    # AlmaLinux 8 with glibc 2.28 and gcc-toolset-13, which satisfies the
+    # CMake 3.22+ / GCC 13+ requirements in docs/building.md and gives the
+    # published binaries a far older glibc floor than a hosted Ubuntu runner.
+    runs-on: azure-linux-scale-rocm
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:a382085df3ba2419b58aa9051350883a0d0b732a4bc0a4ef60458f8161bb08c6 # 2026-06-11
     steps:
       - name: Install build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang \
-            cmake \
-            jq \
-            libzstd-dev \
-            ninja-build \
-            zlib1g-dev
+          # The image already carries CMake, Ninja, and gcc-toolset-13.
+          dnf install -y -q zlib-devel libzstd-devel jq
 
       - name: Checkout rocm-systems
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -73,24 +74,53 @@ jobs:
             emulation/rocjitsu
             .github
 
+      - name: Provide a zstd package config
+        run: |
+          # RHEL-family libzstd-devel ships the library and headers but none of
+          # upstream's CMake package files, so the project's find_package(zstd)
+          # has nothing to consume. Point zstd_DIR at a shim that adopts the
+          # system library; the project's CMake stays untouched.
+          mkdir -p "${ZSTD_SHIM_DIR}"
+          cat > "${ZSTD_SHIM_DIR}/zstdConfig.cmake" <<'EOF'
+          include(FindPackageHandleStandardArgs)
+          find_path(ZSTD_INCLUDE_DIR NAMES zstd.h)
+          find_library(ZSTD_LIBRARY NAMES zstd)
+          find_package_handle_standard_args(
+              zstd
+              REQUIRED_VARS ZSTD_LIBRARY ZSTD_INCLUDE_DIR
+          )
+          if(zstd_FOUND AND NOT TARGET zstd::libzstd_shared)
+              add_library(zstd::libzstd_shared UNKNOWN IMPORTED)
+              set_target_properties(
+                  zstd::libzstd_shared
+                  PROPERTIES
+                      IMPORTED_LOCATION "${ZSTD_LIBRARY}"
+                      INTERFACE_INCLUDE_DIRECTORIES "${ZSTD_INCLUDE_DIR}"
+              )
+          endif()
+          EOF
+
       - name: Configure
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
         run: |
           # Link libstdc++ statically so the published binaries run on hosts
-          # with an older toolchain than the runner, matching the approach in
+          # with an older toolchain than the image, matching the approach in
           # scripts/rocjitsu-docker-build.sh. Symbols stay hidden: both targets
           # already link with --exclude-libs,ALL.
+          #
+          # Keep FetchContent out of the source tree so the checkout stays clean.
           cmake -S . -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-            -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_CXX_COMPILER=clang++ \
+            -DFETCHCONTENT_BASE_DIR="${RUNNER_TEMP}/deps" \
+            -Dzstd_DIR="${ZSTD_SHIM_DIR}" \
             -DCMAKE_SHARED_LINKER_FLAGS="-static-libstdc++" \
             -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++" \
             -DBUILD_TESTING=OFF
 
       - name: Build
         run: |
-          # Halve the worker count to stay clear of the runner's memory ceiling.
+          # Halve the worker count to avoid OOM and excessive system load on the
+          # shared scale set, matching rocjitsu-corpus-tests.yml.
           cmake --build "${ROCJITSU_BUILD_DIR}" \
             --target rocjitsu_dbi_hooks rj_waitcheck \
             -j "$(( ($(nproc) + 1) / 2 ))"
@@ -110,8 +140,20 @@ jobs:
 
           # Record enough provenance to tie a downloaded bundle back to a commit
           # and to the toolchain baseline the binaries were linked against.
-          GLIBC_VERSION="$(ldd --version | head -1 | awk '{print $NF}')"
-          COMPILER_VERSION="$(clang++ --version | head -1)"
+          #
+          # Report the highest versioned glibc symbol the binaries actually
+          # reference rather than the image's own glibc: the build image is
+          # newer than what the artifacts require, and the difference decides
+          # whether a given host can run them.
+          GLIBC_VERSION="$(
+            objdump -T "${HOOK}" "${WAITCHECK}" \
+              | grep -o 'GLIBC_[0-9.]*' \
+              | sed 's/^GLIBC_//' \
+              | sort -V \
+              | tail -1
+          )"
+          IMAGE_GLIBC="$(ldd --version | head -1 | awk '{print $NF}')"
+          COMPILER_VERSION="$(g++ --version | head -1)"
           jq -n \
             --arg repository "${GITHUB_REPOSITORY}" \
             --arg ref "${GITHUB_REF_NAME}" \
@@ -122,7 +164,8 @@ jobs:
             --arg build_type "${BUILD_TYPE}" \
             --arg compiler "${COMPILER_VERSION}" \
             --arg glibc "${GLIBC_VERSION}" \
-            --arg runner "${ImageOS:-ubuntu24}" \
+            --arg image_glibc "${IMAGE_GLIBC}" \
+            --arg image "${BUILD_IMAGE}" \
             '{
               repository: $repository,
               branch: $ref,
@@ -133,7 +176,8 @@ jobs:
               build_type: $build_type,
               compiler: $compiler,
               minimum_glibc: $glibc,
-              runner_image: $runner,
+              build_image: $image,
+              build_image_glibc: $image_glibc,
               run_url: "https://github.com/\($repository)/actions/runs/\($run_id)"
             }' > "${ROCJITSU_STAGE_DIR}/MANIFEST.json"
 

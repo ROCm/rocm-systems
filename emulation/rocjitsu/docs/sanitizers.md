@@ -94,10 +94,12 @@ Point the steps below at those paths instead of a local `build/` tree:
 export ROCJITSU_SANITIZER_HOOK="$PWD/rocjitsu-sanitizers/lib/librocjitsu_dbi_hooks.so"
 ```
 
-The binaries are built on Ubuntu 24.04 with `libstdc++` linked statically, so
-they only require a host `glibc` at least as new as the `minimum_glibc` value
-recorded in `MANIFEST.json`. Artifacts are retained for 30 days; build from
-source for anything older.
+The binaries are built in the same `therock_build_manylinux_x86_64` image the
+rest of the ROCm builds use (AlmaLinux 8, glibc 2.28) with `libstdc++` linked
+statically, so they carry no `libstdc++` dependency and run against any host
+`glibc` at least as new as the `minimum_glibc` value recorded in
+`MANIFEST.json`. Artifacts are retained for 30 days; build from source for
+anything older.
 
 ## Run waitcheck and ConSan together
 
