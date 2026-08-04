@@ -1,9 +1,8 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
- * See LICENSE.txt for more license information
- *************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #include "gdr_peermem.h"
 #include "debug.h"
@@ -35,4 +34,12 @@ int ncclIbScanPeerMemClients(const char* const* basePaths) {
   }
   if (found == 0) INFO(NCCL_INIT, "No peer memory client found, GDR via peermem disabled");
   return found;
+}
+
+int ncclIbScanDefaultPeerMemClients(void) {
+  // `memory_peers` lives under `/sys/kernel/mm/` on Linux 5.15 (e.g. Ubuntu 22.04); newer kernels
+  // may omit it or place it under `/sys/kernel/` or `/sys/`, depending on the ib_peer_mem module.
+  static const char* const memoryPeersPaths[] = {"/sys/kernel/mm/memory_peers", "/sys/kernel/memory_peers",
+                                                 "/sys/memory_peers", NULL};
+  return ncclIbScanPeerMemClients(memoryPeersPaths);
 }

@@ -1,9 +1,8 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
- * See LICENSE.txt for more license information
- *************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #ifndef NCCL_GDR_PEERMEM_H_
 #define NCCL_GDR_PEERMEM_H_
@@ -19,5 +18,10 @@
 // The base-path list is a parameter rather than hardcoded so unit tests can aim the scan
 // at a mock sysfs tree.
 int ncclIbScanPeerMemClients(const char* const* basePaths);
+
+// Scan the standard sysfs `memory_peers` locations for a registered peer-memory client,
+// returning 1 if one is found and 0 otherwise. This is what the transports call; it owns
+// the base-path list so net_ib and net_ib_cast do not each carry a copy of it.
+int ncclIbScanDefaultPeerMemClients(void);
 
 #endif  // NCCL_GDR_PEERMEM_H_

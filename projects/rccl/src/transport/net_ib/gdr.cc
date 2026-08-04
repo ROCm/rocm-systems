@@ -33,12 +33,7 @@ static void ibGdrSupportInitOnce() {
   }
 
   if (ncclIbGdrModuleLoaded == 0) {
-    // `memory_peers` lives under `/sys/kernel/mm/` on Linux 5.15 (e.g. Ubuntu 22.04); newer kernels
-    // may omit it or place it under `/sys/kernel/` or `/sys/`, depending on the ib_peer_mem module.
-    const char* memory_peers_paths[] = {"/sys/kernel/mm/memory_peers", "/sys/kernel/memory_peers",
-                                        "/sys/memory_peers", NULL};
-
-    if (ncclIbScanPeerMemClients(memory_peers_paths)) ncclIbGdrModuleLoaded = 1;
+    if (ncclIbScanDefaultPeerMemClients()) ncclIbGdrModuleLoaded = 1;
 
     char strValue[MAX_STR_LEN];
     (void)ncclTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue);
