@@ -30,7 +30,10 @@
 
 #include <fmt/core.h>
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <thread>
 #include <utility>
 
 namespace rocprofiler
@@ -270,6 +273,84 @@ begin_close_signal_less_queue(uint64_t queue_token)
     if(!_slot) return;
     // Hub lock is taken and released inside; the caller fences gate_lock next.
     signal_less_hub().mark_slot_closing(*_slot);
+}
+
+// Per-queue ceiling on the close drain. Measurement on the reported repro: a
+// 300 ms post-drain delay took loss from ~46% to ~0, so the natural
+// kernel-completion + copy + pair latency for those workloads sits under that.
+// 250 ms covers it with the poll granularity to spare while staying comfortably
+// sub-second, so a single queue destroy never feels hung. Tunable because the
+// right value is workload-dependent -- a long-running kernel needs more, a
+// latency-sensitive teardown wants less.
+uint64_t
+close_drain_budget_ns()
+{
+    static const uint64_t _v = []() {
+        auto _ms = common::get_env("ROCPROFILER_KFD_DISPATCH_LOG_CLOSE_DRAIN_MS", 250);
+        if(_ms < 0) _ms = 0;
+        return static_cast<uint64_t>(_ms) * 1'000'000ull;
+    }();
+    return _v;
+}
+
+// Process-wide ceiling shared by every close, so N queues closing at teardown
+// cannot multiply the per-queue budget into minutes. Comparable to the 5 s
+// Queue::sync() timeout already on the destroy path, so it does not dominate.
+std::atomic<uint64_t>&
+close_drain_remaining_ns()
+{
+    static auto _v = std::atomic<uint64_t>{2'000'000'000ull};  // 2 s total
+    return _v;
+}
+
+size_t
+drain_close_signal_less_queue(uint64_t queue_token)
+{
+    if(g_child_stale.load(std::memory_order_acquire)) return 0;
+    if(!signal_less_feature_enabled() || !signal_less_fully_wired()) return 0;
+
+    auto _slot = owner_registry().slot_of(queue_token);
+    if(!_slot) return 0;
+
+    auto& _hub     = signal_less_hub();
+    auto  _pending = _hub.pending_for_slot(*_slot);
+    if(_pending == 0) return 0;
+
+    // Spend the smaller of this queue's budget and what the process has left.
+    const uint64_t _remaining = close_drain_remaining_ns().load(std::memory_order_relaxed);
+    const uint64_t _budget    = std::min(close_drain_budget_ns(), _remaining);
+    if(_budget == 0) return _pending;
+
+    // No lock is held across this wait: pending_for_slot() takes the hub lock and
+    // releases it on every poll, and the caller already released gate_lock. The
+    // reader/processor reduce the count concurrently as they pair the records.
+    const uint64_t _start    = steady_now_ns();
+    const uint64_t _deadline = _start + _budget;
+    while(_pending > 0 && steady_now_ns() < _deadline)
+    {
+        // The records may still be sitting in the ring; make the reader copy them
+        // now rather than at its next poll.
+        nudge_reader();
+        std::this_thread::sleep_for(std::chrono::microseconds{500});
+        _pending = _hub.pending_for_slot(*_slot);
+    }
+
+    const uint64_t _spent = steady_now_ns() - _start;
+    // Saturating: never wrap the shared budget below zero.
+    auto& _pool = close_drain_remaining_ns();
+    auto  _have = _pool.load(std::memory_order_relaxed);
+    while(!_pool.compare_exchange_weak(_have,
+                                       _spent >= _have ? 0 : _have - _spent,
+                                       std::memory_order_relaxed))
+    {}
+
+    ROCP_INFO << fmt::format(
+        "KFD dispatch-log: close drain for doorbell slot {} waited {} us, {} dispatch(es) still "
+        "outstanding",
+        *_slot,
+        _spent / 1000,
+        _pending);
+    return _pending;
 }
 
 void

@@ -434,9 +434,18 @@ QueueController::destroy_queue(hsa_queue_t* id)
     // The enqueue path holds gate_lock while taking the hub lock, so this path
     // must never hold the hub lock while waiting on gate_lock; it holds at most
     // one of the two at any instant, so no cycle exists.
+    // Between the fence and the strand, give the records that are still in flight
+    // a bounded chance to land. Queue::sync() below does NOT cover this: it waits
+    // on _active_kernels, which only the legacy path increments, so for an inline
+    // signal-less dispatch it returns immediately without waiting for either the
+    // kernel or its firmware record. Without this wait a destroy discards every
+    // dispatch whose EOP had not been paired yet.
+    //
+    // Only what remains after the deadline is stranded, exactly as before.
     const auto _queue_token = queue->get_id().handle;
     kfd::begin_close_signal_less_queue(_queue_token);
     queue_interposition::fence_queue_gate(id);
+    kfd::drain_close_signal_less_queue(_queue_token);
     kfd::finish_close_signal_less_queue(_queue_token);
 
     // KFD dispatch-log: retire this queue's doorbell binding (bumps generation

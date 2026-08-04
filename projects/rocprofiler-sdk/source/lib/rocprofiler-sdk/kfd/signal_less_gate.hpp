@@ -182,6 +182,13 @@ signal_less_abandon_in_child();
 bool
 signal_less_child_stale();
 
+// Bounded wait for the reader to pair the firmware records still outstanding on a
+// closing queue's doorbell slot, so a destroy does not discard dispatches whose
+// EOP is merely in flight. Called between begin_ and finish_close, holding NO
+// lock. Returns how many were still pending when it gave up.
+size_t
+drain_close_signal_less_queue(uint64_t queue_token);
+
 // Whether HW profiling should be enabled lazily (only on a queue's first
 // SIGNAL-path batch) instead of at queue creation.
 //

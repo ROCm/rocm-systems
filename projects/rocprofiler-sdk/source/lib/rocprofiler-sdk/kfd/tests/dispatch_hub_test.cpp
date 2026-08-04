@@ -1539,3 +1539,111 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
     // Every payload ever registered ended with exactly one owner that released it.
     EXPECT_EQ(tracked_payload::live.load(), payloads_before);
 }
+
+// ---------------------------------------------------------------------------
+// Drain-before-strand on queue close
+// ---------------------------------------------------------------------------
+
+// The close path polls this to decide whether anything is still in flight.
+TEST(DispatchHub, pending_for_slot_counts_only_that_slots_live_entries)
+{
+    auto hub = hub_t{};
+    EXPECT_EQ(hub.pending_for_slot(40), 0u);
+
+    ASSERT_TRUE(register_one(hub, key_of(40, 1)));
+    ASSERT_TRUE(register_one(hub, key_of(40, 2)));
+    ASSERT_TRUE(register_one(hub, key_of(41, 1)));
+    EXPECT_EQ(hub.pending_for_slot(40), 2u);
+    EXPECT_EQ(hub.pending_for_slot(41), 1u);
+
+    // A proven entry leaves the hub, so it stops counting as outstanding -- which
+    // is what lets the close drain observe progress and finish early.
+    ASSERT_TRUE(hub.prove_eop(key_of(40, 1), 5, true).has_value());
+    EXPECT_EQ(hub.pending_for_slot(40), 1u);
+
+    ASSERT_TRUE(hub.prove_eop(key_of(40, 2), 5, true).has_value());
+    EXPECT_EQ(hub.pending_for_slot(40), 0u);
+    EXPECT_EQ(hub.pending_for_slot(41), 1u);
+}
+
+// A close whose records all land during the drain strands NOTHING: every
+// dispatch completed normally and its correlation id retires through the
+// finalizer, so the P1 leak stays empty.
+TEST(DispatchHub, a_clean_drain_strands_nothing_and_ledgers_nothing)
+{
+    auto hub = hub_t{};
+    ASSERT_TRUE(register_one(hub, key_of(40, 1), /*corr_id=*/900));
+    ASSERT_TRUE(register_one(hub, key_of(40, 2), /*corr_id=*/900));
+
+    hub.mark_slot_closing(40);
+
+    // The reader pairs both while the close is waiting.
+    EXPECT_TRUE(hub.prove_eop(key_of(40, 1), 5, true).has_value());
+    EXPECT_TRUE(hub.prove_eop(key_of(40, 2), 6, true).has_value());
+    EXPECT_EQ(hub.pending_for_slot(40), 0u);
+
+    // The deadline expires with nothing left, so the strand is a no-op.
+    auto stranded = hub.quarantine_slot(40);
+    EXPECT_TRUE(stranded.empty());
+    EXPECT_EQ(hub.tombstones(), 0u);
+    EXPECT_FALSE(hub.is_ledgered(900)) << "a fully drained close must not leak a correlation id";
+}
+
+// A close whose records never arrive strands exactly the remainder after the
+// deadline -- the pre-existing policy, unchanged -- and tombstones those keys.
+TEST(DispatchHub, an_incomplete_drain_strands_only_the_remainder)
+{
+    auto hub = hub_t{};
+    ASSERT_TRUE(register_one(hub, key_of(40, 1), /*corr_id=*/901));
+    ASSERT_TRUE(register_one(hub, key_of(40, 2), /*corr_id=*/902));
+    ASSERT_TRUE(register_one(hub, key_of(40, 3), /*corr_id=*/903));
+
+    hub.mark_slot_closing(40);
+
+    // Only one record makes it before the deadline.
+    EXPECT_TRUE(hub.prove_eop(key_of(40, 2), 5, true).has_value());
+    EXPECT_EQ(hub.pending_for_slot(40), 2u);
+
+    auto stranded = hub.quarantine_slot(40);
+    EXPECT_EQ(stranded.size(), 2u);
+
+    // The one that paired retired normally; the two that did not are ledgered and
+    // tombstoned, so a recurring key cannot reactivate them (U11).
+    EXPECT_FALSE(hub.is_ledgered(902));
+    EXPECT_TRUE(hub.is_ledgered(901));
+    EXPECT_TRUE(hub.is_ledgered(903));
+    EXPECT_EQ(hub.tombstones(), 2u);
+    EXPECT_FALSE(hub.can_register_batch({key_of(40, 1)}));
+    EXPECT_FALSE(hub.can_register_batch({key_of(40, 3)}));
+}
+
+// The drain observes progress from another thread, which is how the real wait
+// terminates early: the reader pairs records while the closing thread polls.
+TEST(DispatchHub, pending_for_slot_observes_concurrent_pairing)
+{
+    constexpr uint32_t kCount = 128;
+
+    auto hub = hub_t{};
+    for(uint32_t i = 0; i < kCount; ++i)
+    {
+        ASSERT_TRUE(register_one(hub, key_of(40, i)));
+    }
+    EXPECT_EQ(hub.pending_for_slot(40), kCount);
+
+    auto reader = std::thread{[&hub]() {
+        for(uint32_t i = 0; i < kCount; ++i)
+            hub.prove_eop(key_of(40, i), 7, true);
+    }};
+
+    // The closing thread polls exactly as drain_close_signal_less_queue does.
+    size_t pending = kCount;
+    for(int spin = 0; spin < 100000 && pending > 0; ++spin)
+    {
+        pending = hub.pending_for_slot(40);
+    }
+    reader.join();
+
+    EXPECT_EQ(hub.pending_for_slot(40), 0u);
+    auto stranded = hub.quarantine_slot(40);
+    EXPECT_TRUE(stranded.empty()) << "a drain that observed completion must strand nothing";
+}

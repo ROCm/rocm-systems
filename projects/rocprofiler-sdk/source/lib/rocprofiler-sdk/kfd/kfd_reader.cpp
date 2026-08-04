@@ -959,6 +959,16 @@ wait_for_reader_drain_barrier(uint64_t timeout_ns)
 }
 
 void
+nudge_reader()
+{
+    auto& st = state();
+    if(!st.running || st.wake_fd < 0) return;
+    uint64_t one = 1;
+    auto     _   = ::write(st.wake_fd, &one, sizeof(one));
+    (void) _;
+}
+
+void
 request_reader_slot_purge(uint32_t doorbell_slot)
 {
     // Results are behind their own lock, so they can go now; retained starts are

@@ -72,6 +72,12 @@ ensure_reader_session(uint32_t gpu_id);
 void
 request_reader_slot_purge(uint32_t doorbell_slot);
 
+// Break the reader out of its poll so it copies the ring now rather than up to a
+// poll interval from now. Used by the close drain, which is waiting on records
+// the reader has not picked up yet. Safe from any thread; a no-op if no reader.
+void
+nudge_reader();
+
 // Block until the reader has completed a full drain cycle that began after this
 // call, so every firmware record it already held has been turned into a handoff.
 // This is the (b) fence of a hub-aware sync.

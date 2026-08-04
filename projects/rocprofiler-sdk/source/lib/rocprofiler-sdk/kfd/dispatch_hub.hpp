@@ -387,6 +387,23 @@ public:
         return (it == m_outstanding.end()) ? 0 : it->second;
     }
 
+    // Dispatches still awaiting a firmware EOP on this doorbell slot -- exactly
+    // what quarantine_slot() would strand. The close path polls this so it can
+    // wait for records that are still in flight instead of discarding them.
+    size_t pending_for_slot(uint32_t doorbell_slot) const
+    {
+        if(m_abandoned.load(std::memory_order_acquire)) return 0;
+        auto   lk      = std::lock_guard<std::mutex>{m_mu};
+        size_t pending = 0;
+        for(const auto& itr : m_entries)
+        {
+            if(itr.first.doorbell_off == doorbell_slot &&
+               itr.second.state == entry_state::pending)
+                ++pending;
+        }
+        return pending;
+    }
+
     size_t live_entries() const
     {
         if(m_abandoned.load(std::memory_order_acquire)) return 0;
