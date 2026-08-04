@@ -435,8 +435,8 @@ def test_rocprofv3_live_attach_uses_sync_output():
 def test_sdk_pc_sampling_options(
     tmp_path, native_tool_path, method, expected_unit, expected_ld_preload
 ):
-    """sdk PC sampling options set the PC sampling env, json/ps_file output, and
-    append the native tool (when given) to the upstream LD_PRELOAD."""
+    """sdk PC sampling options set the PC sampling env, PID-prefixed json
+    output, and append the native tool (when given) to the upstream LD_PRELOAD."""
     args = _make_sanitize_args(
         ["/bin/true"],
         rocprofiler_sdk_tool_path="/opt/sdk/tool.so",
@@ -456,7 +456,7 @@ def test_sdk_pc_sampling_options(
     assert options["ROCPROF_KERNEL_TRACE"] == "1"
     assert options["ROCPROF_OUTPUT_FORMAT"] == "json"
     assert options["ROCPROF_OUTPUT_PATH"] == str(tmp_path)
-    assert options["ROCPROF_OUTPUT_FILE_NAME"] == "ps_file"
+    assert options["ROCPROF_OUTPUT_FILE_NAME"] == "%pid%_ps_file"
     assert options["ROCPROFILER_PC_SAMPLING_BETA_ENABLED"] == "1"
     assert options["ROCPROF_PC_SAMPLING_METHOD"] == method
     assert options["ROCPROF_PC_SAMPLING_UNIT"] == expected_unit
@@ -496,7 +496,7 @@ def test_v3_pc_sampling_options(
     assert options[options.index("--pc-sampling-unit") + 1] == expected_unit
     assert options[options.index("--pc-sampling-interval") + 1] == "1000"
     assert options[options.index("-d") + 1] == str(tmp_path)
-    assert options[options.index("-o") + 1] == "ps_file"
+    assert options[options.index("-o") + 1] == "%pid%_ps_file"
     if attach_pid:
         assert "--attach-sync-output" in options
         assert options[options.index("--pid") + 1] == attach_pid

@@ -55,7 +55,7 @@ Using native counter collection tool: /app/projects/rocprofiler-compute/src/lib/
    |-> [rocprofiler-sdk] Releasing GPU memory
    |-> [rocprofiler-sdk] Releasing CPU memory
    |-> [rocprofiler-sdk] W0710 07:31:42.431337 1429079 simple_timer.cpp:55] [rocprofv3] 'tests/vcopy -n 16777216 -b 256 -i 3' ::     0.515962 sec
-   |-> [rocprofiler-sdk] E0710 07:31:42.453102 1429079 output_stream.cpp:111] Opened result file: /app/projects/rocprofiler-compute/workloads/vcopy_pcsampling/MI300X_A1/ps_file_results.json
+   |-> [rocprofiler-sdk] E0710 07:31:42.453102 1429079 output_stream.cpp:111] Opened result file: /app/projects/rocprofiler-compute/workloads/vcopy_pcsampling/MI300X_A1/1429079_ps_file_results.json
    |-> [rocprofiler-sdk] W0710 07:31:42.478500 1429079 simple_timer.cpp:55] [rocprofv3] output generation ::     0.035814 sec
    |-> [rocprofiler-sdk] W0710 07:31:42.478706 1429079 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.038550 sec
    |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini

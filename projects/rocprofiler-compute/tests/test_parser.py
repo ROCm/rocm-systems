@@ -55,14 +55,6 @@ def _raw_csv_panel(panel_id: int, table_id: int, source: str) -> dict[str, Any]:
     }
 
 
-def _pc_sampling_panel(panel_id: int, table_id: int, source: str) -> dict[str, Any]:
-    return {
-        "id": panel_id,
-        "title": "PC Sampling Panel",
-        "data source": [{"pc_sampling_table": {"id": table_id, "source": source}}],
-    }
-
-
 def _make_arch_config(panels: list[tuple[int, dict[str, Any]]]) -> schema.ArchConfig:
     ac = schema.ArchConfig()
     ac.panel_configs = OrderedDict(panels)
