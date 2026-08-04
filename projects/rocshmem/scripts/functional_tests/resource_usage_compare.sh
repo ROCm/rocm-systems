@@ -4,7 +4,7 @@
 # between two commits (or one commit vs the current working tree).
 #
 # Builds are cached per (gpu_target, build_config, commit) under
-# $PROJECTS_DIR/build-resource-usage-* so re-comparing COMMIT_1 against a
+# $PROJECTS_DIR/build-cache so re-comparing COMMIT_1 against a
 # different COMMIT_2 doesn't rebuild COMMIT_1 again.
 #
 # Each commit is built in an isolated git worktree under /tmp so the main
@@ -34,6 +34,10 @@
 #   --match REGEX         Pin kernels matching this regex (against demangled or
 #                         mangled name, case-insensitive) to the top of every
 #                         report/chart regardless of delta.
+#   --output-dir DIR      Directory to write the comparison report (CSVs +
+#                         charts) to. Default:
+#                         build-cache/<gpu>-<config>-<sha1>-vs-<sha2>/
+#                         under the rocshmem repo root.
 #
 # Example: compare two explicit commits
 #   ./resource_usage_compare.sh --commit1 d48c64f6e --commit2 3caf8d080 \
@@ -62,6 +66,7 @@ BASE_BRANCH="origin/develop"
 SKIP_BUILD=false
 FORCE_REBUILD=false
 MATCH=""
+OUTPUT_DIR=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -74,6 +79,7 @@ while [[ $# -gt 0 ]]; do
     --skip-build)    SKIP_BUILD=true;    shift ;;
     --force-rebuild) FORCE_REBUILD=true; shift ;;
     --match)         MATCH="$2";         shift 2 ;;
+    --output-dir)    OUTPUT_DIR="$2";    shift 2 ;;
     -h|--help)
       sed -n '2,/^#####/p' "$0" | head -n -1
       exit 0 ;;
@@ -121,7 +127,7 @@ _find_build_config() {
 measure_commit() {
   local commit="$1"
   local sha="$2"
-  local build_dir="$PROJECTS_DIR/build-resource-usage-${GPU_TARGET}-${BUILD_CONFIG}-${sha}"
+  local build_dir="$PROJECTS_DIR/build-cache/${GPU_TARGET}-${BUILD_CONFIG}-${sha}"
   local csv="$build_dir/res-${sha}.csv"
 
   if [[ -f "$csv" && "$FORCE_REBUILD" == false ]]; then
@@ -210,7 +216,7 @@ fi
 SHA_2="$(git rev-parse --short=12 "$COMMIT_2")"
 CSV_2="$(measure_commit "$COMMIT_2" "$SHA_2")"
 
-OUTDIR="$ROCSHMEM_DIR/resource-usage-${GPU_TARGET}-${BUILD_CONFIG}-${SHA_1}-vs-${SHA_2}"
+OUTDIR="${OUTPUT_DIR:-$PROJECTS_DIR/resource-usage/${GPU_TARGET}-${BUILD_CONFIG}-${SHA_1}-vs-${SHA_2}}"
 mkdir -p "$OUTDIR"
 cp "$CSV_1" "$OUTDIR/res-${SHA_1}.csv"
 cp "$CSV_2" "$OUTDIR/res-${SHA_2}.csv"
