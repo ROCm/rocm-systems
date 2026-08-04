@@ -100,7 +100,7 @@ jobs:
         env:
           THEROCK_BIN_DIR: ${{ env.THEROCK_BIN_DIR }}
           NOTIFY_EMAIL: ${{ inputs.notify_email }}
-          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook }}
+          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook || secrets.RCCL_CI_TEAMS_WEBHOOK }}
         run: |
           NOTIFY_ARGS=()
           [ -n "$NOTIFY_EMAIL" ] && NOTIFY_ARGS+=(--notify-email "$NOTIFY_EMAIL")
