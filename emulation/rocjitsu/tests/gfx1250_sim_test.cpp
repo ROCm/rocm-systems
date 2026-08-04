@@ -620,7 +620,7 @@ TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
   EXPECT_EQ(loaded.device.marketing_name, "AMD Instinct MI455X");
   EXPECT_EQ(loaded.device.simd_count, 1024u);
   EXPECT_EQ(loaded.device.max_waves_per_simd, kGfx1250MaxWavesPerSimd);
-  EXPECT_EQ(loaded.device.num_shader_engines, 4u);
+  EXPECT_EQ(loaded.device.num_shader_engines, 2u);
   EXPECT_EQ(loaded.device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(loaded.device.num_cu_per_sh, 8u);
   EXPECT_EQ(loaded.device.simd_per_cu, kGfx1250SimdsPerCu);
@@ -637,8 +637,12 @@ TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
   EXPECT_EQ(soc->iod(1)->req_ports().size(), 6u);
   EXPECT_EQ(soc->xcd(0)->num_shader_engines(), 2u);
   EXPECT_EQ(soc->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
-  EXPECT_EQ(loaded.device.num_shader_engines / loaded.device.num_shader_arrays_per_engine,
-            soc->xcd(0)->num_shader_engines());
+  // num_shader_engines is the shader-engine count itself, not the shader-array
+  // count that has to be divided down: KFD's node_props.array_count is derived
+  // from it as engines * arrays_per_engine, which is the product libhsakmt and
+  // rocdbgapi invert to recover the engine count. A shader engine still holds
+  // arrays_per_engine * num_cu_per_sh compute units.
+  EXPECT_EQ(loaded.device.num_shader_engines, soc->xcd(0)->num_shader_engines());
   EXPECT_EQ(loaded.device.num_shader_arrays_per_engine * loaded.device.num_cu_per_sh,
             soc->xcd(0)->shader_engine(0)->num_compute_units());
   EXPECT_EQ(soc->num_xcds() * soc->xcd(0)->num_shader_engines() *
