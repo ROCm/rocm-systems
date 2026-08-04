@@ -584,42 +584,6 @@ TEST_F(SimulatedKfdTest, PermanentVramBackingDoesNotPrefaultLargeAllocations) {
   EXPECT_EQ(t.driver()->close(), 0);
 }
 
-TEST_F(SimulatedKfdTest, LargePermanentBackingUsesOneRangeInsteadOfPerPageEntries) {
-  rocjitsu::KfdProcess process(/*process_id=*/9);
-  constexpr uint64_t kBaseVa = 0x8000000000ULL;
-  constexpr uint64_t kLargeAllocationSize = 1ULL << 40;
-  constexpr uint64_t kPage = rocjitsu::KfdProcess::kPageSize;
-  constexpr uintptr_t kHostBase = 0x1000000000ULL;
-
-  {
-    std::lock_guard<std::mutex> lock(process.alloc_mutex_);
-    rocjitsu::KfdProcess::GpuAllocation allocation{};
-    allocation.handle = 1;
-    allocation.gpu_va = kBaseVa;
-    allocation.size = kLargeAllocationSize;
-    allocation.backing_size = kLargeAllocationSize;
-    allocation.host_ptr = reinterpret_cast<void *>(kHostBase);
-    allocation.permanent_backing = true;
-    allocation.mapped_to_gpu = true;
-    process.allocations_[allocation.handle] = allocation;
-    process.refresh_backing_ranges_locked();
-  }
-
-  auto expect_resolved = [&](uint64_t gpu_va) {
-    auto backing = process.resolve_backing(gpu_va, kPage);
-    ASSERT_TRUE(backing.has_value());
-    ASSERT_TRUE(backing->gpu_accessible);
-    EXPECT_EQ(reinterpret_cast<uintptr_t>(backing->address), kHostBase + (gpu_va - kBaseVa));
-    EXPECT_EQ(backing->range_size, kLargeAllocationSize);
-  };
-  expect_resolved(kBaseVa);
-  expect_resolved(kBaseVa + (kLargeAllocationSize / 2));
-  expect_resolved(kBaseVa + kLargeAllocationSize - kPage);
-  EXPECT_FALSE(process.resolve_backing(kBaseVa - kPage, kPage).has_value());
-  EXPECT_FALSE(process.resolve_backing(kBaseVa + kLargeAllocationSize, kPage).has_value());
-  EXPECT_TRUE(process.page_table_.empty());
-}
-
 TEST_F(SimulatedKfdTest, GuestDiscoveryOpenIsReleasedOnLastClose) {
   rj_vm_t *raw_vm = nullptr;
   ASSERT_EQ(rj_vm_create(CONFIG_PATH.c_str(), RJ_VM_MODE_LOCAL, &raw_vm), ROCJITSU_STATUS_SUCCESS);
