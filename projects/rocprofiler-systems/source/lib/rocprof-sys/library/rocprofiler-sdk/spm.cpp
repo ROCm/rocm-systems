@@ -1,41 +1,55 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// This file is compiled only when rocprofiler-sdk/experimental/spm.h is
-// available. Keep SDK SPM runtime wiring, callbacks, and agent configuration
-// here; configuration-only code and no-SDK fallbacks belong in spm_config.cpp.
+// Keep SPM request handling, validation, SDK runtime wiring, callbacks, and
+// no-SDK runtime fallbacks here.
 
 #include "library/rocprofiler-sdk/spm.hpp"
-#include "backends/rocprofiler_sdk/backend.hpp"
-#include "backends/rocprofiler_sdk/wrapper.hpp"
-#include "core/trace_cache/cache_manager.hpp"
-#include "core/trace_cache/sample_type.hpp"
-#include "core/utility.hpp"
-#include "library/pmc/collectors/gpu_perf_counter/types.hpp"
-#include "library/rocprofiler-sdk/fwd.hpp"
+#include "common/environment.hpp"
 
 #include "logger/debug.hpp"
 
-#include <rocprofiler-sdk/context.h>
-#include <rocprofiler-sdk/experimental/spm.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include <algorithm>
-#include <array>
-#include <atomic>
-#include <charconv>
-#include <cstdint>
-#include <functional>
-#include <iterator>
-#include <numeric>
-#include <optional>
-#include <string>
+#include <cctype>
 #include <string_view>
-#include <system_error>
-#include <unordered_map>
-#include <unordered_set>
-#include <utility>
-#include <vector>
+
+#if defined(ROCPROFSYS_DISABLE_SPM_RUNTIME)
+#    define ROCPROFSYS_COMPILE_SPM_RUNTIME 0
+#elif ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM &&                                              \
+    __has_include(<rocprofiler-sdk/experimental/spm.h>)
+#    define ROCPROFSYS_COMPILE_SPM_RUNTIME 1
+#else
+#    define ROCPROFSYS_COMPILE_SPM_RUNTIME 0
+#endif
+
+#if ROCPROFSYS_COMPILE_SPM_RUNTIME
+#    include "backends/rocprofiler_sdk/backend.hpp"
+#    include "backends/rocprofiler_sdk/wrapper.hpp"
+#    include "core/trace_cache/cache_manager.hpp"
+#    include "core/trace_cache/sample_type.hpp"
+#    include "core/utility.hpp"
+#    include "library/pmc/collectors/gpu_perf_counter/types.hpp"
+#    include "library/rocprofiler-sdk/fwd.hpp"
+
+#    include <rocprofiler-sdk/context.h>
+#    include <rocprofiler-sdk/experimental/spm.h>
+#    include <rocprofiler-sdk/rocprofiler.h>
+
+#    include <array>
+#    include <atomic>
+#    include <charconv>
+#    include <cstdint>
+#    include <functional>
+#    include <iterator>
+#    include <numeric>
+#    include <optional>
+#    include <string>
+#    include <system_error>
+#    include <unordered_map>
+#    include <unordered_set>
+#    include <utility>
+#    include <vector>
+#endif
 
 namespace rocprofsys
 {
@@ -43,6 +57,93 @@ namespace rocprofiler_sdk
 {
 namespace spm
 {
+namespace
+{
+constexpr auto beta_env_name = "ROCPROFILER_SPM_BETA_ENABLED";
+
+bool
+has_configured_event_string(std::string_view events)
+{
+    return std::any_of(events.begin(), events.end(),
+                       [](unsigned char itr) { return std::isspace(itr) == 0; });
+}
+
+bool
+read_posix_env_bool(const char* name, bool fallback)
+{
+    return ::rocprofsys::common::get_env(name, fallback);
+}
+}  // namespace
+
+bool
+request::requested() const noexcept
+{
+    return !events.empty();
+}
+
+bool
+is_config_valid(const request&                  req,
+                const std::vector<std::string>& dispatch_counter_events,
+                const std::string&              gpu_perf_counter_events)
+{
+    // Backstop for direct library load paths. Tool initialization must reject
+    // SPM requests when the required interval or mutual-exclusion constraints
+    // are not satisfied.
+    if(!req.requested()) return true;
+
+    if(!dispatch_counter_events.empty())
+    {
+        LOG_WARNING("SPM counter collection is mutually exclusive with "
+                    "ROCPROFSYS_ROCM_EVENTS");
+        return false;
+    }
+
+    // ROCPROFSYS_GPU_PERF_COUNTERS is kept as a raw setting string here. Treat
+    // any non-whitespace value as a requested device-counting collection.
+    if(has_configured_event_string(gpu_perf_counter_events))
+    {
+        LOG_WARNING("SPM counter collection is mutually exclusive with "
+                    "ROCPROFSYS_GPU_PERF_COUNTERS");
+        return false;
+    }
+
+    if(req.sample_interval == 0)
+    {
+        LOG_WARNING("SPM counter collection requires a positive sample interval. Set "
+                    "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL or pass --spm-sample-interval "
+                    "(for example, 8192). Supported intervals are hardware-limited and "
+                    "can be queried with 'rocprofv3-avail info --spm-config'.");
+        return false;
+    }
+
+    return true;
+}
+
+bool
+beta_opt_in_satisfied(const request& req, env_bool_reader_t read_env)
+{
+    if(!req.requested()) return true;
+
+    if(read_env(beta_env_name, false))
+    {
+        LOG_WARNING("ROCm SPM counter collection is enabled as a beta feature");
+        return true;
+    }
+
+    LOG_WARNING("ROCm SPM counter collection was requested, but SDK beta SPM is "
+                "not explicitly enabled. SPM samples will be skipped for this "
+                "run. Set ROCPROFILER_SPM_BETA_ENABLED=ON to acknowledge the "
+                "beta risk and enable SPM collection.");
+    return false;
+}
+
+bool
+beta_opt_in_satisfied(const request& req)
+{
+    return beta_opt_in_satisfied(req, read_posix_env_bool);
+}
+
+#if ROCPROFSYS_COMPILE_SPM_RUNTIME
 namespace
 {
 constexpr auto invalid_context_handle = 0UL;
@@ -620,6 +721,23 @@ report_runtime_summary(client_data* data)
                     data_loss_reports);
     }
 }
+#else
+bool
+configure_runtime(client_data*, const request& req)
+{
+    if(!req.requested()) return true;
+
+    LOG_WARNING("SPM runtime collection was requested, but this rocprofiler-sdk "
+                "build does not provide the experimental SPM API. Build with a "
+                "rocprofiler-sdk version that provides "
+                "rocprofiler-sdk/experimental/spm.h.");
+    return false;
+}
+
+void
+report_runtime_summary(client_data*)
+{}
+#endif
 }  // namespace spm
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys
