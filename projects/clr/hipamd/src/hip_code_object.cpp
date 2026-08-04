@@ -371,6 +371,24 @@ FatBinaryInfo** StatCO::AddKpackBinary(const void* hipk_metadata, const void* wr
 hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
   std::scoped_lock lock(sclock_);
 
+  // Host-asynchronous initialization can still reference a variable's host shadow and device
+  // symbol when its fat binary is unloaded.
+  for (auto& [deviceId, state] : managedVarInitialization_.deviceStates) {
+    if (state.phase != DeferredInitManagedVarState::Phase::InProgress) {
+      continue;
+    }
+
+    assert(state.completion != nullptr);
+    if (state.completion->awaitCompletion()) {
+      const uint64_t initializedSequenceNumber = state.queuedUpToSequenceNumber;
+      state.MarkCompleted();
+      managedVarInitialization_.initializedUpToSequenceNumberByDevice[deviceId].store(
+          initializedSequenceNumber, std::memory_order_release);
+    } else {
+      state.MarkFailed(hipErrorUnknown);
+    }
+  }
+
   auto hostVarsIter = module_to_hostVars_.find(module);
   if (hostVarsIter != module_to_hostVars_.end()) {
     for (auto& hostVar : hostVarsIter->second) {
