@@ -2290,13 +2290,34 @@ protected:
   }
 
   // Assert the standard single-AccVGPR spill in `caved`: acc0 stored/reloaded at slot 64
-  // via the `acc` bit (no bridge), the reload guarded by a load wait, and the descriptor
-  // grown by one slot (64 -> 68).
+  // via the `acc` bit (no bridge), the prologue drain immediately before the store and the
+  // epilogue drain immediately before the fill, and the descriptor grown by one slot
+  // (64 -> 68). The positional drain checks matter because on CDNA the drain, load wait, and
+  // store wait all encode as the same s_waitcnt 0, so a bare "an s_waitcnt 0 exists" search
+  // would pass even with the store's guarding drain gone.
   void expect_acc_spill(const Caved &caved) {
     const std::vector<uint32_t> &cave = caved.cave;
     expect_acc_spill_present(cave, /*acc=*/0, /*off=*/64);
     EXPECT_NE(std::find(cave.begin(), cave.end(), build_wait_loads_complete(a_.arch)), cave.end());
+    expect_drain_before_store(
+        cave, build_scratch_store_dword(/*acc=*/0, /*off=*/64, a_.arch, /*acc=*/true));
+    expect_drain_before_fill(
+        cave, build_scratch_load_dword(/*acc=*/0, /*off=*/64, a_.arch, /*acc=*/true));
     EXPECT_EQ(caved.scratch, 68u);
+  }
+
+  // Assert an AccVGPR tuple spill in `caved`: acc0-3 each stored/reloaded straight to
+  // scratch via the `acc` bit in acc order at slots 64/68/72/76, the reload guarded by a
+  // load wait, and the descriptor grown to cover all four (64 -> 80). Used by the MFMA
+  // acc_cd fixtures.
+  void expect_acc_tuple_spill(const Caved &caved) {
+    const std::vector<uint32_t> &cave = caved.cave;
+    expect_acc_spill_present(cave, /*acc=*/0, /*off=*/64);
+    expect_acc_spill_present(cave, /*acc=*/1, /*off=*/68);
+    expect_acc_spill_present(cave, /*acc=*/2, /*off=*/72);
+    expect_acc_spill_present(cave, /*acc=*/3, /*off=*/76);
+    EXPECT_NE(std::find(cave.begin(), cave.end(), build_wait_loads_complete(a_.arch)), cave.end());
+    EXPECT_EQ(caved.scratch, 80u);
   }
 
   // Assert the cave both saves and restores `operand` via an s_mov of `mov_op`.
@@ -2454,6 +2475,30 @@ TEST_F(Cdna4ProbeSpill, RejectsAccVgprPastAccumOffsetWindow) {
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("allocated count"), std::string::npos)
       << result.errors.front();
+}
+
+// AccVGPR liveness must be classified through an MFMA's single acc_cd operand, not only the
+// one-lane v_accvgpr_read/write forms. v_mfma_f32_16x16x16_f16 a[0:3], v[0:1], v[2:3],
+// a[0:3] (acc_cd=1) reads and writes acc[0:3], so all four lanes are live at the anchor; a
+// probe clobbering acc0..acc3 must spill the whole tuple. The default descriptor (8 VGPRs,
+// accum_base=4) allocates exactly acc0-3 -> slots 64/68/72/76. AGPRs are CDNA-only, so no
+// RDNA4 variant.
+TEST_F(Cdna3ProbeSpill, SpillsMfmaAccVgprTupleLiveAcrossProbe) {
+  expect_acc_tuple_spill(
+      patch_spill({kMfmaF32_16x16x16F16_A0to3_Lo, kMfmaF32_16x16x16F16_A0to3_Hi, endpgm()},
+                  {make_accvgpr_write_lo(0), kAccWriteA0ZeroHi, make_accvgpr_write_lo(1),
+                   kAccWriteA0ZeroHi, make_accvgpr_write_lo(2), kAccWriteA0ZeroHi,
+                   make_accvgpr_write_lo(3), kAccWriteA0ZeroHi, setpc()},
+                  64));
+}
+
+TEST_F(Cdna4ProbeSpill, SpillsMfmaAccVgprTupleLiveAcrossProbe) {
+  expect_acc_tuple_spill(
+      patch_spill({kMfmaF32_16x16x16F16_A0to3_Lo, kMfmaF32_16x16x16F16_A0to3_Hi, endpgm()},
+                  {make_accvgpr_write_lo(0), kAccWriteA0ZeroHi, make_accvgpr_write_lo(1),
+                   kAccWriteA0ZeroHi, make_accvgpr_write_lo(2), kAccWriteA0ZeroHi,
+                   make_accvgpr_write_lo(3), kAccWriteA0ZeroHi, setpc()},
+                  64));
 }
 
 // A kernel with zero fixed scratch cannot be spilled into and fails closed.

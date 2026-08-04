@@ -78,6 +78,22 @@ inline constexpr uint32_t kAccWriteA0ZeroHi = 0x18000080u;
   return 0x18000000u | (src0 & 0x1FFu);
 }
 
+// v_accvgpr_write_b32 a{acc}, 0 -> clobbers acc{acc}. The lo word carries the
+// accumulator index in vdst bits [7:0] (kAccWriteA0ZeroLo is the acc0 case); the
+// hi word is kAccWriteA0ZeroHi (inline src0 = 0). acc in [0, 255]. Lets a probe
+// clobber a whole accumulator tuple with one write per lane.
+[[nodiscard]] inline constexpr uint32_t make_accvgpr_write_lo(uint16_t acc) {
+  return kAccWriteA0ZeroLo | (acc & 0xFFu);
+}
+
+// v_mfma_f32_16x16x16_f16 a[0:3], v[0:1], v[2:3], a[0:3] (gfx942/gfx950, identical
+// encodings), two words. acc_cd=1 makes both the C source and D destination the acc[0:3]
+// tuple, so the instruction reads and writes all four accumulator lanes (A=v[0:1],
+// B=v[2:3]); it gives a test AccVGPR liveness through an MFMA acc_cd operand rather than
+// one-lane v_accvgpr_read/write words.
+inline constexpr uint32_t kMfmaF32_16x16x16F16_A0to3_Lo = 0xD3CD8000u;
+inline constexpr uint32_t kMfmaF32_16x16x16F16_A0to3_Hi = 0x04020500u;
+
 // s_setpc_b64 s[30:31] (GFX9 family): a minimal probe body tail that returns
 // through the link pair, so build_probe_callable accepts it.
 inline constexpr uint32_t kProbeSetpcS30S31 = 0xbe801d1eu;
