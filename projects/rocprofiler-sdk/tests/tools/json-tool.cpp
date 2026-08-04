@@ -3714,6 +3714,21 @@ json_tool_start()
 {
     client::start();
     return ROCPROFILER_STATUS_SUCCESS;
+
+}
+
+extern "C" {
+ompt_start_tool_result_t*
+ompt_start_tool(unsigned int omp_version, const char* runtime_version) ROCPROFILER_PUBLIC_API;
+
+ompt_start_tool_result_t*
+ompt_start_tool(unsigned int omp_version, const char* runtime_version)
+{
+    std::clog << "[rocprofiler-sdk-json-tool] ompt_start_tool(omp_version=" << omp_version
+              << ", runtime_version=" << runtime_version << ")" << std::endl;
+    // redirect to rocprofiler-sdk's implementation of ompt_start_tool
+    return rocprofiler_ompt_start_tool(omp_version, runtime_version);
+}
 }
 
 PERFETTO_TRACK_EVENT_STATIC_STORAGE();
