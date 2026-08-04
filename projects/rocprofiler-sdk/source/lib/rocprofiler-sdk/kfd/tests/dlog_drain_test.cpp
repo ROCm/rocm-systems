@@ -27,13 +27,16 @@
 // region_record_count=2048 slots per region (region r at slots [r*2048,(r+1)*2048)).
 
 #include "lib/rocprofiler-sdk/kfd/dlog_drain.hpp"
+#include "lib/rocprofiler-sdk/kfd/record_pipe.hpp"
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
 #include <cstring>
+#include <atomic>
 #include <map>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace
@@ -101,18 +104,26 @@ struct recorder
     }
 };
 
-// Run one drain over the ring. now_ns defaults to a fixed value for determinism.
+// The two production stages back to back: the reader copies out of the ring, the
+// processor pairs the copy. Tests drive them exactly as the threads do.
+struct drain_state
+{
+    ring_cursors cursors = {};
+    pair_state   pairing = {};
+};
+
 uint64_t
 run_drain(fake_ring& ring, drain_state& st, recorder& rec, uint64_t now_ns = 1000)
 {
-    return drain_pipes(ring.records.data(),
-                       ring.num_regions,
-                       ring.rrc,
-                       ring.wptr.data(),
-                       ring.rptr.data(),
-                       st,
-                       now_ns,
-                       rec.on_record());
+    auto batch = std::vector<copied_record>{};
+    copy_pipes(ring.records.data(),
+               ring.num_regions,
+               ring.rrc,
+               ring.wptr.data(),
+               ring.rptr.data(),
+               st.cursors,
+               batch);
+    return pair_records(batch.data(), batch.size(), st.pairing, now_ns, rec.on_record());
 }
 }  // namespace
 
@@ -136,7 +147,7 @@ TEST(dlog_drain, first_drain_consumes_from_origin)
     ASSERT_EQ(rec.pairs.count(std::make_pair(db, 7u)), 1u);
     EXPECT_EQ(rec.pairs[std::make_pair(db, 7u)].first, 111u);
     EXPECT_EQ(ring.rptr[0], 2u);  // cursor advanced to the producer
-    EXPECT_TRUE(st.rptr_init);
+    EXPECT_TRUE(st.cursors.rptr_init);
 }
 
 // A single pipe with N start+eop pairs: all pair, correct ticks, rptr advances.
@@ -256,7 +267,7 @@ TEST(dlog_drain, unmatched_eop_reported_without_a_start)
     ASSERT_EQ(rec.eops_without_start.size(), 1u);
     EXPECT_EQ(rec.eops_without_start[0].first, 4100u);
     EXPECT_EQ(rec.eops_without_start[0].second, 9u);
-    EXPECT_EQ(st.unmatched_eops, 1u);
+    EXPECT_EQ(st.pairing.unmatched_eops, 1u);
     EXPECT_TRUE(rec.all_loss_free);
 }
 
@@ -288,14 +299,14 @@ TEST(dlog_drain, pair_spanning_two_drains)
 TEST(dlog_drain, evict_stale_starts)
 {
     drain_state st;
-    st.pending_starts[1] = drain_state::pending_start{100, 1000};  // old
-    st.pending_starts[2] = drain_state::pending_start{200, 5000};  // fresh
+    st.pairing.pending_starts[1] = pair_state::pending_start{100, 1000};  // old
+    st.pairing.pending_starts[2] = pair_state::pending_start{200, 5000};  // fresh
 
-    size_t removed = st.evict_stale(/*now_ns=*/6000, /*max_age_ns=*/2000);
+    size_t removed = st.pairing.evict_stale(/*now_ns=*/6000, /*max_age_ns=*/2000);
 
     EXPECT_EQ(removed, 1u);
-    EXPECT_EQ(st.pending_starts.count(1), 0u);
-    EXPECT_EQ(st.pending_starts.count(2), 1u);
+    EXPECT_EQ(st.pairing.pending_starts.count(1), 0u);
+    EXPECT_EQ(st.pairing.pending_starts.count(2), 1u);
 }
 
 // --- Degradation: the drain must stay well-behaved under bad geometry, overrun,
@@ -309,13 +320,13 @@ TEST(dlog_drain, invalid_geometry_rejected)
     drain_state st;
     recorder    rec;
 
+    auto batch = std::vector<copied_record>{};
+
     // num_regions == 0 -> reject.
-    EXPECT_EQ(drain_pipes(nullptr, 0, 2048, nullptr, nullptr, st, 1000, rec.on_record()), 0u);
+    EXPECT_EQ(copy_pipes(nullptr, 0, 2048, nullptr, nullptr, st.cursors, batch), 0u);
 
     // num_regions beyond kMaxRegions (cursor storage) -> reject.
-    EXPECT_EQ(drain_pipes(nullptr, kMaxRegions + 1, 2048, nullptr, nullptr, st, 1000,
-                          rec.on_record()),
-              0u);
+    EXPECT_EQ(copy_pipes(nullptr, kMaxRegions + 1, 2048, nullptr, nullptr, st.cursors, batch), 0u);
 
     // region_record_count not a power of two (3000) -> reject.
     fake_ring ring(2, 3000);
@@ -372,8 +383,8 @@ TEST(dlog_drain, boundary_one_below_full_is_safe)
 
     recorder rec;
     EXPECT_EQ(run_drain(ring, st, rec), 1u);
-    EXPECT_EQ(st.overruns, 0u);
-    EXPECT_EQ(st.lost_records, 0u);
+    EXPECT_EQ(st.cursors.overruns, 0u);
+    EXPECT_EQ(st.cursors.lost_records, 0u);
     EXPECT_EQ(ring.rptr[0], 7u);
 }
 
@@ -394,8 +405,8 @@ TEST(dlog_drain, boundary_exactly_full_is_overrun)
 
     recorder rec;
     EXPECT_EQ(run_drain(ring, st, rec), 1u);  // behavior unchanged
-    EXPECT_EQ(st.overruns, 1u);
-    EXPECT_EQ(st.lost_records, 1u);  // the frontier==rptr collision slot
+    EXPECT_EQ(st.cursors.overruns, 1u);
+    EXPECT_EQ(st.cursors.lost_records, 1u);  // the frontier==rptr collision slot
 }
 
 // U5: a deep lap before the scan is detected, and the loss count reports every
@@ -412,14 +423,14 @@ TEST(dlog_drain, deep_lap_before_scan_detected)
     recorder rec;
     run_drain(ring, st, rec);
 
-    EXPECT_EQ(st.overruns, 1u);
-    EXPECT_EQ(st.lost_records, 10000u - 2048u + 1u);
+    EXPECT_EQ(st.cursors.overruns, 1u);
+    EXPECT_EQ(st.cursors.lost_records, 10000u - 2048u + 1u);
 }
 
-// U6: the producer laps DURING the scan. The pre-scan wptr looked safe, so only
-// the after-scan re-read can catch it. The pair callback advances wptr here,
-// which is exactly the "producer moved while we were reading" schedule.
-TEST(dlog_drain, mid_scan_lap_detected_by_after_scan_reread)
+// A lap that happens while the copier is running is caught on its NEXT pass: the
+// copier takes one wptr reading, copies, and moves on -- it does not re-read to
+// second-guess itself, because time spent in the ring is what causes laps.
+TEST(dlog_drain, lap_after_the_copy_is_caught_on_the_following_drain)
 {
     fake_ring   ring(1, 8);
     drain_state st;
@@ -429,28 +440,19 @@ TEST(dlog_drain, mid_scan_lap_detected_by_after_scan_reread)
     const uint32_t db = 4100;
     ring.put(0, 0, kRecStart, 1, db, 10);
     ring.put(0, 1, kRecEop, 1, db, 20);
-    ring.wptr[0] = 4;  // safe at the pre-scan read
+    ring.wptr[0] = 4;
 
-    // The post-scan seam (S1) moves the producer between the scan and the
-    // after-scan wptr read, which is exactly the mid-scan lap window.
     recorder rec;
-    uint64_t pairs = drain_pipes(ring.records.data(),
-                                 ring.num_regions,
-                                 ring.rrc,
-                                 ring.wptr.data(),
-                                 ring.rptr.data(),
-                                 st,
-                                 1000,
-                                 rec.on_record(),
-                                 [&ring]() { ring.wptr[0] = 9; });
+    EXPECT_EQ(run_drain(ring, st, rec), 1u);
+    EXPECT_EQ(st.cursors.overruns, 0u);
+    EXPECT_TRUE(rec.all_loss_free);
 
-    EXPECT_EQ(pairs, 1u);
-    EXPECT_EQ(st.overruns, 1u);
-    EXPECT_EQ(st.lost_records, 9u - 8u + 1u);
-    // The lap is known BEFORE anything is published, so the record is reported as
-    // not loss-free and a signal-less consumer will refuse to complete on it.
-    EXPECT_EQ(rec.records, 1u);
-    EXPECT_FALSE(rec.all_loss_free);
+    // The producer now laps well past the ring; the next drain sees it.
+    ring.wptr[0] = 4 + 9;
+    recorder rec2;
+    run_drain(ring, st, rec2);
+    EXPECT_EQ(st.cursors.overruns, 1u);
+    EXPECT_FALSE(rec2.all_loss_free);
 }
 
 // One lap is counted once, not twice: a pre-scan overrun must not also be counted
@@ -467,8 +469,8 @@ TEST(dlog_drain, overrun_counted_once_per_drain)
     recorder rec;
     run_drain(ring, st, rec);
 
-    EXPECT_EQ(st.overruns, 1u);
-    EXPECT_EQ(st.lost_records, 12u - 8u + 1u);
+    EXPECT_EQ(st.cursors.overruns, 1u);
+    EXPECT_EQ(st.cursors.lost_records, 12u - 8u + 1u);
 }
 
 // --- Phase 0: ring-size env-var parsing (U16). Only a plain decimal integer in
@@ -626,7 +628,7 @@ TEST(dlog_drain, ring_wrap_pairs_across_boundary)
     recorder    rec_sync;
     run_drain(ring, st, rec_sync);  // first drain (empty ring)
     // Prime rptr to just before the power-of-two wrap so we drain [2047, 2049).
-    st.rptr[0] = 2047;
+    st.cursors.rptr[0] = 2047;
 
     const uint32_t db = 4100;
     ring.put(0, 2047, kRecStart, 7, db, 500);  // physical slot 2047
@@ -665,7 +667,7 @@ TEST(dlog_drain, loss_free_verdict_on_a_clean_drain)
     EXPECT_TRUE(rec.all_loss_free);
     EXPECT_EQ(rec.pairs.size(), 1u);
     EXPECT_EQ(rec.eops_without_start.size(), 1u);
-    EXPECT_EQ(st.overruns, 0u);
+    EXPECT_EQ(st.cursors.overruns, 0u);
 }
 
 // A pre-scan overrun (the `>=` boundary) marks the whole region's records not
@@ -684,41 +686,76 @@ TEST(dlog_drain, overrun_marks_records_not_loss_free)
     recorder rec;
     run_drain(ring, st, rec);
 
-    EXPECT_EQ(st.overruns, 1u);
+    EXPECT_EQ(st.cursors.overruns, 1u);
     EXPECT_GT(rec.records, 0u);
     EXPECT_FALSE(rec.all_loss_free);
 }
 
-// Nothing is published before the after-scan wptr read settles the verdict, so a
-// consumer never observes a record it would later have to un-publish.
-TEST(dlog_drain, records_are_published_only_after_the_verdict_is_known)
+// The loss verdict travels WITH each copied record, so a consumer pairing the
+// batch later still knows the region was lapped even though the ring cursors
+// have long since moved on.
+TEST(dlog_drain, the_loss_verdict_travels_with_the_copied_records)
 {
-    fake_ring   ring(1, 8);
-    drain_state st;
-    recorder    rec0;
-    run_drain(ring, st, rec0);
+    fake_ring    ring(1, 8);
+    ring_cursors cursors;
+    auto         batch = std::vector<copied_record>{};
+
+    // First drain syncs the cursor to the origin.
+    copy_pipes(ring.records.data(), 1, ring.rrc, ring.wptr.data(), ring.rptr.data(), cursors,
+               batch);
+    batch.clear();
+
+    ring.put(0, 0, kRecStart, 1, 4100, 10);
+    ring.put(0, 1, kRecEop, 1, 4100, 20);
+    ring.wptr[0] = 8;  // == region_slots: lapped
+
+    const auto copied = copy_pipes(ring.records.data(), 1, ring.rrc, ring.wptr.data(),
+                                   ring.rptr.data(), cursors, batch);
+    EXPECT_GT(copied, 0u);
+    EXPECT_EQ(cursors.overruns, 1u);
+    for(const auto& r : batch)
+    {
+        EXPECT_FALSE(r.loss_free) << "a lapped region's records must be marked";
+    }
+
+    // Pairing happens later and preserves the verdict.
+    pair_state pairing;
+    recorder   rec;
+    pair_records(batch.data(), batch.size(), pairing, 1000, rec.on_record());
+    EXPECT_FALSE(rec.all_loss_free);
+}
+
+// The copier is the only stage that touches the ring, and it advances rptr for
+// every region it copied -- so the producer sees the space freed immediately
+// rather than after the (slower) pairing work.
+TEST(dlog_drain, copier_advances_rptr_without_pairing)
+{
+    fake_ring    ring(2, 2048);
+    ring_cursors cursors;
+    auto         batch = std::vector<copied_record>{};
+    copy_pipes(ring.records.data(), 2, ring.rrc, ring.wptr.data(), ring.rptr.data(), cursors,
+               batch);
+    batch.clear();
 
     ring.put(0, 0, kRecStart, 1, 4100, 10);
     ring.put(0, 1, kRecEop, 1, 4100, 20);
     ring.wptr[0] = 2;
+    ring.put(1, 0, kRecEop, 9, 4200, 30);
+    ring.wptr[1] = 1;
 
-    // The seam laps the producer after the scan; every record published must
-    // already carry the lossy verdict.
-    bool     seen_any_loss_free = false;
-    uint64_t pairs              = drain_pipes(ring.records.data(),
-                                 ring.num_regions,
-                                 ring.rrc,
-                                 ring.wptr.data(),
-                                 ring.rptr.data(),
-                                 st,
-                                 1000,
-                                 [&seen_any_loss_free](const drained_record& r) {
-                                     if(r.loss_free) seen_any_loss_free = true;
-                                 },
-                                 [&ring]() { ring.wptr[0] = 40; });
+    EXPECT_EQ(copy_pipes(ring.records.data(), 2, ring.rrc, ring.wptr.data(), ring.rptr.data(),
+                         cursors, batch),
+              3u);
+    EXPECT_EQ(ring.rptr[0], 2u);  // freed before anything was paired
+    EXPECT_EQ(ring.rptr[1], 1u);
+    EXPECT_EQ(batch.size(), 3u);
 
-    EXPECT_EQ(pairs, 1u);
-    EXPECT_FALSE(seen_any_loss_free);
+    // Pairing the copy yields the same result the coupled drain used to.
+    pair_state pairing;
+    recorder   rec;
+    EXPECT_EQ(pair_records(batch.data(), batch.size(), pairing, 1000, rec.on_record()), 1u);
+    EXPECT_EQ(rec.pairs.size(), 1u);
+    EXPECT_EQ(rec.eops_without_start.size(), 1u);
 }
 
 // Queue destroy asks the reader to drop what it retains for the dead queue's
@@ -732,14 +769,158 @@ TEST(dlog_drain, erase_slot_drops_only_that_slots_retained_starts)
     const uint64_t also_slot_7  = (uint64_t{1024 + 7} << 32) | 2;  // aliases to slot 7
     const uint64_t on_slot_8    = (uint64_t{8} << 32) | 3;
 
-    st.pending_starts[on_slot_7]   = drain_state::pending_start{100, 1000};
-    st.pending_starts[also_slot_7] = drain_state::pending_start{200, 1000};
-    st.pending_starts[on_slot_8]   = drain_state::pending_start{300, 1000};
+    st.pairing.pending_starts[on_slot_7]   = pair_state::pending_start{100, 1000};
+    st.pairing.pending_starts[also_slot_7] = pair_state::pending_start{200, 1000};
+    st.pairing.pending_starts[on_slot_8]   = pair_state::pending_start{300, 1000};
 
-    EXPECT_EQ(st.erase_slot(/*page_slot=*/7, /*slots_per_page=*/1024), 2u);
-    EXPECT_EQ(st.pending_starts.count(on_slot_7), 0u);
-    EXPECT_EQ(st.pending_starts.count(also_slot_7), 0u);
-    EXPECT_EQ(st.pending_starts.count(on_slot_8), 1u);
+    EXPECT_EQ(st.pairing.erase_slot(/*page_slot=*/7, /*slots_per_page=*/1024), 2u);
+    EXPECT_EQ(st.pairing.pending_starts.count(on_slot_7), 0u);
+    EXPECT_EQ(st.pairing.pending_starts.count(also_slot_7), 0u);
+    EXPECT_EQ(st.pairing.pending_starts.count(on_slot_8), 1u);
 
-    EXPECT_EQ(st.erase_slot(7, 1024), 0u);  // idempotent
+    EXPECT_EQ(st.pairing.erase_slot(7, 1024), 0u);  // idempotent
+}
+
+// ---------------------------------------------------------------------------
+// Bounded SPSC handoff between the ring-copier and the record processor
+// ---------------------------------------------------------------------------
+
+// Batches come out in the order they went in, with their contents intact.
+TEST(record_pipe, preserves_batch_order_and_contents)
+{
+    auto pipe = record_pipe<4>{};
+    EXPECT_TRUE(pipe.empty());
+    EXPECT_EQ(pipe.peek(), nullptr);
+
+    for(uint32_t b = 0; b < 3; ++b)
+    {
+        auto* slot = pipe.acquire();
+        ASSERT_NE(slot, nullptr);
+        slot->now_ns = 1000 + b;
+        for(uint32_t i = 0; i < 4; ++i)
+        {
+            auto r              = copied_record{};
+            r.rec.dispatch_id   = b * 10 + i;
+            slot->records.emplace_back(r);
+        }
+        pipe.publish();
+    }
+    EXPECT_EQ(pipe.size(), 3u);
+
+    for(uint32_t b = 0; b < 3; ++b)
+    {
+        auto* got = pipe.peek();
+        ASSERT_NE(got, nullptr);
+        EXPECT_EQ(got->now_ns, 1000u + b);
+        ASSERT_EQ(got->records.size(), 4u);
+        for(uint32_t i = 0; i < 4; ++i)
+        {
+            EXPECT_EQ(got->records[i].rec.dispatch_id, b * 10 + i);
+        }
+        pipe.pop();
+    }
+    EXPECT_TRUE(pipe.empty());
+}
+
+// The producer NEVER blocks: once the consumer falls a full pipe behind,
+// acquire() reports "no slot" so the caller can drop and count, and memory does
+// not grow. Blocking here would stall the ring read and cause the very overrun
+// the split exists to prevent.
+TEST(record_pipe, producer_never_blocks_when_the_consumer_stalls)
+{
+    auto pipe = record_pipe<4>{};
+
+    // Fill it completely; the consumer never runs.
+    for(size_t i = 0; i < pipe.capacity(); ++i)
+    {
+        auto* slot = pipe.acquire();
+        ASSERT_NE(slot, nullptr);
+        pipe.publish();
+    }
+    EXPECT_EQ(pipe.size(), pipe.capacity());
+
+    // Further attempts report full rather than waiting or allocating.
+    uint64_t dropped = 0;
+    for(int i = 0; i < 100; ++i)
+    {
+        if(pipe.acquire() == nullptr) ++dropped;
+    }
+    EXPECT_EQ(dropped, 100u);
+    EXPECT_EQ(pipe.size(), pipe.capacity());
+
+    // One pop frees exactly one slot.
+    pipe.pop();
+    EXPECT_NE(pipe.acquire(), nullptr);
+}
+
+// Slots are a reused pool: a recycled batch arrives cleared, so a stale record
+// from a previous cycle can never be processed twice.
+TEST(record_pipe, recycled_slots_are_cleared)
+{
+    auto  pipe = record_pipe<2>{};
+    auto* a    = pipe.acquire();
+    ASSERT_NE(a, nullptr);
+    a->records.emplace_back(copied_record{});
+    a->records.emplace_back(copied_record{});
+    pipe.publish();
+
+    ASSERT_NE(pipe.peek(), nullptr);
+    pipe.pop();
+
+    auto* reused = pipe.acquire();
+    ASSERT_NE(reused, nullptr);
+    EXPECT_TRUE(reused->records.empty());
+    EXPECT_EQ(reused->now_ns, 0u);
+}
+
+// Real threads: one producer, one consumer, nothing lost, nothing duplicated,
+// order preserved. Run under TSan to exercise the release/acquire pairing.
+TEST(record_pipe, spsc_threads_lose_and_duplicate_nothing)
+{
+    constexpr uint32_t kBatches = 2000;
+
+    auto pipe     = record_pipe<8>{};
+    auto produced = std::atomic<uint32_t>{0};
+    auto dropped  = std::atomic<uint32_t>{0};
+    auto stop     = std::atomic<bool>{false};
+
+    auto consumer = std::thread{[&pipe, &stop]() {
+        uint32_t expect = 0;
+        while(!stop.load(std::memory_order_acquire) || !pipe.empty())
+        {
+            auto* b = pipe.peek();
+            if(!b) continue;
+            // Contents must be exactly what the producer wrote, in order.
+            if(!b->records.empty())
+            {
+                EXPECT_EQ(b->records[0].rec.dispatch_id, b->records.size() - 1);
+            }
+            EXPECT_EQ(b->now_ns, expect);
+            ++expect;
+            pipe.pop();
+        }
+    }};
+
+    for(uint32_t i = 0; i < kBatches; ++i)
+    {
+        record_batch* slot = nullptr;
+        // The producer retries rather than blocking; a real reader would drop.
+        while((slot = pipe.acquire()) == nullptr)
+        {
+            ++dropped;
+        }
+        slot->now_ns = produced.load(std::memory_order_relaxed);
+        auto r       = copied_record{};
+        r.rec.dispatch_id = 0;
+        slot->records.emplace_back(r);
+        slot->records[0].rec.dispatch_id = static_cast<uint32_t>(slot->records.size() - 1);
+        produced.fetch_add(1, std::memory_order_relaxed);
+        pipe.publish();
+    }
+
+    stop.store(true, std::memory_order_release);
+    consumer.join();
+
+    EXPECT_EQ(produced.load(), kBatches);
+    EXPECT_TRUE(pipe.empty());
 }

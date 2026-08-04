@@ -46,7 +46,7 @@ namespace kfd
 // Firmware wire record: 20 bytes, little-endian, fixed layout (dispatch_log_format).
 constexpr uint32_t kFwRecBytes = 20;
 
-// Maximum regions the drain supports (bounds drain_state::rptr[]). Geometry with
+// Maximum regions the drain supports (bounds ring_cursors::rptr[]). Geometry with
 // more regions than this is rejected rather than partially drained.
 constexpr uint32_t kMaxRegions = 8;
 
@@ -135,20 +135,43 @@ struct drained_record
     bool     loss_free    = true;
 };
 
-// Default post-scan hook: the test seam (S1) uses this to move the producer
-// between the scan and the after-scan wptr read.
-struct no_post_scan_hook
+// One record copied out of the shared ring, carrying the copier's loss verdict
+// for the region it came from. The verdict travels with the record because
+// pairing happens later, on another thread, by which time the ring cursors have
+// already moved on.
+struct copied_record
 {
-    void operator()() const {}
+    fw_record rec       = {};
+    bool      loss_free = true;
 };
 
-// Per-pipe drain cursors + unmatched starts, carried across drain calls. One
-// instance lives in dlog_session (reader) or is stack-local (test).
-struct drain_state
+// Reader-side state: ring cursors and loss counters. Touched ONLY by the
+// ring-copier thread, so it needs no lock.
+struct ring_cursors
 {
     uint64_t rptr[kMaxRegions] = {};     // consumer read pos per region
     bool     rptr_init         = false;  // sync rptr to wptr on first drain
 
+    // Overrun telemetry. The producer has lapped the reader once `w - rptr`
+    // reaches region_slots -- its next write target is then the slot at rptr, so
+    // that record is lost or torn.
+    uint64_t overruns     = 0;  // laps observed
+    uint64_t lost_records = 0;  // records the producer advanced past
+
+    bool note_overrun(uint64_t dist, uint32_t region_slots)
+    {
+        if(dist < region_slots) return false;
+        ++overruns;
+        lost_records += dist - region_slots + 1;
+        return true;
+    }
+};
+
+// Processor-side state: start/eop pairing. Touched ONLY by the processor thread,
+// so it needs no lock either. Deliberately separate from ring_cursors: the whole
+// point of the split is that the copier never touches this.
+struct pair_state
+{
     struct pending_start
     {
         uint64_t start_ticks = 0;  // GPU ticks from the dispatch_start record
@@ -158,26 +181,7 @@ struct drain_state
     // (doorbell_off << 32 | dispatch_id).
     std::unordered_map<uint64_t, pending_start> pending_starts = {};
 
-    // Overrun telemetry. Phase 0 is DETECTION ONLY: the recovery in drain_pipes()
-    // is unchanged, so pairing/timestamp behavior is exactly as before. The
-    // producer has lapped the reader once `w - rptr` reaches region_slots -- its
-    // next write target is then the slot at rptr, so that record is lost or torn.
-    uint64_t overruns       = 0;  // laps observed (before or during a scan)
-    uint64_t lost_records   = 0;  // records the producer advanced past the safe window
     uint64_t unmatched_eops = 0;  // EOPs whose START was lost (shape ii)
-
-    // Staging buffer for one region's records. Reused across drains so the reader
-    // does not allocate per drain; nothing is published from it until the
-    // after-scan wptr read has settled the region's loss-free verdict.
-    std::vector<drained_record> staged = {};
-
-    bool note_overrun(uint64_t dist, uint32_t region_slots)
-    {
-        if(dist < region_slots) return false;
-        ++overruns;
-        lost_records += dist - region_slots + 1;
-        return true;
-    }
 
     // Drop retained starts belonging to a page-relative doorbell slot whose queue
     // was destroyed, so a stale start cannot pair with a record from whatever
@@ -223,135 +227,133 @@ struct drain_state
     }
 };
 
-// Drain new firmware records from every pipe, pairing start/eop by
-// (doorbell_off, dispatch_id). Pure: no singletons, no mmap ownership, no host
-// clock. on_record(const drained_record&) is invoked for every EOP, in ring
-// order, AFTER that region's after-scan wptr read -- so a consumer never sees a
-// record before the drain knows whether the producer lapped it (invariant 5, no
-// early publication).
+// STAGE 1 (reader thread): copy raw records out of the shared ring, as fast as
+// possible and touching nothing else.
 //
-// Advances rptr_arr (the shared consumer cursor firmware/kernel read) and
-// state.rptr. Returns the matched start+eop pair count, or 0 on invalid geometry;
-// EOPs without a START are counted in state.unmatched_eops instead.
+// This is the only code that reads the volatile mapping, and the time it spends
+// there is the window in which the producer can lap us -- so it takes NO lock,
+// consults no map, does no pairing, timestamp math or dispatch bookkeeping. It
+// memcpys the bytes into caller-owned storage and moves the cursor on.
 //
-// post_scan is a test seam (S1): it runs between the scan and the after-scan wptr
-// read so a producer lap during the scan can be made deterministic.
-template <typename OnRecord, typename PostScanHook = no_post_scan_hook>
+// `out.emplace_back(copied_record)` receives the records in ring order. Returns
+// the number copied, or 0 on invalid geometry.
+//
+// ORDERING: the copy of a region's slots happens BEFORE the release-store that
+// publishes the new rptr, so the kernel cannot observe the slots as free while we
+// are still reading them.
+template <typename OutT>
 uint64_t
-drain_pipes(const uint8_t*           records_base,
-            uint32_t                 num_regions,
-            uint32_t                 region_record_count,
-            const volatile uint64_t* wptr_arr,
-            volatile uint64_t*       rptr_arr,
-            drain_state&             state,
-            uint64_t                 now_ns,
-            OnRecord&&               on_record,
-            PostScanHook&&           post_scan = {})
+copy_pipes(const uint8_t*           records_base,
+           uint32_t                 num_regions,
+           uint32_t                 region_record_count,
+           const volatile uint64_t* wptr_arr,
+           volatile uint64_t*       rptr_arr,
+           ring_cursors&            cursors,
+           OutT&                    out)
 {
-    // Reject geometry that exceeds the cursor storage (drain_state::rptr[]) rather
-    // than silently draining a subset.
     if(num_regions == 0 || num_regions > kMaxRegions) return 0;
 
-    // Per-region slot count. Must be a power of two so idx masks to a physical slot.
     const uint32_t region_slots = region_record_count;
     if(region_slots == 0 || (region_slots & (region_slots - 1)) != 0) return 0;
 
-    // First drain: start each pipe at the ring origin. The session buffer is
-    // freshly allocated, so every written record belongs to this session and
-    // should be consumed; the scan below only reads slots [rptr, wptr), never
-    // past the producer, so unwritten slots are never touched. If the ring
-    // already wrapped before this first drain, the overrun recovery below
-    // advances past the slots the producer has physically overwritten.
-    if(!state.rptr_init)
+    if(!cursors.rptr_init)
     {
         for(uint32_t p = 0; p < num_regions; ++p)
         {
-            state.rptr[p] = 0;
+            cursors.rptr[p] = 0;
             __atomic_store_n(&rptr_arr[p], 0, __ATOMIC_RELEASE);
         }
-        state.rptr_init = true;
+        cursors.rptr_init = true;
     }
 
-    auto read_rec = [&](uint32_t region, uint64_t idx) {
-        uint64_t slot = static_cast<uint64_t>(region) * region_slots + (idx & (region_slots - 1));
-        auto     rec  = fw_record{};
-        std::memcpy(&rec, records_base + slot * kFwRecBytes, sizeof(rec));
-        return rec;
-    };
-
-    uint64_t seen = 0;
+    uint64_t copied = 0;
     for(uint32_t p = 0; p < num_regions; ++p)
     {
-        uint64_t w    = __atomic_load_n(&wptr_arr[p], __ATOMIC_ACQUIRE);
-        uint64_t scan = state.rptr[p];
-
+        const uint64_t w    = __atomic_load_n(&wptr_arr[p], __ATOMIC_ACQUIRE);
+        uint64_t       scan = cursors.rptr[p];
         if(w <= scan) continue;
-        const bool overran = state.note_overrun(w - scan, region_slots);
-        // Overrun recovery: if the producer lapped us, resume just behind it. In a
-        // power-of-two ring, w - region_slots aliases the producer's current slot,
-        // so +1 keeps recovery strictly behind it.
+
+        // The producer lapped us: the slots it has already overwritten are gone.
+        // Count them, skip past them, and carry on -- the rest of this region is
+        // still valid, and the records we do copy are marked so a consumer will
+        // not complete a dispatch from a possibly-torn one.
+        const bool lossy = cursors.note_overrun(w - scan, region_slots);
         if(w - scan > region_slots) scan = w - region_slots + 1;
 
-        state.staged.clear();
         for(uint64_t idx = scan; idx != w; ++idx)
         {
-            auto rec = read_rec(p, idx);
-            if(rec.record_type == kRecPadding || rec.doorbell_off == 0) continue;
-
-            const uint64_t ts =
-                static_cast<uint64_t>(rec.ts_lo) | (static_cast<uint64_t>(rec.ts_hi) << 32);
-            const uint64_t key = (static_cast<uint64_t>(rec.doorbell_off) << 32) |
-                                 static_cast<uint64_t>(rec.dispatch_id);
-
-            if(rec.record_type == kRecStart)
-            {
-                // Overwrite: dispatch_id is only low-32, so a key can recur; a
-                // collision means the prior start is stale.
-                state.pending_starts[key] = drain_state::pending_start{ts, now_ns};
-            }
-            else if(rec.record_type == kRecEop)
-            {
-                auto out         = drained_record{};
-                out.doorbell_off = rec.doorbell_off;
-                out.dispatch_id  = rec.dispatch_id;
-                out.end_ticks    = ts;
-
-                auto it = state.pending_starts.find(key);
-                if(it != state.pending_starts.end())
-                {
-                    out.start_ticks = it->second.start_ticks;
-                    out.start_known = true;
-                    state.pending_starts.erase(it);
-                }
-                // Otherwise the START was lost (shape ii): the EOP still proves the
-                // kernel finished, it just carries no interval.
-                state.staged.emplace_back(out);
-            }
+            const uint64_t slot =
+                static_cast<uint64_t>(p) * region_slots + (idx & (region_slots - 1));
+            auto _out = copied_record{};
+            std::memcpy(&_out.rec, records_base + slot * kFwRecBytes, sizeof(_out.rec));
+            _out.loss_free = !lossy;
+            out.emplace_back(_out);
+            ++copied;
         }
 
-        post_scan();
-
-        // Re-read the producer frontier BEFORE publishing anything: a lap during
-        // the scan means the slots just read may have been overwritten under us,
-        // so the whole region's records are reported as not loss-free.
-        bool overran_post = false;
-        if(!overran)
-            overran_post = state.note_overrun(
-                __atomic_load_n(&wptr_arr[p], __ATOMIC_ACQUIRE) - state.rptr[p], region_slots);
-
-        const bool loss_free = !overran && !overran_post;
-        for(auto& rec : state.staged)
-        {
-            rec.loss_free = loss_free;
-            if(rec.start_known)
-                ++seen;
-            else
-                ++state.unmatched_eops;
-            on_record(rec);
-        }
-
-        state.rptr[p] = w;
+        // Release: every memcpy above is ordered before the kernel can see these
+        // slots as consumed.
+        cursors.rptr[p] = w;
         __atomic_store_n(&rptr_arr[p], w, __ATOMIC_RELEASE);
+    }
+    return copied;
+}
+
+// STAGE 2 (processor thread): pair start/eop out of an already-copied batch.
+//
+// Runs off the ring entirely, so it may take locks and consult maps freely.
+// on_record(const drained_record&) is invoked for every EOP in batch order.
+// Returns the matched start+eop pair count; EOPs whose START was lost are
+// reported with start_known=false and counted in state.unmatched_eops.
+template <typename OnRecord>
+uint64_t
+pair_records(const copied_record* records,
+             size_t               count,
+             pair_state&          state,
+             uint64_t             now_ns,
+             OnRecord&&           on_record)
+{
+    uint64_t seen = 0;
+    for(size_t i = 0; i < count; ++i)
+    {
+        const auto& rec = records[i].rec;
+        if(rec.record_type == kRecPadding || rec.doorbell_off == 0) continue;
+
+        const uint64_t ts =
+            static_cast<uint64_t>(rec.ts_lo) | (static_cast<uint64_t>(rec.ts_hi) << 32);
+        const uint64_t key = (static_cast<uint64_t>(rec.doorbell_off) << 32) |
+                             static_cast<uint64_t>(rec.dispatch_id);
+
+        if(rec.record_type == kRecStart)
+        {
+            // Overwrite: dispatch_id is only low-32, so a key can recur; a
+            // collision means the prior start is stale.
+            state.pending_starts[key] = pair_state::pending_start{ts, now_ns};
+            continue;
+        }
+        if(rec.record_type != kRecEop) continue;
+
+        auto out         = drained_record{};
+        out.doorbell_off = rec.doorbell_off;
+        out.dispatch_id  = rec.dispatch_id;
+        out.end_ticks    = ts;
+        out.loss_free    = records[i].loss_free;
+
+        auto it = state.pending_starts.find(key);
+        if(it != state.pending_starts.end())
+        {
+            out.start_ticks = it->second.start_ticks;
+            out.start_known = true;
+            state.pending_starts.erase(it);
+            ++seen;
+        }
+        else
+        {
+            // The START was lost (shape ii): the EOP still proves the kernel
+            // finished, it just carries no interval.
+            ++state.unmatched_eops;
+        }
+        on_record(out);
     }
     return seen;
 }
