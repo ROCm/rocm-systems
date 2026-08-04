@@ -122,19 +122,21 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
       // Map the descriptor symbol to the file bytes it points at, validating every
       // step so a crafted symbol cannot form an out-of-bounds pointer: its section
       // index must exist; its value must sit at or above that section's vaddr (so the
-      // vaddr->file delta does not underflow); the delta must land the file offset
-      // within the image (no wrap); and the full 64-byte descriptor must fit from
-      // there. Any failure skips this symbol rather than reading past the image.
+      // vaddr->file delta does not underflow); the owning section must fit within the
+      // image; and the full 64-byte descriptor must fit within *that section* -- not
+      // merely the image -- so a .kd near the section's end cannot extend past sh_size
+      // into an adjacent section and later be mutated across the boundary. Any failure
+      // skips this symbol rather than reading past the section.
       const uint16_t sec_idx = symtab[j].st_shndx;
       if (sec_idx >= ehdr->e_shnum || symtab[j].st_value < shdr[sec_idx].sh_addr)
         continue;
 
-      const uint64_t delta = symtab[j].st_value - shdr[sec_idx].sh_addr;
-      if (!range_in_bounds(shdr[sec_idx].sh_offset, delta, image.size()))
+      const Elf64_Shdr &owner = shdr[sec_idx];
+      const uint64_t delta = symtab[j].st_value - owner.sh_addr;
+      if (!range_in_bounds(owner.sh_offset, owner.sh_size, image.size()) ||
+          !range_in_bounds(delta, sizeof(KD), owner.sh_size))
         continue;
-      const uint64_t file_off = shdr[sec_idx].sh_offset + delta;
-      if (!range_in_bounds(file_off, sizeof(KD), image.size()))
-        continue;
+      const uint64_t file_off = owner.sh_offset + delta;
       if (!seen_descriptor_offsets.insert(file_off).second)
         continue;
 
