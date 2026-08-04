@@ -72,8 +72,9 @@ get_matching_hsa_pcs_units(rocprofiler_pc_sampling_unit_t unit)
 
 size_t get_hsa_pcs_buffer_size(uint32_t /*gfx_target_version*/)
 {
-    // Use bigger buffer to reduce number of dropped samples on actual silicon
-    return 64 * 1024 * sizeof(perf_sample_hosttrap_v1_t);  // 4MB
+    // Small buffers result in dropped samples on actual silicon.
+    // ROCM-22213 further splits the buffer per XCC, so we use a large size.
+    return 1024 * 1024 * sizeof(perf_sample_hosttrap_v1_t);  // 64MB
 }
 }  // namespace utils
 }  // namespace pc_sampling
