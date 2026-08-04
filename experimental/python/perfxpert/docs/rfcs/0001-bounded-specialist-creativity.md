@@ -2,10 +2,28 @@
 status: draft
 author: ephoukong
 start_date: 2026-08-01
-pr: TBD
+pr: 9604
 implements: []
 supersedes: []
 ---
+
+> **Process note — this RFC and its implementation are in one PR.**
+>
+> `docs/rfcs/README.md` step 6 expects implementation to land in separate PRs
+> that reference a merged RFC. This PR does both, which needs an explicit
+> exception rather than passing unnoticed.
+>
+> It was written this way because the RFC's central claim is that the
+> separation between the vetted and exploratory lanes can be enforced rather
+> than merely intended, and the tests that demonstrate it are the argument for
+> the design. Reviewing the design without them would mean approving that
+> claim on assertion.
+>
+> The exploratory tier ships off by default and every guardrail it depends on
+> is enforced in CI, so merging does not enable anything. If reviewers would
+> rather hold to the documented process, the implementation can be split back
+> out and this file merged on its own; the approval checklist at the end of
+> this document is unchecked either way.
 
 # RFC-0001: Bounded creative freedom for Layer-2 specialists
 

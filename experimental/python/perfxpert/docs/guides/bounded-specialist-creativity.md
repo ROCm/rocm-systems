@@ -166,19 +166,29 @@ proposal must cite at least one entry, every reference must match exactly, and
 any named target kernel must be among the measured ones.
 
 The manifest proves a source *was available*. It does not prove the model's
-prose about that source is accurate — that is what the confidence cap and the
-human promotion step are for.
+prose about that source is accurate. Each evidence item has two halves that
+carry very different weight, and they are labelled differently everywhere they
+appear: the `ref` is checked against what ran, while the `observation` beside
+it is the model's own account and is printed to reviewers as an unverified
+claim. Verifying the prose would mean re-deriving every metric a model might
+mention; the confidence cap, the `verification` plan, and the human promotion
+step are what cover that gap instead.
 
 The runtime then computes a content-addressed `pxp-exp-...` identifier from
-the specialist, title, hypothesis, mechanism, and target
-(`perfxpert/agents/creativity.py:125-198`). At most three proposals survive
+the specialist, title, hypothesis, mechanism, target, and a fingerprint of the
+workload (`perfxpert/agents/creativity.py`). At most three proposals survive
 per specialist, and duplicates collapse by identifier only — never by title or
 confidence, since those are model-controlled and could be used to suppress a
 competing proposal.
 
-The identifier deliberately excludes the evidence, so the same idea keeps a
-stable identity across runs and can accumulate support. Including per-run
-evidence would mint a new identifier every time and break deduplication.
+The identifier covers the workload but not the evidence. Those pull in
+opposite directions and each choice is deliberate. Leaving the evidence out
+lets the same idea keep one identity across repeated runs, which is what
+deduplication and promotion are tracked against; including per-run evidence
+would mint a new identifier every time. Putting the workload in stops the same
+sentence written about two unrelated traces from collapsing into a single
+proposal, which would make a reviewer's decision on one silently answer for
+the other.
 
 ### The promotion path
 
@@ -239,8 +249,14 @@ Worth knowing before you rely on a guarantee the RFC states:
 - Expected effects, verification metrics, assumptions, and failure modes
   default to empty lists. The prompts require them; construction does not yet
   enforce that they are non-empty.
-- Provenance is only partly populated. The provider is recorded; the model
-  identity and the trace, fence, and catalog digests keep empty defaults.
+- An evidence item's `observation` is model narration. Only the `ref` beside
+  it is checked, so a proposal can describe a real tool's output inaccurately.
+  It is labelled as unverified wherever it is shown rather than being bound to
+  the captured output.
+- The per-agent token ceiling reaches the SDK path only. The opencode backend
+  has no output-token limit to forward it to, so a run through that provider
+  is unbounded in output size; the provider logs that the ceiling is not
+  applied rather than pretending otherwise.
 - Proposal prose is not scanned for command text or prompt-boundary markers,
   and free-text fields are not individually length-bounded. The structural
   protection — no schema field can carry a command, and the orchestrator
