@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -147,10 +147,10 @@ checked_mul(uint64_t lhs, uint64_t rhs)
     return lhs * rhs;
 }
 
-uint64_t
+std::optional<uint64_t>
 align_down(uint64_t value, uint64_t alignment)
 {
-    if(alignment == 0) return value;
+    if(alignment == 0) return std::nullopt;
     return value - (value % alignment);
 }
 
@@ -596,20 +596,26 @@ calculate_load_bias(const target_elf& elf, const mapped_object& object)
     auto first_mapping        = object.mappings.front();
     auto segment_file_page    = align_down(first_load_segment->p_offset, page_size);
     auto segment_virtual_page = align_down(first_load_segment->p_vaddr, page_size);
+    if(!segment_file_page || !segment_virtual_page)
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Invalid page size " << page_size
+                   << " while calculating load bias for " << object.path;
+        return std::nullopt;
+    }
     // Match the maps entry to the PT_LOAD segment by file page before using it
     // to derive the ET_DYN load bias.
-    if(first_mapping.file_offset != segment_file_page)
+    if(first_mapping.file_offset != *segment_file_page)
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] First target mapping for " << object.path
                    << " has file offset 0x" << std::hex << first_mapping.file_offset
-                   << ", but the first PT_LOAD segment starts at file page 0x" << segment_file_page
+                   << ", but the first PT_LOAD segment starts at file page 0x" << *segment_file_page
                    << std::dec;
         return std::nullopt;
     }
 
     // For ET_DYN shared objects, load bias is runtime start minus page-aligned
     // segment virtual address.
-    auto bias = checked_sub(static_cast<uint64_t>(first_mapping.start), segment_virtual_page);
+    auto bias = checked_sub(static_cast<uint64_t>(first_mapping.start), *segment_virtual_page);
     if(!bias)
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Invalid target mapping/segment pair for "
