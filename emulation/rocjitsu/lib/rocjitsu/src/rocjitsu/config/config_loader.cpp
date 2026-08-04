@@ -46,13 +46,8 @@ engine_config_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
   return cfg;
 }
 
-simdojo::ExecMode parse_exec_mode(const rocjitsu::fb::SimulationConfig *fb_config) {
-  if (fb_config->exec_mode()) {
-    std::string mode_str = fb_config->exec_mode()->str();
-    if (mode_str == "clocked")
-      return simdojo::ExecMode::CLOCKED;
-  }
-  return simdojo::ExecMode::FUNCTIONAL;
+simdojo::ExecMode exec_mode_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
+  return parse_exec_mode(fb_config->exec_mode() ? fb_config->exec_mode()->str() : "");
 }
 
 uint32_t config_u32(const std::unordered_map<std::string, std::string> &cfg, const std::string &key,
@@ -377,10 +372,11 @@ std::unordered_map<std::string, FactoryFn> &factories() {
       c->set_weight(0);
       return c;
     };
-    f["soc"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t arch,
+    f["soc"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode mode, rj_code_arch_t arch,
                   amdgpu::GpuMemory *mem) -> std::unique_ptr<simdojo::Component> {
       auto soc = std::make_unique<SoC>(n, mem);
       soc->set_arch(arch);
+      soc->set_exec_mode(mode);
       return soc;
     };
     f["xcd"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
@@ -423,35 +419,7 @@ std::unordered_map<std::string, FactoryFn> &factories() {
                                 rj_code_arch_t arch,
                                 amdgpu::GpuMemory *) -> std::unique_ptr<simdojo::Component> {
       auto cp = std::make_unique<amdgpu::CommandProcessor>(n);
-      // Matches llvm/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.cpp
-      // AMDGPUBaseInfo::getVGPREncodingGranule():
-      // gfx1250 has Feature1024AddressableVGPRs, so Wave32 descriptors encode
-      // VGPR counts in 16-register blocks; other RDNA Wave32 targets use 8.
-      // LLVM's AMDGPULowerVGPREncoding.cpp handles the separate gfx1250
-      // s_set_vgpr_msb high-bank indexing needed to access VGPRs above v255.
-      uint32_t gran = 4;
-      if (arch == ROCJITSU_CODE_ARCH_GFX1250)
-        gran = 16;
-      else if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-               arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
-               arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-               arch == ROCJITSU_CODE_ARCH_RDNA4)
-        gran = 8;
-      cp->set_vgpr_granularity(gran);
-      // Matches LLVM's FeaturePackedTID: gfx90a and later CDNA targets, plus
-      // GFX11 and later RDNA targets, receive work-item IDs packed in v0.
-      bool packed = (arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-                     arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-                     arch == ROCJITSU_CODE_ARCH_RDNA3_5 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-                     arch == ROCJITSU_CODE_ARCH_GFX1250);
-      cp->set_packed_tid(packed);
-      amdgpu::SdmaPacketDialect sdma_dialect = amdgpu::SdmaPacketDialect::Legacy;
-      if (arch == ROCJITSU_CODE_ARCH_GFX1250)
-        sdma_dialect = amdgpu::SdmaPacketDialect::Gfx1250;
-      else if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-               arch == ROCJITSU_CODE_ARCH_RDNA4)
-        sdma_dialect = amdgpu::SdmaPacketDialect::Gfx11Plus;
-      cp->set_sdma_packet_dialect(sdma_dialect);
+      cp->configure_for_arch(arch);
       return cp;
     };
 
@@ -680,7 +648,7 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
 LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
   LoadedConfig result;
   result.engine_config = engine_config_from_fb(fb_config);
-  result.exec_mode = parse_exec_mode(fb_config);
+  result.exec_mode = exec_mode_from_fb(fb_config);
 
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
   if (fb_config->vm() && fb_config->vm()->arch())
@@ -721,6 +689,10 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
 }
 
 } // namespace
+
+simdojo::ExecMode parse_exec_mode(const std::string &mode_str) {
+  return mode_str == "clocked" ? simdojo::ExecMode::CLOCKED : simdojo::ExecMode::FUNCTIONAL;
+}
 
 rj_code_arch_t parse_arch(const std::string &arch_str) {
   // \NPI new ISA family: add its "arch" string here and in arch_to_string().

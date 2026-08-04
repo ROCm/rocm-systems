@@ -176,34 +176,29 @@ uint32_t max_numeric_dir(const fs::path &dir) {
   return max_id;
 }
 
-std::optional<uint32_t> first_gpu_id_matching_isa_in_topology(const fs::path &topology_root,
-                                                              std::string_view host_isa) {
+bool gpu_id_matches_isa_in_topology(const fs::path &topology_root, uint32_t gpu_id,
+                                    std::string_view host_isa) {
   std::optional<uint32_t> target_version = kmd::gfx_target_version_from_name(host_isa);
   if (!target_version)
-    return std::nullopt;
+    return false;
 
   fs::path nodes_dir = topology_root / "nodes";
   const uint32_t max_node = max_numeric_dir(nodes_dir);
   for (uint32_t node_id = 1; node_id <= max_node; ++node_id) {
     fs::path node_dir = nodes_dir / std::to_string(node_id);
-    const uint32_t gfx_target_version =
-        read_u32_property(node_dir / "properties", "gfx_target_version", 0);
-    if (gfx_target_version != *target_version)
+    if (read_u32_file(node_dir / "gpu_id") != gpu_id)
       continue;
-
-    std::optional<uint32_t> gpu_id = read_u32_file(node_dir / "gpu_id");
-    if (gpu_id && *gpu_id != 0)
-      return gpu_id;
+    return read_u32_property(node_dir / "properties", "gfx_target_version", 0) == *target_version;
   }
-  return std::nullopt;
+  return false;
 }
 
-std::optional<uint32_t> first_real_gpu_id_matching_isa(std::string_view host_isa) {
+bool real_gpu_id_matches_isa(uint32_t gpu_id, std::string_view host_isa) {
   for (std::string_view topology_path : kRealTopologyPaths) {
-    if (auto gpu_id = first_gpu_id_matching_isa_in_topology(fs::path(topology_path), host_isa))
-      return gpu_id;
+    if (gpu_id_matches_isa_in_topology(fs::path(topology_path), gpu_id, host_isa))
+      return true;
   }
-  return std::nullopt;
+  return false;
 }
 
 std::string io_link_to_cpu(uint32_t node_from) {
@@ -624,17 +619,26 @@ bool GuestKfd::ensure_ready_locked() {
   if (!ensure_real_kfd_locked())
     return false;
   if (host_gpu_id_ == 0) {
-    std::optional<uint32_t> host_gpu_id;
-    if (execution_driver_)
-      host_gpu_id = first_gpu_id_matching_isa_in_topology(execution_driver_->topology_path(),
-                                                          config_.host.isa);
-    else
-      host_gpu_id = first_real_gpu_id_matching_isa(config_.host.isa);
-    if (!host_gpu_id) {
-      errno = ENODEV;
-      return false;
-    }
-    host_gpu_id_ = *host_gpu_id;
+    // The launcher resolves the host GPU once and publishes it in the runtime handoff, and
+    // load_dbt_guest_config_from_handoff() refuses an enabled DBT config that arrives here
+    // unresolved. Re-deriving it by first-ISA-match would reintroduce the per-layer
+    // divergence that lets this driver and the hook layer pick different GPUs on a
+    // multi-GPU host, so refuse rather than guess.
+    util::Logger::warn("rocjitsu: DBT config carries no resolved host KFD gpu_id; refusing to "
+                       "guess a host GPU");
+    errno = ENODEV;
+    return false;
+  }
+  const bool host_matches = execution_driver_
+                                ? gpu_id_matches_isa_in_topology(execution_driver_->topology_path(),
+                                                                 host_gpu_id_, config_.host.isa)
+                                : real_gpu_id_matches_isa(host_gpu_id_, config_.host.isa);
+  if (!host_matches) {
+    util::Logger::warn("rocjitsu: host KFD gpu_id=", host_gpu_id_,
+                       " does not match the configured host ISA '", config_.host.isa,
+                       "' in the KFD topology");
+    errno = ENODEV;
+    return false;
   }
   const std::string host_topology = execution_driver_ ? execution_driver_->topology_path() : "";
   if (!overlay_->generate(guest_, host_topology)) {
