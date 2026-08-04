@@ -103,11 +103,25 @@ replaces that with the `>=` latch + no silent recovery.)
 Transactional per-region drain:
 
 1. `w0 = load_acquire(wptr[region])`.
-2. If `w0 - rptr[region] >= region_slots` -> overrun: publish nothing, latch
-   session `LOSS_POISONED`, transition all still-matchable pending entries ->
-   `LEAKED`, loud warning, disable signal-less for the process. (No silent
-   `w - region_slots + 1` recovery in signal-less mode — that recovery is what
-   silently drops lapped records.)
+2. If `w0 - rptr[region] >= region_slots` -> overrun: the lapped slots are gone.
+   Skip past them (`w - region_slots + 1`), mark the records that ARE copied so a
+   consumer will not complete a dispatch from a possibly-torn one, count the loss,
+   report it -- and KEEP GOING.
+
+   REVISED after hardware testing (was: publish nothing, latch `LOSS_POISONED`,
+   leak all still-matchable pending entries, disable signal-less for the process).
+   An overrun's data is already lost; disabling the feature for the remainder of
+   the process turned a bounded, already-known loss into a total one. The rest of
+   the drained batch is valid and is processed normally, and dispatches whose
+   records were lapped simply never complete from firmware. The hub no longer
+   poisons on overrun; `LOSS_POISONED` remains only for the tombstone cap and
+   reader death.
+
+   CONSEQUENCE, not yet addressed: a lapped dispatch's hub entry stays PENDING for
+   the life of the process, because requirement 2 deliberately removed age-based
+   eviction for live pending entries. Teardown leaks them correctly, but a
+   workload that overruns continuously will accumulate them. A bounded
+   pending-entry cap is the follow-up if that matters in practice.
 3. Else scan `[rptr, w0)` and stage candidate pairs (do not publish yet).
 4. `w1 = load_acquire(wptr[region])`. If `w1 - rptr[region] >= region_slots` the
    producer lapped us mid-scan -> discard staged pairs, latch overrun as in (2).
@@ -152,6 +166,21 @@ If ANY packet fails, the WHOLE batch keeps today's signal path (no mixed-mode
 batches). App-signal presence is NOT a gate (P3).
 
 ## Architecture
+
+READER SPLIT (revised after hardware measurement): the reader is two stages, not
+one. Stage 1, the ring-copier, is the only code that touches the volatile
+mapping: it memcpys the raw records into an owned batch, marks each with its
+region's loss verdict, advances `rptr` and returns -- no lock, no map lookup, no
+pairing, no timestamp work. Stage 2, the processor thread, does everything else
+(start/eop pairing, doorbell generation, hub transitions, task-group handoff,
+results deposit) off the ring entirely. Time spent inside the ring is the window
+in which the firmware can lap the reader, so that window is now a memcpy.
+
+The two are joined by a bounded single-producer/single-consumer pipe whose slots
+are the buffer pool. The copier never blocks: if the processor falls a full pipe
+behind, the copier drops the batch and counts it, because blocking the ring read
+is precisely what causes the overruns this split exists to reduce. Pairing state
+belongs to the processor, ring cursors to the copier, so neither needs a lock.
 
 Invert control: the reader matches each drained pair to a pending-completion
 registry entry (the "hub") and hands finalization to the existing inline async
