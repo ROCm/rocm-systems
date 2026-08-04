@@ -59,3 +59,4 @@ install(
     EXPORT rocprofiler-sdk-tool-targets)
 
 add_subdirectory(kokkosp)
+add_subdirectory(list-avail)
