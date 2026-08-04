@@ -22,8 +22,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - `--spm-config` option in `rocprofv3-avail` to list available SPM configurations.
   - JSON and rocpd output format support for SPM.
   - OpenMP (OMPT) tracing via the new `--ompt-trace` flag:
-    - Accepts a bare boolean or category list (`all, thread, parallel, task, sync, mutex, target, device, error`). Must be requested explicitly; like `--kokkos-trace`, it is not folded into `--sys-trace`/`--runtime-trace`.
-    - rocpd-only trace: records go to the rocpd database (auto-added when another format is requested) and export via `rocpd convert`.
+    - Accepts a bare boolean or category list (`all, thread, parallel, task, sync, mutex, target, device, error`); also folded into `--sys-trace`/`--runtime-trace`.
+    - rocpd-only trace: records go to the rocpd database (the default output format) and export via `rocpd convert`.
 
 **Documentation:**
 

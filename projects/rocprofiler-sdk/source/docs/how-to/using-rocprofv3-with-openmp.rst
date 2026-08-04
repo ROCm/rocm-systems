@@ -96,13 +96,13 @@ The preceding files contain detailed profiling information about GPU kernel exec
 Tracing OpenMP runtime events with ``--ompt-trace``
 ====================================================
 
-The flags shown above capture HIP / HSA / kernel-dispatch / memory activity but not OpenMP-level structure. To trace OpenMP itself, pass ``--ompt-trace`` (or ``ROCPROF_OMPT_TRACE=1``); it is not enabled by ``--sys-trace`` or ``--runtime-trace``. This is a host-side facility: it records CPU-side OpenMP execution (thread lifecycle, parallel regions, work-sharing, tasks, sync regions, mutexes, dispatch) even for applications that never offload, plus host-side target-offload events (``target``, ``target_data_op``, ``target_submit``, ``device_initialize`` / ``device_load`` / ``device_finalize``) for offloading applications.
+The flags shown above capture HIP / HSA / kernel-dispatch / memory activity but not OpenMP-level structure. To trace OpenMP itself, pass ``--ompt-trace`` (or ``ROCPROF_OMPT_TRACE=1``; it is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``). This is a host-side facility: it records CPU-side OpenMP execution (thread lifecycle, parallel regions, work-sharing, tasks, sync regions, mutexes, dispatch) even for applications that never offload, plus host-side target-offload events (``target``, ``target_data_op``, ``target_submit``, ``device_initialize`` / ``device_load`` / ``device_finalize``) for offloading applications.
 
 .. code-block:: bash
 
     rocprofv3 --ompt-trace --kernel-trace --memory-copy-trace --output-format rocpd -- ./vector_add
 
-OMPT is a rocpd-only trace: records are written to the rocpd database (``rocpd`` is also the default output format) and are **not** emitted by the direct CSV / JSON / Perfetto / OTF2 generators. If ``--ompt-trace`` is combined with another ``--output-format``, ``rocprofv3`` prints a warning and adds ``rocpd`` automatically so OMPT data is not lost. To view OMPT in CSV / Perfetto / OTF2, convert the database with ``rocpd convert`` (see below).
+OMPT is a rocpd-only trace: records are written to the rocpd database (``rocpd`` is also the default output format) and are **not** emitted by the direct CSV / JSON / Perfetto / OTF2 generators. OMPT records are only captured when ``rocpd`` is among the requested ``--output-format`` values, so a run that requests only the deprecated direct generators contains no OMPT data. To view OMPT in CSV / Perfetto / OTF2, keep the ``rocpd`` output and convert the database with ``rocpd convert`` (see below).
 
 Combined with ``--kernel-trace`` / ``--memory-copy-trace``, each GPU kernel can be correlated with the surrounding ``target_submit`` / ``target_data_op`` region on the host and placed on the same timeline as the enclosing ``parallel`` / ``work`` regions and tasks.
 

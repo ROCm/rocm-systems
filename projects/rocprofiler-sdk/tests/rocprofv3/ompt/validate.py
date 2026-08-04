@@ -33,6 +33,8 @@
 # OMPT operation set is queried from there. The "OMPT" category string is set in
 # source/lib/output/domain_type.cpp.
 
+import os
+import sqlite3
 import sys
 from collections import Counter
 
@@ -205,6 +207,31 @@ def test_ompt_all_form_is_complete(rocpd_conn):
         f"--ompt-trace all is missing target_submit events on a target-offload "
         f"workload; saw: {sorted(ops)}"
     )
+
+
+def test_sys_trace_implicit_ompt_in_rocpd(request):
+    """Regression guard for the --sys-trace implicit-OMPT path. Profiling with
+    --sys-trace and no explicit --ompt-trace must still enable OMPT tracing, so the
+    rocpd output contains OMPT records. A missing database means the run itself
+    failed, so this asserts the database exists (rather than skipping like the shared
+    rocpd_conn fixture) and that it actually contains OMPT records."""
+    filename = request.config.getoption("--rocpd-input")
+    assert os.path.isfile(filename), (
+        f"rocpd database '{filename}' was not created; expected the --sys-trace run to "
+        "write a rocpd database containing implicitly-enabled OMPT records"
+    )
+    conn = sqlite3.connect(filename)
+    try:
+        counts = _ompt_op_counts(conn)
+        assert (
+            sum(counts.values()) > 0
+        ), "rocpd database contains no OMPT records under --sys-trace"
+        assert any(op in counts for op in HOST_PARALLEL_OPS), (
+            f"expected host-side parallel-region events ({HOST_PARALLEL_OPS}) under "
+            f"--sys-trace; saw: {sorted(counts)}"
+        )
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":
