@@ -34,13 +34,31 @@
 // discovery runs). All work happens in the linked libraries' constructors; reaching main
 // means no deadlock occurred.
 
+#include <omp.h>
+
 #include <cstdio>
 #include <cstdlib>
-
-#include <omp.h>
+#include <vector>
 
 extern "C" int
 lib_get_num_places();
+
+namespace
+{
+int64_t
+parallel_reduction(const std::vector<int>& data)
+{
+    // NOLINTBEGIN(modernize-loop-convert)
+    int64_t total = 0;
+#pragma omp parallel for reduction(+ : total)
+    for(std::size_t i = 0; i < data.size(); ++i)
+    {
+        total += data[i];
+    }
+    // NOLINTEND(modernize-loop-convert)
+    return total;
+}
+}  // namespace
 
 int
 main()
@@ -51,6 +69,15 @@ main()
     int _lib_num_places = lib_get_num_places();
     printf("Number of places via OpenMP call:  %d\n", _omp_num_places);
     printf("Number of places via library call: %d\n", _lib_num_places);
+
+    constexpr int N    = 10000;
+    auto          data = std::vector<int>(N, 0);
+    for(int i = 0; i < N; ++i)
+        data[i] = i + 1;
+
+    auto sum = parallel_reduction(data);
+
+    printf("Sum of 1..%d = %ld\n", N, sum);
 
     return (_omp_num_places == _lib_num_places) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
