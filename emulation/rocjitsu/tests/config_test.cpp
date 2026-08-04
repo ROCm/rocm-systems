@@ -33,8 +33,8 @@ RJ_DIAGNOSTIC_POP
 #include <filesystem>
 #include <fstream>
 #include <iterator>
-#include <optional>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
