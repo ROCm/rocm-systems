@@ -613,7 +613,7 @@ def pytest_collection_modifyitems(config, items) -> None:
 # Modules that fail to collect (import errors, parametrize-time crashes, ...)
 # are recorded here so CTest generate mode can fail the build loudly instead of
 # silently omitting their tests from the generated suite.
-_collection_errors: list = []
+_collection_errors: list[pytest.CollectReport] = []
 
 
 def pytest_collectreport(report) -> None:
@@ -622,7 +622,7 @@ def pytest_collectreport(report) -> None:
         _collection_errors.append(report)
 
 
-def pytest_collection_finish(session):
+def pytest_collection_finish(session) -> None:
     if session.config.getoption("--ctest-mode", default="off") == "generate":
         if _collection_errors:
             failures = "\n".join(f"  - {r.nodeid}" for r in _collection_errors)

@@ -75,7 +75,7 @@ THREAD_LIMIT_CASES: dict[str, ThreadLimitCase] = {
         pass_value=lambda count, limit: count - 1,
         fail_value=lambda count, limit: count + 1,
     ),
-    "at": ThreadLimitCase(
+    "at_limit": ThreadLimitCase(
         count=lambda limit: limit,
         pass_value=lambda count, limit: (limit - 1) - INTERNAL_THREAD_OFFSET,
         fail_value=lambda count, limit: limit + 1,
@@ -111,7 +111,7 @@ def get_thread_limit_warning_regex(thread_limit: int) -> str:
 @pytest.mark.parametrize(
     "mode", ["sampling", "binary_rewrite", "runtime_instrument", "sys_run"]
 )
-@pytest.mark.parametrize("thread_ratio", ["half", "at", "double"])
+@pytest.mark.parametrize("thread_ratio", ["half", "at_limit", "double"])
 @pytest.mark.class_name("thread-limit")
 class TestThreadLimit(RocprofsysTest):
     BINARY_REWRITE_ARGS = ["-e", "-v", "2", "-i", "1024", "--label", "return", "args"]
