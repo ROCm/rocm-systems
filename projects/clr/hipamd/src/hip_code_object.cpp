@@ -806,8 +806,8 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId, hip::Stream* orderStrea
   return hipSuccess;
 }
 
-// Nonblocking and per-thread streams do not implicitly wait for legacy null-stream work. Order
-// them explicitly so kernels cannot use a managed symbol before its device pointer is initialized.
+// Every stream other than the null stream needs an explicit dependency, otherwise a kernel could
+// read a managed symbol before its device pointer is written.
 void StatCO::OrderStreamAfterManagedVarInitialization(int deviceId, hip::Stream* orderStream,
                                                       const DeferredInitManagedVarState& state) {
   if (state.completion == nullptr || orderStream == nullptr ||
