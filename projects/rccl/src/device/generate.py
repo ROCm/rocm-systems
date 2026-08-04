@@ -380,9 +380,6 @@ def get_arch_guard(fn):
       cond = "(defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
   elif fn.acc == "1":
       cond = "defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)"
-  elif fn.ty in ("f8e4m3", "f8e5m2"):
-      cond = "defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1250__)"
-
   return cond
 
 ################################################################################
