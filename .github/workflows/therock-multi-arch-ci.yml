@@ -119,7 +119,8 @@ jobs:
       # Limit GPU families for rocm-systems CI
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X' }}
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || '' }}
-      linux_test_labels: ${{ inputs.linux_test_labels || '' }}
+      # TEST: Only run rocprofiler tests
+      linux_test_labels: ${{ inputs.linux_test_labels || 'test:rocprofiler' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
       # Manual override for prebuilt stages
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
@@ -149,8 +150,8 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      # TEST: Always pass changed_projects (ignore run_all_tests for testing)
+      changed_projects: ${{ needs.configure.outputs.changed_projects || 'projects/rocprofiler' }}
       repository: ROCm/TheRock
       ref: users/geomin12/dynamic-determination-stage
     permissions:
@@ -174,8 +175,8 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      # TEST: Always pass changed_projects (ignore run_all_tests for testing)
+      changed_projects: ${{ needs.configure.outputs.changed_projects || 'projects/rocprofiler' }}
       repository: ROCm/TheRock
       ref: users/geomin12/dynamic-determination-stage
     permissions:
