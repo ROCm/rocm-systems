@@ -9,6 +9,7 @@ on:
   pull_request:
     paths:
       - "emulation/rocjitsu/**"
+      - ".github/scripts/rocjitsu_corpus_translation_comment*.py"
       - ".github/workflows/rocjitsu-*.yml"
   push:
     branches:
@@ -190,6 +191,8 @@ jobs:
         run: |
           python3 \
             "${ROCJITSU_SOURCE_DIR}/tests/corpus/test-record-gfx1250-dbt-sha-pairs.py"
+          python3 \
+            "${GITHUB_WORKSPACE}/rocm-systems/.github/scripts/test-rocjitsu-corpus-translation-comment.py"
 
       - name: Install ROCm SDK
         run: |
@@ -536,7 +539,21 @@ jobs:
           name: gfx1250-b0-a0-sha-pairs
           path: ${{ env.ROCJITSU_DBT_SHA_MANIFEST }}
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 45
+
+      # PR jobs intentionally have no write token. They publish only data here;
+      # the trusted workflow_run job downloads it and maintains the PR comment.
+      - name: Upload PR gfx1250 B0-to-A0 SHA pairs
+        if: >-
+          matrix.name == 'release' &&
+          steps.finalize_dbt_sha_pairs.outcome == 'success' &&
+          github.event_name == 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gfx1250-b0-a0-sha-pairs-candidate
+          path: ${{ env.ROCJITSU_DBT_SHA_MANIFEST }}
+          if-no-files-found: error
+          retention-days: 7
 
       # Debugging aid only. The pinned extraction is reproducible, so retain
       # translator logs but never upload the extracted HSACOs.
