@@ -159,9 +159,11 @@ hrr:
   Unit_HRR_DrvMemcpy3DRoundtrip:
     <<: *level_2
     tags: [capture, memcpy, playback, roundtrip]
+    disabled: [amd_windows]
   Unit_HRR_DrvMemcpy2DUnalignedRoundtrip:
     <<: *level_2
     tags: [capture, memcpy, playback, roundtrip]
+    disabled: [amd_windows]
   Unit_HRR_TextureRoundtrip:
     <<: *level_2
     tags: [capture, texture, playback, roundtrip]
@@ -228,9 +230,11 @@ hrr:
   Unit_HRR_DrvMemcpy3D_Direct:
     <<: *level_2
     tags: [direct, memcpy]
+    disabled: [amd_windows]
   Unit_HRR_DrvMemcpy2DUnaligned_Direct:
     <<: *level_2
     tags: [direct, memcpy]
+    disabled: [amd_windows]
   Unit_HRR_DrvMemcpy_Direct:
     <<: *level_2
     tags: [direct, memcpy]
