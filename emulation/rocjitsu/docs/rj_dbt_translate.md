@@ -114,14 +114,16 @@ rj_dbt_translate input.gfx1250.co \
 ```
 
 The verifier decodes the final executable stream after all translation and ELF
-materialization have finished. It reconstructs executable entry boundaries,
-runs the read-only applicability check associated with each implemented rewrite,
-and reports any residual site as an error at its final `.text` offset. One
-profile registry supplies both opcode-keyed and operand-driven rewrites to
-lowering and verification. Every rule in an audited profile must explicitly
-register either a residual predicate or a no-success contract; a no-success rule
-that later begins emitting output fails its registry contract instead of
-silently escaping verification.
+materialization have finished. It reconstructs executable entry boundaries and
+stream-checks instruction-local applicability predicates without retaining the
+complete decoded stream. If a candidate uses predecessor or successor context,
+the verifier reconstructs the full CFG and runs every predicate there instead.
+It reports any residual site as an error at its final `.text` offset. One profile
+registry supplies both opcode-keyed and operand-driven rewrites to lowering and
+verification. Every rule in an audited profile must explicitly register either
+a residual predicate and its required decode context, or a no-success contract;
+a no-success rule that later begins emitting output fails its registry contract
+instead of silently escaping verification.
 
 Translation and final verification require every runtime-loaded executable byte
 to reside in one `SHF_ALLOC | SHF_EXECINSTR` section named `.text`. Inputs with

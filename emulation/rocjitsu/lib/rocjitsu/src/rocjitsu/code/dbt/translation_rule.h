@@ -422,10 +422,18 @@ enum class RewriteDischargeDisposition : uint8_t {
   NoSuccessfulExpansion, ///< The rule may decline or fail, but must never emit output.
 };
 
+/// @brief Decoded context required by one residual rewrite predicate.
+enum class RewriteDischargeContext : uint8_t {
+  Instruction, ///< The predicate observes only the candidate instruction.
+  BasicBlock,  ///< The predicate observes neighboring instructions in the decoded basic block.
+};
+
 /// @brief Explicit final-stream audit contract for one rewrite.
 ///
 /// @details Audited profiles require every rewrite to use checked() or
-/// no_success().
+/// no_success(). A checked predicate declares the least decoded context it
+/// needs: instruction-local checks support a constant-memory stream scan, while
+/// basic-block checks require the verifier to retain the decoded CFG.
 /// The default Unregistered state keeps older, unaudited profiles source
 /// compatible without allowing an audited profile to silently omit a rule.
 class RewriteDischarge {
@@ -433,20 +441,28 @@ public:
   RewriteDischargeDisposition disposition = RewriteDischargeDisposition::Unregistered;
   ResidualExpandFn check = nullptr;
   const char *rationale = nullptr;
+  RewriteDischargeContext context = RewriteDischargeContext::Instruction;
 
-  [[nodiscard]] static constexpr RewriteDischarge checked(ResidualExpandFn predicate) {
-    return {RewriteDischargeDisposition::Checked, predicate, nullptr};
+  [[nodiscard]] static constexpr RewriteDischarge
+  checked(ResidualExpandFn predicate,
+          RewriteDischargeContext required_context = RewriteDischargeContext::Instruction) {
+    return {RewriteDischargeDisposition::Checked, predicate, nullptr, required_context};
   }
 
   [[nodiscard]] static constexpr RewriteDischarge no_success(const char *reason) {
-    return {RewriteDischargeDisposition::NoSuccessfulExpansion, nullptr, reason};
+    return {RewriteDischargeDisposition::NoSuccessfulExpansion, nullptr, reason,
+            RewriteDischargeContext::Instruction};
   }
 
   [[nodiscard]] constexpr bool valid() const {
-    if (disposition == RewriteDischargeDisposition::Checked)
-      return check != nullptr && rationale == nullptr;
+    if (disposition == RewriteDischargeDisposition::Checked) {
+      const bool valid_context = context == RewriteDischargeContext::Instruction ||
+                                 context == RewriteDischargeContext::BasicBlock;
+      return check != nullptr && rationale == nullptr && valid_context;
+    }
     if (disposition == RewriteDischargeDisposition::NoSuccessfulExpansion)
-      return check == nullptr && rationale != nullptr && rationale[0] != '\0';
+      return check == nullptr && rationale != nullptr && rationale[0] != '\0' &&
+             context == RewriteDischargeContext::Instruction;
     return false;
   }
 

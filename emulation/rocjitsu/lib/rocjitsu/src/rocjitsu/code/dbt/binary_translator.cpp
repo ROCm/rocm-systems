@@ -2120,6 +2120,71 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
     std::ranges::sort(block_leaders);
     block_leaders.erase(std::ranges::unique(block_leaders).begin(), block_leaders.end());
 
+    // Most residual predicates inspect only one decoded instruction. Scan those
+    // with constant live memory and retain the full CFG path only when a rule
+    // explicitly requires basic-block neighbors. Besides reducing peak RSS,
+    // delaying CFG construction preserves the existing contextual behavior for
+    // tensor, cluster-load, and IU8-WMMA sequence checks.
+    std::vector<TranslationDiagnostic> streaming_diagnostics;
+    const auto *instruction_words = reinterpret_cast<const uint32_t *>(text->data());
+    const size_t instruction_word_count = text->size() / sizeof(uint32_t);
+    size_t instruction_word_index = 0;
+    uint64_t instruction_offset = 0;
+    size_t next_block_leader = 0;
+    bool invalid_block_leader = false;
+    bool needs_basic_block = false;
+    while (instruction_word_index < instruction_word_count) {
+      if (next_block_leader < block_leaders.size() &&
+          block_leaders[next_block_leader] < instruction_offset) {
+        invalid_block_leader = true;
+        break;
+      }
+
+      if (host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
+          instruction_words[instruction_word_index] == 0) {
+        ++instruction_word_index;
+        instruction_offset += sizeof(uint32_t);
+        continue;
+      }
+
+      if (next_block_leader < block_leaders.size() &&
+          block_leaders[next_block_leader] == instruction_offset) {
+        ++next_block_leader;
+      }
+
+      std::unique_ptr<Instruction> inst(
+          decoder->decode(&instruction_words[instruction_word_index], instruction_offset));
+      if (semantic_translator_->residual_rewrite_needs_basic_block(*inst)) {
+        needs_basic_block = true;
+        break;
+      }
+      if (semantic_translator_->instruction_local_residual_rewrite_applies(*inst)) {
+        append_rewrite_discharge_error(streaming_diagnostics,
+                                       "implemented rewrite remains actionable in final output",
+                                       inst->src_loc(), std::string(inst->mnemonic()));
+      }
+
+      const size_t instruction_size = static_cast<size_t>(inst->size());
+      instruction_word_index += instruction_size / sizeof(uint32_t);
+      instruction_offset += instruction_size;
+    }
+
+    if (!needs_basic_block) {
+      invalid_block_leader |= next_block_leader != block_leaders.size();
+      if (invalid_block_leader) {
+        append_rewrite_discharge_error(
+            result.diagnostics,
+            "rewrite-discharge verification found an invalid final executable entry");
+        return;
+      }
+      const bool found_residual = !streaming_diagnostics.empty();
+      result.diagnostics.insert(result.diagnostics.end(),
+                                std::make_move_iterator(streaming_diagnostics.begin()),
+                                std::make_move_iterator(streaming_diagnostics.end()));
+      result.rewrite_discharge_verified = !found_residual;
+      return;
+    }
+
     const auto blocks = BasicBlock::build(output, *decoder, host_arch_, block_leaders,
                                           ExternalEntryPolicy::ExplicitOnly);
     if (has_invalid_block_leader(blocks, block_leaders, text->size())) {

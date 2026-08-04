@@ -147,16 +147,41 @@ bool SemanticTranslator::rewrite_requires_liveness(const Instruction &inst) cons
 }
 
 bool SemanticTranslator::residual_rewrite_applies(const Instruction &inst) const {
+  return residual_rewrite_applies(inst, RewriteDischargeContext::Instruction) ||
+         residual_rewrite_applies(inst, RewriteDischargeContext::BasicBlock);
+}
+
+bool SemanticTranslator::instruction_local_residual_rewrite_applies(const Instruction &inst) const {
+  return residual_rewrite_applies(inst, RewriteDischargeContext::Instruction);
+}
+
+bool SemanticTranslator::residual_rewrite_needs_basic_block(const Instruction &inst) const {
   const TranslationRule *rule = find_expand_rule(inst);
-  if (rule != nullptr && rule->discharge.check != nullptr &&
-      rule->discharge.disposition == RewriteDischargeDisposition::Checked &&
-      rule->discharge.check(inst)) {
+  if (rule != nullptr && rule->discharge.disposition == RewriteDischargeDisposition::Checked &&
+      rule->discharge.context == RewriteDischargeContext::BasicBlock) {
     return true;
   }
   return std::ranges::any_of(
       instruction_rewrite_rules_, [&](const RegisteredInstructionRewrite &candidate) {
         return candidate.discharge.disposition == RewriteDischargeDisposition::Checked &&
-               candidate.discharge.check != nullptr && candidate.discharge.check(inst);
+               candidate.discharge.context == RewriteDischargeContext::BasicBlock &&
+               candidate.applies != nullptr && candidate.applies(inst);
+      });
+}
+
+bool SemanticTranslator::residual_rewrite_applies(const Instruction &inst,
+                                                  RewriteDischargeContext context) const {
+  const TranslationRule *rule = find_expand_rule(inst);
+  if (rule != nullptr && rule->discharge.check != nullptr &&
+      rule->discharge.disposition == RewriteDischargeDisposition::Checked &&
+      rule->discharge.context == context && rule->discharge.check(inst)) {
+    return true;
+  }
+  return std::ranges::any_of(
+      instruction_rewrite_rules_, [&](const RegisteredInstructionRewrite &candidate) {
+        return candidate.discharge.disposition == RewriteDischargeDisposition::Checked &&
+               candidate.discharge.context == context && candidate.discharge.check != nullptr &&
+               candidate.discharge.check(inst);
       });
 }
 

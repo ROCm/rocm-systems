@@ -103,6 +103,18 @@ public:
   /// same profile registry used for lowering.
   [[nodiscard]] bool residual_rewrite_applies(const Instruction &inst) const;
 
+  /// @brief Whether an instruction-local rewrite remains actionable at @p inst.
+  ///
+  /// @details Predicates requiring neighboring instructions are excluded so a
+  /// caller can use this during a constant-memory linear decode.
+  [[nodiscard]] bool instruction_local_residual_rewrite_applies(const Instruction &inst) const;
+
+  /// @brief Whether @p inst selects a residual predicate requiring a decoded basic block.
+  ///
+  /// @details A true result requires the final-stream verifier to fall back to
+  /// full CFG construction before deciding whether the rewrite was discharged.
+  [[nodiscard]] bool residual_rewrite_needs_basic_block(const Instruction &inst) const;
+
   [[nodiscard]] bool has_rules() const {
     return !expand_rules_.empty() || !instruction_rewrite_rules_.empty();
   }
@@ -124,6 +136,8 @@ private:
   }
 
   [[nodiscard]] const TranslationRule *find_expand_rule(const Instruction &inst) const;
+  [[nodiscard]] bool residual_rewrite_applies(const Instruction &inst,
+                                              RewriteDischargeContext context) const;
 
   RewriteRegistry rewrite_registry_;
   std::span<const TranslationRule> expand_rules_; ///< Sorted by (src_encoding_id, src_opcode).

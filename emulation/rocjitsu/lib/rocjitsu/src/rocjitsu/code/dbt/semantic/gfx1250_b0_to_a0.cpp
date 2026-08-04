@@ -43,6 +43,10 @@ namespace {
   return RewriteDischarge::checked(check);
 }
 
+[[nodiscard]] constexpr RewriteDischarge block_checked_discharge(ResidualExpandFn check) {
+  return RewriteDischarge::checked(check, RewriteDischargeContext::BasicBlock);
+}
+
 [[nodiscard]] constexpr RewriteDischarge no_success_discharge(const char *rationale) {
   return RewriteDischarge::no_success(rationale);
 }
@@ -2642,10 +2646,10 @@ inline constexpr std::array<TranslationRule, 43> kGfx1250B0ToA0ExpandRules = {{
      expand_gfx1250_wmma_scale16, nullptr, nullptr, true, checked_discharge(scale16_residual)},
     {cdna5::encoding::kVop3p, cdna5::kVWmmaI3216x16x64Iu8Vop3p, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_wmma_iu8_spacing, nullptr, nullptr, false,
-     checked_discharge(iu8_spacing_residual)},
+     block_checked_discharge(iu8_spacing_residual)},
     {cdna5::encoding::kVop3p, cdna5::kVSwmmacI3216x16x128Iu8Vop3p, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_wmma_iu8_spacing, nullptr, nullptr, false,
-     checked_discharge(iu8_spacing_residual)},
+     block_checked_discharge(iu8_spacing_residual)},
     {cdna5::encoding::kVop3pOpHi1, cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p, RuleAction::Expand, 0,
      0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false,
      checked_discharge(always_residual)},
@@ -2675,7 +2679,7 @@ inline constexpr std::array<TranslationRule, 43> kGfx1250B0ToA0ExpandRules = {{
      checked_discharge(always_residual)},
     {cdna5::encoding::kVimage, cdna5::kTensorLoadToLdsVimage, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_tensor_load_to_lds, nullptr, nullptr, true,
-     checked_discharge(tensor_load_residual)},
+     block_checked_discharge(tensor_load_residual)},
     {cdna5::encoding::kVop3OpHi3, cdna5::kVCvtF32Fp8Vop3, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_cvt_f32_fp8_e5m3, nullptr, nullptr, true,
      checked_discharge(cvt_f32_fp8_e5m3_residual)},
@@ -2715,25 +2719,25 @@ inline constexpr std::array<TranslationRule, 43> kGfx1250B0ToA0ExpandRules = {{
      expand_gfx1250_ds_addtid, nullptr, nullptr, true, checked_discharge(always_residual)},
     {cdna5::encoding::kVglobal, cdna5::kClusterLoadB32Vglobal, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true,
-     checked_discharge(cluster_load_residual)},
+     block_checked_discharge(cluster_load_residual)},
     {cdna5::encoding::kVglobal, cdna5::kClusterLoadB64Vglobal, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true,
-     checked_discharge(cluster_load_residual)},
+     block_checked_discharge(cluster_load_residual)},
     {cdna5::encoding::kVglobal, cdna5::kClusterLoadB128Vglobal, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true,
-     checked_discharge(cluster_load_residual)},
+     block_checked_discharge(cluster_load_residual)},
     {cdna5::encoding::kVglobal, cdna5::kClusterLoadAsyncToLdsB8Vglobal, RuleAction::Expand, 0,
      0, nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true,
-     checked_discharge(cluster_load_residual)},
+     block_checked_discharge(cluster_load_residual)},
     {cdna5::encoding::kVglobal, cdna5::kClusterLoadAsyncToLdsB32Vglobal, RuleAction::Expand, 0,
      0, nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true,
-     checked_discharge(cluster_load_residual)},
+     block_checked_discharge(cluster_load_residual)},
     {cdna5::encoding::kVglobal, cdna5::kClusterLoadAsyncToLdsB64Vglobal, RuleAction::Expand, 0,
      0, nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true,
-     checked_discharge(cluster_load_residual)},
+     block_checked_discharge(cluster_load_residual)},
     {cdna5::encoding::kVglobal, cdna5::kClusterLoadAsyncToLdsB128Vglobal, RuleAction::Expand, 0,
      0, nullptr, expand_gfx1250_cluster_load, nullptr, nullptr, true,
-     checked_discharge(cluster_load_residual)},
+     block_checked_discharge(cluster_load_residual)},
 }};
 
 static_assert(translation_rules_sorted(kGfx1250B0ToA0ExpandRules),

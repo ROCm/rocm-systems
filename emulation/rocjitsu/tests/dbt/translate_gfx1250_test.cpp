@@ -8512,10 +8512,16 @@ TEST(SemanticTranslator, Gfx1250RegistryHasCompleteDischargeContracts) {
   size_t checked_rules = 0;
   size_t no_success_rules = 0;
   std::vector<uint32_t> no_success_rule_keys;
+  std::vector<uint32_t> block_context_rule_keys;
   for (const rocjitsu::TranslationRule &rule : registry.opcode_rules) {
     EXPECT_TRUE(rule.discharge.valid());
-    if (rule.discharge.disposition == rocjitsu::RewriteDischargeDisposition::Checked)
+    if (rule.discharge.disposition == rocjitsu::RewriteDischargeDisposition::Checked) {
       ++checked_rules;
+      if (rule.discharge.context == rocjitsu::RewriteDischargeContext::BasicBlock) {
+        block_context_rule_keys.push_back((static_cast<uint32_t>(rule.src_encoding_id) << 16) |
+                                          rule.src_opcode);
+      }
+    }
     if (rule.discharge.disposition ==
         rocjitsu::RewriteDischargeDisposition::NoSuccessfulExpansion) {
       ++no_success_rules;
@@ -8540,6 +8546,24 @@ TEST(SemanticTranslator, Gfx1250RegistryHasCompleteDischargeContracts) {
           gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p,
   };
   EXPECT_EQ(no_success_rule_keys, expected_no_success_rule_keys);
+  const std::vector<uint32_t> expected_block_context_rule_keys = {
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3p) << 16) | gfx1250::kVWmmaI3216x16x64Iu8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3p) << 16) |
+          gfx1250::kVSwmmacI3216x16x128Iu8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVimage) << 16) | gfx1250::kTensorLoadToLdsVimage,
+      (static_cast<uint32_t>(gfx1250::encoding::kVglobal) << 16) | gfx1250::kClusterLoadB32Vglobal,
+      (static_cast<uint32_t>(gfx1250::encoding::kVglobal) << 16) | gfx1250::kClusterLoadB64Vglobal,
+      (static_cast<uint32_t>(gfx1250::encoding::kVglobal) << 16) | gfx1250::kClusterLoadB128Vglobal,
+      (static_cast<uint32_t>(gfx1250::encoding::kVglobal) << 16) |
+          gfx1250::kClusterLoadAsyncToLdsB8Vglobal,
+      (static_cast<uint32_t>(gfx1250::encoding::kVglobal) << 16) |
+          gfx1250::kClusterLoadAsyncToLdsB32Vglobal,
+      (static_cast<uint32_t>(gfx1250::encoding::kVglobal) << 16) |
+          gfx1250::kClusterLoadAsyncToLdsB64Vglobal,
+      (static_cast<uint32_t>(gfx1250::encoding::kVglobal) << 16) |
+          gfx1250::kClusterLoadAsyncToLdsB128Vglobal,
+  };
+  EXPECT_EQ(block_context_rule_keys, expected_block_context_rule_keys);
 
   const std::array out_of_order_rules = {registry.opcode_rules[1], registry.opcode_rules[0]};
   const rocjitsu::RewriteRegistry out_of_order_registry{out_of_order_rules, {}};
@@ -8553,6 +8577,7 @@ TEST(SemanticTranslator, Gfx1250RegistryHasCompleteDischargeContracts) {
   EXPECT_TRUE(flat_scratch.requires_liveness);
   EXPECT_TRUE(flat_scratch.valid());
   EXPECT_EQ(flat_scratch.discharge.disposition, rocjitsu::RewriteDischargeDisposition::Checked);
+  EXPECT_EQ(flat_scratch.discharge.context, rocjitsu::RewriteDischargeContext::Instruction);
 
   rocjitsu::SemanticTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250,
                                           rocjitsu::ProcessorRevision::Gfx1250B0,
@@ -8576,6 +8601,8 @@ TEST(SemanticTranslator, Gfx1250RegistryHasCompleteDischargeContracts) {
   EXPECT_TRUE(translator.rewrite_requires_liveness(*high));
   EXPECT_FALSE(translator.residual_rewrite_applies(*low));
   EXPECT_TRUE(translator.residual_rewrite_applies(*high));
+  EXPECT_FALSE(translator.residual_rewrite_needs_basic_block(*high));
+  EXPECT_TRUE(translator.instruction_local_residual_rewrite_applies(*high));
 }
 
 TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule) {
@@ -8680,6 +8707,10 @@ TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule
     EXPECT_EQ(inst->encoding_id(), residual_rules[sample_index]->src_encoding_id);
     EXPECT_EQ(inst->opcode(), residual_rules[sample_index]->src_opcode);
     EXPECT_TRUE(translator.residual_rewrite_applies(*inst));
+    const bool needs_basic_block = residual_rules[sample_index]->discharge.context ==
+                                   rocjitsu::RewriteDischargeContext::BasicBlock;
+    EXPECT_EQ(translator.residual_rewrite_needs_basic_block(*inst), needs_basic_block);
+    EXPECT_EQ(translator.instruction_local_residual_rewrite_applies(*inst), !needs_basic_block);
   }
 }
 
