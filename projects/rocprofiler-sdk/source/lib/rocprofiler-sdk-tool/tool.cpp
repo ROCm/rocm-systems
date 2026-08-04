@@ -215,15 +215,13 @@ is_handled_signal(int signum)
 
 struct signal_worker_state
 {
-    int                   eventfd       = -1;
-    std::atomic<uint32_t> finalize_done = {};
-    // set to 1 when `rocprofv3_error_signal_handler` owns the signal path (re-entry guard +
-    // interceptor bypass).
-    std::atomic<uint32_t> handling    = {0};
-    std::atomic_flag      finalized   = ATOMIC_FLAG_INIT;
-    int                   signo       = {0};
-    std::thread           thread      = {};
-    int                   timeout_sec = {10};
+    int                   eventfd       = -1;   // handler -> worker wakeup fd
+    std::atomic<uint32_t> finalize_done = {};   // worker sets when flush done (futex word)
+    std::atomic<uint32_t> handling      = {0};  // 1 once our handler owns the path
+    std::atomic_flag      finalized     = ATOMIC_FLAG_INIT;  // runs finalize_rocprofv3 once
+    int                   signo         = {0};               // signal handled (0 == normal exit)
+    std::thread           thread        = {};                // the finalization worker
+    int                   timeout_sec   = {10};
 };
 
 static_assert(std::atomic<uint32_t>::is_always_lock_free,
@@ -251,9 +249,8 @@ get_signal_worker(bool reset = false)
 
     if(reset)
     {
-        // Post-fork child: parent's eventfd duplicate and std::thread are invalid. Close the fd
-        // first, then reset storage and value-construct so defaults live only in
-        // signal_worker_state (we do not run ~std::thread() on a possibly-joinable parent thread).
+        // Post-fork child: the parent's eventfd/thread are invalid here. Close the fd and reset
+        // in place (never run ~std::thread() on the parent's still-joinable thread).
         reset_signal_worker_state(sw);
     }
 
@@ -4488,6 +4485,34 @@ wait_for_children(pid_t this_pid, pid_t this_ppid, uint64_t this_tid, std::strin
     }
 }
 
+// Reinstall the disposition we wrapped for `signo`: the saved chained handler if any, else
+// SIG_DFL. Uses the real sigaction (bypasses our interceptor).
+void
+restore_signal_disposition(int signo)
+{
+    if(auto& chained = get_chained_signals().at(signo); chained)
+    {
+        if(chained->action)
+        {
+            get_sigaction_function()(signo, &(*chained->action), nullptr);
+        }
+        else
+        {
+            struct sigaction sa = {};
+            sa.sa_handler       = chained->handler ? chained->handler : SIG_DFL;
+            sigemptyset(&sa.sa_mask);
+            get_sigaction_function()(signo, &sa, nullptr);
+        }
+    }
+    else
+    {
+        struct sigaction sa = {};
+        sa.sa_handler       = SIG_DFL;
+        sigemptyset(&sa.sa_mask);
+        get_sigaction_function()(signo, &sa, nullptr);
+    }
+}
+
 void
 signal_finalization_worker()
 {
@@ -4519,7 +4544,7 @@ signal_finalization_worker()
 
     if(tool::get_config().enable_process_sync) wait_peer_finished(this_pid, this_ppid);
 
-    // Wait for children to finalize before we re-raise.
+    // Wait for children to finalize before we terminate.
     wait_for_children(this_pid, this_ppid, this_tid, this_func);
 
     ROCP_INFO << fmt::format(
@@ -4529,8 +4554,30 @@ signal_finalization_worker()
         this_tid,
         this_func);
 
+    // Signal completion (only the SIGABRT handler path waits on this).
     sw.finalize_done.store(1u, std::memory_order_release);
     syscall(SYS_futex, &sw.finalize_done, FUTEX_WAKE, 1, nullptr, nullptr, 0);
+
+    // Terminate the process now that the flush is complete, but only when we were woken by an
+    // async signal. signo == 0 is normal-exit finalization (main/atexit woke us to be joined);
+    // SIGABRT terminates itself once its (synchronously waiting) handler returns into abort().
+    if(sw.signo != 0 && sw.signo != SIGABRT)
+    {
+        const bool have_chained = static_cast<bool>(get_chained_signals().at(sw.signo));
+        restore_signal_disposition(sw.signo);
+
+        // Re-raise process-directed (kill, not raise) so it lands on an app thread, not this
+        // worker (which blocks these signals): the chained handler runs, or SIG_DFL exits.
+        if(!have_chained)
+        {
+            // No chained handler: also unblock here so SIG_DFL is guaranteed to terminate.
+            sigset_t unblock{};
+            sigemptyset(&unblock);
+            sigaddset(&unblock, sw.signo);
+            pthread_sigmask(SIG_UNBLOCK, &unblock, nullptr);
+        }
+        kill(getpid(), sw.signo);
+    }
 }
 
 void
@@ -4541,21 +4588,34 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
 
     auto& sw = get_signal_worker();
 
-    // We're handling signals = assume app doesn't coordinate shutdown properly.
-    // All processes (parent and children) need to flush and die.
-    // For well-behaved apps, use --disable-signal-handlers (atexit handles everything).
-
-    // Re-entry guard: lock-free compare-exchange (see static_assert on `handling`).
+    // Our handler being installed means the app doesn't coordinate shutdown.
+    // Well-behaved apps use --disable-signal-handlers (atexit handles everything).
+    // Re-entry guard: On re-entry (e.g. a chained handler like LLVM/comgr re-raises into us),
+    // don't swallow the signal as that would hang. Escalate: force SIG_DFL and re-raise so the
+    // process dies.
     uint32_t expected = 0;
-    if(!sw.handling.compare_exchange_strong(expected, 1u, std::memory_order_acquire)) return;
+    if(!sw.handling.compare_exchange_strong(expected, 1u, std::memory_order_acquire))
+    {
+        struct sigaction _dfl = {};
+        _dfl.sa_handler       = SIG_DFL;
+        sigemptyset(&_dfl.sa_mask);
+        get_sigaction_function()(signo, &_dfl, nullptr);
+
+        sigset_t _unblock{};
+        sigemptyset(&_unblock);
+        sigaddset(&_unblock, signo);
+        pthread_sigmask(SIG_UNBLOCK, &_unblock, nullptr);
+        raise(signo);
+        return;
+    }
 
     // For testing: allow quick_exit path
     if(signal_handler_exit) ::quick_exit(signo);
 
-    // Store signal number for the worker thread to log (serialized by eventfd write/read)
+    // Hand the signal number to the worker (ordered by the eventfd write/read below).
     sw.signo = signo;
 
-    // Wake the worker thread
+    // Wake the finalization worker: the flush is NOT async-signal-safe, so it runs there.
     bool worker_notified = false;
     if(sw.eventfd >= 0)
     {
@@ -4563,81 +4623,30 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
         worker_notified = (write(sw.eventfd, &val, sizeof(val)) == sizeof(val));
     }
 
-    // Wait for worker with bounded timeout via futex syscall instead of a std::mutex
-    // Wait for worker to complete finalization.
-    // Uses exponential backoff (5, 10, 30, 60s) with periodic logging.
-    if(worker_notified)
+    // SIGABRT can't defer: returning lets abort() re-raise SIG_DFL before the worker flushes.
+    // So wait for the flush here, then return into abort(). This is the one path that can still
+    // block on a lock the interrupted thread holds — acceptable since we're already aborting.
+    if(signo == SIGABRT)
     {
-        static constexpr auto backoff_sec = std::array{5, 10, 30, 60};
-
-        int attempt = 0;
-
-        while(sw.finalize_done.load(std::memory_order_acquire) == 0)
-        {
-            auto timeout   = timespec{};
-            timeout.tv_sec = backoff_sec[attempt < 4 ? attempt : 3];
-
-            syscall(SYS_futex, &sw.finalize_done, FUTEX_WAIT, 0, &timeout, nullptr, 0);
-
-            if(sw.finalize_done.load(std::memory_order_acquire) != 0) break;
-
-            // Still waiting — log progress
-            auto elapsed = backoff_sec[0];
-            for(int j = 1; j <= attempt && j < 4; j++)
-                elapsed += backoff_sec[j];
-
-            // Logging here is not async-signal-safe in the strict POSIX sense (Abseil may take
-            // locks). In practice this path is still safe enough for diagnostics: the handler is
-            // one-shot (re-entry guard above), SA_NODEFER is not set on our installed action so the
-            // same thread cannot be re-entered for another signal while we're here, and other
-            // threads may log concurrently (Abseil is thread-safe). We keep this message so users
-            // see progress during long flushes.
-            ROCP_WARNING << fmt::format(
-                "signalhandler: waiting for worker thread to flush profiling data: ~{}s elapsed...",
-                elapsed);
-            attempt++;
-        }
+        if(worker_notified)
+            while(sw.finalize_done.load(std::memory_order_acquire) == 0)
+                syscall(SYS_futex, &sw.finalize_done, FUTEX_WAIT, 0, nullptr, nullptr, 0);
+        return;
     }
 
-    // Restore original handler. sigaction() is async-signal-safe per POSIX.
-    // sw.handling is set, so our interceptor passes through to the real sigaction.
-    if(auto& chained = get_chained_signals().at(signo); chained)
+    // Async signals (SIGINT/SIGQUIT/SIGTERM): don't block or re-raise here. Returning lets this
+    // thread resume and release any lock it holds, so the worker's flush can't deadlock against
+    // it; the worker terminates via kill() once the flush is done.
+    if(!worker_notified)
     {
-        if(chained->action)
-        {
-            get_sigaction_function()(signo, &(*chained->action), nullptr);
-        }
-        else
-        {
-            struct sigaction sa = {};
-            sa.sa_handler       = chained->handler ? chained->handler : SIG_DFL;
-            sigemptyset(&sa.sa_mask);
-            get_sigaction_function()(signo, &sa, nullptr);
-        }
+        // No worker to hand off to — best-effort terminate on this thread.
+        restore_signal_disposition(signo);
+        sigset_t unblock{};
+        sigemptyset(&unblock);
+        sigaddset(&unblock, signo);
+        pthread_sigmask(SIG_UNBLOCK, &unblock, nullptr);
+        raise(signo);
     }
-    else
-    {
-        struct sigaction sa = {};
-        sa.sa_handler       = SIG_DFL;
-        sigemptyset(&sa.sa_mask);
-        get_sigaction_function()(signo, &sa, nullptr);
-    }
-
-    // Unblock and re-raise. The restored handler (or SIG_DFL) runs in a fresh delivery.
-    sigset_t unblock{};
-    sigemptyset(&unblock);
-    sigaddset(&unblock, signo);
-    pthread_sigmask(SIG_UNBLOCK, &unblock, nullptr);
-    raise(signo);
-
-    // If the chained handler returned (didn't kill the process), force exit.
-    {
-        struct sigaction sa = {};
-        sa.sa_handler       = SIG_DFL;
-        sigemptyset(&sa.sa_mask);
-        get_sigaction_function()(signo, &sa, nullptr);
-    }
-    raise(signo);
 }
 
 int
