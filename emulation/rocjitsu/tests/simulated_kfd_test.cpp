@@ -288,8 +288,9 @@ TEST_F(SimulatedKfdTest, SpanningMunmapCannotConsumeDoorbellPage) {
   process->event_state_.notify_closing();
   EXPECT_EQ(t.driver()->munmap(doorbell_page, kPageSize), 0);
   process->event_state_.reset();
-  if (spanning_result != 0)
+  if (spanning_result != 0) {
     EXPECT_EQ(t.driver()->munmap(reservation, kPageSize), 0);
+  }
   EXPECT_EQ(t.driver()->close(), 0);
 }
 
@@ -326,8 +327,9 @@ TEST_F(SimulatedKfdTest, SpanningMunmapCannotConsumeEventPage) {
   EXPECT_EQ(process->event_state_.page, event_page);
 
   EXPECT_EQ(t.driver()->munmap(event_page, kPageSize), 0);
-  if (spanning_result != 0)
+  if (spanning_result != 0) {
     EXPECT_EQ(t.driver()->munmap(reservation, kPageSize), 0);
+  }
   EXPECT_EQ(t.driver()->close(), 0);
 }
 
