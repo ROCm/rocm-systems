@@ -59,6 +59,5 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT
         "OMP_TOOL=enabled"
         "OMP_NUM_THREADS=2"
-        "OMP_TOOL_LIBRARIES=$<TARGET_FILE:rocprofiler-sdk::rocprofiler-sdk-shared-library>"
         "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     PASS_REGULAR_EXPRESSION "reached main: no OMPT-init deadlock")
