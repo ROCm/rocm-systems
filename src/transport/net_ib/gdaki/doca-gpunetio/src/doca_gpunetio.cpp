@@ -1623,8 +1623,7 @@ doca_error_t doca_gpu_verbs_check_host_code_compatibility(uint32_t host_code_ver
     return DOCA_SUCCESS;
 }
 
-doca_error_t doca_gpu_verbs_req_notify_cq(doca_gpu_t *gpu_dev, doca_verbs_cq_t *verbs_cq)
-{
+doca_error_t doca_gpu_verbs_req_notify_cq(doca_gpu_t *gpu_dev, doca_verbs_cq_t *verbs_cq) {
     doca_error_t status = DOCA_SUCCESS;
     cudaError_t cuda_status;
     cudaPointerAttributes attributes;
@@ -1637,8 +1636,7 @@ doca_error_t doca_gpu_verbs_req_notify_cq(doca_gpu_t *gpu_dev, doca_verbs_cq_t *
     __be64 db_val;
     cudaStream_t stream = nullptr;
 
-    if (gpu_dev == nullptr || verbs_cq == nullptr)
-        return DOCA_ERROR_INVALID_VALUE;
+    if (gpu_dev == nullptr || verbs_cq == nullptr) return DOCA_ERROR_INVALID_VALUE;
 
     if (verbs_cq->type == DOCA_VERBS_SDK_LIB_TYPE_SDK) {
         if (gpu_dev->type != DOCA_GPU_LIB_TYPE_SDK) {
@@ -1658,7 +1656,8 @@ doca_error_t doca_gpu_verbs_req_notify_cq(doca_gpu_t *gpu_dev, doca_verbs_cq_t *
     }
 
     if (verbs_cq->open == nullptr) {
-        DOCA_LOG(LOG_ERR, "Invalid DOCA Verbs CQ open instance provided at %s line %d.", __func__, __LINE__);
+        DOCA_LOG(LOG_ERR, "Invalid DOCA Verbs CQ open instance provided at %s line %d.", __func__,
+                 __LINE__);
         return DOCA_ERROR_INVALID_VALUE;
     }
 
@@ -1689,7 +1688,8 @@ doca_error_t doca_gpu_verbs_req_notify_cq(doca_gpu_t *gpu_dev, doca_verbs_cq_t *
     dbr_val = htobe32(MLX5_CQ_DB_REQ_NOT_SOL);
 
     if (is_gpu_memory) {
-        cudaError_t cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaMemcpyAsync(arm_dbr, &dbr_val, sizeof(dbr_val), cudaMemcpyHostToDevice, stream));
+        cudaError_t cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(
+            cudaMemcpyAsync(arm_dbr, &dbr_val, sizeof(dbr_val), cudaMemcpyHostToDevice, stream));
         if (cuda_status != cudaSuccess) {
             DOCA_LOG(LOG_ERR, "Failed to copy CQ arm DBR to GPU memory");
             return DOCA_ERROR_DRIVER;

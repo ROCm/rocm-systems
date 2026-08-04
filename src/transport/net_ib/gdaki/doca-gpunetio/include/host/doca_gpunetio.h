@@ -431,7 +431,6 @@ doca_error_t doca_gpu_verbs_destroy_service(doca_gpu_verbs_service_t service);
 doca_error_t doca_gpu_verbs_query_last_error(struct doca_gpu_verbs_qp *qp,
                                              struct doca_gpu_verbs_qp_error_info *error_info);
 
-
 /**
  * Export multiple QPs to GPU.
  * This API allows holes in the `qps` array.

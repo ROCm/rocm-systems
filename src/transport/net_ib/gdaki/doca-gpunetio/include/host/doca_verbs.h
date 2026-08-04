@@ -1858,24 +1858,25 @@ doca_error_t doca_verbs_cq_attr_set_cq_collapsed(doca_verbs_cq_attr_t *cq_attr, 
  * @param [in] cq_attr
  * Pointer to doca_verbs_cq_attr instance.
  * @param [in] comp_channel
- * Pointer to completion channel to bind the CQ to. comp_channel may be null in case the application regrets setting a
- * completion channel.
+ * Pointer to completion channel to bind the CQ to. comp_channel may be null in case the application
+ * regrets setting a completion channel.
  *
  * @return
  * DOCA_SUCCESS - in case of success.
  * doca_error code - in case of failure:
  * - DOCA_ERROR_INVALID_VALUE - received invalid input.
  */
-doca_error_t doca_verbs_cq_attr_set_comp_channel(doca_verbs_cq_attr_t *cq_attr, doca_verbs_comp_channel_t *comp_channel);
+doca_error_t doca_verbs_cq_attr_set_comp_channel(doca_verbs_cq_attr_t *cq_attr,
+                                                 doca_verbs_comp_channel_t *comp_channel);
 
 /**
  * @brief CQ doorbell create state
  */
 enum doca_verbs_cq_state {
-	DOCA_VERBS_CQ_ST_NO_ACTION,
-	DOCA_VERBS_CQ_ST_SOLICITED_NOTIFICATION_REQUEST_ARMED,
-	DOCA_VERBS_CQ_ST_NOTIFICATION_REQUEST_ARMED,
-	DOCA_VERBS_CQ_ST_FIRED,
+    DOCA_VERBS_CQ_ST_NO_ACTION,
+    DOCA_VERBS_CQ_ST_SOLICITED_NOTIFICATION_REQUEST_ARMED,
+    DOCA_VERBS_CQ_ST_NOTIFICATION_REQUEST_ARMED,
+    DOCA_VERBS_CQ_ST_FIRED,
 };
 
 /**
@@ -1891,7 +1892,8 @@ enum doca_verbs_cq_state {
  * doca_error code - in case of failure:
  * - DOCA_ERROR_INVALID_VALUE - received invalid input.
  */
-doca_error_t doca_verbs_cq_attr_set_st(doca_verbs_cq_attr_t *cq_attr, enum doca_verbs_cq_state cq_state);
+doca_error_t doca_verbs_cq_attr_set_st(doca_verbs_cq_attr_t *cq_attr,
+                                       enum doca_verbs_cq_state cq_state);
 
 /**
  * @brief Create a DOCA Verbs Completion Queue instance.
@@ -1954,7 +1956,7 @@ doca_error_t doca_verbs_cq_get_wq(doca_verbs_cq_t *verbs_cq, void **cq_buf,
  * Pointer to the arm doorbell record
  */
 doca_error_t doca_verbs_cq_get_dbr_db_addr(doca_verbs_cq_t *verbs_cq, uint64_t **uar_db_reg,
-                                        uint32_t **ci_dbr, uint32_t **arm_dbr);
+                                           uint32_t **ci_dbr, uint32_t **arm_dbr);
 
 /**
  * @brief Get the CQ number of a DOCA Verbs CQ instance.
@@ -1970,8 +1972,8 @@ doca_error_t doca_verbs_cq_get_dbr_db_addr(doca_verbs_cq_t *verbs_cq, uint64_t *
 doca_error_t doca_verbs_cq_get_cq_num(const doca_verbs_cq_t *verbs_cq, uint32_t *cqn);
 
 /**
- * @brief Set cq_context attribute for verbs_cq. This function allows to set cq_context if the desired user data is not
- * available at CQ creation time.
+ * @brief Set cq_context attribute for verbs_cq. This function allows to set cq_context if the
+ * desired user data is not available at CQ creation time.
  *
  * @param [in] verbs_cq
  * Pointer to verbs_cq instance.
@@ -1999,7 +2001,8 @@ doca_error_t doca_verbs_cq_set_cq_context(doca_verbs_cq_t *verbs_cq, void *cq_co
  * - DOCA_ERROR_INVALID_VALUE - received invalid input.
  * - DOCA_ERROR_NO_MEMORY - failed to allocate resources.
  */
-doca_error_t doca_verbs_comp_channel_create(const doca_dev_t *net_dev, doca_verbs_comp_channel_t **verbs_comp_channel);
+doca_error_t doca_verbs_comp_channel_create(const doca_dev_t *net_dev,
+                                            doca_verbs_comp_channel_t **verbs_comp_channel);
 
 /**
  * @brief Destroy a DOCA Verbs Completion Channel instance.
@@ -2027,7 +2030,8 @@ doca_error_t doca_verbs_comp_channel_destroy(doca_verbs_comp_channel_t *verbs_co
  * doca_error code - in case of failure:
  * - DOCA_ERROR_INVALID_VALUE - received invalid input.
  */
-doca_error_t doca_verbs_get_cq_comp_channel_event(doca_verbs_comp_channel_t *verbs_comp_channel, void **cq_context);
+doca_error_t doca_verbs_get_cq_comp_channel_event(doca_verbs_comp_channel_t *verbs_comp_channel,
+                                                  void **cq_context);
 
 /**
  * Acknowledge completion events
