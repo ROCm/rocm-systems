@@ -48,7 +48,7 @@ set_target_properties(
                SOVERSION ${PROJECT_VERSION_MAJOR}
                VERSION ${PROJECT_VERSION}
                BUILD_RPATH "\$ORIGIN:\$ORIGIN/.."
-               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..:\$ORIGIN/../rocm_sysdeps/lib")
 
 install(
     TARGETS rocprofv3-list-avail
