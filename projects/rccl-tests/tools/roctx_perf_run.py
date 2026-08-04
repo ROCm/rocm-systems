@@ -230,7 +230,6 @@ def collect_metadata(args, run_dir):
         "repeats": args.repeats,
         "np": args.np,
         "map_by": args.map_by,
-        "mca_accelerator": args.mca_accelerator,
         "perf_args": args.perf_args,
         "build_dir": os.path.abspath(args.build_dir),
         "modes": args.modes,
@@ -285,7 +284,6 @@ def collect_metadata(args, run_dir):
         "repeats": args.repeats,
         "np": args.np,
         "map_by": args.map_by,
-        "mca_accelerator": args.mca_accelerator,
         "perf_args": args.perf_args,
         "modes": args.modes,
         "baseline": args.baseline,
@@ -348,20 +346,6 @@ def build_mpicmd(args, roctx=True):
         # access). "--map-by numa" spreads ranks across NUMA domains so each
         # rank's host binding matches its GPU's socket.
         mpicmd += ["--map-by", args.map_by]
-    if args.mca_accelerator:
-        # Open MPI's ob1 PML eagerly initializes GPU-aware ("accelerator")
-        # support in MPI_Init -- before the app has called cudaSetDevice, so
-        # HIP's current device is still its global default (device ordinal
-        # 0). Every rank ends up leaking a handful of HSA compute queues onto
-        # whichever physical GPU that is, regardless of which GPU the rank
-        # actually owns. On an 8-rank single-node job that oversubscribes
-        # that one GPU's KFD runlist and causes periodic ~10ms collective
-        # stalls (confirmed via HSA-API-level backtraces: the streams come
-        # from mca_pml_ob1_accelerator_init, not from RCCL or this harness).
-        # rccl-tests never passes GPU pointers through MPI itself (only
-        # small host-memory bootstrap traffic), so this support is unused
-        # dead weight here; "--mca accelerator null" disables it entirely.
-        mpicmd += ["--mca", "accelerator", args.mca_accelerator]
     mpicmd += _mpi_env_flags()
     if roctx:
         mpicmd += ["-x", "RCCL_TESTS_ROCTX=1"]
@@ -701,16 +685,6 @@ def parse_args(argv=None):
              "default.",
     )
     parser.add_argument(
-        "--mca-accelerator", type=str, default="null",
-        help="Open MPI '--mca accelerator' component (default: null). Open "
-             "MPI's ob1 PML eagerly initializes GPU-aware MPI support in "
-             "MPI_Init, before the app selects its device, leaking HSA "
-             "queues onto whichever GPU is device ordinal 0 on every rank. "
-             "rccl-tests never passes GPU pointers through MPI, so this is "
-             "unused; 'null' disables it. Pass an empty string ('') to omit "
-             "the flag and use Open MPI's own default (auto-detect rocm).",
-    )
-    parser.add_argument(
         "--perf-args", type=str, default=DEFAULT_PERF_ARGS,
         help=f"Arguments passed to the *_perf binary (default: '{DEFAULT_PERF_ARGS}')",
     )
@@ -837,7 +811,6 @@ def main():
     print(f"Dtypes:   {', '.join(args.dtypes)}")
     print(f"Ranks:    {args.np}")
     print(f"Map-by:   {args.map_by or '(Open MPI default)'}")
-    print(f"Accel:    --mca accelerator {args.mca_accelerator}" if args.mca_accelerator else "Accel:    (Open MPI default)")
     print(f"Reps:     {args.repeats}")
     print(f"Args:     {args.perf_args}")
     print(f"Modes:    {', '.join(args.modes) if args.modes else 'none'}")
