@@ -20,9 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Models an OpenBLAS-style library built with OpenMP support (USE_OPENMP=1). On the AAC6
-// system the deadlock originated in OpenBLAS's DT_INIT constructor, which queries the CPU/thread
-// count through OpenMP:
+// Models an OpenBLAS-style library built with OpenMP support (USE_OPENMP=1). The deadlock
+// originates in OpenBLAS's DT_INIT constructor, which queries the CPU/thread count through
+// OpenMP:
 //
 //     gotoblas_init -> blas_get_cpu_number -> get_num_procs -> omp_get_num_places
 //
