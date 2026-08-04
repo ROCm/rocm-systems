@@ -146,8 +146,13 @@ signal_less_stats()
     _s.eop_unmatched       = _at(signal_less_counter::eop_unmatched);
     _s.handoff_submitted   = _at(signal_less_counter::handoff_submitted);
     _s.handoff_retried     = _at(signal_less_counter::handoff_retried);
-    _s.finalizer_emitted   = _at(signal_less_counter::finalizer_emitted);
-    _s.finalizer_no_timing = _at(signal_less_counter::finalizer_no_timing);
+    _s.finalizer_emitted        = _at(signal_less_counter::finalizer_emitted);
+    _s.finalizer_no_timing      = _at(signal_less_counter::finalizer_no_timing);
+    _s.no_timing_start_unknown  = _at(signal_less_counter::no_timing_start_unknown);
+    _s.no_timing_convert_failed = _at(signal_less_counter::no_timing_convert_failed);
+    _s.no_timing_bad_interval   = _at(signal_less_counter::no_timing_bad_interval);
+    _s.no_timing_before_enqueue = _at(signal_less_counter::no_timing_before_enqueue);
+    _s.no_timing_after_now      = _at(signal_less_counter::no_timing_after_now);
     return _s;
 }
 
@@ -489,7 +494,8 @@ signal_less_teardown()
     ROCP_WARNING << fmt::format(
         "KFD dispatch-log signal-less summary: {} eligible batch(es), {} entry(ies) registered ({} "
         "refused), {} EOP proven / {} unmatched, {} handed off ({} retried), {} record(s) emitted, "
-        "{} completed without timing; teardown finalized {} retry-owned and stranded {}",
+        "{} completed without timing (start-unknown {} / convert-fail {} / bad-interval {} / "
+        "before-enqueue {} / after-now {}); teardown finalized {} retry-owned and stranded {}",
         _c.batch_eligible,
         _c.entry_registered,
         _c.register_refused,
@@ -499,6 +505,11 @@ signal_less_teardown()
         _c.handoff_retried,
         _c.finalizer_emitted,
         _c.finalizer_no_timing,
+        _c.no_timing_start_unknown,
+        _c.no_timing_convert_failed,
+        _c.no_timing_bad_interval,
+        _c.no_timing_before_enqueue,
+        _c.no_timing_after_now,
         _steps.flushed,
         _steps.leaked);
 }

@@ -145,6 +145,14 @@ enum class signal_less_counter
     handoff_retried,      // rejected; parked in the retry owner
     finalizer_emitted,    // RESULT_READY: record emitted with KFD timestamps
     finalizer_no_timing,  // COMPLETED_NO_TIMING: retired, no record
+    // Why a no-timing happened. These sum to finalizer_no_timing and are the
+    // whole point: shape-ii (a lost START) and a rejected sanity clause are
+    // different bugs needing opposite fixes.
+    no_timing_start_unknown,
+    no_timing_convert_failed,
+    no_timing_bad_interval,
+    no_timing_before_enqueue,
+    no_timing_after_now,
     kCount
 };
 
@@ -157,8 +165,13 @@ struct signal_less_counters
     uint64_t eop_unmatched       = 0;
     uint64_t handoff_submitted   = 0;
     uint64_t handoff_retried     = 0;
-    uint64_t finalizer_emitted   = 0;
-    uint64_t finalizer_no_timing = 0;
+    uint64_t finalizer_emitted        = 0;
+    uint64_t finalizer_no_timing      = 0;
+    uint64_t no_timing_start_unknown  = 0;
+    uint64_t no_timing_convert_failed = 0;
+    uint64_t no_timing_bad_interval   = 0;
+    uint64_t no_timing_before_enqueue = 0;
+    uint64_t no_timing_after_now      = 0;
 };
 
 void

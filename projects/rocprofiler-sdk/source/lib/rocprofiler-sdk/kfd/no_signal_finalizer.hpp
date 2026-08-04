@@ -54,6 +54,28 @@ enum class finalize_outcome
     completed_no_timing,  // no record; start unknown or convert/sanity failed
 };
 
+// Why a completion produced no record. Reported so a no-timing spike can be
+// attributed without a rebuild: shape-ii (the START was lost) and a rejected
+// sanity clause are entirely different bugs with entirely different fixes.
+enum class finalize_reason
+{
+    ready = 0,       // RESULT_READY: record emitted
+    start_unknown,   // shape ii -- EOP proved completion but its START was lost
+    convert_failed,  // hsa_amd_profiling_convert_tick_to_system_domain said no
+    bad_interval,    // converted start >= end
+    before_enqueue,  // converted start precedes this dispatch's own enqueue
+    after_now,       // converted end is beyond now + the conversion slack
+};
+
+// Everything the finalizer learned, for diagnostics.
+struct finalize_detail
+{
+    finalize_reason reason    = finalize_reason::ready;
+    uint64_t        start_ns  = 0;
+    uint64_t        end_ns    = 0;
+    bool            converted = false;
+};
+
 enum class submit_result
 {
     accepted,
@@ -74,19 +96,34 @@ resolve_finalize(const std::optional<uint64_t>& start_ticks,
                  uint64_t                      now_ns,
                  ConvertFn&&                   convert,
                  uint64_t*                     start_ns_out,
-                 uint64_t*                     end_ns_out)
+                 uint64_t*                     end_ns_out,
+                 finalize_detail*              detail = nullptr)
 {
+    auto _note = [detail](finalize_reason r) {
+        if(detail) detail->reason = r;
+        return finalize_outcome::completed_no_timing;
+    };
+
     // Shape (ii): the EOP proved completion but its START was lost, so there is no
     // interval to report.
-    if(!start_ticks) return finalize_outcome::completed_no_timing;
+    if(!start_ticks) return _note(finalize_reason::start_unknown);
 
     if(!convert(*start_ticks, start_ns_out) || !convert(end_ticks, end_ns_out))
-        return finalize_outcome::completed_no_timing;
+        return _note(finalize_reason::convert_failed);
 
-    // Same correlation guard the signal path uses: a record that does not fall
-    // inside this dispatch's own CPU window is not this dispatch's record.
-    if(!kfd_time_is_sane(*start_ns_out, *end_ns_out, enqueue_ts, now_ns))
-        return finalize_outcome::completed_no_timing;
+    if(detail)
+    {
+        detail->converted = true;
+        detail->start_ns  = *start_ns_out;
+        detail->end_ns    = *end_ns_out;
+    }
+
+    // Same correlation guard the signal path uses, reported clause by clause: a
+    // record that does not fall inside this dispatch's own CPU window is not this
+    // dispatch's record.
+    if(!(*start_ns_out < *end_ns_out)) return _note(finalize_reason::bad_interval);
+    if(*start_ns_out < enqueue_ts) return _note(finalize_reason::before_enqueue);
+    if(*end_ns_out > now_ns + kKfdFutureSlackNs) return _note(finalize_reason::after_now);
 
     return finalize_outcome::result_ready;
 }
@@ -105,14 +142,15 @@ run_no_signal_finalizer(const std::optional<uint64_t>& start_ticks,
                         uint64_t                      now_ns,
                         ConvertFn&&                   convert,
                         EmitFn&&                      emit,
-                        RetireFn&&                    retire)
+                        RetireFn&&                    retire,
+                        finalize_detail*              detail = nullptr)
 {
     auto _cleanup = common::scope_destructor{[&retire]() { retire(); }};
 
     uint64_t _start_ns = 0;
     uint64_t _end_ns   = 0;
     auto     _outcome  = resolve_finalize(
-        start_ticks, end_ticks, enqueue_ts, now_ns, convert, &_start_ns, &_end_ns);
+        start_ticks, end_ticks, enqueue_ts, now_ns, convert, &_start_ns, &_end_ns, detail);
 
     if(_outcome == finalize_outcome::result_ready) emit(_start_ns, _end_ns);
     return _outcome;

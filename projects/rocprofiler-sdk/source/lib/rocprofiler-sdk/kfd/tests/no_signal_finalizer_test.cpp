@@ -535,3 +535,97 @@ TEST(signal_less_teardown, flush_with_nothing_held_finalizes_nothing)
     EXPECT_EQ(finalized, 0);
     EXPECT_EQ(owner.size(), 0u);
 }
+
+// ---------------------------------------------------------------------------
+// Rejection-cause reporting
+//
+// The no-timing breakdown is only useful if each cause is attributed correctly:
+// shape-ii and a rejected sanity clause need opposite fixes, so a mislabelled
+// counter would send the next investigation the wrong way.
+// ---------------------------------------------------------------------------
+
+TEST(no_signal_finalizer, reports_the_exact_rejection_cause)
+{
+    constexpr uint64_t now = 1'000'000'000;
+
+    auto run = [&](std::optional<uint64_t> start_ticks,
+                   uint64_t                end_ticks,
+                   uint64_t                enqueue_ts,
+                   bool                    convert_ok) {
+        auto obs    = observer{};
+        auto conv   = converter{convert_ok, /*epoch=*/0};
+        auto detail = finalize_detail{};
+        auto outcome =
+            run_no_signal_finalizer(start_ticks, end_ticks, enqueue_ts, now, conv.fn(),
+                                    obs.emit_fn(), obs.retire_fn(), &detail);
+        // Whatever the cause, the correlation id retires exactly once.
+        EXPECT_EQ(obs.retires, 1);
+        return std::make_pair(outcome, detail.reason);
+    };
+
+    // Success reports `ready` and emits.
+    {
+        auto [outcome, reason] = run(now - 5'000'000, now - 1'000'000, 0, true);
+        EXPECT_EQ(outcome, finalize_outcome::result_ready);
+        EXPECT_EQ(reason, finalize_reason::ready);
+    }
+
+    // Shape ii: the EOP proved completion, the START was lost.
+    {
+        auto [outcome, reason] = run(std::nullopt, now - 1'000'000, 0, true);
+        EXPECT_EQ(outcome, finalize_outcome::completed_no_timing);
+        EXPECT_EQ(reason, finalize_reason::start_unknown);
+    }
+
+    // Conversion refused (non-GPU agent).
+    {
+        auto [outcome, reason] = run(now - 5'000'000, now - 1'000'000, 0, false);
+        EXPECT_EQ(outcome, finalize_outcome::completed_no_timing);
+        EXPECT_EQ(reason, finalize_reason::convert_failed);
+    }
+
+    // Non-positive interval.
+    {
+        auto [outcome, reason] = run(now - 1'000'000, now - 5'000'000, 0, true);
+        EXPECT_EQ(outcome, finalize_outcome::completed_no_timing);
+        EXPECT_EQ(reason, finalize_reason::bad_interval);
+    }
+
+    // Starts before this dispatch was enqueued -- the misattribution check.
+    {
+        auto [outcome, reason] = run(now - 5'000'000, now - 1'000'000, now - 2'000'000, true);
+        EXPECT_EQ(outcome, finalize_outcome::completed_no_timing);
+        EXPECT_EQ(reason, finalize_reason::before_enqueue);
+    }
+
+    // Ends beyond now + the conversion slack.
+    {
+        auto [outcome, reason] = run(1, now + kKfdFutureSlackNs + 1, 0, true);
+        EXPECT_EQ(outcome, finalize_outcome::completed_no_timing);
+        EXPECT_EQ(reason, finalize_reason::after_now);
+    }
+}
+
+// A few ms past now stays inside the slack, so it must be reported as ready and
+// NOT counted against after_now -- otherwise the breakdown would blame the guard
+// for the very skew it was widened to absorb.
+TEST(no_signal_finalizer, conversion_skew_is_not_counted_as_a_rejection)
+{
+    constexpr uint64_t now  = 1'000'000'000;
+    auto               obs  = observer{};
+    auto               conv = converter{true, /*epoch=*/0};
+    auto               det  = finalize_detail{};
+
+    auto outcome = run_no_signal_finalizer(std::optional<uint64_t>{now - 5'000'000},
+                                           now + 2'700'000,
+                                           0,
+                                           now,
+                                           conv.fn(),
+                                           obs.emit_fn(),
+                                           obs.retire_fn(),
+                                           &det);
+
+    EXPECT_EQ(outcome, finalize_outcome::result_ready);
+    EXPECT_EQ(det.reason, finalize_reason::ready);
+    EXPECT_EQ(obs.emits, 1);
+}

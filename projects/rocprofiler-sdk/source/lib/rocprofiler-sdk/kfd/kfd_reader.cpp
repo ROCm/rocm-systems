@@ -841,9 +841,17 @@ reader_loop()
     // visible even if teardown does not run. Silent unless the feature is active.
     const auto _sl = signal_less_stats();
     ROCP_WARNING_IF(_sl.batch_eligible > 0 || _sl.eop_unmatched > 0) << fmt::format(
+        "KFD dispatch-log ring: {} lap(s), {} record(s) lost to laps, {} batch(es) dropped -- a "
+        "lost record is a lost START, which shows up as a start-unknown no-timing",
+        st.session.cursors.overruns,
+        st.session.cursors.lost_records,
+        st.batches_dropped.load(std::memory_order_relaxed));
+
+    ROCP_WARNING_IF(_sl.batch_eligible > 0 || _sl.eop_unmatched > 0) << fmt::format(
         "KFD dispatch-log signal-less chain: {} eligible batch(es) -> {} registered ({} refused) "
         "-> {} EOP proven / {} unmatched -> {} handed off ({} retried) -> {} emitted / {} "
-        "no-timing",
+        "no-timing (start-unknown {} / convert-fail {} / bad-interval {} / before-enqueue {} / "
+        "after-now {})",
         _sl.batch_eligible,
         _sl.entry_registered,
         _sl.register_refused,
@@ -852,7 +860,12 @@ reader_loop()
         _sl.handoff_submitted,
         _sl.handoff_retried,
         _sl.finalizer_emitted,
-        _sl.finalizer_no_timing);
+        _sl.finalizer_no_timing,
+        _sl.no_timing_start_unknown,
+        _sl.no_timing_convert_failed,
+        _sl.no_timing_bad_interval,
+        _sl.no_timing_before_enqueue,
+        _sl.no_timing_after_now);
 }
 }  // namespace
 
