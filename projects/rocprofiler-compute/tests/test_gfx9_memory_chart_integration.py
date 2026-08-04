@@ -101,7 +101,7 @@ class TestIntegrationGfx9:
         assert output.count("N/A") == expected_na_count
 
     @pytest.mark.xfail(
-        reason="AIPROFCOMP-783: renderer expects a different Active CUs key",
+        reason="Renderer expects a different Active CUs key",
         raises=AssertionError,
         strict=True,
     )
