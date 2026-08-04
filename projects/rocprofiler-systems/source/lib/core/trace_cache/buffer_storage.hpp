@@ -86,9 +86,7 @@ namespace type_traits
 {
 template <typename T>
 concept thread_state_policy = requires(state::thread::State state_to_set) {
-    typename decltype(T::scoped(state_to_set));
-    requires !std::same_as<decltype(T::scoped(state_to_set)), void>;
-    requires std::destructible<decltype(T::scoped(state_to_set))>;
+    { T::scoped(state_to_set) } -> std::destructible;
     { T::Internal } -> std::convertible_to<state::thread::State>;
 };
 }  // namespace type_traits
