@@ -294,13 +294,4 @@ kinetoesque_get_trace_count()
     std::lock_guard<std::mutex> lock(trace_mutex);
     return static_cast<int>(traces.size());
 }
-
-// ROCPROFILER_PUBLIC_API rocprofiler_tool_configure_result_t*
-//                        rocprofiler_configure(uint32_t                 version,
-//                                              const char*              runtime_version,
-//                                              uint32_t                 priority,
-//                                              rocprofiler_client_id_t* client_id)
-// {
-//     return configure(version, runtime_version, priority, client_id);
-// }
 }  // extern "C"
