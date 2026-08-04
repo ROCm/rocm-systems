@@ -1307,19 +1307,52 @@ ncclResult_t ncclTopoForceMerge(struct ncclXml* xml, struct ncclTopoNetInfo* net
   char* semi = strtok_r(ncStr, ";", &semi_token);
   while (semi) {
     TRACE(NCCL_NET, "Fusing %s", semi);
-    struct netIf userIfs[NCCL_NET_MAX_DEVS_PER_NIC];
-    int nUserIfs = parseStringList(semi, userIfs, NCCL_NET_MAX_DEVS_PER_NIC);
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    // RCCL: one entry past the limit. parseStringList() truncates silently, so without it an
+    // over-limit group is indistinguishable from a legal full-size one.
+    const int maxUserIfs = NCCL_NET_MAX_DEVS_PER_NIC + 1;
+#else
+    const int maxUserIfs = NCCL_NET_MAX_DEVS_PER_NIC;
+#endif
+    struct netIf userIfs[maxUserIfs];
+    int nUserIfs = parseStringList(semi, userIfs, maxUserIfs);
     if (nUserIfs == 0) {
       INFO(NCCL_NET,
            "NET/IB : Invalid NCCL_NET_FORCE_MERGE specified %s. Couldn't parse substring %s. Please provide a "
            "semicolon-delimited list of comma-delimited NIC groups.",
            ncStr, semi);
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+      // RCCL: the loop advances semi at the bottom, so continuing without a step of its own
+      // re-parses the same unparsable substring forever. ":" and "," both parse to zero NICs.
+      semi = strtok_r(NULL, ";", &semi_token);
+#endif
       continue;
     }
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    // RCCL: reject a group that requests more NICs than one vNIC can hold, see maxUserIfs above.
+    // The count is a lower bound, since parsing stopped one entry past the limit.
+    if (nUserIfs > NCCL_NET_MAX_DEVS_PER_NIC) {
+      WARN("TOPO/NET : Specified fused NIC %s which requests at least %d devices. Max %d", semi, nUserIfs,
+           NCCL_NET_MAX_DEVS_PER_NIC);
+      ret = ncclInvalidUsage;
+      goto fail;
+    }
+#endif
 
     ncclNetVDeviceProps_t vProps = {0};
     for (int d = 0; d < nPhysDevs; d++) {
       if (matchIfList(propsList[d].name, propsList[d].port, userIfs, nUserIfs, 1)) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+        // RCCL: a pattern given without ":port" matches every port of a multi-port NIC, so the
+        // number of matches is not bounded by nUserIfs and can overrun devs[].
+        if (vProps.ndevs == NCCL_NET_MAX_DEVS_PER_NIC) {
+          WARN("TOPO/NET : Specified fused NIC %s which matches too many devices. Max %d", semi,
+               NCCL_NET_MAX_DEVS_PER_NIC);
+          ret = ncclInvalidUsage;
+          goto fail;
+        }
+#endif
         vProps.devs[vProps.ndevs++] = d;
       }
     }
@@ -1350,7 +1383,6 @@ ncclResult_t ncclTopoForceMerge(struct ncclXml* xml, struct ncclTopoNetInfo* net
     }
 
     semi = strtok_r(NULL, ";", &semi_token);
-    ;
   }
 
 exit:

@@ -456,10 +456,18 @@ AgentStepping classify_agent(const OriginalApi &api, hsa_agent_t agent) {
   return revision == 0 ? AgentStepping::kA0 : AgentStepping::kB0OrLater;
 }
 
-bool any_agent_could_be_a0(const OriginalApi &api) {
+/// @brief Whether an agent-less load could land on a gfx1250 A0.
+/// @details kUnenumerable is a separate verdict only so the refusal can name agent
+/// enumeration as the cause; it is treated exactly like kPossible by callers. A tool
+/// loaded ahead of this hook in HSA_TOOLS_LIB owns hsa_iterate_agents_fn (this hook
+/// never patches it), so a failing enumeration usually means that tool refused, not
+/// that the machine has no agents.
+enum class A0Risk { kNone, kPossible, kUnenumerable };
+
+A0Risk assess_a0_risk(const OriginalApi &api) {
   auto *iterate = api.iterate_agents;
   if (iterate == nullptr)
-    return true;
+    return A0Risk::kUnenumerable;
   struct IterateData {
     const OriginalApi *api;
     bool found = false;
@@ -475,7 +483,11 @@ bool any_agent_could_be_a0(const OriginalApi &api) {
         return HSA_STATUS_SUCCESS;
       },
       &data);
-  return data.found || (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK);
+  if (data.found)
+    return A0Risk::kPossible;
+  if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+    return A0Risk::kUnenumerable;
+  return A0Risk::kNone;
 }
 
 hsa_status_t load_owned_bytes(hsa_executable_t executable, hsa_agent_t agent, const Blob &bytes,
@@ -697,7 +709,15 @@ hsa_status_t HSA_API load_program_code_object(hsa_executable_t executable,
     if (api == nullptr)
       return HSA_STATUS_ERROR;
     auto *original = api->load_program;
-    if (any_agent_could_be_a0(*api))
+    const A0Risk risk = assess_a0_risk(*api);
+    // Same status either way -- callers must not have to distinguish these -- but the
+    // unenumerable case is logged separately so a co-loaded tool that refuses agent
+    // iteration is not misread as an A0 incompatibility.
+    if (risk == A0Risk::kUnenumerable) {
+      log("agent enumeration failed; refusing agent-less program load");
+      return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+    }
+    if (risk == A0Risk::kPossible)
       return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
     return original(executable, reader, options, loaded);
   });

@@ -580,8 +580,10 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   ::strncpy(deviceProps.name, info.boardName_, sizeof(info.boardName_));
   memcpy(deviceProps.uuid.bytes, info.uuid_, sizeof(info.uuid_));
   deviceProps.totalGlobalMem = info.globalMemSize_;
+  const size_t ldsPerMultiprocessor = static_cast<size_t>(info.localMemSizePerCU_) *
+      (deviceHandle->settings().enableWgpMode_ ? 2 : 1);
   deviceProps.sharedMemPerBlock = info.localMemSizePerCU_;
-  deviceProps.sharedMemPerMultiprocessor = info.localMemSizePerCU_;
+  deviceProps.sharedMemPerMultiprocessor = ldsPerMultiprocessor;
   deviceProps.regsPerBlock = info.availableRegistersPerCU_;
   deviceProps.warpSize = info.wavefrontWidth_;
   deviceProps.maxThreadsPerBlock = info.maxWorkGroupSize_;
@@ -625,7 +627,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.pciDomainID = info.pciDomainID;
   deviceProps.pciBusID = info.deviceTopology_.pcie.bus;
   deviceProps.pciDeviceID = info.deviceTopology_.pcie.device;
-  deviceProps.maxSharedMemoryPerMultiProcessor = info.localMemSizePerCU_;
+  deviceProps.maxSharedMemoryPerMultiProcessor = ldsPerMultiprocessor;
   deviceProps.canMapHostMemory = 1;
   deviceProps.regsPerMultiprocessor = info.availableRegistersPerCU_;
   snprintf(deviceProps.gcnArchName, sizeof(deviceProps.gcnArchName), "%s", isa.targetId());
@@ -785,6 +787,8 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   const auto& isa = deviceHandle->isa();
   ::strncpy(deviceProps.name, info.boardName_, sizeof(deviceProps.name));
   deviceProps.totalGlobalMem = info.globalMemSize_;
+  const size_t ldsPerMultiprocessor = static_cast<size_t>(info.localMemSizePerCU_) *
+      (deviceHandle->settings().enableWgpMode_ ? 2 : 1);
   deviceProps.sharedMemPerBlock = info.localMemSizePerCU_;
   deviceProps.regsPerBlock = info.availableRegistersPerCU_;
   deviceProps.warpSize = info.wavefrontWidth_;
@@ -827,7 +831,7 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   deviceProps.pciDomainID = info.pciDomainID;
   deviceProps.pciBusID = info.deviceTopology_.pcie.bus;
   deviceProps.pciDeviceID = info.deviceTopology_.pcie.device;
-  deviceProps.maxSharedMemoryPerMultiProcessor = info.localMemSizePerCU_;
+  deviceProps.maxSharedMemoryPerMultiProcessor = ldsPerMultiprocessor;
   deviceProps.canMapHostMemory = 1;
   // FIXME: This should be removed, targets can have character names as well.
   deviceProps.gcnArch = isa.versionMajor() * 100 + isa.versionMinor() * 10 + isa.versionStepping();

@@ -256,6 +256,10 @@ struct InstructionFacts {
   bool written_sgprs_computed = false;
 };
 
+[[nodiscard]] bool is_lane_fixup_consumer(const InstructionFacts &facts) {
+  return facts.swappc_ssrc.has_value();
+}
+
 struct AnalysisContext {
   std::span<const Instruction *const> insts;
   std::span<const uint8_t> text;
@@ -1943,9 +1947,6 @@ struct VectorLaneFlowState {
 // banking may exceed 255 (bank*256 + selector). The ABI table only defines the
 // convention for v0-255, so a banked register above that range is NOT proven
 // callee-saved and must fail closed rather than be masked down to its selector.
-[[nodiscard]] bool is_callee_saved_vgpr(uint16_t phys_vgpr) {
-  return phys_vgpr >= 40 && phys_vgpr <= 255 && ((phys_vgpr - 40) % 16) < 8;
-}
 
 void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<AnalysisBlock> &blocks,
                                      std::vector<IndirectCallFixup> &recovered,
@@ -2082,7 +2083,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         continue;
       }
 
-      if (emit_fixups && facts.swappc_ssrc &&
+      if (emit_fixups && is_lane_fixup_consumer(facts) &&
           static_cast<size_t>(*facts.swappc_ssrc + 1) < read_halves.size()) {
         const uint16_t pair_lo = *facts.swappc_ssrc;
         const auto &lo = read_halves[pair_lo];
@@ -2103,24 +2104,28 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
                       [](const auto &item) { return !is_callee_saved_vgpr(item.first.vgpr); });
       }
 
-      RegisterSet vgpr_defs;
-      for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
-        const Operand *op = inst.dst_operand(dst_index);
-        if (op == nullptr)
-          continue;
-        if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::VGPR)
-          vgpr_defs.expand(*ref);
-      }
-      inst.implicit_defs(vgpr_defs);
-      vgpr_defs.for_each([&](RegisterRef ref) {
-        if (ref.cls != RegClass::VGPR)
-          return;
-        // Operand metadata does not expose a role for every implicit/wide def.
-        // Conservatively invalidate every physical bank sharing this selector.
-        std::erase_if(state.slots, [&](const auto &item) {
-          return (item.first.vgpr & 0xffu) == (ref.index & 0xffu);
+      // VGPR defs are decoded only to invalidate tracked slots; no slots makes
+      // this entire region a no-op.
+      if (!state.slots.empty()) {
+        RegisterSet vgpr_defs;
+        for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
+          const Operand *op = inst.dst_operand(dst_index);
+          if (op == nullptr)
+            continue;
+          if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::VGPR)
+            vgpr_defs.expand(*ref);
+        }
+        inst.implicit_defs(vgpr_defs);
+        vgpr_defs.for_each([&](RegisterRef ref) {
+          if (ref.cls != RegClass::VGPR)
+            return;
+          // Operand metadata does not expose a role for every implicit/wide def.
+          // Conservatively invalidate every physical bank sharing this selector.
+          std::erase_if(state.slots, [&](const auto &item) {
+            return (item.first.vgpr & 0xffu) == (ref.index & 0xffu);
+          });
         });
-      });
+      }
 
       if (!builders.active_pairs().empty())
         invalidate_written_sgprs(ctx, index, builders);
@@ -2223,8 +2228,18 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
   }
 
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
-    if (reachable[block_index])
-      (void)scan_block(blocks[block_index], entry_states[block_index], true);
+    if (!reachable[block_index])
+      continue;
+    const AnalysisBlock &block = blocks[block_index];
+    bool has_consumer = false;
+    for (size_t index = block.first_index; index <= block.last_index; ++index) {
+      if (is_lane_fixup_consumer(ctx.facts[index])) {
+        has_consumer = true;
+        break;
+      }
+    }
+    if (has_consumer)
+      (void)scan_block(block, entry_states[block_index], true);
   }
 }
 
@@ -2381,8 +2396,14 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
   if (pc_builders != nullptr) {
     pc_builders->clear();
     pc_builders->reserve(round_builders.size());
-    for (const auto &[getpc_offset, entry] : round_builders)
-      pc_builders->push_back(entry.record);
+    for (const auto &[getpc_offset, entry] : round_builders) {
+      // Publish the disagreement flag on the copy that leaves this pass. It is kept off the stored
+      // record so the equality test above, which decides whether a second observation conflicts,
+      // keeps comparing only the observed value.
+      PcAddressBuilder published = entry.record;
+      published.poisoned = entry.poisoned;
+      pc_builders->push_back(published);
+    }
     std::ranges::sort(*pc_builders, {}, &PcAddressBuilder::source_getpc_offset);
   }
 
@@ -2391,6 +2412,10 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 }
 
 } // namespace
+
+bool is_callee_saved_vgpr(uint16_t phys_vgpr) {
+  return phys_vgpr >= 40 && phys_vgpr <= 255 && ((phys_vgpr - 40) % 16) < 8;
+}
 
 std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,

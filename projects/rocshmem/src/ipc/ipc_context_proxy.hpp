@@ -35,7 +35,7 @@ namespace rocshmem {
 class IPCBackend;
 
 class IPCDefaultContextProxy {
-  using ProxyT = DeviceProxy<HIPAllocator, IPCContext>;
+  using ProxyT = DeviceProxy<IPCContext>;
 
  public:
   IPCDefaultContextProxy() = default;
@@ -44,9 +44,9 @@ class IPCDefaultContextProxy {
    * Placement new the memory which is allocated by proxy_
    */
   explicit IPCDefaultContextProxy(IPCBackend* backend, TeamInfo *tinfo,
-                                  [[maybe_unused]] const HIPAllocator& alloc = HIPAllocator(),
+                                  HIPAllocator alloc = HIPAllocator(),
                                   size_t num_elems = 1)
-  : proxy_{num_elems}, constructed_{true} {
+  : alloc_{alloc}, proxy_{num_elems, alloc_}, constructed_{true} {
     auto ctx{proxy_.get()};
     new (ctx) IPCContext(reinterpret_cast<Backend*>(backend), 0);
     ctx->tinfo = tinfo;
@@ -78,6 +78,7 @@ class IPCDefaultContextProxy {
   __host__ __device__ Context* get() { return proxy_.get(); }
 
  private:
+  HIPAllocator alloc_{};
   /*
    * @brief Memory managed by the lifetime of this object
    */
