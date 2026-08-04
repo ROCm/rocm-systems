@@ -1,0 +1,150 @@
+{
+    "required_tables": [
+        {
+            "commit": "Python regions and HIP API calls from pytorch_function_fit.py, run with '-e 200'.",
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "name",
+                "start",
+                "end"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Verify that 'train_one_epoch' ran once per epoch.",
+                    "error_message": "'train_one_epoch' was not traced 200 times, one per epoch requested with '-e 200'.",
+                    "expected_result": 200,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name = 'train_one_epoch';"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify kernel launches reached the HIP API.",
+                    "error_message": "Almost no hipLaunchKernel calls found; the training loop should launch kernels on the device.",
+                    "expected_result": 5,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name = 'hipLaunchKernel';"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify the batch uploads reached the HIP API.",
+                    "error_message": "Almost no hipMemcpyWithStream calls found; each step copies its inputs and targets to the device.",
+                    "expected_result": 5,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name = 'hipMemcpyWithStream';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for any NULL values in the 'name' column of regions.",
+                    "error_message": "NULL entries found in the name column of regions.",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name IS NULL;"
+                }
+            ]
+        },
+        {
+            "commit": "GPU kernels dispatched by the model. The counts below only establish that each part of the model reached the device, deliberately not how much of it ran: how many kernels a training step issues depends on the epoch count, the batch size and whatever torch does internally, so a real run clears these by orders of magnitude. Matching is by substring because the torch kernel names are mangled C++ templates whose exact spelling changes between releases.",
+            "name": "kernels",
+            "required_columns": [
+                "id",
+                "category",
+                "name",
+                "start",
+                "end",
+                "queue",
+                "stream"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify kernels were dispatched to the GPU at all.",
+                    "error_message": "Almost no kernel dispatches found; the model did not run on the device.",
+                    "expected_result": 5,
+                    "query": "SELECT COUNT(*) FROM kernels;"
+                },
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "Verify the dispatches are not all one kernel: a GEMM, an activation and the optimizer update are distinct.",
+                    "error_message": "Fewer than 3 distinct kernel names found; the trace is missing part of the training step.",
+                    "expected_result": 3,
+                    "query": "SELECT COUNT(DISTINCT name) FROM kernels;"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify the nn.Linear layers reached rocBLAS. Tensile names every generated GEMM 'Cijk_<layout>_<tile>_...'.",
+                    "error_message": "Almost no rocBLAS GEMM kernels found; the nn.Linear layers did not reach rocBLAS.",
+                    "expected_result": 5,
+                    "query": "SELECT COUNT(*) FROM kernels WHERE name LIKE 'Cijk%';"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify the activations ran on the device: the nn.Tanh layers are elementwise kernels.",
+                    "error_message": "Almost no tanh kernels found; the nn.Tanh activations did not run on the device.",
+                    "expected_result": 5,
+                    "query": "SELECT COUNT(*) FROM kernels WHERE name LIKE '%tanh%';"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify the batch uploads happened. Torch stages small host-to-device transfers through a ROCclr blit kernel rather than an async copy, so the input and target batch of every step land here instead of in memory_copies.",
+                    "error_message": "Almost no copy-buffer kernels found; the input and target batches were not uploaded to the device.",
+                    "expected_result": 5,
+                    "query": "SELECT COUNT(*) FROM kernels WHERE name LIKE '%copyBuffer%';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for kernels with no active time.",
+                    "error_message": "Kernels with no active execution times found.",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM kernels WHERE (end - start) = 0;"
+                }
+            ]
+        },
+        {
+            "commit": "Kernel summary table",
+            "name": "top_kernels",
+            "required_columns": [
+                "name",
+                "total_calls",
+                "total_duration",
+                "average",
+                "percentage"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Check for null kernel names in the summary.",
+                    "error_message": "Found kernels with null names in top_kernels.",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM top_kernels WHERE name IS NULL;"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Check that the summary is not empty.",
+                    "error_message": "No kernels found in top_kernels.",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM top_kernels;"
+                }
+            ]
+        },
+        {
+            "commit": "Only a couple of transfers reach the memory copy domain, and they come from moving the model to the device rather than from the training loop. The per-step batch uploads are staged through a blit kernel instead, and are checked in the kernels table above.",
+            "name": "memory_copies",
+            "required_columns": [
+                "id",
+                "category",
+                "name",
+                "start",
+                "end"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify at least one real host-to-device copy was recorded.",
+                    "error_message": "No 'MEMORY_COPY_HOST_TO_DEVICE' entries found in memory_copies.",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM memory_copies WHERE name = 'MEMORY_COPY_HOST_TO_DEVICE';"
+                }
+            ]
+        }
+    ]
+}

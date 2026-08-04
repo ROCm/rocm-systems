@@ -126,5 +126,6 @@ class TestCodeCoverage(RocprofsysTest):
             target="code-coverage.py",
             run_args=run_args,
             python_version=python_version,
+            use_sys_mod=True,
         )
         self.assert_regex(result)

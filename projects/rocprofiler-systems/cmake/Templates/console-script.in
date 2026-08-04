@@ -14,23 +14,88 @@ run-script()
     eval $@
 }
 
+# Asking the interpreter beats deriving its package directories from the
+# executable path
+python_site_dirs()
+{
+    ${PYTHON_EXECUTABLE} -c 'import sysconfig; print("\n".join({sysconfig.get_paths()[k] for k in ("purelib", "platlib")}))' 2>/dev/null || true
+}
+
+# Wheels such as torch ship private shared libraries and find them through a
+# $ORIGIN RPATH. Under rocprof-sys the loader attributes their dlopen calls to
+# our own extension module and consults its RPATH instead, so those directories
+# have to be on LD_LIBRARY_PATH
 add_so_paths_to_ld_library_path()
 {
-    local python_name_version=$(basename ${PYTHON_EXECUTABLE})
-    local libdir=$(dirname $(dirname $PYTHON_EXECUTABLE))/lib/${python_name_version}/site-packages
-
-    if [ -d "$libdir" ]; then
-        local so_dirs=$(find "$libdir" -name "*.so" -type f -exec dirname {} \; 2>/dev/null | sort -u)
-
-        for dir in $so_dirs; do
-            if [ -d "$dir" ] && [[ ":$LD_LIBRARY_PATH:" != *":$dir:"* ]]; then
-                export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}${dir}"
+    local site_dir dir
+    for site_dir in ${SITE_DIRS}; do
+        [ -d "${site_dir}" ] || continue
+        for dir in $(find "${site_dir}" -type f \( -name '*.so' -o -name '*.so.*' \) -printf '%h\n' 2>/dev/null | sort -u); do
+            if [[ ":${LD_LIBRARY_PATH}:" != *":${dir}:"* ]]; then
+                export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}${dir}"
             fi
         done
-    fi
+    done
+}
+
+# The caller's glob has already expanded and sorted, so the first argument is the
+# first match, or the unmatched pattern itself, which is not a file.
+first_glob_match()
+{
+    if [ -f "$1" ]; then echo "$1"; fi
+}
+
+# Which rocprofiler-sdk the loader will bind for us on this machine.
+resolve_rocm_sdk()
+{
+    local root lib sdk
+    root=$(cd $(dirname ${BASH_SOURCE[0]})/.. && pwd)
+    for lib in ${ROCM_PATH:+${ROCM_PATH}/lib/librocprofiler-sdk.so.*} \
+               ${root}/lib/librocprof-sys.so ${root}/lib64/librocprof-sys.so; do
+        [ -f "${lib}" ] || continue
+        case ${lib} in
+            *librocprofiler-sdk.so.*) echo "${lib}"; return 0 ;;
+        esac
+        sdk=$(ldd "${lib}" 2>/dev/null | awk '$1 ~ /^librocprofiler-sdk\.so\./ && $2=="=>" {print $3; exit}' || true)
+        if [ -f "${sdk}" ]; then echo "${sdk}"; return 0; fi
+    done
+}
+
+# Pytorch wheels bundle their own rocprofiler and HSA runtimes.
+# Preload system ones as opposed to wheel's one to avoid registering after the
+# SDK's configuration window has closed, which collects no GPU data at all.
+add_rocm_preload()
+{
+    # An explicit setting means the caller is managing the race themselves.
+    case ":${LD_PRELOAD:-}:" in
+        *librocprofiler-sdk*) return 0 ;;
+    esac
+
+    # Only relevant when an installed wheel ships a competing copy.
+    local site_dir bundled=""
+    for site_dir in ${SITE_DIRS}; do
+        [ -d "${site_dir}" ] || continue
+        bundled=$(find "${site_dir}" -name 'librocprofiler-register.so*' -print -quit 2>/dev/null || true)
+        if [ -n "${bundled}" ]; then break; fi
+    done
+    if [ -z "${bundled}" ]; then return 0; fi
+
+    local sdk dir entry preload="${LD_PRELOAD:-}"
+    sdk=$(resolve_rocm_sdk)
+    if [ -z "${sdk}" ]; then return 0; fi
+    dir=$(dirname "${sdk}")
+
+    for entry in "$(first_glob_match ${dir}/librocprofiler-register.so.[0-9]*)" \
+                 "${sdk}" \
+                 "$(first_glob_match ${dir}/libhsa-runtime64.so.[0-9]*)"; do
+        if [ -n "${entry}" ]; then preload="${preload:+${preload}:}${entry}"; fi
+    done
+    export LD_PRELOAD="${preload}"
 }
 
 OLD_LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}
+SITE_DIRS=$(python_site_dirs)
+add_rocm_preload
 add_so_paths_to_ld_library_path
 
 run-script ${PYTHON_EXECUTABLE} -m @SCRIPT_SUBMODULE@ "$(printf ' %q' "$@")"

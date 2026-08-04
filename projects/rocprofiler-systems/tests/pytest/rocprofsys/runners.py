@@ -700,23 +700,58 @@ class PythonRunner(BaseRunner):
         python_version: Optional[str] = None,
         annotated: bool = False,
         standalone: bool = False,
+        use_sys_mod: bool = False,
+        env: Optional[dict[str, str]] = None,
         **kwargs,
     ):
-        super().__init__(config, TestEnvKind.PYTHON, target, output_dir, **kwargs)
+        """Initialize Python runner.
+
+        Args:
+            config: rocprofiler-systems configuration
+            target: Name of target script
+            output_dir: Directory for output files
+            profile_args: Arguments for rocprof-sys-python
+            python_version: Interpreter version to run the script with
+            annotated: Whether to pass --annotate-trace
+            standalone: Run the script with the interpreter, without profiling.
+                Mutually exclusive with use_sys_mod.
+            use_sys_mod: Profile with `python -m rocprofsys` rather than the
+                rocprof-sys-python wrapper. Mutually exclusive with standalone.
+            env: Environment variables for the test
+            **kwargs: Additional arguments passed to BaseRunner
+        """
+        if standalone and use_sys_mod:
+            raise ValueError("standalone and use_sys_mod are mutually exclusive")
+
+        self.python_executable = config.capabilities.get_python_executable(python_version)
+        # Neither entry point falls back to the other
+        if not standalone and config.rocprofsys_python is None:
+            missing = "rocprofsys module" if use_sys_mod else "rocprof-sys-python"
+            raise FileNotFoundError(f"{missing} not found")
+
+        if not (standalone or use_sys_mod):
+            # The wrapper otherwise runs the interpreter it was configured with,
+            # which is not the one this parameterization asked for
+            env = {**(env or {}), "PYTHON_EXECUTABLE": str(self.python_executable)}
+        super().__init__(
+            config, TestEnvKind.PYTHON, target, output_dir, env=env, **kwargs
+        )
 
         self.python_version = python_version
         self.annotated = annotated
         self.standalone = standalone
+        self.use_sys_mod = use_sys_mod
         self.profile_args = profile_args or []
 
     def build_command(self) -> list[str]:
-        python_executable = self.config.capabilities.get_python_executable(
-            self.python_version
-        )
+        if self.standalone:
+            command = [str(self.python_executable)]
+        elif self.use_sys_mod:
+            command = [str(self.python_executable), "-m", "rocprofsys"]
+        else:
+            command = [str(self.config.rocprofsys_python)]
 
-        command = [str(python_executable)]
         if not self.standalone:
-            command.extend(["-m", "rocprofsys"])
             if self.profile_args:
                 command.extend(self.profile_args)
             if self.annotated:

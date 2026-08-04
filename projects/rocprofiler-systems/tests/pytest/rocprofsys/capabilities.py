@@ -10,6 +10,7 @@ import functools
 import os
 import shutil
 import subprocess
+import sys
 import re
 
 from .cache import persistent_cache, persistent_cached_property
@@ -538,6 +539,29 @@ class SystemCapabilities:
         path = shutil.which("julia")
         return Path(path) if path else None
 
+    @persistent_cache("cap.pytorch_available", method=True)
+    def pytorch_available(self, executable: Path) -> bool:
+        """Check if ``executable`` has torch installed.
+
+        Torch is installed per interpreter, not per system, so the interpreter a
+        test launches the PyTorch example with is the one that has to be asked.
+
+        The probe locates the package rather than importing it to avoid loading
+        the ROCm runtime and costing seconds.
+        """
+        probe = (
+            "import importlib.util as u, sys; sys.exit(0 if u.find_spec('torch') else 1)"
+        )
+        try:
+            result = subprocess.run(
+                [str(executable), "-c", probe],
+                capture_output=True,
+                timeout=10,
+            )
+        except (subprocess.SubprocessError, OSError):
+            return False
+        return result.returncode == 0
+
     @persistent_cached_property
     def mpiexec_exec(self) -> Optional[Path]:
         """Find MPI launcher executable."""
@@ -673,8 +697,6 @@ def _get_supported_python_versions_and_executables(
                     found_versions.append(detected)
                     found_executables.append(found)
     else:
-        import sys
-
         current_exe = Path(sys.executable)
         version = _get_python_version(current_exe)
         if version:

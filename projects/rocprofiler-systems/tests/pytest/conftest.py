@@ -267,6 +267,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "shmem",
         "nic",
         "ainic_required",
+        "pytorch_available",
     ]
 
     # Informational markers, only used for test labeling
@@ -336,6 +337,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "minimal",
         "rank_filter",
         "pytest_impl",
+        "pytorch",
     ]
     for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
@@ -416,7 +418,7 @@ def pytest_collection_modifyitems(config, items) -> None:
         # The general form is <name>_optional(...). If the condition is met, <name> marker is added
         if (
             "mpi_optional" in item.keywords
-            and mpi_unavailable_reason(rocprof_config, config) is None
+            and mpi_unavailable_reason(rocprof_config) is None
         ):
             target = item.get_closest_marker("mpi_optional").args[0]
             try:
@@ -473,7 +475,7 @@ def pytest_collection_modifyitems(config, items) -> None:
         if "ucx" in item.keywords and not rocprof_config.capabilities.ucx_availability:
             item.add_marker(pytest.mark.skip(reason="UCX not available"))
         if "mpi" in item.keywords:
-            _msg = mpi_unavailable_reason(rocprof_config, config)
+            _msg = mpi_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
         if "mpi_implementation" in item.keywords:
@@ -497,6 +499,12 @@ def pytest_collection_modifyitems(config, items) -> None:
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
             _msg = python_versions_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "pytorch_available" in item.keywords:
+            callspec = getattr(item, "callspec", None)
+            _version = callspec.params.get("python_version") if callspec else None
+            _msg = pytorch_unavailable_reason(rocprof_config, _version)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
         if "julia" in item.keywords:
@@ -807,9 +815,7 @@ def rocprofiler_sdk_min_version_unavailable_reason(
     )
 
 
-def mpi_unavailable_reason(
-    rocprof_config: RocprofsysConfig, config: pytest.Config
-) -> Optional[str]:
+def mpi_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     if rocprof_config.capabilities.mpiexec_exec is None:
         return "MPI not available"
     return None
@@ -831,6 +837,20 @@ def python_versions_unavailable_reason(rocprof_config: RocprofsysConfig) -> Opti
         "No supported Python versions. Each version needs a corresponding "
         "libpyrocprofsys.<IMPL>-<VERSION>-<ARCH>-<OS>-<ABI>.so in site-packages/rocprofsys."
     )
+
+
+def pytorch_unavailable_reason(
+    rocprof_config: RocprofsysConfig, python_version: Optional[str]
+) -> Optional[str]:
+    """Torch is installed per interpreter, so ask the version under test."""
+    try:
+        executable = rocprof_config.capabilities.get_python_executable(python_version)
+    except FileNotFoundError:
+        # The python marker already reports the interpreter itself being missing.
+        return None
+    if rocprof_config.capabilities.pytorch_available(executable):
+        return None
+    return f"torch not installed for Python {python_version}"
 
 
 def julia_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
@@ -1560,8 +1580,9 @@ def _build_rocprofsys_config_header() -> list[str]:
 
     W = 22  # label width for alignment
 
-    def _row(label: str, value) -> str:
-        return f"  {label:<{W}}{value}"
+    def _row(label: str, value, note: Optional[str] = None) -> str:
+        row = f"  {label:<{W}}{value}"
+        return f"{row}  [{note}]" if note else row
 
     def _subrow(label: str, value) -> str:
         return f"    {label:<{W}}{value}"
@@ -1642,7 +1663,8 @@ def _build_rocprofsys_config_header() -> list[str]:
             cap.supported_python_versions,
             cap.supported_python_executables,
         ):
-            header.append(_row(version, exe))
+            found = "found" if cap.pytorch_available(exe) else "not found"
+            header.append(_row(version, exe, f"PyTorch: {found}"))
     else:
         header.append(
             _row(
@@ -2108,7 +2130,13 @@ _FUNCTION_ALLOWED_KWARGS: dict[str, dict[str, set[str]]] = {
         "runtime_instrument": {"runtime_instrument_args"},
         "sys_run": {"sys_run_args"},
         "causal": {"causal_args", "causal_mode"},
-        "python": {"python_version", "profile_args", "annotated", "standalone"},
+        "python": {
+            "python_version",
+            "profile_args",
+            "annotated",
+            "standalone",
+            "use_sys_mod",
+        },
     },
     "assert_regex": {
         "baseline": {"baseline_pass_regex", "baseline_fail_regex"},
@@ -2324,11 +2352,14 @@ def run_test(
                 no_base_env=no_base_env,
                 **filtered_kwargs,
             )
-        except FileNotFoundError:
+        except FileNotFoundError as exc:
+            # The runner reports what it could not find, which is not always the
+            # target itself (e.g. an optional tool the runner needs).
+            not_found = str(exc).strip() or f"{target} binary not found"
             if fail_on_not_found:
-                pytest.fail(f"{target} binary not found")
+                pytest.fail(not_found)
             else:
-                pytest.skip(f"{target} binary not found")
+                pytest.skip(not_found)
 
         result = runner.run()
         collect_result(result)

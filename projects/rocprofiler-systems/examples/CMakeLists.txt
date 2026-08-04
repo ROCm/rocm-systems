@@ -85,6 +85,7 @@ set(ROCPROFSYS_EXAMPLE_DIRS
     openmp
     mpi
     python
+    pytorch
     lulesh
     rccl
     rewrite-caller
