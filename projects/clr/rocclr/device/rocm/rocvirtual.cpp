@@ -3638,11 +3638,17 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
     result = false;
   }
 
-  // Synchronize the launch (compute) stream with SDMA engines.
-  // WaitingSignal(Compute) inside dispatchBarrierPacket detects the engine switch
-  // from SDMA→Compute, collects the SDMA completion signal as a barrier dependency,
-  // and updates engine_ to Compute before ActiveSignal tags the profiling signal.
-  if (result) {
+  // copyBufferBatch records every completion signal it produced. The last one sits at
+  // current_id_ and is attached to this command; any signals that are not implicitly
+  // ordered behind it (mixed shader + SDMA paths, or multiple SDMA engine groups running
+  // in parallel) are queued as external signals. Only then is a barrier needed, to join
+  // them into a single completion signal for this command -- otherwise the next command's
+  // profilingBegin() clears those external signals and the dependency is lost.
+  //
+  // When there are no extra signals (e.g. a pure P2P/D2D batch that collapses to one
+  // engine-group op), the sole completion signal already represents the whole batch and
+  // the next op waits on it through the engine switch, so the barrier is pure overhead.
+  if (result && !Barriers().IsExternalSignalListEmpty()) {
     dispatchBarrierPacket(kNopPacketHeader);
   }
 
@@ -4257,6 +4263,11 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
       constexpr bool kImportVmmForInterprocess = true;
       dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj, const_cast<void*>(vcmd.ptr()),
                                          kImportVmmForInterprocess);
+      // The VA is now backed, so the true owning agent (a peer device for imported memory)
+      // can finally be resolved. create() ran before the mapping existed, so cache it now.
+      if (auto* devMem = static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(dev()))) {
+        devMem->refreshOwningAgentFromPointerInfo();
+      }
     } else {
       LogError("HSA Command: hsa_amd_vmem_map failed!");
     }

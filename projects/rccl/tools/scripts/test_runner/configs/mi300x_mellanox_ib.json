@@ -469,9 +469,19 @@
           "test_filter": "NetIbMPITest.MakeVirtualDeviceOutOfRangeDev"
         },
         {
+          "name": "NetIB_VNic_NegativeNdevs",
+          "description": "makeVDevice rejects a negative device count",
+          "test_filter": "NetIbMPITest.MakeVirtualDeviceNegativeNdevs"
+        },
+        {
           "name": "NetIB_VNic_DuplicateDevs",
           "description": "makeVDevice dedups a repeated device into a single-device vNIC",
           "test_filter": "NetIbMPITest.MakeVirtualDeviceDuplicateDevs"
+        },
+        {
+          "name": "NetIB_VNic_MergeMultipleDevices",
+          "description": "makeVDevice merges up to NCCL_NET_MAX_DEVS_PER_NIC devices and rejects an over-limit request. GTEST_SKIPs without two physical NICs at a common speed",
+          "test_filter": "NetIbMPITest.MergeMultipleDevices"
         },
         {
           "name": "NetIB_VNic_CrossNuma",
@@ -668,6 +678,11 @@
           "name": "TopoTest",
           "description": "Topology construction tests",
           "test_filter": "TopoTest.*"
+        },
+        {
+          "name": "TopoNicFusionTests",
+          "description": "NIC fusion input validation in the topology layer",
+          "test_filter": "TopoNicFusionTests.*"
         },
         {
           "name": "DdaIpcEligibilityTest",
@@ -869,7 +884,8 @@
         {"name": "CollTraceUtils.aggregateResults", "description": "CollTrace utils aggregate results", "test_filter": "CollTraceUtilsTest.aggregateResultsTest"},
         {"name": "CollTraceUtils.EventQueueOperation", "description": "CollTrace utils event queue operation", "test_filter": "CollTraceUtilsTest.EventQueueOperationTest"},
         {"name": "CollTraceUtils.EventQueueMultiThread", "description": "CollTrace utils event queue multithread", "test_filter": "CollTraceUtilsTest.EventQueueMultiThreadTest"},
-        {"name": "CollTraceUtils.getSizeMb", "description": "CollTrace utils get size MB", "test_filter": "CollTraceUtilsTest.getSizeMbTest"}
+        {"name": "CollTraceUtils.getSizeMb", "description": "CollTrace utils get size MB", "test_filter": "CollTraceUtilsTest.getSizeMbTest"},
+        {"name": "CpuAffinity.RestoredAfterInitRank", "description": "Verify CPU affinity mask is restored after ncclCommInitRank (NCCL #2033 regression)", "test_filter": "CpuAffinity.RestoredAfterInitRank"}
       ]
     },
     "asymmetric_visibility": {
@@ -902,6 +918,18 @@
       "tests": [
         {"name": "PluginCompatV11.NetLazyInitialization", "description": "AICOMRCCL-1532: v11 net plugin compat layer initializes lazily (only ncclNet.init set until init() runs)", "test_filter": "PluginCompatV11.NetLazyInitialization"},
         {"name": "PluginCompatV11.CollNetLazyInitialization", "description": "AICOMRCCL-1532: v11 collnet plugin compat layer initializes lazily", "test_filter": "PluginCompatV11.CollNetLazyInitialization"}
+      ]
+    },
+    "socket_poll_bootstrap": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "description": "Bootstrap socket busy-loop regression. Validates that NCCL_SOCKET_POLL_TIMEOUT_MSEC makes a blocked bootstrap socket recv wait in poll() instead of pinning a CPU core at 100%. Single node, no NIC/GPU required.",
+      "tests": [
+        {"name": "Socket_BootstrapPollNoBusyLoop", "description": "With NCCL_SOCKET_POLL_TIMEOUT_MSEC set, a receiver blocked on a slow peer sleeps in poll() (low CPU); the control case with the param at 0 reproduces the pre-fix busy loop (high CPU).", "test_filter": "SocketPollTimeout.*"}
       ]
     },
     "net_plugin_reload": {
@@ -2633,6 +2661,23 @@
       "extends": "net_ib_stress_inline",
       "env_variables": { "NCCL_NET": "ib-cast" }
     },
+    "nccl4py_build_smoke": {
+      "extends": "default",
+      "is_pytest": true,
+      "setup_venv": true,
+      "test_dir": "test/nccl4py",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 0,
+      "timeout": 600,
+      "tests": [
+        {
+          "name": "NCCL4Py_BuildSmoke_All",
+          "description": "uv/CMake nccl4py wheel build (cmake --build --target nccl4py) + CPU smoke pytest modules; self-skips without cmake/uv/librccl.so",
+          "test_filter": "ALL"
+        }
+      ]
+    },
     "ir_device": {
       "extends": "default",
       "is_pytest": true,
@@ -3406,6 +3451,12 @@
       "enabled": true
     },
     {
+      "name": "Bootstrap socket poll - no busy loop",
+      "description": "AICOMRCCL-1322: NCCL_SOCKET_POLL_TIMEOUT_MSEC makes a blocked bootstrap socket recv wait in poll() instead of busy-spinning a CPU core (Debug only, no NIC/GPU required)",
+      "config": "socket_poll_bootstrap",
+      "enabled": true
+    },
+    {
       "name": "Asymmetric Visibility",
       "description": "Comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES",
       "config": "asymmetric_visibility",
@@ -3775,6 +3826,12 @@
       "name": "NET IB - Stress Inline CTS (ib-cast)",
       "description": "InfiniBand inline CTS stress via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_stress_inline_cast",
+      "enabled": true
+    },
+    {
+      "name": "nccl4py Build Smoke",
+      "description": "uv/CMake nccl4py wheel build + CPU smoke pytest modules; self-skips without cmake/uv/librccl.so",
+      "config": "nccl4py_build_smoke",
       "enabled": true
     },
     {

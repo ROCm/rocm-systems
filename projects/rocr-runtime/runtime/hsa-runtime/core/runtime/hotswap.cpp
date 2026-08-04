@@ -383,11 +383,18 @@ std::optional<RewriteDecision> DecideHotswapRewrite(const AgentGfxRevision& gfx,
 }  // namespace
 
 void ConfigureHotswapBackend() {
-  HotswapBackend backend = HotswapBackend::kComgr;
+  // The rocjitsu backend is the default. It only does anything when a gfx1250 A0
+  // agent is present, so selecting it costs nothing on every other device; see
+  // Runtime::LoadHotswapTool(), which returns early otherwise.
+  //
+  // HSA_HOTSWAP_ENABLE=1 selects the COMGR backend instead. That is a transitional
+  // escape hatch, not a supported configuration. "2" keeps naming the rocjitsu
+  // backend so existing invocations that request it explicitly continue to work.
+  HotswapBackend backend = HotswapBackend::kRocjitsu;
   if (IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE")) {
     backend = HotswapBackend::kDisabled;
-  } else if (os::GetEnvVar("HSA_HOTSWAP_ENABLE") == "2") {
-    backend = HotswapBackend::kRocjitsu;
+  } else if (os::GetEnvVar("HSA_HOTSWAP_ENABLE") == "1") {
+    backend = HotswapBackend::kComgr;
   }
   g_hotswap_backend.store(backend, std::memory_order_release);
 }

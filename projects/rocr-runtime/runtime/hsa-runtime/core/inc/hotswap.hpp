@@ -98,6 +98,9 @@ enum class HotswapBackend {
   kRocjitsu,
 };
 
+// Selects the backend from the environment. kRocjitsu is the default;
+// HSA_HOTSWAP_DISABLE turns hotswap off entirely, and HSA_HOTSWAP_ENABLE=1
+// selects kComgr as a transitional fallback.
 void ConfigureHotswapBackend();
 HotswapBackend GetHotswapBackend();
 bool IsRocjitsuHotswapEnabled();

@@ -168,6 +168,7 @@ public:
   }
   uint32_t GetComputeEngine() { return device_info_.compute_schedid; }
 
+  uint64_t VramTotal();
   hsa_status_t VramAvail(uint64_t* available_bytes);
 
   void GetClockCounters(uint64_t *gpu, uint64_t *cpu);
@@ -266,6 +267,13 @@ private:
 
   bool QuerySegmentInfo();
   bool FindSegmentId(SegmentKind segment_kind, uint32_t *segment_id);
+  hsa_status_t QuerySegmentBytesResident(uint32_t segment_id,
+                                         uint64_t *bytes_resident) const;
+  hsa_status_t QuerySegmentGroupUsage(uint32_t segment_group,
+                                      uint64_t *bytes_allocated) const;
+  hsa_status_t QueryLocalVramUsage(uint64_t *usage_bytes);
+  hsa_status_t QueryNonLocalVramUsage(uint64_t *usage_bytes) const;
+  hsa_status_t QueryVramUsage(uint64_t *usage_bytes);
 
   D3DKMT_HANDLE adapter_;
   LUID adapter_luid_;

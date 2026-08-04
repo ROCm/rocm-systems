@@ -59,6 +59,24 @@ main()
         return 2;
     }
 
+    // Guard: ensure there are enough GPUs for all local PEs.
+    // rocSHMEM requires one GPU per PE; if two PEs share a GPU, stream-based
+    // synchronisation operations (barrier_all_on_stream, signal_wait_until_on_stream,
+    // etc.) deadlock rather than fail with a clear error.
+    // OMPI_COMM_WORLD_LOCAL_SIZE is set by Open MPI before process start and
+    // gives the number of PEs on this node.  Other MPI implementations do not
+    // set it; in that case local_size defaults to 1 and the guard is skipped.
+    const char* local_size_env = getenv("OMPI_COMM_WORLD_LOCAL_SIZE");
+    const int   local_size     = local_size_env ? atoi(local_size_env) : 1;
+    if(num_devices < local_size)
+    {
+        fprintf(stderr,
+                "rocshmem: %d GPU(s) available but %d local PEs requested "
+                "-- 1 GPU per PE required, skipping\n",
+                num_devices, local_size);
+        return 2;
+    }
+
     // rocSHMEM requires hipSetDevice() to be called BEFORE rocshmem_init()
     // so that the MPI PE is bound to its GPU before the symmetric heap is
     // allocated on that device.  Use OMPI_COMM_WORLD_LOCAL_RANK (set by
