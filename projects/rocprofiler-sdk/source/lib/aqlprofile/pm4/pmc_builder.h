@@ -134,7 +134,7 @@ public:
     virtual uint32_t Read(CmdBuffer*             cmd_buffer,
                           const counters_vector& counters_vec,
                           void*                  data_buffer) = 0;
-    virtual int GetNumWGPs() = 0;
+    virtual int      GetNumWGPs()            = 0;
 };
 
 // PMC PM4 commands builder template
