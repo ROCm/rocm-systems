@@ -69,14 +69,12 @@ openmp_init_deadlock_add_omp_library(openmp-init-deadlock-consumer openmp_consum
 # the consumer (and blas-stub) so their DT_INIT constructors are pending when discovery
 # runs
 openmp_init_deadlock_add_omp_library(openmp-init-deadlock-client client.cpp)
-target_link_libraries(
-    openmp-init-deadlock-client
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk
-            # ensure the consumer/blas-stub initialize first and remain hard dependencies
-            "-Wl,--no-as-needed"
-            openmp-init-deadlock-consumer
-            openmp-init-deadlock-blas-stub
-            "-Wl,--as-needed")
+target_link_libraries(openmp-init-deadlock-client
+                      PRIVATE rocprofiler-sdk::rocprofiler-sdk)
+
+openmp_init_deadlock_add_omp_library(openmp-init-deadlock-client-alt client.cpp)
+target_link_libraries(openmp-init-deadlock-client-alt
+                      PRIVATE rocprofiler-sdk::rocprofiler-sdk)
 
 add_executable(openmp-init-deadlock)
 target_sources(openmp-init-deadlock PRIVATE openmp-init-deadlock.cpp)
@@ -91,6 +89,7 @@ target_link_libraries(
             # deps
             "-Wl,--no-as-needed"
             openmp-init-deadlock-client
+            openmp-init-deadlock-client-alt
             openmp-init-deadlock-consumer
             "-Wl,--as-needed")
 if(OMP_TARGET_COMPILER)
