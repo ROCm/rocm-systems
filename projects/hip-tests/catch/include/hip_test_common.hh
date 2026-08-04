@@ -711,64 +711,6 @@ template <> struct MemTraits<MemcpyAsync> {
 };
 
 // Heap ownership keeps callback state alive if an assertion unwinds the test.
-class StreamCallbackLatch {
-  struct State {
-    std::mutex mutex;
-    std::condition_variable condition;
-    bool complete = false;
-  };
-
- public:
-  explicit StreamCallbackLatch(hipStream_t stream) : stream_(stream) {}
-
-  StreamCallbackLatch(const StreamCallbackLatch&) = delete;
-  StreamCallbackLatch& operator=(const StreamCallbackLatch&) = delete;
-  StreamCallbackLatch(StreamCallbackLatch&&) = delete;
-  StreamCallbackLatch& operator=(StreamCallbackLatch&&) = delete;
-
-  hipError_t enqueue() {
-    if (enqueued_) {
-      return hipErrorInvalidValue;
-    }
-    auto* holder = new std::shared_ptr<State>(state_);
-    const hipError_t status = hipStreamAddCallback(
-        stream_,
-        [](hipStream_t, hipError_t, void* data) {
-          std::unique_ptr<std::shared_ptr<State>> holder(
-              static_cast<std::shared_ptr<State>*>(data));
-          const std::shared_ptr<State>& state = *holder;
-          {
-            std::lock_guard<std::mutex> lock(state->mutex);
-            state->complete = true;
-          }
-          state->condition.notify_all();
-        },
-        holder, 0);
-    if (status != hipSuccess) {
-      delete holder;
-      return status;
-    }
-    enqueued_ = true;
-    return hipSuccess;
-  }
-
-  bool wait_for(std::chrono::milliseconds timeout) const {
-    std::unique_lock<std::mutex> lock(state_->mutex);
-    return state_->condition.wait_for(lock, timeout, [this]() { return state_->complete; });
-  }
-
-  bool complete() const {
-    std::lock_guard<std::mutex> lock(state_->mutex);
-    return state_->complete;
-  }
-
- private:
-  hipStream_t stream_;
-  std::shared_ptr<State> state_ = std::make_shared<State>();
-  bool enqueued_ = false;
-};
-
-// Heap ownership keeps callback state alive if an assertion unwinds the test.
 class BlockingContext {
   struct State {
     std::mutex mutex;
