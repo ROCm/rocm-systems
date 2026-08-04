@@ -4,41 +4,24 @@
 #pragma once
 
 #include "database_backend.hpp"
-
 #include "debug.hpp"
 #include "directory.hpp"
+#include "profiler-hub/version.hpp"
+#include "schema_catalog.hpp"
 
+#include <algorithm>
 #include <filesystem>
+#include <fstream>
+#include <regex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include <regex>
-
-#include "schema/data_views.hpp"
-#include "schema/rocpd_metadata.hpp"
-#include "schema/rocpd_tables.hpp"
-#include "schema/rocpd_views.hpp"
-#include "schema/summary_views.hpp"
-
 namespace
 {
-enum rocpd_sql_schema_kind_t
-{
-    ROCPD_SQL_SCHEMA_NONE = 0,
-    ROCPD_SQL_SCHEMA_ROCPD_TABLES,
-    ROCPD_SQL_SCHEMA_ROCPD_INDEXES,
-    ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
-    ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
-    ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
-    ROCPD_SQL_SCHEMA_ROCPD_METADATA,
-    ROCPD_SQL_SCHEMA_LAST,
-};
-}  // namespace
 
-namespace
-{
 [[maybe_unused]] void
 create_directory_for_database_file(const std::string& db_file)
 {
@@ -49,42 +32,26 @@ create_directory_for_database_file(const std::string& db_file)
     }
 }
 
+/**
+ * Substitutes the {{uuid}}, {{schema_version}}, etc. placeholders in `schema_content`
+ * (a compiled-in SQL constant from schema_catalog.hpp) with their actual runtime values.
+ * @return The finished query string, or empty if `schema_content` is null.
+ */
 [[maybe_unused]] std::string
-get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
+get_schema_query(const char*                    schema_content,
+                 const std::string&             uuid,
+                 const profiler_hub::version_t& schema_version)
 {
-    std::string_view schema_content;
-
-    switch(schema_kind)
+    if(schema_content == nullptr)
     {
-        case ROCPD_SQL_SCHEMA_ROCPD_TABLES:
-            schema_content = rocpd::data_storage::schema::ROCPD_TABLES_SQL;
-            break;
-        case ROCPD_SQL_SCHEMA_ROCPD_VIEWS:
-            schema_content = rocpd::data_storage::schema::ROCPD_VIEWS_SQL;
-            break;
-        case ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS:
-            schema_content = rocpd::data_storage::schema::DATA_VIEWS_SQL;
-            break;
-        case ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS:
-            schema_content = rocpd::data_storage::schema::SUMMARY_VIEWS_SQL;
-            break;
-        case ROCPD_SQL_SCHEMA_ROCPD_METADATA:
-            schema_content = rocpd::data_storage::schema::ROCPD_METADATA_SQL;
-            break;
-        default:
-            throw std::runtime_error("Unknown schema kind: " +
-                                     std::to_string(schema_kind));
+        LOG_ERROR("No compiled-in schema content provided");
+        return {};
     }
-
-    std::string query_str = std::string(schema_content);
+    std::string query_str = schema_content;
 
     std::regex upid_pattern("\\{\\{uuid\\}\\}");
     std::regex guid_pattern("\\{\\{guid\\}\\}");
     std::regex view_upid_pattern("\\{\\{view_upid\\}\\}");
-
-    // rocpd_metadata.sql references these; hardcoded to the baseline schema version
-    // (3.0.1) for now until schema files are selected by version rather than always
-    // taking the latest cloned/bundled copy.
     std::regex schema_version_pattern("\\{\\{schema_version\\}\\}");
     std::regex schema_version_major_pattern("\\{\\{schema_version_major\\}\\}");
     std::regex schema_version_minor_pattern("\\{\\{schema_version_minor\\}\\}");
@@ -93,10 +60,14 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
     query_str = std::regex_replace(query_str, upid_pattern, "_" + uuid);
     query_str = std::regex_replace(query_str, guid_pattern, uuid);
     query_str = std::regex_replace(query_str, view_upid_pattern, "");
-    query_str = std::regex_replace(query_str, schema_version_pattern, "3.0.1");
-    query_str = std::regex_replace(query_str, schema_version_major_pattern, "3");
-    query_str = std::regex_replace(query_str, schema_version_minor_pattern, "0");
-    query_str = std::regex_replace(query_str, schema_version_patch_pattern, "1");
+    query_str =
+        std::regex_replace(query_str, schema_version_pattern, schema_version.to_string());
+    query_str = std::regex_replace(
+        query_str, schema_version_major_pattern, std::to_string(schema_version.major));
+    query_str = std::regex_replace(
+        query_str, schema_version_minor_pattern, std::to_string(schema_version.minor));
+    query_str = std::regex_replace(
+        query_str, schema_version_patch_pattern, std::to_string(schema_version.patch));
 
     return query_str;
 }
@@ -210,37 +181,62 @@ database_backend<SqlitePolicy>::discover_uuids()
     return uuids;
 }
 
+/**
+ * Creates the rocpd schema for `schema_version` (or the latest available version,
+ * if version_t{}) and marks the database as initialized.
+ */
 template <typename SqlitePolicy>
 void
-database_backend<SqlitePolicy>::initialize_schema()
+database_backend<SqlitePolicy>::initialize_schema(profiler_hub::version_t schema_version)
 {
     if(m_initialized)
     {
-        throw std::runtime_error("Database already initialized!");
+        LOG_WARNING("Database already initialized!");
+        return;
     }
 
-    const std::vector<rocpd_sql_schema_kind_t> schema_kinds = {
-        ROCPD_SQL_SCHEMA_ROCPD_TABLES,     ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
-        ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS, ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
-        ROCPD_SQL_SCHEMA_ROCPD_METADATA,
-    };
+    // known_schema_versions() caches its table in a function-local static, so every
+    // subsequent initialize_schema() call (e.g. across versions/instances) reuses it
+    // instead of rebuilding it.
+    const auto& versions = known_schema_versions();
 
-    for(const auto& schema_kind : schema_kinds)
+    // version_t{} (all-zero) means "use whatever is the latest compiled-in version".
+    profiler_hub::version_t resolved_version = schema_version;
+    if(schema_version.is_latest())
     {
-        const std::string query = get_schema_query(schema_kind, m_uuid);
+        for(const auto& entry : versions)
+        {
+            if(resolved_version.is_latest() || resolved_version < entry.version)
+            {
+                resolved_version = entry.version;
+            }
+        }
+    }
 
+    const auto version_it = std::find_if(
+        versions.begin(), versions.end(), [&resolved_version](const auto& entry) {
+            return entry.version == resolved_version;
+        });
+    if(version_it == versions.end())
+    {
+        throw std::runtime_error("Unsupported rocpd schema version requested: " +
+                                 schema_version.to_string());
+    }
+
+    for(const char* schema_content : version_it->sql)
+    {
+        const std::string query =
+            get_schema_query(schema_content, m_uuid, resolved_version);
         if(query.empty())
         {
-            LOG_ERROR("Failed to get schema query for schema kind: {}",
-                      static_cast<int>(schema_kind));
+            LOG_ERROR("Failed to get schema query for version {}",
+                      resolved_version.to_string());
             continue;
         }
-
         validate_sqlite3_result(SqlitePolicy::exec(m_sqlite3, query.c_str()),
                                 query.c_str(),
                                 std::string("Invalid schema, init database failed!"));
     }
-
     m_initialized = true;
 }
 

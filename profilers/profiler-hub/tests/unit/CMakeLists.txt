@@ -51,12 +51,25 @@ target_include_directories(
         ${CMAKE_SOURCE_DIR}/source/common
         ${CMAKE_SOURCE_DIR}/source/data_storage
         ${CMAKE_SOURCE_DIR}/source/queries
+        ${SQL_SCHEMA_BINARY_DIR}
 )
 
-target_include_directories(
-    profiler-hub_unit_tests
-    PRIVATE ${SQL_SCHEMA_BINARY_DIR}
-)
+target_compile_features(profiler-hub_unit_tests PRIVATE cxx_std_17)
+
+# Several tests (e.g. sqlite_backend_impl_test.cpp) #include headers with LOG_*
+# calls directly, compiling them fresh into this TU rather than reusing
+# profiler-hub-objects' copy, so this target needs its own copy of the define.
+if(PROFILER_HUB_ENABLE_LOGGING)
+    target_compile_definitions(
+        profiler-hub_unit_tests
+        PRIVATE $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_ENABLE_LOGGING=1>
+    )
+else()
+    target_compile_definitions(
+        profiler-hub_unit_tests
+        PRIVATE $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_ENABLE_LOGGING=0>
+    )
+endif()
 
 if(PROFILER_HUB_ENABLE_COVERAGE)
     profiler_hub_add_coverage_flags(profiler-hub_unit_tests)
