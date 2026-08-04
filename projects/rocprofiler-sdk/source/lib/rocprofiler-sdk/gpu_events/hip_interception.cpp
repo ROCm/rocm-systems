@@ -25,13 +25,16 @@
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip/runtime_api_id.h>
 
+#include <atomic>
 #include <unordered_map>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -64,7 +67,22 @@ get_event_map()
     return _v;
 }
 
-static uint64_t event_index = 0;
+static std::atomic<uint64_t> event_index{0};
+
+struct event_signal_state_t
+{
+    std::unordered_map<uint64_t, uint64_t>                     event_to_signal;
+    std::unordered_map<uint64_t, uint64_t>                     signal_to_event;
+    std::unordered_map<uint64_t, std::vector<pending_wait_info>> pending_waits;
+};
+
+static auto*&
+get_event_signal_state()
+{
+    static auto*& _v =
+        common::static_object<common::Synchronized<event_signal_state_t>>::construct();
+    return _v;
+}
 
 static t_hipEventCreate base_event_create = nullptr;
 hipError_t
@@ -100,7 +118,14 @@ static t_hipEventDestroy base_event_destroy = nullptr;
 hipError_t
 hip_event_destroy_wrapper(hipEvent_t event)
 {
-    get_event_map()->wlock([&](auto& data) { data.erase(event); });
+    auto eid = get_event_map()->wlock([&](auto& data) -> uint64_t {
+        auto it = data.find(event);
+        if(it == data.end()) return 0;
+        auto id = it->second;
+        data.erase(it);
+        return id;
+    });
+    if(eid > 0) unregister_record_signal(eid);
 
     return base_event_destroy(event);
 }
@@ -118,8 +143,19 @@ static t_hipStreamWaitEvent base_stream_wait_event = nullptr;
 hipError_t
 hip_stream_wait_event_wrapper(hipStream_t stream, hipEvent_t event, unsigned int flags)
 {
+    auto event_id = lookup_event_id(event);
+
     hip_event_api_record_t hip_record{
-        ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent, event, lookup_event_id(event), stream};
+        ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent, event, event_id, stream};
+
+    if(event_id > 0)
+    {
+        auto wait_stream_id =
+            (stream) ? hip::stream::get_stream_id(stream) : rocprofiler_stream_id_t{.handle = 0};
+        get_event_signal_state()->wlock([&](auto& state) {
+            state.pending_waits[event_id].push_back(pending_wait_info{event_id, wait_stream_id});
+        });
+    }
 
     set_hip_event_record_tag(&hip_record);
     auto _cleanup = common::scope_destructor{[] { set_hip_event_record_tag(nullptr); }};
@@ -130,10 +166,19 @@ static t_hipStreamWaitEvent_spt base_stream_wait_event_spt = nullptr;
 hipError_t
 hip_stream_wait_event_spt_wrapper(hipStream_t stream, hipEvent_t event, unsigned int flags)
 {
-    hip_event_api_record_t hip_record{ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent_spt,
-                                      event,
-                                      lookup_event_id(event),
-                                      stream};
+    auto event_id = lookup_event_id(event);
+
+    hip_event_api_record_t hip_record{
+        ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent_spt, event, event_id, stream};
+
+    if(event_id > 0)
+    {
+        auto wait_stream_id =
+            (stream) ? hip::stream::get_stream_id(stream) : rocprofiler_stream_id_t{.handle = 0};
+        get_event_signal_state()->wlock([&](auto& state) {
+            state.pending_waits[event_id].push_back(pending_wait_info{event_id, wait_stream_id});
+        });
+    }
 
     set_hip_event_record_tag(&hip_record);
     auto _cleanup = common::scope_destructor{[] { set_hip_event_record_tag(nullptr); }};
@@ -180,12 +225,6 @@ hip_event_record_with_flags_wrapper(hipEvent_t event, hipStream_t stream, unsign
 }
 #endif
 
-bool
-gpu_event_tracing()
-{
-    return (hip_event_record_tls != nullptr);
-}
-
 uint64_t
 get_gpu_event_id()
 {
@@ -200,56 +239,110 @@ get_gpu_event_stream_id()
     return rocprofiler_stream_id_t{.handle = 0};
 }
 
+rocprofiler_gpu_event_operation_t
+get_gpu_event_op()
+{
+    if(!hip_event_record_tls) return ROCPROFILER_GPU_EVENT_NONE;
+
+    switch(hip_event_record_tls->operation)
+    {
+        case ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent:
+        case ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent_spt:
+            return ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE;
+        case ROCPROFILER_HIP_RUNTIME_API_ID_hipEventRecord:
+        case ROCPROFILER_HIP_RUNTIME_API_ID_hipEventRecord_spt:
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
+        case ROCPROFILER_HIP_RUNTIME_API_ID_hipEventRecordWithFlags:
+#endif
+            return ROCPROFILER_GPU_EVENT_RECORD_ENQUEUE;
+        default: return ROCPROFILER_GPU_EVENT_NONE;
+    }
+}
+
+void
+register_record_signal(uint64_t event_id, hsa_signal_t signal)
+{
+    get_event_signal_state()->wlock([&](auto& state) {
+        auto it = state.event_to_signal.find(event_id);
+        if(it != state.event_to_signal.end())
+        {
+            state.signal_to_event.erase(it->second);
+        }
+        state.event_to_signal.insert_or_assign(event_id, signal.handle);
+        state.signal_to_event.insert_or_assign(signal.handle, event_id);
+    });
+}
+
+void
+unregister_record_signal(uint64_t event_id)
+{
+    get_event_signal_state()->wlock([&](auto& state) {
+        auto it = state.event_to_signal.find(event_id);
+        if(it != state.event_to_signal.end())
+        {
+            state.signal_to_event.erase(it->second);
+            state.event_to_signal.erase(it);
+        }
+        state.pending_waits.erase(event_id);
+    });
+}
+
+bool
+lookup_pending_wait(hsa_signal_t dep_signal, pending_wait_info& out)
+{
+    return get_event_signal_state()->wlock([&](auto& state) -> bool {
+        auto s2e_it = state.signal_to_event.find(dep_signal.handle);
+        if(s2e_it == state.signal_to_event.end()) return false;
+
+        auto pw_it = state.pending_waits.find(s2e_it->second);
+        if(pw_it == state.pending_waits.end() || pw_it->second.empty()) return false;
+
+        out = pw_it->second.back();
+        pw_it->second.pop_back();
+        if(pw_it->second.empty()) state.pending_waits.erase(pw_it);
+        return true;
+    });
+}
+
+template <typename TableT>
+void
+initialize(TableT* hip_api_table)
+{
+    for(const auto& itr : context::get_registered_contexts())
+    {
+        if(itr->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS,
+                                  ROCPROFILER_BUFFER_TRACING_GPU_EVENTS))
+        {
+            base_event_create            = hip_api_table->hipEventCreate_fn;
+            base_event_create_with_flags = hip_api_table->hipEventCreateWithFlags_fn;
+            base_event_destroy           = hip_api_table->hipEventDestroy_fn;
+            base_stream_wait_event       = hip_api_table->hipStreamWaitEvent_fn;
+            base_stream_wait_event_spt   = hip_api_table->hipStreamWaitEvent_spt_fn;
+            base_event_record            = hip_api_table->hipEventRecord_fn;
+            base_event_record_spt        = hip_api_table->hipEventRecord_spt_fn;
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
+            base_event_record_with_flags = hip_api_table->hipEventRecordWithFlags_fn;
+#endif
+
+            hip_api_table->hipEventCreate_fn          = &hip_event_create_wrapper;
+            hip_api_table->hipEventCreateWithFlags_fn  = &hip_event_create_with_flags_wrapper;
+            hip_api_table->hipEventDestroy_fn          = &hip_event_destroy_wrapper;
+            hip_api_table->hipStreamWaitEvent_fn       = &hip_stream_wait_event_wrapper;
+            hip_api_table->hipStreamWaitEvent_spt_fn   = &hip_stream_wait_event_spt_wrapper;
+            hip_api_table->hipEventRecord_fn           = &hip_event_record_wrapper;
+            hip_api_table->hipEventRecord_spt_fn       = &hip_event_record_spt_wrapper;
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
+            hip_api_table->hipEventRecordWithFlags_fn  = &hip_event_record_with_flags_wrapper;
+#endif
+            return;
+        }
+    }
+}
+
+using hip_runtime_api_table_t = hip::hip_runtime_api_table_t;
+
+template void initialize<hip_runtime_api_table_t>(hip_runtime_api_table_t*);
+
 }  // namespace gpu_events
 }  // namespace rocprofiler
-
-extern "C" {
-
-ROCPROFILER_API void
-hip_gpu_event_registration_callback(rocprofiler_intercept_table_t type,
-                                    uint64_t                      lib_version,
-                                    uint64_t                      lib_instance,
-                                    void**                        tables,
-                                    uint64_t                      num_tables,
-                                    void*                         user_data)
-{
-    (void) type;
-    (void) lib_version;
-    (void) lib_instance;
-    (void) num_tables;
-    (void) user_data;
-
-    ROCP_FATAL_IF(tables == nullptr || num_tables < 1) << "invalid tables in gpu_events "
-                                                          "registration callback";
-
-    auto* hip_api_table = static_cast<HipDispatchTable*>(tables[0]);
-
-    rocprofiler::gpu_events::base_event_create = hip_api_table->hipEventCreate_fn;
-    rocprofiler::gpu_events::base_event_create_with_flags =
-        hip_api_table->hipEventCreateWithFlags_fn;
-    rocprofiler::gpu_events::base_event_destroy         = hip_api_table->hipEventDestroy_fn;
-    rocprofiler::gpu_events::base_stream_wait_event     = hip_api_table->hipStreamWaitEvent_fn;
-    rocprofiler::gpu_events::base_stream_wait_event_spt = hip_api_table->hipStreamWaitEvent_spt_fn;
-    rocprofiler::gpu_events::base_event_record          = hip_api_table->hipEventRecord_fn;
-    rocprofiler::gpu_events::base_event_record_spt      = hip_api_table->hipEventRecord_spt_fn;
-
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
-    rocprofiler::gpu_events::base_event_record_with_flags =
-        hip_api_table->hipEventRecordWithFlags_fn;
-#endif
-
-    hip_api_table->hipEventCreate_fn = &rocprofiler::gpu_events::hip_event_create_wrapper;
-    hip_api_table->hipEventCreateWithFlags_fn =
-        &rocprofiler::gpu_events::hip_event_create_with_flags_wrapper;
-    hip_api_table->hipEventDestroy_fn    = &rocprofiler::gpu_events::hip_event_destroy_wrapper;
-    hip_api_table->hipStreamWaitEvent_fn = &rocprofiler::gpu_events::hip_stream_wait_event_wrapper;
-    hip_api_table->hipStreamWaitEvent_spt_fn =
-        &rocprofiler::gpu_events::hip_stream_wait_event_spt_wrapper;
-    hip_api_table->hipEventRecord_fn     = &rocprofiler::gpu_events::hip_event_record_wrapper;
-    hip_api_table->hipEventRecord_spt_fn = &rocprofiler::gpu_events::hip_event_record_spt_wrapper;
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
-    hip_api_table->hipEventRecordWithFlags_fn =
-        &rocprofiler::gpu_events::hip_event_record_with_flags_wrapper;
-#endif
-}
-}

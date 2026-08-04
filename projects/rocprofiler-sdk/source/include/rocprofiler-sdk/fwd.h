@@ -949,14 +949,14 @@ typedef rocprofiler_counter_config_id_t rocprofiler_profile_config_id_t;
  */
 typedef struct rocprofiler_gpu_event_info_t
 {
-    uint64_t                size;               ///< Size of this struct
-    uint64_t                issue_id;           ///< Issue index for this command
-    rocprofiler_agent_id_t  agent_id;           ///< Agent ID where the gpu event packet is enqueued
-    rocprofiler_queue_id_t  queue_id;           ///< Queue ID where gpu event packet is enqueued
-    rocprofiler_stream_id_t stream_id;          ///< Stream ID where gpu event packet is enqueued
-    uint64_t                event_id;           ///< Event ID being operated upon
-    uint64_t                type_id;            ///< Type of operation @see ::rocprofiler_gpu_event_operation_t
-    uint8_t                 reserved_padding[72];  ///< reserved for extensions w/o ABI break
+    uint64_t                size;       ///< Size of this struct
+    uint64_t                issue_id;   ///< Issue index for this command
+    rocprofiler_agent_id_t  agent_id;   ///< Agent ID where the gpu event packet is enqueued
+    rocprofiler_queue_id_t  queue_id;   ///< Queue ID where gpu event packet is enqueued
+    rocprofiler_stream_id_t stream_id;  ///< Stream ID where gpu event packet is enqueued
+    uint64_t                event_id;   ///< Event ID being operated upon
+    uint64_t type_id;               ///< Type of operation @see ::rocprofiler_gpu_event_operation_t
+    uint8_t  reserved_padding[72];  ///< reserved for extensions w/o ABI break
 } rocprofiler_gpu_event_info_t;
 
 /** @} */

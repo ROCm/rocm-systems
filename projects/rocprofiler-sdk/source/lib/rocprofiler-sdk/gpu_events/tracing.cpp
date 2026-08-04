@@ -43,10 +43,7 @@ get_gpu_event_time(const queue_info_session_t& session, packet_data_t& packet_da
     const auto* _rocp_agent  = agent::get_agent(event_record.event_info.agent_id);
     auto        _hsa_agent   = agent::get_hsa_agent(_rocp_agent);
 
-    auto _signal = (event_record.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE ||
-                    event_record.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_COMPLETE)
-                       ? packet_data.kernel_packet.barrier_and.completion_signal
-                       : packet_data.kernel_packet.ext_amd_aql_pm4.completion_signal;
+    auto _signal = packet_data.kernel_packet.barrier_and.completion_signal;
 
     return (_hsa_agent)
                ? tracing::get_signal_profiling_time(*_hsa_agent, _signal, 0, session.enqueue_ts)
@@ -78,49 +75,45 @@ gpu_event_complete(queue_info_session_t& session,
         event_record.start_timestamp = dispatch_time.start;
         event_record.end_timestamp   = dispatch_time.end;
 
-        auto complete_op =
-            (event_record.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE ||
-             event_record.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_COMPLETE)
-                ? ROCPROFILER_GPU_EVENT_WAIT_COMPLETE
-                : ROCPROFILER_GPU_EVENT_RECORD_COMPLETE;
+        auto complete_op = (event_record.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE ||
+                            event_record.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_COMPLETE)
+                               ? ROCPROFILER_GPU_EVENT_WAIT_COMPLETE
+                               : ROCPROFILER_GPU_EVENT_RECORD_COMPLETE;
 
         event_record.event_info.type_id = static_cast<uint64_t>(complete_op);
 
         if(!tracing_data_v.callback_contexts.empty())
         {
             auto tracer_data = event_record;
-            tracing::execute_phase_none_callbacks(
-                tracing_data_v.callback_contexts,
-                _tid,
-                _internal_corr_id,
-                _extern_corr_ids,
-                _ancestor_corr_id,
-                ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS,
-                complete_op,
-                tracer_data);
+            tracing::execute_phase_none_callbacks(tracing_data_v.callback_contexts,
+                                                  _tid,
+                                                  _internal_corr_id,
+                                                  _extern_corr_ids,
+                                                  _ancestor_corr_id,
+                                                  ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS,
+                                                  complete_op,
+                                                  tracer_data);
         }
 
         if(!tracing_data_v.buffered_contexts.empty())
         {
-            auto record = gpu_event_record_t{
-                sizeof(gpu_event_record_t),
-                ROCPROFILER_BUFFER_TRACING_GPU_EVENTS,
-                complete_op,
-                rocprofiler_async_correlation_id_t{},
-                _tid,
-                event_record.start_timestamp,
-                event_record.end_timestamp,
-                event_record.event_info};
+            auto record = gpu_event_record_t{sizeof(gpu_event_record_t),
+                                             ROCPROFILER_BUFFER_TRACING_GPU_EVENTS,
+                                             complete_op,
+                                             rocprofiler_async_correlation_id_t{},
+                                             _tid,
+                                             event_record.start_timestamp,
+                                             event_record.end_timestamp,
+                                             event_record.event_info};
 
-            tracing::execute_buffer_record_emplace(
-                tracing_data_v.buffered_contexts,
-                _tid,
-                _internal_corr_id,
-                _extern_corr_ids,
-                _ancestor_corr_id,
-                ROCPROFILER_BUFFER_TRACING_GPU_EVENTS,
-                complete_op,
-                record);
+            tracing::execute_buffer_record_emplace(tracing_data_v.buffered_contexts,
+                                                   _tid,
+                                                   _internal_corr_id,
+                                                   _extern_corr_ids,
+                                                   _ancestor_corr_id,
+                                                   ROCPROFILER_BUFFER_TRACING_GPU_EVENTS,
+                                                   complete_op,
+                                                   record);
         }
     }
 }

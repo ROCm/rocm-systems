@@ -24,30 +24,40 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
+#include <hsa/hsa.h>
+
 #include <cstdint>
 
 namespace rocprofiler
 {
 namespace gpu_events
 {
-bool
-gpu_event_tracing();
-
 uint64_t
 get_gpu_event_id();
 
 rocprofiler_stream_id_t
 get_gpu_event_stream_id();
+
+rocprofiler_gpu_event_operation_t
+get_gpu_event_op();
+
+struct pending_wait_info
+{
+    uint64_t                event_id;
+    rocprofiler_stream_id_t wait_stream_id;
+};
+
+void
+register_record_signal(uint64_t event_id, hsa_signal_t signal);
+
+void
+unregister_record_signal(uint64_t event_id);
+
+bool
+lookup_pending_wait(hsa_signal_t dep_signal, pending_wait_info& out);
+
+template <typename TableT>
+void
+initialize(TableT* table);
 }  // namespace gpu_events
 }  // namespace rocprofiler
-
-extern "C" {
-
-ROCPROFILER_API void
-hip_gpu_event_registration_callback(rocprofiler_intercept_table_t type,
-                                    uint64_t                      lib_version,
-                                    uint64_t                      lib_instance,
-                                    void**                        tables,
-                                    uint64_t                      num_tables,
-                                    void*                         user_data);
-}

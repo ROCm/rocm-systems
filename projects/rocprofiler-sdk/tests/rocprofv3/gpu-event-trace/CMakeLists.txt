@@ -41,10 +41,10 @@ rocprofiler_add_integration_execute_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --gpu-event-trace --kernel-trace -d
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o cmdl-input/out --output-format json
-        --log-level env -- $<TARGET_FILE:gpu-events>
+        rocpd --log-level env -- $<TARGET_FILE:gpu-events>
     DEPENDS gpu-events
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;rocpd"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-gpu-event-trace)
 
@@ -55,8 +55,10 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     ARGS --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/gpu-events-trace/cmdl-input/out_results.json
+         --rocpd-input
+         ${CMAKE_CURRENT_BINARY_DIR}/gpu-events-trace/cmdl-input/out_results.db
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED rocprofv3-test-gpu-event-trace)
 
 # JSON input test
@@ -69,7 +71,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:gpu-events>
     DEPENDS gpu-events
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;rocpd"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-gpu-event-trace-input-json)
 
@@ -80,6 +82,8 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     ARGS --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/gpu-events-trace/json-input/out_results.json
+         --rocpd-input
+         ${CMAKE_CURRENT_BINARY_DIR}/gpu-events-trace/json-input/out_results.db
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED rocprofv3-test-gpu-event-trace-input-json)

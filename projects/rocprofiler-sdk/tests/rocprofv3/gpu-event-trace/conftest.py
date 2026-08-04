@@ -27,6 +27,7 @@ import pytest
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils.rocpd_reader import RocpdReader
 
 
 def pytest_addoption(parser):
@@ -35,6 +36,11 @@ def pytest_addoption(parser):
         action="store",
         help="Path to JSON results file.",
     )
+    parser.addoption(
+        "--rocpd-input",
+        action="store",
+        help="Path to rocpd SQLite3 database file.",
+    )
 
 
 @pytest.fixture
@@ -42,3 +48,9 @@ def json_data(request):
     filename = request.config.getoption("--json-input")
     with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
+
+
+@pytest.fixture
+def rocpd_data(request):
+    filename = request.config.getoption("--rocpd-input")
+    return RocpdReader(filename).read()[0]

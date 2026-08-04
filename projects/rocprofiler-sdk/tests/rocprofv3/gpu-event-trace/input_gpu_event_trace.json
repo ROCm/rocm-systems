@@ -5,7 +5,8 @@
             "kernel_trace": true,
             "output_file": "json-input/out",
             "output_format": [
-                "json"
+                "json",
+                "rocpd"
             ]
         }
     ]

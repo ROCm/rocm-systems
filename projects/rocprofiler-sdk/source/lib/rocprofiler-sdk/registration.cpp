@@ -35,6 +35,7 @@
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
+#include "lib/rocprofiler-sdk/gpu_events/hip_interception.hpp"
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
@@ -1197,6 +1198,9 @@ rocprofiler_set_api_table(const char* name,
 
         // install HIP stream deduction wrappers
         rocprofiler::hip::stream::update_table(hip_runtime_api_table);
+
+        // install GPU event interception wrappers
+        rocprofiler::gpu_events::initialize(hip_runtime_api_table);
 
         // allow tools to install API wrappers
         rocprofiler::intercept_table::notify_intercept_table_registration(

@@ -35,7 +35,7 @@
                     "GPU API Error - %s:%d: '%s'\n",                                               \
                     __FILE__,                                                                      \
                     __LINE__,                                                                      \
-                    hipGetErrorString(gpuErr));                                                     \
+                    hipGetErrorString(gpuErr));                                                    \
             exit(1);                                                                               \
         }                                                                                          \
     } while(0)

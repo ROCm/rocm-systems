@@ -50,10 +50,15 @@ def test_gpu_event_json(json_data):
 
 
 def test_gpu_event_timestamps(json_data):
-    """Validate start < end for all GPU event records."""
+    """Validate timestamps are ordered and fall within the profiling window."""
     data = json_data["rocprofiler-sdk-tool"]
+    init_time = data["metadata"]["init_time"]
+    fini_time = data["metadata"]["fini_time"]
+
     for itr in data["buffer_records"]["gpu_events"]:
         assert itr.start_timestamp < itr.end_timestamp, f"Bad timestamps: {itr}"
+        assert itr.start_timestamp > init_time, f"start before init: {itr}"
+        assert itr.end_timestamp < fini_time, f"end after fini: {itr}"
 
 
 def test_gpu_event_operations(json_data):
@@ -65,10 +70,60 @@ def test_gpu_event_operations(json_data):
 
     # WAIT_COMPLETE = 2, RECORD_COMPLETE = 4
     assert 2 in operations, f"Missing WAIT_COMPLETE in {operations}"
-    # TODO: RECORD_COMPLETE (4) is not yet captured because hipEventRecord defers
-    # the doorbell ring, so the TLS tag is no longer set when the packet is processed.
-    # assert 4 in operations, f"Missing RECORD_COMPLETE in {operations}"
+    assert 4 in operations, f"Missing RECORD_COMPLETE in {operations}"
 
+
+def test_gpu_event_info(json_data):
+    """Verify event_info fields in buffer records."""
+    data = json_data["rocprofiler-sdk-tool"]
+
+    for itr in data["buffer_records"]["gpu_events"]:
+        info = itr.event_info
+        assert info.size > 0, f"Bad event_info size: {itr}"
+        assert info.event_id > 0, f"Bad event_id: {itr}"
+        assert info.issue_id > 0, f"Bad issue_id: {itr}"
+
+
+def test_gpu_event_correlation_ids(json_data):
+    """Verify correlation IDs are valid in buffer records.
+
+    COMPLETE operations (2=WAIT_COMPLETE, 4=RECORD_COMPLETE) fire asynchronously
+    on the GPU without a host-side HIP API call, so they have no external
+    correlation ID. Only ENQUEUE-originated records carry one.
+    """
+    data = json_data["rocprofiler-sdk-tool"]
+
+    for itr in data["buffer_records"]["gpu_events"]:
+        assert itr.correlation_id.internal > 0, f"Bad internal corr_id: {itr}"
+        if itr.operation not in (2, 4):
+            assert itr.correlation_id.external > 0, f"Bad external corr_id: {itr}"
+
+
+def test_rocpd_gpu_events(rocpd_data, json_data):
+    """Verify rocpd event_operations table matches JSON buffer records."""
+    js_data = json_data["rocprofiler-sdk-tool"]["buffer_records"]["gpu_events"]
+
+    rpd_data = rocpd_data.execute("SELECT * FROM event_operations").fetchall()
+
+    assert len(rpd_data) == len(js_data), (
+        f"rocpd event_operations has {len(rpd_data)} rows, "
+        f"JSON gpu_events has {len(js_data)} records"
+    )
+
+    num_total = rocpd_data.execute(
+        "SELECT COUNT(*) FROM event_operations"
+    ).fetchone()[0]
+    num_unique_start = rocpd_data.execute(
+        "SELECT COUNT(DISTINCT(start)) FROM event_operations"
+    ).fetchone()[0]
+    num_unique_end = rocpd_data.execute(
+        "SELECT COUNT(DISTINCT(end)) FROM event_operations"
+    ).fetchone()[0]
+
+    assert num_total == num_unique_start == num_unique_end, (
+        f"Duplicate records in event_operations: total={num_total}, "
+        f"unique starts={num_unique_start}, unique ends={num_unique_end}"
+    )
 
 
 if __name__ == "__main__":

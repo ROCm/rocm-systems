@@ -29,7 +29,6 @@
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/gpu_events/hip_interception.hpp"
-#include "lib/rocprofiler-sdk/gpu_events/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/gpu_events/tracing.hpp"
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
@@ -113,13 +112,6 @@ full_packet_instrumentation_context_filter(const context::context* ctx)
     return (context_filter(ctx, ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) ||
             context_filter(ctx, ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) ||
             context_filter(ctx, ROCPROFILER_BUFFER_TRACING_GPU_EVENTS) ||
-            context_filter(ctx, ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS));
-}
-
-bool
-gpu_event_context_filter(const context::context* ctx)
-{
-    return (context_filter(ctx, ROCPROFILER_BUFFER_TRACING_GPU_EVENTS) ||
             context_filter(ctx, ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS));
 }
 
@@ -339,8 +331,9 @@ WriteInterceptor(const void* packets,
 
     const auto* packets_arr          = static_cast<const rocprofiler_packet*>(packets);
     auto        num_dispatch_packets = size_t{0};
-    auto        num_evt_barrier_pkts = size_t{0};
-    auto        num_evt_signal_pkts  = size_t{0};
+    auto        num_gpu_event_pkts   = size_t{0};
+    bool        has_barrier_and_pkts = false;
+    const auto  gpu_event_op         = gpu_events::get_gpu_event_op();
     for(size_t i = 0; i < pkt_count; ++i)
     {
         const auto& original_packet = packets_arr[i].kernel_dispatch;
@@ -360,24 +353,27 @@ WriteInterceptor(const void* packets,
             {
                 ++num_dispatch_packets;
             }
-            else
+            else if(gpu_event_op != ROCPROFILER_GPU_EVENT_NONE)
             {
-                if(gpu_events::gpu_event_tracing()) num_evt_signal_pkts++;
+                num_gpu_event_pkts++;
             }
         }
 #else
         else if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
         {
-            if(gpu_events::gpu_event_tracing()) num_evt_signal_pkts++;
+            if(gpu_event_op != ROCPROFILER_GPU_EVENT_NONE) num_gpu_event_pkts++;
         }
 #endif
         else if(packet_type == HSA_PACKET_TYPE_BARRIER_AND)
         {
-            if(gpu_events::gpu_event_tracing()) num_evt_barrier_pkts++;
+            if(gpu_event_op != ROCPROFILER_GPU_EVENT_NONE)
+                num_gpu_event_pkts++;
+            else
+                has_barrier_and_pkts = true;
         }
     }
 
-    if(num_dispatch_packets == 0 && num_evt_barrier_pkts == 0 && num_evt_signal_pkts == 0)
+    if(num_dispatch_packets == 0 && num_gpu_event_pkts == 0 && !has_barrier_and_pkts)
     {
         writer(packets, pkt_count);
         return;
@@ -408,11 +404,16 @@ WriteInterceptor(const void* packets,
                                    ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                    tracing_data_v);
     }
-    if(num_evt_barrier_pkts || num_evt_signal_pkts)
+    if(num_gpu_event_pkts || has_barrier_and_pkts)
     {
+        auto pre_size = tracing_data_v.callback_contexts.size() +
+                        tracing_data_v.buffered_contexts.size();
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS,
                                    ROCPROFILER_BUFFER_TRACING_GPU_EVENTS,
                                    tracing_data_v);
+        auto post_size = tracing_data_v.callback_contexts.size() +
+                         tracing_data_v.buffered_contexts.size();
+        if(pre_size == post_size) has_barrier_and_pkts = false;
     }
 
     for(const auto* itr : context::get_active_contexts(queue_callback_context_filter))
@@ -455,8 +456,9 @@ WriteInterceptor(const void* packets,
 
     auto process_packet_batch = [&queue,
                                  &corr_id,
-                                 num_evt_barrier_pkts,
-                                 num_evt_signal_pkts,
+                                 num_gpu_event_pkts,
+                                 has_barrier_and_pkts,
+                                 gpu_event_op,
                                  tracing_data_v](const rocprofiler_packet* _packets,
                                                  uint64_t                  _num_packets,
                                                  const packet_writer_fn_t& _writer) {
@@ -483,7 +485,6 @@ WriteInterceptor(const void* packets,
         for(size_t i = 0; i < _num_packets; ++i)
         {
             const auto& barrier_and     = _packets[i].barrier_and;
-            const auto& ext_amd_aql_pm4 = _packets[i].ext_amd_aql_pm4;
             const auto& original_packet = _packets[i].kernel_dispatch;
             auto        packet_type =
                 bit_extract(original_packet.header,
@@ -491,12 +492,12 @@ WriteInterceptor(const void* packets,
                             HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
             bool is_kernel_dispatch     = (packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH);
             bool is_ext_kernel_dispatch = false;
-            bool is_evt_signal_packet   = (num_evt_signal_pkts > 0) &&
-                                        gpu_events::gpu_event_tracing() &&
-                                        (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC);
-            bool is_evt_barrier_packet = (num_evt_barrier_pkts > 0) &&
-                                         gpu_events::gpu_event_tracing() &&
-                                         (packet_type == HSA_PACKET_TYPE_BARRIER_AND);
+            bool is_gpu_event_packet    = (num_gpu_event_pkts > 0) &&
+                                       (gpu_event_op != ROCPROFILER_GPU_EVENT_NONE) &&
+                                       (packet_type == HSA_PACKET_TYPE_BARRIER_AND ||
+                                        packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC);
+            bool                          is_deferred_wait = false;
+            gpu_events::pending_wait_info deferred_wait_info{};
 
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
             if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
@@ -505,13 +506,28 @@ WriteInterceptor(const void* packets,
                 if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
                 {
                     is_ext_kernel_dispatch = true;
-                    is_evt_signal_packet   = false;
+                    is_gpu_event_packet    = false;
                 }
             }
 #endif
 
-            if(!is_kernel_dispatch && !is_ext_kernel_dispatch && !is_evt_signal_packet &&
-               !is_evt_barrier_packet)
+            if(!is_gpu_event_packet && has_barrier_and_pkts &&
+               packet_type == HSA_PACKET_TYPE_BARRIER_AND)
+            {
+                for(int d = 0; d < 5; ++d)
+                {
+                    if(barrier_and.dep_signal[d].handle != 0 &&
+                       gpu_events::lookup_pending_wait(barrier_and.dep_signal[d],
+                                                       deferred_wait_info))
+                    {
+                        is_deferred_wait = true;
+                        break;
+                    }
+                }
+            }
+
+            if(!is_kernel_dispatch && !is_ext_kernel_dispatch && !is_gpu_event_packet &&
+               !is_deferred_wait)
             {
                 transformed_packets.emplace_back(_packets[i]);
                 continue;
@@ -538,23 +554,14 @@ WriteInterceptor(const void* packets,
                     ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
                     internal_corr_id);
             }
-            else if(is_evt_signal_packet)
+            else if(is_gpu_event_packet || is_deferred_wait)
             {
+                auto evt_op = is_deferred_wait ? ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE : gpu_event_op;
                 tracing::populate_external_correlation_ids(
                     _packet_data.tracing_data.external_correlation_ids,
                     thr_id,
                     ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_GPU_EVENTS,
-                    ROCPROFILER_GPU_EVENT_RECORD_ENQUEUE,
-                    internal_corr_id);
-                original_completion_signal = ext_amd_aql_pm4.completion_signal;
-            }
-            else if(is_evt_barrier_packet)
-            {
-                tracing::populate_external_correlation_ids(
-                    _packet_data.tracing_data.external_correlation_ids,
-                    thr_id,
-                    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_GPU_EVENTS,
-                    ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE,
+                    evt_op,
                     internal_corr_id);
                 original_completion_signal = barrier_and.completion_signal;
             }
@@ -708,22 +715,20 @@ WriteInterceptor(const void* packets,
                     }
                 });
             }
-            else if(is_evt_barrier_packet || is_evt_signal_packet)
+            else if(is_gpu_event_packet || is_deferred_wait)
             {
                 dispatch_id = ++event_counter;
 
-                rocprofiler_gpu_event_operation_t op = ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE;
-                if(is_evt_barrier_packet)
-                {
-                    _packet_data.pooled_signal =
-                        queue.create_signal(0, &kernel_packet.barrier_and.completion_signal, true);
-                }
-                else if(is_evt_signal_packet)
-                {
-                    op                         = ROCPROFILER_GPU_EVENT_RECORD_ENQUEUE;
-                    _packet_data.pooled_signal = queue.create_signal(
-                        0, &kernel_packet.ext_amd_aql_pm4.completion_signal, true);
-                }
+                auto op = is_deferred_wait ? ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE : gpu_event_op;
+
+                _packet_data.pooled_signal =
+                    queue.create_signal(0, &kernel_packet.barrier_and.completion_signal, true);
+
+                auto evt_stream_id = is_deferred_wait ? deferred_wait_info.wait_stream_id
+                                                      : gpu_events::get_gpu_event_stream_id();
+                auto evt_event_id =
+                    is_deferred_wait ? deferred_wait_info.event_id : gpu_events::get_gpu_event_id();
+
                 _packet_data.event_record = event_record_t{
                     sizeof(event_record_t),
                     rocprofiler_timestamp_t{0},
@@ -733,10 +738,15 @@ WriteInterceptor(const void* packets,
                         .issue_id  = dispatch_id,
                         .agent_id  = queue.get_agent().get_rocp_agent()->id,
                         .queue_id  = queue.get_id(),
-                        .stream_id = gpu_events::get_gpu_event_stream_id(),
-                        .event_id  = gpu_events::get_gpu_event_id(),
-                        .type_id           = static_cast<uint64_t>(op),
-                        .reserved_padding  = {0}}};
+                        .stream_id = evt_stream_id,
+                        .event_id  = evt_event_id,
+                        .type_id   = static_cast<uint64_t>(op),
+                        .reserved_padding = {0}}};
+
+                if(is_gpu_event_packet && op == ROCPROFILER_GPU_EVENT_RECORD_ENQUEUE)
+                {
+                    gpu_events::register_record_signal(evt_event_id, original_completion_signal);
+                }
 
                 {
                     auto tracer_data = _packet_data.event_record;
@@ -807,11 +817,8 @@ WriteInterceptor(const void* packets,
                 if(is_kernel_dispatch || is_ext_kernel_dispatch)
                     transformed_packets.back().kernel_dispatch.header |=
                         1 << HSA_PACKET_HEADER_BARRIER;
-                else if(is_evt_barrier_packet)
+                else if(is_gpu_event_packet || is_deferred_wait)
                     transformed_packets.back().barrier_and.header |= 1 << HSA_PACKET_HEADER_BARRIER;
-                else if(is_evt_signal_packet)
-                    transformed_packets.back().ext_amd_aql_pm4.header |=
-                        1 << HSA_PACKET_HEADER_BARRIER;
             }
 
             // if the original completion signal exists, trigger it via a barrier packet
@@ -844,10 +851,8 @@ WriteInterceptor(const void* packets,
 
                 if(is_kernel_dispatch || is_ext_kernel_dispatch)
                     transformed_packets.back().kernel_dispatch.completion_signal = interrupt_signal;
-                else if(is_evt_barrier_packet)
+                else if(is_gpu_event_packet || is_deferred_wait)
                     transformed_packets.back().barrier_and.completion_signal = interrupt_signal;
-                else if(is_evt_signal_packet)
-                    transformed_packets.back().ext_amd_aql_pm4.completion_signal = interrupt_signal;
 
                 CreateBarrierPacket(&interrupt_signal, &interrupt_signal, transformed_packets);
             }
@@ -855,16 +860,14 @@ WriteInterceptor(const void* packets,
             {
                 if(is_kernel_dispatch || is_ext_kernel_dispatch)
                     completion_signal = kernel_packet.kernel_dispatch.completion_signal;
-                else if(is_evt_barrier_packet)
+                else if(is_gpu_event_packet || is_deferred_wait)
                     completion_signal = kernel_packet.barrier_and.completion_signal;
-                else if(is_evt_signal_packet)
-                    completion_signal = kernel_packet.ext_amd_aql_pm4.completion_signal;
 
                 get_core_table()->hsa_signal_store_screlease_fn(completion_signal, 0);
             }
 
-            ROCP_FATAL_IF(!(is_kernel_dispatch || is_ext_kernel_dispatch || is_evt_barrier_packet ||
-                            is_evt_signal_packet))
+            ROCP_FATAL_IF(!(is_kernel_dispatch || is_ext_kernel_dispatch || is_gpu_event_packet ||
+                            is_deferred_wait))
                 << "unhandled packet type in WriteInterceptor";
 
             if(is_kernel_dispatch || is_ext_kernel_dispatch)
@@ -879,8 +882,7 @@ WriteInterceptor(const void* packets,
             }
             else
             {
-                auto op = (is_evt_signal_packet) ? ROCPROFILER_GPU_EVENT_RECORD_ENQUEUE
-                                                 : ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE;
+                auto op = is_deferred_wait ? ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE : gpu_event_op;
 
                 auto tracer_data = _packet_data.event_record;
                 tracing::execute_phase_exit_callbacks(
@@ -907,6 +909,10 @@ WriteInterceptor(const void* packets,
             queue.signal_async_handler(last_pooled_signal,
                                        last_completion_signal,
                                        new std::shared_ptr<info_session_t>(shared));
+        }
+        else
+        {
+            queue.async_complete();
         }
 
         // Command is only executed if GLOG_v=2 or higher, otherwise it is a no-op

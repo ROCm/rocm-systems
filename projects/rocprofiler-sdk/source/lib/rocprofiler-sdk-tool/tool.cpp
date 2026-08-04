@@ -133,16 +133,6 @@ void
 rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 }
 
-extern "C" {
-ROCPROFILER_API void
-hip_gpu_event_registration_callback(rocprofiler_intercept_table_t type,
-                                    uint64_t                      lib_version,
-                                    uint64_t                      lib_instance,
-                                    void**                        tables,
-                                    uint64_t                      num_tables,
-                                    void*                         user_data);
-}
-
 namespace
 {
 // Thread for safe cleanup output generation
@@ -3187,11 +3177,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                        callbacks.hip_stream,
                                                        nullptr),
         "hip stream tracing configure failed");
-
-    ROCPROFILER_CALL(
-        rocprofiler_at_intercept_table_registration(
-            hip_gpu_event_registration_callback, ROCPROFILER_HIP_RUNTIME_TABLE, nullptr),
-        "runtime api registration");
 
     start_context(hip_stream_display_ctx, "hip stream");
 

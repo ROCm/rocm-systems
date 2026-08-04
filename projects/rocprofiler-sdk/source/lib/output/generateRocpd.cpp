@@ -261,7 +261,7 @@ read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options   = ROCPD_SQL_OPTIONS_NONE;
-    auto _version   = rocpd_version_triplet_t{3, 0, 3};  // default schema version
+    auto _version   = rocpd_version_triplet_t{3, 0, 4};  // default schema version
 
     _variables.uuid = db.uuid.c_str();
     _variables.guid = db.guid.c_str();
@@ -1744,13 +1744,13 @@ write_rocpd(
     };
 
     auto insert_event_operation = [&db,
-                                    &tool_metadata,
-                                    &string_entries,
-                                    node_id,
-                                    this_pid,
-                                    &get_thread_id,
-                                    &get_queue_id,
-                                    &get_stream_id](const auto& _gen) {
+                                   &tool_metadata,
+                                   &string_entries,
+                                   node_id,
+                                   this_pid,
+                                   &get_thread_id,
+                                   &get_queue_id,
+                                   &get_stream_id](const auto& _gen) {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_event_operation");
 
         for(auto pitr : _gen)
@@ -1771,11 +1771,10 @@ write_rocpd(
                         insert_value("correlation_id", itr.correlation_id.external.value),
                     });
 
-                auto type =
-                    (itr.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE ||
-                     itr.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_COMPLETE)
-                        ? std::string("WAIT")
-                        : std::string("RECORD");
+                auto type = (itr.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE ||
+                             itr.event_info.type_id == ROCPROFILER_GPU_EVENT_WAIT_COMPLETE)
+                                ? std::string("WAIT")
+                                : std::string("RECORD");
 
                 get_insert_statement(
                     db,

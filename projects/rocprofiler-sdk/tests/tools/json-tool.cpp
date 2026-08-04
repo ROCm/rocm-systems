@@ -76,16 +76,6 @@
 #include <variant>
 #include <vector>
 
-extern "C" {
-ROCPROFILER_API void
-hip_gpu_event_registration_callback(rocprofiler_intercept_table_t type,
-                                    uint64_t                      lib_version,
-                                    uint64_t                      lib_instance,
-                                    void**                        tables,
-                                    uint64_t                      num_tables,
-                                    void*                         user_data);
-}
-
 namespace client
 {
 namespace
@@ -1184,13 +1174,11 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     }
     else if(record.kind == ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS)
     {
-        auto* data =
-            static_cast<rocprofiler_callback_tracing_gpu_event_data_t*>(record.payload);
+        auto* data = static_cast<rocprofiler_callback_tracing_gpu_event_data_t*>(record.payload);
 
         static auto _mutex = std::mutex{};
         auto        _lk    = std::unique_lock<std::mutex>{_mutex};
-        gpu_event_cb_records.emplace_back(
-            gpu_event_callback_record_t{ts, record, *data});
+        gpu_event_cb_records.emplace_back(gpu_event_callback_record_t{ts, record, *data});
     }
     else
     {
@@ -1407,8 +1395,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_GPU_EVENTS)
             {
                 auto* record =
-                    static_cast<rocprofiler_buffer_tracing_gpu_event_record_t*>(
-                        header->payload);
+                    static_cast<rocprofiler_buffer_tracing_gpu_event_record_t*>(header->payload);
 
                 gpu_event_bf_records.emplace_back(*record);
             }
@@ -2583,11 +2570,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             "setup buffered service");
     }
 
-    ROCPROFILER_CALL(
-        rocprofiler_at_intercept_table_registration(
-            hip_gpu_event_registration_callback, ROCPROFILER_HIP_RUNTIME_TABLE, nullptr),
-        "gpu events hip intercept table registration");
-
     for(auto* itr : buffers)
     {
         if(itr->handle == 0) continue;
@@ -2790,8 +2772,7 @@ tool_fini(void* tool_data)
               << ", rocshmem_api_bf_records=" << rocshmem_api_bf_records.size()
               << ", rocshmem_api_ext_bf_records=" << rocshmem_api_ext_bf_records.size() << "...\n"
               << ", gpu_event_cb_records=" << gpu_event_cb_records.size()
-              << ", gpu_event_bf_records=" << gpu_event_bf_records.size()
-              << std::flush;
+              << ", gpu_event_bf_records=" << gpu_event_bf_records.size() << std::flush;
 
     auto* _call_stack = static_cast<call_stack_t*>(tool_data);
     if(_call_stack)
