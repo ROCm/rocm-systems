@@ -482,8 +482,12 @@ const void* Os::createOsThread(amd::Thread* thread) {
             thread->name().c_str());
 
     // A stack size cannot be unset, so rebuild the attributes from scratch.
-    ::pthread_attr_destroy(&threadAttr);
-    ::pthread_attr_init(&threadAttr);
+    if (0 != ::pthread_attr_destroy(&threadAttr)) {
+      fatal("pthread_attr_destroy() failed");
+    }
+    if (0 != ::pthread_attr_init(&threadAttr)) {
+      fatal("pthread_attr_init() failed");
+    }
     if (0 != ::pthread_attr_setdetachstate(&threadAttr, PTHREAD_CREATE_DETACHED)) {
       fatal("pthread_attr_setdetachstate() failed");
     }
