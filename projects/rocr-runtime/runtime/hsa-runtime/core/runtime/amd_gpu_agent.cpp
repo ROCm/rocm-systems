@@ -60,6 +60,7 @@
 #include "core/inc/amd_blit_kernel.h"
 #include "core/inc/amd_blit_sdma.h"
 #include "core/inc/amd_gpu_pm4.h"
+#include "core/inc/sdma_registers.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/default_signal.h"
 #include "core/inc/interrupt_signal.h"
@@ -1071,6 +1072,18 @@ void GpuAgent::ReleaseResources() {
 
     for (int i = 0; i < QueueCount; i++)
       queues_[i].reset();
+    // Destroy the GWS-access queue here. It is a GpuAgent member that would
+    // otherwise only be released by ~GpuAgent's automatic member destruction,
+    // which runs after Runtime::Unload() has cleared SharedSignalPool. At that
+    // point its ~AqlQueue stores to an already-freed queue_inactive_signal,
+    // causing a use-after-free at process exit. Releasing it here, while the
+    // signal pool and async handler are still alive, lets ~AqlQueue tear down
+    // safely.
+    {
+      std::lock_guard<std::mutex> gws_lock(gws_queue_.lock_);
+      gws_queue_.queue_.reset();
+      gws_queue_.ref_ct_ = 0;
+    }
 
     system_deallocator()(doorbell_queue_map_);
 
@@ -1272,7 +1285,12 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
           (dst_agent.device_type() == core::Agent::kAmdGpuDevice)) &&
          ("Both devices are CPU agents which is not expected"));
 
-  if (engine_offset > num_h2d_d2h_engines_ + num_p2p_engines_) {
+  // engine_offset is an index into blits_, not an SDMA engine count. blits_ is
+  // always sized DefaultBlitCount + num_p2p_engines_, so BlitHostToDev(1) and
+  // BlitDevToHost(2) are valid everywhere, regardless of how many SDMA engines
+  // it has. Bounding by the engine count instead rejected BlitDevToHost
+  // whenever NumSdmaEngines == 1 (e.g. gfx1151).
+  if (engine_offset < 0 || engine_offset >= static_cast<int>(blits_.size())) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -1568,6 +1586,18 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   if (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP &&
       !coordinator->SwapSupported() && !coordinator->IsGfx125Plus())
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // Swap ops alignment validation
+  if (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
+    const size_t kAlign = coordinator->IsGfx125Plus()
+        ? SDMA_PKT_COPY_LINEAR_SWAP_GFX1250::kAlignment_  // 32
+        : SDMA_PKT_COPY_LINEAR_SWAP::kAlignment_;         // 64
+    for (uint32_t d = 0; d < num_entries; ++d) {
+      if ((reinterpret_cast<uintptr_t>(dst_list[d]) & (kAlign - 1)) != 0 ||
+          (reinterpret_cast<uintptr_t>(src_list[d]) & (kAlign - 1)) != 0)
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+  }
 
   const bool is_indirect =
       (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC) ||

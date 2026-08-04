@@ -3,6 +3,8 @@
 
 #include "aql_queue.h"
 #include "halt_snapshot_plugin.h"
+#include "long_path_handoff.h"
+#include "scoped_temp.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
@@ -11,9 +13,10 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/vm/rj_vm.h"
+#include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
-#include "rocjitsu/vm/virtual_machine.h"
 
 #include "simdojo/sim/simulation.h"
 
@@ -30,10 +33,11 @@ RJ_DIAGNOSTIC_POP
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-
 namespace {
 
 const std::string CONFIG_DIR_PATH = CONFIG_DIR;
@@ -41,11 +45,10 @@ const std::string CONFIG_DIR_PATH = CONFIG_DIR;
 // \NPI new GPU: add a config-load test for its configs/<gpu>.json here.
 using namespace rocjitsu;
 
-std::filesystem::path write_temp_config(std::string_view name, std::string_view json) {
-  std::filesystem::path path = std::filesystem::temp_directory_path() / std::string(name);
-  std::ofstream out(path);
-  out << json;
-  return path;
+test::ScopedTempFile write_temp_config(std::string_view json) {
+  test::ScopedTempFile file("rocjitsu-config-");
+  file.write(json);
+  return file;
 }
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
@@ -324,7 +327,7 @@ TEST(ConfigLoaderTest, DeviceCapabilityFieldsRoundTripFromJson) {
 }
 
 TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
-  const std::filesystem::path path = write_temp_config("rocjitsu_dbt_only_config_test.json", R"({
+  const auto file = write_temp_config(R"({
       "dbt_guest": {
         "enabled": true,
         "guest_isa": "gfx950",
@@ -350,8 +353,7 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
       }
     })");
 
-  auto dbt = config::load_dbt_guest_config_from_file(path.string());
-  std::filesystem::remove(path);
+  auto dbt = config::load_dbt_guest_config_from_file(file.path());
 
   EXPECT_TRUE(dbt.enabled);
   EXPECT_EQ(dbt.guest_isa, "gfx950");
@@ -370,11 +372,37 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
                                              dbt.guest_device.simd_per_cu);
   EXPECT_EQ(dbt.guest_device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(dbt.guest_device.local_mem_size, 309237645312ULL);
+  // Revisions default to Unspecified when the config omits them.
+  EXPECT_EQ(dbt.guest_revision, config::DbtSiliconRevision::Unspecified);
+  EXPECT_EQ(dbt.host_revision, config::DbtSiliconRevision::Unspecified);
+}
+
+TEST(ConfigLoaderTest, LoadsDbtGuestSiliconRevisions) {
+  // gfx1250 A0 and B0 share an ELF machine ID, so the configured revisions
+  // select the B0-to-A0 translation profile.
+  //
+  // This also pins guest_isa == host_isa as a legal configuration. The hook
+  // layer resolves the resulting agent-role overlap by matching the host first
+  // (only the host carries the node-id constraint) rather than by rejecting the
+  // config here, which would foreclose this profile.
+  const auto file = write_temp_config(R"({
+      "dbt_guest": {
+        "enabled": true,
+        "guest_isa": "gfx1250",
+        "host_isa": "gfx1250",
+        "guest_revision": "gfx1250_b0",
+        "host_revision": "gfx1250_a0"
+      }
+    })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+
+  EXPECT_EQ(dbt.guest_revision, config::DbtSiliconRevision::Gfx1250B0);
+  EXPECT_EQ(dbt.host_revision, config::DbtSiliconRevision::Gfx1250A0);
 }
 
 TEST(ConfigLoaderTest, RejectsDbtGuestDeviceWithInconsistentSimdCount) {
-  const std::filesystem::path path =
-      write_temp_config("rocjitsu_bad_dbt_guest_geometry_config_test.json", R"({
+  const auto file = write_temp_config(R"({
       "dbt_guest": {
         "enabled": true,
         "guest_isa": "gfx950",
@@ -390,8 +418,7 @@ TEST(ConfigLoaderTest, RejectsDbtGuestDeviceWithInconsistentSimdCount) {
       }
     })");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
-  std::filesystem::remove(path);
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
 }
 
 TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
@@ -426,10 +453,8 @@ TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
     },
   )");
 
-  const std::filesystem::path path =
-      write_temp_config("rocjitsu_full_dbt_guest_config_test.json", json);
-  auto loaded = config::load_config(path.string(), rocjitsu::kEmbeddedSchema);
-  std::filesystem::remove(path);
+  const auto file = write_temp_config(json);
+  auto loaded = config::load_config(file.path(), rocjitsu::kEmbeddedSchema);
 
   EXPECT_TRUE(loaded.dbt_guest.enabled);
   EXPECT_EQ(loaded.dbt_guest.guest_isa, "gfx950");
@@ -445,11 +470,9 @@ TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
 }
 
 TEST(ConfigLoaderTest, MissingDbtGuestConfigReturnsDefaults) {
-  const std::filesystem::path path =
-      write_temp_config("rocjitsu_missing_dbt_guest_config_test.json", "{}");
+  const auto file = write_temp_config("{}");
 
-  auto dbt = config::load_dbt_guest_config_from_file(path.string());
-  std::filesystem::remove(path);
+  auto dbt = config::load_dbt_guest_config_from_file(file.path());
 
   EXPECT_FALSE(dbt.enabled);
   EXPECT_TRUE(dbt.guest_isa.empty());
@@ -462,8 +485,7 @@ TEST(ConfigLoaderTest, MissingDbtGuestConfigReturnsDefaults) {
 }
 
 TEST(ConfigLoaderTest, MissingDbtGuestDeviceLeavesDeviceAbsent) {
-  const std::filesystem::path path =
-      write_temp_config("rocjitsu_missing_dbt_guest_device_config_test.json", R"({
+  const auto file = write_temp_config(R"({
         "dbt_guest": {
           "enabled": true,
           "guest_isa": "gfx950",
@@ -471,8 +493,7 @@ TEST(ConfigLoaderTest, MissingDbtGuestDeviceLeavesDeviceAbsent) {
         }
       })");
 
-  auto dbt = config::load_dbt_guest_config_from_file(path.string());
-  std::filesystem::remove(path);
+  auto dbt = config::load_dbt_guest_config_from_file(file.path());
 
   EXPECT_TRUE(dbt.enabled);
   EXPECT_EQ(dbt.guest_isa, "gfx950");
@@ -481,16 +502,13 @@ TEST(ConfigLoaderTest, MissingDbtGuestDeviceLeavesDeviceAbsent) {
 }
 
 TEST(ConfigLoaderTest, MalformedDbtGuestConfigThrows) {
-  const std::filesystem::path path =
-      write_temp_config("rocjitsu_malformed_dbt_guest_config_test.json", R"({ "dbt_guest": )");
+  const auto file = write_temp_config(R"({ "dbt_guest": )");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
-  std::filesystem::remove(path);
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
 }
 
 TEST(ConfigLoaderTest, LoadsSimulatorDbtBackendConfig) {
-  const std::filesystem::path external_path =
-      write_temp_config("rocjitsu_simulator_dbt_guest_config_test.json", R"({
+  const auto external_file = write_temp_config(R"({
         "dbt_guest": {
           "enabled": true,
           "guest_isa": "gfx950",
@@ -499,8 +517,7 @@ TEST(ConfigLoaderTest, LoadsSimulatorDbtBackendConfig) {
           "simulator_config": "gfx942_cdna3_kmd.json"
         }
       })");
-  const std::filesystem::path self_contained_path =
-      write_temp_config("rocjitsu_self_contained_dbt_guest_config_test.json", R"({
+  const auto self_contained_file = write_temp_config(R"({
         "dbt_guest": {
           "enabled": true,
           "guest_isa": "gfx950",
@@ -509,10 +526,8 @@ TEST(ConfigLoaderTest, LoadsSimulatorDbtBackendConfig) {
         }
       })");
 
-  auto external = config::load_dbt_guest_config_from_file(external_path.string());
-  auto self_contained = config::load_dbt_guest_config_from_file(self_contained_path.string());
-  std::filesystem::remove(external_path);
-  std::filesystem::remove(self_contained_path);
+  auto external = config::load_dbt_guest_config_from_file(external_file.path());
+  auto self_contained = config::load_dbt_guest_config_from_file(self_contained_file.path());
 
   EXPECT_EQ(external.host.isa, "gfx942");
   EXPECT_EQ(external.host.backend, config::DbtExecutionBackend::Simulator);
@@ -522,44 +537,240 @@ TEST(ConfigLoaderTest, LoadsSimulatorDbtBackendConfig) {
 }
 
 TEST(ConfigLoaderTest, LoadsExplicitHardwareDbtBackendConfig) {
-  const std::filesystem::path path =
-      write_temp_config("rocjitsu_hardware_dbt_guest_config_test.json", R"({
+  const auto file = write_temp_config(R"({
         "dbt_guest": {
           "enabled": true,
           "execution_backend": "hardware"
         }
       })");
 
-  auto dbt = config::load_dbt_guest_config_from_file(path.string());
-  std::filesystem::remove(path);
+  auto dbt = config::load_dbt_guest_config_from_file(file.path());
 
   EXPECT_EQ(dbt.host.backend, config::DbtExecutionBackend::Hardware);
 }
 
+TEST(ConfigLoaderTest, AppliesResolvedDbtHostGpuId) {
+  config::DbtGuestConfig automatic;
+  automatic.enabled = true;
+  automatic.host.backend = config::DbtExecutionBackend::Hardware;
+  config::DbtGuestConfig explicit_id = automatic;
+  explicit_id.host.gpu_id = 8716;
+  config::DbtGuestConfig simulator = automatic;
+  simulator.host.backend = config::DbtExecutionBackend::Simulator;
+
+  config::apply_resolved_dbt_host_gpu_id(automatic, "28851");
+  config::apply_resolved_dbt_host_gpu_id(explicit_id, "28851");
+  config::apply_resolved_dbt_host_gpu_id(simulator, "28851");
+
+  EXPECT_EQ(automatic.host.gpu_id, 28851u);
+  EXPECT_EQ(explicit_id.host.gpu_id, 8716u);
+  EXPECT_EQ(simulator.host.gpu_id, 28851u);
+}
+
+TEST(ConfigLoaderTest, RejectsInvalidResolvedDbtHostGpuId) {
+  const std::array<std::string_view, 5> invalid_values = {"", "0", "not-a-number", "28851 trailing",
+                                                          "4294967296"};
+  for (std::string_view value : invalid_values) {
+    config::DbtGuestConfig dbt;
+    dbt.enabled = true;
+    EXPECT_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, value), std::runtime_error) << value;
+  }
+}
+
+TEST(ConfigLoaderTest, ExplicitDbtHostGpuIdOverridesResolvedHandoff) {
+  config::DbtGuestConfig dbt;
+  dbt.enabled = true;
+  dbt.host.gpu_id = 8716;
+
+  EXPECT_NO_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, "invalid-but-ignored"));
+  EXPECT_EQ(dbt.host.gpu_id, 8716u);
+}
+
+TEST(ConfigLoaderTest, ParsesRuntimeConfigHandoff) {
+  const auto dbt = config::parse_dbt_runtime_config_handoff("/tmp/config.json\r\n28851\r\n");
+  ASSERT_TRUE(dbt);
+  EXPECT_EQ(dbt->config_path, "/tmp/config.json");
+  ASSERT_TRUE(dbt->resolved_gpu_id);
+  EXPECT_EQ(*dbt->resolved_gpu_id, "28851");
+
+  const auto non_dbt = config::parse_dbt_runtime_config_handoff("/tmp/config.json");
+  ASSERT_TRUE(non_dbt);
+  EXPECT_EQ(non_dbt->config_path, "/tmp/config.json");
+  EXPECT_FALSE(non_dbt->resolved_gpu_id);
+
+  const auto newline_terminated = config::parse_dbt_runtime_config_handoff("/tmp/config.json\n");
+  ASSERT_TRUE(newline_terminated);
+  EXPECT_FALSE(newline_terminated->resolved_gpu_id);
+  EXPECT_FALSE(config::parse_dbt_runtime_config_handoff("\n28851\n"));
+}
+
+TEST(ConfigLoaderTest, RoundTripsRuntimeConfigHandoff) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-round-trip-");
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  config::DbtGuestConfig dbt;
+  dbt.enabled = true;
+  dbt.host.gpu_id = 28851;
+
+  ASSERT_TRUE(config::write_dbt_runtime_config_handoff("/tmp/config.json", dbt, getpid()));
+  std::ifstream handoff(rocjitsu::rpc_invocation_config_file_path(getpid()));
+  const std::string contents((std::istreambuf_iterator<char>(handoff)),
+                             std::istreambuf_iterator<char>());
+  const auto parsed = config::parse_dbt_runtime_config_handoff(contents);
+
+  ASSERT_TRUE(parsed);
+  EXPECT_EQ(parsed->config_path, "/tmp/config.json");
+  ASSERT_TRUE(parsed->resolved_gpu_id);
+  EXPECT_EQ(*parsed->resolved_gpu_id, "28851");
+}
+
+TEST(ConfigLoaderTest, RejectsUnresolvedAutomaticDbtHandoffWrite) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-unresolved-");
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  config::DbtGuestConfig dbt;
+  dbt.enabled = true;
+
+  EXPECT_FALSE(config::write_dbt_runtime_config_handoff("/tmp/config.json", dbt, getpid()));
+  EXPECT_FALSE(std::filesystem::exists(rocjitsu::rpc_invocation_config_file_path(getpid())));
+}
+
+TEST(ConfigLoaderTest, RuntimeConfigHandoffReportsDirectoryCreationFailure) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-write-failure-");
+  const std::filesystem::path blocked_root = std::filesystem::path(runtime.path()) / "blocked";
+  std::ofstream(blocked_root) << "not a directory";
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", blocked_root.string());
+  config::DbtGuestConfig dbt;
+  dbt.enabled = true;
+  dbt.host.gpu_id = 28851;
+
+  EXPECT_FALSE(config::write_dbt_runtime_config_handoff("/tmp/config.json", dbt, getpid()));
+}
+
+TEST(ConfigLoaderTest, RejectsEmptyResolvedGpuIdLineForEnabledDbt) {
+  const auto handoff = config::parse_dbt_runtime_config_handoff("/tmp/config.json\n\n");
+  ASSERT_TRUE(handoff);
+  ASSERT_TRUE(handoff->resolved_gpu_id);
+
+  config::DbtGuestConfig dbt;
+  dbt.enabled = true;
+  EXPECT_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, *handoff->resolved_gpu_id),
+               std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, LoadsDbtRuntimeConfigHandoffFromInvocationDirectory) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-handoff-");
+  const auto config_file = write_temp_config(R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx942"
+        }
+      })");
+  {
+    std::ofstream handoff(std::filesystem::path(runtime.path()) / "config_path");
+    handoff << config_file.path() << "\n28851\n";
+  }
+  test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
+
+  const std::optional<config::DbtGuestConfig> loaded =
+      config::load_dbt_guest_config_from_runtime_config();
+
+  ASSERT_TRUE(loaded);
+  EXPECT_TRUE(loaded->enabled);
+  EXPECT_EQ(loaded->host.gpu_id, 28851u);
+}
+
+// The HSA-hook half of a pair. GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes drives
+// the same oversized handoff through the other consumer -- the KFD interposer's raw read loop,
+// which is where a fixed 4096-byte read once truncated it. This reader has always been an
+// unbounded std::ifstream, so the case is coverage rather than a fix; what it locks down is that
+// the two independent readers agree. Both are built by install_oversized_handoff() and both
+// assert test::kOversizedHandoffHostGpuId, so a reader that starts resolving a different host
+// GPU from identical bytes fails here or there instead of silently splitting the two layers
+// onto different GPUs on a multi-GPU host.
+TEST(ConfigLoaderTest, ReadsRuntimeHandoffLargerThan4095Bytes) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-oversized-");
+
+  // Same treatment as the KFD-side test: a temp directory already deeper than the path being
+  // built is a limit of where the test runs, not a defect in the reader, so it must skip.
+  const test::LongPathHandoff handoff = test::install_oversized_handoff(runtime.path(), R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx942"
+        }
+      })");
+  if (handoff.status() == test::LongPathHandoff::Status::kSkip)
+    GTEST_SKIP() << "cannot build the oversized handoff here: " << handoff.reason();
+  ASSERT_TRUE(handoff.status() == test::LongPathHandoff::Status::kOk) << handoff.reason();
+
+  const test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv,
+                                                       runtime.path());
+  const std::optional<config::DbtGuestConfig> loaded =
+      config::load_dbt_guest_config_from_runtime_config();
+
+  ASSERT_TRUE(loaded);
+  EXPECT_TRUE(loaded->enabled);
+  EXPECT_EQ(loaded->host.gpu_id, test::kOversizedHandoffHostGpuId);
+}
+
+TEST(ConfigLoaderTest, RejectsPathOnlyHandoffForAutomaticDbtHost) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-automatic-");
+  const auto config_file = write_temp_config(R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx942"
+        }
+      })");
+  {
+    std::ofstream handoff(std::filesystem::path(runtime.path()) / "config_path");
+    handoff << config_file.path() << '\n';
+  }
+  test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_runtime_config(), std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, AllowsPathOnlyHandoffWithoutAutomaticDbtHost) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-path-only-");
+  test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
+
+  for (const std::string_view dbt_guest : {
+           R"("dbt_guest": {"enabled": true, "host_gpu_id": 28851})",
+           R"("dbt_guest": {"enabled": false})",
+       }) {
+    const auto config_file = write_temp_config("{" + std::string(dbt_guest) + "}");
+    {
+      std::ofstream handoff(std::filesystem::path(runtime.path()) / "config_path");
+      handoff << config_file.path() << '\n';
+    }
+
+    const auto loaded = config::load_dbt_guest_config_from_runtime_config();
+    ASSERT_TRUE(loaded);
+    EXPECT_EQ(loaded->host.gpu_id, dbt_guest.find("28851") == std::string_view::npos ? 0u : 28851u);
+  }
+}
+
 TEST(ConfigLoaderTest, RejectsEmptyDbtExecutionBackend) {
-  const std::filesystem::path path =
-      write_temp_config("rocjitsu_empty_dbt_backend_config_test.json", R"({
+  const auto file = write_temp_config(R"({
         "dbt_guest": {
           "enabled": true,
           "execution_backend": ""
         }
       })");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
-  std::filesystem::remove(path);
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
 }
 
 TEST(ConfigLoaderTest, RejectsMisspelledDbtExecutionBackend) {
-  const std::filesystem::path path =
-      write_temp_config("rocjitsu_misspelled_dbt_backend_config_test.json", R"({
+  const auto file = write_temp_config(R"({
         "dbt_guest": {
           "enabled": true,
           "execution_backed": "simulator"
         }
       })");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
-  std::filesystem::remove(path);
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
 }
 
 TEST(ConfigLoaderTest, ValidatesSimulatorDbtGuestDeviceLimits) {
@@ -588,15 +799,13 @@ TEST(ConfigLoaderTest, ValidatesSimulatorDbtGuestDeviceLimits) {
 }
 
 TEST(ConfigLoaderTest, DisabledDbtBackendSkipsBackendSpecificValidation) {
-  const std::filesystem::path simulator_path =
-      write_temp_config("rocjitsu_disabled_simulator_dbt_config_test.json", R"({
+  const auto simulator_file = write_temp_config(R"({
         "dbt_guest": {
           "enabled": false,
           "execution_backend": "simulator"
         }
       })");
-  const std::filesystem::path hardware_path =
-      write_temp_config("rocjitsu_disabled_hardware_dbt_config_test.json", R"({
+  const auto hardware_file = write_temp_config(R"({
         "dbt_guest": {
           "enabled": false,
           "execution_backend": "hardware",
@@ -604,10 +813,8 @@ TEST(ConfigLoaderTest, DisabledDbtBackendSkipsBackendSpecificValidation) {
         }
       })");
 
-  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(simulator_path.string()));
-  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(hardware_path.string()));
-  std::filesystem::remove(simulator_path);
-  std::filesystem::remove(hardware_path);
+  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(simulator_file.path()));
+  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(hardware_file.path()));
 }
 
 TEST(ConfigLoaderTest, ResolvesDbtHostConfigPath) {
@@ -620,21 +827,18 @@ TEST(ConfigLoaderTest, ResolvesDbtHostConfigPath) {
 }
 
 TEST(ConfigLoaderTest, RejectsUnknownDbtExecutionBackend) {
-  const std::filesystem::path path =
-      write_temp_config("rocjitsu_unknown_dbt_backend_config_test.json", R"({
+  const auto file = write_temp_config(R"({
         "dbt_guest": {
           "enabled": true,
           "execution_backend": "magic"
         }
       })");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
-  std::filesystem::remove(path);
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
 }
 
 TEST(ConfigLoaderTest, RejectsSimulatorConfigForHardwareDbtBackend) {
-  const std::filesystem::path path =
-      write_temp_config("rocjitsu_hardware_with_simulator_config_test.json", R"({
+  const auto file = write_temp_config(R"({
         "dbt_guest": {
           "enabled": true,
           "execution_backend": "hardware",
@@ -642,8 +846,7 @@ TEST(ConfigLoaderTest, RejectsSimulatorConfigForHardwareDbtBackend) {
         }
       })");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
-  std::filesystem::remove(path);
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
 }
 
 TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
@@ -747,7 +950,7 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
 }
 
 TEST(CheckpointTest, SaveAndRestoreMemory) {
-  const char *json = R"({"max_ticks":10000,"num_threads":1,
+  const char *json = R"({"max_ticks":10000,"num_threads":1,"exec_mode":"clocked",
     "vm":{"arch":"cdna3"},
     "topology":{
       "root":{
@@ -777,19 +980,24 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
 
   auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
+  auto *source_cp = soc->xcd(0)->command_processor();
+  ASSERT_NE(source_cp, nullptr);
+  EXPECT_TRUE(source_cp->packed_tid());
+  EXPECT_EQ(soc->exec_mode(), simdojo::ExecMode::CLOCKED);
 
   soc->memory()->write32(0x1000, 0xDEADBEEF);
   soc->memory()->write64(0x2000, 0x0123456789ABCDEFULL);
 
-  const char *path = "/tmp/rocjitsu_test_checkpoint.bin";
-  config::save_checkpoint(path, *soc, 42, loaded.engine_config);
-  ASSERT_TRUE(std::filesystem::exists(path));
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
+  config::save_checkpoint(checkpoint.path(), *soc, 42, loaded.engine_config);
+  ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
-  auto restored = config::restore_checkpoint(path);
+  auto restored = config::restore_checkpoint(checkpoint.path());
   EXPECT_EQ(restored.memory()->read32(0x1000), 0xDEADBEEFu);
   EXPECT_EQ(restored.memory()->read64(0x2000), 0x0123456789ABCDEFULL);
-
-  std::filesystem::remove(path);
+  EXPECT_EQ(restored.exec_mode, simdojo::ExecMode::CLOCKED);
+  EXPECT_EQ(restored.soc()->exec_mode(), simdojo::ExecMode::CLOCKED);
+  EXPECT_TRUE(restored.soc()->xcd(0)->command_processor()->packed_tid());
 }
 
 TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
@@ -805,7 +1013,7 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
             {"name":"cp","type":"command_processor"},
             {"name":"se0","type":"shader_engine","children":[
               {"name":"cu[0:1]","type":"compute_unit","config":[
-                {"key":"num_wf_slots","value":"1"},
+                {"key":"num_wf_slots","value":"4"},
                 {"key":"sgprs_per_wf","value":"104"},
                 {"key":"vgprs_per_wf","value":"256"},
                 {"key":"lds_size_kb","value":"64"}
@@ -825,32 +1033,39 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
 
-  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  auto *lower_wf = cu->dispatch_wf(0, 0x1000, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(lower_wf, nullptr);
+  auto *wf = cu->dispatch_wf(1, 0x2000, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_id(), 1u);
+  lower_wf->halt();
   const uint32_t acc0 = wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET;
   const uint32_t acc_last = acc0 + cdna3::Isa::MAX_ACC_VGPRS_PER_WF - 1;
   cu->write_vgpr(acc0, 0, 0xA55A0001u);
   cu->write_vgpr(acc_last, 0, 0xDEADBEEFu);
 
-  const char *path = "/tmp/rocjitsu_test_checkpoint_accvgpr.bin";
-  config::save_checkpoint(path, *loaded.soc(), 42, loaded.engine_config);
-  ASSERT_TRUE(std::filesystem::exists(path));
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
+  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
+  ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
-  auto restored = config::restore_checkpoint(path);
-  auto *restored_vm = dynamic_cast<VirtualMachine *>(restored.build_result.root.get());
-  ASSERT_NE(restored_vm, nullptr);
-  auto *restored_cu = restored_vm->soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto restored = config::restore_checkpoint(checkpoint.path());
+  auto *restored_soc = restored.soc();
+  ASSERT_NE(restored_soc, nullptr);
+  auto *restored_cu = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(restored_cu, nullptr);
-  auto *restored_wf = restored_cu->wf(0);
+  EXPECT_TRUE(restored_cu->wf(0)->is_halted());
+  auto *restored_wf = restored_cu->wf(1);
   ASSERT_NE(restored_wf, nullptr);
+  EXPECT_FALSE(restored_wf->is_halted());
+  EXPECT_EQ(restored_wf->wf_id(), 1u);
+  EXPECT_EQ(restored_wf->wg_id(), 1u);
+  EXPECT_EQ(restored_wf->pc, 0x2000u);
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET, 0),
             0xA55A0001u);
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET +
                                        cdna3::Isa::MAX_ACC_VGPRS_PER_WF - 1,
                                    0),
             0xDEADBEEFu);
-
-  std::filesystem::remove(path);
 }
 
 TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
@@ -891,19 +1106,77 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   ASSERT_EQ(wf->wf_size(), 32u);
   wf->set_exec_raw(0xDEADBEEF0000000FULL);
 
-  const char *path = "/tmp/rocjitsu_test_checkpoint_wave32_exec.bin";
-  config::save_checkpoint(path, *loaded.soc(), 42, loaded.engine_config);
-  ASSERT_TRUE(std::filesystem::exists(path));
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
+  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
+  ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
-  auto restored = config::restore_checkpoint(path);
-  auto *restored_vm = dynamic_cast<VirtualMachine *>(restored.build_result.root.get());
-  ASSERT_NE(restored_vm, nullptr);
-  auto *restored_wf = restored_vm->soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+  auto restored = config::restore_checkpoint(checkpoint.path());
+  auto *restored_soc = restored.soc();
+  ASSERT_NE(restored_soc, nullptr);
+  auto *restored_cp = restored_soc->xcd(0)->command_processor();
+  ASSERT_NE(restored_cp, nullptr);
+  EXPECT_EQ(restored_cp->sdma_packet_dialect(), amdgpu::SdmaPacketDialect::Gfx11Plus);
+  auto *restored_wf = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
   ASSERT_NE(restored_wf, nullptr);
   EXPECT_EQ(restored_wf->exec(), 0xFULL);
   EXPECT_EQ(restored_wf->exec_raw(), 0xDEADBEEF0000000FULL);
+}
 
-  std::filesystem::remove(path);
+TEST(CheckpointTest, SaveAndRestoreHwregState) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"gfx1250"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  constexpr uint32_t kStatus = 0xA5A55A5Au;
+  constexpr uint32_t kWaveSchedMode = 0x5A5AA5A5u;
+  wf->set_status_raw(kStatus);
+  wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
+  wf->set_wave_sched_mode_raw(kWaveSchedMode);
+  ASSERT_TRUE(wf->fp16_ovfl());
+
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
+  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
+  ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
+
+  auto restored = config::restore_checkpoint(checkpoint.path());
+  auto *restored_soc = restored.soc();
+  ASSERT_NE(restored_soc, nullptr);
+  auto *restored_wf = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+  ASSERT_NE(restored_wf, nullptr);
+  EXPECT_EQ(restored_wf->status_raw(), kStatus);
+  EXPECT_EQ(restored_wf->mode_raw(), amdgpu::Wavefront::FP16_OVFL_BIT);
+  EXPECT_EQ(restored_wf->wave_sched_mode_raw(), kWaveSchedMode);
+  EXPECT_TRUE(restored_wf->fp16_ovfl());
 }
 
 TEST(CApiTest, CreateAndDestroyFromString) {
@@ -938,6 +1211,92 @@ TEST(CApiTest, CreateAndDestroyFromString) {
   EXPECT_EQ(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(handle, nullptr);
   rj_vm_destroy(handle);
+}
+
+TEST(CApiTest, CheckpointRoundTrip) {
+  rj_vm_t *raw_source = nullptr;
+  ASSERT_EQ(rj_vm_create((CONFIG_DIR_PATH + "/gfx942_cdna3.json").c_str(), RJ_VM_MODE_DEFAULT,
+                         &raw_source),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_source, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw_source, &rj_vm_destroy);
+
+  constexpr uint64_t kCodeAddress = 0x1000;
+  constexpr uint32_t kSEndpgm = 0xBF810000u;
+  source->soc->memory()->write32(kCodeAddress, kSEndpgm);
+  auto *source_cu = source->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(source_cu, nullptr);
+  auto *source_wf = source_cu->dispatch_wf(0, kCodeAddress, source_cu->config().sgprs_per_wf,
+                                           source_cu->config().vgprs_per_wf);
+  ASSERT_NE(source_wf, nullptr);
+
+  test::ScopedTempFile checkpoint("rocjitsu-c-api-checkpoint-");
+  ASSERT_EQ(rj_vm_save_checkpoint(source.get(), checkpoint.path().c_str(), 42),
+            ROCJITSU_STATUS_SUCCESS);
+
+  rj_vm_t *raw_restored = nullptr;
+  ASSERT_EQ(rj_vm_restore_checkpoint(checkpoint.path().c_str(), &raw_restored),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_restored, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> restored(raw_restored, &rj_vm_destroy);
+
+  auto *restored_cu = restored->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(restored_cu, nullptr);
+  ASSERT_EQ(restored_cu->num_wfs(), 1u);
+
+  int active = 1;
+  EXPECT_EQ(rj_vm_step(restored.get(), &active), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(restored_cu->num_wfs(), 0u);
+}
+
+TEST(CApiTest, RejectsMalformedCheckpoints) {
+  test::ScopedTempFile junk("rocjitsu-junk-checkpoint-");
+  junk.write(std::string(512, static_cast<char>(0xA5)));
+
+  rj_vm_t *restored = nullptr;
+  EXPECT_EQ(rj_vm_restore_checkpoint(junk.path().c_str(), &restored), ROCJITSU_STATUS_INVALID_FILE);
+  EXPECT_EQ(restored, nullptr);
+
+  rj_vm_t *raw_source = nullptr;
+  ASSERT_EQ(rj_vm_create((CONFIG_DIR_PATH + "/gfx942_cdna3.json").c_str(), RJ_VM_MODE_DEFAULT,
+                         &raw_source),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_source, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw_source, &rj_vm_destroy);
+
+  test::ScopedTempFile valid("rocjitsu-valid-checkpoint-");
+  ASSERT_EQ(rj_vm_save_checkpoint(source.get(), valid.path().c_str(), 42), ROCJITSU_STATUS_SUCCESS);
+  std::ifstream input(valid.path(), std::ios::binary);
+  std::string bytes{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+  ASSERT_GT(bytes.size(), 8u);
+  bytes.resize(bytes.size() / 2);
+
+  test::ScopedTempFile truncated("rocjitsu-truncated-checkpoint-");
+  truncated.write(bytes);
+  EXPECT_EQ(rj_vm_restore_checkpoint(truncated.path().c_str(), &restored),
+            ROCJITSU_STATUS_INVALID_FILE);
+  EXPECT_EQ(restored, nullptr);
+}
+
+TEST(CApiTest, PluginLifecycleDispatchesProfiledShutdownThroughBaseGroup) {
+  test::ScopedTempDirectory sink_dir("rocjitsu-plugin-lifecycle-");
+  const std::filesystem::path sink_path(sink_dir.path());
+
+  rj_vm_t *handle = nullptr;
+  ASSERT_EQ(
+      rj_vm_create((CONFIG_DIR_PATH + "/gfx950_cdna4.json").c_str(), RJ_VM_MODE_DEFAULT, &handle),
+      ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(handle, nullptr);
+
+  const std::string plugin_config = std::format(
+      R"({{"profiled":true,"sinks":{{"types":["file"],"dir":"{}"}}}})", sink_path.string());
+  ASSERT_EQ(rj_vm_load_plugins(handle, plugin_config.c_str(), nullptr), ROCJITSU_STATUS_SUCCESS);
+  rj_vm_destroy(handle);
+
+  std::ifstream profile(sink_path / "profile.log");
+  const std::string output{std::istreambuf_iterator<char>(profile),
+                           std::istreambuf_iterator<char>()};
+  EXPECT_NE(output.find("total emulation time"), std::string::npos) << output;
 }
 
 TEST(CApiTest, InvalidArguments) {

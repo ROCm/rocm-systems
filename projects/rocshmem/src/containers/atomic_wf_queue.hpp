@@ -329,14 +329,14 @@ class AtomicWFQueue {
 template <typename TYPE>
 class AtomicWFQueueProxy {
   using AtomicWFQueueT = AtomicWFQueue<TYPE>;
-  using ProxyT = DeviceProxy<HIPAllocator, AtomicWFQueueT>;
+  using ProxyT = DeviceProxy<AtomicWFQueueT>;
 
  public:
   __host__ __device__ AtomicWFQueueT* get() { return proxy_.get(); }
 
   explicit AtomicWFQueueProxy(const MemoryAllocator& alloc = HIPAllocator(),
                               size_t num_elems = 1)
-      : allocator_{alloc}, proxy_{num_elems} {
+      : allocator_{alloc}, proxy_{num_elems, allocator_} {
     new (proxy_.get()) AtomicWFQueueT(allocator_);
   }
 

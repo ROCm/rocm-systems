@@ -49,6 +49,33 @@ rj_add_device_kernel(multikernel_indirect_branch gfx950)
 rj_add_device_kernel(multikernel_indirect_branch_part0 gfx950)
 rj_add_device_kernel(multikernel_indirect_branch_part1 gfx950)
 
+# gfx1250 was added after older installed ROCm compilers. Probe the selected
+# compiler before registering this fixture so a checkout remains buildable with
+# an otherwise supported toolchain. `-nogpulib` keeps the probe independent of
+# device-library packaging; the real custom command still uses ROCM_PATH.
+execute_process(
+    COMMAND
+        ${AMDCXX} -x hip --offload-arch=gfx1250 -nogpulib --cuda-device-only -c
+        /dev/null -o /dev/null
+    RESULT_VARIABLE RJ_AMDCXX_SUPPORTS_GFX1250
+    OUTPUT_QUIET
+    ERROR_QUIET
+)
+set(HAS_GFX1250_DEVICE_KERNELS FALSE)
+set(RJ_GFX1250_DEVICE_KERNEL_TARGET)
+if(RJ_AMDCXX_SUPPORTS_GFX1250 EQUAL 0)
+    rj_add_device_kernel(relocation_function_table_dispatch gfx1250)
+    set(HAS_GFX1250_DEVICE_KERNELS TRUE)
+    set(RJ_GFX1250_DEVICE_KERNEL_TARGET
+        kernel_relocation_function_table_dispatch
+    )
+else()
+    message(
+        STATUS
+        "gfx1250 device kernel tests disabled (selected amdclang++ does not support gfx1250)"
+    )
+endif()
+
 # Triton-generated assembly fixtures. The checked-in assembly records the
 # original Triton-generated kernels, so normal test builds only need the ROCm
 # assembler/linker and do not depend on a Python/Triton install.
@@ -126,6 +153,12 @@ if(RJ_INSTALL_TESTS)
         ${KERNEL_OUTPUT_DIR}/triton_cdna3_flash_attention_no_async_1024.hsaco
         ${KERNEL_OUTPUT_DIR}/triton_cdna3_flash_attention_buffer_async_1024.hsaco
     )
+    if(HAS_GFX1250_DEVICE_KERNELS)
+        list(
+            APPEND RJ_DEVICE_KERNEL_FIXTURES
+            ${KERNEL_OUTPUT_DIR}/relocation_function_table_dispatch.o
+        )
+    endif()
     install(
         FILES ${RJ_DEVICE_KERNEL_FIXTURES}
         DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/tests/kernels
@@ -144,9 +177,26 @@ find_program(
     DOC "Path to clang-offload-bundler for device-only probe objects"
 )
 set(HAS_PROBE_FIXTURES FALSE)
+set(HAS_GFX1250_DBT_FIXTURE FALSE)
+set(RJ_GFX1250_DBT_FIXTURE_TARGET)
 if(CLANG_OFFLOAD_BUNDLER)
     rj_add_probe_object(rj_nop_probe gfx90a OUTPUT_NAME rj_nop_probe_gfx90a)
     set(HAS_PROBE_FIXTURES TRUE)
+
+    # The narrow gfx1250 DBT library accepts a raw AMDGPU code object rather
+    # than the host ELF / .hip_fatbin produced by rj_add_device_kernel().
+    if(HAS_GFX1250_DEVICE_KERNELS)
+        rj_add_probe_object(
+            relocation_function_table_dispatch
+            gfx1250
+            OUTPUT_NAME relocation_function_table_dispatch_gfx1250
+        )
+        set(HAS_GFX1250_DBT_FIXTURE TRUE)
+        set(RJ_GFX1250_DBT_FIXTURE_TARGET
+            probe_relocation_function_table_dispatch_gfx1250
+        )
+    endif()
+
     # Install the probe object alongside the other kernel fixtures so installed
     # runs of probe_fixture_test / hsa_dbi_nop_probe_test can find it via
     # ROCJITSU_KERNEL_DIR. Gated here (not in the list above) because it exists
@@ -156,6 +206,13 @@ if(CLANG_OFFLOAD_BUNDLER)
             FILES ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx90a.hsaco
             DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/tests/kernels
         )
+        if(HAS_GFX1250_DBT_FIXTURE)
+            install(
+                FILES
+                    ${KERNEL_OUTPUT_DIR}/relocation_function_table_dispatch_gfx1250.hsaco
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/tests/kernels
+            )
+        endif()
     endif()
 else()
     message(
@@ -181,6 +238,8 @@ add_custom_target(
         kernel_multikernel_indirect_branch
         kernel_multikernel_indirect_branch_part0
         kernel_multikernel_indirect_branch_part1
+        ${RJ_GFX1250_DEVICE_KERNEL_TARGET}
+        ${RJ_GFX1250_DBT_FIXTURE_TARGET}
         kernel_triton_cdna4_matmul_dynamic_32x32x64
         kernel_triton_cdna4_matmul_buffer_async_1024
         kernel_triton_cdna4_flash_attention_no_async_1024
@@ -199,5 +258,7 @@ endif()
 
 # Export variables to the parent scope so the test executable can use them.
 set(HAS_DEVICE_KERNELS TRUE PARENT_SCOPE)
+set(HAS_GFX1250_DEVICE_KERNELS ${HAS_GFX1250_DEVICE_KERNELS} PARENT_SCOPE)
+set(HAS_GFX1250_DBT_FIXTURE ${HAS_GFX1250_DBT_FIXTURE} PARENT_SCOPE)
 set(HAS_PROBE_FIXTURES ${HAS_PROBE_FIXTURES} PARENT_SCOPE)
 set(KERNEL_OUTPUT_DIR ${KERNEL_OUTPUT_DIR} PARENT_SCOPE)

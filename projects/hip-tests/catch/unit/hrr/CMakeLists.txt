@@ -38,6 +38,7 @@ endif()
 set(TEST_SRC
     hrr_format_test.cc
     hrr_recovery_test.cc
+    hrr_playback_test.cc
     hrr_workload_test.cc
     hrr_repro_workload_test.cc
     hrr_roundtrip_test.cc

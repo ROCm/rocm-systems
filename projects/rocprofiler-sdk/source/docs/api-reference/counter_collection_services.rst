@@ -333,7 +333,7 @@ Firmware restrictions are defined alongside counter definitions in the ``config.
               expression: 400*reduce(SQ_WAIT_INST_LDS,sum)/reduce(SQ_WAVES,sum)/reduce(GRBM_GUI_ACTIVE,max)
 
       # Required: Firmware restrictions schema version
-      fw_restriction_schema_version: 1
+      fw-restriction-schema-version: 2
 
       # List of firmware restrictions
       firmware_restrictions:
@@ -355,9 +355,18 @@ Firmware restrictions are defined alongside counter definitions in the ``config.
             - "gfx1100"
             - "gfx1101"
 
+        # Example: per-feature capability floor (queried at runtime, not a hard
+        # startup requirement)
+        - firmware_type: CP
+          feature: pc_sampling_host_trap
+          min_version: 210
+          reason: "PC sampling host-trap mode requires CP firmware version 210 or newer on MI300 devices"
+          affected_architectures:
+            - "gfx942"
+
 **Schema elements:**
 
-- ``fw_restriction_schema_version`` (required): Integer specifying the schema version (currently 1).
+- ``fw-restriction-schema-version`` (required): Integer specifying the schema version (currently 2; the ``feature`` field was added in version 2).
 - ``firmware_restrictions``: Array of restriction objects consisting of the following fields:
 
   - ``firmware_type`` (required): Type of firmware being restricted. Supported types include:
@@ -368,6 +377,7 @@ Firmware restrictions are defined alongside counter definitions in the ``config.
   - ``min_version`` (required): Integer specifying the minimum firmware version.
   - ``reason`` (optional): Human-readable explanation for the restriction.
   - ``affected_architectures`` (optional): Array of GPU architecture names, such as "gfx940" and "gfx942" liable to meet this restriction. If empty, the restriction applies to all the architectures.
+  - ``feature`` (optional): String naming a firmware-gated feature. When present, the entry is treated as a *per-feature capability floor* rather than a hard startup requirement: it is **not** enforced during the startup firmware validation and does not prevent ROCprofiler-SDK from initializing. Instead, services query it at runtime (via the internal feature-support API) to decide whether functionality requiring that firmware feature can be enabled on a given agent. When ``feature`` is absent (or empty), the entry is a hard floor as before and is enforced at startup.
 
 Counter definitions file location
 ++++++++++++++++++++++++++++++++++

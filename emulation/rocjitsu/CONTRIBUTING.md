@@ -36,9 +36,9 @@
 
 Before writing new infrastructure, check these existing libraries:
 
-- **Logging** — Use `util/log.h` (`Logger::print<>()`), never `fprintf`
-  or `std::cerr`. Build with or without tracing via the logger's
-  compile-time group filters.
+- **Logging** — Use `util/log.h`: `Logger::print<>()` / group helpers for
+  tracing (compile-time filtered), `Logger::warn()` for always-on messages.
+  See the Code style section for the two `stderr` carve-outs.
 - **Bit manipulation** — `util/bit.h` and `util/bitfield.h` cover
   masks, extraction, insertion, and typed bitfield access.
 - **Data types** — `util/data_types.h` provides FP16/BF16/FP8/BF8/FP4/FP6
@@ -75,7 +75,18 @@ Before writing new infrastructure, check these existing libraries:
 - **Comments.** Use `@brief` / `@details` doxygen style when documenting
   public APIs. Avoid decorative comment lines (`---`, `===`). Default
   to writing no comments; only comment when the *why* is non-obvious.
-- **No `fprintf`.** Always use `Logger` from `util/log.h`.
+- **Logging.** Use `Logger` from `util/log.h`. `Logger::print<>()` and the
+  per-group helpers (`Logger::dbt_hooks()`, `Logger::vm()`, ...) compile to
+  nothing unless the group is enabled at configure time
+  (`-DRJ_LOG_GROUPS=...`, default `OFF`), so they are for tracing only. Use
+  `Logger::warn()` for anything that must be audible in a default build. Do
+  not add `fprintf`/`printf`/`std::cerr` to library code. Two existing
+  carve-outs: the CLI front end (`tools/`) writes user-facing errors to
+  `std::cerr`, and the ROCR-interposed hook layer
+  (`lib/rocjitsu/src/rocjitsu/hooks/`) writes fatal diagnostics straight to
+  `stderr` — it runs inside another runtime's `OnLoad`, its messages must
+  survive a log-groups-OFF build, and its signal-backtrace path must stay
+  async-signal-safe (`rj_hsa_dbt_hooks.cpp` uses raw `::write`).
 - **Exceptions.** Exceptions are used only for unrecoverable errors
   during initialization and configuration (`ConfigError`) or when
   encountering invalid/unimplemented instructions during code object

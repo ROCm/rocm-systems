@@ -24,8 +24,7 @@
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
-#include "rocjitsu/vm/plugins/plugin_sink.h"
-#include "rocjitsu/vm/plugins/profiled_execution_plugin_group.h"
+#include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 
@@ -79,9 +78,6 @@ RJ_DIAGNOSTIC_POP
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-extern "C" rocjitsu::ExecutionPlugin *createKernelLoggingPlugin();
-extern "C" rocjitsu::ExecutionPlugin *createRaceDetectorPlugin();
 
 using rocjitsu::GuestKfd;
 using rocjitsu::LinuxKfd;
@@ -164,26 +160,47 @@ int kfd_ioctl_ret(int r) {
   return r;
 }
 
-/// @brief Read the child-process rocjitsu config path from @p cfg_file.
+/// @brief Read the child-process rocjitsu config handoff from @p cfg_file.
 ///
-/// @details The launcher writes the config path to a runtime file (per-PID
-/// invocation directory) that the interposer reads back for both local
-/// simulation and DBT guest mode.
-std::optional<std::string> child_config_path(const std::string &cfg_file) {
-  char cfg_buf[4096]{};
+/// @details The first line is the config path. DBT launches include the resolved
+/// host KFD gpu_id on the second line.
+std::optional<rocjitsu::config::DbtRuntimeConfigHandoff>
+child_config_handoff(const std::string &cfg_file) {
+  constexpr size_t kMaxHandoffSize = 64 * 1024;
+  constexpr size_t kReadChunkSize = 4096;
   auto &real = rocjitsu::libc_passthrough();
   int cfg_fd = real.openat(AT_FDCWD, cfg_file.c_str(), O_RDONLY, 0);
   if (cfg_fd < 0)
     return std::nullopt;
 
-  auto n = real.read(cfg_fd, cfg_buf, sizeof(cfg_buf) - 1);
+  std::string contents;
+  contents.reserve(kReadChunkSize);
+  while (contents.size() < kMaxHandoffSize) {
+    char buffer[kReadChunkSize];
+    const size_t remaining = kMaxHandoffSize - contents.size();
+    ssize_t bytes_read = 0;
+    do {
+      bytes_read = real.read(cfg_fd, buffer, std::min(sizeof(buffer), remaining));
+    } while (bytes_read < 0 && errno == EINTR);
+    if (bytes_read < 0) {
+      real.close(cfg_fd);
+      return std::nullopt;
+    }
+    if (bytes_read == 0)
+      break;
+    contents.append(buffer, static_cast<size_t>(bytes_read));
+  }
+
+  char extra = 0;
+  ssize_t extra_bytes = 0;
+  do {
+    extra_bytes = real.read(cfg_fd, &extra, 1);
+  } while (extra_bytes < 0 && errno == EINTR);
   real.close(cfg_fd);
-  if (n <= 0)
+  if (contents.empty() || extra_bytes != 0)
     return std::nullopt;
 
-  while (n > 0 && (cfg_buf[n - 1] == '\n' || cfg_buf[n - 1] == '\r'))
-    cfg_buf[--n] = '\0';
-  return std::string(cfg_buf);
+  return rocjitsu::config::parse_dbt_runtime_config_handoff(contents);
 }
 
 void *raw_mmap_syscall(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
@@ -858,40 +875,12 @@ public:
       return false;
     }
 
-    if (rj_vm_->soc) {
-      std::shared_ptr<rocjitsu::ExecutionPluginGroup> pg;
-      if (std::getenv("RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP"))
-        pg = std::make_shared<rocjitsu::ProfiledExecutionPluginGroup>();
-      else
-        pg = std::make_shared<rocjitsu::ExecutionPluginGroup>();
-
-      std::string sinks_str = "stderr";
-      if (const char *s = std::getenv("RJ_SINKS"))
-        sinks_str = s;
-      std::istringstream ss(sinks_str);
-      std::string token;
-      while (std::getline(ss, token, ',')) {
-        if (token == "stderr")
-          pg->add_sink(&rocjitsu::StderrSink::instance());
-        else if (token == "stdout")
-          pg->add_sink(&rocjitsu::StdoutSink::instance());
-        else if (token == "file") {
-          const char *dir = std::getenv("RJ_SINK_DIR");
-          if (dir)
-            pg->set_sink_dir(dir);
-        }
-      }
-
-      if (const char *rj_log = std::getenv("RJ_LOG"); rj_log && std::string(rj_log) == "1") {
-        pg->add(std::unique_ptr<rocjitsu::ExecutionPlugin>(createKernelLoggingPlugin()));
-        fprintf(stderr, "[rocjitsu] Logging enabled (RJ_LOG)\n");
-      }
-
-      if (const char *race = std::getenv("RJ_RACE"); race && std::string(race) == "1") {
-        pg->add(std::unique_ptr<rocjitsu::ExecutionPlugin>(createRaceDetectorPlugin()));
-        fprintf(stderr, "[rocjitsu] Race detection enabled (RJ_RACE)\n");
-      }
-      rj_vm_->soc->set_plugin_group(pg);
+    std::string config_json = read_file_passthrough(config_path.c_str());
+    if (rj_vm_load_plugins(rj_vm_, config_json.c_str(), nullptr) != ROCJITSU_STATUS_SUCCESS) {
+      util::Logger::debug_print("rocjitsu: failed to configure execution plugins");
+      rj_vm_destroy(rj_vm_);
+      rj_vm_ = nullptr;
+      return false;
     }
     return true;
   }
@@ -1193,31 +1182,31 @@ public:
       cfg_candidates.push_back(invocation_runtime_dir() + "/config_path");
       cfg_candidates.push_back(rocjitsu::rpc_invocation_config_file_path(getpid()));
       cfg_candidates.push_back(rocjitsu::rpc_default_config_file_path());
-      std::optional<std::string> cfg_path;
+      std::optional<rocjitsu::config::DbtRuntimeConfigHandoff> handoff;
       std::string tried_last;
       for (const auto &candidate : cfg_candidates) {
         if (candidate == tried_last)
           continue; // Skip a duplicate tier (e.g. env unset collapses 1 and 2).
         tried_last = candidate;
-        cfg_path = child_config_path(candidate);
-        if (cfg_path)
+        handoff = child_config_handoff(candidate);
+        if (handoff)
           break;
       }
-      if (!cfg_path) {
+      if (!handoff) {
         util::Logger::debug_print("rocjitsu: no child config path");
         in_construction = false;
         return nullptr;
       }
 
       try {
-        auto dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(*cfg_path);
+        auto dbt_guest = rocjitsu::config::load_dbt_guest_config_from_handoff(*handoff);
         if (dbt_guest.enabled) {
           LinuxKfd *execution_driver = nullptr;
           const bool simulator_backend =
               dbt_guest.host.backend == rocjitsu::config::DbtExecutionBackend::Simulator;
           if (simulator_backend) {
             const std::string host_config_path = rocjitsu::config::resolve_dbt_host_config_path(
-                *cfg_path, dbt_guest.host.simulator_config_path);
+                handoff->config_path, dbt_guest.host.simulator_config_path);
             if (!create_local_vm(host_config_path)) {
               in_construction = false;
               return nullptr;
@@ -1244,13 +1233,18 @@ public:
           in_construction = false;
           return driver;
         }
+
+        if (!create_local_vm(handoff->config_path)) {
+          in_construction = false;
+          return nullptr;
+        }
       } catch (const std::exception &e) {
-        util::Logger::debug_print("rocjitsu: failed to load child config: ", e.what());
+        // This is where a broken runtime handoff lands, including an enabled DBT config
+        // with no resolved host gpu_id. Failing closed leaves the process with a null
+        // driver and an opaque downstream failure, so the reason must be audible in a
+        // default build the way the hook layer's equivalent refusal already is.
+        util::Logger::warn("rocjitsu: failed to load child config: ", e.what());
         destroy_local_vm();
-        in_construction = false;
-        return nullptr;
-      }
-      if (!create_local_vm(*cfg_path)) {
         in_construction = false;
         return nullptr;
       }
@@ -1267,6 +1261,39 @@ public:
       in_construction = false;
     }
     return driver();
+  }
+
+  /// @brief Read an entire file via the libc passthrough (real openat/read/
+  /// close), retrying on EINTR.
+  /// @details Used during driver construction where re-entering our interposed
+  /// I/O path could recurse. Read errors (other than EINTR) are reported and
+  /// yield an empty string, distinct from a successfully read empty file.
+  static std::string read_file_passthrough(const char *path) {
+    if (!real().ready())
+      return {};
+    int fd;
+    do {
+      fd = real().openat(AT_FDCWD, path, O_RDONLY, 0);
+    } while (fd < 0 && errno == EINTR);
+    if (fd < 0)
+      return {};
+    std::string out;
+    char buf[4096] = {};
+    for (;;) {
+      ssize_t n = real().read(fd, buf, sizeof(buf));
+      if (n < 0) {
+        if (errno == EINTR)
+          continue;
+        util::Logger::warn("rocjitsu: read error on '", path, "': ", std::strerror(errno));
+        real().close(fd);
+        return {};
+      }
+      if (n == 0)
+        break; // EOF.
+      out.append(buf, static_cast<size_t>(n));
+    }
+    real().close(fd);
+    return out;
   }
 
   static int fopen_flags_from_mode(const char *mode) {
