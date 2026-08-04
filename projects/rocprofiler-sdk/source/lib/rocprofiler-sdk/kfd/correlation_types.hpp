@@ -44,11 +44,18 @@ struct correlation_key
     uint32_t doorbell_off       = 0;
     uint32_t dispatch_idx_low32 = 0;
     uint32_t generation         = 0;
+    // The GPU whose firmware produced (or will produce) the record. Doorbell
+    // slots and dispatch indices are per-GPU and both restart from low values, so
+    // without this a record from one GPU could match a dispatch enqueued on
+    // another and report its timestamps -- the wrong-dispatch completion the loss
+    // policy forbids. Last field so existing three-field construction still means
+    // "GPU 0".
+    uint32_t gpu_id = 0;
 
     bool operator==(const correlation_key& rhs) const
     {
         return doorbell_off == rhs.doorbell_off && dispatch_idx_low32 == rhs.dispatch_idx_low32 &&
-               generation == rhs.generation;
+               generation == rhs.generation && gpu_id == rhs.gpu_id;
     }
 
     bool operator!=(const correlation_key& rhs) const { return !(*this == rhs); }
@@ -97,6 +104,7 @@ struct correlation_key_hash
         size_t seed = std::hash<uint32_t>{}(key.doorbell_off);
         seed        = mix(seed, key.dispatch_idx_low32);
         seed        = mix(seed, key.generation);
+        seed        = mix(seed, key.gpu_id);
         return seed;
     }
 };

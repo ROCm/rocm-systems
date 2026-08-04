@@ -71,6 +71,7 @@ struct packet_data_t
     uint32_t kfd_doorbell_off          = 0;  // snapshot at enqueue
     uint32_t kfd_dispatch_idx_low32    = 0;  // low 32 bits of the HSA queue slot
     uint32_t kfd_generation            = 0;  // snapshot at enqueue
+    uint32_t kfd_gpu_id                = 0;  // the GPU this dispatch runs on
 };
 
 // Internal session information that is used by write interceptor

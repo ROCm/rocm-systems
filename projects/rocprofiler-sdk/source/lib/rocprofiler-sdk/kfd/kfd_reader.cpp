@@ -49,6 +49,7 @@
 #include <string>
 #include <system_error>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include <fcntl.h>
@@ -80,9 +81,16 @@ constexpr uint64_t kStartMaxAgeNs            = 5'000'000'000ull;  // 5 s
 constexpr uint64_t kResultMaxAgeNs           = 5'000'000'000ull;  // 5 s
 
 // Start/eop pairing state, owned exclusively by the processor thread.
+//
+// One map PER GPU. Doorbell slots and dispatch indices are per-GPU and both
+// restart from low values, so a single shared map would let a START from one GPU
+// pair with an EOP from another and report a foreign start timestamp. Keeping
+// them apart makes that impossible by construction rather than by key hygiene.
 struct processor_state
 {
-    pair_state pairing = {};
+    std::unordered_map<uint32_t, pair_state> by_gpu = {};
+
+    pair_state& for_gpu(uint32_t gpu_id) { return by_gpu[gpu_id]; }
 };
 
 // Dispatch-log ring size in bytes. Validated before any sizing math uses it: the
@@ -505,6 +513,7 @@ copy_records(reader_state& st)
     }
 
     _batch->now_ns = common::timestamp_ns();
+    _batch->gpu_id = _s->gpu_id;
     const auto _n  = copy_pipes(recs,
                                _s->info.num_regions,
                                _s->info.region_record_count,
@@ -561,12 +570,15 @@ process_batch(processor_state& proc, const record_batch& batch)
 {
     trace_raw_records(batch);
 
+    const uint32_t _gpu = batch.gpu_id;
+    auto&          _pairing = proc.for_gpu(_gpu);
+
     return pair_records(
         batch.records.data(),
         batch.records.size(),
-        proc.pairing,
+        _pairing,
         batch.now_ns,
-        [&proc](const drained_record& rec) {
+        [&_pairing, _gpu](const drained_record& rec) {
             // An orphaned EOP: report whether retained STARTs exist for the SAME
             // doorbell under a DIFFERENT id, which would mean the two record types
             // disagree about the id rather than the START being absent.
@@ -577,7 +589,7 @@ process_batch(processor_state& proc, const record_batch& batch)
                 static auto _logged = std::atomic<int>{0};
                 if(_trace && _logged.fetch_add(1, std::memory_order_relaxed) < 10)
                 {
-                    auto _near = proc.pairing.starts_with_doorbell(rec.doorbell_off);
+                    auto _near = _pairing.starts_with_doorbell(rec.doorbell_off);
                     ROCP_WARNING << fmt::format(
                         "KFD orphaned EOP: doorbell_off={} dispatch_id={} -- {} retained START(s) "
                         "on this doorbell (example id={}), {} retained overall",
@@ -585,12 +597,14 @@ process_batch(processor_state& proc, const record_batch& batch)
                         rec.dispatch_id,
                         _near.first,
                         _near.second,
-                        proc.pairing.pending_starts.size());
+                        _pairing.pending_starts.size());
                 }
             }
             uint32_t slot = doorbell_off_to_page_slot(rec.doorbell_off);
             uint32_t gen  = doorbell_map().get_generation(slot);
-            auto     key  = correlation_key{slot, rec.dispatch_id, gen};
+            // gpu_id stamped from the ring this record came from: a record can
+            // only ever match a dispatch enqueued on the same GPU.
+            auto key = correlation_key{slot, rec.dispatch_id, gen, _gpu};
 
             // Signal-less dispatch: this EOP IS the completion event (G3). Both
             // shapes route here -- a matched pair carries start_ticks, an EOP whose
@@ -784,13 +798,15 @@ processor_loop()
                 _slots.swap(purge_requests());
             }
             for(auto _slot : _slots)
-                proc.pairing.erase_slot(_slot, kDoorbellSlotsPerPage);
+                for(auto& _itr : proc.by_gpu)
+                    _itr.second.erase_slot(_slot, kDoorbellSlotsPerPage);
         }
 
         const uint64_t _now = common::timestamp_ns();
         if(_now - last_evict_ns >= kProcessorEvictIntervalNs)
         {
-            proc.pairing.evict_stale(_now, kStartMaxAgeNs);
+            for(auto& _itr : proc.by_gpu)
+                _itr.second.evict_stale(_now, kStartMaxAgeNs);
             last_evict_ns = _now;
         }
     }
@@ -802,30 +818,38 @@ processor_loop()
         st.pipe.pop();
     }
 
-    ROCP_WARNING_IF(proc.pairing.eops_seen > 0) << fmt::format(
-        "KFD dispatch-log pairing census: {} START record(s) drained, {} EOP record(s) drained, {} "
-        "EOP(s) unmatched, {} START(s) overwritten on a live key, {} START(s) still retained at "
-        "exit",
-        proc.pairing.starts_seen,
-        proc.pairing.eops_seen,
-        proc.pairing.unmatched_eops,
-        proc.pairing.starts_overwritten,
-        proc.pairing.pending_starts.size());
-
-    // Per-doorbell breakdown. The pairing key is (doorbell_off, dispatch_id), so
-    // a doorbell carrying STARTs but no EOPs alongside one carrying EOPs but no
-    // STARTs means the two record types disagree about the doorbell -- which no
-    // change to the pairing scope could fix.
-    for(const auto& itr : proc.pairing.per_doorbell)
+    for(const auto& _gpu_itr : proc.by_gpu)
     {
-        ROCP_WARNING_IF(proc.pairing.eops_seen > 0) << fmt::format(
-            "KFD dispatch-log per-doorbell: doorbell_off={} (page_slot={}) starts={} eops={} "
-            "unmatched_eops={}",
-            itr.first,
-            doorbell_off_to_page_slot(itr.first),
-            itr.second.starts,
-            itr.second.eops,
-            itr.second.unmatched);
+        const auto& _p = _gpu_itr.second;
+        if(_p.eops_seen == 0) continue;
+
+        ROCP_WARNING << fmt::format(
+            "KFD dispatch-log pairing census (gpu_id={}): {} START record(s) drained, {} EOP "
+            "record(s) drained, {} EOP(s) unmatched, {} START(s) overwritten on a live key, {} "
+            "START(s) still retained at exit",
+            _gpu_itr.first,
+            _p.starts_seen,
+            _p.eops_seen,
+            _p.unmatched_eops,
+            _p.starts_overwritten,
+            _p.pending_starts.size());
+
+        // Per-doorbell breakdown. The pairing key is (doorbell_off, dispatch_id)
+        // within one GPU, so a doorbell carrying STARTs but no EOPs alongside one
+        // carrying EOPs but no STARTs means the two record types disagree about
+        // the doorbell -- which no change to the pairing scope could fix.
+        for(const auto& itr : _p.per_doorbell)
+        {
+            ROCP_WARNING << fmt::format(
+                "KFD dispatch-log per-doorbell (gpu_id={}): doorbell_off={} (page_slot={}) "
+                "starts={} eops={} unmatched_eops={}",
+                _gpu_itr.first,
+                itr.first,
+                doorbell_off_to_page_slot(itr.first),
+                itr.second.starts,
+                itr.second.eops,
+                itr.second.unmatched);
+        }
     }
 }
 

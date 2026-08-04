@@ -512,3 +512,47 @@ TEST(ResultsMap, erase_slot_drops_only_that_slot)
 
     EXPECT_EQ(m.erase_slot(7), 0u);  // idempotent
 }
+
+// A firmware record from one GPU must never match a dispatch enqueued on
+// another. Doorbell slots and dispatch indices are per-GPU and both restart from
+// low values, so the same (slot, index, generation) legitimately occurs on every
+// GPU -- gpu_id is what keeps them apart.
+TEST(correlation_key, gpu_id_prevents_cross_gpu_matching)
+{
+    auto on_gpu0 = correlation_key{7, 100, 0, /*gpu_id=*/0};
+    auto on_gpu1 = correlation_key{7, 100, 0, /*gpu_id=*/1};
+
+    EXPECT_NE(on_gpu0, on_gpu1) << "identical slot/index/generation on two GPUs must not be equal";
+    EXPECT_EQ(on_gpu0, (correlation_key{7, 100, 0, 0}));
+
+    auto hash = correlation_key_hash{};
+    EXPECT_NE(hash(on_gpu0), hash(on_gpu1));
+
+    // Three-field construction still means GPU 0, so existing single-GPU call
+    // sites keep their meaning.
+    EXPECT_EQ((correlation_key{7, 100, 0}), on_gpu0);
+}
+
+// The same proof at the map level: a result deposited for one GPU cannot be
+// taken by the other GPU's dispatch, and each is delivered exactly once.
+TEST(ResultsMap, a_result_is_never_taken_across_gpus)
+{
+    auto m       = ResultsMap{};
+    auto on_gpu0 = correlation_key{7, 100, 0, 0};
+    auto on_gpu1 = correlation_key{7, 100, 0, 1};
+
+    m.deposit(on_gpu0, kfd_timing_result{1000, 2000, 0});
+
+    // GPU 1's dispatch, same slot/index/generation, must not see it.
+    EXPECT_FALSE(m.take(on_gpu1).has_value());
+
+    auto r = m.take(on_gpu0);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->start_gpu_ticks, 1000u);
+
+    // Both GPUs can have a live result on the same slot at once.
+    m.deposit(on_gpu0, kfd_timing_result{11, 22, 0});
+    m.deposit(on_gpu1, kfd_timing_result{33, 44, 0});
+    EXPECT_EQ(m.take(on_gpu1)->start_gpu_ticks, 33u);
+    EXPECT_EQ(m.take(on_gpu0)->start_gpu_ticks, 11u);
+}

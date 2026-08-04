@@ -1647,3 +1647,48 @@ TEST(DispatchHub, pending_for_slot_observes_concurrent_pairing)
     auto stranded = hub.quarantine_slot(40);
     EXPECT_TRUE(stranded.empty()) << "a drain that observed completion must strand nothing";
 }
+
+// The hub keys on correlation_key, so the same slot/index/generation on two GPUs
+// are two independent dispatches: proving one must never consume the other, and
+// leaking one must never tombstone the other.
+TEST(DispatchHub, entries_on_different_gpus_never_collide)
+{
+    auto hub     = hub_t{};
+    auto on_gpu0 = correlation_key{40, 1, 0, /*gpu_id=*/0};
+    auto on_gpu1 = correlation_key{40, 1, 0, /*gpu_id=*/1};
+
+    auto batch = std::vector<hub_t::registration>{};
+    batch.emplace_back(reg_of(on_gpu0, /*corr_id=*/10, /*queue_token=*/1));
+    batch.emplace_back(reg_of(on_gpu1, /*corr_id=*/20, /*queue_token=*/2));
+    ASSERT_TRUE(hub.register_batch(std::move(batch)))
+        << "the same slot on two GPUs must not look like a duplicate key";
+    EXPECT_EQ(hub.live_entries(), 2u);
+
+    // Proving GPU 0's dispatch leaves GPU 1's untouched.
+    auto p0 = hub.prove_eop(on_gpu0, 500, true);
+    ASSERT_TRUE(p0.has_value());
+    EXPECT_EQ(p0->key.gpu_id, 0u);
+    EXPECT_EQ(hub.live_entries(), 1u);
+
+    auto p1 = hub.prove_eop(on_gpu1, 600, true);
+    ASSERT_TRUE(p1.has_value());
+    EXPECT_EQ(p1->key.gpu_id, 1u);
+    EXPECT_EQ(p1->end_ticks, 600u) << "GPU 1 must get its own record, not GPU 0's";
+}
+
+// Leaking a dispatch on one GPU must not tombstone the same slot/index on
+// another -- otherwise one GPU's loss would silently disable the other.
+TEST(DispatchHub, a_leak_on_one_gpu_does_not_tombstone_another)
+{
+    auto hub     = hub_t{};
+    auto on_gpu0 = correlation_key{40, 1, 0, 0};
+    auto on_gpu1 = correlation_key{40, 1, 0, 1};
+
+    ASSERT_TRUE(register_one(hub, on_gpu0, 10, 1));
+    ASSERT_TRUE(hub.leak(on_gpu0).has_value());
+
+    EXPECT_FALSE(hub.can_register_batch({on_gpu0}));  // tombstoned
+    EXPECT_TRUE(hub.can_register_batch({on_gpu1}));   // the other GPU is unaffected
+    EXPECT_TRUE(register_one(hub, on_gpu1, 20, 2));
+    EXPECT_TRUE(hub.prove_eop(on_gpu1, 7, true).has_value());
+}

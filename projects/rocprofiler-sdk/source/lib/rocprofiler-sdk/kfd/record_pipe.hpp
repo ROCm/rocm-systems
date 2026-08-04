@@ -63,11 +63,15 @@ struct record_batch
 {
     std::vector<copied_record> records = {};
     uint64_t                   now_ns  = 0;  // host clock sampled once for the batch
+    // Which GPU's ring these came from. Pairing and correlation are keyed by it,
+    // so records from different GPUs can never be matched to each other.
+    uint32_t gpu_id = 0;
 
     void clear()
     {
         records.clear();  // keeps capacity: steady state does not allocate
         now_ns = 0;
+        gpu_id = 0;
     }
 };
 

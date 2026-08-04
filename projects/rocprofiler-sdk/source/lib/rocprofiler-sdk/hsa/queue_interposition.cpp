@@ -727,7 +727,8 @@ signal_less_batch_eligible(Queue*                                            que
         auto _key =
             kfd::correlation_key{_db->doorbell_off,
                                  static_cast<uint32_t>((base_pkt_index + i) & 0xFFFFFFFFULL),
-                                 _db->generation};
+                                 _db->generation,
+                                 static_cast<uint32_t>(_gpu_id)};
         (*keys_out)[i] = _key;
         _flat.emplace_back(_key);
     }
@@ -1090,6 +1091,7 @@ write_interceptor(Queue*                                queue,
                     {
                         _packet_data.kfd_doorbell_off          = _db->doorbell_off;
                         _packet_data.kfd_generation            = _db->generation;
+                        _packet_data.kfd_gpu_id                = static_cast<uint32_t>(_gpu_id);
                         _packet_data.kfd_correlation_key_valid = true;
                     }
                 }

@@ -70,5 +70,19 @@ kfd_dispatch_log_available();
 // without affecting other GPUs.
 bool
 gpu_supports_dispatch_log(uint32_t gpu_id);
+
+// Arm the dispatch-log ring(s), called when a context that traces kernel dispatch
+// starts.
+//
+// Deliberately NOT done at startup: installing the HSA table says nothing about
+// whether anyone wants kernel traces, and arming registers a GTT buffer and opens
+// a firmware stream. Configuration time is still early enough that the ring is
+// live before the first dispatch, and a tool that configures tracing later simply
+// arms later -- sessions are per-GPU and independent of queues. The first-dispatch
+// fallback in ensure_reader_session() still covers anything in between.
+//
+// Idempotent and safe to call from any context start.
+void
+arm_dispatch_log_sessions();
 }  // namespace kfd
 }  // namespace rocprofiler

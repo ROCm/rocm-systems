@@ -66,7 +66,8 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
     {
         auto corr_key = kfd::correlation_key{packet_data.kfd_doorbell_off,
                                              packet_data.kfd_dispatch_idx_low32,
-                                             packet_data.kfd_generation};
+                                             packet_data.kfd_generation,
+                                             packet_data.kfd_gpu_id};
 
         // Rendezvous rather than a one-shot take(): wait for the reader to deposit
         // this dispatch's record instead of silently using HSA because the record
