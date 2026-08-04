@@ -1387,33 +1387,42 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
   const uintptr_t unmap_begin = reinterpret_cast<uintptr_t>(addr);
   std::optional<uint64_t> rounded_length = checked_page_aligned_size(length);
-  std::map<uintptr_t, uintptr_t>::iterator mapping = proc.cpu_mappings_.upper_bound(unmap_begin);
-  if (mapping != proc.cpu_mappings_.begin()) {
-    --mapping;
-    if (mapping->first <= unmap_begin && unmap_begin < mapping->second) {
-      if (!rounded_length || (unmap_begin & (KfdProcess::kPageSize - 1)) != 0 ||
-          *rounded_length > UINTPTR_MAX - unmap_begin) {
-        errno = EINVAL;
-        return -1;
-      }
-      const uintptr_t unmap_end = unmap_begin + static_cast<uintptr_t>(*rounded_length);
-      if (unmap_end > mapping->second) {
-        errno = EINVAL;
-        return -1;
-      }
+  if (length == 0 || !rounded_length || (unmap_begin & (KfdProcess::kPageSize - 1)) != 0 ||
+      *rounded_length > UINTPTR_MAX - unmap_begin) {
+    errno = EINVAL;
+    return -1;
+  }
+  const uintptr_t unmap_end = unmap_begin + static_cast<uintptr_t>(*rounded_length);
 
+  std::map<uintptr_t, uintptr_t>::iterator mapping = proc.cpu_mappings_.lower_bound(unmap_begin);
+  if (mapping != proc.cpu_mappings_.begin()) {
+    std::map<uintptr_t, uintptr_t>::iterator previous = std::prev(mapping);
+    if (previous->second > unmap_begin)
+      mapping = previous;
+  }
+  const bool overlaps_cpu_mapping = mapping != proc.cpu_mappings_.end() &&
+                                    mapping->first < unmap_end && mapping->second > unmap_begin;
+  if (overlaps_cpu_mapping) {
+    int rc = libc_passthrough().munmap(addr, length);
+    if (rc != 0)
+      return rc;
+
+    while (mapping != proc.cpu_mappings_.end() && mapping->first < unmap_end) {
+      if (mapping->second <= unmap_begin) {
+        ++mapping;
+        continue;
+      }
       const uintptr_t mapping_begin = mapping->first;
       const uintptr_t mapping_end = mapping->second;
-      int rc = libc_passthrough().munmap(addr, static_cast<size_t>(*rounded_length));
-      if (rc != 0)
-        return rc;
-      proc.cpu_mappings_.erase(mapping);
+      mapping = proc.cpu_mappings_.erase(mapping);
       if (mapping_begin < unmap_begin)
         proc.cpu_mappings_.emplace(mapping_begin, unmap_begin);
-      if (unmap_end < mapping_end)
+      if (unmap_end < mapping_end) {
         proc.cpu_mappings_.emplace(unmap_end, mapping_end);
-      return 0;
+        break;
+      }
     }
+    return 0;
   }
   for (auto &[handle, alloc] : proc.allocations_) {
     if (alloc.host_ptr == addr) {

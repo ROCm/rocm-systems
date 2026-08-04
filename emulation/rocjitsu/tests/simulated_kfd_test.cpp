@@ -174,7 +174,7 @@ TEST_F(SimulatedKfdTest, PermanentVramBackingSurvivesCpuMapLifecycle) {
   EXPECT_EQ(t.driver()->close(), 0);
 }
 
-TEST_F(SimulatedKfdTest, PermanentVramBackingTracksPartialCpuUnmapsByPage) {
+TEST_F(SimulatedKfdTest, PermanentVramBackingTracksPartialAndCrossRangeCpuUnmaps) {
   TestVM t = create_test_vm();
   ASSERT_NE(t.driver(), nullptr);
   ASSERT_GE(t.driver()->open(), 0);
@@ -220,8 +220,25 @@ TEST_F(SimulatedKfdTest, PermanentVramBackingTracksPartialCpuUnmapsByPage) {
     EXPECT_EQ(second->second, begin + kAllocationSize);
   }
 
+  ASSERT_EQ(t.driver()->munmap(mapping, kAllocationSize), 0);
+  {
+    std::lock_guard<std::mutex> lock(process->alloc_mutex_);
+    EXPECT_TRUE(process->cpu_mappings_.empty());
+  }
+
+  mapping = t.driver()->mmap(reservation, kMappingLength, PROT_READ | PROT_WRITE,
+                             MAP_SHARED | MAP_FIXED, static_cast<off_t>(alloc.mmap_offset));
+  ASSERT_EQ(mapping, reservation);
+  ASSERT_EQ(t.driver()->munmap(middle_page, kPageSize), 0);
+  ASSERT_EQ(t.driver()->munmap(middle_page, 2 * kPageSize), 0);
+  {
+    std::lock_guard<std::mutex> lock(process->alloc_mutex_);
+    ASSERT_EQ(process->cpu_mappings_.size(), 1u);
+    EXPECT_EQ(process->cpu_mappings_.begin()->first, begin);
+    EXPECT_EQ(process->cpu_mappings_.begin()->second, begin + kPageSize);
+  }
+
   ASSERT_EQ(t.driver()->munmap(mapping, 1), 0);
-  ASSERT_EQ(t.driver()->munmap(static_cast<uint8_t *>(mapping) + 2 * kPageSize, kPageSize), 0);
   {
     std::lock_guard<std::mutex> lock(process->alloc_mutex_);
     EXPECT_TRUE(process->cpu_mappings_.empty());
