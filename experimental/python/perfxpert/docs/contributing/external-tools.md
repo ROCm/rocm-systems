@@ -59,8 +59,14 @@ with pytest.raises(Exception):
     require_tool("not-a-registered-dep")
 
 # Configured binary path: keep the registered dependency name for install
-# hints, but probe the exact executable path that will be invoked.
-require_tool("amdclang++", executable=os.environ.get("PERFXPERT_CXX", "amdclang++"))
+# hints, but probe the exact executable path that will be invoked. Handled
+# the same way as above, because a host without the ROCm toolchain is the
+# case this call exists to report.
+try:
+    require_tool("amdclang++", executable=os.environ.get("PERFXPERT_CXX", "amdclang++"))
+    compiler_status = "amdclang++: found"
+except ExternalToolMissing as e:
+    compiler_status = f"amdclang++: unavailable ({e.install_hint})"
 ```
 
 `require_tool` does three things in order:
