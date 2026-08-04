@@ -1,6 +1,6 @@
 # Changelog for hipFile
 
-## (Unreleased) hipFile 0.4.0
+## hipFile 0.4.0 for ROCm 10.0.0
 
 ### Added
 

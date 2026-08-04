@@ -86,7 +86,7 @@ const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/gfx1250.json"
 constexpr uint32_t S_ENDPGM_GFX12 = 0xBFB00000u;
 constexpr uint32_t S_WAIT_KMCNT_0_GFX12 = 0xBFC70000u;
 constexpr uint32_t S_SET_VGPR_MSB = 0xBF860000u;
-// LLVM references for these gfx1250 register capacities:
+// LLVM references for these gfx1250 register capabilities:
 // - llvm/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.cpp:
 //   getAddressableNumSGPRs() returns 106 ordinary SGPRs for GFX10+.
 // - llvm/lib/Target/AMDGPU/SIRegisterInfo.td:
@@ -99,15 +99,18 @@ constexpr uint32_t S_SET_VGPR_MSB = 0xBF860000u;
 //   high VGPRs still use the encoded v0-v255 operand window; s_set_vgpr_msb
 //   supplies two high address bits per operand role.
 // - llvm/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.cpp:
-//   GFX12.5 reports four SIMDs per CU, 20 waves per SIMD, and 160 KiB of
-//   addressable local memory.
+//   GFX12.5 reports four SIMD units per CU.
 constexpr uint32_t kGfx1250ScalarSlots = 128;
 constexpr uint32_t kGfx1250Wave32VgprAllocation = 1024;
 constexpr uint32_t kGfx1250VgprEncodingGranule = 16;
 constexpr uint32_t kGfx1250SimdsPerCu = 4;
-constexpr uint32_t kGfx1250MaxWavesPerSimd = 20;
+constexpr uint32_t kGfx1250MaxWavesPerSimd = 16;
 constexpr uint32_t kGfx1250WaveSlotsPerCu = kGfx1250SimdsPerCu * kGfx1250MaxWavesPerSimd;
-constexpr uint32_t kGfx1250LdsSizeKb = 160;
+constexpr uint32_t kGfx1250LdsSizeKb = 320;
+constexpr uint64_t kGfx1250HbmBytes = 432ull * 1024 * 1024 * 1024;
+constexpr uint32_t kGfx1250HbmWidthBits = 12 * 2048;
+constexpr uint32_t kGfx1250VectorCacheSizeKb = 64;
+constexpr uint32_t kGfx1250L2SizeKb = 192 * 1024;
 constexpr uint32_t kSdmaOpCopy = 1;
 constexpr uint32_t kSdmaOpFence = 5;
 constexpr uint32_t kSdmaOpPollRegmem = 8;
@@ -614,20 +617,33 @@ TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
 
   EXPECT_TRUE(loaded.device.present);
   EXPECT_EQ(loaded.device.gfx_target_version, 120500u);
+  EXPECT_EQ(loaded.device.marketing_name, "AMD Instinct MI455X");
   EXPECT_EQ(loaded.device.simd_count, 1024u);
   EXPECT_EQ(loaded.device.max_waves_per_simd, kGfx1250MaxWavesPerSimd);
+  EXPECT_EQ(loaded.device.num_shader_engines, 4u);
   EXPECT_EQ(loaded.device.num_shader_arrays_per_engine, 2u);
-  EXPECT_EQ(loaded.device.num_cu_per_sh, 4u);
+  EXPECT_EQ(loaded.device.num_cu_per_sh, 8u);
   EXPECT_EQ(loaded.device.simd_per_cu, kGfx1250SimdsPerCu);
   EXPECT_EQ(loaded.device.wave_front_size, 32u);
+  EXPECT_EQ(loaded.device.local_mem_size, kGfx1250HbmBytes);
   EXPECT_EQ(loaded.device.lds_size_kb, kGfx1250LdsSizeKb);
-  EXPECT_EQ(loaded.device.mem_width, 8192u);
-  EXPECT_EQ(loaded.device.marketing_name, "gfx1250");
+  EXPECT_EQ(loaded.device.mem_width, kGfx1250HbmWidthBits);
+  EXPECT_EQ(loaded.device.l1_size_kb, kGfx1250VectorCacheSizeKb);
+  EXPECT_EQ(loaded.device.l2_size_kb, kGfx1250L2SizeKb);
 
   EXPECT_EQ(soc->num_xcds(), 8u);
   EXPECT_EQ(soc->num_iods(), 2u);
-  EXPECT_EQ(soc->xcd(0)->num_shader_engines(), 4u);
-  EXPECT_EQ(soc->xcd(0)->shader_engine(0)->num_compute_units(), 8u);
+  EXPECT_EQ(soc->iod(0)->req_ports().size(), 6u);
+  EXPECT_EQ(soc->iod(1)->req_ports().size(), 6u);
+  EXPECT_EQ(soc->xcd(0)->num_shader_engines(), 2u);
+  EXPECT_EQ(soc->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
+  EXPECT_EQ(loaded.device.num_shader_engines / loaded.device.num_shader_arrays_per_engine,
+            soc->xcd(0)->num_shader_engines());
+  EXPECT_EQ(loaded.device.num_shader_arrays_per_engine * loaded.device.num_cu_per_sh,
+            soc->xcd(0)->shader_engine(0)->num_compute_units());
+  EXPECT_EQ(soc->num_xcds() * soc->xcd(0)->num_shader_engines() *
+                soc->xcd(0)->shader_engine(0)->num_compute_units() * loaded.device.simd_per_cu,
+            loaded.device.simd_count);
   auto *cu = soc->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   EXPECT_EQ(cu->wf_size(), 32u);
@@ -926,6 +942,7 @@ TEST(Gfx1250SdmaTest, CopyWaitSignalResolvesTranslatedAddresses) {
   Gfx1250Sim sim;
   TranslatedSdmaQueueForTest queue(sim);
   constexpr uint32_t kCopyBytes = 128;
+  queue.poll_value() = 0;
   queue.signal_value() = 5;
   for (uint32_t i = 0; i < kCopyBytes; ++i) {
     queue.src()[i] = static_cast<uint8_t>(i ^ 0x5a);
@@ -933,7 +950,13 @@ TEST(Gfx1250SdmaTest, CopyWaitSignalResolvesTranslatedAddresses) {
   }
 
   auto *packet = queue.ring();
-  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8) | (1u << 31);
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8) | (1u << 30) | (1u << 31);
+  packet[1] = 3;
+  write_sdma_qword_va(packet, 2, 3, queue.poll_va());
+  packet[4] = 0;
+  packet[5] = 0;
+  packet[6] = 0xFFFFFFFFu;
+  packet[7] = 0xFFFFFFFFu;
   packet[8] = kCopyBytes - 1;
   write_sdma_qword_va(packet, 10, 11, queue.src_va());
   write_sdma_qword_va(packet, 12, 13, queue.dst_va());
@@ -945,6 +968,61 @@ TEST(Gfx1250SdmaTest, CopyWaitSignalResolvesTranslatedAddresses) {
   queue.submit(19);
   ASSERT_TRUE(sim.engine->step());
   EXPECT_EQ(queue.read_idx(), 19u * sizeof(uint32_t));
+  EXPECT_EQ(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
+  EXPECT_EQ(queue.signal_value(), 4);
+}
+
+TEST(Gfx1250SdmaTest, CompactCopyWaitPacketCopies) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr uint32_t kCopyBytes = 128;
+  queue.poll_value() = 0;
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    queue.src()[i] = static_cast<uint8_t>(i ^ 0xb7);
+    queue.dst()[i] = 0;
+  }
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8) | (1u << 30);
+  packet[1] = 3;
+  write_sdma_qword_va(packet, 2, 3, queue.poll_va());
+  packet[4] = 0;
+  packet[5] = 0;
+  packet[6] = 0xFFFFFFFFu;
+  packet[7] = 0xFFFFFFFFu;
+  packet[8] = kCopyBytes - 1;
+  write_sdma_qword_va(packet, 10, 11, queue.src_va());
+  write_sdma_qword_va(packet, 12, 13, queue.dst_va());
+
+  queue.submit(14);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 14u * sizeof(uint32_t));
+  EXPECT_EQ(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
+}
+
+TEST(Gfx1250SdmaTest, CompactCopySignalPacketCopiesAndSignals) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr uint32_t kCopyBytes = 128;
+  queue.signal_value() = 5;
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    queue.src()[i] = static_cast<uint8_t>(i ^ 0xd3);
+    queue.dst()[i] = 0;
+  }
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8) | (1u << 31);
+  packet[1] = kCopyBytes - 1;
+  write_sdma_qword_va(packet, 3, 4, queue.src_va());
+  write_sdma_qword_va(packet, 5, 6, queue.dst_va());
+  packet[7] = 0x70;
+  write_sdma_qword_va(packet, 8, 9, queue.signal_va());
+  packet[10] = 1;
+  packet[11] = 0;
+
+  queue.submit(12);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 12u * sizeof(uint32_t));
   EXPECT_EQ(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
   EXPECT_EQ(queue.signal_value(), 4);
 }
@@ -971,7 +1049,7 @@ TEST(Gfx1250SdmaTest, CopyWaitSignalUnresolvedWaitAddressDoesNotAdvance) {
   write_sdma_qword_va(packet, 10, 11, queue.src_va());
   write_sdma_qword_va(packet, 12, 13, queue.dst_va());
 
-  queue.submit(19);
+  queue.submit(14);
   ASSERT_TRUE(sim.engine->step());
   EXPECT_EQ(queue.read_idx(), 0u);
   EXPECT_NE(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
@@ -990,15 +1068,15 @@ TEST(Gfx1250SdmaTest, CopyWaitSignalUnresolvedDstDoesNotAdvanceOrSignal) {
 
   auto *packet = queue.ring();
   packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8) | (1u << 31);
-  packet[8] = kCopyBytes - 1;
-  write_sdma_qword_va(packet, 10, 11, queue.src_va());
-  write_sdma_qword_va(packet, 12, 13, kUnmappedDstVa);
-  packet[14] = 0x70;
-  write_sdma_qword_va(packet, 15, 16, queue.signal_va());
-  packet[17] = 1;
-  packet[18] = 0;
+  packet[1] = kCopyBytes - 1;
+  write_sdma_qword_va(packet, 3, 4, queue.src_va());
+  write_sdma_qword_va(packet, 5, 6, kUnmappedDstVa);
+  packet[7] = 0x70;
+  write_sdma_qword_va(packet, 8, 9, queue.signal_va());
+  packet[10] = 1;
+  packet[11] = 0;
 
-  queue.submit(19);
+  queue.submit(12);
   ASSERT_TRUE(sim.engine->step());
   EXPECT_EQ(queue.read_idx(), 0u);
   EXPECT_NE(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
@@ -1018,15 +1096,15 @@ TEST(Gfx1250SdmaTest, CopyWaitSignalUnresolvedSignalDoesNotAdvanceOrCopy) {
 
   auto *packet = queue.ring();
   packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8) | (1u << 31);
-  packet[8] = kCopyBytes - 1;
-  write_sdma_qword_va(packet, 10, 11, queue.src_va());
-  write_sdma_qword_va(packet, 12, 13, queue.dst_va());
-  packet[14] = 0x70;
-  write_sdma_qword_va(packet, 15, 16, kUnmappedSignalVa);
-  packet[17] = 1;
-  packet[18] = 0;
+  packet[1] = kCopyBytes - 1;
+  write_sdma_qword_va(packet, 3, 4, queue.src_va());
+  write_sdma_qword_va(packet, 5, 6, queue.dst_va());
+  packet[7] = 0x70;
+  write_sdma_qword_va(packet, 8, 9, kUnmappedSignalVa);
+  packet[10] = 1;
+  packet[11] = 0;
 
-  queue.submit(19);
+  queue.submit(12);
   ASSERT_TRUE(sim.engine->step());
   EXPECT_EQ(queue.read_idx(), 0u);
   EXPECT_NE(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
