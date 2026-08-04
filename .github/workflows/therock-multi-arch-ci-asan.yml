@@ -3,18 +3,21 @@
 
 # Multi-Arch CI ASAN for rocm-systems
 #
-# Postsubmit and on-demand ASAN builds. TheRock's configure_multi_arch_ci.py
-# automatically selects host-asan for push events (faster, host-only) and
-# full asan for workflow_dispatch (comprehensive device-side instrumentation).
+# Presubmit and on-demand ASAN builds. TheRock's configure_multi_arch_ci.py
+# automatically selects host-asan for pull_request events (faster, host-only)
+# and full asan for workflow_dispatch (comprehensive device-side instrumentation).
 #
 # For scheduled nightly runs, see therock-multi-arch-ci-asan-nightly.yml.
 
 name: TheRock Multi-Arch CI ASAN
 
 on:
-  push:
-    branches:
-      - develop
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
