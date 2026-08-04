@@ -4,6 +4,13 @@
 #pragma once
 
 /// @file Shared pseudo-scalar transcendental implementations.
+///
+/// @details Architectural numeric behavior follows the AMD RDNA4 Instruction Set Architecture
+/// Reference Guide: section 7.10 requires the usual DENORMAL and ROUND mode bits, and section
+/// 7.2.3.1 requires nonzero OMOD to flush output denormals and map negative zero to positive zero.
+/// The functional examples for the vector V_LOG_F32, V_RSQ_F32, and V_SQRT_F32 equivalents specify
+/// negative quiet NaNs for invalid domains. The host standard-library functions below provide the
+/// approximate transcendental values; the surrounding logic applies these architectural rules.
 
 #include "util/data_types.h"
 
