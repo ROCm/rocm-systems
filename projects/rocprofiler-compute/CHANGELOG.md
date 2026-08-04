@@ -6,6 +6,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ## ROCm Compute Profiler 3.9.0 for ROCm 10.1.0
 
 ### Added
+* Added GPU benchmarking and roofline profiling/analysis support for gfx1153 hardware.
 
 * Added multi-process PC sampling across profile and analyze modes.
   * Profile mode writes one PID-prefixed `<pid>_ps_file_results.json` per process.
