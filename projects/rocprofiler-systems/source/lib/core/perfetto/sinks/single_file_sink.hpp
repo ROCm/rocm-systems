@@ -3,12 +3,12 @@
 
 #pragma once
 
+#include "core/perfetto/packet_framing.hpp"
 #include "core/perfetto/sinks/append_mode.hpp"
 #include "core/perfetto/sinks/trace_sink.hpp"
 
 #include <cstdint>
 #include <functional>
-#include <limits>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -41,8 +41,6 @@ public:
 private:
     static constexpr std::uint32_t PER_SOURCE_SEQ_ID_BASE_STRIDE = 1u << 16;
 
-    static constexpr std::uint64_t TRUSTED_SEQ_ID_MAX_EXCLUSIVE =
-        static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
     std::reference_wrapper<output_file_registry> m_registry;
     std::string                                  m_output_filename_override{};
     std::vector<char>                            m_buffer{};
