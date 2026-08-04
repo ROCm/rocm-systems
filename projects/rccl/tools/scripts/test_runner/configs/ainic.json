@@ -1,7 +1,7 @@
 {
   "system_configurations": {
     "name": "RCCL-AINIC",
-    "description": "AINIC test plan. Group A: NetIbMPI + GIN component/unit tests (2 nodes x 1 GPU = 2 ranks). Group B: NCCL_NET plugin x knobs sweep on rccl-tests perf (2 nodes x 8 GPU = 16 ranks), including out-of-the-box autodetect. Group C: IONIC hardware counter validation. Run on the AINIC cluster with --system ainic."
+    "description": "AINIC test plan. Group A: NetIbMPI + GIN component/unit tests (2 nodes x 1 GPU = 2 ranks). Group B: NCCL_NET plugin x knobs sweep on rccl-tests perf (2 nodes x 8 GPU = 16 ranks), including out-of-the-box autodetect. Group C: IONIC hardware counter validation. Group D: nccl_m2n M2N reshard functional matrix (single node) - single-process (local) and multi-process (MPI), world 4 (51 cases) and world 8 (192 cases), RING and DIRECT, plus the reshard_bench --validate data-correctness matrix. Run on the AINIC cluster with --system ainic."
   },
   "paths": {
     "workdir": "${WORKDIR:-$PWD}",
@@ -28,6 +28,15 @@
   "build_configuration": {
     "install_flags": ["--debug", "-t", "--amdgpu_targets", "gfx950", "--log-trace", "--enable-mpi-tests", "--no_clean"],
     "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+  },
+
+  "rccl_tests_build_configuration": {
+    "enabled": true,
+    "source_dir": "${WORKDIR:-$PWD}/contrib/nccl_m2n",
+    "build_command": "make -f Makefile.rocm -j lib bench tests OFFLOAD_ARCH=gfx950 GTEST_DIR=${GTEST_DIR:-} MPICC=${MPI_PATH:-/it-share/ompi-5.0.8}/bin/mpicc",
+    "env_variables": {
+      "NCCL_M2N_BUILD_NOTE": "Builds contrib/nccl_m2n (libnccl_m2n.so + reshard_bench + basic_api_test_{local,mpi}) against the librccl built above via Makefile.rocm. RCCL_HOME/NCCL_HOME/ROCM_PATH/MPI_HOME are exported by the runner. reshard_bench needs no gtest; the functional tests (Group D D1-D8) need a prebuilt googletest - set GTEST_DIR in the CI environment (tree with include/ + lib/), otherwise the make 'tests' target no-ops and only the bench (D9-D16) binaries are produced. Output goes to contrib/nccl_m2n/build/bin (see Group D test_binary_dir)."
+    }
   },
 
   "test_configurations": {
@@ -435,6 +444,67 @@
         { "name": "C1_alltoall_counters_ROCMIB", "binary": "alltoall_perf", "command_args": "-b 1M -e 128M -f 2 -g 1", "env_variables": { "NCCL_NET": "ROCM-IB" }, "description": "IONIC counters (tx_rdma_ucast_bytes) non-zero and BW > 10 GB/s on the ROCM-IB backend. Capped at 128M to keep the counter run fast; large-size coverage lives in b_large_alltoall_repro." },
         { "name": "C1_allreduce_counters_ROCMIB", "binary": "all_reduce_perf", "command_args": "-b 1G -e 8G -f 2 -g 1", "env_variables": { "NCCL_NET": "ROCM-IB" }, "description": "IONIC counter validation on allreduce over the ROCM-IB backend." }
       ]
+    },
+
+    "d_m2n_base": {
+      "is_gtest": true,
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 1200,
+      "description": "nccl_m2n M2N reshard base (single node). Binaries come from the contrib/nccl_m2n Makefile.rocm build (see rccl_tests_build_configuration); children set an absolute ${WORKDIR}-based binary path (build/bin) so the runner resolves them directly rather than from the rccl-tests dir. Symmetric-window RDMA path: keep CUMEM on and scratch-reclaim off. Children pin the world size via num_gpus (local, one thread per visible GPU) or num_ranks (MPI, one process per rank); the algorithm is a CLI flag, so no gtest filter is needed - each run executes the full parameterised case matrix (51 cases at world 4, 192 at world 8).",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "HSA_NO_SCRATCH_RECLAIM": "1"
+      }
+    },
+
+    "d_m2n_local": {
+      "extends": "d_m2n_base",
+      "binary": "${WORKDIR:-$PWD}/contrib/nccl_m2n/build/bin/basic_api_test_local",
+      "description": "D1-D4: single-process multi-rank (ncclCommInitAll, one host thread per GPU). World size = visible GPUs, so num_gpus selects the 192-case (8) or 51-case (4) matrix.",
+      "tests": [
+        { "name": "D1_local_ring_w8",   "command_args": "--algorithm ring",   "num_gpus": 8, "description": "Single-process 8-rank RING, full 192-case reshard matrix." },
+        { "name": "D2_local_direct_w8", "command_args": "--algorithm direct", "num_gpus": 8, "description": "Single-process 8-rank DIRECT, full 192-case reshard matrix." },
+        { "name": "D3_local_ring_w4",   "command_args": "--algorithm ring",   "num_gpus": 4, "description": "Single-process 4-rank RING, 51-case reshard matrix." },
+        { "name": "D4_local_direct_w4", "command_args": "--algorithm direct", "num_gpus": 4, "description": "Single-process 4-rank DIRECT, 51-case reshard matrix." }
+      ]
+    },
+
+    "d_m2n_mpi": {
+      "extends": "d_m2n_base",
+      "binary": "${WORKDIR:-$PWD}/contrib/nccl_m2n/build/bin/basic_api_test_mpi",
+      "description": "D5-D8: one rank per process (MPI). num_ranks selects the 192-case (8) or 51-case (4) matrix.",
+      "tests": [
+        { "name": "D5_mpi_ring_w8",   "command_args": "--algorithm ring",   "num_ranks": 8, "description": "MPI 8-rank RING, full 192-case reshard matrix." },
+        { "name": "D6_mpi_direct_w8", "command_args": "--algorithm direct", "num_ranks": 8, "description": "MPI 8-rank DIRECT, full 192-case reshard matrix." },
+        { "name": "D7_mpi_ring_w4",   "command_args": "--algorithm ring",   "num_ranks": 4, "description": "MPI 4-rank RING, 51-case reshard matrix." },
+        { "name": "D8_mpi_direct_w4", "command_args": "--algorithm direct", "num_ranks": 4, "description": "MPI 4-rank DIRECT, 51-case reshard matrix." }
+      ]
+    },
+
+    "d_m2n_bench": {
+      "is_gtest": false,
+      "binary": "${WORKDIR:-$PWD}/contrib/nccl_m2n/build/bin/reshard_bench",
+      "num_ranks": 6,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 1200,
+      "description": "D9-D16: reshard_bench --validate data-correctness matrix (T4). Mesh 1,4 -> 1,2 (6 ranks), RING/DIRECT x same/cross-dim x 3D (256,128,64) / 2D (1024,1024). Fails on any byte mismatch.",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "HSA_NO_SCRATCH_RECLAIM": "1"
+      },
+      "tests": [
+        { "name": "D9_bench_ring_3D_same",     "command_args": "--src-mesh-dims 1,4 --dst-mesh-dims 1,2 --tensor-dims 256,128,64 --src-shard-dim 0 --dst-shard-dim 0 --algorithm ring   --validate --warmup 2 --iterations 3", "description": "RING 3D same-dim reshard, data validated." },
+        { "name": "D10_bench_ring_3D_cross",   "command_args": "--src-mesh-dims 1,4 --dst-mesh-dims 1,2 --tensor-dims 256,128,64 --src-shard-dim 0 --dst-shard-dim 1 --algorithm ring   --validate --warmup 2 --iterations 3", "description": "RING 3D cross-dim reshard, data validated." },
+        { "name": "D11_bench_ring_2D_same",    "command_args": "--src-mesh-dims 1,4 --dst-mesh-dims 1,2 --tensor-dims 1024,1024 --src-shard-dim 0 --dst-shard-dim 0 --algorithm ring   --validate --warmup 2 --iterations 3", "description": "RING 2D same-dim reshard, data validated." },
+        { "name": "D12_bench_ring_2D_cross",   "command_args": "--src-mesh-dims 1,4 --dst-mesh-dims 1,2 --tensor-dims 1024,1024 --src-shard-dim 0 --dst-shard-dim 1 --algorithm ring   --validate --warmup 2 --iterations 3", "description": "RING 2D cross-dim reshard, data validated." },
+        { "name": "D13_bench_direct_3D_same",  "command_args": "--src-mesh-dims 1,4 --dst-mesh-dims 1,2 --tensor-dims 256,128,64 --src-shard-dim 0 --dst-shard-dim 0 --algorithm direct --validate --warmup 2 --iterations 3", "description": "DIRECT 3D same-dim reshard, data validated." },
+        { "name": "D14_bench_direct_3D_cross", "command_args": "--src-mesh-dims 1,4 --dst-mesh-dims 1,2 --tensor-dims 256,128,64 --src-shard-dim 0 --dst-shard-dim 1 --algorithm direct --validate --warmup 2 --iterations 3", "description": "DIRECT 3D cross-dim reshard, data validated." },
+        { "name": "D15_bench_direct_2D_same",  "command_args": "--src-mesh-dims 1,4 --dst-mesh-dims 1,2 --tensor-dims 1024,1024 --src-shard-dim 0 --dst-shard-dim 0 --algorithm direct --validate --warmup 2 --iterations 3", "description": "DIRECT 2D same-dim reshard, data validated." },
+        { "name": "D16_bench_direct_2D_cross", "command_args": "--src-mesh-dims 1,4 --dst-mesh-dims 1,2 --tensor-dims 1024,1024 --src-shard-dim 0 --dst-shard-dim 1 --algorithm direct --validate --warmup 2 --iterations 3", "description": "DIRECT 2D cross-dim reshard, data validated." }
+      ]
     }
   },
 
@@ -462,6 +532,10 @@
     { "name": "B11. CTS force-override (PR#4657)",   "config": "b9_cts_force_override", "enabled": true },
     { "name": "B12. alltoall full-range guard",      "config": "b_large_alltoall_repro", "enabled": true },
 
-    { "name": "C1. IONIC counter validation",        "config": "c_counters",        "enabled": true }
+    { "name": "C1. IONIC counter validation",        "config": "c_counters",        "enabled": true },
+
+    { "name": "D1-D4. M2N reshard local (single-process, world 4/8)", "config": "d_m2n_local", "enabled": true },
+    { "name": "D5-D8. M2N reshard MPI (multi-process, world 4/8)",    "config": "d_m2n_mpi",   "enabled": true },
+    { "name": "D9-D16. M2N reshard_bench --validate matrix",          "config": "d_m2n_bench", "enabled": true }
   ]
 }

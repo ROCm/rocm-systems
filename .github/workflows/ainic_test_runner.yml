@@ -10,18 +10,30 @@
 #   Group A - NetIbMPI + GIN component/unit gtests (rccl-UnitTestsMPI binary).
 #   Group B - NCCL_NET plugin x knobs sweep on rccl-tests perf binaries.
 #   Group C - IONIC hardware counter validation.
+#   Group D - nccl_m2n M2N reshard (contrib/nccl_m2n binaries: reshard_bench
+#             and basic_api_test_{local,mpi}); single node.
 #
 # Triggers: manual (workflow_dispatch), nightly (schedule) against the default
 # branch, and label-gated on PRs -- add the "ainic-test" label to run a fast
-# smoke subset (Group A + selected B suites). Not a required merge gate.
+# smoke subset (Group A + selected B suites + the Group D functional reshard
+# matrices). Not a required merge gate.
 #
 # Build strategy: the runner is a SLURM submit node with no local GPUs, so
 # everything runs inside one SLURM batch job (sbatch --wait) on the GPU compute
 # nodes. Phase 0 builds RCCL fresh with --enable-mpi-tests from this run's own
 # checkout on the compute node (install.sh defaults -j to $(nproc), using all of
-# the node's cores). Both groups then run against that same fresh build: Group A
-# uses the freshly built rccl-UnitTestsMPI gtest binary; Group B/C uses prebuilt
-# rccl-tests perf binaries that load the fresh librccl.so via LD_LIBRARY_PATH.
+# the node's cores). It also builds contrib/nccl_m2n against that fresh librccl
+# via the rccl_tests_build_configuration hook (Group D binaries). All groups then
+# run against that same fresh build: Group A uses the freshly built
+# rccl-UnitTestsMPI gtest binary; Group B/C uses prebuilt rccl-tests perf binaries
+# that load the fresh librccl.so via LD_LIBRARY_PATH; Group D uses the freshly
+# built nccl_m2n binaries linked against the fresh librccl.so.
+#
+# Group D note: the reshard user-window path requires the AINIC/ionic runtime env
+# (RCCL_AINIC_ROCE / IONIC_LOCKFREE / NCCL_SOCKET_IFNAME), which --system ainic
+# applies; without it the reshard hangs. D1-D8 (basic_api_test_*) are gtest
+# binaries that only build when GTEST_DIR points at a prebuilt googletest tree;
+# D9-D16 (reshard_bench) need no gtest and always build.
 name: AINIC RCCL Test Runner
 
 on:
@@ -91,6 +103,11 @@ env:
   # Prebuilt rccl-tests perf binaries for Group B/C (they load librccl.so at
   # runtime via LD_LIBRARY_PATH; see the build-strategy note in the header).
   DEFAULT_RCCL_TESTS_BIN: /it-share/rccl-ci/rccl-tests-2.30.4/bin
+  # Googletest for the Group D functional tests (D1-D8 basic_api_test_*). Built
+  # once from this ROCm-mirrored tarball into GTEST_DIR and cached under the
+  # shared CI root (see the Phase -1 step). reshard_bench (D9-D16) needs no gtest.
+  GTEST_URL: https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/googletest-1.16.0.tar.gz
+  GTEST_DIR_CACHE: /it-share/rccl-ci/gtest-prebuilt
   # SLURM allocation defaults (single source of truth; workflow_dispatch inputs
   # override them when non-empty).
   DEFAULT_SALLOC_PARTITION: amd-tw
@@ -101,8 +118,11 @@ env:
   DEFAULT_SALLOC_EXCLUDE: ''
   # PR subset for the label-gated path: Group A component gtests + selected B
   # suites (IB baseline, CAST full alltoall, autodetect on/off, ROCM-IB no
-  # offload, CTS force-override, and the full-range guard). Skips B3-B7 and C1.
-  SMOKE_SUITES: 'A*. Component*,B1.*,B2.*,B8.*,B9.*,B10.*,B11.*,B12.*'
+  # offload, CTS force-override, and the full-range guard) + the Group D
+  # functional reshard matrices D1-D4 (single-process local) and D5-D8 (MPI) --
+  # the 51-case (world 4) and 192-case (world 8) RING/DIRECT sweeps. Skips B3-B7,
+  # C1, and D9-D16 (the reshard_bench matrix runs nightly, not on the PR smoke).
+  SMOKE_SUITES: 'A*. Component*,B1.*,B2.*,B8.*,B9.*,B10.*,B11.*,B12.*,D1-D4.*,D5-D8.*'
 
 jobs:
   ainic-test-runner:
@@ -169,28 +189,34 @@ jobs:
         run: |
           set -o pipefail
 
-          # Split TEST_SUITES (or default to "everything") into a Group A glob
-          # and a Group B/C glob for --suite-name, since the two groups need
-          # different RCCL_BUILD_DIR/RCCL_TESTS_BIN and must run as separate
-          # test_runner.py invocations (its build dir is a single global value
-          # for the whole process). All Group A test_suites entries are named
-          # "A<n>. Component - ..." in ainic.json.
+          # Split TEST_SUITES (or default to "everything") into a Group A glob, a
+          # Group B/C glob, and a Group D glob for --suite-name, since the groups
+          # need different RCCL_BUILD_DIR/RCCL_TESTS_BIN/WORKDIR and must run as
+          # separate test_runner.py invocations (its build dir is a single global
+          # value for the whole process). All Group A test_suites entries are named
+          # "A<n>. Component - ..." and all Group D entries "D<n>..." in ainic.json.
+          # The B/C default excludes both A and D via negated globs.
           GROUP_A_FILTER="A*. Component*"
-          GROUP_BC_FILTER="-A*. Component*"
+          GROUP_BC_FILTER="-A*. Component*:-D*"
+          GROUP_D_FILTER="D*"
           RUN_GROUP_A=1
           RUN_GROUP_BC=1
+          RUN_GROUP_D=1
           if [ -n "${TEST_SUITES}" ]; then
             GROUP_A_LIST=""
             GROUP_BC_LIST=""
+            GROUP_D_LIST=""
             IFS=',' read -ra _suite_tokens <<< "${TEST_SUITES}"
             for tok in "${_suite_tokens[@]}"; do
               case "${tok}" in
                 A*". Component"*) GROUP_A_LIST="${GROUP_A_LIST:+${GROUP_A_LIST}:}${tok}" ;;
+                D*)               GROUP_D_LIST="${GROUP_D_LIST:+${GROUP_D_LIST}:}${tok}" ;;
                 *)                GROUP_BC_LIST="${GROUP_BC_LIST:+${GROUP_BC_LIST}:}${tok}" ;;
               esac
             done
             if [ -n "${GROUP_A_LIST}" ]; then GROUP_A_FILTER="${GROUP_A_LIST}"; else RUN_GROUP_A=0; fi
             if [ -n "${GROUP_BC_LIST}" ]; then GROUP_BC_FILTER="${GROUP_BC_LIST}"; else RUN_GROUP_BC=0; fi
+            if [ -n "${GROUP_D_LIST}" ]; then GROUP_D_FILTER="${GROUP_D_LIST}"; else RUN_GROUP_D=0; fi
           fi
 
           # Run inside a SLURM batch job (sbatch, not interactive salloc): it
@@ -213,11 +239,13 @@ jobs:
           fi
 
           # sbatch --export=ALL (default) forwards these to the batch job.
-          export RUN_GROUP_A RUN_GROUP_BC GROUP_A_FILTER GROUP_BC_FILTER \
+          export RUN_GROUP_A RUN_GROUP_BC RUN_GROUP_D \
+                 GROUP_A_FILTER GROUP_BC_FILTER GROUP_D_FILTER \
                  GROUP_A_RCCL_BUILD_DIR GROUP_BC_RCCL_BUILD_DIR GROUP_BC_RCCL_TESTS_BIN \
                  RCCL_BUILD_OVERRIDE \
                  GITHUB_WORKSPACE TEST_RUNNER_DIR RUNNER_TEMP \
-                 WORKDIR MPI_PATH ROCM_PATH
+                 WORKDIR MPI_PATH ROCM_PATH \
+                 RCCL_CI_ROOT GTEST_URL GTEST_DIR_CACHE
 
           BATCH_SCRIPT="${RUNNER_TEMP}/ainic_job.sbatch"
           SLURM_OUT="${RUNNER_TEMP}/ainic_slurm.out"
@@ -231,21 +259,68 @@ jobs:
           cd "${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}"
           overall_rc=0
 
+          # Phase -1: prepare GTEST_DIR for the Group D functional tests (D1-D8
+          # basic_api_test_*). Makefile.rocm's `tests` target needs a googletest
+          # tree (include/ + lib/libgtest.a, linked -no-pie); reshard_bench (D9-D16)
+          # needs none. Build libgtest.a once from the ROCm-mirrored tarball and
+          # cache it under the shared CI root so later runs reuse it. Only needed
+          # when Group D runs; export GTEST_DIR so the Phase 0
+          # rccl_tests_build_configuration hook (`make ... tests GTEST_DIR=...`)
+          # picks it up.
+          if [ "${RUN_GROUP_D}" = "1" ]; then
+            GTEST_DIR="${GTEST_DIR_CACHE}"
+            if [ ! -f "${GTEST_DIR}/lib/libgtest.a" ] || [ ! -f "${GTEST_DIR}/include/gtest/gtest.h" ]; then
+              echo "================================================================"
+              echo "Phase -1: build+cache googletest -> ${GTEST_DIR}"
+              echo "================================================================"
+              _gt_tmp="$(mktemp -d)"
+              if curl -fsSL "${GTEST_URL}" -o "${_gt_tmp}/gt.tgz" \
+                 && tar -xzf "${_gt_tmp}/gt.tgz" -C "${_gt_tmp}"; then
+                _gt_src="${_gt_tmp}/googletest-1.16.0/googletest"
+                mkdir -p "${GTEST_DIR}/lib"
+                if "${ROCM_PATH}/llvm/bin/clang++" -std=c++17 \
+                       -isystem "${_gt_src}/include" -I"${_gt_src}" \
+                       -c "${_gt_src}/src/gtest-all.cc" -o "${_gt_tmp}/gtest-all.o" \
+                   && ar rcs "${GTEST_DIR}/lib/libgtest.a" "${_gt_tmp}/gtest-all.o"; then
+                  cp -a "${_gt_src}/include" "${GTEST_DIR}/"
+                fi
+              fi
+              rm -rf "${_gt_tmp}"
+            fi
+            if [ -f "${GTEST_DIR}/lib/libgtest.a" ] && [ -f "${GTEST_DIR}/include/gtest/gtest.h" ]; then
+              export GTEST_DIR
+              echo "GTEST_DIR ready: ${GTEST_DIR}"
+            else
+              echo "WARNING: GTEST_DIR prep failed; Group D functional tests (D1-D8)"
+              echo "         will not build. Continuing (reshard_bench D9-D16 still builds)."
+              unset GTEST_DIR
+            fi
+          fi
+
           # Phase 0: build RCCL with --enable-mpi-tests on THIS compute node
           # rather than the 8-core submit node. No RCCL_BUILD_DIR here, so
           # test_runner.py invokes install.sh, which defaults -j to $(nproc) and
           # therefore uses ALL of the compute node's cores. WORKDIR points at this
-          # run's own checkout so install.sh and the build tree resolve there (on
-          # /it-share, shared with every node in the allocation).
+          # run's own checkout (=.../projects/rccl) so install.sh and the build tree
+          # resolve there (on /it-share, shared with every node in the allocation).
+          # This same invocation (no --no-build) also runs the
+          # rccl_tests_build_configuration hook, which builds contrib/nccl_m2n
+          # (Group D binaries) against the just-built librccl. --skip-tests only
+          # skips test execution, not the build steps.
           #
           # When to build:
           #   - Group A always needs a fresh --enable-mpi-tests build (that is
           #     where its rccl-UnitTestsMPI gtest binary comes from).
+          #   - Group D always needs a fresh build too: its nccl_m2n binaries are
+          #     produced by the rccl_tests_build_configuration hook, which only runs
+          #     during a build (non --no-build) invocation, and they must link the
+          #     version-matched fresh librccl.so (a stale prebuilt lib triggers an
+          #     "NCCL library version too old" abort).
           #   - Group B/C needs a build only when NO prebuilt override was given
           #     (RCCL_BUILD_OVERRIDE empty); with an override it loads that
           #     prebuilt librccl.so and the build is skipped.
           NEED_BUILD=0
-          if [ "${RUN_GROUP_A}" = "1" ]; then
+          if [ "${RUN_GROUP_A}" = "1" ] || [ "${RUN_GROUP_D}" = "1" ]; then
             NEED_BUILD=1
           elif [ "${RUN_GROUP_BC}" = "1" ] && [ -z "${RCCL_BUILD_OVERRIDE}" ]; then
             NEED_BUILD=1
@@ -305,6 +380,31 @@ jobs:
             [ "${rc}" -ne 0 ] && overall_rc=1
           else
             echo "SKIP: Group B/C (no matching suites in --suite-name selection)"
+          fi
+
+          if [ "${RUN_GROUP_D}" = "1" ]; then
+            echo "================================================================"
+            echo "Group D: nccl_m2n M2N reshard (fresh nccl_m2n + fresh librccl.so)"
+            echo "================================================================"
+            # WORKDIR mirrors Phase 0 (=.../projects/rccl) so the ${WORKDIR}-based
+            # nccl_m2n binary paths in ainic.json (contrib/nccl_m2n/build/bin/*)
+            # resolve to where the Phase 0 hook built them. RCCL_BUILD_DIR is the
+            # fresh build/debug so the runner loads the version-matched librccl.so
+            # (build dir goes first on LD_LIBRARY_PATH). --system ainic supplies the
+            # ionic runtime env the reshard user-window path requires.
+            WORKDIR="${GITHUB_WORKSPACE}/projects/rccl" \
+            RCCL_BUILD_DIR="${GROUP_A_RCCL_BUILD_DIR}" \
+            python3 test_runner.py \
+              --config configs/ainic.json \
+              --system ainic \
+              --no-build \
+              --suite-name "${GROUP_D_FILTER}" \
+              --report-suffix groupD \
+              2>&1 | tee "${RUNNER_TEMP}/ainic_run_groupD.log"
+            rc=$?
+            [ "${rc}" -ne 0 ] && overall_rc=1
+          else
+            echo "SKIP: Group D (no matching suites in --suite-name selection)"
           fi
 
           exit "${overall_rc}"
