@@ -7,6 +7,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added multi-process PC sampling across profile and analyze modes.
+  * Profile mode writes one PID-prefixed `<pid>_ps_file_results.json` per process.
+  * Analyze mode reports every process in a single run, with a `pid` column
+    identifying each one.
+
 ### Changed
 
 * ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) are no longer allowed with PC-sampling-only profiling; the run now fails with an error telling the user to drop the ML API tracing flag or add a counter block, since without counters there is nothing to correlate the markers against.

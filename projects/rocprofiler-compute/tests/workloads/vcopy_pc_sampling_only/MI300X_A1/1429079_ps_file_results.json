@@ -27,10 +27,10 @@
         ],
         "config": {
           "output_path": "/app/projects/rocprofiler-compute/workloads/vcopy_pcsampling/MI300X_A1",
-          "output_file": "ps_file",
+          "output_file": "1429079_ps_file",
           "tmp_directory": "/app/projects/rocprofiler-compute",
           "raw_output_path": "/app/projects/rocprofiler-compute/workloads/vcopy_pcsampling/MI300X_A1",
-          "raw_output_file": "ps_file",
+          "raw_output_file": "%pid%_ps_file",
           "raw_tmp_directory": "%cwd%",
           "perfetto_shmem_size_hint": 64,
           "perfetto_buffer_size": 1048576,

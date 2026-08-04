@@ -162,7 +162,7 @@ class Kernel(Base):
 
 class CodeObjectStore(Base):
     __tablename__ = f"{PREFIX}code_object_store"
-    # code_object_id is only unique per process, so pid disambiguates it.
+    # code_object_id is process-local within a workload.
     __table_args__ = (UniqueConstraint("workload_id", "pid", "code_object_id"),)
 
     code_object_uuid = Column(Integer, primary_key=True)
@@ -639,8 +639,13 @@ class Database:
                 WorkloadMetricValue,
                 MetricDefinition.metric_uuid == WorkloadMetricValue.metric_uuid,
             ),
+            # One row per sampled instruction line. Identity is
+            # (pid, code_object_id, kernel, offset): the same offset in two
+            # processes can be different code, so the rows stay separate.
             "pc_sampling": select(
                 CodeObjectStore.workload_id.label("workload_id"),
+                CodeObjectStore.pid.label("pid"),
+                CodeObjectStore.code_object_id.label("code_object_id"),
                 Kernel.kernel_uuid.label("kernel_uuid"),
                 Kernel.kernel_name,
                 InstructionLine.code_object_offset.label("offset"),
