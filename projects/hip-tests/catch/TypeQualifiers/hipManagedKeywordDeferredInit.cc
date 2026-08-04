@@ -461,11 +461,67 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyPeer) {
   HIP_CHECK(hipMemcpyPeer(g_managed_b, /*dstDevice=*/1, g_managed_a,
                           /*srcDevice=*/0, kN * sizeof(int)));
 
+  HIP_CHECK(hipDeviceSynchronize());
+
   for (int i = 0; i < kN; ++i) {
     INFO("Index " << i);
     REQUIRE(g_managed_b[i] == i);
   }
 }
+
+// Deferred managed-variable initialization of a peer device must keep hipMemcpyPeerAsync
+// host-asynchronous and must still produce the copied data. Device 1's initialization is queued
+// behind its blocked null stream while the copy runs on a nonblocking stream of device 0, so an
+// initialization step that waited on the host would deadlock here.
+#if HT_AMD
+HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyPeerAsync_SyncBehavior) {
+  int numDevices = 0;
+  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  if (numDevices < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
+  }
+  CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(0);
+  CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(1);
+  int canAccess = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, 0, 1));
+  if (!canAccess) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    return;
+  }
+
+  HIP_CHECK(hipSetDevice(1));
+  LinearAllocGuard<int> destination(LinearAllocs::hipMalloc, kStaticInitLen * sizeof(int));
+
+  // Neither hipMalloc nor hipStreamAddCallback touches a managed symbol, so device 1 is still
+  // uninitialized once its null stream is blocked.
+  HipTest::BlockingContext blockedDestinationNullStream{nullptr};
+  HIP_CHECK(blockedDestinationNullStream.block_stream());
+  REQUIRE(blockedDestinationNullStream.is_blocked());
+
+  HIP_CHECK(hipSetDevice(0));
+  StreamGuard copyStream(Streams::withFlags, hipStreamNonBlocking);
+  HIP_CHECK(hipMemcpyPeerAsync(destination.ptr(), /*dstDevice=*/1, g_managed_initialized,
+                               /*srcDevice=*/0, kStaticInitLen * sizeof(int),
+                               copyStream.stream()));
+
+  // The copy cannot complete while device 1's initialization is still blocked.
+  HIP_CHECK_ERROR(hipStreamQuery(copyStream.stream()), hipErrorNotReady);
+
+  blockedDestinationNullStream.unblock_stream();
+  HIP_CHECK(hipStreamSynchronize(copyStream.stream()));
+  REQUIRE(hipStreamQuery(copyStream.stream()) == hipSuccess);
+
+  HIP_CHECK(hipSetDevice(1));
+  std::vector<int> result(kStaticInitLen);
+  HIP_CHECK(hipMemcpy(result.data(), destination.ptr(), kStaticInitLen * sizeof(int),
+                      hipMemcpyDeviceToHost));
+  for (int i = 0; i < kStaticInitLen; ++i) {
+    INFO("Index " << i);
+    REQUIRE(result[i] == i + 1);
+  }
+}
+#endif  // HT_AMD
 
 // hipMemcpyAsync must initialize managed symbols for the stream's device, not
 // the current device. A zero-byte copy isolates initialization from copy effects.

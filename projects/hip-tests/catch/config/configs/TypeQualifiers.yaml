@@ -28,6 +28,10 @@ TypeQualifiers:
     <<: *level_2
     # SWDEV-396615 mGPUs not considered correctly
     disabled: [amd_windows, amd_wsl]
+  Unit_hipManagedKeyword_hipMemcpyPeerAsync_SyncBehavior:
+    <<: *level_2
+    # SWDEV-396615 mGPUs not considered correctly
+    disabled: [amd_windows, amd_wsl]
   Unit_hipManagedKeyword_hipMemcpyAsync_CrossCurrentDeviceStream:
     <<: *level_2
     disabled: [amd_wsl]

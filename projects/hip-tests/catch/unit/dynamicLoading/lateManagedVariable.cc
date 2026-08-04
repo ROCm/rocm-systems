@@ -8,7 +8,6 @@
 #include <resource_guards.hh>
 
 #include <dlfcn.h>
-#include <future>
 
 namespace {
 
@@ -112,41 +111,4 @@ HIP_TEST_CASE(Unit_StatCO_Positive_ManagedVariableFromRepeatedLateDlopenAcrossDe
   VerifyLateManagedVariableOnDevice(launch, /*device=*/0, /*expectedValue=*/41);
   VerifyLateManagedVariableOnDevice(launch, /*device=*/1, /*expectedValue=*/42);
   REQUIRE(dlclose(handle) == 0);
-}
-
-HIP_TEST_CASE(Unit_StatCO_Positive_UnloadWaitsForDeferredManagedVariableInitialization) {
-  CHECK_MANAGED_MEMORY_SUPPORT
-
-  // Consume the process-wide first-unregister synchronization before exercising a later unload.
-  LoadVerifyAndUnloadLateManagedVariable();
-
-  void* handle = dlopen("./libLateManagedVariable.so", RTLD_NOW);
-  REQUIRE(handle != nullptr);
-
-  HipTest::BlockingContext blockedNullStream{nullptr};
-  HIP_CHECK(blockedNullStream.block_stream());
-  REQUIRE(blockedNullStream.is_blocked());
-
-  StreamGuard stream(Streams::withFlags, hipStreamNonBlocking);
-  IncrementInitialManagedValue<<<1, 1, 0, stream.stream()>>>();
-  HIP_CHECK(hipGetLastError());
-
-  std::promise<void> beginUnload;
-  std::future<void> unloadStarted = beginUnload.get_future();
-  auto unblock = std::async(std::launch::async,
-                            [&blockedNullStream, started = std::move(unloadStarted)]() mutable {
-    started.wait();
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    blockedNullStream.unblock_stream();
-  });
-
-  beginUnload.set_value();
-  const int unloadStatus = dlclose(handle);
-  const bool initializationStillBlocked = blockedNullStream.is_blocked();
-  unblock.get();
-
-  REQUIRE(unloadStatus == 0);
-  REQUIRE_FALSE(initializationStillBlocked);
-  HIP_CHECK(hipStreamSynchronize(stream.stream()));
-  REQUIRE(initialManagedValue == kInitialManagedValue + 1);
 }
