@@ -3,8 +3,30 @@
  *
  * SPDX-License-Identifier: MIT
  */
-// A fresh process keeps the completed generation unpublished until the
-// barrier-synchronized launches contend on managed-variable initialization.
+
+/*
+ * Child-process executable for Unit_StatCO_ManagedVarConcurrentFirstTouch.
+ *
+ * WHY A CHILD PROCESS:
+ *   StatCO::InitManagedVarDevicePtr sets a per-device atomic flag that is
+ *   PROCESS-GLOBAL state in the PlatformState singleton.  It is triggered by
+ *   the very first call to ihipModuleLaunchKernel in the process.  When tests
+ *   run inside the main Catch2 binary, earlier test cases have already launched
+ *   kernels, so the flag is already set long before this test runs and the
+ *   concurrent first-touch race window is permanently closed.  By running in a
+ *   fresh child process (spawned via hip::SpawnProc), the barrier-synchronised
+ *   threads below perform the FIRST kernel launch of the entire process,
+ *   maximising the chance of overlapping first-touch paths colliding on
+ *   InitManagedVarDevicePtr.
+ *
+ * WHAT RACE IS TARGETED:
+ *   Tests static code object race conditions. Specifically managed variables
+ *
+ * IMPORTANT CONSTRAINT:
+ *   No HIP kernel must be launched before the barrier-synchronised burst.
+ *   Any premature launch would call ihipModuleLaunchKernel and set the flag,
+ *   closing the race window before the threads are released.
+ */
 
 #include <hip/hip_runtime.h>
 

@@ -3,11 +3,13 @@
  *
  * SPDX-License-Identifier: MIT
  */
+
 #include <hip_test_common.hh>
 #include <resource_guards.hh>
 #include <dlfcn.h>
 #include <pthread.h>
 #include <atomic>
+#include <thread>
 #include <vector>
 
 /**
@@ -174,6 +176,15 @@ static void* churner_fn(void* arg) {
 
     ctx->dlopen_success_count->fetch_add(1);
 
+    void* sym = dlsym(handle, "lazyLoad");
+    if (sym) {
+      int (*fp)() = reinterpret_cast<int (*)()>(sym);
+      /* We do not assert on the return value here; the purpose of the
+       * call is just to exercise the registered fat binary path before
+       * dlclose triggers removal. */
+      (void)fp();
+    }
+
     /* dlclose -> static destructors -> __hipUnregisterFatBinary ->
      * StatCO::RemoveFatBinary: this is the racing erase. */
     dlclose(handle);
@@ -189,11 +200,14 @@ HIP_TEST_CASE(Unit_StatCO_ConcurrentDlopenDlcloseWhileLaunching) {
   HIPCHECK(hipSetDevice(0));
 
   constexpr int kWorkers = 4;
-  constexpr int kChurners = 1;
+  constexpr int kChurners = 2;
   constexpr int kTotalThreads = kWorkers + kChurners;
   /* Worker launches are cheap (kernel launch + sync), so iterate many times to
-   * keep the functions_.find load high. Each churn cycle registers and removes
-   * the library's fat binary without invoking its memory-intensive kernels. */
+   * keep the functions_.find load high. Churner cycles each do a full dlopen ->
+   * fat-binary digest/kernel-build -> dlclose, which is expensive, so they are
+   * bounded to a much smaller count to keep CI runtime sane. The race is
+   * exercised on every churn cycle (each one erases the lib's funcs while the
+   * workers are finding), so a few dozen cycles still gives strong coverage. */
   constexpr int kWorkerIters = 300;
   constexpr int kChurnerIters = 40;
   constexpr int kN = 1024;  /* Small buffer; latency matters, not bandwidth. */
