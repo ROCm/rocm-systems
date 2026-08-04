@@ -95,7 +95,7 @@ and :doc:`GPU isolation <rocm:conceptual/gpu-isolation>`.
     * - | ``GPU_MAX_HW_QUEUES``
         | The maximum number of hardware queues allocated per device.
       - ``4``
-      - | ``GPU number-1``: If GPU number is greater than 4.
+      - | It is recommended to set the this value to 4.
         | The variable controls how many independent hardware queues HIP runtime can create per process,
         | per device. If an application allocates more HIP streams than this number, then HIP runtime reuses
         | the same hardware queues for the new streams in a round-robin manner. Note that this maximum
