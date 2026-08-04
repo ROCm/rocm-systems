@@ -38,9 +38,12 @@ typedef struct rj_gfx1250_b0_to_a0_translation_info_s {
 /// @param[out] translated_size Number of bytes in @p translated_elf.
 /// @retval ROCJITSU_STATUS_SUCCESS Translation succeeded.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT An input or output argument is invalid.
-/// @retval ROCJITSU_STATUS_INVALID_CODE_OBJECT The input is not a gfx1250 code object.
-/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Output allocation failed.
-/// @retval ROCJITSU_STATUS_ERROR Translation failed or produced a non-dispatchable object.
+/// @retval ROCJITSU_STATUS_INVALID_CODE_OBJECT The input is not a gfx1250 code object, or
+///         translating it produced nothing dispatchable. Both are properties of the input, so
+///         repeating the call reaches the same verdict.
+/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Output allocation failed. Environmental: the same
+///         input may translate on a later attempt.
+/// @retval ROCJITSU_STATUS_ERROR The translator threw. Carries no promise about the input.
 #ifdef __cplusplus
 [[nodiscard]]
 #endif

@@ -43,8 +43,14 @@ rj_status_t rj_gfx1250_b0_to_a0_translate_with_info(const void *source_elf, size
         ++info->changed_instruction_count;
     });
     auto result = translator.translate(source);
+    // A translation that ran to completion and produced nothing dispatchable is a
+    // statement about the input, not about this run: repeating it reaches the same
+    // conclusion. Reporting it as such is what lets a caller distinguish it from
+    // the environmental failures below and cache the verdict rather than
+    // rediscovering it. ROCJITSU_STATUS_ERROR is left to mean the translator threw,
+    // which carries no such promise.
     if (result.elf_bytes.empty() || !result.dispatchable())
-      return ROCJITSU_STATUS_ERROR;
+      return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
 
     auto *output = static_cast<uint8_t *>(std::malloc(result.elf_bytes.size()));
     if (!output)
