@@ -14,6 +14,7 @@
     "NCCL_DEBUG": "WARN"
   },
   "build_configuration": {
+    "build_type": "release",
     "install_flags": ["-t", "-l", "--no_clean"],
     "cmake_options": "",
     "env_variables": {

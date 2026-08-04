@@ -44,21 +44,84 @@ RCCL_BUILD_TYPES = ("debug", "release")
 DEBUG_ONLY_INSTALL_FLAGS = ("--debug", "--debug-fast", "--enable-mpi-tests")
 
 
-def resolve_rccl_build_type(build_config, override=None):
+def classify_test_kinds(config_data):
+    """
+    Determine which kinds of tests a config actually runs.
+
+    ``is_gtest`` is resolved the way the executor resolves it -- per-test value,
+    else suite value, else the test_configuration's value following its
+    ``extends`` chain, else True. Only configurations referenced by an enabled
+    suite are considered, so abstract base entries never count on their own.
+
+    Args:
+        config_data: Raw (unexpanded) configuration dict
+
+    Returns:
+        tuple: (runs_rccl_tests, runs_gtest) booleans
+    """
+    test_configs = config_data.get("test_configurations", {}) or {}
+    suites = config_data.get("test_suites", []) or []
+
+    def inherited_is_gtest(name, seen=()):
+        node = test_configs.get(name)
+        if not isinstance(node, dict):
+            return None
+        if isinstance(node.get("is_gtest"), bool):
+            return node["is_gtest"]
+        parents = node.get("extends", [])
+        if not isinstance(parents, list):
+            parents = [parents]
+        for parent in parents:
+            if parent not in seen:
+                value = inherited_is_gtest(parent, seen + (name,))
+                if value is not None:
+                    return value
+        return None
+
+    runs_rccl_tests = False
+    runs_gtest = False
+    for suite in suites:
+        if not isinstance(suite, dict) or not suite.get("enabled", True):
+            continue
+        config_name = suite.get("config")
+        node = test_configs.get(config_name)
+        suite_value = suite.get("is_gtest")
+        if not isinstance(suite_value, bool):
+            suite_value = inherited_is_gtest(config_name)
+
+        tests = node.get("tests") if isinstance(node, dict) else None
+        for test in (tests or [{}]):
+            value = test.get("is_gtest") if isinstance(test, dict) else None
+            if not isinstance(value, bool):
+                value = suite_value
+            if value is False:
+                runs_rccl_tests = True
+            else:
+                runs_gtest = True
+
+    return runs_rccl_tests, runs_gtest
+
+
+def resolve_rccl_build_type(build_config, override=None, perf_only=False):
     """
     Resolve which RCCL build flavor ("debug" or "release") to build and test against.
 
     Precedence, highest first:
       1. override                            (the --rccl-build-type CLI flag)
       2. build_configuration.build_type      (JSON config)
-      3. presence of --debug/--debug-fast in build_configuration.install_flags
+      3. "release" when perf_only            (config runs only rccl-tests)
+      4. presence of --debug/--debug-fast in build_configuration.install_flags
 
-    Rule 3 is the historical behavior and remains the default so existing configs
-    keep resolving to the same flavor they always did.
+    Rule 4 is the historical behavior, so mixed and gtest-only configs keep
+    resolving to the flavor they always did. Rule 3 exists because perf numbers
+    measured against a Debug build are meaningless: a config whose suites run
+    nothing but rccl-tests binaries has no reason to want Debug, so it must say
+    so explicitly (rule 1 or 2) rather than inherit it from a stray --debug.
 
     Args:
         build_config: The "build_configuration" section (may be empty/None)
         override: Explicit build type, or None
+        perf_only: True when every enabled suite runs rccl-tests binaries
 
     Returns:
         str: "debug" or "release"
@@ -77,6 +140,9 @@ def resolve_rccl_build_type(build_config, override=None):
                     f"{', '.join(RCCL_BUILD_TYPES)}"
                 )
             return build_type
+
+    if perf_only:
+        return "release"
 
     install_flags = (build_config or {}).get("install_flags", [])
     if "--debug" in install_flags or "--debug-fast" in install_flags:
@@ -172,11 +238,14 @@ class TestConfigProcessor:
         # Validate against the JSON schema
         self._validate_schema(config_data, config_file)
 
+        self.runs_rccl_tests, self.runs_gtest = classify_test_kinds(config_data)
+
         # Resolve the RCCL build flavor before any expansion below, and export it
         # so configs can point paths at the selected build with
         # "${WORKDIR}/build/${RCCL_BUILD_TYPE}" instead of hardcoding debug/release.
         self.rccl_build_type = resolve_rccl_build_type(
-            config_data.get("build_configuration", {}), build_type_override
+            config_data.get("build_configuration", {}), build_type_override,
+            perf_only=self.runs_rccl_tests and not self.runs_gtest,
         )
         os.environ["RCCL_BUILD_TYPE"] = self.rccl_build_type
 
@@ -548,6 +617,15 @@ class TestConfigProcessor:
             str: "debug" or "release"
         """
         return self.rccl_build_type
+
+    def get_test_kinds(self):
+        """
+        Get which kinds of tests this config runs.
+
+        Returns:
+            tuple: (runs_rccl_tests, runs_gtest) booleans
+        """
+        return self.runs_rccl_tests, self.runs_gtest
 
     def get_rccl_tests_build_config(self):
         """

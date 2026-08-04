@@ -52,6 +52,12 @@ def main():
         # Create test executor
         executor = TestExecutor(config_processor, args)
 
+        # Refuse to benchmark rccl-tests against a Debug build of RCCL
+        if not executor.check_perf_build_type():
+            if args.verbose:
+                print("Exiting: Debug build rejected for an rccl-tests config")
+            sys.exit(1)
+
         # Check environment
         if not executor.check_environment():
             if args.verbose:

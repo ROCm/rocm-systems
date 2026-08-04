@@ -46,7 +46,7 @@ Examples:
   %(prog)s -c test_config.json --build-dir /tmp/my_rccl_build
 
   # Build and test against a Release build of RCCL (build/release)
-  %(prog)s -c mi455_ainic_roce_perf_release.json --rccl-build-type release
+  %(prog)s -c mi455_ainic_roce_perf.json --rccl-build-type release
 
   # Generate coverage report from existing data
   %(prog)s -c test_config.json --no-build --skip-tests --coverage-report
@@ -115,6 +115,14 @@ Examples:
                  "the release librccl.so. Overrides build_configuration.build_type; default is "
                  "whatever the config selects (debug when its install_flags contain "
                  "--debug/--debug-fast, else release)."
+        )
+        self.parser.add_argument(
+            '--allow-debug-perf',
+            action='store_true',
+            default=False,
+            help="Permit running rccl-tests perf binaries against a Debug build of RCCL. "
+                 "Without this the runner refuses, because perf numbers measured against "
+                 "a Debug build are not meaningful."
         )
         self.parser.add_argument(
             '--report-suffix',
@@ -234,6 +242,7 @@ Examples:
             print(f"Coverage report:   {args.coverage_report}")
             print(f"Build dir:         {args.build_dir if args.build_dir else 'default'}")
             print(f"RCCL build type:   {args.rccl_build_type if args.rccl_build_type else 'from config'}")
+            print(f"Allow debug perf:  {args.allow_debug_perf}")
             print(f"Report suffix:     {args.report_suffix}")
             print(f"Rerun failed:      {args.rerun_failed}")
             print(f"Skip MPI check:    {args.skip_mpi_check}")

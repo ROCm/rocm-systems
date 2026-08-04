@@ -106,7 +106,7 @@ JSON config.
 
 ```bash
 # Build and test against a Release build of RCCL
-python test_runner.py --config mi455_ainic_roce_perf_release.json
+python test_runner.py --config mi455_ainic_roce_perf.json
 
 # Force Release for a config that would otherwise build Debug
 python test_runner.py --config mi455_ainic_roce_perf.json --rccl-build-type release
@@ -116,19 +116,43 @@ Resolution order (highest first):
 
 1. `--rccl-build-type debug|release`
 2. `build_configuration.build_type` in the JSON config
-3. Inferred from `build_configuration.install_flags` — `debug` if it contains
+3. `release`, when every enabled suite runs `rccl-tests` (see
+   [Perf configs must be Release](#perf-configs-must-be-release))
+4. Inferred from `build_configuration.install_flags` — `debug` if it contains
    `--debug` or `--debug-fast`, otherwise `release` (the historical behavior, so
-   configs without `build_type` keep building exactly what they always did)
+   gtest and mixed configs without `build_type` keep building exactly what they
+   always did)
 
 For a Release build the runner drops the debug-only `install.sh` flags
 (`--debug`, `--debug-fast`, `--enable-mpi-tests`) and prints a note for each;
 `install.sh` itself rejects `--enable-mpi-tests` unless `--debug` is given. Debug
 builds get `--debug` added if the flags don't already select a debug flavor.
 
-Perf sweeps are the main use case: they run `rccl-tests` binaries
-(`all_reduce_perf`, ...) rather than RCCL's own MPI gtests, so nothing in them
-needs a Debug build. `configs/mi455_ainic_roce_perf_release.json` is the Release
-counterpart of `configs/mi455_ainic_roce_perf.json`.
+### Perf configs must be Release
+
+Perf numbers measured against a Debug build of RCCL are meaningless, so the
+runner makes it hard to produce them by accident. Two mechanisms:
+
+**A Release default.** A config whose enabled suites run *only* `rccl-tests`
+binaries (every test resolves to `is_gtest: false`) defaults to `release`, ahead
+of the `install_flags` inference. A stray `--debug` in such a config no longer
+drags the whole run into a Debug build; Debug has to be asked for explicitly via
+`build_type` or `--rccl-build-type`.
+
+**A startup guard.** If a config that runs `rccl-tests` still resolves to Debug,
+the runner says so loudly before building anything:
+
+- Config runs *only* `rccl-tests` → **hard error**. Debug can only have been
+  chosen explicitly, and there is no gtest suite that could justify it. Pass
+  `--allow-debug-perf` to proceed anyway.
+- Config *also* runs gtest suites → **warning**, and the run continues.
+  `rccl-UnitTestsMPI` and `rccl-UnitTestsFixturesDebug` do not exist in a
+  Release build, so Debug is genuinely required; the warning just records that
+  the perf numbers from that run are not representative.
+
+Mixed func+perf configs (`mi455_ainic_roce.json`, `mi355x_thor2_roce.json`,
+`mi300x_mellanox_ib.json`, `ainic.json`) therefore stay Debug by design. Run the
+dedicated perf configs when you need numbers you can publish.
 
 If a config's `rccl_tests_build_configuration.rccl_home` still points at the other
 flavor's directory (e.g. a pre-existing `${WORKDIR}/build/debug`), the runner
@@ -501,6 +525,7 @@ Optional:
   --coverage-report         Generate code coverage report (HTML + text)
   --build-dir PATH          Custom build directory path (default: <workdir>/build/debug or build/release)
   --rccl-build-type TYPE    RCCL build flavor to build and test against: 'debug' or 'release'. Overrides build_configuration.build_type; default is whatever the config selects
+  --allow-debug-perf        Permit running rccl-tests perf binaries against a Debug build (otherwise refused; perf numbers from a Debug build are meaningless)
   --rerun-failed            Rerun failed tests with additional environment variables
   --skip-mpi-check          Skip MPI: removes --enable-mpi-tests from build, skips MPI check, skips tests with num_ranks > 1
   --stop-on-rerun-failure   Stop testing immediately if a rerun also fails (requires --rerun-failed)
@@ -1241,7 +1266,8 @@ The test runner invokes `install.sh` directly, so build options map to `install.
 
 **All Options:**
 - `build_type` - `"debug"` or `"release"`; selects the `build/<flavor>` directory and
-  reconciles `install_flags` with it. Overridden by `--rccl-build-type`. See
+  reconciles `install_flags` with it. Overridden by `--rccl-build-type`, and defaults
+  to `"release"` for configs that only run `rccl-tests`. See
   [Select the RCCL Build Flavor](#select-the-rccl-build-flavor-debug-vs-release)
 - `install_flags` - List of `install.sh` command-line flags (e.g. `--debug`, `-t`, `-c`, `-l`)
 - `cmake_options` - Additional CMake options string passed via `install.sh --cmake-options` (e.g. `-DFOO=BAR`)

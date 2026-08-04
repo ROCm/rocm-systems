@@ -275,6 +275,7 @@ class TestExecutor:
         # RCCL build flavor ("debug"/"release"); the config processor has already
         # applied the --rccl-build-type override.
         self.rccl_build_type = config_processor.get_rccl_build_type()
+        self.runs_rccl_tests, self.runs_gtest = config_processor.get_test_kinds()
 
         # Setup directories
         self.setup_directories()
@@ -603,6 +604,52 @@ class TestExecutor:
         print("  - Or pass the CMake option through install.sh:")
         print('        ./install.sh --cmake-options "-DENABLE_CODE_COVERAGE=ON" ...')
         print("=" * 80)
+
+    def check_perf_build_type(self):
+        """
+        Refuse to benchmark rccl-tests against a Debug build of RCCL.
+
+        Perf numbers from a Debug build are not representative, so this is an
+        error for a config whose suites run nothing but rccl-tests -- such a
+        config defaults to Release, and can only reach Debug through an explicit
+        build_type or --rccl-build-type. Configs that also run gtest suites are
+        only warned: rccl-UnitTestsMPI and rccl-UnitTestsFixturesDebug do not
+        exist in a Release build, so Debug is genuinely required there.
+
+        Returns:
+            bool: False if the run should abort
+        """
+        if not self.runs_rccl_tests or self.rccl_build_type != "debug":
+            return True
+
+        # A custom lib/build dir is used verbatim, so the resolved flavor says
+        # nothing about what it actually contains.
+        if self.using_custom_lib:
+            return True
+
+        banner = "!" * 80
+        if self.runs_gtest or self.args.allow_debug_perf:
+            print(f"\n{banner}")
+            print("WARNING: rccl-tests perf binaries will run against a DEBUG build of RCCL")
+            print(f"         Build directory: {self.build_dir}")
+            if self.runs_gtest:
+                print("         This config also runs gtest suites that require a Debug build,")
+                print("         so the build type is left as-is.")
+            print("         Perf numbers from this run are NOT representative -- do not")
+            print("         publish or compare them against Release results.")
+            print(f"{banner}\n")
+            return True
+
+        print(f"\n{banner}")
+        print("ERROR: refusing to run rccl-tests perf binaries against a DEBUG build of RCCL")
+        print(f"       Build directory: {self.build_dir}")
+        print("       Every enabled suite in this config runs rccl-tests, so Debug was")
+        print("       selected explicitly via build_configuration.build_type or")
+        print("       --rccl-build-type. Perf numbers from a Debug build are meaningless.")
+        print("       Use --rccl-build-type release, or pass --allow-debug-perf if you")
+        print("       really do want to benchmark a Debug build.")
+        print(f"{banner}\n")
+        return False
 
     def _install_flags_for_build_type(self, install_flags):
         """
@@ -2500,13 +2547,7 @@ class TestExecutor:
             md = host_metadata.collect(rocm_version=re_mod._rocm_version(self._rocm_root()))
 
             # RCCL build type (perf configs should use a Release build).
-            install_flags = self.build_config.get("install_flags", []) if isinstance(self.build_config, dict) else []
-            if getattr(self, "using_custom_lib", False):
-                build_type = "custom"
-            elif any(f in install_flags for f in ("--debug", "--debug-fast")):
-                build_type = "debug"
-            else:
-                build_type = "release"
+            build_type = "custom" if self.using_custom_lib else self.rccl_build_type
             md["rccl_build_type"] = build_type
             md["mpi_impl"] = self.mpi_impl
             # Which librccl.so the tests actually loaded (and, if it came from a
@@ -2516,7 +2557,8 @@ class TestExecutor:
             md["rccl_lib"] = self._resolve_rccl_lib()
             md.setdefault("checks", {})["release_build"] = {
                 "status": "OK" if build_type == "release" else ("SKIP" if build_type == "custom" else "WARN"),
-                "value": build_type + (" (perf should use release)" if build_type == "debug" else ""),
+                "value": build_type + (" (perf should use release)"
+                                       if build_type == "debug" and self.runs_rccl_tests else ""),
             }
             manifest["metadata"] = md
         except Exception as e:
