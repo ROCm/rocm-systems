@@ -29,6 +29,7 @@
 #include "ipc_policy.hpp"
 #include "sdma/anvil_device.hpp"
 #include "assembly.hpp"
+#include "verify_results_kernels.hpp"
 
 using namespace rocshmem;
 
@@ -147,9 +148,9 @@ SdmaPingPongTester::~SdmaPingPongTester() {
 }
 
 void SdmaPingPongTester::resetBuffers(size_t size) {
-  memset(s_buf, 0, size * args.num_wgs);
-  memset(r_buf, 0, size * args.num_wgs);
-  memset(sig_addr, 0, sizeof(uint64_t) * args.num_wgs);
+  CHECK_HIP(hipMemset(s_buf, 'a', size * args.num_wgs));
+  CHECK_HIP(hipMemset(r_buf, 0, size * args.num_wgs));
+  CHECK_HIP(hipMemset(sig_addr, 0, sizeof(uint64_t) * args.num_wgs));
 }
 
 void SdmaPingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
@@ -165,4 +166,21 @@ void SdmaPingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   num_timed_msgs = loop * gridSize.x;
 }
 
-void SdmaPingPongTester::verifyResults([[maybe_unused]] size_t size) {}
+void SdmaPingPongTester::verifyResults(size_t size) {
+  if (args.op_type <= 1) return;
+
+  size_t check_bytes = size * args.num_wgs;
+  *verification_error = false;
+  size_t block = std::min((size_t)1024, check_bytes);
+  size_t grid = (check_bytes + block - 1) / block;
+  hipLaunchKernelGGL(rocshmem::verify_results_kernel_char, grid, block, 0, stream,
+                     r_buf, check_bytes, check_bytes, 1, 1, 0, 1,
+                     verification_error);
+  CHECK_HIP(hipStreamSynchronize(stream));
+
+  if (*verification_error) {
+    fprintf(stderr, "FAIL: r_buf data mismatch (expected 'a') at size=%zu rank=%d\n",
+            size, args.myid);
+    rocshmem_global_exit(1);
+  }
+}
