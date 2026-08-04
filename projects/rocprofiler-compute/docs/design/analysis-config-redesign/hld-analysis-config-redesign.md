@@ -269,16 +269,17 @@ Layer 2 metric files use a custom `!inherit` YAML tag to eliminate per-architect
 
 A file beginning with `!inherit <path>` loads the referenced base file first, then deep-merges the current file's content on top.
 
-**Merge rules:**
+**Merge operations** -- the inheritance mechanism supports three operations:
 
-| Input | Behavior |
-|---|---|
-| Map + map | Recursive deep merge. Override keys win; base-only keys preserved. |
-| `data source` list | Matched by `metric_table.id` (not position), then deep-merged per entry. New entries appended. |
-| Scalar | Override replaces base. |
-| New key in override | Appended to the map. |
+| Operation | Input | Behavior |
+|---|---|---|
+| Modify | Scalar in override | Override replaces base value. |
+| Add | New key in override | Appended to the merged map. New metrics, new tables, new fields. |
+| Remove | Value set to `!remove` | Key is deleted from the merged result. Used when a child arch drops a metric or field that existed in the parent. |
+| Deep merge | Map + map | Recursive deep merge. Override keys win; base-only keys preserved. |
+| List merge | `data source` list | Matched by `metric_table.id` (not position), then deep-merged per entry. New entries appended. |
 
-**Inheritance hierarchy:**
+**Inheritance hierarchy** -- each arch inherits from its immediate predecessor to minimize diffs:
 
 ```mermaid
 flowchart LR
@@ -286,13 +287,15 @@ flowchart LR
     gfx115x["gfx115x (RDNA base)"]
 
     gfx908 --> gfx90a
-    gfx908 --> gfx940
+    gfx90a --> gfx940
     gfx940 --> gfx941
     gfx940 --> gfx942
     gfx942 --> gfx950
 ```
 
-The first architecture in each family serves as the base -- its files are the complete, standalone definitions. There is no abstract `_base/` directory. CDNA and RDNA share no content. Within CDNA, the inheritance chain mirrors hardware lineage. Files identical to the parent arch do not exist in the child directory; they are inherited implicitly. Files that exist contain only `!inherit` plus overrides.
+The first architecture in each family serves as the base -- its files are the complete, standalone definitions. There is no abstract `_base/` directory. CDNA and RDNA share no content. Each arch inherits from its immediate predecessor in the hardware lineage, not from the family root. This minimizes the diff at each step: gfx90a overrides only what changed from gfx908, gfx940 overrides only what changed from gfx90a, etc. The same chain-based pattern applies to future families (gfx12xx).
+
+Files identical to the parent arch do not exist in the child directory; they are inherited implicitly. Files that exist contain only `!inherit` plus additions, modifications, or removals.
 
 **Example:** gfx941 differs from gfx940 in exactly one file. With inheritance, that file becomes:
 
@@ -489,7 +492,7 @@ Implementation details for all stages are covered by the [LLD](lld-index.md).
 ```mermaid
 flowchart LR
     subgraph P1["Phase 1 — Metric Library (Layer 2)"]
-        s1["1. Layer 2 schema + inheritance loader\n───────────────────\nRequired: id, name, formula,\nunit, description\nOptional: peak, coll_level\nTyped variants: xfer, coherency,\nexpr (fabric stall tables)\nPyYAML loader for !inherit tag\nwith deepmerge library\n───────────────────\nDepends on: nothing\nResolves: FR2.1, FR2.4\nDeveloper gains: agreed field contract\nfor all metric files"]
+        s1["1. Layer 2 schema + inheritance loader\n───────────────────\nRequired: id, name, formula,\nunit, description\nOptional: peak, coll_level\nTyped variants: xfer, coherency,\nexpr (fabric stall tables)\nPyYAML loader for !inherit tag\nwith vendored deepmerge\n───────────────────\nDepends on: nothing\nResolves: FR2.1, FR2.4\nDeveloper gains: agreed field contract\nfor all metric files"]
         s2["2. Layer 2 parser\n───────────────────\nRead Layer 2 metric files\nResolve !inherit chains\n───────────────────\nDepends on: Stage 1\nResolves: FR2.2.1, FR2.3\nDeveloper gains: metric files\ncan be parsed and validated"]
         s3["3. Compatibility adapter\n───────────────────\nTranslate Layer 2 output into\nexisting pipeline structure\nExisting consumers unchanged\n───────────────────\nDepends on: Stage 2\nResolves: NFR1\nDeveloper gains: safe to merge\nLayer 2 files without breaking\nexisting pipeline"]
         s4["4. Metric and set migration\n───────────────────\ngfx908 is CDNA base,\ngfx115x is RDNA base\nConvert one arch at a time\n(start with gfx90a — inherits gfx908)\nVerify output equivalence at each step\nParallelizable: compute,\nmemory, system, sets\n⚠️ 39 metrics need manual\nCase A/B classification\n⚠️ 43 metrics need canonical\nname selection\n───────────────────\nDepends on: Stages 1, 2\nResolves: FR2, FR2.2, FR3 (Layer 2), PS2\nDeveloper gains: formula fixes\npropagate in one edit; new arch\nadds only override files;\nsets reference metric ids"]
