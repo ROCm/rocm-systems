@@ -1563,7 +1563,7 @@ __BF16_HOST_DEVICE_STATIC__ bool operator==(const __hip_bfloat16& l, const __hip
  * \brief Operator to perform a not equal on two __hip_bfloat16 numbers
  */
 __BF16_HOST_DEVICE_STATIC__ bool operator!=(const __hip_bfloat16& l, const __hip_bfloat16& r) {
-  return __hne(l, r);
+  return __hneu(l, r);
 }
 
 /**
