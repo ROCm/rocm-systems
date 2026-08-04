@@ -12,9 +12,6 @@ on:
   push:
     branches:
       - shared/rocjitsu/sanitizers
-      # TEMPORARY: qualify this workflow from PR #9681 before it reaches the
-      # shared branch. Remove this line before merging.
-      - users/arosa/rj/sanitizers/build
     paths:
       - "emulation/rocjitsu/**"
       - ".github/workflows/rocjitsu-sanitizer-artifacts.yml"
