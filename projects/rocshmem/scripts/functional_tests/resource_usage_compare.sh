@@ -75,7 +75,7 @@ while [[ $# -gt 0 ]]; do
     --force-rebuild) FORCE_REBUILD=true; shift ;;
     --match)         MATCH="$2";         shift 2 ;;
     -h|--help)
-      sed -n '2,/^###$/p' "$0" | head -n -1
+      sed -n '2,/^#####/p' "$0" | head -n -1
       exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
@@ -88,6 +88,19 @@ cd "$ROCSHMEM_DIR"
 
 
 TOOLS_DIR="$ROCSHMEM_DIR/scripts/functional_tests"
+
+# Tracks the worktree currently being built so the EXIT trap below can clean
+# it up if the build fails partway through (errexit exits the script before
+# reaching the normal `git worktree remove` call, otherwise leaking a
+# worktree registration + /tmp checkout).
+CURRENT_WORKTREE=""
+_cleanup_worktree() {
+  if [[ -n "$CURRENT_WORKTREE" ]]; then
+    git -C "$ROCSHMEM_DIR" worktree remove --force "$CURRENT_WORKTREE" 2>/dev/null || true
+    CURRENT_WORKTREE=""
+  fi
+}
+trap _cleanup_worktree EXIT
 
 _find_build_config() {
   local worktree="$1"
@@ -126,11 +139,11 @@ measure_commit() {
   local worktree="/tmp/rocshmem-resource-usage-${sha}-$$"
 
   git -C "$ROCSHMEM_DIR" worktree add "$worktree" "$commit" --detach >&2
+  CURRENT_WORKTREE="$worktree"
 
   FOUND_BUILD_CONFIG="$(_find_build_config "$worktree" "$BUILD_CONFIG")"
   if [[ -z "$FOUND_BUILD_CONFIG" ]]; then
     echo "ERROR: Cannot find $BUILD_CONFIG in baseline worktree" >&2
-    git -C "$ROCSHMEM_DIR" worktree remove "$worktree" || true
     exit 1
   fi
 
@@ -150,6 +163,7 @@ measure_commit() {
   )
 
   git -C "$ROCSHMEM_DIR" worktree remove "$worktree" >&2 || true
+  CURRENT_WORKTREE=""
 
   # measure_commit's stdout is captured by the caller (CSV_1="$(measure_commit ...)")
   # and must contain only the final `echo "$csv"` path -- redirect this script's own
