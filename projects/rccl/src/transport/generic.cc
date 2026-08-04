@@ -73,8 +73,9 @@ fail:
 ncclResult_t ncclTransportMeshConnect(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
   if (comm && comm->nRanks > 1 && comm->directA2aSupport) {
-    // Only connect the channels the mesh graph actually computed (1 for v1);
-    // every connector costs plugin comms (odl_tb5 maxComms=8).
+    // Only connect the channels the mesh graph admitted after accounting for
+    // the NET plugin's comm budget. Every channel costs one send and one recv
+    // comm per peer.
     int nMeshChannels = comm->nChannels < comm->graphs[NCCL_ALGO_DIRECT_A2A].nChannels
       ? comm->nChannels : comm->graphs[NCCL_ALGO_DIRECT_A2A].nChannels;
     for (int c = 0; c < nMeshChannels; c++) {

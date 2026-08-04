@@ -98,6 +98,11 @@ constexpr int rcclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize =
 
 NCCL_PARAM(L1SharedMemoryCarveout, "L1_SHARED_MEMORY_CARVEOUT", 0);
 NCCL_PARAM(SymCeThreshold, "SYM_CE_THRESHOLD", 8 * 1024 * 1024);
+// DIRECT_A2A fans each AllReduce payload out to every remote rank. Keep it on
+// latency-sensitive messages by default and let larger collectives use a
+// bandwidth-oriented algorithm. Set RCCL_DIRECT_A2A_MAX_BYTES=-1 to remove
+// the size limit.
+RCCL_PARAM(DirectA2aMaxBytes, "DIRECT_A2A_MAX_BYTES", 1 << 20);
 
 // Returns maximum kernel stack size of all CUDA kernels
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) {
@@ -2428,8 +2433,17 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
         (!nvlsSupport || (info->func != ncclFuncAllReduce && comm->localRanks > NCCL_MAX_NVLS_ARITY)))
       continue;
     if (a == NCCL_ALGO_NVLS && collNetSupport != 1 && comm->nNodes > 1) continue;
-    // [RCCL] DIRECT_A2A requires the mesh graph to have computed successfully
-    if (a == NCCL_ALGO_DIRECT_A2A && !comm->directA2aSupport) continue;
+    // [RCCL] DIRECT_A2A is an AllReduce-only latency algorithm. Its full-mesh
+    // fan-out amplifies transport pressure for large payloads, so exclude it
+    // above the configurable threshold and let the cost table select Ring (or
+    // another enabled algorithm). A negative threshold means unlimited.
+    if (a == NCCL_ALGO_DIRECT_A2A) {
+      int64_t maxBytes = rcclParamDirectA2aMaxBytes();
+      if (info->func != ncclFuncAllReduce || !comm->directA2aSupport ||
+          (maxBytes >= 0 && nBytes > (size_t)maxBytes)) {
+        continue;
+      }
+    }
     /* Tree reduceScatter doesn't support scaling yet */
     if (a == NCCL_ALGO_PAT && info->func == ncclFuncReduceScatter &&
         (info->opDev.op == ncclDevPreMulSum || info->opDev.op == ncclDevSumPostDiv))

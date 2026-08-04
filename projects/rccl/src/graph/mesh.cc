@@ -40,9 +40,21 @@ ncclResult_t ncclTopoComputeMesh(struct ncclTopoSystem* system, struct ncclTopoG
     return ncclSuccess;
   }
 
-  // Two channels for large-message bandwidth: the fan-out writes and proxy
-  // progress of the 3 peers are split across two channel thread groups.
-  graph->nChannels = 2;
+  // Each mesh channel creates one send and one recv comm for every peer on
+  // the same NET device. Respect the plugin's maxComms budget instead of
+  // treating it as a per-peer channel limit. For example, a four-rank mesh
+  // needs six comms per channel, so a plugin advertising maxComms=8 can only
+  // support one channel.
+  struct ncclTopoNode* net = system->nodes[NET].nodes;
+  int commsPerChannel = 2 * (nranks - 1);
+  int maxMeshChannels = net->net.maxChannels / commsPerChannel;
+  graph->nChannels = std::min(2, maxMeshChannels);
+  if (graph->nChannels == 0) {
+    INFO(NCCL_GRAPH,
+         "MESH : insufficient NET comm capacity (maxComms=%d requiredPerChannel=%d), DIRECT_A2A disabled",
+         net->net.maxChannels, commsPerChannel);
+    return ncclSuccess;
+  }
   graph->sameChannels = 1;
   graph->nHops = 1;
   graph->typeIntra = PATH_NET; // 1 GPU per node: there is no intra-node path
@@ -50,7 +62,6 @@ ncclResult_t ncclTopoComputeMesh(struct ncclTopoSystem* system, struct ncclTopoG
 
   // Take bandwidth/latency from the first NET node (odl_tb5 reports
   // speed=20000 Mbps ~= 2.5 GB/s and latency=20 us).
-  struct ncclTopoNode* net = system->nodes[NET].nodes;
   graph->bwInter = net->net.bw;
   graph->bwIntra = net->net.bw;
   graph->latencyInter = net->net.latency;
@@ -72,7 +83,9 @@ ncclResult_t ncclTopoComputeMesh(struct ncclTopoSystem* system, struct ncclTopoG
     }
   }
 
-  INFO(NCCL_GRAPH, "MESH : full mesh over net, %d ranks, bw=%.2f GB/s, lat=%.1f us",
-       nranks, graph->bwInter, graph->latencyInter);
+  INFO(NCCL_GRAPH,
+       "MESH : full mesh over net, %d ranks, %d channels, maxComms=%d, commsPerChannel=%d, bw=%.2f GB/s, lat=%.1f us",
+       nranks, graph->nChannels, net->net.maxChannels, commsPerChannel,
+       graph->bwInter, graph->latencyInter);
   return ncclSuccess;
 }

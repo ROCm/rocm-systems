@@ -1709,9 +1709,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, nvlsGraph), ret, fail);
   }
 
-  // [RCCL] DIRECT_A2A mesh graph: one-hop all-to-all, so a single channel is
-  // enough for v1 (and the odl_tb5 plugin's maxComms=8 only leaves room for
-  // 3 send + 3 recv connectors per rank anyway).
+  // [RCCL] DIRECT_A2A mesh graph. ncclTopoComputeMesh caps the channel count
+  // using the NET plugin's maxComms budget because every channel needs one
+  // send and one recv comm for every remote rank.
   memset(meshGraph, 0, sizeof(struct ncclTopoGraph));
   meshGraph->id = 5;
   meshGraph->pattern = NCCL_TOPO_PATTERN_MESH;
