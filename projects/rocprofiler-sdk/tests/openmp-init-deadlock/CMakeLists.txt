@@ -38,14 +38,15 @@ if(NOT OMP_TARGET_COMPILER)
     set(IS_DISABLED ON)
 endif()
 
-# Regression test for the OMPT-init deadlock fixed in rocprofiler-sdk client discovery.
+# Regression test verifying that rocprofiler-sdk does not act as an OMPT tool on its own.
 #
-# rocprofiler-sdk is loaded as the OMPT tool (OMP_TOOL_LIBRARIES). When the linked
-# blas-stub library's DT_INIT enters an omp parallel region, libomp performs OMPT tool
-# discovery while holding its init lock. Previously, client discovery dlopen'd the
-# configure-exporting client library (whose DT_INIT was still pending), re-entering libomp
-# and self-deadlocking. With the fix, discovery resolves symbols via the ELF symbol table
-# without dlopen, so the application runs to completion.
+# The workload links librocprofiler-sdk (via the client library) but the rocprofv3 tool
+# library is not loaded. libomp discovers an OMPT tool by searching loaded libraries for
+# an ompt_start_tool symbol; because rocprofiler-sdk no longer exports that symbol, libomp
+# finds no tool, performs no client discovery, and the linked libraries' DT_INIT
+# constructors (which call into libomp) run to completion. This models the case of a plain
+# application that merely has rocprofiler-sdk in its address space (for example, importing
+# a library that pulls in OpenMP) with no profiler active: it must not deadlock.
 #
 # The assertion is twofold: the TIMEOUT guards against the deadlock (a hang fails the
 # test), and PASS_REGULAR_EXPRESSION ensures the application actually reached main (so an

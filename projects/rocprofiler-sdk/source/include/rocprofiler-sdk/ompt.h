@@ -34,6 +34,10 @@
  * Functions for enabling OMPT support in tools which provide their own ompt_start_tool symbol but
  * want to defer to rocprofiler-sdk for OMPT.
  *
+ * The rocprofiler-sdk library does not itself export an ompt_start_tool symbol. A tool that wants
+ * rocprofiler-sdk to act as the OMPT tool must provide its own ompt_start_tool and invoke
+ * rocprofiler_ompt_start_tool() from it.
+ *
  * @{
  */
 
