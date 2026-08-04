@@ -176,6 +176,89 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       }
     }
 
+    typedef struct IndirectCopyBufferBatchDescriptor {
+      ulong source_address;       // holder VA if src indirect, else real VA
+      ulong destination_address;  // holder VA if dst indirect, else real VA
+      ulong size;                 // copy size in bytes
+      uint indirect_mode;         // bit0 = src indirect, bit1 = dst indirect
+    } IndirectCopyBufferBatchDescriptor;
+
+    __kernel void __amd_rocclr_copyBufferBatchIndirect(
+        __global const IndirectCopyBufferBatchDescriptor *descriptors,
+        uint workgroup_size,
+        uint copy_stride) {
+      uint work_item_id = __builtin_amdgcn_workitem_id_x();
+      uint group_ordinal = __builtin_amdgcn_workgroup_id_x();
+      uint descriptor_index = __builtin_amdgcn_workgroup_id_y();
+
+      IndirectCopyBufferBatchDescriptor descriptor = descriptors[descriptor_index];
+      // Access the indirect pointer based on the indirect_mode's bit
+      __global uchar *real_src =
+          (descriptor.indirect_mode & 1)
+              ? (__global uchar *)(*(__global ulong *)descriptor.source_address)
+              : (__global uchar *)descriptor.source_address;
+      __global uchar *real_dst =
+          (descriptor.indirect_mode & 2)
+              ? (__global uchar *)(*(__global ulong *)descriptor.destination_address)
+              : (__global uchar *)descriptor.destination_address;
+      ulong copy_index = ((ulong)group_ordinal * workgroup_size) + work_item_id;
+
+      // Figure out the largest overlapping power of two between the addresses
+      // This must be computed on the device, as it is not known until kernel
+      // launch
+      ulong combined = (ulong)real_src | (ulong)real_dst;
+      ulong lowest_set_bit = combined & (~combined + 1);
+      uint aligned_element_size =
+          (combined == 0) ? 1 : (uint)min(lowest_set_bit, (ulong)sizeof(ulong2));
+      ulong aligned_element_count = descriptor.size / aligned_element_size;
+      uint trailing_byte_count = (uint)(descriptor.size % aligned_element_size);
+
+      if (aligned_element_size == sizeof(ulong2)) {
+        __global ulong2 *source_data = (__global ulong2 *)(real_src);
+        __global ulong2 *destination_data = (__global ulong2 *)(real_dst);
+        while (copy_index < aligned_element_count) {
+          destination_data[copy_index] = source_data[copy_index];
+          copy_index += copy_stride;
+        }
+      } else if (aligned_element_size == sizeof(ulong)) {
+        __global ulong *source_data = (__global ulong *)(real_src);
+        __global ulong *destination_data = (__global ulong *)(real_dst);
+        while (copy_index < aligned_element_count) {
+          destination_data[copy_index] = source_data[copy_index];
+          copy_index += copy_stride;
+        }
+      } else if (aligned_element_size == sizeof(uint)) {
+        __global uint *source_data = (__global uint *)(real_src);
+        __global uint *destination_data = (__global uint *)(real_dst);
+        while (copy_index < aligned_element_count) {
+          destination_data[copy_index] = source_data[copy_index];
+          copy_index += copy_stride;
+        }
+      } else if (aligned_element_size == sizeof(ushort)) {
+        __global ushort *source_data = (__global ushort *)(real_src);
+        __global ushort *destination_data = (__global ushort *)(real_dst);
+        while (copy_index < aligned_element_count) {
+          destination_data[copy_index] = source_data[copy_index];
+          copy_index += copy_stride;
+        }
+      } else {
+        __global uchar *source_data = (__global uchar *)(real_src);
+        __global uchar *destination_data = (__global uchar *)(real_dst);
+        while (copy_index < aligned_element_count) {
+          destination_data[copy_index] = source_data[copy_index];
+          copy_index += copy_stride;
+        }
+      }
+      if ((trailing_byte_count != 0) && (group_ordinal == 0) &&
+          (work_item_id == 0)) {
+        ulong tail_start = aligned_element_count * aligned_element_size;
+        ulong tail_end = tail_start + trailing_byte_count;
+        for (ulong i = tail_start; i < tail_end; ++i) {
+          real_dst[i] = real_src[i];
+        }
+      }
+    }
+
     __kernel void __amd_rocclr_copyBufferAligned(__global uint* src, __global uint* dst,
                                                  ulong srcOrigin, ulong dstOrigin, ulong size,
                                                  uint alignment) {
