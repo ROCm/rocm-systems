@@ -38,10 +38,10 @@ Symmetric memory and ``NCCL_P2P_LEVEL``
 RCCL can accelerate some collectives (for example, allreduce, allgather, and
 reduce-scatter) through a *symmetric memory* path. This path uses
 :doc:`Virtual Memory Management <../api-reference/api-library>`-backed
-buffers that are registered as symmetric windows
-(``ncclCommWindowRegister`` with the ``NCCL_WIN_COLL_SYMMETRIC`` flag, or
-buffers allocated with ``ncclMemAlloc``) so that every participating rank can
-address the buffer directly.
+buffers that are registered as symmetric windows (``ncclCommWindowRegister``
+with the ``NCCL_WIN_COLL_SYMMETRIC`` flag) so that every participating rank can
+address the buffer directly. ``ncclMemAlloc`` allocates memory suitable for such
+a registration, but it does not create a symmetric window on its own.
 
 Whether a communicator can use symmetric memory is decided once at
 ``ncclCommInitRank`` time. The prerequisites are:

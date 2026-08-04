@@ -93,14 +93,15 @@ __global__ void findWindowReadPeerValueKernel(void*         localInputPtr,
 
 struct DeviceApiRankResources
 {
-    int           device         = -1;
-    ncclComm_t    comm           = nullptr;
-    hipStream_t   stream         = nullptr;
-    int*          inputBuffer    = nullptr;
-    int*          outputBuffer   = nullptr;
-    ncclWindow_t  inputWindow    = nullptr;
-    ncclDevComm_t devComm        = {};
-    bool          devCommCreated = false;
+    int           device               = -1;
+    ncclComm_t    comm                 = nullptr;
+    hipStream_t   stream               = nullptr;
+    int*          inputBuffer          = nullptr;
+    int*          outputBuffer         = nullptr;
+    ncclWindow_t* resolvedWindowBuffer = nullptr;
+    ncclWindow_t  inputWindow          = nullptr;
+    ncclDevComm_t devComm              = {};
+    bool          devCommCreated       = false;
 };
 
 struct DeviceApiResources
@@ -130,6 +131,9 @@ struct DeviceApiResources
             if(rank.outputBuffer != nullptr)
                 (void)hipFree(rank.outputBuffer);
 
+            if(rank.resolvedWindowBuffer != nullptr)
+                (void)hipFree(rank.resolvedWindowBuffer);
+
             if(rank.inputBuffer != nullptr)
                 (void)ncclMemFree(rank.inputBuffer);
 
@@ -142,60 +146,6 @@ struct DeviceApiResources
     }
 
     std::vector<DeviceApiRankResources> ranks;
-};
-
-// Owns one device-side ncclWindow_t slot per rank. A fatal assertion only
-// returns from the enclosing function, so freeing in a destructor is what keeps
-// the assertion and skip paths from leaking these allocations.
-class ResolvedWindowBuffers
-{
-public:
-    explicit ResolvedWindowBuffers(const std::vector<DeviceApiRankResources>& ranks)
-        : ranks_(ranks)
-        , pointers_(ranks.size(), nullptr)
-    {
-    }
-
-    ResolvedWindowBuffers(const ResolvedWindowBuffers&)            = delete;
-    ResolvedWindowBuffers& operator=(const ResolvedWindowBuffers&) = delete;
-
-    ~ResolvedWindowBuffers()
-    {
-        for(size_t rankIdx = 0; rankIdx < pointers_.size(); ++rankIdx)
-        {
-            if(pointers_[rankIdx] == nullptr)
-                continue;
-
-            (void)hipSetDevice(ranks_[rankIdx].device);
-            (void)hipFree(pointers_[rankIdx]);
-        }
-    }
-
-    hipError_t allocate()
-    {
-        for(size_t rankIdx = 0; rankIdx < pointers_.size(); ++rankIdx)
-        {
-            hipError_t error = hipSetDevice(ranks_[rankIdx].device);
-            if(error != hipSuccess)
-                return error;
-
-            error = hipMalloc(reinterpret_cast<void**>(&pointers_[rankIdx]), sizeof(ncclWindow_t));
-            if(error != hipSuccess)
-                return error;
-
-            error = hipMemset(pointers_[rankIdx], 0, sizeof(ncclWindow_t));
-            if(error != hipSuccess)
-                return error;
-        }
-
-        return hipSuccess;
-    }
-
-    ncclWindow_t* operator[](size_t rankIdx) const { return pointers_[rankIdx]; }
-
-private:
-    const std::vector<DeviceApiRankResources>& ranks_;
-    std::vector<ncclWindow_t*>                 pointers_;
 };
 
 static int getVisibleGpuCount()
@@ -432,8 +382,16 @@ static void runFindWindowRemoteReadTest()
     ASSERT_NO_FATAL_FAILURE(allocatePositiveBuffers(resources, inputValues));
 
     // Per-rank slot holding the handle ncclFindWindow resolved on the device.
-    ResolvedWindowBuffers resolvedWindows(resources.ranks);
-    ASSERT_EQ(resolvedWindows.allocate(), hipSuccess);
+    // Owned by resources, so ~DeviceApiResources frees it after synchronizing
+    // the rank's stream, on the assertion and skip paths as well.
+    for(auto& rank : resources.ranks)
+    {
+        ASSERT_EQ(hipSetDevice(rank.device), hipSuccess);
+        ASSERT_EQ(
+            hipMalloc(reinterpret_cast<void**>(&rank.resolvedWindowBuffer), sizeof(ncclWindow_t)),
+            hipSuccess);
+        ASSERT_EQ(hipMemset(rank.resolvedWindowBuffer, 0, sizeof(ncclWindow_t)), hipSuccess);
+    }
 
     // Symmetric-window registration is a precondition, not the behavior under
     // test; treat an unsupported configuration as a skip (see LsaRemoteRead).
@@ -492,7 +450,7 @@ static void runFindWindowRemoteReadTest()
                            rank.stream,
                            rank.inputBuffer,
                            rank.outputBuffer,
-                           resolvedWindows[rankIdx],
+                           rank.resolvedWindowBuffer,
                            rank.devComm);
         const hipError_t launchError = hipGetLastError();
         ASSERT_EQ(launchError, hipSuccess)
@@ -516,7 +474,7 @@ static void runFindWindowRemoteReadTest()
 
         ASSERT_EQ(hipSetDevice(rank.device), hipSuccess);
         ASSERT_EQ(hipMemcpy(&deviceResolvedWindow,
-                            resolvedWindows[rankIdx],
+                            rank.resolvedWindowBuffer,
                             sizeof(ncclWindow_t),
                             hipMemcpyDeviceToHost),
                   hipSuccess);
