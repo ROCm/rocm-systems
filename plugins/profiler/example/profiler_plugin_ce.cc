@@ -25,6 +25,7 @@ extern double getProfilerStartTime(void);
 // CE profiler global state
 static struct {
   pthread_t pollerThread;
+  bool pollerStarted;   // poller thread exists, so CE global state is live
   bool pollerRunning;
   pthread_mutex_t mutex;
   struct context** contextRegistry;
@@ -34,6 +35,7 @@ static struct {
   int pollerIntervalUs;
 } ceProfilerCtxt = {
   .pollerThread = 0,
+  .pollerStarted = false,
   .pollerRunning = false,
   .mutex = PTHREAD_MUTEX_INITIALIZER,
   .contextRegistry = NULL,
@@ -240,26 +242,36 @@ ncclResult_t ceProfilerInitGlobal(void) {
     = (struct context**)calloc(ceProfilerCtxt.contextCapacity,
                                sizeof(struct context*));
   if (!ceProfilerCtxt.contextRegistry) {
+    ceProfilerCtxt.contextCapacity = 0;
     return ncclSystemError;
   }
 
   ceProfilerCtxt.pollerRunning = true;
   if (pthread_create(&ceProfilerCtxt.pollerThread, NULL, cePollerThreadMain, NULL) != 0) {
+    ceProfilerCtxt.pollerRunning = false;
     free(ceProfilerCtxt.contextRegistry);
+    ceProfilerCtxt.contextRegistry = NULL;
+    ceProfilerCtxt.contextCapacity = 0;
     return ncclSystemError;
   }
 
+  ceProfilerCtxt.pollerStarted = true;
   return ncclSuccess;
 }
 
 // Finalize CE profiler global state
 ncclResult_t ceProfilerFinalizeGlobal(FILE* fh) {
-  if (ceProfilerCtxt.contextRegistry) {
-    __atomic_store_n(&ceProfilerCtxt.pollerRunning, false, __ATOMIC_RELAXED);
-    pthread_join(ceProfilerCtxt.pollerThread, NULL);
-    free(ceProfilerCtxt.contextRegistry);
-    ceProfilerCtxt.contextRegistry = NULL;
-  }
+  // With CE events disabled the poller was never created, and pthread_join(0) segfaults.
+  if (!ceProfilerCtxt.pollerStarted) return ncclSuccess;
+
+  __atomic_store_n(&ceProfilerCtxt.pollerRunning, false, __ATOMIC_RELAXED);
+  pthread_join(ceProfilerCtxt.pollerThread, NULL);
+  ceProfilerCtxt.pollerStarted = false;
+
+  free(ceProfilerCtxt.contextRegistry);
+  ceProfilerCtxt.contextRegistry = NULL;
+  ceProfilerCtxt.contextCount = 0;
+  ceProfilerCtxt.contextCapacity = 0;
   return ncclSuccess;
 }
 
@@ -272,6 +284,10 @@ void ceProfilerRegisterContext(struct context* ctx) {
   ctx->ceEvents.ceCollHead = NULL;
   ctx->ceEvents.ceSyncHead = NULL;
   ctx->ceEvents.ceBatchHead = NULL;
+
+  // Nothing polls this context, and growing from zero capacity would leave a
+  // registry that makes teardown think CE is live.
+  if (!ceProfilerCtxt.pollerStarted) return;
 
   // Must not be skipped: an unregistered context is never polled.
   pthread_mutex_lock(&ceProfilerCtxt.mutex);
@@ -306,6 +322,8 @@ void ceProfilerRegisterContext(struct context* ctx) {
 
 // Deregister context from CE poller
 void ceProfilerDeregisterContext(struct context* ctx) {
+  if (!ceProfilerCtxt.pollerStarted) return;
+
   // Must not be skipped: the poller would walk this context after it is freed.
   pthread_mutex_lock(&ceProfilerCtxt.mutex);
 
