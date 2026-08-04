@@ -58,10 +58,17 @@
 // is declared in headers on backport builds outside the supported window too,
 // so it cannot gate the feature on its own: the version predicate has to agree.
 #if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
-#define NCCL_CUMEM_DMABUF_EXPORT_GATE NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
+#define NCCL_CUMEM_DMABUF_EXPORT_PROBE 1
 #else
-#define NCCL_CUMEM_DMABUF_EXPORT_GATE 0
+#define NCCL_CUMEM_DMABUF_EXPORT_PROBE 0
 #endif
+
+// Both gate inputs are parameters so every (probe, version) combination can be
+// asserted in unit tests; the gate itself is this build's instantiation.
+#define NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(probe, v) ((probe) && NCCL_CUMEM_VERSION_SUPPORTED(v))
+
+#define NCCL_CUMEM_DMABUF_EXPORT_GATE \
+  NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(NCCL_CUMEM_DMABUF_EXPORT_PROBE, HIP_VERSION)
 
 // HIP: implemented in rma_proxy_launch.cc (hipStreamBatchMemOp + old-HIP fallback).
 // CUDA: implemented in cudawrap.cc (cuStreamBatchMemOp).

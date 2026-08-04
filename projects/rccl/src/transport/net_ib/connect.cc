@@ -1475,7 +1475,7 @@ ib_recv:
       if (rcclParamIbGdrFlushGpuMemNoRelaxedOrdering()) {
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
         if (ncclCuMemEnable()) {
-          NCCLCHECKGOTO(ncclMemAlloc((void**)&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int)), ret, fail);
+          NCCLCHECKGOTO(ncclMemAlloc((void**)&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int)), ret, cumem_flush_hsa);
           CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&rCommDev->gpuFlush.dmabuf_fd,
                                                     (CUdeviceptr)rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int),
                                                     CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0),
@@ -1488,6 +1488,9 @@ ib_recv:
           gpuFlushRegistered = true;
           goto flush_reg_done;
         cumem_flush_hsa:
+          // The HSA path below allocates its own buffer, so every cuMem failure here is
+          // recoverable and must not leave ret poisoned for the eventual `return ret`.
+          ret = ncclSuccess;
           if (rCommDev->gpuFlush.dmabuf_fd >= 0) {
             close(rCommDev->gpuFlush.dmabuf_fd);
             rCommDev->gpuFlush.dmabuf_fd = -1;
@@ -1526,6 +1529,8 @@ ib_recv:
             gpuFlushRegistered = true;
             goto flush_reg_done;
           peermem_flush:
+            // Flush registration is optional; losing it degrades GDR rather than failing accept.
+            ret = ncclSuccess;
             if (rCommDev->gpuFlush.dmabuf_fd >= 0) {
               close(rCommDev->gpuFlush.dmabuf_fd);
               rCommDev->gpuFlush.dmabuf_fd = -1;
