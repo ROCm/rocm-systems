@@ -408,9 +408,9 @@ TEST(DispatchHub, quarantine_leaks_slot_and_blocks_reservation)
     ASSERT_TRUE(register_one(hub, key_of(4, 2)));
     ASSERT_TRUE(register_one(hub, key_of(9, 1)));  // different slot, must survive
 
-    auto lost = hub.quarantine_slot(4);
+    auto lost = hub.quarantine_slot(0, 4);
     EXPECT_EQ(lost.size(), 2u);
-    EXPECT_TRUE(hub.is_quarantined(4));
+    EXPECT_TRUE(hub.is_quarantined(0, 4));
     EXPECT_EQ(hub.live_entries(), 1u);
 
     EXPECT_FALSE(register_one(hub, key_of(4, 3)));  // permanently unusable
@@ -423,7 +423,7 @@ TEST(DispatchHub, quarantined_slot_refuses_a_new_generation)
 {
     auto hub = hub_t{};
     ASSERT_TRUE(register_one(hub, key_of(4, 1, /*generation=*/0)));
-    hub.quarantine_slot(4);
+    hub.quarantine_slot(0, 4);
     EXPECT_FALSE(register_one(hub, key_of(4, 1, /*generation=*/1)));
 }
 
@@ -483,7 +483,7 @@ TEST(DispatchHub, child_epoch_short_circuits_every_operation)
     EXPECT_FALSE(hub.prove_eop(key_of(4, 1), 1, true).has_value());
     EXPECT_FALSE(hub.leak(key_of(4, 1)).has_value());
     EXPECT_FALSE(hub.is_ledgered(1));
-    EXPECT_TRUE(hub.quarantine_slot(4).empty());
+    EXPECT_TRUE(hub.quarantine_slot(0, 4).empty());
     EXPECT_TRUE(hub.close_queue(1).empty());
     EXPECT_TRUE(hub.drain_for_teardown().first.empty());
     EXPECT_TRUE(hub.poison(session_mode::child_stale).first.empty());
@@ -559,7 +559,7 @@ TEST(DispatchHub, can_register_batch_refuses_quarantine_tombstone_and_duplicates
     EXPECT_FALSE(hub.can_register_batch({key_of(4, 2)}));
 
     // Quarantined slot.
-    hub.quarantine_slot(6);
+    hub.quarantine_slot(0, 6);
     EXPECT_FALSE(hub.can_register_batch({key_of(6, 1)}));
 
     // Poisoned session.
@@ -805,9 +805,9 @@ TEST(OwnerRegistry, second_owner_collides_and_quarantines)
     EXPECT_EQ(reg.owners_of(0, 40), 2u);
 
     // The caller's response: quarantine, stranding what was pending on the slot.
-    auto stranded = hub.quarantine_slot(40);
+    auto stranded = hub.quarantine_slot(0, 40);
     EXPECT_EQ(stranded.size(), 2u);
-    EXPECT_TRUE(hub.is_quarantined(40));
+    EXPECT_TRUE(hub.is_quarantined(0, 40));
     EXPECT_FALSE(hub.can_register_batch({key_of(40, 3)}));  // both owners now signal-path
 }
 
@@ -821,11 +821,11 @@ TEST(OwnerRegistry, quarantine_persists_after_the_collision_clears)
 
     reg.add_queue(1, 0, uint32_t{40});
     reg.add_queue(2, 0, uint32_t{40});
-    hub.quarantine_slot(40);
+    hub.quarantine_slot(0, 40);
 
     reg.remove_queue(2);
     EXPECT_TRUE(reg.is_injective(0, 40));  // ownership looks clean again...
-    EXPECT_TRUE(hub.is_quarantined(40));   // ...but the slot stays unusable
+    EXPECT_TRUE(hub.is_quarantined(0, 40));   // ...but the slot stays unusable
     EXPECT_FALSE(hub.can_register_batch({key_of(40, 9)}));
 }
 
@@ -953,16 +953,16 @@ TEST(DispatchHub, destroy_closes_the_slot_for_reuse)
     ASSERT_TRUE(register_one(hub, key_of(40, 2), /*corr_id=*/500, /*queue_token=*/1));
 
     // Step 1: stop new reservations (hub lock taken and released).
-    hub.mark_slot_closing(40);
-    EXPECT_TRUE(hub.is_closing(40));
+    hub.mark_slot_closing(0, 40);
+    EXPECT_TRUE(hub.is_closing(0, 40));
 
     // Step 2 is the gate_lock fence, which holds no hub lock; nothing to assert
     // here beyond it not being part of this critical section.
 
     // Step 3+4: strand what is left and quarantine permanently.
-    auto stranded = hub.quarantine_slot(40);
+    auto stranded = hub.quarantine_slot(0, 40);
     EXPECT_EQ(stranded.size(), 2u);
-    EXPECT_TRUE(hub.is_quarantined(40));
+    EXPECT_TRUE(hub.is_quarantined(0, 40));
     EXPECT_EQ(hub.live_entries(), 0u);
 
     // Their correlation id is on the ledger: deliberately not retired.
@@ -989,10 +989,10 @@ TEST(DispatchHub, destroy_closes_the_slot_for_reuse)
 TEST(DispatchHub, closing_blocks_new_reservations_but_not_an_in_flight_one)
 {
     auto hub = hub_t{};
-    hub.mark_slot_closing(40);
+    hub.mark_slot_closing(0, 40);
 
     // Eligibility consults is_closing() and refuses...
-    EXPECT_TRUE(hub.is_closing(40));
+    EXPECT_TRUE(hub.is_closing(0, 40));
 
     // ...but a batch already past that point still registers, and can complete.
     EXPECT_TRUE(hub.can_register_batch({key_of(40, 1)}));
@@ -1000,7 +1000,7 @@ TEST(DispatchHub, closing_blocks_new_reservations_but_not_an_in_flight_one)
     EXPECT_TRUE(hub.prove_eop(key_of(40, 1), 5, true).has_value());
 
     // Quarantine, by contrast, refuses registration outright.
-    hub.quarantine_slot(40);
+    hub.quarantine_slot(0, 40);
     EXPECT_FALSE(hub.can_register_batch({key_of(40, 2)}));
     EXPECT_FALSE(register_one(hub, key_of(40, 2)));
 }
@@ -1010,8 +1010,8 @@ TEST(DispatchHub, closing_blocks_new_reservations_but_not_an_in_flight_one)
 TEST(DispatchHub, clean_destroy_strands_nothing)
 {
     auto hub = hub_t{};
-    hub.mark_slot_closing(40);
-    auto stranded = hub.quarantine_slot(40);
+    hub.mark_slot_closing(0, 40);
+    auto stranded = hub.quarantine_slot(0, 40);
 
     EXPECT_TRUE(stranded.empty());
     EXPECT_EQ(hub.live_entries(), 0u);
@@ -1035,8 +1035,8 @@ TEST(DispatchHub, concurrent_destroy_and_registration_stay_consistent)
     auto destroyer = std::thread{[&hub]() {
         for(uint32_t s = 0; s < kSlots; ++s)
         {
-            hub.mark_slot_closing(s);
-            hub.quarantine_slot(s);
+            hub.mark_slot_closing(0, s);
+            hub.quarantine_slot(0, s);
         }
     }};
 
@@ -1054,7 +1054,7 @@ TEST(DispatchHub, concurrent_destroy_and_registration_stay_consistent)
     // exactly one way -- proven or stranded, never both.
     for(uint32_t s = 0; s < kSlots; ++s)
     {
-        EXPECT_TRUE(hub.is_quarantined(s));
+        EXPECT_TRUE(hub.is_quarantined(0, s));
     }
     EXPECT_EQ(hub.live_entries(), 0u);
     EXPECT_LE(prover.load(), kSlots);
@@ -1104,11 +1104,11 @@ all_entry_points_short_circuit()
     ok = ok && forked_hub().live_entries() == 0;
     ok = ok && forked_hub().tombstones() == 0;
     ok = ok && forked_hub().outstanding(1) == 0;
-    ok = ok && !forked_hub().is_quarantined(40);
-    ok = ok && !forked_hub().is_closing(40);
+    ok = ok && !forked_hub().is_quarantined(0, 40);
+    ok = ok && !forked_hub().is_closing(0, 40);
     ok = ok && !forked_hub().is_ledgered(500);
     ok = ok && forked_hub().mode() == session_mode::child_stale;
-    ok = ok && forked_hub().quarantine_slot(40).empty();
+    ok = ok && forked_hub().quarantine_slot(0, 40).empty();
     ok = ok && forked_hub().close_queue(1).empty();
     ok = ok && forked_hub().drain_for_teardown().first.empty();
     ok = ok && forked_hub().poison(session_mode::loss_poisoned).first.empty();
@@ -1435,7 +1435,7 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
             case 6:  // Collision -> quarantine a slot
             {
                 const uint32_t slot = rng() % kSlots;
-                auto           lost = hub.quarantine_slot(slot);
+                auto           lost = hub.quarantine_slot(0, slot);
                 model.quarantined.insert(slot);
                 for(auto& kv : model.state)
                 {
@@ -1524,7 +1524,7 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
         // A quarantined slot never accepts a reservation again.
         for(auto slot : model.quarantined)
         {
-            EXPECT_TRUE(hub.is_quarantined(slot));
+            EXPECT_TRUE(hub.is_quarantined(0, slot));
         }
     }
 
@@ -1548,22 +1548,22 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
 TEST(DispatchHub, pending_for_slot_counts_only_that_slots_live_entries)
 {
     auto hub = hub_t{};
-    EXPECT_EQ(hub.pending_for_slot(40), 0u);
+    EXPECT_EQ(hub.pending_for_slot(0, 40), 0u);
 
     ASSERT_TRUE(register_one(hub, key_of(40, 1)));
     ASSERT_TRUE(register_one(hub, key_of(40, 2)));
     ASSERT_TRUE(register_one(hub, key_of(41, 1)));
-    EXPECT_EQ(hub.pending_for_slot(40), 2u);
-    EXPECT_EQ(hub.pending_for_slot(41), 1u);
+    EXPECT_EQ(hub.pending_for_slot(0, 40), 2u);
+    EXPECT_EQ(hub.pending_for_slot(0, 41), 1u);
 
     // A proven entry leaves the hub, so it stops counting as outstanding -- which
     // is what lets the close drain observe progress and finish early.
     ASSERT_TRUE(hub.prove_eop(key_of(40, 1), 5, true).has_value());
-    EXPECT_EQ(hub.pending_for_slot(40), 1u);
+    EXPECT_EQ(hub.pending_for_slot(0, 40), 1u);
 
     ASSERT_TRUE(hub.prove_eop(key_of(40, 2), 5, true).has_value());
-    EXPECT_EQ(hub.pending_for_slot(40), 0u);
-    EXPECT_EQ(hub.pending_for_slot(41), 1u);
+    EXPECT_EQ(hub.pending_for_slot(0, 40), 0u);
+    EXPECT_EQ(hub.pending_for_slot(0, 41), 1u);
 }
 
 // A close whose records all land during the drain strands NOTHING: every
@@ -1575,15 +1575,15 @@ TEST(DispatchHub, a_clean_drain_strands_nothing_and_ledgers_nothing)
     ASSERT_TRUE(register_one(hub, key_of(40, 1), /*corr_id=*/900));
     ASSERT_TRUE(register_one(hub, key_of(40, 2), /*corr_id=*/900));
 
-    hub.mark_slot_closing(40);
+    hub.mark_slot_closing(0, 40);
 
     // The reader pairs both while the close is waiting.
     EXPECT_TRUE(hub.prove_eop(key_of(40, 1), 5, true).has_value());
     EXPECT_TRUE(hub.prove_eop(key_of(40, 2), 6, true).has_value());
-    EXPECT_EQ(hub.pending_for_slot(40), 0u);
+    EXPECT_EQ(hub.pending_for_slot(0, 40), 0u);
 
     // The deadline expires with nothing left, so the strand is a no-op.
-    auto stranded = hub.quarantine_slot(40);
+    auto stranded = hub.quarantine_slot(0, 40);
     EXPECT_TRUE(stranded.empty());
     EXPECT_EQ(hub.tombstones(), 0u);
     EXPECT_FALSE(hub.is_ledgered(900)) << "a fully drained close must not leak a correlation id";
@@ -1598,13 +1598,13 @@ TEST(DispatchHub, an_incomplete_drain_strands_only_the_remainder)
     ASSERT_TRUE(register_one(hub, key_of(40, 2), /*corr_id=*/902));
     ASSERT_TRUE(register_one(hub, key_of(40, 3), /*corr_id=*/903));
 
-    hub.mark_slot_closing(40);
+    hub.mark_slot_closing(0, 40);
 
     // Only one record makes it before the deadline.
     EXPECT_TRUE(hub.prove_eop(key_of(40, 2), 5, true).has_value());
-    EXPECT_EQ(hub.pending_for_slot(40), 2u);
+    EXPECT_EQ(hub.pending_for_slot(0, 40), 2u);
 
-    auto stranded = hub.quarantine_slot(40);
+    auto stranded = hub.quarantine_slot(0, 40);
     EXPECT_EQ(stranded.size(), 2u);
 
     // The one that paired retired normally; the two that did not are ledgered and
@@ -1628,7 +1628,7 @@ TEST(DispatchHub, pending_for_slot_observes_concurrent_pairing)
     {
         ASSERT_TRUE(register_one(hub, key_of(40, i)));
     }
-    EXPECT_EQ(hub.pending_for_slot(40), kCount);
+    EXPECT_EQ(hub.pending_for_slot(0, 40), kCount);
 
     auto reader = std::thread{[&hub]() {
         for(uint32_t i = 0; i < kCount; ++i)
@@ -1639,12 +1639,12 @@ TEST(DispatchHub, pending_for_slot_observes_concurrent_pairing)
     size_t pending = kCount;
     for(int spin = 0; spin < 100000 && pending > 0; ++spin)
     {
-        pending = hub.pending_for_slot(40);
+        pending = hub.pending_for_slot(0, 40);
     }
     reader.join();
 
-    EXPECT_EQ(hub.pending_for_slot(40), 0u);
-    auto stranded = hub.quarantine_slot(40);
+    EXPECT_EQ(hub.pending_for_slot(0, 40), 0u);
+    auto stranded = hub.quarantine_slot(0, 40);
     EXPECT_TRUE(stranded.empty()) << "a drain that observed completion must strand nothing";
 }
 

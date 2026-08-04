@@ -40,6 +40,7 @@
 
 #include <fmt/core.h>
 
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -72,6 +73,9 @@ constexpr int kEventfdFlags = EFD_CLOEXEC | EFD_NONBLOCK;
 // a processor hiccup, small enough that a stalled processor costs bounded memory
 // rather than unbounded growth.
 constexpr size_t kBatchPipeDepth = 16;
+
+// Upper bound on armed GPUs. One session per GPU that supports dispatch-log.
+constexpr size_t kMaxSessions = 8;
 
 // Aging cadences. A deposited result is normally taken within milliseconds; an
 // unmatched start belongs to a dispatch whose eop never arrived.
@@ -164,6 +168,12 @@ struct dlog_session
     // lock is needed. Start/eop pairing state deliberately does NOT live here --
     // it belongs to the processor thread (see processor_state).
     ring_cursors cursors = {};
+
+    // Per-session, so one GPU failing to arm never disables another. `ready`
+    // publishes a fully-built session to the copier (release/acquire); `failed`
+    // latches a permanently unusable GPU.
+    std::atomic<bool> ready  = {false};
+    std::atomic<bool> failed = {false};
 };
 
 // Reader thread state. Single instance via static_object (ordered teardown). Its
@@ -176,22 +186,29 @@ struct reader_state
     int               wake_fd = -1;
     bool              running = false;
 
-    int          kfd_fd  = -1;
-    dlog_session session = {};
+    int kfd_fd = -1;
+
+    // One session per armed GPU. A fixed array rather than a container so the
+    // atfork child handler can walk it with plain indexing -- no allocation, no
+    // container invariants to be caught mid-mutation.
+    std::array<dlog_session, kMaxSessions> sessions      = {};
+    std::atomic<size_t>                    session_count = {0};
 
     // Session is set up on the app thread (ensure_reader_session, via
     // create_queue) and drained on the reader thread. setup_mu serializes setup;
     // session_ready publishes the completed session to the reader (acquire/release
     // so the reader sees a fully-built session before it drains).
-    std::mutex        setup_mu      = {};
-    std::atomic<bool> session_ready = {false};
+    std::mutex setup_mu = {};
+    // True once ANY session is armed: lets the reader pick its poll cadence
+    // without walking the array on every iteration.
+    std::atomic<bool> any_session_ready = {false};
     // Latched when the reader can never serve a session: setup_session() failed
     // (no aperture, alloc, ABI, geometry -- all permanent, and retrying would
     // repeat 128 alloc ioctls plus a warning on every dispatch), the reader failed
     // to start, or we are in a forked child. Checked before setup_mu is taken, so a
     // latched reader never makes a dispatch block on that mutex. Cleared only by
     // stop_reader().
-    std::atomic<bool> setup_failed = {false};
+    std::atomic<bool> reader_unavailable = {false};
     // Bumped once per completed drain pass. A sync point waits for it to advance
     // twice, which proves a whole pass ran after the request.
     std::atomic<uint64_t> drain_epoch = {0};
@@ -220,10 +237,10 @@ purge_mutex()
     return _v;
 }
 
-std::vector<uint32_t>&
+std::vector<std::pair<uint32_t, uint32_t>>&
 purge_requests()
 {
-    static auto _v = std::vector<uint32_t>{};
+    static auto _v = std::vector<std::pair<uint32_t, uint32_t>>{};  // (gpu_id, slot)
     return _v;
 }
 
@@ -495,37 +512,46 @@ teardown_session(int kfd, dlog_session* s)
 uint64_t
 copy_records(reader_state& st)
 {
-    auto* _s       = &st.session;
-    auto* base     = static_cast<uint8_t*>(_s->smap);
-    auto* recs     = base + _s->info.records_offset;
-    auto* wptr_arr = reinterpret_cast<volatile uint64_t*>(base + _s->info.wptr_offset);
-    auto* rptr_arr = reinterpret_cast<volatile uint64_t*>(base + _s->info.rptr_offset);
+    uint64_t _total = 0;
+    const size_t _n = st.session_count.load(std::memory_order_acquire);
 
-    auto* _batch = st.pipe.acquire();
-    if(!_batch)
+    // One reader walks every armed ring. The rings are independent -- each has its
+    // own wptr/rptr and its own cursors -- so this is the single-session copier in
+    // a loop, with the same per-region acquire/release: the wptr acquire-load
+    // happens before the copy, and the rptr release-store after it, per session.
+    for(size_t i = 0; i < _n; ++i)
     {
-        // No free slot. Do NOT read the ring: leaving the records for the next
-        // pass keeps rptr where it is, which is the honest thing to do -- the
-        // producer may lap us, and that shows up as an overrun rather than as a
-        // silent hole.
-        st.batches_dropped.fetch_add(1, std::memory_order_relaxed);
-        return 0;
+        auto& _s = st.sessions[i];
+        if(!_s.ready.load(std::memory_order_acquire)) continue;
+
+        auto* base     = static_cast<uint8_t*>(_s.smap);
+        auto* recs     = base + _s.info.records_offset;
+        auto* wptr_arr = reinterpret_cast<volatile uint64_t*>(base + _s.info.wptr_offset);
+        auto* rptr_arr = reinterpret_cast<volatile uint64_t*>(base + _s.info.rptr_offset);
+
+        auto* _batch = st.pipe.acquire();
+        if(!_batch)
+        {
+            // No free slot. Do NOT read the ring: leaving the records for the next
+            // pass keeps rptr where it is, which is the honest thing to do -- the
+            // producer may lap us, and that shows up as an overrun rather than as
+            // a silent hole.
+            st.batches_dropped.fetch_add(1, std::memory_order_relaxed);
+            continue;
+        }
+
+        _batch->now_ns = common::timestamp_ns();
+        _batch->gpu_id = _s.gpu_id;
+        const auto _copied =
+            copy_pipes(recs, _s.info.num_regions, _s.info.region_record_count, wptr_arr, rptr_arr,
+                       _s.cursors, _batch->records);
+
+        // Release-store inside publish() orders the copy above before the
+        // processor can observe the batch.
+        if(_copied > 0) st.pipe.publish();
+        _total += _copied;
     }
-
-    _batch->now_ns = common::timestamp_ns();
-    _batch->gpu_id = _s->gpu_id;
-    const auto _n  = copy_pipes(recs,
-                               _s->info.num_regions,
-                               _s->info.region_record_count,
-                               wptr_arr,
-                               rptr_arr,
-                               _s->cursors,
-                               _batch->records);
-
-    // Release-store inside publish() orders the copy above before the processor
-    // can observe the batch.
-    if(_n > 0) st.pipe.publish();
-    return _n;
+    return _total;
 }
 
 // STAGE 2, processor thread: everything the reader used to do inline.
@@ -601,7 +627,7 @@ process_batch(processor_state& proc, const record_batch& batch)
                 }
             }
             uint32_t slot = doorbell_off_to_page_slot(rec.doorbell_off);
-            uint32_t gen  = doorbell_map().get_generation(slot);
+            uint32_t gen  = doorbell_map().get_generation(_gpu, slot);
             // gpu_id stamped from the ring this record came from: a record can
             // only ever match a dispatch enqueued on the same GPU.
             auto key = correlation_key{slot, rec.dispatch_id, gen, _gpu};
@@ -640,20 +666,21 @@ process_batch(processor_state& proc, const record_batch& batch)
 // Rate-limited to one line per escalating episode so a sustained overrun cannot
 // flood the log. Reader thread only, so the statics need no lock.
 void
-report_overrun(const ring_cursors& c, uint64_t batches_dropped)
+report_overrun(uint32_t gpu_id, const ring_cursors& c, uint64_t batches_dropped)
 {
-    static uint64_t _reported_overruns = 0;
-    static uint64_t _reported_drops    = 0;
-    if(c.overruns == _reported_overruns && batches_dropped == _reported_drops) return;
-
-    _reported_overruns = c.overruns;
-    _reported_drops    = batches_dropped;
+    // Per GPU: one ring lapping says nothing about another's.
+    static std::unordered_map<uint32_t, std::pair<uint64_t, uint64_t>> _reported;
+    auto&                                                              _prev = _reported[gpu_id];
+    if(c.overruns == _prev.first && batches_dropped == _prev.second) return;
+    _prev = {c.overruns, batches_dropped};
 
     ROCP_WARNING << fmt::format(
-        "KFD dispatch-log: ring overrun -- {} lap(s) so far, at least {} record(s) lost, {} "
+        "KFD dispatch-log (gpu_id={}): ring overrun -- {} lap(s) so far, at least {} record(s) "
+        "lost, {} "
         "batch(es) dropped because the processor fell behind. Those dispatches have no "
         "dispatch-log timestamps; everything else is unaffected and collection continues. Raise "
         "the ring with ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB if this repeats.",
+        gpu_id,
         c.overruns,
         c.lost_records,
         batches_dropped);
@@ -684,7 +711,7 @@ stop_reader()
 
     // Latch unavailable before the join so no dispatch can acquire a correlation
     // key against a reader that is on its way out (cleared again below).
-    st.setup_failed.store(true, std::memory_order_release);
+    st.reader_unavailable.store(true, std::memory_order_release);
     st.stop.store(true, std::memory_order_release);
     if(st.wake_fd >= 0)
     {
@@ -704,9 +731,16 @@ stop_reader()
     // here, and finalize itself is std::call_once (single-threaded). If that ordering
     // ever changes, this teardown must take st.setup_mu to serialize against a
     // concurrent setup_session(). The reader thread is already stopped+joined above.
-    teardown_session(st.kfd_fd, &st.session);
-    st.session_ready.store(false, std::memory_order_release);
-    st.setup_failed.store(false, std::memory_order_release);
+    const size_t _n = st.session_count.load(std::memory_order_acquire);
+    for(size_t i = 0; i < _n; ++i)
+    {
+        st.sessions[i].ready.store(false, std::memory_order_release);
+        teardown_session(st.kfd_fd, &st.sessions[i]);
+        st.sessions[i].failed.store(false, std::memory_order_release);
+    }
+    st.session_count.store(0, std::memory_order_release);
+    st.any_session_ready.store(false, std::memory_order_release);
+    st.reader_unavailable.store(false, std::memory_order_release);
     if(st.kfd_fd >= 0)
     {
         ::close(st.kfd_fd);
@@ -741,10 +775,10 @@ disable_reader_in_child()
     signal_less_abandon_in_child();
 
     auto& st = state();
-    st.session_ready.store(false, std::memory_order_relaxed);
+    st.any_session_ready.store(false, std::memory_order_relaxed);
     // Latch unavailable: setup_mu may have been held by a thread that did not
     // survive the fork, so a child dispatch must not reach it.
-    st.setup_failed.store(true, std::memory_order_relaxed);
+    st.reader_unavailable.store(true, std::memory_order_relaxed);
     st.running = false;  // makes stop_reader() and ~reader_state() no-ops
     // Abandon the handles of the vanished threads. Not detach(): that would touch
     // a pthread descriptor fork has already reclaimed in the child. The pipe and
@@ -754,11 +788,19 @@ disable_reader_in_child()
     new(&st.processor_thread) std::thread{};
     st.wake_fd = -1;
     st.kfd_fd  = -1;
-    // Drop ownership of the inherited stream fd / mapping / GTT allocation so the
-    // child can never tear down kernel objects that belong to the parent.
-    st.session.smap      = MAP_FAILED;
-    st.session.stream_fd = -1;
-    st.session.buffer_va = 0;
+    // Drop ownership of every inherited stream fd / mapping / GTT allocation so
+    // the child can never tear down kernel objects that belong to the parent.
+    // Plain indexed scalar stores over a fixed array: no allocation, no locking,
+    // no container invariants to trip over.
+    const size_t _n = st.session_count.load(std::memory_order_relaxed);
+    for(size_t i = 0; i < _n && i < kMaxSessions; ++i)
+    {
+        st.sessions[i].ready.store(false, std::memory_order_relaxed);
+        st.sessions[i].smap      = MAP_FAILED;
+        st.sessions[i].stream_fd = -1;
+        st.sessions[i].buffer_va = 0;
+    }
+    st.session_count.store(0, std::memory_order_relaxed);
 }
 
 // The processor thread. Sole consumer of the pipe; owns all pairing state.
@@ -872,7 +914,7 @@ reader_loop()
         // reader is not a 1000-wakeup/sec idle spinner during the (possibly long)
         // window before the first GPU queue is created. stop_reader() writes wake_fd
         // to break either wait immediately.
-        const int _timeout_ms = st.session_ready.load(std::memory_order_acquire) ? 1 : 100;
+        const int _timeout_ms = st.any_session_ready.load(std::memory_order_acquire) ? 1 : 100;
         int       rc          = ::poll(&wake, 1, _timeout_ms);
         if(rc < 0 && errno != EINTR)
         {
@@ -883,8 +925,8 @@ reader_loop()
             // dispatches already in flight simply miss and use HSA timestamps.
             // kfd_dispatch_log_available() is deliberately left alone so queue
             // destroy still retires doorbell-map entries.
-            st.session_ready.store(false, std::memory_order_release);
-            st.setup_failed.store(true, std::memory_order_release);
+            st.any_session_ready.store(false, std::memory_order_release);
+            st.reader_unavailable.store(true, std::memory_order_release);
             // No record can be deposited again: release anyone waiting on one
             // rather than make them burn their rendezvous deadline.
             results_map().abandon_waiters();
@@ -901,33 +943,42 @@ reader_loop()
             {}
         }
 
-        if(st.session_ready.load(std::memory_order_acquire))
+        if(st.any_session_ready.load(std::memory_order_acquire))
         {
             uint64_t now_ns = common::timestamp_ns();
 
             // The whole hot path: copy and publish. Everything else the reader
             // used to do now happens on the processor thread.
             total_seen += copy_records(st);
-            report_overrun(st.session.cursors,
-                           st.batches_dropped.load(std::memory_order_relaxed));
+            for(size_t i = 0, _n = st.session_count.load(std::memory_order_acquire); i < _n; ++i)
+                report_overrun(st.sessions[i].gpu_id,
+                               st.sessions[i].cursors,
+                               st.batches_dropped.load(std::memory_order_relaxed));
 
             st.drain_epoch.fetch_add(1, std::memory_order_release);
 
             if(now_ns - last_evict_ns >= kEvictIntervalNs)
             {
                 results_map().evict_stale(now_ns, kResultMaxAgeNs);
-                log_stream_status(st.session);
+                for(size_t i = 0, _n = st.session_count.load(std::memory_order_acquire); i < _n;
+                    ++i)
+                    log_stream_status(st.sessions[i]);
                 last_evict_ns = now_ns;
             }
         }
     }
 
     // Final copy to catch late records; the processor drains the pipe after us.
-    if(st.session_ready.load(std::memory_order_acquire))
+    if(st.any_session_ready.load(std::memory_order_acquire))
     {
         total_seen += copy_records(st);
-        report_overrun(st.session.cursors, st.batches_dropped.load(std::memory_order_relaxed));
-        log_stream_status(st.session);
+        for(size_t i = 0, _n = st.session_count.load(std::memory_order_acquire); i < _n; ++i)
+        {
+            report_overrun(st.sessions[i].gpu_id,
+                           st.sessions[i].cursors,
+                           st.batches_dropped.load(std::memory_order_relaxed));
+            log_stream_status(st.sessions[i]);
+        }
     }
 
     // The reader is done: nothing else will be deposited.
@@ -947,12 +998,20 @@ reader_loop()
 
     // Signal-less chain, reported from the reader too so the break point is
     // visible even if teardown does not run. Silent unless the feature is active.
+    uint64_t _ring_overruns = 0;
+    uint64_t _ring_lost     = 0;
+    for(size_t i = 0, _n = st.session_count.load(std::memory_order_acquire); i < _n; ++i)
+    {
+        _ring_overruns += st.sessions[i].cursors.overruns;
+        _ring_lost += st.sessions[i].cursors.lost_records;
+    }
+
     const auto _sl = signal_less_stats();
     ROCP_WARNING_IF(_sl.batch_eligible > 0 || _sl.eop_unmatched > 0) << fmt::format(
         "KFD dispatch-log ring: {} lap(s), {} record(s) lost to laps, {} batch(es) dropped -- a "
         "lost record is a lost START, which shows up as a start-unknown no-timing",
-        st.session.cursors.overruns,
-        st.session.cursors.lost_records,
+        _ring_overruns,
+        _ring_lost,
         st.batches_dropped.load(std::memory_order_relaxed));
 
     ROCP_WARNING_IF(_sl.batch_eligible > 0 || _sl.eop_unmatched > 0) << fmt::format(
@@ -989,7 +1048,7 @@ start_kfd_reader()
     // never have a session.
     common::scope_destructor cleanup{[&st]() {
         if(st.running) return;
-        st.setup_failed.store(true, std::memory_order_release);
+        st.reader_unavailable.store(true, std::memory_order_release);
         if(st.kfd_fd >= 0) ::close(st.kfd_fd);
         if(st.wake_fd >= 0) ::close(st.wake_fd);
         st.kfd_fd  = -1;
@@ -1059,7 +1118,7 @@ bool
 wait_for_reader_drain_barrier(uint64_t timeout_ns)
 {
     auto& st = state();
-    if(!st.running || !st.session_ready.load(std::memory_order_acquire)) return true;
+    if(!st.running || !st.any_session_ready.load(std::memory_order_acquire)) return true;
 
     const uint64_t _start    = st.drain_epoch.load(std::memory_order_acquire);
     const uint64_t _deadline = common::timestamp_ns() + timeout_ns;
@@ -1090,14 +1149,14 @@ nudge_reader()
 }
 
 void
-request_reader_slot_purge(uint32_t doorbell_slot)
+request_reader_slot_purge(uint32_t gpu_id, uint32_t doorbell_slot)
 {
     // Results are behind their own lock, so they can go now; retained starts are
-    // the reader's, so they are queued for it.
-    results_map().erase_slot(doorbell_slot);
+    // the processor's, so they are queued for it.
+    results_map().erase_slot(gpu_id, doorbell_slot);
 
     auto lk = std::lock_guard<std::mutex>{purge_mutex()};
-    purge_requests().emplace_back(doorbell_slot);
+    purge_requests().emplace_back(gpu_id, doorbell_slot);
 }
 
 namespace
@@ -1110,54 +1169,77 @@ namespace
 // init the device may simply not be ready yet, so a retryable failure must NOT
 // latch, or an attempt that was merely early would disable the feature for the
 // whole process. A genuinely permanent cause latches either way.
+// The armed session for this GPU, or nullptr. Reader/enqueue read this without a
+// lock: session_count is release-stored after a session is fully built, and each
+// session's `ready` flag is release-stored last, so an acquiring reader either
+// sees a complete session or none.
+dlog_session*
+find_session(reader_state& st, uint32_t gpu_id)
+{
+    const size_t _n = st.session_count.load(std::memory_order_acquire);
+    for(size_t i = 0; i < _n; ++i)
+        if(st.sessions[i].gpu_id == gpu_id) return &st.sessions[i];
+    return nullptr;
+}
+
 bool
 establish_session(uint32_t gpu_id, bool latch_retryable)
 {
     if(!kfd_dispatch_log_available() || !gpu_supports_dispatch_log(gpu_id)) return false;
 
     auto& st = state();
-    // setup_failed is checked FIRST so it overrides a still-published session: a
-    // dead or stopping reader latches it while session_ready may still be set.
-    if(st.setup_failed.load(std::memory_order_acquire)) return false;
-    // The session's gpu_id is written before session_ready is released and never
-    // mutated afterwards, so this acquire-load makes it safe to read unlocked.
-    if(st.session_ready.load(std::memory_order_acquire)) return st.session.gpu_id == gpu_id;
+    // A dead or stopping reader disables every GPU at once.
+    if(st.reader_unavailable.load(std::memory_order_acquire)) return false;
+
+    if(auto* _existing = find_session(st, gpu_id))
+        return _existing->ready.load(std::memory_order_acquire);
 
     auto lk = std::lock_guard<std::mutex>{st.setup_mu};
-    if(st.session_ready.load(std::memory_order_relaxed))
-        return st.session.gpu_id == gpu_id;  // lost the race; someone set it up
-    // Threads that all passed the unlocked check before the first failure land here
-    // one at a time; without this recheck each would repeat the failed setup.
-    if(st.setup_failed.load(std::memory_order_relaxed)) return false;
+    // Re-check under the lock: another thread may have armed this GPU meanwhile.
+    if(auto* _existing = find_session(st, gpu_id))
+        return _existing->ready.load(std::memory_order_relaxed);
+    if(st.reader_unavailable.load(std::memory_order_relaxed)) return false;
     if(st.kfd_fd < 0) return false;  // reader not started
 
-    // One session for the first supported GPU. (This gpu_id is supported per the
-    // guard above.)
-    bool _permanent = false;
-    if(!setup_session(st.kfd_fd, gpu_id, &st.session, &_permanent))
+    const size_t _slot = st.session_count.load(std::memory_order_relaxed);
+    if(_slot >= kMaxSessions)
+    {
+        ROCP_WARNING << fmt::format(
+            "KFD dispatch-log: gpu_id={} not armed, already holding {} sessions", gpu_id, _slot);
+        return false;
+    }
+
+    auto& _s = st.sessions[_slot];
+    bool  _permanent = false;
+    if(!setup_session(st.kfd_fd, gpu_id, &_s, &_permanent))
     {
         if(!_permanent && !latch_retryable)
         {
             // Too early, most likely: leave the door open for the first dispatch
-            // to try again rather than disabling the feature for the process.
+            // on THIS GPU to try again rather than disabling it.
             ROCP_INFO << fmt::format(
-                "KFD dispatch-log: gpu_id={} session not established at init; will retry on the "
-                "first dispatch",
+                "KFD dispatch-log: gpu_id={} session not established at configuration; will retry "
+                "on the first dispatch",
                 gpu_id);
             return false;
         }
 
-        st.setup_failed.store(true, std::memory_order_release);
-        // The GPU advertised dispatch-log support but the session could not be
-        // established (specific cause logged by setup_session above). This latch is
-        // permanent, so warn once that the whole process now uses HSA timestamps.
+        // Latched for THIS GPU only: another GPU's session is unaffected.
+        _s.gpu_id = gpu_id;
+        _s.failed.store(true, std::memory_order_release);
+        st.session_count.store(_slot + 1, std::memory_order_release);
         ROCP_WARNING << fmt::format(
-            "KFD dispatch-log: gpu_id={} supports dispatch-log but session setup failed; "
-            "dispatch-log is now disabled for this process, all dispatches use HSA timestamps",
+            "KFD dispatch-log: gpu_id={} supports dispatch-log but session setup failed; that GPU "
+            "now uses HSA timestamps",
             gpu_id);
         return false;
     }
-    st.session_ready.store(true, std::memory_order_release);
+
+    // Publish: `ready` last, so an acquiring reader never sees a half-built
+    // session, and session_count after it so the copier's walk finds it complete.
+    _s.ready.store(true, std::memory_order_release);
+    st.session_count.store(_slot + 1, std::memory_order_release);
+    st.any_session_ready.store(true, std::memory_order_release);
 
     // Break the reader out of its coarse pre-session poll so the first dispatches
     // are drained immediately instead of up to 100 ms later.
@@ -1172,7 +1254,7 @@ bool
 ensure_reader_session(uint32_t gpu_id)
 {
     // First-dispatch path: the device is usable by now, so a failure here is
-    // permanent and latches, exactly as before.
+    // permanent for this GPU and latches, exactly as before.
     return establish_session(gpu_id, /*latch_retryable=*/true);
 }
 

@@ -258,7 +258,7 @@ add_live_queue(uint64_t queue_token, uint32_t gpu_id, std::optional<uint32_t> do
     // and refuses every later reservation for it, so both owners fall back to the
     // signal path. Done AFTER add_queue returned, so the registry lock is not held
     // while the hub lock is taken.
-    auto _stranded = signal_less_hub().quarantine_slot(*doorbell_slot);
+    auto _stranded = signal_less_hub().quarantine_slot(gpu_id, *doorbell_slot);
     if(_stranded.empty()) return;
 
     note_signal_less_losses();
@@ -275,9 +275,10 @@ begin_close_signal_less_queue(uint64_t queue_token)
 {
     if(g_child_stale.load(std::memory_order_acquire)) return;
     auto _slot = owner_registry().slot_of(queue_token);
-    if(!_slot) return;
+    auto _gpu  = owner_registry().gpu_of(queue_token);
+    if(!_slot || !_gpu) return;
     // Hub lock is taken and released inside; the caller fences gate_lock next.
-    signal_less_hub().mark_slot_closing(*_slot);
+    signal_less_hub().mark_slot_closing(*_gpu, *_slot);
 }
 
 // Per-queue ceiling on the close drain. Measurement on the reported repro: a
@@ -315,10 +316,11 @@ drain_close_signal_less_queue(uint64_t queue_token)
     if(!signal_less_feature_enabled() || !signal_less_fully_wired()) return 0;
 
     auto _slot = owner_registry().slot_of(queue_token);
-    if(!_slot) return 0;
+    auto _gpu  = owner_registry().gpu_of(queue_token);
+    if(!_slot || !_gpu) return 0;
 
     auto& _hub     = signal_less_hub();
-    auto  _pending = _hub.pending_for_slot(*_slot);
+    auto  _pending = _hub.pending_for_slot(*_gpu, *_slot);
     if(_pending == 0) return 0;
 
     // Spend the smaller of this queue's budget and what the process has left.
@@ -337,7 +339,7 @@ drain_close_signal_less_queue(uint64_t queue_token)
         // now rather than at its next poll.
         nudge_reader();
         std::this_thread::sleep_for(std::chrono::microseconds{500});
-        _pending = _hub.pending_for_slot(*_slot);
+        _pending = _hub.pending_for_slot(*_gpu, *_slot);
     }
 
     const uint64_t _spent = steady_now_ns() - _start;
@@ -363,17 +365,18 @@ finish_close_signal_less_queue(uint64_t queue_token)
 {
     if(g_child_stale.load(std::memory_order_acquire)) return;
     auto _slot = owner_registry().slot_of(queue_token);
-    if(!_slot) return;
+    auto _gpu  = owner_registry().gpu_of(queue_token);
+    if(!_slot || !_gpu) return;
 
     // Leak + permanently quarantine in one hub critical section. The returned
     // payloads are released here, off the hub lock; releasing one runs no client
     // code, so this is safe on the destroying thread.
-    auto _stranded = signal_less_hub().quarantine_slot(*_slot);
+    auto _stranded = signal_less_hub().quarantine_slot(*_gpu, *_slot);
 
     // The reader owns its retained starts, so ask it to purge rather than touching
     // them from this thread; results are behind their own lock and can be dropped
     // directly.
-    request_reader_slot_purge(*_slot);
+    request_reader_slot_purge(*_gpu, *_slot);
 
     if(_stranded.empty()) return;
     note_signal_less_losses();

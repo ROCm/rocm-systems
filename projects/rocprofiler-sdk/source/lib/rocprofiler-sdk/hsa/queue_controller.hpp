@@ -159,6 +159,8 @@ profiler_serializer_kernel_completion_signal(hsa_signal_t queue_block_signal);
 // not a doorbell kind (the dispatch then falls back to HSA). Assumes the caller
 // has already established a reader session for this queue's GPU.
 std::optional<kfd::queue_doorbell_entry>
-capture_doorbell_key(rocprofiler_queue_id_t queue_id, const hsa_queue_t* intercept_queue);
+capture_doorbell_key(uint32_t               gpu_id,
+                     rocprofiler_queue_id_t queue_id,
+                     const hsa_queue_t*     intercept_queue);
 }  // namespace hsa
 }  // namespace rocprofiler

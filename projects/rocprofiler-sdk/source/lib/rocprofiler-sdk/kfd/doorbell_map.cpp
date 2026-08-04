@@ -29,40 +29,47 @@ namespace rocprofiler
 namespace kfd
 {
 queue_doorbell_entry
-DoorbellMap::bind_locked(map_data& data, rocprofiler_queue_id_t queue_id, uint32_t doorbell_off)
+DoorbellMap::bind_locked(map_data&              data,
+                         uint32_t               gpu_id,
+                         rocprofiler_queue_id_t queue_id,
+                         uint32_t               doorbell_off)
 {
-    // Preserve an existing generation for this doorbell; default to 0.
-    auto gen_it = data.generations.find(doorbell_off);
-    auto gen    = (gen_it != data.generations.end()) ? gen_it->second : 0u;
+    // Preserve an existing generation for this (gpu, doorbell); default to 0.
+    auto gen_key = std::make_pair(gpu_id, doorbell_off);
+    auto gen_it  = data.generations.find(gen_key);
+    auto gen     = (gen_it != data.generations.end()) ? gen_it->second : 0u;
 
-    auto entry                     = queue_doorbell_entry{doorbell_off, gen};
+    auto entry                     = queue_doorbell_entry{doorbell_off, gen, gpu_id};
     data.by_queue[queue_id.handle] = entry;
-    data.generations[doorbell_off] = gen;
+    data.generations[gen_key]      = gen;
     return entry;
 }
 
 queue_doorbell_entry
-DoorbellMap::bind_and_resolve(rocprofiler_queue_id_t queue_id, uint32_t doorbell_off)
+DoorbellMap::bind_and_resolve(uint32_t gpu_id, rocprofiler_queue_id_t queue_id,
+                              uint32_t doorbell_off)
 {
     // Fast path: this queue is already bound to this exact doorbell_off. Steady
     // state for every dispatch after the first -- a single read lock, no mutation.
     auto fast = m_data.rlock([&](const auto& data) -> std::optional<queue_doorbell_entry> {
         auto it = data.by_queue.find(queue_id.handle);
-        if(it == data.by_queue.end() || it->second.doorbell_off != doorbell_off)
+        if(it == data.by_queue.end() || it->second.doorbell_off != doorbell_off ||
+           it->second.gpu_id != gpu_id)
             return std::nullopt;
         return it->second;
     });
     if(fast) return *fast;
 
     // Slow path: first dispatch for this queue, or a rebind after doorbell reuse.
-    return m_data.wlock([&](auto& data) { return bind_locked(data, queue_id, doorbell_off); });
+    return m_data.wlock(
+        [&](auto& data) { return bind_locked(data, gpu_id, queue_id, doorbell_off); });
 }
 
 uint32_t
-DoorbellMap::get_generation(uint32_t doorbell_off) const
+DoorbellMap::get_generation(uint32_t gpu_id, uint32_t doorbell_off) const
 {
     return m_data.rlock([&](const auto& data) -> uint32_t {
-        auto it = data.generations.find(doorbell_off);
+        auto it = data.generations.find({gpu_id, doorbell_off});
         return (it != data.generations.end()) ? it->second : 0u;
     });
 }
@@ -75,12 +82,15 @@ DoorbellMap::on_queue_destroyed(rocprofiler_queue_id_t queue_id)
         if(it == data.by_queue.end()) return;
 
         const uint32_t doorbell_off = it->second.doorbell_off;
+        const uint32_t gpu_id       = it->second.gpu_id;
 
         data.by_queue.erase(it);
 
         // Bump generation so records that arrive on this doorbell after the
         // queue is gone are not paired with the destroyed queue's dispatches.
-        data.generations[doorbell_off] += 1;
+        // Keyed per GPU: slot numbers repeat across GPUs, so a shared counter
+        // would invalidate another GPU's live dispatches on the same slot.
+        data.generations[{gpu_id, doorbell_off}] += 1;
     });
 }
 }  // namespace kfd

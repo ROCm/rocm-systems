@@ -228,28 +228,23 @@ arm_dispatch_log_sessions()
     auto& st = state();
     if(!st.available) return;
 
-    // One process-wide session, so only arm when a single GPU supports
-    // dispatch-log: with several, nothing here says which one the application
-    // will use, and arming a guess would permanently deny the one that does get
-    // used. Multi-GPU keeps the lazy behavior of following the first dispatch
-    // until the reader can hold a session per GPU.
-    if(st.supported_gpu_ids.size() != 1)
+    // Arm every GPU that supports dispatch-log. Arming one the application never
+    // dispatches on is harmless -- its ring simply stays empty and the reader
+    // walks it for nothing -- and it is the only way to be ready for whichever
+    // GPU the application does use. Sessions are independent: a retryable failure
+    // on one leaves it to retry on first dispatch, a permanent failure leaves
+    // that GPU on HSA timestamps, and neither affects the others.
+    size_t _armed = 0;
+    for(uint32_t _gpu_id : st.supported_gpu_ids)
     {
-        ROCP_INFO << fmt::format(
-            "KFD dispatch-log: {} GPUs support dispatch-log; the single process-wide session is "
-            "left to follow the first GPU that dispatches",
-            st.supported_gpu_ids.size());
-        return;
+        if(arm_reader_session_early(_gpu_id)) ++_armed;
     }
 
-    const uint32_t _gpu_id = *st.supported_gpu_ids.begin();
-    if(arm_reader_session_early(_gpu_id))
-    {
-        ROCP_INFO << fmt::format(
-            "KFD dispatch-log: ring armed at kernel-trace configuration for gpu_id={}, before any "
-            "dispatch",
-            _gpu_id);
-    }
+    ROCP_INFO << fmt::format(
+        "KFD dispatch-log: armed {} of {} supported GPU(s) at kernel-trace configuration, before "
+        "any dispatch",
+        _armed,
+        st.supported_gpu_ids.size());
 }
 
 bool

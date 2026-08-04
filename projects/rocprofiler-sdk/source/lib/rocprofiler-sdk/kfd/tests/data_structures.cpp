@@ -118,7 +118,7 @@ TEST(kfd_time_is_sane, rejects_records_outside_the_dispatch_window)
 // ---------------------------------------------------------------------------
 TEST(DoorbellMap, bind_and_lookup)
 {
-    auto e = DoorbellMap{}.bind_and_resolve(qid(42), /*doorbell_off=*/7);
+    auto e = DoorbellMap{}.bind_and_resolve(0, qid(42), /*doorbell_off=*/7);
     EXPECT_EQ(e.doorbell_off, 7u);
     EXPECT_EQ(e.generation, 0u);
 }
@@ -126,24 +126,24 @@ TEST(DoorbellMap, bind_and_lookup)
 TEST(DoorbellMap, destroy_bumps_generation)
 {
     auto m = DoorbellMap{};
-    m.bind_and_resolve(qid(42), 7);
+    m.bind_and_resolve(0, qid(42), 7);
 
     m.on_queue_destroyed(qid(42));
 
-    EXPECT_EQ(m.get_generation(7), 1u);  // bumped
+    EXPECT_EQ(m.get_generation(0, 7), 1u);  // bumped
 }
 
 TEST(DoorbellMap, doorbell_reuse_gets_new_generation)
 {
     auto m = DoorbellMap{};
     // queue 42 on doorbell 7, then destroyed
-    m.bind_and_resolve(qid(42), 7);
+    m.bind_and_resolve(0, qid(42), 7);
     m.on_queue_destroyed(qid(42));
-    EXPECT_EQ(m.get_generation(7), 1u);
+    EXPECT_EQ(m.get_generation(0, 7), 1u);
 
     // a new queue 43 reuses doorbell 7 -> must carry the bumped generation,
     // so records from the old queue can never be attributed to the new one.
-    auto e = m.bind_and_resolve(qid(43), 7);
+    auto e = m.bind_and_resolve(0, qid(43), 7);
     EXPECT_EQ(e.doorbell_off, 7u);
     EXPECT_EQ(e.generation, 1u);
 }
@@ -152,7 +152,7 @@ TEST(DoorbellMap, destroy_unknown_queue_is_noop)
 {
     auto m = DoorbellMap{};
     m.on_queue_destroyed(qid(123));  // must not crash
-    EXPECT_EQ(m.get_generation(7), 0u);
+    EXPECT_EQ(m.get_generation(0, 7), 0u);
 }
 
 // Two distinct queues binding the same doorbell (degenerate, should not happen
@@ -161,12 +161,12 @@ TEST(DoorbellMap, destroy_unknown_queue_is_noop)
 TEST(DoorbellMap, two_queues_same_doorbell_forward_resolves)
 {
     auto m = DoorbellMap{};
-    auto a = m.bind_and_resolve(qid(42), 7);
-    auto b = m.bind_and_resolve(qid(43), 7);
+    auto a = m.bind_and_resolve(0, qid(42), 7);
+    auto b = m.bind_and_resolve(0, qid(43), 7);
 
     EXPECT_EQ(a.doorbell_off, 7u);
     EXPECT_EQ(b.doorbell_off, 7u);
-    EXPECT_EQ(m.get_generation(7), 0u);  // no destroy -> generation unchanged
+    EXPECT_EQ(m.get_generation(0, 7), 0u);  // no destroy -> generation unchanged
 }
 
 // Page-relative doorbell slot helpers: capture (from pointer) and reader (from
@@ -195,12 +195,12 @@ TEST(DoorbellMap, bind_and_resolve_binds_then_caches)
     auto m = DoorbellMap{};
 
     // First call binds (queue previously unknown) and resolves.
-    auto e1 = m.bind_and_resolve(qid(42), 4u);
+    auto e1 = m.bind_and_resolve(0, qid(42), 4u);
     EXPECT_EQ(e1.doorbell_off, 4u);
     EXPECT_EQ(e1.generation, 0u);
 
     // Subsequent calls return the same entry without changing state.
-    auto e2 = m.bind_and_resolve(qid(42), 4u);
+    auto e2 = m.bind_and_resolve(0, qid(42), 4u);
     EXPECT_EQ(e2.doorbell_off, 4u);
     EXPECT_EQ(e2.generation, 0u);
 }
@@ -212,20 +212,20 @@ TEST(DoorbellMap, bind_and_resolve_rebinds_on_doorbell_reuse)
 {
     auto m = DoorbellMap{};
 
-    m.bind_and_resolve(qid(1), 4u);  // gen 0
+    m.bind_and_resolve(0, qid(1), 4u);  // gen 0
     m.on_queue_destroyed(qid(1));    // doorbell 4 -> gen bumped to 1
 
     // New queue reuses doorbell 4: the FIRST resolve rebinds via the slow
     // (write-lock) path because qid(2) is absent from by_queue -- hand back the
     // bumped gen 1.
-    auto e = m.bind_and_resolve(qid(2), 4u);
+    auto e = m.bind_and_resolve(0, qid(2), 4u);
     EXPECT_EQ(e.doorbell_off, 4u);
     EXPECT_EQ(e.generation, 1u);
 
     // A SECOND resolve on the reused queue now takes the fast (read-lock) path.
     // It must still report the bumped gen 1, never a stale 0 -- guards against
     // the fast path serving pre-reuse state.
-    auto e2 = m.bind_and_resolve(qid(2), 4u);
+    auto e2 = m.bind_and_resolve(0, qid(2), 4u);
     EXPECT_EQ(e2.doorbell_off, 4u);
     EXPECT_EQ(e2.generation, 1u);
 }
@@ -236,10 +236,10 @@ TEST(DoorbellMap, bind_and_resolve_follows_queue_to_new_doorbell)
 {
     auto m = DoorbellMap{};
 
-    auto a = m.bind_and_resolve(qid(7), 4u);
+    auto a = m.bind_and_resolve(0, qid(7), 4u);
     EXPECT_EQ(a.doorbell_off, 4u);
 
-    auto b = m.bind_and_resolve(qid(7), 8u);  // same queue, different doorbell
+    auto b = m.bind_and_resolve(0, qid(7), 8u);  // same queue, different doorbell
     EXPECT_EQ(b.doorbell_off, 8u);
 }
 
@@ -505,12 +505,12 @@ TEST(ResultsMap, erase_slot_drops_only_that_slot)
     m.deposit(correlation_key{7, 2, 1}, kfd_timing_result{3, 4, 0});  // later generation
     m.deposit(correlation_key{8, 1, 0}, kfd_timing_result{5, 6, 0});
 
-    EXPECT_EQ(m.erase_slot(7), 2u);
+    EXPECT_EQ(m.erase_slot(0, 7), 2u);
     EXPECT_FALSE(m.take(correlation_key{7, 1, 0}).has_value());
     EXPECT_FALSE(m.take(correlation_key{7, 2, 1}).has_value());
     EXPECT_TRUE(m.take(correlation_key{8, 1, 0}).has_value());
 
-    EXPECT_EQ(m.erase_slot(7), 0u);  // idempotent
+    EXPECT_EQ(m.erase_slot(0, 7), 0u);  // idempotent
 }
 
 // A firmware record from one GPU must never match a dispatch enqueued on
@@ -555,4 +555,32 @@ TEST(ResultsMap, a_result_is_never_taken_across_gpus)
     m.deposit(on_gpu1, kfd_timing_result{33, 44, 0});
     EXPECT_EQ(m.take(on_gpu1)->start_gpu_ticks, 33u);
     EXPECT_EQ(m.take(on_gpu0)->start_gpu_ticks, 11u);
+}
+
+// Doorbell slot numbers repeat across GPUs, so the generation counter must be
+// per-GPU: destroying a queue on one GPU must not invalidate another GPU's live
+// dispatches on the same slot number.
+TEST(DoorbellMap, generations_are_per_gpu)
+{
+    auto m = DoorbellMap{};
+
+    auto on_gpu0 = m.bind_and_resolve(/*gpu_id=*/0, qid(1), /*doorbell_off=*/7);
+    auto on_gpu1 = m.bind_and_resolve(/*gpu_id=*/1, qid(2), /*doorbell_off=*/7);
+    EXPECT_EQ(on_gpu0.generation, 0u);
+    EXPECT_EQ(on_gpu1.generation, 0u);
+    EXPECT_EQ(on_gpu0.gpu_id, 0u);
+    EXPECT_EQ(on_gpu1.gpu_id, 1u);
+
+    // Destroying GPU 0's queue bumps only GPU 0's slot 7.
+    m.on_queue_destroyed(qid(1));
+    EXPECT_EQ(m.get_generation(0, 7), 1u);
+    EXPECT_EQ(m.get_generation(1, 7), 0u) << "another GPU's slot must be untouched";
+
+    // GPU 1's queue keeps resolving at its own generation.
+    auto again = m.bind_and_resolve(1, qid(2), 7);
+    EXPECT_EQ(again.generation, 0u);
+
+    // A new queue reusing GPU 0's slot picks up the bumped generation.
+    auto reused = m.bind_and_resolve(0, qid(3), 7);
+    EXPECT_EQ(reused.generation, 1u);
 }

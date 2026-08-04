@@ -400,12 +400,12 @@ QueueController::add_queue(hsa_queue_t*           id,
     if(const auto* _queue = get_queue(*id))
     {
         auto _slot = std::optional<uint32_t>{};
-        if(auto _db = capture_doorbell_key(_queue->get_id(), _queue->intercept_queue()))
+        const auto _gpu_id =
+            static_cast<uint32_t>(_queue->get_agent().get_rocp_agent()->gpu_id);
+        if(auto _db = capture_doorbell_key(_gpu_id, _queue->get_id(), _queue->intercept_queue()))
             _slot = _db->doorbell_off;
 
-        kfd::add_live_queue(_queue->get_id().handle,
-                            static_cast<uint32_t>(_queue->get_agent().get_rocp_agent()->gpu_id),
-                            _slot);
+        kfd::add_live_queue(_queue->get_id().handle, _gpu_id, _slot);
     }
 
     if(create_interposition_state)
@@ -814,7 +814,9 @@ queue_controller_init(RocAttachDispatchTable* attach_table)
 }
 
 std::optional<kfd::queue_doorbell_entry>
-capture_doorbell_key(rocprofiler_queue_id_t queue_id, const hsa_queue_t* intercept_queue)
+capture_doorbell_key(uint32_t               gpu_id,
+                     rocprofiler_queue_id_t queue_id,
+                     const hsa_queue_t*     intercept_queue)
 {
     // Extract the queue's hardware doorbell pointer from its intercept queue's
     // doorbell signal (HSA-internal amd_signal_t layout; same pattern as
@@ -847,7 +849,7 @@ capture_doorbell_key(rocprofiler_queue_id_t queue_id, const hsa_queue_t* interce
     // firmware record (kfd::doorbell_off_to_page_slot). bind_and_resolve binds once
     // per queue (write lock on the first dispatch), then is a plain read lock.
     const uint32_t slot = kfd::doorbell_ptr_to_page_slot(hwptr, page_size);
-    return kfd::doorbell_map().bind_and_resolve(queue_id, slot);
+    return kfd::doorbell_map().bind_and_resolve(gpu_id, queue_id, slot);
 }
 
 }  // namespace hsa

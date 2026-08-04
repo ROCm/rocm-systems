@@ -27,6 +27,7 @@
 #include <rocprofiler-sdk/fwd.h>
 
 #include <cstdint>
+#include <map>
 #include <unordered_map>
 
 // DoorbellMap: the SDK-side bridge between a firmware record's doorbell_off (the
@@ -80,6 +81,7 @@ struct queue_doorbell_entry
 {
     uint32_t doorbell_off = 0;
     uint32_t generation   = 0;
+    uint32_t gpu_id       = 0;
 };
 
 class DoorbellMap
@@ -100,10 +102,12 @@ public:
     // doorbell reuse, takes the write lock to bind. Destroying a queue erases its
     // binding, so a queue that reuses the doorbell takes the bind path and picks
     // up the bumped generation.
-    queue_doorbell_entry bind_and_resolve(rocprofiler_queue_id_t queue_id, uint32_t doorbell_off);
+    queue_doorbell_entry bind_and_resolve(uint32_t               gpu_id,
+                                          rocprofiler_queue_id_t queue_id,
+                                          uint32_t               doorbell_off);
 
     // Current generation for a doorbell_off (0 if never seen).
-    uint32_t get_generation(uint32_t doorbell_off) const;
+    uint32_t get_generation(uint32_t gpu_id, uint32_t doorbell_off) const;
 
     // A queue was destroyed: drop its mappings and bump the doorbell generation
     // so future records are not misattributed.
@@ -113,11 +117,13 @@ private:
     struct map_data
     {
         std::unordered_map<uint64_t /*queue handle*/, queue_doorbell_entry>    by_queue;
-        std::unordered_map<uint32_t /*doorbell_off*/, uint32_t /*generation*/> generations;
+        // Keyed by (gpu_id, doorbell_off): slot numbers repeat across GPUs.
+        std::map<std::pair<uint32_t, uint32_t>, uint32_t /*generation*/> generations;
     };
 
     // Shared bind logic; caller holds the write lock. Returns the bound entry.
     static queue_doorbell_entry bind_locked(map_data&              data,
+                                            uint32_t               gpu_id,
                                             rocprofiler_queue_id_t queue_id,
                                             uint32_t               doorbell_off);
 

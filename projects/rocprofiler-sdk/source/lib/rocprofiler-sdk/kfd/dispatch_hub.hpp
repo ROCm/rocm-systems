@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -284,35 +285,35 @@ public:
     // completion signals must still be able to register -- the destroy path fences
     // those in flight before it leaks and quarantines. So this deliberately does
     // NOT make register_batch() fail; only the eligibility query consults it.
-    void mark_slot_closing(uint32_t doorbell_slot)
+    void mark_slot_closing(uint32_t gpu_id, uint32_t doorbell_slot)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return;
         auto lk = std::lock_guard<std::mutex>{m_mu};
-        m_closing.insert(doorbell_slot);
+        m_closing.insert({gpu_id, doorbell_slot});
     }
 
-    bool is_closing(uint32_t doorbell_slot) const
+    bool is_closing(uint32_t gpu_id, uint32_t doorbell_slot) const
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
         auto lk = std::lock_guard<std::mutex>{m_mu};
-        return m_closing.count(doorbell_slot) != 0;
+        return m_closing.count({gpu_id, doorbell_slot}) != 0;
     }
 
     // Slot collision (requirement 3) or queue close / generation bump
     // (requirement 4): leak everything still pending on the slot and make it
     // permanently unusable, so no later owner or reused generation can register
     // against it again (invariant 9, U12/U13).
-    std::vector<leaked> quarantine_slot(uint32_t doorbell_slot)
+    std::vector<leaked> quarantine_slot(uint32_t gpu_id, uint32_t doorbell_slot)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return {};
 
         auto lk = std::lock_guard<std::mutex>{m_mu};
-        m_quarantined.insert(doorbell_slot);
-        m_closing.insert(doorbell_slot);
+        m_quarantined.insert({gpu_id, doorbell_slot});
+        m_closing.insert({gpu_id, doorbell_slot});
         auto out = std::vector<leaked>{};
         for(auto it = m_entries.begin(); it != m_entries.end();)
         {
-            if(it->first.doorbell_off == doorbell_slot)
+            if(it->first.gpu_id == gpu_id && it->first.doorbell_off == doorbell_slot)
             {
                 out.emplace_back(leak_locked(it));
                 it = m_entries.erase(it);
@@ -371,11 +372,11 @@ public:
         return m_ledger.count(correlation_id) != 0;
     }
 
-    bool is_quarantined(uint32_t doorbell_slot) const
+    bool is_quarantined(uint32_t gpu_id, uint32_t doorbell_slot) const
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
         auto lk = std::lock_guard<std::mutex>{m_mu};
-        return m_quarantined.count(doorbell_slot) != 0;
+        return m_quarantined.count({gpu_id, doorbell_slot}) != 0;
     }
 
     // ++ on register, -- on any terminal transition (invariant 7).
@@ -390,14 +391,14 @@ public:
     // Dispatches still awaiting a firmware EOP on this doorbell slot -- exactly
     // what quarantine_slot() would strand. The close path polls this so it can
     // wait for records that are still in flight instead of discarding them.
-    size_t pending_for_slot(uint32_t doorbell_slot) const
+    size_t pending_for_slot(uint32_t gpu_id, uint32_t doorbell_slot) const
     {
         if(m_abandoned.load(std::memory_order_acquire)) return 0;
         auto   lk      = std::lock_guard<std::mutex>{m_mu};
         size_t pending = 0;
         for(const auto& itr : m_entries)
         {
-            if(itr.first.doorbell_off == doorbell_slot &&
+            if(itr.first.gpu_id == gpu_id && itr.first.doorbell_off == doorbell_slot &&
                itr.second.state == entry_state::pending)
                 ++pending;
         }
@@ -465,7 +466,8 @@ private:
     bool key_admissible_locked(const correlation_key& key) const
     {
         return m_mode == session_mode::running && m_entries.count(key) == 0 &&
-               m_tombstones.count(key) == 0 && m_quarantined.count(key.doorbell_off) == 0;
+               m_tombstones.count(key) == 0 &&
+               m_quarantined.count({key.gpu_id, key.doorbell_off}) == 0;
     }
 
     // Caller holds m_mu. Does NOT erase; callers that iterate erase themselves.
@@ -523,8 +525,10 @@ private:
     map_t                                                     m_entries     = {};
     std::unordered_set<correlation_key, correlation_key_hash> m_tombstones  = {};
     std::unordered_set<uint64_t>                              m_ledger      = {};
-    std::unordered_set<uint32_t>                              m_quarantined = {};
-    std::unordered_set<uint32_t>                              m_closing     = {};
+    // Keyed by (gpu_id, slot): slot numbers repeat across GPUs, so a single set
+    // would let one GPU's queue destroy quarantine another GPU's live slot.
+    std::set<std::pair<uint32_t, uint32_t>>                   m_quarantined = {};
+    std::set<std::pair<uint32_t, uint32_t>>                   m_closing     = {};
     std::unordered_map<uint64_t, size_t>                      m_outstanding = {};
 };
 }  // namespace kfd

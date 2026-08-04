@@ -102,7 +102,7 @@ public:
 
     // Drop every result for a doorbell slot whose queue was destroyed, so a stale
     // result cannot be taken by whatever reuses the slot. Returns the count.
-    size_t erase_slot(uint32_t doorbell_off);
+    size_t erase_slot(uint32_t gpu_id, uint32_t doorbell_off);
 
     // Remove entries whose deposited_at_ns is older than max_age_ns relative to
     // now_ns. now_ns is passed in (not sampled) so the function is deterministic

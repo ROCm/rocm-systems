@@ -716,7 +716,8 @@ signal_less_batch_eligible(Queue*                                            que
     const auto _gpu_id = queue->get_agent().get_rocp_agent()->gpu_id;
     if(!kfd::ensure_reader_session(static_cast<uint32_t>(_gpu_id))) return false;
 
-    auto _db = capture_doorbell_key(queue->get_id(), queue->intercept_queue());
+    auto _db = capture_doorbell_key(
+        static_cast<uint32_t>(_gpu_id), queue->get_id(), queue->intercept_queue());
     if(!_db) return false;
 
     keys_out->assign(num_packets, std::nullopt);
@@ -748,7 +749,8 @@ signal_less_batch_eligible(Queue*                                            que
     // is_closing() is an eligibility-only gate: a batch already past this point
     // may still register, which is what the destroy path fences before it strands.
     _inputs.hub_accepts_batch = kfd::signal_less_hub().can_register_batch(_flat) &&
-                                !kfd::signal_less_hub().is_closing(_db->doorbell_off);
+                                !kfd::signal_less_hub().is_closing(static_cast<uint32_t>(_gpu_id),
+                                                                   _db->doorbell_off);
     // The payload is value-only (see kfd::pending_payload), so construction cannot
     // fail once the key resolved.
     _inputs.payload_constructible = true;
@@ -1087,7 +1089,9 @@ write_interceptor(Queue*                                queue,
                 {
                     // Resolve + bind the queue's page-relative doorbell slot.
                     // nullopt when the doorbell pointer is unavailable -> HSA fallback.
-                    if(auto _db = capture_doorbell_key(queue->get_id(), queue->intercept_queue()))
+                    if(auto _db = capture_doorbell_key(static_cast<uint32_t>(_gpu_id),
+                                                       queue->get_id(),
+                                                       queue->intercept_queue()))
                     {
                         _packet_data.kfd_doorbell_off          = _db->doorbell_off;
                         _packet_data.kfd_generation            = _db->generation;

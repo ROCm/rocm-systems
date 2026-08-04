@@ -84,7 +84,7 @@ arm_reader_session_early(uint32_t gpu_id);
 // consumes it on its next pass. Results, which sit behind their own lock, are
 // dropped immediately here.
 void
-request_reader_slot_purge(uint32_t doorbell_slot);
+request_reader_slot_purge(uint32_t gpu_id, uint32_t doorbell_slot);
 
 // Break the reader out of its poll so it copies the ring now rather than up to a
 // poll interval from now. Used by the close drain, which is waiting on records

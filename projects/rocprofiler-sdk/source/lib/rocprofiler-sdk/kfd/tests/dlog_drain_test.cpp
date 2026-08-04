@@ -1039,3 +1039,92 @@ TEST(dlog_drain, per_doorbell_tally_exposes_start_eop_doorbell_disagreement)
     EXPECT_EQ(st.pairing.pending_starts.size(), 1u);
     EXPECT_EQ(st.pairing.starts_with_doorbell(4102).second, 23u);
 }
+
+// Two GPUs' rings are independent: one reader walking both must route each
+// batch to its own pairing state, and neither ring's state may affect the other.
+TEST(dlog_drain, two_rings_pair_independently_per_gpu)
+{
+    // Two rings standing in for two GPUs, using the SAME doorbell and dispatch
+    // ids -- the collision that would occur if pairing were shared.
+    fake_ring    ring_a(1, 2048);
+    fake_ring    ring_b(1, 2048);
+    ring_cursors cur_a;
+    ring_cursors cur_b;
+
+    auto batch_a = std::vector<copied_record>{};
+    auto batch_b = std::vector<copied_record>{};
+    copy_pipes(ring_a.records.data(), 1, ring_a.rrc, ring_a.wptr.data(), ring_a.rptr.data(), cur_a,
+               batch_a);
+    copy_pipes(ring_b.records.data(), 1, ring_b.rrc, ring_b.wptr.data(), ring_b.rptr.data(), cur_b,
+               batch_b);
+    batch_a.clear();
+    batch_b.clear();
+
+    const uint32_t db = 4100;
+    // GPU A: a complete pair. GPU B: the SAME doorbell and id, also a pair.
+    ring_a.put(0, 0, kRecStart, 5, db, 100);
+    ring_a.put(0, 1, kRecEop, 5, db, 200);
+    ring_a.wptr[0] = 2;
+    ring_b.put(0, 0, kRecStart, 5, db, 300);
+    ring_b.put(0, 1, kRecEop, 5, db, 400);
+    ring_b.wptr[0] = 2;
+
+    copy_pipes(ring_a.records.data(), 1, ring_a.rrc, ring_a.wptr.data(), ring_a.rptr.data(), cur_a,
+               batch_a);
+    copy_pipes(ring_b.records.data(), 1, ring_b.rrc, ring_b.wptr.data(), ring_b.rptr.data(), cur_b,
+               batch_b);
+
+    // One pairing state PER GPU, as the processor keeps them.
+    pair_state pair_a;
+    pair_state pair_b;
+    recorder   rec_a;
+    recorder   rec_b;
+
+    EXPECT_EQ(pair_records(batch_a.data(), batch_a.size(), pair_a, 1000, rec_a.on_record()), 1u);
+    EXPECT_EQ(pair_records(batch_b.data(), batch_b.size(), pair_b, 1000, rec_b.on_record()), 1u);
+
+    // Each GPU got ITS OWN timestamps, not the other's.
+    ASSERT_EQ(rec_a.pairs.count(std::make_pair(db, 5u)), 1u);
+    ASSERT_EQ(rec_b.pairs.count(std::make_pair(db, 5u)), 1u);
+    EXPECT_EQ(rec_a.pairs[std::make_pair(db, 5u)].first, 100u);
+    EXPECT_EQ(rec_b.pairs[std::make_pair(db, 5u)].first, 300u);
+    EXPECT_EQ(pair_a.unmatched_eops, 0u);
+    EXPECT_EQ(pair_b.unmatched_eops, 0u);
+}
+
+// An overrun on one GPU's ring must not touch another's cursors or verdicts.
+TEST(dlog_drain, an_overrun_on_one_ring_does_not_affect_another)
+{
+    fake_ring    ring_a(1, 8);
+    fake_ring    ring_b(1, 8);
+    ring_cursors cur_a;
+    ring_cursors cur_b;
+    auto         batch_a = std::vector<copied_record>{};
+    auto         batch_b = std::vector<copied_record>{};
+
+    copy_pipes(ring_a.records.data(), 1, 8, ring_a.wptr.data(), ring_a.rptr.data(), cur_a, batch_a);
+    copy_pipes(ring_b.records.data(), 1, 8, ring_b.wptr.data(), ring_b.rptr.data(), cur_b, batch_b);
+    batch_a.clear();
+    batch_b.clear();
+
+    // A laps; B is clean.
+    ring_a.put(0, 0, kRecStart, 1, 4100, 10);
+    ring_a.put(0, 1, kRecEop, 1, 4100, 20);
+    ring_a.wptr[0] = 40;
+    ring_b.put(0, 0, kRecStart, 1, 4100, 30);
+    ring_b.put(0, 1, kRecEop, 1, 4100, 40);
+    ring_b.wptr[0] = 2;
+
+    copy_pipes(ring_a.records.data(), 1, 8, ring_a.wptr.data(), ring_a.rptr.data(), cur_a, batch_a);
+    copy_pipes(ring_b.records.data(), 1, 8, ring_b.wptr.data(), ring_b.rptr.data(), cur_b, batch_b);
+
+    EXPECT_EQ(cur_a.overruns, 1u);
+    EXPECT_EQ(cur_b.overruns, 0u) << "one ring lapping must not mark another";
+    EXPECT_GT(cur_a.lost_records, 0u);
+    EXPECT_EQ(cur_b.lost_records, 0u);
+
+    for(const auto& r : batch_b)
+    {
+        EXPECT_TRUE(r.loss_free) << "the clean ring's records stay usable";
+    }
+}

@@ -126,6 +126,17 @@ public:
         return it->second.slot;
     }
 
+    // The GPU this queue lives on, if it is still live. The close path needs it to
+    // address the hub's per-(gpu, slot) quarantine.
+    std::optional<uint32_t> gpu_of(uint64_t queue_token) const
+    {
+        if(m_abandoned.load(std::memory_order_acquire)) return std::nullopt;
+        auto lk = std::lock_guard<std::mutex>{m_mu};
+        auto it = m_by_queue.find(queue_token);
+        if(it == m_by_queue.end()) return std::nullopt;
+        return it->second.gpu_id;
+    }
+
     size_t owners_of(uint32_t gpu_id, uint32_t slot) const
     {
         if(m_abandoned.load(std::memory_order_acquire)) return 0;

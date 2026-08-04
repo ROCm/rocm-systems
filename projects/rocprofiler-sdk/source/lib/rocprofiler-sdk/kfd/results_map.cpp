@@ -116,13 +116,13 @@ ResultsMap::stats() const
 }
 
 size_t
-ResultsMap::erase_slot(uint32_t doorbell_off)
+ResultsMap::erase_slot(uint32_t gpu_id, uint32_t doorbell_off)
 {
     auto   lk      = std::lock_guard<std::mutex>{m_mutex};
     size_t erased  = 0;
     for(auto it = m_data.begin(); it != m_data.end();)
     {
-        if(it->first.doorbell_off == doorbell_off)
+        if(it->first.gpu_id == gpu_id && it->first.doorbell_off == doorbell_off)
         {
             it = m_data.erase(it);
             ++erased;
