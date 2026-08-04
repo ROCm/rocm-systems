@@ -55,7 +55,11 @@ RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <barrier>
 #include <bit>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <format>
@@ -66,6 +70,7 @@ RJ_DIAGNOSTIC_POP
 #include <set>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -347,6 +352,73 @@ public:
   ParallelSafePlugin() : ExecutionPlugin("parallel_safe") {}
   bool requires_serial_execution() const override { return false; }
 };
+
+class SerialHotHookPlugin final : public ExecutionPlugin {
+public:
+  SerialHotHookPlugin() : ExecutionPlugin("serial_hot_hook") {}
+  bool requires_serial_execution() const override { return true; }
+};
+
+class ConcurrencyProbePlugin final : public ExecutionPlugin {
+public:
+  explicit ConcurrencyProbePlugin(bool serialize_hot_hooks)
+      : ExecutionPlugin("concurrency_probe"), serialize_hot_hooks_(serialize_hot_hooks) {}
+
+  bool requires_serial_execution() const override { return serialize_hot_hooks_; }
+
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override {
+    observe(hot_active_, hot_max_active_);
+  }
+
+  void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override {
+    observe(cold_active_, cold_max_active_);
+  }
+
+  int hot_max_active() const { return hot_max_active_.load(std::memory_order_relaxed); }
+  int cold_max_active() const { return cold_max_active_.load(std::memory_order_relaxed); }
+
+private:
+  void observe(std::atomic<int> &active, std::atomic<int> &max_active) {
+    const int current = active.fetch_add(1, std::memory_order_relaxed) + 1;
+    int observed = max_active.load(std::memory_order_relaxed);
+    while (current > observed &&
+           !max_active.compare_exchange_weak(observed, current, std::memory_order_relaxed)) {
+    }
+    wait_cv_.notify_all();
+
+    if (current == 1) {
+      std::unique_lock<std::mutex> lock(wait_mutex_);
+      wait_cv_.wait_for(lock, std::chrono::milliseconds(100),
+                        [&]() { return max_active.load(std::memory_order_relaxed) >= 2; });
+    }
+
+    active.fetch_sub(1, std::memory_order_relaxed);
+    wait_cv_.notify_all();
+  }
+
+  bool serialize_hot_hooks_;
+  std::atomic<int> hot_active_{0};
+  std::atomic<int> hot_max_active_{0};
+  std::atomic<int> cold_active_{0};
+  std::atomic<int> cold_max_active_{0};
+  std::mutex wait_mutex_;
+  std::condition_variable wait_cv_;
+};
+
+template <typename Callback> void run_two_threads(Callback callback) {
+  std::barrier start(3);
+  std::thread first([&]() {
+    start.arrive_and_wait();
+    callback();
+  });
+  std::thread second([&]() {
+    start.arrive_and_wait();
+    callback();
+  });
+  start.arrive_and_wait();
+  first.join();
+  second.join();
+}
 
 class MfmaRacePlugin : public ExecutionPlugin {
 public:
@@ -732,7 +804,45 @@ TEST(ExecutionPluginTest, GroupCapabilitiesComeFromContainedPlugins) {
   EXPECT_FALSE(group.requires_serial_execution());
 
   ASSERT_TRUE(group.add(std::make_unique<OrderingPlugin>()));
+  EXPECT_FALSE(group.requires_serial_execution());
+
+  ASSERT_TRUE(group.add(std::make_unique<SerialHotHookPlugin>()));
   EXPECT_TRUE(group.requires_serial_execution());
+}
+
+TEST(ExecutionPluginTest, InfrequentHooksSerializeAtGroupBoundary) {
+  ExecutionPluginGroup group;
+  auto probe = std::make_unique<ConcurrencyProbePlugin>(false);
+  auto *probe_ptr = probe.get();
+  ASSERT_TRUE(group.add(std::move(probe)));
+
+  run_two_threads([&]() { group.onAmdgpuWorkgroupCompleted(0, 0); });
+
+  EXPECT_EQ(probe_ptr->cold_max_active(), 1);
+}
+
+TEST(ExecutionPluginTest, HighFrequencyHooksRunConcurrentlyByDefault) {
+  ExecutionPluginGroup group;
+  auto probe = std::make_unique<ConcurrencyProbePlugin>(false);
+  auto *probe_ptr = probe.get();
+  ASSERT_TRUE(group.add(std::move(probe)));
+  ASSERT_FALSE(group.requires_serial_execution());
+
+  run_two_threads([&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
+
+  EXPECT_EQ(probe_ptr->hot_max_active(), 2);
+}
+
+TEST(ExecutionPluginTest, HighFrequencyHooksHonorSerialOptIn) {
+  ExecutionPluginGroup group;
+  auto probe = std::make_unique<ConcurrencyProbePlugin>(true);
+  auto *probe_ptr = probe.get();
+  ASSERT_TRUE(group.add(std::move(probe)));
+  ASSERT_TRUE(group.requires_serial_execution());
+
+  run_two_threads([&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
+
+  EXPECT_EQ(probe_ptr->hot_max_active(), 1);
 }
 
 TEST(ExecutionPluginTest, ProfileDecoratorIsAConservativePlugin) {

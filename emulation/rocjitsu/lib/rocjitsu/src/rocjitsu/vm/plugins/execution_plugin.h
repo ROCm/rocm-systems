@@ -54,10 +54,12 @@ public:
   /// Output sink for this plugin. Use sink().write("msg") for all output.
   PluginSink &sink() { return *sink_; }
 
-  /// Whether concurrent command-processor callbacks are unsafe for this plugin.
-  /// Plugins are serial by default because hooks may share mutable state or
-  /// depend on callback ordering. Return false only after auditing every hook.
-  virtual bool requires_serial_execution() const { return true; }
+  /// Whether high-frequency instruction and register callbacks must be
+  /// serialized for this plugin. They run concurrently by default because each
+  /// callback is scoped to one wavefront. Override after identifying shared
+  /// mutable state that cannot be protected within the plugin. Infrequent
+  /// lifecycle and topology callbacks are always serialized by the group.
+  virtual bool requires_serial_execution() const { return false; }
 
   // -- Lifecycle hooks ------------------------------------------------------
 

@@ -223,26 +223,26 @@ Synchronization retires the corresponding outstanding operations.
 ### Dispatch threading
 
 Hook presence and callback policy are derived from the plugins contained by an
-`ExecutionPluginGroup`. An empty group has no hooks. A group requires serial
-command-processor callbacks when any contained plugin requires them.
+`ExecutionPluginGroup`. An empty group has no hooks. The group divides hooks by
+frequency and synchronization cost:
 
-Plugins conservatively require serial callbacks by default because concurrent
-hook ordering is undefined and plugins may contain unsynchronized mutable
-state. For example, callbacks from different command processors can race while
-updating dispatch maps or counters, interleave a before/after correlation, or
-concurrently use output and profiling state that assumed a single callback
-stream. Defaulting to parallel execution would make existing plugins silently
-unsafe; requiring every plugin to declare a policy would add source churn
-without making an omitted audit safe.
+- Lifecycle, dispatch, workgroup, wavefront, and barrier callbacks are
+  infrequent. The group takes one mutex before iterating its plugins, so these
+  callbacks cannot overlap across simulation partitions or with each other.
+- Instruction before/after, memory-routing, and register-access callbacks are
+  high-frequency and run concurrently by default. Each callback is scoped to a
+  wavefront below the simulation's shader-engine partition granularity.
 
-A plugin may override `requires_serial_execution()` to return `false` only
-after its complete callback path has been audited and tested for concurrent
-command-processor callbacks. That audit includes lifecycle and ordering
-assumptions as well as all state and sinks reached from its hooks.
+A plugin whose high-frequency callbacks reach shared mutable state may override
+`requires_serial_execution()` to return `true`. The group samples that policy
+when the plugin is added and then takes the same group mutex around every
+high-frequency callback, serializing it with the infrequent callbacks without a
+per-instruction scan of the plugin list. Plugins that protect their own shared
+state should retain the parallel default.
 
 Hook profiling is implemented as `ProfiledExecutionPlugin`, a serial decorator
-around another plugin group. It therefore participates in the same
-capability aggregation instead of adding hidden hook behavior to the group.
+around another plugin group. Its shared counters opt high-frequency callbacks
+into group serialization.
 
 
 ## Adding a new plugin

@@ -31,7 +31,6 @@
 #pragma once
 
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
-#include "simdojo/sim/simulation.h"
 
 #include <memory>
 #include <string>
@@ -67,13 +66,10 @@ public:
   /// identically regardless of how the VM is brought up.
   ///
   /// @p plugin_dir has the same meaning as in load_from_config().
-  /// @p engine_config is the simulation engine configuration. Profiled execution
-  /// requires a single thread because its counters are not synchronized.
   ///
   /// @returns A non-null group (empty if the config declares no plugins).
   static std::shared_ptr<ExecutionPluginGroup>
-  configure_plugin_group(const std::string &config_json, const std::string &plugin_dir = {},
-                         const simdojo::SimulationEngine::Config &engine_config = {});
+  configure_plugin_group(const std::string &config_json, const std::string &plugin_dir = {});
 };
 
 } // namespace rocjitsu

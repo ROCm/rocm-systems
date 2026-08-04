@@ -56,8 +56,9 @@ public:
     return outer.add(std::move(profile)) ? result : nullptr;
   }
 
-  /// Profiling counters and the dispatch-name map are unsynchronized. If they
-  /// become concurrency-safe, return plugins_->requires_serial_execution().
+  /// Profiling counters and the dispatch-name map are unsynchronized, so the
+  /// containing group must serialize high-frequency callbacks. If they become
+  /// concurrency-safe, return plugins_->requires_serial_execution().
   bool requires_serial_execution() const override { return true; }
 
   void onInit() override { plugins_->onInit(); }

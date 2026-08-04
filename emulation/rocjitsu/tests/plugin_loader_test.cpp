@@ -10,7 +10,6 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
-#include <stdexcept>
 #include <string>
 
 #ifndef PLUGIN_LOADER_FIXTURE_DIR
@@ -87,11 +86,10 @@ TEST_F(PluginLoaderTest, DestroysRejectedDuplicateBeforeUnload) {
   EXPECT_EQ(group.num_plugins(), 1u);
 }
 
-TEST_F(PluginLoaderTest, RejectsProfiledGroupWithMultipleThreads) {
-  const simdojo::SimulationEngine::Config engine_config{.num_threads = 2};
-  EXPECT_THROW(
-      rocjitsu::PluginLoader::configure_plugin_group(R"({"profiled":true})", "", engine_config),
-      std::invalid_argument);
+TEST_F(PluginLoaderTest, ProfiledGroupSerializesHighFrequencyHooks) {
+  auto group = rocjitsu::PluginLoader::configure_plugin_group(R"({"profiled":true})");
+
+  EXPECT_TRUE(group->requires_serial_execution());
 }
 
 TEST_F(PluginLoaderTest, ProfileDecoratorForwardsLoadedPluginLifecycle) {
