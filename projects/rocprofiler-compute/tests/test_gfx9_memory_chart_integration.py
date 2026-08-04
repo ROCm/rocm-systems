@@ -95,4 +95,19 @@ class TestIntegrationGfx9:
 
         assert len(output.splitlines()) == 43
         assert output.count("N/A") == expected_na_count
+
+    @pytest.mark.xfail(
+        reason="AIPROFCOMP-783: renderer expects a different Active CUs key",
+        raises=AssertionError,
+        strict=True,
+    )
+    @pytest.mark.parametrize("architecture", GFX9_ARCHITECTURES)
+    def test_panel_yaml_metrics_do_not_render_missing_key_fallback(self, architecture):
+        output = common.strip_ansi(
+            mem_chart_gfx9.plot_mem_chart(
+                dict.fromkeys(panel_yaml_metric_keys(architecture)),
+                chart_title=DEFAULT_TITLE,
+            )
+        )
+
         assert "n/a:" not in output
