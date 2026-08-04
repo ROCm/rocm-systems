@@ -1,16 +1,18 @@
 name: TheRock CI
 
 on:
-  push:
-    branches:
-      - develop
-      - release/therock-*
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - labeled
+  # TEMPORARY: Disabled for multi-arch CI migration testing
+  # TODO(geomin12): Re-enable or remove once migration is validated
+  # push:
+  #   branches:
+  #     - develop
+  #     - release/therock-*
+  # pull_request:
+  #   types:
+  #     - opened
+  #     - synchronize
+  #     - reopened
+  #     - labeled
   workflow_dispatch:
     inputs:
       projects:
