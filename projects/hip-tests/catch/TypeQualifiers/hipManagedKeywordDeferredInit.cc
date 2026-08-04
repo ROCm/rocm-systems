@@ -507,6 +507,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyAsync_CrossCurrentDeviceStream) {
 // stream is blocked so the init cannot complete until unblocked; the kernel below
 // references the managed symbol by name as the first managed-touching op, so it
 // must still observe the initialized symbol rather than an uninitialized pointer.
+#if HT_AMD
 HIP_TEST_CASE(Unit_hipManagedKeyword_NonBlockingStreamOrdering) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
@@ -546,3 +547,4 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_NonBlockingStreamOrdering) {
     REQUIRE(g_managed_nonblocking[i] == kSentinel);
   }
 }
+#endif  // HT_AMD
