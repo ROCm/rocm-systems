@@ -3219,3 +3219,44 @@ def test_only_gfx1250_generates_implicit_use_operands_overrides(
             f'{arch} has no VGPR-MSB banking, so implicit_use_operands() overrides '
             f'are dead weight: {offenders}'
         )
+
+
+@pytest.mark.parametrize(
+    'src_file,class_name',
+    [
+        ('vflat.cpp', 'FlatLoadD16U8Vflat'),
+        ('vglobal.cpp', 'GlobalLoadD16U8Vglobal'),
+        ('vscratch.cpp', 'ScratchLoadD16U8Vscratch'),
+    ],
+)
+def test_gfx1250_d16_load_preserves_destination_without_printing_it(
+    gfx1250_generated_root: Path, src_file, class_name
+):
+    """A D16 partial-def load reads vdst via the implicit hooks, not src_operands_.
+
+    GLOBAL/SCRATCH share semantic_class 'flat_load' with FLAT but emit to
+    separate files, so cover all three. Listing vdst as a source would print it
+    twice in disassembly; pin that a future generator change doing so fails here.
+    """
+    cpp = (gfx1250_generated_root / src_file).read_text()
+    ctor = _generated_constructor_body(cpp, class_name)
+
+    # vdst is a destination, never a source (kept out of the printed operands).
+    assert 'dst_operands_[0] = &vdst;' in ctor
+    assert 'src_operands_[0] = &vdst;' not in ctor
+    assert 'src_operands_[1] = &vdst;' not in ctor
+    assert 'src_operands_[num_src_++] = &vdst;' not in ctor
+
+    # The preserved-destination read is modeled via both implicit hooks.
+    uses_override = f'void {class_name}::implicit_uses(RegisterSet &uses) const'
+    operands_override = f'void {class_name}::implicit_use_operands('
+    assert uses_override in cpp
+    assert operands_override in cpp
+    uses_start = cpp.index(uses_override)
+    uses_body = cpp[uses_start : cpp.index('\n}', uses_start)]
+    assert 'if (auto r = vdst.to_register_ref())' in uses_body
+    assert 'uses.expand(*r);' in uses_body
+    operands_start = cpp.index(operands_override)
+    operands_body = cpp[operands_start : cpp.index('\n}', operands_start)]
+    assert 'if (vdst.to_register_ref())' in operands_body
+    assert 'operands.push_back(&vdst);' in operands_body

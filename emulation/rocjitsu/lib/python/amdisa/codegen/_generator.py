@@ -6717,6 +6717,16 @@ class CodeGenerator:
                             ),
                             None,
                         )
+                        # Fail loudly: _d16_load_reads_dst() matched, so a
+                        # destination read must be modeled. A None here (e.g. a
+                        # future dest rename) would silently skip both the
+                        # implicit_uses declaration and definition below, losing
+                        # the preserved-destination read from liveness.
+                        assert d16_implicit_use_opnd is not None, (
+                            f'{inst.name}: D16 load reads its destination, but no '
+                            "'vdst'/'sdst'/'vdata' output operand was found to model "
+                            'the preserved-destination read'
+                        )
                         d16_sem = self.semantics.instructions.get(inst.name)
                         d16_total_bytes = d16_sem.num_elems * d16_sem.elem_size
                         d16_vgpr_count = (d16_total_bytes + 3) // 4  # round up

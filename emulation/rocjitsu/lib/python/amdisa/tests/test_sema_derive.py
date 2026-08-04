@@ -2943,3 +2943,42 @@ class TestDeriveBufferFormat:
         assert sem.semantic_class == 'buffer_load'
         assert (sem.elem_size, sem.num_elems) == (4, 4)
         assert not sem.d16_lo and not sem.d16_hi
+
+
+class TestDeriveFlatLoadD16:
+    """GLOBAL/SCRATCH D16 loads share the FLAT 'flat_load' classification.
+
+    They decode into separate generated files (vglobal.cpp / vscratch.cpp) from
+    FLAT (vflat.cpp), so confirm all three segments derive the same partial-def
+    shape (single sub-dword element with a d16 half flag). This is what
+    _d16_load_reads_dst() keys on to model the preserved-destination read.
+    """
+
+    @pytest.mark.parametrize(
+        'name,enc',
+        [
+            ('FLAT_LOAD_SHORT_D16', 'ENC_FLAT'),
+            ('GLOBAL_LOAD_SHORT_D16', 'ENC_VGLOBAL'),
+            ('SCRATCH_LOAD_SHORT_D16', 'ENC_VSCRATCH'),
+        ],
+    )
+    def test_short_d16_load_is_partial_flat_load(self, name, enc):
+        sem = derive_semantics(name, enc)
+        assert sem is not None
+        assert sem.semantic_class == 'flat_load'
+        assert sem.num_elems == 1
+        assert (sem.num_elems * sem.elem_size) % 4 != 0
+        assert sem.d16_lo and not sem.d16_hi
+
+    @pytest.mark.parametrize(
+        'name,enc',
+        [
+            ('GLOBAL_LOAD_SHORT_D16_HI', 'ENC_VGLOBAL'),
+            ('GLOBAL_LOAD_D16_HI_B16', 'ENC_VGLOBAL'),
+        ],
+    )
+    def test_d16_hi_variant_sets_hi_flag(self, name, enc):
+        sem = derive_semantics(name, enc)
+        assert sem is not None
+        assert sem.semantic_class == 'flat_load'
+        assert sem.d16_hi and not sem.d16_lo
