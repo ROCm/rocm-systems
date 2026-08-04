@@ -131,18 +131,22 @@ HIP_TEST_CASE(Unit_StatCO_Positive_UnloadWaitsForDeferredManagedVariableInitiali
   IncrementInitialManagedValue<<<1, 1, 0, stream.stream()>>>();
   HIP_CHECK(hipGetLastError());
 
-  std::promise<void> unloadStarted;
-  std::future<void> started = unloadStarted.get_future();
-  auto unload = std::async(std::launch::async, [handle, &unloadStarted]() {
-    unloadStarted.set_value();
-    return dlclose(handle);
+  std::promise<void> beginUnload;
+  std::future<void> unloadStarted = beginUnload.get_future();
+  auto unblock = std::async(std::launch::async,
+                            [&blockedNullStream, started = std::move(unloadStarted)]() mutable {
+    started.wait();
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    blockedNullStream.unblock_stream();
   });
 
-  started.wait();
-  REQUIRE(unload.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout);
+  beginUnload.set_value();
+  const int unloadStatus = dlclose(handle);
+  const bool initializationStillBlocked = blockedNullStream.is_blocked();
+  unblock.get();
 
-  blockedNullStream.unblock_stream();
-  REQUIRE(unload.get() == 0);
+  REQUIRE(unloadStatus == 0);
+  REQUIRE_FALSE(initializationStillBlocked);
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
   REQUIRE(initialManagedValue == kInitialManagedValue + 1);
 }

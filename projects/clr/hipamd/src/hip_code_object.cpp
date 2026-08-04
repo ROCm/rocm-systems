@@ -373,19 +373,22 @@ hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
 
   // Host-asynchronous initialization can still reference a variable's host shadow and device
   // symbol when its fat binary is unloaded.
-  for (auto& [deviceId, state] : managedVarInitialization_.deviceStates) {
-    if (state.phase != DeferredInitManagedVarState::Phase::InProgress) {
-      continue;
-    }
+  if (!HIP_SKIP_ABORT_ON_GPU_ERROR || !amd::Device::IsGPUInError()) {
+    for (auto& [deviceId, state] : managedVarInitialization_.deviceStates) {
+      if (state.phase != DeferredInitManagedVarState::Phase::InProgress ||
+          state.modulesInProgress.count(module) == 0) {
+        continue;
+      }
 
-    assert(state.completion != nullptr);
-    if (state.completion->awaitCompletion()) {
-      const uint64_t initializedSequenceNumber = state.queuedUpToSequenceNumber;
-      state.MarkCompleted();
-      managedVarInitialization_.initializedUpToSequenceNumberByDevice[deviceId].store(
-          initializedSequenceNumber, std::memory_order_release);
-    } else {
-      state.MarkFailed(hipErrorUnknown);
+      assert(state.completion != nullptr);
+      if (state.completion->awaitCompletion()) {
+        const uint64_t initializedSequenceNumber = state.queuedUpToSequenceNumber;
+        state.MarkCompleted();
+        managedVarInitialization_.initializedUpToSequenceNumberByDevice[deviceId].store(
+            initializedSequenceNumber, std::memory_order_release);
+      } else {
+        state.MarkFailed(hipErrorUnknown);
+      }
     }
   }
 
@@ -765,6 +768,39 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId, hip::Stream* orderStrea
     }
 
     bool queuedWork = false;
+    auto trackQueuedWork = [&](uint64_t accountedSequenceNumber) -> hipError_t {
+      if (!queuedWork) {
+        return hipSuccess;
+      }
+
+      amd::Command* completion = new amd::Marker(*stream, /*userVisible=*/false);
+      if (completion == nullptr) {
+        // Preserve lifetime safety if bookkeeping allocation fails after copies were queued.
+        if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
+          devInitState.MarkFailed(hipErrorUnknown);
+          return hipErrorOutOfMemory;
+        }
+        stream->finish();
+        devInitState.queuedUpToSequenceNumber = accountedSequenceNumber;
+        devInitState.MarkCompleted();
+        managedVarInitialization_.initializedUpToSequenceNumberByDevice[deviceId].store(
+            accountedSequenceNumber, std::memory_order_release);
+        return hipErrorOutOfMemory;
+      }
+      completion->enqueue();
+      devInitState.completion.reset(completion);
+      devInitState.phase = Phase::InProgress;
+      devInitState.queuedUpToSequenceNumber = accountedSequenceNumber;
+      return hipSuccess;
+    };
+    auto returnAfterTrackingQueuedWork = [&](hipError_t error) -> hipError_t {
+      // A failed snapshot may have gaps because managedVars_ is unordered. Retry the whole
+      // unaccounted range after the queued work reaches a terminal state.
+      const hipError_t trackingStatus =
+          trackQueuedWork(devInitState.queuedUpToSequenceNumber);
+      return trackingStatus == hipSuccess ? error : trackingStatus;
+    };
+
     for (auto& vecIter : managedVars_) {
       for (auto& var : vecIter.second) {
 
@@ -781,35 +817,37 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId, hip::Stream* orderStrea
           std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
         }
 
-        IHIP_RETURN_ONFAIL(var->AllocateManagedVarPtr());
+        hipError_t status = var->AllocateManagedVarPtr();
+        if (status != hipSuccess) {
+          return returnAfterTrackingQueuedWork(status);
+        }
 
         amd::Memory* mem = nullptr;
-        IHIP_RETURN_ONFAIL(var->GetStatDeviceVar(&mem, deviceId));
+        status = var->GetStatDeviceVar(&mem, deviceId);
+        if (status != hipSuccess) {
+          return returnAfterTrackingQueuedWork(status);
+        }
 
         // Preserve host-asynchronous API semantics: deferred initialization must not make the
         // calling host thread wait.
-        IHIP_RETURN_ONFAIL(
-            ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), var->GetManagedVarPtr(),
-                       mem->getSize(), hipMemcpyHostToDevice, *stream,
-                       /*isHostAsync=*/true, /*isGPUAsync=*/true));
+        status = ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), var->GetManagedVarPtr(),
+                            mem->getSize(), hipMemcpyHostToDevice, *stream,
+                            /*isHostAsync=*/true, /*isGPUAsync=*/true);
+        if (status != hipSuccess) {
+          return returnAfterTrackingQueuedWork(status);
+        }
         queuedWork = true;
+        devInitState.modulesInProgress.insert(module);
       }
     }
 
     if (queuedWork) {
       // Copies are profiled individually; keep this aggregate bookkeeping marker internal.
-      devInitState.completion.reset(new amd::Marker(*stream, /*userVisible=*/false));
-      if (devInitState.completion == nullptr) {
-        return hipErrorOutOfMemory;
-      }
-      devInitState.completion->enqueue();
-      devInitState.phase = Phase::InProgress;
+      IHIP_RETURN_ONFAIL(trackQueuedWork(currentSequenceNumber));
     } else if (devInitState.phase == Phase::NotStarted) {
       // No copy was needed, so there is no completion marker to track.
       devInitState.MarkCompleted();
     }
-    // Every variable in this snapshot is now accounted for; the marker tracks any queued work.
-    devInitState.queuedUpToSequenceNumber = currentSequenceNumber;
   } else if (devInitState.phase == Phase::NotStarted) {
     devInitState.MarkCompleted();
   }
