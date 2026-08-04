@@ -147,6 +147,10 @@ measure_commit() {
     exit 1
   fi
 
+  # cmake's --fresh has been unreliable at fully resetting cache/generated
+  # state between commits, so wipe the directory ourselves instead of
+  # relying on it.
+  rm -rf "$build_dir"
   mkdir -p "$build_dir"
   (
     cd "$build_dir"
