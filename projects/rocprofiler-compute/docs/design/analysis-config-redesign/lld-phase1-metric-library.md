@@ -254,36 +254,75 @@ base arch YAML files.
 New module `src/utils/yaml_inherit_loader.py`. Implements a custom PyYAML loader
 for the `!inherit <path>` tag. The tag must appear as the first line of a YAML file.
 
-**Prior art:** GitLab CI's `extends` keyword provides the same semantics -- deep
-merge across files, multi-level inheritance, later values override earlier ones.
+GitLab CI's `extends` keyword uses the same approach -- deep merge across files,
+multi-level inheritance, later values override earlier ones.
 See [GitLab YAML optimization docs](https://docs.gitlab.com/ci/yaml/yaml_optimization/).
 Native YAML anchors (`&`/`*`) and merge keys (`<<`) are insufficient -- they only
 perform shallow merge, do not work across files, and the merge key is semi-deprecated
 in the YAML spec.
 
-**Implementation:** Use the [`deepmerge`](https://pypi.org/project/deepmerge/) Python
-library for merge logic. `deepmerge` is well-maintained (latest release June 2026),
-supports configurable merge strategies for maps, lists, and scalars, and eliminates
-the need to write custom merge code. Add `deepmerge` to `requirements.txt`.
+**Implementation:** Vendor the [`deepmerge`](https://pypi.org/project/deepmerge/)
+Python library (pure Python, MIT license) or implement the merge logic inline
+(~30 lines for our specific merge rules). The merge must work in profile mode,
+which prohibits pip dependencies (`ProfileModeImportGuard` enforces stdlib-only
+imports). The vendored PyYAML is precedent for this approach. Import yaml from
+the vendored copy (`from vendored import yaml`) for profile-mode compatibility.
 
-`InheritLoader` subclasses `yaml.SafeLoader` and registers a constructor for the
-`!inherit` tag. When the constructor fires:
+`InheritLoader` subclasses `yaml.SafeLoader` and registers constructors for two
+custom tags:
+- `!inherit <path>` -- file-level inheritance (loads and merges the referenced file)
+- `!remove` -- marks a key for deletion during merge
+
+When `!inherit` fires:
 
 1. Resolve `<path>` relative to the current file's directory.
-2. Load the base file recursively (supporting chains: `gfx950 -> gfx942 -> gfx940 -> gfx908`).
-3. Deep-merge the current file's content on top of the base using `deepmerge`.
+2. Load the base file recursively (supporting chains:
+   `gfx950 -> gfx942 -> gfx940 -> gfx90a -> gfx908`).
+3. Deep-merge the current file's content on top of the base.
+4. After merge, scan for any `!remove` markers and delete those keys.
 
-**Merge rules** (configured as `deepmerge` strategies):
+**Merge operations:**
 
-| Input | Behavior |
-|---|---|
-| Map + map | Recursive deep merge. Override keys win; base-only keys preserved. |
-| `data source` list | Matched by `metric_table.id` (not position), then deep-merged per entry. New entries appended. |
-| Scalar | Override replaces base. |
-| New key in override | Appended to the map. |
+| Operation | Input | Behavior |
+|---|---|---|
+| Modify | Scalar in override | Override replaces base value. |
+| Add | New key in override | Appended to the merged map. Supports adding new metrics, tables, or fields that the parent arch does not have. |
+| Remove | Value set to `!remove` | Key is deleted from the merged result. Used when a child arch drops a metric or field that existed in the parent. |
+| Deep merge | Map + map | Recursive deep merge. Override keys win; base-only keys preserved. |
+| List merge | `data source` list | Matched by `metric_table.id` (not position), then deep-merged per entry. New entries appended. |
+
+Example of all three operations:
+
+```yaml
+# gfx90a/0200_system_speed_of_light.yaml
+!inherit ../gfx908/0200_system_speed_of_light.yaml
+
+metric:
+  # Modify: change the formula for an existing metric
+  VALU FLOPs:
+    formula: "64 * (SQ_INSTS_VALU_ADD_F16 + ...) / (End_Timestamp - Start_Timestamp)"
+
+  # Add: new metric not present in gfx908
+  MFMA FLOPs (BF16):
+    id: compute.mfma_flops_bf16
+    name: "MFMA FLOPs (BF16)"
+    formula: "512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 / (End_Timestamp - Start_Timestamp)"
+    unit: GFLOPs
+    description: >-
+      BF16 matrix fused multiply-add operations per second.
+
+  # Remove: metric that existed in gfx908 but is not valid for gfx90a
+  Some Deprecated Metric: !remove
+```
 
 **Cycle detection:** Maintain a set of resolved absolute paths during the recursive
 chain. If a path appears twice, raise `InheritanceCycleError` with the full chain.
+
+**Why env var for feature flag:** The transition flag (`ROCPROF_COMPUTE_LAYER2`)
+uses an environment variable rather than the project's `--experimental` argparse
+pattern because it is a temporary internal implementation switch (not a user feature)
+that must work in both profile and analyze code paths without threading through the
+argparse namespace.
 
 ### Tests
 
@@ -291,11 +330,17 @@ chain. If a path appears twice, raise `InheritanceCycleError` with the full chai
   raise validation errors, typed variant fields accepted only for fabric stall metrics.
 - Collectable schema: valid collectable definitions pass validation, missing `id` or
   `formula` raises errors, counter list is inferred from formula when not explicit.
-- Inheritance loader: single-level inheritance, 3-level chain, cycle detection error,
-  deep-merge of maps (key preservation, key override), deep-merge of `data source`
-  list matched by `metric_table.id`, scalar override, new key insertion.
-- Round-trip: a minimal synthetic YAML family (base + one override) loads correctly
-  and produces the expected merged structure.
+- Inheritance loader: single-level inheritance, multi-level chain (4+ deep, matching
+  the real `gfx908 -> gfx90a -> gfx940 -> gfx942` chain), cycle detection error.
+- Merge operations: key modification (override), key addition (new metric in child),
+  key removal (`!remove` deletes from merged result), deep-merge of maps,
+  `data source` list matched by `metric_table.id`, new list entry appended.
+- Round-trip: a minimal synthetic YAML family (base + chain of overrides with
+  additions, modifications, and removals) loads correctly and produces the expected
+  merged structure.
+- Golden-file comparison infrastructure: note this is a new testing pattern for the
+  project. The test framework for serializing and comparing `panel_configs` output
+  needs to be built as part of this stage.
 
 ### Dependencies
 
@@ -315,7 +360,7 @@ New module `src/utils/layer2_parser.py`.
    ARCH_INHERITANCE = {
        "gfx908": None,         # CDNA base -- no parent
        "gfx90a": "gfx908",
-       "gfx940": "gfx908",
+       "gfx940": "gfx90a",     # each arch inherits from its immediate predecessor
        "gfx941": "gfx940",
        "gfx942": "gfx940",
        "gfx950": "gfx942",
@@ -351,11 +396,20 @@ class MetricLibrary:
     ) -> set[str]: ...
 ```
 
-`get_counters_for_metrics()` concatenates the formula strings for the requested
-metrics and delegates to the existing `extract_counters_and_variables()` in
-`utils_counter_defs.py` for regex-based HW counter extraction. Collectable
-references in metric formulas are resolved transitively -- the collectable's own
-formula is expanded to extract the underlying Layer 1 counters.
+`get_counters_for_metrics()` extracts HW counters from the requested metrics:
+
+1. **Pre-expand collectable references:** Replace `$collect.xxx` in formulas with the
+   collectable's own formula before passing to the regex extractor. This is necessary
+   because `VARIABLE_RE` in `utils_counter_defs.py` stops at the dot -- `$collect.l2_hit_miss`
+   would be parsed as variable `collect` + stray text `.l2_hit_miss`.
+2. **Concatenate formula strings** for the requested metrics (including expanded
+   collectables).
+3. **Include `coll_level` values** in the text passed to the extractor. The current
+   `detect_counters()` scans raw YAML text which incidentally picks up
+   `coll_level: SQ_LEVEL_WAVES` as a counter name. The MetricLibrary approach must
+   explicitly add `coll_level` values to maintain equivalence.
+4. **Delegate to `extract_counters_and_variables()`** in `utils_counter_defs.py` for
+   regex-based HW counter extraction and transitive built-in variable resolution.
 
 ### Tests
 
@@ -417,19 +471,17 @@ The adapter reconstructs this shape from `MetricLibrary` by:
    field is the bridge between string ids and the numeric structure.
 2. Building the `header` dict from the table's column layout (determined by the
    view in the final design, or from a legacy mapping during transition).
-3. **Auto-generating aggregation wrappers** from each metric's base `formula`.
-   Given base formula `X / Y` and header columns `{avg, min, max}`:
-   - `avg`: `SUM(X) / SUM(Y)` (or `AVG(X / Y)` if `avg_mode: simple`)
-   - `min`: `MIN(X / Y)`
-   - `max`: `MAX(X / Y)`
-   For header column `{value}`: wrap in `SUM(X) / SUM(Y)` (weighted average).
-   This is the inverse of what `simple_box` tables already do (auto-generating
-   `MIN/Q1/MEDIAN/Q3/MAX` from a single `expr`).
-4. Building the `metric` OrderedDict with metric name as key and the generated
-   formula fields as value dict.
-5. Computing percent-of-peak automatically for metrics with both `peak` and
+3. Building the `metric` OrderedDict with metric name as key and formula fields as
+   value dict. During the initial migration (Stage 4), the migration tooling
+   pre-computes the aggregation-wrapped formulas (avg/min/max) from the base formula
+   and stores them alongside the base formula. The adapter reads these pre-computed
+   values rather than generating them at runtime. Runtime auto-generation of
+   aggregation wrappers is a future optimization (the wrapping logic is more complex
+   than a simple prefix/suffix -- it involves constant factoring, numerator/denominator
+   decomposition, and handling of inner functions like NOISE_CLAMP).
+4. Computing percent-of-peak automatically for metrics with both `peak` and
    `unit: Percent`.
-6. Placing descriptions into `metrics_description`.
+5. Placing descriptions into `metrics_description`.
 
 `layer2_vars_to_builtin_vars(library: MetricLibrary) -> dict[str, str]`:
 
@@ -536,7 +588,7 @@ analysis_configs/
     2100_fabric_stall.yaml
     2200_fabric_stall_2.yaml
   gfx90a/              # inherits gfx908, overrides only what differs
-  gfx940/              # inherits gfx908 (or gfx90a, depending on lineage)
+  gfx940/              # inherits gfx90a
   gfx941/              # inherits gfx940 (1 file diff)
   gfx942/              # inherits gfx940
   gfx950/              # inherits gfx942
@@ -549,15 +601,19 @@ analysis_configs/
 
 No abstract `_base/` directories. The first architecture in each family (gfx908 for
 CDNA, gfx115x for RDNA) serves as the base -- its files are complete, standalone
-definitions. Other architectures inherit from the base and override only what differs.
+definitions. Each subsequent arch inherits from its immediate predecessor in the
+hardware lineage, using additions, modifications, and removals (`!remove`) to
+express only what changed. This chain-based pattern applies to future families
+(gfx12xx).
 
 ### Migration order
 
 1. **gfx908** -- the CDNA base. Convert its current panel config files to Layer 2
    format with string IDs, single formulas, and descriptions. This is the largest
-   single-arch conversion but produces the foundation all other CDNA arches inherit from.
-2. **gfx90a** -- inherits gfx908. Override files for metrics that differ from MI100.
-3. **gfx940** -- inherits gfx908 (or gfx90a). MI300 generation.
+   single-arch conversion but produces the foundation for the inheritance chain.
+2. **gfx90a** -- inherits gfx908. Override files for metrics added or modified in MI200.
+3. **gfx940** -- inherits gfx90a. MI300 generation -- adds MFMA FLOPs variants,
+   modifies formulas for new counter names.
 4. **gfx941** -- inherits gfx940. Differs in exactly 1 file (unit override). The
    smallest possible override, ideal for validating the inheritance mechanism.
 5. **gfx942, gfx950** -- inherits gfx940/gfx942 respectively.
