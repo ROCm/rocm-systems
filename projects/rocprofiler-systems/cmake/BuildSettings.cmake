@@ -48,10 +48,6 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_RELEASE
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_EXTRA_OPTIMIZATIONS
     "Extra optimization flags" OFF
 )
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_PORTABLE
-    "Build with a portable CPU ISA baseline."
-    ON
-)
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LTO "Build with link-time optimization"
     OFF
 )
