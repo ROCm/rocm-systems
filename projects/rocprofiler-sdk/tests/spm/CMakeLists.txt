@@ -25,11 +25,9 @@ endif()
 
 rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 if(${SANITIZER})
-    set(IS_SPM_DISABLED TRUE)
+    set(IS_SPM_DISABLED True)
 endif()
-# Intentionally hard-disabled until selectively re-enabled with other devs.
-# Labels are kept so CI can route these via -L/-LE spm when ready.
-set(IS_DISABLED TRUE)
+set(IS_DISABLED True)
 
 rocprofiler_add_integration_execute_test(
     test-spm-dispatch-collection-execute

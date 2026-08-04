@@ -25,7 +25,7 @@ endif()
 
 rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 if(${IS_DISABLED})
-    set(IS_SPM_DISABLED ON)
+    set(IS_SPM_DISABLED on)
 endif()
 
 rocprofiler_add_integration_execute_test(
