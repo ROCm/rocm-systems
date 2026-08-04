@@ -1059,37 +1059,42 @@ TEST(CfgAnalysis, SeedsTextEntryWithLoopBackedgeForCrossBlockPcBuilder) {
   EXPECT_FALSE(consumer->static_indirect_call_fixups()[0].source_incomplete);
 }
 
-TEST(CfgAnalysis, ExplicitKernelEntryMakesIncomingPcBuilderIncomplete) {
+TEST(CfgAnalysis, MultipleUnorderedExplicitEntriesMakeIncomingPcBuilderIncomplete) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint32_t kLiteralOperand = 255;
   constexpr uint32_t kInlineInt0 = 128;
 
-  // Entry A builds a static target and branches into entry B. B is also a
-  // separately launchable kernel, so its externally supplied s[8:9] value is
-  // unconstrained and must participate in the join with A's concrete builder.
+  // Entry A builds a static target and branches into entries B and C. Both are
+  // separately launchable kernels, so their externally supplied s[8:9] values
+  // must participate in the joins with A's concrete builder. Supply the entry
+  // offsets out of order with a duplicate to exercise the ordered merge.
   std::vector<uint32_t> words = {
       pack_sop1(0x1c, kPcSreg, 0),                         // 0x00: s_getpc_b64.
       pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x04: s_add_u32.
-      24,                                                  // 0x08: 0x04 + 24 = 0x1c.
+      32,                                                  // 0x08: 0x04 + 32 = 0x24.
       pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c: s_addc_u32.
-      build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4),         // 0x10 -> entry B at 0x18.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x14: skipped.
+      pack_sopp(5, 2),                                     // 0x10: cbranch -> entry C at 0x1c.
+      build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> entry B at 0x18.
       pack_sop1(0x1d, 0, kPcSreg),                         // 0x18: entry B setpc.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x1c: A's target.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x1c: entry C setpc.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x20: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x24: A's target.
   };
 
   TestCodeObject co(std::move(words));
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  constexpr std::array<uint64_t, 1> extra_leaders{24};
+  constexpr std::array<uint64_t, 3> extra_leaders{28, 24, 28};
   auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
 
-  auto *consumer = block_starting_at(blocks, 24);
-  ASSERT_NE(consumer, nullptr);
-  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
-  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 28u);
-  EXPECT_TRUE(consumer->static_indirect_call_fixups()[0].source_incomplete)
-      << "an independently launchable entry must include unconstrained external SGPR state";
+  for (uint64_t consumer_offset : {uint64_t{24}, uint64_t{28}}) {
+    auto *consumer = block_starting_at(blocks, consumer_offset);
+    ASSERT_NE(consumer, nullptr);
+    ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+    EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 36u);
+    EXPECT_TRUE(consumer->static_indirect_call_fixups()[0].source_incomplete)
+        << "each independently launchable entry must include unconstrained external SGPR state";
+  }
 }
 
 TEST(CfgAnalysis, RocrAbortTrapStopsTemporaryPcBuilderCfg) {
@@ -1572,7 +1577,7 @@ TEST(CfgAnalysis, DirectCallKillsCarriedPcBuilderFacts) {
   EXPECT_FALSE(has_successor_start(*continuation, stale_target->start_offset()));
 }
 
-TEST(CfgAnalysis, KillPredecessorPreventsRecoveredConsumer) {
+TEST(CfgAnalysis, EitherHalfKillPredecessorPreventsRecoveredConsumer) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint32_t kLiteralOperand = 255;
   constexpr uint32_t kInlineInt0 = 128;
@@ -1581,39 +1586,43 @@ TEST(CfgAnalysis, KillPredecessorPreventsRecoveredConsumer) {
   // Two paths reach the same setpc consumer:
   //
   //   * the fallthrough path builds a concrete PC target in s[8:9]
-  //   * the branch path writes s8 through ordinary scalar code, killing that
-  //     pair for this analysis
+  //   * the branch path writes either s8 or s9 through ordinary scalar code,
+  //     killing that pair for this analysis
   //
   // The concrete builder path alone is not enough to recover the consumer. A
   // real unmodeled write reaches the join, so the analysis must fail closed and
   // leave the setpc for the later DBT diagnostic.
-  std::vector<uint32_t> words = {
-      pack_sopp(5, 5),                                     // 0x00 -> kill path at 0x18.
-      pack_sop1(0x1c, kPcSreg, 0),                         // 0x04: s_getpc_b64.
-      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x08: s_add_u32.
-      kOriginalGetpcDelta,                                 // 0x0c: target delta.
-      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
-      build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> consumer at 0x20.
-      pack_sop2(0, kPcSreg, kPcSreg, kInlineInt0),         // 0x18: unmodeled write.
-      build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4),         // 0x1c -> consumer at 0x20.
-      pack_sop1(0x1d, 0, kPcSreg),                         // 0x20: joined consumer.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x24: not a target.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x28: builder target.
-  };
+  constexpr std::array<uint16_t, 2> clobbered_sregs{kPcSreg, kPcSreg + 1};
+  for (uint16_t clobbered_sreg : clobbered_sregs) {
+    SCOPED_TRACE(clobbered_sreg);
+    std::vector<uint32_t> words = {
+        pack_sopp(5, 5),                                           // 0x00 -> kill path at 0x18.
+        pack_sop1(0x1c, kPcSreg, 0),                               // 0x04: s_getpc_b64.
+        pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),           // 0x08: s_add_u32.
+        kOriginalGetpcDelta,                                       // 0x0c: target delta.
+        pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0),       // 0x10: s_addc_u32.
+        build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA4),               // 0x14 -> consumer at 0x20.
+        pack_sop2(0, clobbered_sreg, clobbered_sreg, kInlineInt0), // 0x18: write.
+        build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4),               // 0x1c -> consumer.
+        pack_sop1(0x1d, 0, kPcSreg),                               // 0x20: consumer.
+        build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                  // 0x24: not a target.
+        build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                  // 0x28: target.
+    };
 
-  TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
-  ASSERT_NE(decoder, nullptr);
-  constexpr std::array<uint64_t, 1> extra_leaders{40};
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+    TestCodeObject co(std::move(words));
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NE(decoder, nullptr);
+    constexpr std::array<uint64_t, 1> extra_leaders{40};
+    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
 
-  auto *consumer = block_starting_at(blocks, 32);
-  auto *target = block_starting_at(blocks, 40);
-  ASSERT_NE(consumer, nullptr);
-  ASSERT_NE(target, nullptr);
+    auto *consumer = block_starting_at(blocks, 32);
+    auto *target = block_starting_at(blocks, 40);
+    ASSERT_NE(consumer, nullptr);
+    ASSERT_NE(target, nullptr);
 
-  EXPECT_TRUE(consumer->static_indirect_call_fixups().empty());
-  EXPECT_FALSE(has_successor_start(*consumer, target->start_offset()));
+    EXPECT_TRUE(consumer->static_indirect_call_fixups().empty());
+    EXPECT_FALSE(has_successor_start(*consumer, target->start_offset()));
+  }
 }
 
 TEST(CfgAnalysis, RecoversSignedDeltaTemplateConsumers) {
