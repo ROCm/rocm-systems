@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -1000,17 +1000,6 @@ set_fini_status(int v)
 void
 client_initialize(std::optional<client_library>& client)
 {
-    // ensure we have already initialized
-    // initialize();
-
-    // auto  _temp_clients = find_clients();
-    // auto* _clients      = CHECK_NOTNULL(get_clients());
-    // for(auto& itr : _temp_clients)
-    // {
-    //     emplace_client(*_clients, itr->name, itr->dlhandle, itr->configure_func,
-    //     itr->configure_attach_func);
-    // }
-
     set_init_status(-1);
     invoke_client_configure(client);
     invoke_client_initializer(client);

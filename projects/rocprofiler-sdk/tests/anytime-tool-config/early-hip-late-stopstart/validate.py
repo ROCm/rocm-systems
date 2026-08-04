@@ -63,11 +63,25 @@ def test_both_captured_dispatch(tool_a_data, tool_b_data):
     assert len(_dispatch_starts(tool_b_data)) > 0, "Tool B captured no dispatches"
 
 
-def test_b_captured_fewer_than_a(tool_a_data, tool_b_data):
-    """Tool B was stopped for one phase, so it captured strictly fewer than Tool A."""
+def test_exact_dispatch_counts(tool_a_data, tool_b_data):
+    """Exact dispatch accounting proves the stop/start window is the right size.
+
+    The driver creates NUM_STREAMS(4) streams, each seeded with one hipMemsetAsync (a memset
+    is itself a kernel dispatch), then launches NUM_STREAMS*PHASE_ITERS = 20 kernels in each of
+    four phases: warm-up, A, B, C.
+
+      Tool A (early, never stopped) captures the 4 stream-init memsets + all four phases:
+          4 + 4*20 = 84.
+      Tool B (registers after warm-up, stopped during phase B) captures neither the memsets
+          nor warm-up, and drops phase B: only phases A and C: 2*20 = 40.
+    """
+    per_phase = 4 * 5  # NUM_STREAMS * PHASE_ITERS
+    a_expected = 4 + 4 * per_phase  # 4 stream-init memsets + all four phases = 84
+    b_expected = 2 * per_phase  # phases A + C only = 40
     a = len(_dispatch_starts(tool_a_data))
     b = len(_dispatch_starts(tool_b_data))
-    assert b < a, f"Tool B ({b}) should capture fewer dispatches than Tool A ({a})"
+    assert a == a_expected, f"Tool A should capture {a_expected} dispatches, got {a}"
+    assert b == b_expected, f"Tool B should capture {b_expected} dispatches, got {b}"
 
 
 def _largest_gap_window(starts):
