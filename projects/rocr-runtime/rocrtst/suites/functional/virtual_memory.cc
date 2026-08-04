@@ -1421,6 +1421,7 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t agent, hsa_amd_memory
   // Write to addr1
   int* data1 = reinterpret_cast<int*>(addr1);
   for (int i = 0; i < kMemoryAllocSize; ++i) {
+    std::cout << "    Writing data1[" << i << "] = " << i << std::endl;
     data1[i] = i;
   }
 
@@ -1735,6 +1736,20 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(void) {
   std::vector<hsa_agent_t> gpus;
   ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
 
+  // Run on CPU pools - CPU-only alias verification via direct reads/writes
+  std::vector<std::shared_ptr<rocrtst::agent_pools_t>> agent_pools;
+  ASSERT_SUCCESS(rocrtst::GetAgentPools(&agent_pools));
+  for (auto a : agent_pools) {
+    for (auto p : a->pools) {
+      TestVirtAddressAlias(a->agent, p);
+    }
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Host Memory VA alias test on CPU pools done" << std::endl;
+  }
+
+  // Run on GPU pools
   for (unsigned int i = 0; i < gpus.size(); ++i) {
     hsa_amd_memory_pool_t gpu_pool;
     memset(&gpu_pool, 0, sizeof(gpu_pool));
