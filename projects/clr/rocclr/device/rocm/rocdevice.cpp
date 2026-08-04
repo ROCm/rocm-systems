@@ -3579,6 +3579,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   auto& qInfo = result.first->second;
   qInfo.refCount = 1;
   qInfo.hasDedicatedQueue_ = dedicated_queue;
+  qInfo.ringPublish = std::make_unique<RingPublishState>(queue->size);
   populateExtras();
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "acquireQueue refCount: %p (%d) %s",
           result.first->first->base_address, result.first->second.refCount,
@@ -3679,6 +3680,20 @@ Device::QueueExtras Device::GetQueueExtras(hsa_queue_t* queue) {
   amd::ScopedLock l(active_queue_access_);
   auto it = queue_extras_.find(queue);
   return (it != queue_extras_.end()) ? it->second : QueueExtras{};
+}
+
+RingPublishState* Device::GetRingPublishState(hsa_queue_t* queue) {
+  if (queue == nullptr) {
+    return nullptr;
+  }
+  amd::ScopedLock l(active_queue_access_);
+  for (auto& pool : queuePool_) {
+    auto it = pool.find(queue);
+    if (it != pool.end()) {
+      return it->second.ringPublish.get();
+    }
+  }
+  return nullptr;
 }
 
 bool Device::findLinkInfo(const amd::Device& other_device, std::vector<LinkAttrType>* link_attrs) {

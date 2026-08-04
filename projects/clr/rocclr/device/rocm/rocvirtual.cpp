@@ -1230,6 +1230,9 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 // ================================================================================================
 void VirtualGPU::SetGpuQueue(hsa_queue_t* queue) {
   gpu_queue_ = queue;
+  // Bind the per-ring allocation/publish state owned by the queue pool. Null for
+  // unshared queues, which keep the fused single-producer path.
+  ring_publish_ = roc_device_.GetRingPublishState(queue);
 
   cached_read_dispatch_id_ = 0;
   // The cached queue-progress state belongs to the previously assigned HW queue. When the HW
@@ -1418,8 +1421,12 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   const uint32_t queueMask = queueSize - 1;
   const uint32_t sw_queue_size = queueMask;
 
-  // Check for queue full and wait if needed.
-  uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
+  // Split allocation from the GPU write-pointer bump. Reserve a slot from the
+  // CLR-private allocation counter. The GPU-visible write_dispatch_id is advanced
+  // later, in MarkReadyAndCommit, only over contiguously-published slots.
+  RingPublishState* ring = ring_publish_;
+  uint64_t index = (ring != nullptr) ? ring->Reserve(1)
+                                     : Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
   adjustHeader(header);
 
   bool attachSignal = timestamp_ != nullptr || attach_signal;
@@ -1478,7 +1485,22 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   bool ring_for_non_profiler_signal = attach_signal && (packet->completion_signal.handle != 0);
   bool ring_doorbell = IS_LINUX || dev().IsPm4Emulation() || blocking ||
                        (skippedDispatches_ >= skip_limit) || ring_for_non_profiler_signal;
-  if (ring_doorbell) {
+  if (ring != nullptr) {
+    // Publish this slot, advance the frontier over any contiguously-published slots
+    // (the frontier store is done under the commit lock via the callback), then ring
+    // the doorbell to the frontier. Note: never ring to our own index, which may sit
+    // above an earlier producer's still-unpublished slot.
+    hsa_queue_t* q = gpu_queue_;
+    RingPublishState::CommitResult r = ring->MarkReadyAndCommit(
+        index, 1,
+        [q](uint64_t frontier) { Hsa::queue_store_write_index_screlease(q, frontier); });
+    if (r.advanced && ring_doorbell) {
+      ringQueueDoorbell(r.frontier - 1);
+      skippedDispatches_ = 0;
+    } else {
+      ++skippedDispatches_;
+    }
+  } else if (ring_doorbell) {
     ringQueueDoorbell(index);
     skippedDispatches_ = 0;
   } else {
@@ -1683,7 +1705,11 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   // Per-chunk: yield if the queue is full (handles graphs larger than the queue), then
   // memcpy + per-packet fixups + headers + doorbell.  For graphs that fit in the queue
   // the yield never fires.
-  uint64_t startIndex = Hsa::queue_add_write_index_screlease(gpu_queue_, numPackets);
+  // Reserve the whole block from the CLR-private allocation counter (see
+  // dispatchGenericAqlPacket). Each chunk publishes and advances the frontier below.
+  RingPublishState* ring = ring_publish_;
+  uint64_t startIndex = (ring != nullptr) ? ring->Reserve(numPackets)
+                                          : Hsa::queue_add_write_index_screlease(gpu_queue_, numPackets);
   setFenceDirty(true);
 
   // Update cached fence state from the last packet's release scope.
@@ -1929,7 +1955,18 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       }
     }
 
-    if (doorbell_ptr_) {
+    if (ring != nullptr) {
+      // This chunk's slots [chunkStart, chunkEnd) are now published. Mark them ready
+      // and advance the frontier over any contiguously-published slots, then ring to
+      // the frontier. Note: never ring to this chunk's own end index.
+      hsa_queue_t* q = gpu_queue_;
+      RingPublishState::CommitResult r = ring->MarkReadyAndCommit(
+          startIndex + chunkStart, chunkEnd - chunkStart,
+          [q](uint64_t frontier) { Hsa::queue_store_write_index_screlease(q, frontier); });
+      if (r.advanced) {
+        ringQueueDoorbell(r.frontier - 1);
+      }
+    } else if (doorbell_ptr_) {
       amd::ringDoorbell(doorbell_ptr_, startIndex + chunkEnd - 1);
     } else {
       Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, startIndex + chunkEnd - 1);
@@ -2011,7 +2048,10 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
     }
   }
 
-  uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
+  // Allocation-pointer reserve (see dispatchGenericAqlPacket).
+  RingPublishState* ring = ring_publish_;
+  uint64_t index = (ring != nullptr) ? ring->Reserve(1)
+                                     : Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
 
   setFenceDirty(true);
   auto cache_state = extractAqlBits(packetHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
@@ -2040,7 +2080,17 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
       &(reinterpret_cast<hsa_barrier_and_packet_t*>(gpu_queue_->base_address))[index & queueMask];
 
   writePacketToRingBuffer(aql_loc, &barrier_packet_, packetHeader, uint16_t{0}, index & queueMask);
-  ringQueueDoorbell(index);
+  if (ring != nullptr) {
+    hsa_queue_t* q = gpu_queue_;
+    RingPublishState::CommitResult r = ring->MarkReadyAndCommit(
+        index, 1,
+        [q](uint64_t frontier) { Hsa::queue_store_write_index_screlease(q, frontier); });
+    if (r.advanced) {
+      ringQueueDoorbell(r.frontier - 1);
+    }
+  } else {
+    ringQueueDoorbell(index);
+  }
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
     logAqlBarrierPacket(roc_device_, gpu_queue_, packetHeader, &barrier_packet_, index, priority_);
   }
@@ -2110,7 +2160,10 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
     setFenceDirty(false);
   }
 
-  uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
+  // Allocation-pointer reserve (see dispatchGenericAqlPacket).
+  RingPublishState* ring = ring_publish_;
+  uint64_t index = (ring != nullptr) ? ring->Reserve(1)
+                                     : Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
 
   TrackQueueProgress(barrier_value_packet_, index, external_signal);
 
@@ -2118,7 +2171,17 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   hsa_amd_barrier_value_packet_t* aql_loc = &(reinterpret_cast<hsa_amd_barrier_value_packet_t*>(
       gpu_queue_->base_address))[index & queueMask];
   writePacketToRingBuffer(aql_loc, &barrier_value_packet_, packetHeader, rest, index & queueMask);
-  ringQueueDoorbell(index);
+  if (ring != nullptr) {
+    hsa_queue_t* q = gpu_queue_;
+    RingPublishState::CommitResult r = ring->MarkReadyAndCommit(
+        index, 1,
+        [q](uint64_t frontier) { Hsa::queue_store_write_index_screlease(q, frontier); });
+    if (r.advanced) {
+      ringQueueDoorbell(r.frontier - 1);
+    }
+  } else {
+    ringQueueDoorbell(index);
+  }
 
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
     logAqlBarrierValuePacket(roc_device_, gpu_queue_, packetHeader, &barrier_value_packet_, index,

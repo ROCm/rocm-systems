@@ -20,6 +20,7 @@
 
 #include "device/rocm/rocrctx.hpp"
 #include "device/rocm/rocsettings.hpp"
+#include "device/rocm/rocringpublish.hpp"
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rocdefs.hpp"
 #include "device/rocm/rocprintf.hpp"
@@ -623,6 +624,10 @@ class Device : public NullDevice {
   //! Look up per-queue extras (metadata ring buffer and placement).
   QueueExtras GetQueueExtras(hsa_queue_t* queue);
 
+  //! Publish state for a pooled ring, or nullptr for queues that are never shared
+  //! (cuMask/coop). Those keep the original fused single-producer path.
+  RingPublishState* GetRingPublishState(hsa_queue_t* queue);
+
   //! Return the pre-computed metadata packet version header bits
   uint32_t MetadataVersionHeader() const { return metadata_version_header_; }
 
@@ -770,6 +775,8 @@ class Device : public NullDevice {
   struct QueueInfo {
     int refCount;             //! Reference counter. Shows how many time the queue was shared
     bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
+    //! Per-ring publish state, shared by every VirtualGPU multiplexed onto this ring.
+    std::unique_ptr<RingPublishState> ringPublish;
 
     // Constructor
     QueueInfo() : refCount(0), hasDedicatedQueue_(false) {}
