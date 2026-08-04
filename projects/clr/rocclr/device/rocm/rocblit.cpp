@@ -492,9 +492,11 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
   constexpr size_t kRetainCountThreshold = 8;
   const bool requireSDMA =
       (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA);
-  // ROC_SDMA_ENGINE_SELECT: 2=disabled -> skip engine selection, let ROCr pick the engine.
+  // ROC_SDMA_ENGINE_SELECT: 2 and 3 both disable CLR selection -> let ROCr pick the engine.
+  // (Mode 3 additionally enables ROCr's round-robin spreading via HSA_ENABLE_SDMA_RR.)
   // requireSDMA (e.g. P2P) still needs the on_engine path, so it is honored here.
-  bool kUseRegularCopyApi = (ROC_SDMA_ENGINE_SELECT == 2) && !requireSDMA;
+  bool kUseRegularCopyApi =
+      (ROC_SDMA_ENGINE_SELECT == 2 || ROC_SDMA_ENGINE_SELECT == 3) && !requireSDMA;
   bool forceSDMA = requireSDMA;
   HwQueueEngine engine = HwQueueEngine::Unknown;
 

@@ -127,6 +127,12 @@ class Flag {
     enable_sdma_recommended_eng_ = (var == "0") ? SDMA_DISABLE :
                                    ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
+    // When set, DmaCopy self-selection round-robins across the preferred SDMA
+    // engines instead of always picking the first one. Default off (original
+    // behavior: always the lowest preferred engine).
+    var = os::GetEnvVar("HSA_ENABLE_SDMA_RR");
+    enable_sdma_rr_ = (var == "1") ? true : false;
+
     visible_gpus_ = os::GetEnvVar("ROCR_VISIBLE_DEVICES");
     filter_visible_gpus_ = os::IsEnvVarSet("ROCR_VISIBLE_DEVICES");
 
@@ -422,6 +428,8 @@ class Flag {
 
   SDMA_OVERRIDE enable_sdma_recommended_eng() const { return enable_sdma_recommended_eng_; }
 
+  bool enable_sdma_rr() const { return enable_sdma_rr_; }
+
   std::string visible_gpus() const { return visible_gpus_; }
 
   bool filter_visible_gpus() const { return filter_visible_gpus_; }
@@ -607,6 +615,8 @@ class Flag {
   SDMA_OVERRIDE enable_sdma_gang_;
   SDMA_OVERRIDE enable_sdma_copy_size_override_;
   SDMA_OVERRIDE enable_sdma_recommended_eng_;
+
+  bool enable_sdma_rr_;
 
   bool filter_visible_gpus_;
   std::string visible_gpus_;

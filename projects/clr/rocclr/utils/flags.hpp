@@ -213,7 +213,7 @@ release(uint, ROC_P2P_SDMA_SIZE, 1024,                                        \
         "The minimum size in KB for P2P transfer with SDMA")                  \
 release(uint, ROC_SDMA_ENGINE_SELECT, 0,                                      \
         "SDMA engine selection: 0=default(exclusivity) 1=round-robin "        \
-        "2=disabled(ROCr picks)")                                             \
+        "2=disabled(ROCr picks,funnel) 3=disabled(ROCr picks+RR spread)")     \
 release(uint, ROC_AQL_QUEUE_SIZE, 16384,                                      \
         "AQL queue size in AQL packets")                                      \
 release(uint, ROC_SIGNAL_POOL_SIZE, 64,                                       \
