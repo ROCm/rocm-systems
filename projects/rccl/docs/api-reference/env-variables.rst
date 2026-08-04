@@ -242,6 +242,13 @@ in the following table.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
 
+    * - | ``NCCL_IB_SPLIT_DATA_ON_QPS``
+        | Controls how multiple QPs are used when more than one QP is
+          configured per connection.
+      - | ``0``: Round-robin mode (default). Each message is sent on a single
+          QP, cycling through available QPs across messages.
+        | ``1``: Split mode. Each message is split evenly across all QPs.
+
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.
       - | Ring topology specification string
@@ -256,6 +263,76 @@ in the following table.
         | Controls ring remapping for specific topologies.
       - | Remapping specification string
         | Used with Rome 4P2H topology
+
+QP scheduling (CAST)
+==============================
+
+CAST (Congestion Aware Sprayed Traffic) adds a dynamic QP (Queue Pair) scheduler
+that balances RDMA traffic across multiple QPs per connection based on measured
+round-trip time (RTT). The following variables tune the scheduler and are
+accessible with either the ``RCCL_`` or ``NCCL_`` prefix; the ``RCCL_`` form is
+shown below.
+
+These variables only take effect when the CAST QP scheduler is active.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``RCCL_IB_QP_SCHED_ENABLE``
+        | Enables the CAST QP scheduler.
+      - | ``-1``: Auto (default). Disabled unless ``NCCL_NET=IB-CAST`` is set,
+          which forces it on. Can be explicitly overridden regardless of
+          ``NCCL_NET``.
+        | ``0``: Force off.
+        | ``1``: Force on.
+
+    * - | ``RCCL_IB_QP_SCHED_WRR_ENABLE``
+        | Enables Weighted Round-Robin (WRR) scheduling within the QP scheduler.
+      - | ``0``: Disabled.
+        | ``1``: Enabled (default).
+
+    * - | ``RCCL_IB_QP_SCHED_RESET_INTERVAL``
+        | Interval at which accumulated RTT statistics are reset, to prevent
+          stale samples from permanently biasing the scheduler. Value is in
+          milliseconds.
+      - | Integer milliseconds. Default: ``60000`` (60 seconds).
+        | ``0``: Never reset.
+
+    * - | ``RCCL_IB_QP_SCHED_UPDATE_INTERVAL``
+        | Minimum interval between scheduler weight updates. Value is in
+          microseconds.
+      - | Integer microseconds. Default: ``50``.
+        | Clamped to the range 1 µs to 60 s; out-of-range values are ignored.
+
+    * - | ``RCCL_IB_QP_SCHED_WEIGHT``
+        | Exponential moving average (EMA) weight applied to new RTT samples.
+      - | Floating-point value in the range ``0`` to ``1.0``. Default: ``0``.
+        | ``0``: Simple average.
+        | Values closer to ``1.0`` react faster to recent samples.
+
+    * - | ``RCCL_IB_QP_SCHED_SPLIT_DATA_MIN``
+        | Minimum chunk size when splitting a message across QPs (split-data
+          mode, enabled via ``NCCL_IB_SPLIT_DATA_ON_QPS``). Value is in bytes.
+      - | Integer bytes. Default: ``65536``.
+        | Only positive values are applied.
+
+    * - | ``RCCL_IB_QP_SCHED_LOG_PATH``
+        | Directory for per-QP scheduler log files (RTT samples, computed
+          weights, token allocations). Log files are named
+          ``cast_log_<hostname>_<pid>``.
+      - | String directory path.
+        | Default: unset (logging disabled).
+
+    * - | ``RCCL_IB_QP_SCHED_LOG_INTERVAL``
+        | Interval at which scheduler statistics are written to the log file.
+          Value is in microseconds. Only used when
+          ``RCCL_IB_QP_SCHED_LOG_PATH`` is set.
+      - | Integer microseconds. Default: ``1000000`` (1 second).
+        | Clamped to the range 1 µs to 60 s; out-of-range values are ignored.
 
 Development and testing (advanced)
 ==================================
