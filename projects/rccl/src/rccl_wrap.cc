@@ -525,10 +525,12 @@ bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
   if (!comm->hierarchicalCommsInitialized) return false;
 
   size_t threshold = 0;
-  if (comm->nNodes >= 16) {
-    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE;
+  if (comm->nNodes >= 32) {
+    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE; // 128MB
+  } else if (comm->nNodes >= 16) {
+    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2; // 64MB
   } else if (comm->nNodes >= 8) {
-    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
+    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 4; // 32MB
   }
 
   return threshold > 0 && msgSize <= threshold;
