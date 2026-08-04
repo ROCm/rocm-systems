@@ -195,6 +195,9 @@ if(BUILD_TESTS)
     SendRecvTests.cpp
     StandaloneTests.cpp
     DdaIpcTests.cpp
+    NetPluginReloadTests.cpp
+    plugin/net_reload_plugin.cpp
+    CpuAffinityTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
     common/main.cpp
@@ -228,6 +231,17 @@ if(BUILD_TESTS)
   # Create rccl-UnitTests binary
   add_executable(rccl-UnitTests ${TEST_SOURCE_FILES})
 
+  # AICOMRCCL-1534: net_reload_plugin.cpp is compiled into rccl-UnitTests and loaded
+  # in-process via NCCL_NET_PLUGIN=STATIC_PLUGIN (dlopen(NULL)), so no external .so.
+  # Scope its headers to the file so the generic example headers don't shadow others.
+  set_source_files_properties(plugin/net_reload_plugin.cpp PROPERTIES
+    INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/net/example/nccl)
+
+  # dlsym(dlopen(NULL), ...) only finds symbols present in the dynamic symbol table;
+  # export just the one plugin symbol (narrow, unlike a broad -rdynamic).
+  target_link_options(rccl-UnitTests PRIVATE
+    "LINKER:--export-dynamic-symbol=ncclNetPlugin_v10")
+
   # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
   # (inline, static, constexpr, template functions) and can run in both Release and Debug.
   if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
@@ -236,6 +250,7 @@ if(BUILD_TESTS)
     set(TEST_FIXTURE_SOURCE_FILES
       BitOpsTests.cpp
       IommuPassthrough_test.cpp
+      MatchSubnet_test.cpp
       MiscTests.cpp
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
@@ -338,7 +353,6 @@ if(BUILD_TESTS)
       AllocTests.cpp
       ParamTests.cpp
       ParameterApiTests.cpp
-      EnvPluginTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
       DdaAlltoAllThresholdTests.cpp
@@ -347,12 +361,16 @@ if(BUILD_TESTS)
       EnqueueTests.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
+      TopoNicFusionTests.cpp
       NetSocketTests.cpp
+      PluginCompatV11_test.cpp
       ProxyTests.cpp
       RcclWrapTests.cpp
+      SocketPollTests.cpp
       TransportTests.cpp
       TimeoutTests.cpp
       mem_manager/MemManagerTests.cpp
+      graph/SearchTests.cpp
       graph/XmlTests.cpp
       graph/NetDevsPolicyP2pNetTests.cpp
       graph/TopoTests.cpp
@@ -363,11 +381,26 @@ if(BUILD_TESTS)
 
     add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
 
+    # SearchTests.cpp #includes the hipify-generated copy of src/graph/search.cc
+    # directly (via #include SEARCH_CC_PATH) so it can exercise search.cc's
+    # internal symbols in the same TU. Pass the absolute path as a source-scoped
+    # define; the hipify step is ordered ahead of the test via the add_dependencies
+    # / link to the rccl target that the common foreach below applies.
+    set_source_files_properties(graph/SearchTests.cpp PROPERTIES
+      COMPILE_DEFINITIONS
+        "SEARCH_CC_PATH=\"${PROJECT_BINARY_DIR}/hipify/src/graph/search.cc\"")
+
     # TopoEnvPolicyTests and NetDevsPolicyP2pNetTests load a topology XML fixture
     # from the source tree (tools/topo_expl/models). Expose the test source dir
     # so they can build the path.
     target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
       RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+    # PluginCompatV11_test.cpp resolves its in-process mock plugin symbols via
+    # dlsym(dlopen(NULL), ...), which only sees the executable's dynamic symbols.
+    target_link_options(rccl-UnitTestsFixturesDebug PRIVATE
+      -Wl,--export-dynamic-symbol=ncclNetPlugin_v11
+      -Wl,--export-dynamic-symbol=ncclCollNetPlugin_v11)
   endif()
 
   # rccl-UnitTestsAltRsmi: Compiles alt_rsmi.cc directly (not via librccl.so) with
@@ -395,6 +428,82 @@ if(BUILD_TESTS)
     # returns false in test TUs even when AMDSMI_FABRIC_DIRECT is set.
     if(DEFINED SMI_INCLUDE_DIR)
       target_include_directories(rccl-UnitTestsAltRsmi PRIVATE ${SMI_INCLUDE_DIR})
+    endif()
+  endif()
+
+  # rccl-UnitTestsAmdSmi: tests for the amdsmi_wrap layer.
+  #
+  # AmdSmiFabricTests.cpp covers the fabric predicates and struct layout pinned in
+  # amdsmi_wrap.h. Those are header-inline, so they need no librccl.so symbols and
+  # run in both Release and Debug.
+  #
+  # AmdSmiWrapTests.cpp drives the amd_smi_* API itself, so it needs symbols that
+  # src/CMakeLists.txt only exports under -fvisibility=default in Debug. Adding it
+  # in Release would fail to link, so it joins the target only where they exist.
+  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
+    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsAmdSmi)
+
+    # main_altrsmi.cpp is a plain InitGoogleTest/RUN_ALL_TESTS entry point, reused here.
+    set(TEST_AMDSMI_SOURCE_FILES
+      AmdSmiFabricTests.cpp
+      common/main_altrsmi.cpp
+    )
+
+    if(CMAKE_BUILD_TYPE MATCHES "Debug")
+      list(APPEND TEST_AMDSMI_SOURCE_FILES
+        AmdSmiWrapTests.cpp
+        common/ProcessIsolatedTestRunner.cpp
+      )
+
+      # Loaded only by isolated lifecycle tests, never by the normal test process.
+      add_library(rccl-AmdSmiLifecycleStub SHARED AmdSmiLifecycleStub.cpp)
+      set_target_properties(rccl-AmdSmiLifecycleStub PROPERTIES
+        OUTPUT_NAME "amd_smi"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/amdsmi_lifecycle_stub"
+      )
+
+      # Match the versioned name used by amdsmi_wrap when headers are present.
+      # Older ROCm configurations may not define SMI_INCLUDE_DIR, so also check
+      # ROCM_PATH; without either header amdsmi_wrap uses the unversioned name.
+      if(EXISTS "${SMI_INCLUDE_DIR}/amd_smi/amdsmi.h")
+        set(AMDSMI_TEST_HEADER "${SMI_INCLUDE_DIR}/amd_smi/amdsmi.h")
+      elseif(EXISTS "${ROCM_PATH}/include/amd_smi/amdsmi.h")
+        set(AMDSMI_TEST_HEADER "${ROCM_PATH}/include/amd_smi/amdsmi.h")
+      endif()
+      if(AMDSMI_TEST_HEADER)
+        file(STRINGS "${AMDSMI_TEST_HEADER}" AMDSMI_VERSION_MAJOR_LINE
+          REGEX "^#define AMDSMI_LIB_VERSION_MAJOR [0-9]+"
+          LIMIT_COUNT 1
+        )
+        string(REGEX REPLACE ".* ([0-9]+)$" "\\1"
+          AMDSMI_TEST_SOVERSION "${AMDSMI_VERSION_MAJOR_LINE}"
+        )
+        set_target_properties(rccl-AmdSmiLifecycleStub PROPERTIES
+          SOVERSION "${AMDSMI_TEST_SOVERSION}"
+        )
+      endif()
+    endif()
+
+    add_executable(rccl-UnitTestsAmdSmi ${TEST_AMDSMI_SOURCE_FILES})
+
+    if(CMAKE_BUILD_TYPE MATCHES "Debug")
+      add_dependencies(rccl-UnitTestsAmdSmi rccl-AmdSmiLifecycleStub)
+      target_compile_definitions(rccl-UnitTestsAmdSmi PRIVATE
+        AMDSMI_TEST_STUB_DIR="$<TARGET_FILE_DIR:rccl-AmdSmiLifecycleStub>"
+        AMDSMI_TEST_STUB_SONAME="$<TARGET_SONAME_FILE_NAME:rccl-AmdSmiLifecycleStub>"
+      )
+    endif()
+
+    # amdsmi_wrap.h needs both halves of this pairing: the include path so its
+    # __has_include finds amdsmi, and AMDSMI_FABRIC_DIRECT, which is PRIVATE to the
+    # rccl target and so does not reach test TUs. With the headers reachable but the
+    # define absent, the header's fabric compat block compiles on top of the real
+    # declarations and every fabric type collides.
+    if(DEFINED SMI_INCLUDE_DIR)
+      target_include_directories(rccl-UnitTestsAmdSmi PRIVATE ${SMI_INCLUDE_DIR})
+    endif()
+    if(AMDSMI_FABRIC_API)
+      target_compile_definitions(rccl-UnitTestsAmdSmi PRIVATE AMDSMI_FABRIC_DIRECT)
     endif()
   endif()
 
@@ -431,6 +540,7 @@ if(BUILD_TESTS)
       GinNcclTimeoutMPITests.cpp
       SymmetricKernelMPITests.cpp
       SymmetricWindowMPITests.cpp
+      CommNetMismatchMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
@@ -472,6 +582,34 @@ if(BUILD_TESTS)
     else()
       add_dependencies(${test_executable} rccl)
       target_link_libraries(${test_executable} PRIVATE dl rt numa -lrccl -L${CMAKE_BINARY_DIR} -lrocm_smi64 -L${ROCM_PATH}/lib -L${ROCM_PATH}/rocm_smi/lib)
+    endif()
+
+    # Link the GIN device backend library and device-link its rdc code (-fgpu-rdc
+    # --hip-link --offload-arch=... -rdynamic) so GIN device tests can run.
+    if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_INSTALL_DIR AND "${test_executable}" STREQUAL "rccl-UnitTestsMPI")
+      set(_ROCSHMEM_OFFLOAD_FLAGS "")
+      foreach(_g IN LISTS GPU_TARGETS)
+        if(_g)
+          list(APPEND _ROCSHMEM_OFFLOAD_FLAGS "--offload-arch=${_g}")
+        endif()
+      endforeach()
+      # Fall back to linking by bare name if the hint lookup misses (avoids injecting <VAR>-NOTFOUND into the link line).
+      find_library(_ROCSHMEM_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      find_library(_ROCSHMEM_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      if(NOT _ROCSHMEM_DRM)
+        set(_ROCSHMEM_DRM drm)
+      endif()
+      if(NOT _ROCSHMEM_DRM_AMDGPU)
+        set(_ROCSHMEM_DRM_AMDGPU drm_amdgpu)
+      endif()
+      # Enable the GIN device backend in the test kernels so ncclGinCall has a
+      # dispatch case for the corresponding runtime GIN type.
+      target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ROCSHMEM_GDA_ENABLE=1)
+      target_compile_options(${test_executable} PRIVATE -fgpu-rdc)
+      target_link_libraries(${test_executable} PRIVATE
+          ${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a
+          ibverbs hsa-runtime64 hsakmt numa ${_ROCSHMEM_DRM} ${_ROCSHMEM_DRM_AMDGPU})
+      target_link_options(${test_executable} PRIVATE -fgpu-rdc --hip-link ${_ROCSHMEM_OFFLOAD_FLAGS} -rdynamic)
     endif()
 
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
@@ -529,6 +667,23 @@ if(BUILD_TESTS)
             )
         else()
             message(WARNING "Skipping test categories for rccl-UnitTestsFixtures: missing ${_rccl_test_categories_fixtures_yaml}")
+        endif()
+
+        # Registered outside the Debug-only block below: this target's fabric predicate
+        # and layout cases need no librccl symbols and so run in Release too. The
+        # AmdSmiWrap* patterns in the yaml match nothing in a Release binary, where
+        # that file is left out for lack of exported amd_smi_* symbols.
+        set(_rccl_test_categories_amdsmi_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_amdsmi.yaml")
+        if(EXISTS "${_rccl_test_categories_amdsmi_yaml}")
+            message(STATUS "Applying test categories for rccl-UnitTestsAmdSmi")
+            apply_test_category_labels(
+                rccl-UnitTestsAmdSmi
+                "${_rccl_test_categories_amdsmi_yaml}"
+                "${PROJECT_BINARY_DIR}"
+                "${INSTALL_TEST_FILE}"
+            )
+        else()
+            message(WARNING "Skipping test categories for rccl-UnitTestsAmdSmi: missing ${_rccl_test_categories_amdsmi_yaml}")
         endif()
     endif()
 

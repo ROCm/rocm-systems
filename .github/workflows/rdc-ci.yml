@@ -1,0 +1,379 @@
+# RDC keeps this standalone workflow temporarily to validate project-specific
+# packaging and test coverage while integration with TheRock CI is completed.
+name: RDC CI
+
+on:
+  pull_request:
+    branches: [ 'develop', 'amd-staging', 'amd-mainline' ]
+    paths:
+      - 'projects/rdc/**'
+      - '.github/workflows/rdc-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  DEBCONF_NONINTERACTIVE_SEEN: true
+  BUILD_TYPE: RelWithDebInfo
+  ROCM_DIR: /opt/rocm
+  GRPC_ROOT: /opt/grpc
+  GRPC_VERSION: "1.67.1"
+  GPU_TARGETS: ${{ vars.GPU_TARGETS || 'gfx942' }}
+
+defaults:
+  run:
+    working-directory: projects/rdc
+
+jobs:
+  # Resolve the current GPU runner label from ROCm/therock-ci-config instead of
+  # hard-coding one (labels get decommissioned). Reuses the shared resolver action.
+  ci_config:
+    if: ${{ vars.RDC_GPU_TESTS_ENABLED == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
+    name: Resolve GPU runner label
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
+    steps:
+    - name: Checkout resolve-ci-config action
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+        set-safe-directory: true
+
+    - name: Resolve runner labels
+      id: runner
+      uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+
+  rdc_build:
+    if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
+    runs-on: lstt_ci_runners
+    timeout-minutes: 90
+    container: rocm/dev-ubuntu-22.04:7.2
+    outputs:
+      TODAY: ${{ steps.metadata.outputs.TODAY }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: |
+          projects/amdsmi
+          projects/rdc
+
+    - name: Build metadata
+      id: metadata
+      working-directory: .
+      run: |
+        TODAY="$(date +%Y_%m_%d)"
+        echo "TODAY=$TODAY" >> "$GITHUB_ENV"
+        echo "TODAY=$TODAY" >> "$GITHUB_OUTPUT"
+
+    - name: Install build tools
+      working-directory: .
+      run: |
+        apt update -y
+        apt install -y \
+          autoconf \
+          automake \
+          build-essential \
+          ccache \
+          clang \
+          cmake \
+          curl \
+          git \
+          gzip \
+          hip-dev \
+          hip-runtime-amd \
+          hipcc \
+          hsa-rocr-dev \
+          jq \
+          libcap-dev \
+          libc++-dev \
+          libdrm-dev \
+          libgflags-dev \
+          libgtest-dev \
+          libtool \
+          libmnl-dev \
+          libnl-3-dev \
+          libnl-genl-3-dev \
+          pkg-config \
+          rocm-core \
+          rocm-developer-tools \
+          rocm-device-libs \
+          rocm-smi-lib \
+          rocprofiler-dev \
+          rocprofiler-plugins \
+          rocprofiler-register \
+          rocprofiler-sdk \
+          tar \
+          unzip \
+          wget \
+          zip \
+          zstd
+
+    - name: Fetch gRPC source
+      working-directory: .
+      shell: bash
+      run: |
+        set -euo pipefail
+        git clone --branch "v${GRPC_VERSION}" --depth 1 \
+          https://github.com/grpc/grpc.git /tmp/grpc
+        git -C /tmp/grpc submodule update --init --depth 1 \
+          third_party/abseil-cpp \
+          third_party/boringssl-with-bazel \
+          third_party/cares/cares \
+          third_party/protobuf \
+          third_party/re2 \
+          third_party/zlib
+
+    - name: Build and install gRPC
+      working-directory: .
+      shell: bash
+      run: |
+        set -euo pipefail
+        cmake -S /tmp/grpc -B /tmp/grpc/build \
+          -DgRPC_INSTALL=ON \
+          -DgRPC_BUILD_TESTS=OFF \
+          -DBUILD_SHARED_LIBS=ON \
+          -DCMAKE_INSTALL_PREFIX="${GRPC_ROOT}" \
+          -DCMAKE_INSTALL_LIBDIR=lib \
+          -DCMAKE_BUILD_TYPE=Release
+        cmake --build /tmp/grpc/build --parallel "$(nproc)"
+        cmake --install /tmp/grpc/build
+        echo "${GRPC_ROOT}/lib" > /etc/ld.so.conf.d/grpc.conf
+        ldconfig
+
+    - name: Cache .ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ccache
+        key: ${{ runner.os }}-rdc-ccache-${{ github.ref_name }}-${{ env.TODAY }}
+        restore-keys: |
+          ${{ runner.os }}-rdc-ccache-${{ github.ref_name }}-
+          ${{ runner.os }}-rdc-ccache-
+
+    - name: Build and install amd-smi
+      working-directory: projects/amdsmi
+      run: |
+        # RDC's metric fetcher links amdsmi_get_cpu_* (ESMI/CPU), so amd-smi
+        # must be built with the E-SMI library enabled or librdc fails to link.
+        cmake -B build \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+          -DCMAKE_INSTALL_PREFIX=${ROCM_DIR} \
+          -DCPACK_GENERATOR=DEB \
+          -DENABLE_ESMI_LIB=ON
+        make -C build -j $(nproc)
+        make -C build install
+        make -C build -j $(nproc) package
+
+    - name: Build RDC
+      run: |
+        pwd
+        cmake \
+            -B build \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+            -DGRPC_DESIRED_VERSION="${GRPC_VERSION}" \
+            -DGRPC_ROOT="${GRPC_ROOT}" \
+            -DBUILD_RUNTIME=ON \
+            -DGPU_TARGETS="${GPU_TARGETS}" \
+            -DBUILD_PROFILER=ON \
+            -DBUILD_RVS=OFF \
+            -DBUILD_TESTS=ON \
+            -DCPACK_GENERATOR="DEB" \
+            -DCMAKE_INSTALL_PREFIX=${ROCM_DIR}
+        make -C build -j $(nproc)
+        make -C build -j $(nproc) package
+
+    - name: Install RDC
+      run: |
+        make -C build -j $(nproc) install
+
+    - name: Upload RDC packages
+      uses: actions/upload-artifact@v4
+      with:
+        name: rdc-packages
+        path: |
+          projects/amdsmi/build/amd-smi-lib*.deb
+          projects/rdc/build/rdc*.deb
+        if-no-files-found: error
+        retention-days: 5
+
+  # =================================================================
+  #  Test job — non-GPU tests (installation, CLI, Python, parsers)
+  # =================================================================
+  rdc_test:
+    if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
+    needs: rdc_build
+    runs-on: lstt_ci_runners
+    timeout-minutes: 30
+    container: rocm/dev-ubuntu-22.04:7.2
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rdc
+
+    - name: Install test dependencies
+      working-directory: .
+      run: |
+        apt update -y
+        # rdctst pulls in libamd_smi's netlink (NIC) code, so the runtime
+        # libnl stack must be present or the binary fails to load.
+        apt install -y python3 python3-pip libnl-3-200 libnl-genl-3-200 libmnl0
+        pip3 install pytest prometheus_client
+
+    - name: Download RDC packages
+      uses: actions/download-artifact@v4
+      with:
+        name: rdc-packages
+        path: /opt/
+
+    - name: Install RDC packages
+      shell: bash
+      working-directory: .
+      run: |
+        mapfile -t AMD_SMI_DEBS < <(find /opt/ -iname 'amd-smi-lib*.deb' ! -iname '*tests*' | sort)
+        mapfile -t RDC_DEBS < <(find /opt/ -iname 'rdc*.deb' | sort)
+        test "${#AMD_SMI_DEBS[@]}" -eq '1'
+        test "${#RDC_DEBS[@]}" -eq '2'
+        apt-get install -y "${AMD_SMI_DEBS[@]}" "${RDC_DEBS[@]}"
+
+    - name: Configure RDC runtime library path
+      shell: bash
+      working-directory: .
+      run: |
+        echo "LD_LIBRARY_PATH=${ROCM_DIR}/lib:${ROCM_DIR}/lib/rdc:${ROCM_DIR}/lib/rdc/grpc/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+    - name: Create test results directory
+      run: mkdir -p build
+
+    - name: Verify RDC installation
+      shell: bash
+      working-directory: .
+      run: |
+        # confirm binaries are installed
+        find $ROCM_DIR/bin -maxdepth 1 -iname rdcd
+        find $ROCM_DIR/bin -maxdepth 1 -iname rdci
+        find $ROCM_DIR/share/rdc -iname rdctst
+        # confirm that libraries are installed
+        MISSING_LIBS=()
+        for lib in librdc.so librdc_bootstrap.so librdc_client.so; do
+          test -e "$ROCM_DIR/lib/$lib" || MISSING_LIBS+=("$lib")
+        done
+        for lib in librdc_rocr.so librdc_rocp.so; do
+          test -e "$ROCM_DIR/lib/rdc/$lib" || MISSING_LIBS+=("$lib")
+        done
+        if test "${#MISSING_LIBS[@]}" != "0"; then
+          echo "Missing libs found!"
+          for lib in "${MISSING_LIBS[@]}"; do
+            echo "- $lib"
+          done
+          exit 1
+        else
+          echo "No missing libs found!"
+        fi
+
+    - name: Run RDC test suite (no GPU)
+      shell: bash
+      run: |
+        python3 -m pytest tests/ci \
+          -v --tb=short \
+          --junitxml=build/test-results-nogpu.xml
+      env:
+        RDC_SRC_DIR: ${{ github.workspace }}/projects/rdc/python_binding
+
+    - name: Publish test summary
+      if: always()
+      run: python3 tests/ci/junit_summary.py >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: rdc-test-results
+        path: projects/rdc/build/test-results-*.xml
+        retention-days: 30
+
+  # =================================================================
+  #  GPU test job — requires AMD GPU hardware
+  #  Enable by setting repo variable: RDC_GPU_TESTS_ENABLED=true
+  # =================================================================
+  rdc_test_gpu:
+    needs: [rdc_build, ci_config]
+    runs-on: ${{ needs.ci_config.outputs.gfx94x_runner }}
+    timeout-minutes: 90
+    if: ${{ vars.RDC_GPU_TESTS_ENABLED == 'true' }}
+    container:
+      image: rocm/dev-ubuntu-22.04:7.2
+      options: --device=/dev/kfd --device=/dev/dri --group-add video
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rdc
+
+    - name: Set up environment
+      working-directory: .
+      run: |
+        apt update -y
+        # rdctst pulls in libamd_smi's netlink (NIC) code, so the runtime
+        # libnl stack must be present or the binary fails to load.
+        apt install -y python3 python3-pip libnl-3-200 libnl-genl-3-200 libmnl0
+        pip3 install pytest prometheus_client
+
+    - name: Download RDC packages
+      uses: actions/download-artifact@v4
+      with:
+        name: rdc-packages
+        path: /opt/
+
+    - name: Install RDC packages
+      shell: bash
+      working-directory: .
+      run: |
+        mapfile -t AMD_SMI_DEBS < <(find /opt/ -iname 'amd-smi-lib*.deb' ! -iname '*tests*' | sort)
+        mapfile -t RDC_DEBS < <(find /opt/ -iname 'rdc*.deb' | sort)
+        test "${#AMD_SMI_DEBS[@]}" -eq '1'
+        test "${#RDC_DEBS[@]}" -eq '2'
+        apt-get install -y "${AMD_SMI_DEBS[@]}" "${RDC_DEBS[@]}"
+
+    - name: Configure RDC runtime library path
+      shell: bash
+      working-directory: .
+      run: |
+        echo "LD_LIBRARY_PATH=${ROCM_DIR}/lib:${ROCM_DIR}/lib/rdc:${ROCM_DIR}/lib/rdc/grpc/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+    - name: Create test results directory
+      run: mkdir -p build
+
+    - name: Run RDC test suite (with GPU)
+      shell: bash
+      run: |
+        python3 -m pytest tests/ci \
+          -v --tb=short \
+          --junitxml=build/test-results-gpu.xml
+      env:
+        RDC_SRC_DIR: ${{ github.workspace }}/projects/rdc/python_binding
+
+    - name: Publish test summary
+      if: always()
+      run: python3 tests/ci/junit_summary.py >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload GPU test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: rdc-test-results-gpu
+        path: projects/rdc/build/test-results-*.xml
+        retention-days: 30

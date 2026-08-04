@@ -27,7 +27,7 @@
 #include "lib/rocprofiler-sdk/spm/interface.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <cstddef>
 #include <cstdlib>
 #include <iostream>

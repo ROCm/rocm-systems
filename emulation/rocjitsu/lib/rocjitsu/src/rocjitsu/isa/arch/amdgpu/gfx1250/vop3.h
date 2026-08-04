@@ -18,7 +18,6 @@ class VNopVop3 : public Vop3 {
 public:
   VNopVop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  static const bool execute_registered_;
 };
 
 class VMovB32Vop3 : public Vop3 {
@@ -27,7 +26,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VReadfirstlaneB32Vop3 : public Vop3 {
@@ -36,7 +34,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtI32F64Vop3 : public Vop3 {
@@ -45,7 +42,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF64I32Vop3 : public Vop3 {
@@ -54,7 +50,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF32I32Vop3 : public Vop3 {
@@ -63,7 +58,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF32U32Vop3 : public Vop3 {
@@ -72,7 +66,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtU32F32Vop3 : public Vop3 {
@@ -81,7 +74,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtI32F32Vop3 : public Vop3 {
@@ -90,7 +82,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF16F32Vop3 : public Vop3 {
@@ -98,9 +89,9 @@ public:
   VCvtF16F32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF32F16Vop3 : public Vop3 {
@@ -109,7 +100,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtNearestI32F32Vop3 : public Vop3 {
@@ -118,7 +108,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtFloorI32F32Vop3 : public Vop3 {
@@ -127,7 +116,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtOffF32I4Vop3 : public Vop3 {
@@ -136,7 +124,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF32F64Vop3 : public Vop3 {
@@ -145,7 +132,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF64F32Vop3 : public Vop3 {
@@ -154,7 +140,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF32Ubyte0Vop3 : public Vop3 {
@@ -163,7 +148,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF32Ubyte1Vop3 : public Vop3 {
@@ -172,7 +156,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF32Ubyte2Vop3 : public Vop3 {
@@ -181,7 +164,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF32Ubyte3Vop3 : public Vop3 {
@@ -190,7 +172,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtU32F64Vop3 : public Vop3 {
@@ -199,7 +180,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF64U32Vop3 : public Vop3 {
@@ -208,7 +188,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VTruncF64Vop3 : public Vop3 {
@@ -217,7 +196,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCeilF64Vop3 : public Vop3 {
@@ -226,7 +204,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VRndneF64Vop3 : public Vop3 {
@@ -235,7 +212,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VFloorF64Vop3 : public Vop3 {
@@ -244,14 +220,12 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VPipeflushVop3 : public Vop3 {
 public:
   VPipeflushVop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  static const bool execute_registered_;
 };
 
 class VMovB16Vop3 : public Vop3 {
@@ -259,9 +233,9 @@ public:
   VMovB16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VMovB64Vop3 : public Vop3 {
@@ -270,7 +244,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VTanhF32Vop3 : public Vop3 {
@@ -279,7 +252,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VTanhF16Vop3 : public Vop3 {
@@ -287,9 +259,9 @@ public:
   VTanhF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VFractF32Vop3 : public Vop3 {
@@ -298,7 +270,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VTruncF32Vop3 : public Vop3 {
@@ -307,7 +278,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCeilF32Vop3 : public Vop3 {
@@ -316,7 +286,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VRndneF32Vop3 : public Vop3 {
@@ -325,7 +294,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VFloorF32Vop3 : public Vop3 {
@@ -334,7 +302,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VExpF32Vop3 : public Vop3 {
@@ -343,7 +310,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VLogF32Vop3 : public Vop3 {
@@ -352,7 +318,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VRcpF32Vop3 : public Vop3 {
@@ -361,7 +326,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VRcpIflagF32Vop3 : public Vop3 {
@@ -370,7 +334,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VRsqF32Vop3 : public Vop3 {
@@ -379,7 +342,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VRcpF64Vop3 : public Vop3 {
@@ -388,7 +350,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VRsqF64Vop3 : public Vop3 {
@@ -397,7 +358,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSqrtF32Vop3 : public Vop3 {
@@ -406,7 +366,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSqrtF64Vop3 : public Vop3 {
@@ -415,7 +374,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSinF32Vop3 : public Vop3 {
@@ -424,7 +382,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCosF32Vop3 : public Vop3 {
@@ -433,7 +390,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VNotB32Vop3 : public Vop3 {
@@ -442,7 +398,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VBfrevB32Vop3 : public Vop3 {
@@ -451,7 +406,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VClzI32U32Vop3 : public Vop3 {
@@ -460,7 +414,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCtzI32B32Vop3 : public Vop3 {
@@ -469,7 +422,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VClsI32Vop3 : public Vop3 {
@@ -478,7 +430,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VFrexpExpI32F64Vop3 : public Vop3 {
@@ -487,7 +438,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VFrexpMantF64Vop3 : public Vop3 {
@@ -496,7 +446,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VFractF64Vop3 : public Vop3 {
@@ -505,7 +454,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VFrexpExpI32F32Vop3 : public Vop3 {
@@ -514,7 +462,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VFrexpMantF32Vop3 : public Vop3 {
@@ -523,7 +470,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VMovreldB32Vop3 : public Vop3 {
@@ -532,7 +478,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
+  Operand m0;
 };
 
 class VMovrelsB32Vop3 : public Vop3 {
@@ -541,7 +487,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
+  Operand m0;
 };
 
 class VMovrelsdB32Vop3 : public Vop3 {
@@ -550,7 +496,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
+  Operand m0;
 };
 
 class VMovrelsd2B32Vop3 : public Vop3 {
@@ -559,7 +505,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
+  Operand m0;
 };
 
 class VPermlane16SwapB32Vop3 : public Vop3 {
@@ -568,7 +514,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VTanhBf16Vop3 : public Vop3 {
@@ -576,9 +521,9 @@ public:
   VTanhBf16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VPrngB32Vop3 : public Vop3 {
@@ -587,7 +532,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF16U16Vop3 : public Vop3 {
@@ -595,9 +539,9 @@ public:
   VCvtF16U16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF16I16Vop3 : public Vop3 {
@@ -605,9 +549,9 @@ public:
   VCvtF16I16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtU16F16Vop3 : public Vop3 {
@@ -615,9 +559,9 @@ public:
   VCvtU16F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtI16F16Vop3 : public Vop3 {
@@ -625,9 +569,9 @@ public:
   VCvtI16F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VRcpF16Vop3 : public Vop3 {
@@ -635,9 +579,9 @@ public:
   VRcpF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSqrtF16Vop3 : public Vop3 {
@@ -645,9 +589,9 @@ public:
   VSqrtF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VRsqF16Vop3 : public Vop3 {
@@ -655,9 +599,9 @@ public:
   VRsqF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VLogF16Vop3 : public Vop3 {
@@ -665,9 +609,9 @@ public:
   VLogF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VExpF16Vop3 : public Vop3 {
@@ -675,9 +619,9 @@ public:
   VExpF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VFrexpMantF16Vop3 : public Vop3 {
@@ -685,9 +629,9 @@ public:
   VFrexpMantF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VFrexpExpI16F16Vop3 : public Vop3 {
@@ -695,9 +639,9 @@ public:
   VFrexpExpI16F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VFloorF16Vop3 : public Vop3 {
@@ -705,9 +649,9 @@ public:
   VFloorF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCeilF16Vop3 : public Vop3 {
@@ -715,9 +659,9 @@ public:
   VCeilF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VTruncF16Vop3 : public Vop3 {
@@ -725,9 +669,9 @@ public:
   VTruncF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VRndneF16Vop3 : public Vop3 {
@@ -735,9 +679,9 @@ public:
   VRndneF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VFractF16Vop3 : public Vop3 {
@@ -745,9 +689,9 @@ public:
   VFractF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSinF16Vop3 : public Vop3 {
@@ -755,9 +699,9 @@ public:
   VSinF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCosF16Vop3 : public Vop3 {
@@ -765,9 +709,9 @@ public:
   VCosF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSatPkU8I16Vop3 : public Vop3 {
@@ -775,9 +719,9 @@ public:
   VSatPkU8I16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtNormI16F16Vop3 : public Vop3 {
@@ -785,9 +729,9 @@ public:
   VCvtNormI16F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtNormU16F16Vop3 : public Vop3 {
@@ -795,9 +739,9 @@ public:
   VCvtNormU16F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VNotB16Vop3 : public Vop3 {
@@ -805,9 +749,9 @@ public:
   VNotB16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtI32I16Vop3 : public Vop3 {
@@ -816,7 +760,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtU32U16Vop3 : public Vop3 {
@@ -825,7 +768,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF32Fp8Vop3 : public Vop3 {
@@ -834,7 +776,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF32Bf8Vop3 : public Vop3 {
@@ -843,7 +784,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtPkF32Fp8Vop3 : public Vop3 {
@@ -852,7 +792,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtPkF32Bf8Vop3 : public Vop3 {
@@ -861,7 +800,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF32Bf16Vop3 : public Vop3 {
@@ -870,7 +808,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSatPk4I4I8Vop3 : public Vop3 {
@@ -878,9 +815,9 @@ public:
   VSatPk4I4I8Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSatPk4U4U8Vop3 : public Vop3 {
@@ -888,9 +825,9 @@ public:
   VSatPk4U4U8Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtPkF16Fp8Vop3 : public Vop3 {
@@ -899,7 +836,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtPkF16Bf8Vop3 : public Vop3 {
@@ -908,7 +844,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF16Fp8Vop3 : public Vop3 {
@@ -916,9 +851,9 @@ public:
   VCvtF16Fp8Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtF16Bf8Vop3 : public Vop3 {
@@ -926,9 +861,9 @@ public:
   VCvtF16Bf8Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VRcpBf16Vop3 : public Vop3 {
@@ -936,9 +871,9 @@ public:
   VRcpBf16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSqrtBf16Vop3 : public Vop3 {
@@ -946,9 +881,9 @@ public:
   VSqrtBf16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VRsqBf16Vop3 : public Vop3 {
@@ -956,9 +891,9 @@ public:
   VRsqBf16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VLogBf16Vop3 : public Vop3 {
@@ -966,9 +901,9 @@ public:
   VLogBf16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VExpBf16Vop3 : public Vop3 {
@@ -976,9 +911,9 @@ public:
   VExpBf16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSinBf16Vop3 : public Vop3 {
@@ -986,9 +921,9 @@ public:
   VSinBf16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCosBf16Vop3 : public Vop3 {
@@ -996,9 +931,9 @@ public:
   VCosBf16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCndmaskB32Vop3 : public Vop3 {
@@ -1009,7 +944,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VAddF64Vop3 : public Vop3 {
@@ -1019,7 +953,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VAddF32Vop3 : public Vop3 {
@@ -1029,7 +962,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VSubF32Vop3 : public Vop3 {
@@ -1039,7 +971,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VSubrevF32Vop3 : public Vop3 {
@@ -1049,7 +980,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMulF64Vop3 : public Vop3 {
@@ -1059,7 +989,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMulDx9ZeroF32Vop3 : public Vop3 {
@@ -1069,7 +998,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMulF32Vop3 : public Vop3 {
@@ -1079,7 +1007,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMulI32I24Vop3 : public Vop3 {
@@ -1089,7 +1016,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMulHiI32I24Vop3 : public Vop3 {
@@ -1099,7 +1025,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMulU32U24Vop3 : public Vop3 {
@@ -1109,7 +1034,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMulHiU32U24Vop3 : public Vop3 {
@@ -1119,7 +1043,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMinNumF64Vop3 : public Vop3 {
@@ -1129,7 +1052,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMaxNumF64Vop3 : public Vop3 {
@@ -1139,7 +1061,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMinI32Vop3 : public Vop3 {
@@ -1149,7 +1070,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMaxI32Vop3 : public Vop3 {
@@ -1159,7 +1079,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMinU32Vop3 : public Vop3 {
@@ -1169,7 +1088,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMaxU32Vop3 : public Vop3 {
@@ -1179,7 +1097,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMinNumF32Vop3 : public Vop3 {
@@ -1189,7 +1106,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMaxNumF32Vop3 : public Vop3 {
@@ -1199,7 +1115,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VFmacF64Vop3 : public Vop3 {
@@ -1209,7 +1124,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VLshlrevB32Vop3 : public Vop3 {
@@ -1219,7 +1133,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VLshrrevB32Vop3 : public Vop3 {
@@ -1229,7 +1142,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VAshrrevI32Vop3 : public Vop3 {
@@ -1239,7 +1151,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VAndB32Vop3 : public Vop3 {
@@ -1249,7 +1160,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VOrB32Vop3 : public Vop3 {
@@ -1259,7 +1169,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VXorB32Vop3 : public Vop3 {
@@ -1269,7 +1178,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VXnorB32Vop3 : public Vop3 {
@@ -1279,7 +1187,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VLshlrevB64Vop3 : public Vop3 {
@@ -1289,7 +1196,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VAddNcU32Vop3 : public Vop3 {
@@ -1299,7 +1205,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VSubNcU32Vop3 : public Vop3 {
@@ -1309,7 +1214,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VSubrevNcU32Vop3 : public Vop3 {
@@ -1319,7 +1223,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VAddNcU64Vop3 : public Vop3 {
@@ -1329,7 +1232,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VSubNcU64Vop3 : public Vop3 {
@@ -1339,7 +1241,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMulU64Vop3 : public Vop3 {
@@ -1349,7 +1250,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VFmacF32Vop3 : public Vop3 {
@@ -1359,7 +1259,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtPkRtzF16F32Vop3 : public Vop3 {
@@ -1369,7 +1268,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMinNumF16Vop3 : public Vop3 {
@@ -1377,10 +1275,10 @@ public:
   VMinNumF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMaxNumF16Vop3 : public Vop3 {
@@ -1388,10 +1286,10 @@ public:
   VMaxNumF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VAddF16Vop3 : public Vop3 {
@@ -1399,10 +1297,10 @@ public:
   VAddF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VSubF16Vop3 : public Vop3 {
@@ -1410,10 +1308,10 @@ public:
   VSubF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VSubrevF16Vop3 : public Vop3 {
@@ -1421,10 +1319,10 @@ public:
   VSubrevF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMulF16Vop3 : public Vop3 {
@@ -1432,10 +1330,10 @@ public:
   VMulF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VFmacF16Vop3 : public Vop3 {
@@ -1443,10 +1341,10 @@ public:
   VFmacF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VLdexpF16Vop3 : public Vop3 {
@@ -1454,10 +1352,10 @@ public:
   VLdexpF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VFmaDx9ZeroF32Vop3 : public Vop3 {
@@ -1468,7 +1366,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMadI32I24Vop3 : public Vop3 {
@@ -1479,7 +1376,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMadU32U24Vop3 : public Vop3 {
@@ -1490,7 +1386,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCubeidF32Vop3 : public Vop3 {
@@ -1501,7 +1396,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCubescF32Vop3 : public Vop3 {
@@ -1512,7 +1406,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCubetcF32Vop3 : public Vop3 {
@@ -1523,7 +1416,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCubemaF32Vop3 : public Vop3 {
@@ -1534,7 +1426,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VBfeU32Vop3 : public Vop3 {
@@ -1545,7 +1436,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VBfeI32Vop3 : public Vop3 {
@@ -1556,7 +1446,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VBfiB32Vop3 : public Vop3 {
@@ -1567,7 +1456,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VFmaF32Vop3 : public Vop3 {
@@ -1578,7 +1466,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VFmaF64Vop3 : public Vop3 {
@@ -1589,7 +1476,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VLerpU8Vop3 : public Vop3 {
@@ -1600,7 +1486,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VAlignbitB32Vop3 : public Vop3 {
@@ -1611,7 +1496,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VAlignbyteB32Vop3 : public Vop3 {
@@ -1622,7 +1506,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMullitF32Vop3 : public Vop3 {
@@ -1633,7 +1516,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMin3I32Vop3 : public Vop3 {
@@ -1644,7 +1526,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMin3U32Vop3 : public Vop3 {
@@ -1655,7 +1536,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMax3I32Vop3 : public Vop3 {
@@ -1666,7 +1546,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMax3U32Vop3 : public Vop3 {
@@ -1677,7 +1556,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMed3I32Vop3 : public Vop3 {
@@ -1688,7 +1566,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMed3U32Vop3 : public Vop3 {
@@ -1699,7 +1576,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSadU8Vop3 : public Vop3 {
@@ -1710,7 +1586,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSadHiU8Vop3 : public Vop3 {
@@ -1721,7 +1596,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSadU16Vop3 : public Vop3 {
@@ -1732,7 +1606,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSadU32Vop3 : public Vop3 {
@@ -1743,7 +1616,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtPkU8F32Vop3 : public Vop3 {
@@ -1754,7 +1626,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VDivFixupF32Vop3 : public Vop3 {
@@ -1765,7 +1636,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VDivFixupF64Vop3 : public Vop3 {
@@ -1776,7 +1646,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMin3NumF32Vop3 : public Vop3 {
@@ -1787,7 +1656,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMax3NumF32Vop3 : public Vop3 {
@@ -1798,7 +1666,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMin3NumF16Vop3 : public Vop3 {
@@ -1806,11 +1673,11 @@ public:
   VMin3NumF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMax3NumF16Vop3 : public Vop3 {
@@ -1818,11 +1685,11 @@ public:
   VMax3NumF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMinimum3F32Vop3 : public Vop3 {
@@ -1833,7 +1700,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMaximum3F32Vop3 : public Vop3 {
@@ -1844,7 +1710,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMinimum3F16Vop3 : public Vop3 {
@@ -1852,11 +1717,11 @@ public:
   VMinimum3F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMaximum3F16Vop3 : public Vop3 {
@@ -1864,11 +1729,11 @@ public:
   VMaximum3F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMed3NumF32Vop3 : public Vop3 {
@@ -1879,7 +1744,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMed3NumF16Vop3 : public Vop3 {
@@ -1887,11 +1751,11 @@ public:
   VMed3NumF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VBitop3B16Vop3 : public Vop3 {
@@ -1899,11 +1763,11 @@ public:
   VBitop3B16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VBitop3B32Vop3 : public Vop3 {
@@ -1914,7 +1778,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMadU32Vop3 : public Vop3 {
@@ -1925,7 +1788,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VDivFmasF32Vop3 : public Vop3 {
@@ -1936,7 +1798,7 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
+  Operand vcc;
 };
 
 class VDivFmasF64Vop3 : public Vop3 {
@@ -1947,7 +1809,7 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
+  Operand vcc;
 };
 
 class VMsadU8Vop3 : public Vop3 {
@@ -1958,7 +1820,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VQsadPkU16U8Vop3 : public Vop3 {
@@ -1969,7 +1830,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMqsadPkU16U8Vop3 : public Vop3 {
@@ -1980,7 +1840,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMqsadU32U8Vop3 : public Vop3 {
@@ -1991,7 +1850,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPermPk16B4U4Vop3 : public Vop3 {
@@ -2002,7 +1860,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VXor3B32Vop3 : public Vop3 {
@@ -2013,7 +1870,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMadU16Vop3 : public Vop3 {
@@ -2021,11 +1877,11 @@ public:
   VMadU16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPermPk16B6U4Vop3 : public Vop3 {
@@ -2036,7 +1892,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPermPk16B8U4Vop3 : public Vop3 {
@@ -2047,7 +1902,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPermB32Vop3 : public Vop3 {
@@ -2058,7 +1912,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VXadU32Vop3 : public Vop3 {
@@ -2069,7 +1922,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VLshlAddU32Vop3 : public Vop3 {
@@ -2080,7 +1932,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VAddLshlU32Vop3 : public Vop3 {
@@ -2091,7 +1942,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VFmaF16Vop3 : public Vop3 {
@@ -2099,11 +1949,11 @@ public:
   VFmaF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMin3I16Vop3 : public Vop3 {
@@ -2111,11 +1961,11 @@ public:
   VMin3I16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMin3U16Vop3 : public Vop3 {
@@ -2123,11 +1973,11 @@ public:
   VMin3U16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMax3I16Vop3 : public Vop3 {
@@ -2135,11 +1985,11 @@ public:
   VMax3I16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMax3U16Vop3 : public Vop3 {
@@ -2147,11 +1997,11 @@ public:
   VMax3U16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMed3I16Vop3 : public Vop3 {
@@ -2159,11 +2009,11 @@ public:
   VMed3I16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMed3U16Vop3 : public Vop3 {
@@ -2171,11 +2021,11 @@ public:
   VMed3U16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VLshlAddU64Vop3 : public Vop3 {
@@ -2186,7 +2036,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMadI16Vop3 : public Vop3 {
@@ -2194,11 +2043,11 @@ public:
   VMadI16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VDivFixupF16Vop3 : public Vop3 {
@@ -2206,11 +2055,11 @@ public:
   VDivFixupF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VAdd3U32Vop3 : public Vop3 {
@@ -2221,7 +2070,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VLshlOrB32Vop3 : public Vop3 {
@@ -2232,7 +2080,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VAndOrB32Vop3 : public Vop3 {
@@ -2243,7 +2090,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VOr3B32Vop3 : public Vop3 {
@@ -2254,7 +2100,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMadU32U16Vop3 : public Vop3 {
@@ -2265,7 +2110,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMadI32I16Vop3 : public Vop3 {
@@ -2276,7 +2120,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPermlane16B32Vop3 : public Vop3 {
@@ -2287,7 +2130,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPermlanex16B32Vop3 : public Vop3 {
@@ -2298,7 +2140,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCndmaskB16Vop3 : public Vop3 {
@@ -2306,11 +2147,11 @@ public:
   VCndmaskB16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VAddMaxI32Vop3 : public Vop3 {
@@ -2321,7 +2162,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VAddMaxU32Vop3 : public Vop3 {
@@ -2332,7 +2172,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VAddMinI32Vop3 : public Vop3 {
@@ -2343,7 +2182,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VAddMinU32Vop3 : public Vop3 {
@@ -2354,7 +2192,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMaxminU32Vop3 : public Vop3 {
@@ -2365,7 +2202,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMinmaxU32Vop3 : public Vop3 {
@@ -2376,7 +2212,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMaxminI32Vop3 : public Vop3 {
@@ -2387,7 +2222,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMinmaxI32Vop3 : public Vop3 {
@@ -2398,7 +2232,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMinmaxNumF32Vop3 : public Vop3 {
@@ -2409,7 +2242,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMaxminNumF32Vop3 : public Vop3 {
@@ -2420,7 +2252,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMinmaxNumF16Vop3 : public Vop3 {
@@ -2428,11 +2259,11 @@ public:
   VMinmaxNumF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMaxminNumF16Vop3 : public Vop3 {
@@ -2440,11 +2271,11 @@ public:
   VMaxminNumF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMinimummaximumF32Vop3 : public Vop3 {
@@ -2455,7 +2286,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMaximumminimumF32Vop3 : public Vop3 {
@@ -2466,7 +2296,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMinimummaximumF16Vop3 : public Vop3 {
@@ -2474,11 +2303,11 @@ public:
   VMinimummaximumF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMaximumminimumF16Vop3 : public Vop3 {
@@ -2486,11 +2315,11 @@ public:
   VMaximumminimumF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPermlaneBcastB32Vop3 : public Vop3 {
@@ -2501,7 +2330,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPermlaneUpB32Vop3 : public Vop3 {
@@ -2512,7 +2340,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPermlaneDownB32Vop3 : public Vop3 {
@@ -2523,7 +2350,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VPermlaneXorB32Vop3 : public Vop3 {
@@ -2534,7 +2360,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSExpF32Vop3 : public Vop3 {
@@ -2543,7 +2368,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSExpF16Vop3 : public Vop3 {
@@ -2552,7 +2376,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSLogF32Vop3 : public Vop3 {
@@ -2561,7 +2384,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSLogF16Vop3 : public Vop3 {
@@ -2570,7 +2392,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSRcpF32Vop3 : public Vop3 {
@@ -2579,7 +2400,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSRcpF16Vop3 : public Vop3 {
@@ -2588,7 +2408,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSRsqF32Vop3 : public Vop3 {
@@ -2597,7 +2416,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSRsqF16Vop3 : public Vop3 {
@@ -2606,7 +2424,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSSqrtF32Vop3 : public Vop3 {
@@ -2615,7 +2432,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VSSqrtF16Vop3 : public Vop3 {
@@ -2624,7 +2440,6 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VAshrPkI8I32Vop3 : public Vop3 {
@@ -2632,11 +2447,11 @@ public:
   VAshrPkI8I32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VAshrPkU8I32Vop3 : public Vop3 {
@@ -2644,11 +2459,11 @@ public:
   VAshrPkU8I32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32SrPk8Fp4F32Vop3 : public Vop3 {
@@ -2659,7 +2474,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32SrPk8Fp8F32Vop3 : public Vop3 {
@@ -2670,7 +2484,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32SrPk8Bf8F32Vop3 : public Vop3 {
@@ -2681,7 +2494,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtScalePk8F16Fp4Vop3 : public Vop3 {
@@ -2691,7 +2503,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalePk8Bf16Fp4Vop3 : public Vop3 {
@@ -2701,7 +2512,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalePk8F32Fp4Vop3 : public Vop3 {
@@ -2711,7 +2521,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalePk8F16Fp8Vop3 : public Vop3 {
@@ -2721,7 +2530,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalePk8Bf16Fp8Vop3 : public Vop3 {
@@ -2731,7 +2539,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalePk8F32Fp8Vop3 : public Vop3 {
@@ -2741,7 +2548,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalePk8F16Bf8Vop3 : public Vop3 {
@@ -2751,7 +2557,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalePk8Bf16Bf8Vop3 : public Vop3 {
@@ -2761,7 +2566,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalePk8F32Bf8Vop3 : public Vop3 {
@@ -2771,7 +2575,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32Pk8Fp4F32Vop3 : public Vop3 {
@@ -2781,7 +2584,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32Pk8Fp4F16Vop3 : public Vop3 {
@@ -2791,7 +2593,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32Pk8Fp8Bf16Vop3 : public Vop3 {
@@ -2801,7 +2602,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32Pk8Bf8Bf16Vop3 : public Vop3 {
@@ -2811,7 +2611,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32Pk8Fp4Bf16Vop3 : public Vop3 {
@@ -2821,7 +2620,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32SrPk8Fp4F16Vop3 : public Vop3 {
@@ -2832,7 +2630,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32SrPk8Fp4Bf16Vop3 : public Vop3 {
@@ -2843,7 +2640,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32SrPk8Fp8F16Vop3 : public Vop3 {
@@ -2854,7 +2650,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32SrPk8Fp8Bf16Vop3 : public Vop3 {
@@ -2865,7 +2660,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32SrPk8Bf8F16Vop3 : public Vop3 {
@@ -2876,7 +2670,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32SrPk8Bf8Bf16Vop3 : public Vop3 {
@@ -2887,7 +2680,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32Pk8Fp8F32Vop3 : public Vop3 {
@@ -2897,7 +2689,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32Pk8Fp8F16Vop3 : public Vop3 {
@@ -2907,7 +2698,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32Pk8Bf8F32Vop3 : public Vop3 {
@@ -2917,7 +2707,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32Pk8Bf8F16Vop3 : public Vop3 {
@@ -2927,7 +2716,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalePk16F16Fp6Vop3 : public Vop3 {
@@ -2937,7 +2725,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalePk16Bf16Fp6Vop3 : public Vop3 {
@@ -2947,7 +2734,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalePk16F32Fp6Vop3 : public Vop3 {
@@ -2957,7 +2743,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalePk16F16Bf6Vop3 : public Vop3 {
@@ -2967,7 +2752,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalePk16Bf16Bf6Vop3 : public Vop3 {
@@ -2977,7 +2761,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalePk16F32Bf6Vop3 : public Vop3 {
@@ -2987,7 +2770,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32Pk16Fp6F32Vop3 : public Vop3 {
@@ -2997,7 +2779,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32Pk16Bf6F32Vop3 : public Vop3 {
@@ -3007,7 +2788,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32Pk16Fp6F16Vop3 : public Vop3 {
@@ -3017,7 +2797,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32Pk16Bf6F16Vop3 : public Vop3 {
@@ -3027,7 +2806,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32Pk16Fp6Bf16Vop3 : public Vop3 {
@@ -3037,7 +2815,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32Pk16Bf6Bf16Vop3 : public Vop3 {
@@ -3047,7 +2824,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32SrPk16Fp6F32Vop3 : public Vop3 {
@@ -3058,7 +2834,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32SrPk16Bf6F32Vop3 : public Vop3 {
@@ -3069,7 +2844,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32SrPk16Fp6F16Vop3 : public Vop3 {
@@ -3080,7 +2854,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32SrPk16Bf6F16Vop3 : public Vop3 {
@@ -3091,7 +2864,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32SrPk16Fp6Bf16Vop3 : public Vop3 {
@@ -3102,7 +2874,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtScalef32SrPk16Bf6Bf16Vop3 : public Vop3 {
@@ -3113,7 +2884,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMadNcU64U32Vop3 : public Vop3 {
@@ -3124,7 +2894,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMadNcI64I32Vop3 : public Vop3 {
@@ -3135,7 +2904,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VAddNcU16Vop3 : public Vop3 {
@@ -3143,10 +2911,10 @@ public:
   VAddNcU16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VSubNcU16Vop3 : public Vop3 {
@@ -3154,10 +2922,10 @@ public:
   VSubNcU16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMulLoU16Vop3 : public Vop3 {
@@ -3165,10 +2933,10 @@ public:
   VMulLoU16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtPkI16F32Vop3 : public Vop3 {
@@ -3178,7 +2946,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtPkU16F32Vop3 : public Vop3 {
@@ -3188,7 +2955,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMaxU16Vop3 : public Vop3 {
@@ -3196,10 +2962,10 @@ public:
   VMaxU16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMaxI16Vop3 : public Vop3 {
@@ -3207,10 +2973,10 @@ public:
   VMaxI16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMinU16Vop3 : public Vop3 {
@@ -3218,10 +2984,10 @@ public:
   VMinU16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMinI16Vop3 : public Vop3 {
@@ -3229,10 +2995,10 @@ public:
   VMinI16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VAddNcI16Vop3 : public Vop3 {
@@ -3240,10 +3006,10 @@ public:
   VAddNcI16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VSubNcI16Vop3 : public Vop3 {
@@ -3251,10 +3017,10 @@ public:
   VSubNcI16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPermlane16VarB32Vop3 : public Vop3 {
@@ -3264,7 +3030,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPermlanex16VarB32Vop3 : public Vop3 {
@@ -3274,7 +3039,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPackB32F16Vop3 : public Vop3 {
@@ -3284,7 +3048,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtPkNormI16F16Vop3 : public Vop3 {
@@ -3294,7 +3057,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtPkNormU16F16Vop3 : public Vop3 {
@@ -3304,7 +3066,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VPermlaneIdxGenB32Vop3 : public Vop3 {
@@ -3314,7 +3075,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMinU64Vop3 : public Vop3 {
@@ -3324,7 +3084,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMaxU64Vop3 : public Vop3 {
@@ -3334,7 +3093,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMinI64Vop3 : public Vop3 {
@@ -3344,7 +3102,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMaxI64Vop3 : public Vop3 {
@@ -3354,7 +3111,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VLdexpF32Vop3 : public Vop3 {
@@ -3364,7 +3120,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VBfmB32Vop3 : public Vop3 {
@@ -3374,7 +3129,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VBcntU32B32Vop3 : public Vop3 {
@@ -3384,7 +3138,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMbcntLoU32B32Vop3 : public Vop3 {
@@ -3394,7 +3147,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMbcntHiU32B32Vop3 : public Vop3 {
@@ -3404,7 +3156,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtPkNormI16F32Vop3 : public Vop3 {
@@ -3414,7 +3165,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtPkNormU16F32Vop3 : public Vop3 {
@@ -3424,7 +3174,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtPkU16U32Vop3 : public Vop3 {
@@ -3434,7 +3183,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtPkI16I32Vop3 : public Vop3 {
@@ -3444,7 +3192,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VSubNcI32Vop3 : public Vop3 {
@@ -3454,7 +3201,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VAddNcI32Vop3 : public Vop3 {
@@ -3464,7 +3210,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VLdexpF64Vop3 : public Vop3 {
@@ -3474,7 +3219,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMulLoU32Vop3 : public Vop3 {
@@ -3484,7 +3228,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMulHiU32Vop3 : public Vop3 {
@@ -3494,7 +3237,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMulHiI32Vop3 : public Vop3 {
@@ -3504,7 +3246,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VTrigPreopF64Vop3 : public Vop3 {
@@ -3514,7 +3255,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VLshlrevB16Vop3 : public Vop3 {
@@ -3522,10 +3262,10 @@ public:
   VLshlrevB16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VLshrrevB16Vop3 : public Vop3 {
@@ -3533,10 +3273,10 @@ public:
   VLshrrevB16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VAshrrevI16Vop3 : public Vop3 {
@@ -3544,10 +3284,10 @@ public:
   VAshrrevI16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VLshrrevB64Vop3 : public Vop3 {
@@ -3557,7 +3297,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VAshrrevI64Vop3 : public Vop3 {
@@ -3567,7 +3306,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMinimumF64Vop3 : public Vop3 {
@@ -3577,7 +3315,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMaximumF64Vop3 : public Vop3 {
@@ -3587,7 +3324,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VReadlaneB32Vop3 : public Vop3 {
@@ -3597,7 +3333,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VWritelaneB32Vop3 : public Vop3 {
@@ -3607,7 +3342,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VAndB16Vop3 : public Vop3 {
@@ -3615,10 +3349,10 @@ public:
   VAndB16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VOrB16Vop3 : public Vop3 {
@@ -3626,10 +3360,10 @@ public:
   VOrB16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VXorB16Vop3 : public Vop3 {
@@ -3637,10 +3371,10 @@ public:
   VXorB16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMinimumF32Vop3 : public Vop3 {
@@ -3650,7 +3384,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMaximumF32Vop3 : public Vop3 {
@@ -3660,7 +3393,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMinimumF16Vop3 : public Vop3 {
@@ -3668,10 +3400,10 @@ public:
   VMinimumF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VMaximumF16Vop3 : public Vop3 {
@@ -3679,10 +3411,10 @@ public:
   VMaximumF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtPkFp8F32Vop3 : public Vop3 {
@@ -3690,10 +3422,10 @@ public:
   VCvtPkFp8F32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtPkBf8F32Vop3 : public Vop3 {
@@ -3701,10 +3433,10 @@ public:
   VCvtPkBf8F32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtSrFp8F32Vop3 : public Vop3 {
@@ -3712,10 +3444,10 @@ public:
   VCvtSrFp8F32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtSrBf8F32Vop3 : public Vop3 {
@@ -3723,10 +3455,10 @@ public:
   VCvtSrBf8F32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtPkBf16F32Vop3 : public Vop3 {
@@ -3736,7 +3468,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtSrPkBf16F32Vop3 : public Vop3 {
@@ -3747,7 +3478,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtPkF16F32Vop3 : public Vop3 {
@@ -3757,7 +3487,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtSrPkF16F32Vop3 : public Vop3 {
@@ -3768,7 +3497,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VCvtPkFp8F16Vop3 : public Vop3 {
@@ -3776,9 +3504,9 @@ public:
   VCvtPkFp8F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtPkBf8F16Vop3 : public Vop3 {
@@ -3786,9 +3514,9 @@ public:
   VCvtPkBf8F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
-  static const bool execute_registered_;
 };
 
 class VCvtSrFp8F16Vop3 : public Vop3 {
@@ -3796,10 +3524,10 @@ public:
   VCvtSrFp8F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCvtSrBf8F16Vop3 : public Vop3 {
@@ -3807,10 +3535,10 @@ public:
   VCvtSrBf8F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLtF16Vop3 : public Vop3 {
@@ -3820,7 +3548,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpEqF16Vop3 : public Vop3 {
@@ -3830,7 +3557,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLeF16Vop3 : public Vop3 {
@@ -3840,7 +3566,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGtF16Vop3 : public Vop3 {
@@ -3850,7 +3575,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLgF16Vop3 : public Vop3 {
@@ -3860,7 +3584,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGeF16Vop3 : public Vop3 {
@@ -3870,7 +3593,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpOF16Vop3 : public Vop3 {
@@ -3880,7 +3602,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpUF16Vop3 : public Vop3 {
@@ -3890,7 +3611,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNgeF16Vop3 : public Vop3 {
@@ -3900,7 +3620,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNlgF16Vop3 : public Vop3 {
@@ -3910,7 +3629,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNgtF16Vop3 : public Vop3 {
@@ -3920,7 +3638,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNleF16Vop3 : public Vop3 {
@@ -3930,7 +3647,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNeqF16Vop3 : public Vop3 {
@@ -3940,7 +3656,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNltF16Vop3 : public Vop3 {
@@ -3950,7 +3665,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLtF32Vop3 : public Vop3 {
@@ -3960,7 +3674,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpEqF32Vop3 : public Vop3 {
@@ -3970,7 +3683,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLeF32Vop3 : public Vop3 {
@@ -3980,7 +3692,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGtF32Vop3 : public Vop3 {
@@ -3990,7 +3701,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLgF32Vop3 : public Vop3 {
@@ -4000,7 +3710,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGeF32Vop3 : public Vop3 {
@@ -4010,7 +3719,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpOF32Vop3 : public Vop3 {
@@ -4020,7 +3728,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpUF32Vop3 : public Vop3 {
@@ -4030,7 +3737,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNgeF32Vop3 : public Vop3 {
@@ -4040,7 +3746,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNlgF32Vop3 : public Vop3 {
@@ -4050,7 +3755,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNgtF32Vop3 : public Vop3 {
@@ -4060,7 +3764,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNleF32Vop3 : public Vop3 {
@@ -4070,7 +3773,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNeqF32Vop3 : public Vop3 {
@@ -4080,7 +3782,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNltF32Vop3 : public Vop3 {
@@ -4090,7 +3791,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLtF64Vop3 : public Vop3 {
@@ -4100,7 +3800,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpEqF64Vop3 : public Vop3 {
@@ -4110,7 +3809,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLeF64Vop3 : public Vop3 {
@@ -4120,7 +3818,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGtF64Vop3 : public Vop3 {
@@ -4130,7 +3827,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLgF64Vop3 : public Vop3 {
@@ -4140,7 +3836,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGeF64Vop3 : public Vop3 {
@@ -4150,7 +3845,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpOF64Vop3 : public Vop3 {
@@ -4160,7 +3854,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpUF64Vop3 : public Vop3 {
@@ -4170,7 +3863,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNgeF64Vop3 : public Vop3 {
@@ -4180,7 +3872,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNlgF64Vop3 : public Vop3 {
@@ -4190,7 +3881,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNgtF64Vop3 : public Vop3 {
@@ -4200,7 +3890,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNleF64Vop3 : public Vop3 {
@@ -4210,7 +3899,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNeqF64Vop3 : public Vop3 {
@@ -4220,7 +3908,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNltF64Vop3 : public Vop3 {
@@ -4230,7 +3917,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLtI16Vop3 : public Vop3 {
@@ -4240,7 +3926,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpEqI16Vop3 : public Vop3 {
@@ -4250,7 +3935,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLeI16Vop3 : public Vop3 {
@@ -4260,7 +3944,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGtI16Vop3 : public Vop3 {
@@ -4270,7 +3953,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNeI16Vop3 : public Vop3 {
@@ -4280,7 +3962,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGeI16Vop3 : public Vop3 {
@@ -4290,7 +3971,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLtU16Vop3 : public Vop3 {
@@ -4300,7 +3980,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpEqU16Vop3 : public Vop3 {
@@ -4310,7 +3989,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLeU16Vop3 : public Vop3 {
@@ -4320,7 +3998,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGtU16Vop3 : public Vop3 {
@@ -4330,7 +4007,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNeU16Vop3 : public Vop3 {
@@ -4340,7 +4016,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGeU16Vop3 : public Vop3 {
@@ -4350,7 +4025,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLtI32Vop3 : public Vop3 {
@@ -4360,7 +4034,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpEqI32Vop3 : public Vop3 {
@@ -4370,7 +4043,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLeI32Vop3 : public Vop3 {
@@ -4380,7 +4052,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGtI32Vop3 : public Vop3 {
@@ -4390,7 +4061,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNeI32Vop3 : public Vop3 {
@@ -4400,7 +4070,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGeI32Vop3 : public Vop3 {
@@ -4410,7 +4079,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLtU32Vop3 : public Vop3 {
@@ -4420,7 +4088,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpEqU32Vop3 : public Vop3 {
@@ -4430,7 +4097,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLeU32Vop3 : public Vop3 {
@@ -4440,7 +4106,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGtU32Vop3 : public Vop3 {
@@ -4450,7 +4115,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNeU32Vop3 : public Vop3 {
@@ -4460,7 +4124,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGeU32Vop3 : public Vop3 {
@@ -4470,7 +4133,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLtI64Vop3 : public Vop3 {
@@ -4480,7 +4142,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpEqI64Vop3 : public Vop3 {
@@ -4490,7 +4151,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLeI64Vop3 : public Vop3 {
@@ -4500,7 +4160,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGtI64Vop3 : public Vop3 {
@@ -4510,7 +4169,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNeI64Vop3 : public Vop3 {
@@ -4520,7 +4178,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGeI64Vop3 : public Vop3 {
@@ -4530,7 +4187,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLtU64Vop3 : public Vop3 {
@@ -4540,7 +4196,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpEqU64Vop3 : public Vop3 {
@@ -4550,7 +4205,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpLeU64Vop3 : public Vop3 {
@@ -4560,7 +4214,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGtU64Vop3 : public Vop3 {
@@ -4570,7 +4223,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpNeU64Vop3 : public Vop3 {
@@ -4580,7 +4232,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpGeU64Vop3 : public Vop3 {
@@ -4590,7 +4241,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpClassF16Vop3 : public Vop3 {
@@ -4600,7 +4250,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpClassF32Vop3 : public Vop3 {
@@ -4610,7 +4259,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpClassF64Vop3 : public Vop3 {
@@ -4620,7 +4268,6 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VCmpxLtF16Vop3 : public Vop3 {
@@ -4630,7 +4277,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxEqF16Vop3 : public Vop3 {
@@ -4640,7 +4287,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLeF16Vop3 : public Vop3 {
@@ -4650,7 +4297,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGtF16Vop3 : public Vop3 {
@@ -4660,7 +4307,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLgF16Vop3 : public Vop3 {
@@ -4670,7 +4317,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGeF16Vop3 : public Vop3 {
@@ -4680,7 +4327,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxOF16Vop3 : public Vop3 {
@@ -4690,7 +4337,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxUF16Vop3 : public Vop3 {
@@ -4700,7 +4347,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNgeF16Vop3 : public Vop3 {
@@ -4710,7 +4357,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNlgF16Vop3 : public Vop3 {
@@ -4720,7 +4367,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNgtF16Vop3 : public Vop3 {
@@ -4730,7 +4377,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNleF16Vop3 : public Vop3 {
@@ -4740,7 +4387,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNeqF16Vop3 : public Vop3 {
@@ -4750,7 +4397,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNltF16Vop3 : public Vop3 {
@@ -4760,7 +4407,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLtF32Vop3 : public Vop3 {
@@ -4770,7 +4417,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxEqF32Vop3 : public Vop3 {
@@ -4780,7 +4427,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLeF32Vop3 : public Vop3 {
@@ -4790,7 +4437,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGtF32Vop3 : public Vop3 {
@@ -4800,7 +4447,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLgF32Vop3 : public Vop3 {
@@ -4810,7 +4457,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGeF32Vop3 : public Vop3 {
@@ -4820,7 +4467,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxOF32Vop3 : public Vop3 {
@@ -4830,7 +4477,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxUF32Vop3 : public Vop3 {
@@ -4840,7 +4487,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNgeF32Vop3 : public Vop3 {
@@ -4850,7 +4497,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNlgF32Vop3 : public Vop3 {
@@ -4860,7 +4507,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNgtF32Vop3 : public Vop3 {
@@ -4870,7 +4517,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNleF32Vop3 : public Vop3 {
@@ -4880,7 +4527,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNeqF32Vop3 : public Vop3 {
@@ -4890,7 +4537,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNltF32Vop3 : public Vop3 {
@@ -4900,7 +4547,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLtF64Vop3 : public Vop3 {
@@ -4910,7 +4557,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxEqF64Vop3 : public Vop3 {
@@ -4920,7 +4567,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLeF64Vop3 : public Vop3 {
@@ -4930,7 +4577,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGtF64Vop3 : public Vop3 {
@@ -4940,7 +4587,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLgF64Vop3 : public Vop3 {
@@ -4950,7 +4597,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGeF64Vop3 : public Vop3 {
@@ -4960,7 +4607,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxOF64Vop3 : public Vop3 {
@@ -4970,7 +4617,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxUF64Vop3 : public Vop3 {
@@ -4980,7 +4627,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNgeF64Vop3 : public Vop3 {
@@ -4990,7 +4637,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNlgF64Vop3 : public Vop3 {
@@ -5000,7 +4647,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNgtF64Vop3 : public Vop3 {
@@ -5010,7 +4657,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNleF64Vop3 : public Vop3 {
@@ -5020,7 +4667,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNeqF64Vop3 : public Vop3 {
@@ -5030,7 +4677,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNltF64Vop3 : public Vop3 {
@@ -5040,7 +4687,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLtI16Vop3 : public Vop3 {
@@ -5050,7 +4697,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxEqI16Vop3 : public Vop3 {
@@ -5060,7 +4707,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLeI16Vop3 : public Vop3 {
@@ -5070,7 +4717,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGtI16Vop3 : public Vop3 {
@@ -5080,7 +4727,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNeI16Vop3 : public Vop3 {
@@ -5090,7 +4737,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGeI16Vop3 : public Vop3 {
@@ -5100,7 +4747,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLtU16Vop3 : public Vop3 {
@@ -5110,7 +4757,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxEqU16Vop3 : public Vop3 {
@@ -5120,7 +4767,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLeU16Vop3 : public Vop3 {
@@ -5130,7 +4777,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGtU16Vop3 : public Vop3 {
@@ -5140,7 +4787,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNeU16Vop3 : public Vop3 {
@@ -5150,7 +4797,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGeU16Vop3 : public Vop3 {
@@ -5160,7 +4807,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLtI32Vop3 : public Vop3 {
@@ -5170,7 +4817,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxEqI32Vop3 : public Vop3 {
@@ -5180,7 +4827,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLeI32Vop3 : public Vop3 {
@@ -5190,7 +4837,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGtI32Vop3 : public Vop3 {
@@ -5200,7 +4847,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNeI32Vop3 : public Vop3 {
@@ -5210,7 +4857,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGeI32Vop3 : public Vop3 {
@@ -5220,7 +4867,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLtU32Vop3 : public Vop3 {
@@ -5230,7 +4877,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxEqU32Vop3 : public Vop3 {
@@ -5240,7 +4887,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLeU32Vop3 : public Vop3 {
@@ -5250,7 +4897,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGtU32Vop3 : public Vop3 {
@@ -5260,7 +4907,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNeU32Vop3 : public Vop3 {
@@ -5270,7 +4917,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGeU32Vop3 : public Vop3 {
@@ -5280,7 +4927,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLtI64Vop3 : public Vop3 {
@@ -5290,7 +4937,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxEqI64Vop3 : public Vop3 {
@@ -5300,7 +4947,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLeI64Vop3 : public Vop3 {
@@ -5310,7 +4957,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGtI64Vop3 : public Vop3 {
@@ -5320,7 +4967,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNeI64Vop3 : public Vop3 {
@@ -5330,7 +4977,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGeI64Vop3 : public Vop3 {
@@ -5340,7 +4987,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLtU64Vop3 : public Vop3 {
@@ -5350,7 +4997,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxEqU64Vop3 : public Vop3 {
@@ -5360,7 +5007,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxLeU64Vop3 : public Vop3 {
@@ -5370,7 +5017,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGtU64Vop3 : public Vop3 {
@@ -5380,7 +5027,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxNeU64Vop3 : public Vop3 {
@@ -5390,7 +5037,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxGeU64Vop3 : public Vop3 {
@@ -5400,7 +5047,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxClassF16Vop3 : public Vop3 {
@@ -5410,7 +5057,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxClassF32Vop3 : public Vop3 {
@@ -5420,7 +5067,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VCmpxClassF64Vop3 : public Vop3 {
@@ -5430,7 +5077,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
+  Operand sdst_exec;
 };
 
 class VAddCoCiU32Vop3SdstEnc : public Vop3SdstEnc {
@@ -5442,7 +5089,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSubCoCiU32Vop3SdstEnc : public Vop3SdstEnc {
@@ -5454,7 +5100,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VSubrevCoCiU32Vop3SdstEnc : public Vop3SdstEnc {
@@ -5466,7 +5111,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VDivScaleF32Vop3SdstEnc : public Vop3SdstEnc {
@@ -5478,7 +5122,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VDivScaleF64Vop3SdstEnc : public Vop3SdstEnc {
@@ -5490,7 +5133,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMadCoU64U32Vop3SdstEnc : public Vop3SdstEnc {
@@ -5502,7 +5144,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VMadCoI64I32Vop3SdstEnc : public Vop3SdstEnc {
@@ -5514,7 +5155,6 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
-  static const bool execute_registered_;
 };
 
 class VAddCoU32Vop3SdstEnc : public Vop3SdstEnc {
@@ -5525,7 +5165,6 @@ public:
   Operand sdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VSubCoU32Vop3SdstEnc : public Vop3SdstEnc {
@@ -5536,7 +5175,6 @@ public:
   Operand sdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 class VSubrevCoU32Vop3SdstEnc : public Vop3SdstEnc {
@@ -5547,7 +5185,6 @@ public:
   Operand sdst;
   Operand src0;
   Operand src1;
-  static const bool execute_registered_;
 };
 
 } // namespace gfx1250

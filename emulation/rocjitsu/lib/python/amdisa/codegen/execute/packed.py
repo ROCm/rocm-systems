@@ -97,7 +97,7 @@ def gen_pk_binop(
         L.append(f'    float rlo = {lo_expr};')
         L.append(f'    float rhi = {hi_expr};')
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_f16(rlo) | (static_cast<uint32_t>(util::f32_to_f16(rhi)) << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) | (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));'
         )
     elif dtype == 'bf16':
         L.append(
@@ -125,6 +125,8 @@ def gen_pk_binop(
         lo_expr, hi_expr = f_op_map[op]
         L.append(f'    float rlo = {lo_expr};')
         L.append(f'    float rhi = {hi_expr};')
+        # Packed BF16 arithmetic is not mode-aware here. Explicit F32-to-BF16
+        # data conversions use the mode-aware helpers instead.
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_bf16(rlo) | (static_cast<uint32_t>(util::f32_to_bf16(rhi)) << 16));'
         )
@@ -274,7 +276,7 @@ def gen_pk_ternary(
             L.append('    float rlo = a_lo * b_lo + c_lo;')
             L.append('    float rhi = a_hi * b_hi + c_hi;')
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_f16(rlo) | (static_cast<uint32_t>(util::f32_to_f16(rhi)) << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) | (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));'
         )
     elif dtype == 'bf16':
         L.append(
@@ -307,6 +309,8 @@ def gen_pk_ternary(
         else:
             L.append('    float rlo = a_lo * b_lo + c_lo;')
             L.append('    float rhi = a_hi * b_hi + c_hi;')
+        # Packed BF16 arithmetic is not mode-aware here. Explicit F32-to-BF16
+        # data conversions use the mode-aware helpers instead.
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_bf16(rlo) | (static_cast<uint32_t>(util::f32_to_bf16(rhi)) << 16));'
         )
@@ -674,7 +678,7 @@ def gen_mad_mix_lo_hi(
         f'    float result = {"std::fma(a, b, c)" if use_gfx1250_helpers else "a * b + c"};'
     )
     L.append('    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);')
-    L.append(f'    uint16_t h = util::f32_to_f16(result);')
+    L.append(f'    uint16_t h = util::f32_to_f16_mode(result, wf.fp16_ovfl());')
     if is_lo:
         L.append(
             f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, 0u, h);'
@@ -882,9 +886,10 @@ def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
     if cls == 'dot2_f16_f16':
         widen = 'util::f16_to_f32'
-        narrow = 'util::f32_to_f16'
+        narrow = 'util::f32_to_f16_mode'
     elif cls == 'dot2_bf16_bf16':
         widen = 'util::bf16_to_f32'
+        # DOT2_BF16_BF16 is a packed arithmetic op, not a data conversion.
         narrow = 'util::f32_to_bf16'
     else:
         raise ValueError(f'unhandled true16 dot2 class: {cls}')
@@ -912,7 +917,10 @@ def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
     L.extend(vop3_src_mod('acc', 2, True))
     L.append('    float result = a0 * b0 + a1 * b1 + acc;')
     L.extend(vop3_dst_mod('result'))
-    L.append(f'    uint32_t result_bits = {narrow}(result);')
+    if cls == 'dot2_f16_f16':
+        L.append(f'    uint32_t result_bits = {narrow}(result, wf.fp16_ovfl());')
+    else:
+        L.append(f'    uint32_t result_bits = {narrow}(result);')
     L.append(
         f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, opsel, result_bits, true);'
     )

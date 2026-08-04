@@ -3,22 +3,15 @@
 
 #pragma once
 
-#include "common/defines.h"
-#include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
 #include <spdlog/fmt/fmt.h>
 
-#include <algorithm>
 #include <cstdlib>
-#include <cstring>
 #include <dlfcn.h>
-#include <fstream>
-#include <ios>
 #include <link.h>
 #include <linux/limits.h>
 #include <string>
-#include <string_view>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -77,15 +70,19 @@ get_environ(int _verbose, std::string _search_paths = {},
 
     if(!_omnilib_path.empty())
     {
-        _omnilib      = fmt::format("{}/{}", _omnilib_path, ::basename(_omnilib.c_str()));
+        _omnilib      = fmt::format("{}/{}", _omnilib_path, path::filename(_omnilib));
         _search_paths = fmt::format("{}:{}", _omnilib_path, _search_paths);
     }
 
     if(!_omnilib_dl_path.empty())
     {
-        _omnilib_dl =
-            fmt::format("{}/{}", _omnilib_dl_path, ::basename(_omnilib_dl.c_str()));
+        _omnilib_dl = fmt::format("{}/{}", _omnilib_dl_path, path::filename(_omnilib_dl));
         _search_paths = fmt::format("{}:{}", _omnilib_dl_path, _search_paths);
+    }
+
+    if(_search_paths.find_first_not_of(':') == std::string::npos)
+    {
+        _search_paths = get_default_lib_search_paths();
     }
 
     _omnilib    = common::path::find_path(_omnilib, _verbose, _search_paths);

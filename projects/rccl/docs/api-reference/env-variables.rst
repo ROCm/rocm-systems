@@ -62,18 +62,6 @@ in the following table.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
 
-    * - | ``NCCL_ENV_PLUGIN``
-        | Loads an external environment plugin that intercepts all RCCL parameter
-          lookups. See :ref:`using-rccl-env-plugin` for full details.
-      - | Absolute path to a plugin ``.so`` file, or ``none`` to disable.
-        | Default: unset (reads from process environment).
-
-    * - | ``NCCL_ENV_JSON_FILE``
-        | Path to a JSON configuration file used by ``librccl-env-json.so``.
-          Has no effect unless ``NCCL_ENV_PLUGIN`` points to that plugin.
-      - | Absolute path to a flat JSON file mapping variable names to string values.
-        | Default: unset (falls back to ``getenv()`` for all lookups).
-
 Logging and debugging
 =====================
 
@@ -120,6 +108,7 @@ in the following table.
         | ``PROFILE``: Prints logs related to the profiling/timing info.
         | ``RAS``: Prints logs related to RAS.
         | ``VERBS``: Prints logs related to IB/Verbs.
+        | ``DESTROY``: Prints logs related to communicator/plugin teardown (destroy, abort, revoke, plugin unload).
         | ``ALL``: Activates all logging subsystems.
 
     * - | ``NCCL_WARN_ENABLE_DEBUG_INFO``
@@ -204,6 +193,24 @@ in the following table.
       - | ``AF_INET``: Force IPv4
         | ``AF_INET6``: Force IPv6
         | Unset: Use first available
+
+    * - | ``NCCL_IGNORE_NET_MISMATCH``
+        | Controls what happens when ranks report a different number of local
+          network (NET) devices during communicator initialization. RCCL gathers
+          each rank's local NET device count and compares the minimum and maximum
+          across the communicator. A mismatch usually means the job was launched
+          with an inconsistent NIC selection (for example, an uneven
+          ``NCCL_SOCKET_IFNAME``/``NCCL_IB_HCA`` per rank, or nodes with different
+          NIC counts), which otherwise surfaces later as obscure transport
+          failures. See :ref:`heterogeneous-nic-counts`.
+      - | ``1``: Detect and continue, logging the mismatch at ``INFO`` level (default).
+        | ``0``: Fail initialization with ``ncclSystemError`` and a warning on the mismatch.
+
+    * - | ``NCCL_IGNORE_COLLNET_MISMATCH``
+        | Same as ``NCCL_IGNORE_NET_MISMATCH`` but for the number of local CollNet
+          devices reported by each rank.
+      - | ``0``: Fail initialization with ``ncclSystemError`` and a warning on the mismatch (default).
+        | ``1``: Detect and continue, logging the mismatch at ``INFO`` level.
 
     * - | ``NCCL_NET_MERGE_LEVEL``
         | Controls network device merging behavior.

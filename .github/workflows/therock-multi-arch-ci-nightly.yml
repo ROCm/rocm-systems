@@ -42,10 +42,9 @@ permissions:
   contents: read
 
 concurrency:
-  # A PR number if a pull request and otherwise the commit hash. This cancels
-  # queued and in-progress runs for the same PR (presubmit) or commit
-  # (postsubmit). The workflow name is prepended to avoid conflicts between
-  # different workflows.
+  # This workflow only runs on schedule / workflow_dispatch (never on PRs), so
+  # github.event.number is always empty and this effectively groups by commit.
+  # The workflow name is prepended to avoid collisions with other workflows.
   group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
   cancel-in-progress: true
 
@@ -54,6 +53,9 @@ jobs:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
     with:
       build_variant: "release"
+      # nightly release_type makes tests comprehensive on any trigger (schedule or
+      # manual dispatch), and gives artifacts nightly versioning/bucket rather than ci/dev.
+      release_type: "nightly"
       # Limit GPU families for nightly CI: gfx94X, gfx950, gfx125X (Linux) and gfx1151 (Windows)
       linux_amdgpu_families: 'gfx94X,gfx950,gfx125X'
       windows_amdgpu_families: 'gfx1151'

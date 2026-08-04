@@ -107,6 +107,12 @@ public:
   ///          or insufficient register space.
   Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, uint32_t num_vgprs);
 
+  /// @brief Activate a specific idle wavefront slot.
+  /// @details Used by checkpoint restoration when hardware slot identity is
+  /// execution state. Returns nullptr when the requested slot is invalid or busy.
+  Wavefront *dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
+                            uint32_t num_vgprs);
+
   /// @brief Advance every RUNNING wavefront by one instruction, then report
   /// residency.
   /// @details Issues one instruction to each wavefront currently in the RUNNING
@@ -149,7 +155,8 @@ public:
   void request_functional_yield() { functional_yield_requested_ = true; }
 
   /// @brief Schedule the tick event if the CU is not already executing.
-  /// Called from dispatch_wf() and the cpl_ port handler.
+  /// Called from dispatch_wf(), the cpl_ port handler, and single-threaded VM
+  /// initialization after engine creation but before simulation workers start.
   virtual void schedule_work() = 0;
 
   /// @brief Check whether this CU has no active wavefronts.
@@ -287,8 +294,8 @@ public:
 
   /// @brief Flush all per-CU caches and the shared L2 to backing store.
   ///
-  /// @details L1 V$ uses write-through, so flush just invalidates. L2 flushes
-  /// all dirty lines to the backing MemoryInterface (MSC or HBM).
+  /// @details Both L1 caches use write-through, so flush just invalidates. L2
+  /// flushes all dirty lines to the backing MemoryInterface (MSC or HBM).
   /// Note: prefer flush_l1() + per-XCD L2 flush to avoid redundant L2 flushes
   /// when multiple CUs share the same L2.
   void flush_all(uint32_t vmid = 0) {
@@ -298,14 +305,13 @@ public:
                           reinterpret_cast<uintptr_t>(this), l1_vector_.store_count(),
                           l1_vector_.store_active_count(), l1_vector_.store_l2_writes());
     });
-    l1_scalar_.writeback_all(vmid);
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
     l2_->flush_all(vmid);
   }
 
   void flush_l1(uint32_t vmid = 0) {
-    l1_scalar_.writeback_all(vmid);
+    (void)vmid;
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
   }
@@ -421,17 +427,35 @@ public:
   /// VGPR values through RegisterAccess rather than manually pairing raw
   /// storage access with this hook.
   void notify_vgpr_read(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
-                        uint8_t byte_mask = 0xF) const {
+                        uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
     if (wf && lane_mask != 0)
       plugin_group_->onAmdgpuReadVgprLanes(wf, reg_idx, lane_mask, byte_mask);
+  }
+
+  /// @brief Notify plugins that a wavefront wrote lanes of a physical VGPR.
+  /// @details Low-level notification primitive used by RegisterAccess.
+  /// Raw VM/storage writes deliberately bypass this hook.
+  void notify_vgpr_write(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
+                         uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
+    if (wf && lane_mask != 0 && byte_mask != 0)
+      plugin_group_->onAmdgpuWriteVgprLanes(wf, reg_idx, lane_mask, byte_mask);
   }
 
   /// @brief Notify plugins that lanes of a physical VGPR were read.
   /// @details Resolves the owning wavefront from the physical register index.
   /// Intended for RegisterAccess and CU internals, not as a direct instruction
   /// emulator API.
-  virtual void notify_vgpr_read_by_reg(uint32_t reg_idx, uint64_t lane_mask,
-                                       uint8_t byte_mask = 0xF) const = 0;
+  virtual void
+  notify_vgpr_read_by_reg(uint32_t reg_idx, uint64_t lane_mask,
+                          uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const = 0;
+
+  /// @brief Notify plugins that lanes of a physical VGPR were written.
+  /// @details Resolves the owning wavefront from the physical register index.
+  /// Intended for RegisterAccess and CU internals, not as a direct instruction
+  /// emulator API.
+  virtual void
+  notify_vgpr_write_by_reg(uint32_t reg_idx, uint64_t lane_mask,
+                           uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const = 0;
 
   /// @brief Read a vector register lane from the physical VGPR file.
   /// @details VM/storage-level scalar lane accessor. The concrete
@@ -478,6 +502,14 @@ public:
   /// @param base Base register index in the VGPR file.
   /// @returns Mutable pointer to the raw VGPR data.
   virtual uint8_t *raw_vgpr_data(uint32_t base) = 0;
+
+  /// @brief Read a VGPR lane directly from physical storage.
+  /// @details This deliberately bypasses plugin observation and is reserved
+  /// for VM storage operations. Instruction code receives
+  /// `InstructionComputeUnitView`, which does not expose this API.
+  uint32_t read_vgpr_storage(uint32_t reg_idx, uint32_t lane) const {
+    return reinterpret_cast<const uint32_t *>(raw_vgpr_data(reg_idx))[lane];
+  }
 
   /// @brief Number of physical VGPR registers in one allocation block.
   virtual uint32_t vgpr_allocation_block_size() const = 0;
@@ -680,12 +712,12 @@ public:
     // Waking the CU then would run an empty tick with no wave to issue — pure waste.
     // Work is scheduled only when there is work to do.
     //
-    // ENGINE-THREAD ONLY: executing_ and tick_event_ are touched without
-    // synchronization, and schedule_event() pushes to the partition's event queue
-    // non-thread-safely. All callers (dispatch_wf(), the cpl_ port handler, and the
-    // CP on the same partition) run on this CU's owning partition engine thread. A
-    // cross-partition schedule_work() would be an executing_ data race plus an
-    // unsynchronized event-queue push.
+    // When simulation is running, executing_ and tick_event_ are engine-thread
+    // only: dispatch_wf(), the cpl_ handler, and the CP all run on this CU's owning
+    // partition. VM creation may also call this after engine attachment but before
+    // any simulation worker starts, when it has exclusive access to the queues. A
+    // cross-partition call during execution would be an executing_ data race plus
+    // an unsynchronized event-queue push.
     if (executing_ || !this->engine() || !this->has_active_wfs())
       return;
     executing_ = true;
@@ -753,10 +785,18 @@ public:
     return vgpr_file_[reg_idx][lane];
   }
 
-  void notify_vgpr_read_by_reg(uint32_t reg_idx, uint64_t lane_mask,
-                               uint8_t byte_mask = 0xF) const override {
+  void notify_vgpr_read_by_reg(
+      uint32_t reg_idx, uint64_t lane_mask,
+      uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const override {
     if (auto *wf = vgpr_to_wave_[reg_idx])
       this->notify_vgpr_read(wf, reg_idx, lane_mask, byte_mask);
+  }
+
+  void notify_vgpr_write_by_reg(
+      uint32_t reg_idx, uint64_t lane_mask,
+      uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const override {
+    if (auto *wf = vgpr_to_wave_[reg_idx])
+      this->notify_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
   }
 
   void fill_vgpr_to_wave(uint32_t base, uint32_t count, Wavefront *wf) override {

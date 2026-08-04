@@ -112,6 +112,15 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
   if (slot >= config_.num_wf_slots)
     return nullptr;
 
+  return dispatch_wf_at(static_cast<uint32_t>(slot), wg_id, pc, num_sgprs, num_vgprs);
+}
+
+Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc,
+                                           uint32_t num_sgprs, uint32_t num_vgprs) {
+  assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
+  if (wf_id >= config_.num_wf_slots || !wfs_[wf_id]->is_halted())
+    return nullptr;
+
   int32_t sgpr_base = sgpr_file_.allocate(num_sgprs);
   if (sgpr_base < 0)
     return nullptr;
@@ -133,7 +142,7 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
   // On real hardware, the driver issues s_dcache_inv at kernel launch.
   l1_scalar_.invalidate_all();
 
-  auto *wf = wfs_[slot].get();
+  auto *wf = wfs_[wf_id].get();
   wf->wg_id_ = wg_id;
   wf->pc = pc;
   wf->sgpr_alloc_ = {static_cast<uint32_t>(sgpr_base), num_sgprs};
@@ -152,7 +161,7 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
   std::fill(sgpr_to_wave_.begin() + sgpr_base, sgpr_to_wave_.begin() + sgpr_base + num_sgprs, wf);
   fill_vgpr_to_wave(static_cast<uint32_t>(vgpr_base), vgpr_allocation_block_size(), wf);
 
-  util::Logger::cp("DISPATCH_WF cu=", this->full_path(), " wf=", wf->wf_id(), " slot=", slot,
+  util::Logger::cp("DISPATCH_WF cu=", this->full_path(), " wf=", wf->wf_id(), " slot=", wf_id,
                    " pc=0x", std::hex, pc, std::dec, " wg=", wg_id, " pid=", wf->process_id());
 
   schedule_work();

@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -15,6 +17,55 @@ namespace rocjitsu {
 
 class AmdGpuCodeObject;
 struct KdTranslation;
+
+/// @brief One exact source-to-target offset mapping inside `.text`.
+///
+/// @details DBT supplies instruction starts and block ends after final kernel
+/// placement. The ELF patcher uses these mappings to keep local labels and
+/// function symbols attached to relocated code without interpreting the ISA.
+struct TextOffsetRelocation {
+  uint64_t source_offset = 0;
+  uint64_t target_offset = 0;
+};
+
+/// @brief One relocated literal64 PC builder whose target is outside `.text`.
+struct PcRelativeDataRelocation {
+  uint64_t target_getpc_offset = 0;
+  uint64_t target_literal_offset = 0;
+  uint64_t source_target_vaddr = 0;
+};
+
+/// @brief Section-relative location of an address in allocated non-executable storage.
+struct AllocatedDataSectionAddress {
+  size_t section_index = 0;
+  uint64_t section_offset = 0;
+};
+
+/// @brief Resolve a data address, including a nonempty section's one-past-end value.
+///
+/// @details Returns the first allocated, non-executable, nonempty section that contains @p vaddr or
+/// ends there. Empty sections do not own an endpoint. If two sections meet at @p vaddr, callers
+/// must not rely on which one is returned.
+[[nodiscard]] std::optional<AllocatedDataSectionAddress>
+resolve_allocated_data_section_address(std::span<const Elf64_Shdr> sections, uint64_t vaddr);
+
+/// @brief Resolve a PC-relative data target without reclassifying an address inside source text.
+[[nodiscard]] std::optional<AllocatedDataSectionAddress>
+resolve_pc_relative_data_section_address(std::span<const Elf64_Shdr> sections, uint64_t vaddr,
+                                         uint64_t text_vaddr, uint64_t text_size);
+
+/// @brief One relocated literal64 PC builder whose target is inside `.text`.
+///
+/// @details Separate from PcRelativeDataRelocation because the target is named by a final `.text`
+/// offset rather than a virtual address: a code target moves with the body that holds it, so it
+/// cannot be resolved by locating the section that contains a fixed address. The literal is
+/// recomputed as @c target_text_offset - (target_getpc_offset + 4), the distance an `s_get_pc_i64`
+/// leaves to be made up, using only offsets within the emitted text.
+struct PcRelativeTextRelocation {
+  uint64_t target_getpc_offset = 0;
+  uint64_t target_literal_offset = 0;
+  uint64_t target_text_offset = 0;
+};
 
 /// @brief Location of a sidecar kernel descriptor appended into a loaded ELF segment.
 struct AppendedSidecarDescriptor {
@@ -30,6 +81,8 @@ public:
   std::span<const uint8_t> text_bytes() const;
 
   std::span<const uint8_t> image_bytes() const { return {image_.data(), image_.size()}; }
+  /// @brief Validated raw section headers, including SHT_NOBITS entries.
+  [[nodiscard]] std::vector<Elf64_Shdr> section_headers() const;
   uint64_t text_offset() const { return text_offset_; }
   uint64_t text_size() const { return text_size_; }
 
@@ -39,7 +92,11 @@ public:
   /// the executable LOAD segment that contains .text, preserves LOAD alignment,
   /// updates moved symbols and relocation places, and keeps descriptor-relative
   /// entries coherent with explicit descriptor patches applied by DBT.
-  [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text);
+  [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text,
+                                  std::span<const TextOffsetRelocation> text_relocations = {},
+                                  std::span<const PcRelativeDataRelocation> data_relocations = {},
+                                  std::span<const PcRelativeTextRelocation> code_relocations = {},
+                                  bool require_every_text_symbol_mapped = false);
 
   /// @brief True if any relocation's place (r_offset) falls inside .text.
   ///
@@ -52,21 +109,17 @@ public:
   /// genuinely unsupported inputs.
   [[nodiscard]] bool has_relocations_within_text() const;
 
-  /// @brief True if any relocation resolves against a location inside .text.
+  /// @brief True if any relocation references .text in a form DBT cannot remap.
   ///
-  /// @details DBT moves (and can duplicate) .text blocks, but the symbol values
-  /// (st_value) of anything defined in .text are not remapped. A relocation
-  /// elsewhere (e.g. a function-pointer table in .data) that resolves against
-  /// such a location would therefore point at its stale pre-move PC. This covers
-  /// every symbol whose st_shndx is the text section regardless of type —
-  /// STT_FUNC helpers, STT_NOTYPE labels, and an STT_SECTION symbol for .text
-  /// (whose addend selects an in-.text offset) all alias moved code. Kernel entry
-  /// points are dispatched through the descriptor's kernel_code_entry_byte_offset
-  /// (which DBT does update) and are not the target of in-object relocations, so
-  /// this rejects only genuinely address-taken text locations that cannot be
-  /// relocated safely yet. BinaryTranslator uses it to fail closed instead of
-  /// resolving to a wrong address.
-  [[nodiscard]] bool has_relocation_to_text_symbol() const;
+  /// @details DBT can remap zero-addend RELA references to ordinary symbols
+  /// defined in .text by updating the symbol value, and symbol-less
+  /// R_AMDGPU_RELATIVE64 references by updating their explicit addend. Section
+  /// symbols, REL records with implicit addends, and named-symbol references
+  /// with nonzero addends require relocation-specific address reconstruction
+  /// that is not implemented. BinaryTranslator uses this predicate to reject
+  /// only those unsupported forms while allowing relocation-backed function
+  /// tables that the text offset map can update safely.
+  [[nodiscard]] bool has_unsupported_relocation_to_text() const;
 
   void update_elf_flags(uint32_t new_flags);
 

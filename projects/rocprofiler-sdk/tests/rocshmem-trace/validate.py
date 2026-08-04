@@ -532,11 +532,11 @@ def test_retired_correlation_ids(input_data):
             f"for api corr_id {cid}: {itr}"
         )
 
-    # alloc corr_ids are a subset of api corr_ids (allocs reuse the triggering
-    # API's id), so api == retired counts.
     assert len(api_corr_ids) == len(retired_corr_ids), (
         f"corr_id count mismatch: api={len(api_corr_ids)}, "
-        f"retired={len(retired_corr_ids)}"
+        f"retired={len(retired_corr_ids)}. This assumes alloc corr_ids are a subset of "
+        f"api corr_ids (allocs reuse the triggering API's id) and that the retired stream "
+        f"contains no ids outside the api set."
     )
 
 
