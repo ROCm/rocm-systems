@@ -13,7 +13,7 @@
 # - Better parallelization across GPU architectures
 
 # TEST BRANCH: users/geomin12/dynamic-determination-stage
-# Testing dynamic baseline_run_id selection for external repos
+# Testing skip path filter for external repos
 # NOTE: rocm-systems changes affect compiler-runtime which cascades to ALL stages,
 # so no stages will be reusable. This is expected behavior.
 
