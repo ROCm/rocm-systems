@@ -101,13 +101,24 @@
           },
           "promoted_by": {
             "type": "string",
-            "description": "Human who ran the experiment and vouches for the measurement"
+            "minLength": 2,
+            "pattern": "^(?![Tt][Oo][Dd][Oo]\\b)\\S",
+            "description": "Human who ran the experiment and vouches for the measurement. The skeleton ships a TODO placeholder here, which this pattern rejects: an entry attributed to nobody has nobody standing behind its numbers."
           },
           "promoted_at": {
             "type": "string",
             "format": "date",
-            "description": "ISO-8601 date of promotion"
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            "description": "ISO-8601 date of promotion. Given as a pattern as well as a format because format is advisory unless a validator opts into checking it, and the skeleton's TODO placeholder must not pass."
           }
+        },
+        "if": {
+          "properties": {"kind": {"const": "promoted_proposal"}},
+          "required": ["kind"]
+        },
+        "then": {
+          "required": ["proposal_id", "promoted_by", "promoted_at"],
+          "description": "A promoted entry has to say which proposal it came from, who measured it, and when. Without all three the origin records that a model was involved while leaving no one accountable for the measurement."
         }
       }
     }

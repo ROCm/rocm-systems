@@ -17,8 +17,13 @@ human's job, not a CLI flag.
 from __future__ import annotations
 
 import argparse
+import errno
+import hashlib
 import json
+import os
+import re
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -210,14 +215,17 @@ def _render_show(proposal: Dict[str, Any]) -> str:
     ]
 
     evidence = proposal.get("evidence") or []
-    lines.append("Evidence (bound to this run):")
+    # The reference was checked against what actually ran; the sentence under
+    # it was not. Labelling them the same way would invite a reviewer to read
+    # the model's prose as a measurement.
+    lines.append("Evidence — references verified against this run:")
     if evidence:
         for item in evidence:
             if isinstance(item, dict):
                 lines.append(f"  - [{item.get('kind', '?')}] {item.get('ref', '?')}")
                 observation = item.get("observation")
                 if observation:
-                    lines.append(f"      {observation}")
+                    lines.append(f"      unverified model claim: {observation}")
     else:
         lines.append("  (none recorded)")
     lines.append("")
@@ -347,15 +355,67 @@ class PromotionRefused(RuntimeError):
     """Raised when a skeleton would emit as a complete catalog entry."""
 
 
-def _refuse_output_path(path: Path) -> Optional[str]:
-    """Reject destinations that would make this command a promotion after all.
+def _write_skeleton(path: Path, text: str) -> Optional[str]:
+    """Write ``text`` to a newly created ``path``, or say why it was refused.
 
-    Writing a skeleton into the knowledge tree, or over an existing file,
-    turns "emit something for a human to finish" into "edit the catalog" --
-    which is the thing promotion is documented not to do.
+    Checking a path and then writing to it are two lookups, and whoever owns
+    the parent directory can change what the name means in between: a check
+    that passed on a plain file can be followed by a write through a symlink
+    into the knowledge tree. So the checks here are the ones the kernel makes
+    as part of the same operation that creates the file.
+
+    The parent is opened first and the destination is then created relative to
+    that descriptor, which pins the directory to an inode rather than a name.
+    ``O_EXCL`` refuses a name that already exists and ``O_NOFOLLOW`` refuses a
+    symlink in the final position, so neither can be introduced after the
+    containment check and still be followed.
+    """
+    expanded = path.expanduser()
+    parent = expanded.parent if str(expanded.parent) else Path(".")
+
+    try:
+        dir_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    except OSError as exc:
+        return f"cannot open output directory {parent}: {exc}"
+
+    try:
+        refusal = _refuse_knowledge_tree(parent)
+        if refusal:
+            return refusal
+
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        name = expanded.name
+        try:
+            if os.open in getattr(os, "supports_dir_fd", set()):
+                fd = os.open(name, flags, 0o600, dir_fd=dir_fd)
+            else:  # pragma: no cover - platforms without dir_fd support
+                fd = os.open(expanded, flags, 0o600)
+        except FileExistsError:
+            return f"refusing to overwrite an existing file: {expanded}"
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                return f"refusing to write through a symlink: {expanded}"
+            return f"cannot write to {expanded}: {exc}"
+
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(text)
+        except OSError as exc:  # pragma: no cover - defensive
+            return f"cannot write to {expanded}: {exc}"
+    finally:
+        os.close(dir_fd)
+    return None
+
+
+def _refuse_knowledge_tree(parent: Path) -> Optional[str]:
+    """Reject a destination inside the shipped catalog.
+
+    Writing a skeleton into the knowledge tree turns "emit something for a
+    human to finish" into "edit the catalog", which is the thing promotion is
+    documented not to do.
     """
     try:
-        resolved = path.expanduser().resolve()
+        resolved = parent.resolve()
     except (OSError, RuntimeError) as exc:
         return f"cannot resolve output path: {exc}"
 
@@ -365,10 +425,6 @@ def _refuse_output_path(path: Path) -> Optional[str]:
             f"refusing to write into the knowledge tree ({resolved}). "
             "Promotion emits a skeleton for review; it does not edit the catalog."
         )
-    if path.is_symlink():
-        return f"refusing to write through a symlink: {path}"
-    if resolved.exists():
-        return f"refusing to overwrite an existing file: {resolved}"
     return None
 
 
@@ -397,17 +453,84 @@ def _assert_still_unmeasured(rendered: str) -> None:
         )
 
 
-def _suggest_id(proposal: Dict[str, Any]) -> str:
-    """Derive a snake_case catalog id matching the schema's id pattern."""
-    title = str(proposal.get("title", "")).lower()
-    kept = [char if char.isalnum() else "_" for char in title]
-    slug = "".join(kept).strip("_")
+_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]+$")
+_ID_MAX_LEN = 48
+
+
+def _catalog_ids() -> frozenset:
+    """Ids already in the shipped catalog, or an empty set if unreadable.
+
+    Read rather than assumed, because a suggested id that duplicates one of
+    them would silently shadow an existing technique once appended.
+    """
+    path = Path(__file__).parent.parent / "knowledge" / "proven_optimizations.yaml"
+    try:
+        entries = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):  # pragma: no cover - defensive
+        return frozenset()
+    if not isinstance(entries, list):  # pragma: no cover - defensive
+        return frozenset()
+    return frozenset(
+        entry["id"]
+        for entry in entries
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+    )
+
+
+def _slugify(title: str) -> str:
+    """Reduce a model-written title to the ASCII the id pattern allows.
+
+    The title is model-supplied and may hold any Unicode. ``str.isalnum`` is
+    true for a great deal of it, so a title in a non-Latin script or with an
+    accented letter used to pass straight into an id the catalog schema then
+    rejects. Decomposing and dropping non-ASCII keeps what survives valid.
+    """
+    decomposed = unicodedata.normalize("NFKD", title)
+    ascii_only = decomposed.encode("ascii", "ignore").decode("ascii").lower()
+    slug = "".join(
+        char if ("a" <= char <= "z" or "0" <= char <= "9") else "_"
+        for char in ascii_only
+    )
     while "__" in slug:
         slug = slug.replace("__", "_")
-    slug = slug[:48].strip("_")
+    return slug.strip("_")
+
+
+def _suggest_id(proposal: Dict[str, Any]) -> str:
+    """Derive a snake_case catalog id matching the schema's id pattern.
+
+    Only a suggestion — a reviewer may rename it — but it has to be valid and
+    it has to be free, or the reviewer's first feedback is a schema error or a
+    duplicate technique.
+    """
+    slug = _slugify(str(proposal.get("title", "")))
     if not slug or not slug[0].isalpha():
         slug = f"proposal_{slug}".strip("_")
-    return slug or "promoted_proposal"
+    slug = slug[:_ID_MAX_LEN].strip("_") or "promoted_proposal"
+    if len(slug) < 2:
+        slug = f"{slug}_proposal"
+
+    taken = _catalog_ids()
+    if slug in taken:
+        # Disambiguated from the proposal's own identity rather than a
+        # counter, so the same proposal keeps suggesting the same id.
+        suffix = _id_suffix(proposal)
+        trimmed = slug[: _ID_MAX_LEN - len(suffix) - 1].strip("_") or "proposal"
+        slug = f"{trimmed}_{suffix}"
+
+    if not _ID_PATTERN.match(slug):  # pragma: no cover - construction guarantees it
+        return "promoted_proposal"
+    return slug
+
+
+def _id_suffix(proposal: Dict[str, Any]) -> str:
+    """Short stable discriminator for a proposal, for id disambiguation."""
+    proposal_id = str(proposal.get("proposal_id", ""))
+    tail = "".join(char for char in proposal_id if char in "0123456789abcdef")
+    if len(tail) >= 8:
+        return tail[-8:]
+    digest = hashlib.sha256(proposal_id.encode("utf-8")).hexdigest()
+    return digest[:8]
 
 
 # -- Entry point -----------------------------------------------------------
@@ -453,11 +576,10 @@ def run_proposals(args: argparse.Namespace) -> int:
         )
         output = getattr(args, "output", None)
         if output:
-            refusal = _refuse_output_path(Path(output))
+            refusal = _write_skeleton(Path(output), rendered)
             if refusal:
                 print(f"error: {refusal}", file=sys.stderr)
                 return 2
-            Path(output).write_text(rendered, encoding="utf-8")
             print(f"Wrote promotion skeleton to {output}")
         else:
             sys.stdout.write(rendered)

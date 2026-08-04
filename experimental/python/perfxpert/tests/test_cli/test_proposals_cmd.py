@@ -418,6 +418,251 @@ def test_suggested_id_matches_the_schema_id_pattern():
         assert pattern.match(entry["id"]), f"bad id from title {title!r}: {entry['id']}"
 
 
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Préfetch the pagéd region",
+        "Оптимизация ядра",
+        "内核优化",
+        "Prefetch \u2014 the paged region",
+        "\u0661\u0662\u0663 way unroll",
+    ],
+)
+def test_non_ascii_titles_still_produce_a_valid_id(title):
+    """``str.isalnum`` is true for most of Unicode, and the schema is not.
+
+    A title in a non-Latin script or with an accented letter used to pass its
+    characters straight into an id, which then failed catalog validation with
+    an error about a pattern rather than about the title.
+    """
+    import re
+
+    entry = yaml.safe_load(promotion_skeleton({**PROPOSAL, "title": title}))[0]
+    assert re.match("^[a-z][a-z0-9_]+$", entry["id"]), f"bad id: {entry['id']!r}"
+    assert entry["id"].isascii()
+
+
+def test_an_accented_title_keeps_its_words_in_the_id():
+    """Decomposing beats discarding: the id should still read like the title.
+
+    Falling back to a generic id whenever a title carries an accent would be
+    valid and useless, so the accented characters are decomposed to their
+    base letters rather than the whole slug being thrown away.
+    """
+    entry = yaml.safe_load(
+        promotion_skeleton({**PROPOSAL, "title": "Préfetch the pagéd région"})
+    )[0]
+    assert entry["id"] == "prefetch_the_paged_region"
+
+
+def test_suggested_id_does_not_collide_with_the_shipped_catalog():
+    """A duplicate id shadows an existing technique once appended."""
+    catalog = yaml.safe_load(
+        (
+            Path(__file__).parent.parent.parent
+            / "perfxpert" / "knowledge" / "proven_optimizations.yaml"
+        ).read_text()
+    )
+    existing = next(entry["id"] for entry in catalog if isinstance(entry, dict))
+
+    entry = yaml.safe_load(
+        promotion_skeleton({**PROPOSAL, "title": existing.replace("_", " ")})
+    )[0]
+    assert entry["id"] != existing
+    assert entry["id"].startswith(existing[: len(existing) // 2])
+
+
+def test_a_colliding_title_suggests_the_same_id_every_time():
+    """Disambiguation comes from the proposal, so it is stable across runs."""
+    catalog = yaml.safe_load(
+        (
+            Path(__file__).parent.parent.parent
+            / "perfxpert" / "knowledge" / "proven_optimizations.yaml"
+        ).read_text()
+    )
+    existing = next(entry["id"] for entry in catalog if isinstance(entry, dict))
+    proposal = {**PROPOSAL, "title": existing.replace("_", " ")}
+
+    first = yaml.safe_load(promotion_skeleton(proposal))[0]["id"]
+    second = yaml.safe_load(promotion_skeleton(proposal))[0]["id"]
+    assert first == second
+
+
+def test_review_output_separates_a_checked_reference_from_a_model_claim():
+    """The two halves of an evidence item carry very different weight.
+
+    ``ref`` is checked against what actually ran; the sentence beside it is
+    the model's own account and nothing compares it to the tool's real output.
+    Printing them under one "bound to this run" heading invited a reviewer to
+    read the prose as a measurement.
+    """
+    rendered = proposals_cmd._render_show(PROPOSAL)
+    assert "unverified model claim: paging events on the hot buffer" in rendered
+    assert "Evidence — references verified against this run:" in rendered
+
+
+# -- The catalog schema will not accept an unfinished promotion ------------
+
+
+def _completed_entry():
+    """A skeleton with the measured fields filled in, as a human would leave it."""
+    entry = yaml.safe_load(promotion_skeleton(PROPOSAL))[0]
+    stem = entry["id"]
+    entry["measured_speedup_range"] = [1.15, 1.30]
+    entry["source_citation"] = "in-house experiment 2026-08-01-prefetch"
+    entry["preconditions"] = [{"metric": "paging_events", "op": ">", "threshold": 100}]
+    entry["fixture_pair"] = {
+        "baseline_db": f"tests/fixtures/proven_optimizations/{stem}.baseline.db",
+        "optimized_db": f"tests/fixtures/proven_optimizations/{stem}.optimized.db",
+        "description_md": f"tests/fixtures/proven_optimizations/{stem}.md",
+    }
+    return entry
+
+
+def test_catalog_rejects_an_entry_that_kept_the_placeholder_attribution():
+    """Measured numbers with nobody's name on them are unattributable.
+
+    The skeleton ships ``promoted_by: "TODO: your name"``. Filling in the four
+    measured fields and leaving that line made a valid entry recording that a
+    model was involved while naming no one who stands behind the measurement.
+    """
+    validator = Draft7Validator(json.loads(SCHEMA_PATH.read_text()))
+    entry = _completed_entry()
+    entry["origin"]["promoted_at"] = "2026-08-01"
+
+    assert entry["origin"]["promoted_by"].startswith("TODO")
+    assert list(validator.iter_errors([entry])), "placeholder attribution validated"
+
+
+def test_catalog_rejects_an_entry_that_kept_the_placeholder_date():
+    validator = Draft7Validator(json.loads(SCHEMA_PATH.read_text()))
+    entry = _completed_entry()
+    entry["origin"]["promoted_by"] = "someone"
+
+    assert entry["origin"]["promoted_at"].startswith("TODO")
+    assert list(validator.iter_errors([entry])), "placeholder date validated"
+
+
+def test_catalog_requires_attribution_on_a_promoted_entry():
+    """Dropping the placeholders rather than filling them must not pass either."""
+    validator = Draft7Validator(json.loads(SCHEMA_PATH.read_text()))
+    entry = _completed_entry()
+    entry["origin"].pop("promoted_by", None)
+    entry["origin"].pop("promoted_at", None)
+
+    assert list(validator.iter_errors([entry])), "unattributed promotion validated"
+
+
+def test_a_human_authored_entry_needs_no_promotion_fields():
+    """The requirement is scoped to promoted proposals, not to every entry."""
+    validator = Draft7Validator(json.loads(SCHEMA_PATH.read_text()))
+    entry = _completed_entry()
+    entry["origin"] = {"kind": "human"}
+
+    assert list(validator.iter_errors([entry])) == []
+
+
+# -- Writing the skeleton out ---------------------------------------------
+
+
+def test_promote_refuses_a_symlinked_destination(result_file, tmp_path, capsys):
+    """Checking a path and then writing to it are two different lookups.
+
+    Whoever owns the directory can change what the name means in between, so
+    the refusal has to be part of the operation that creates the file rather
+    than a check made just before it.
+    """
+    victim = tmp_path / "victim.yaml"
+    victim.write_text("keep me\n")
+    link = tmp_path / "skeleton.yaml"
+    link.symlink_to(victim)
+
+    rc = run_proposals(
+        _args(
+            result_json=str(result_file),
+            proposals_action="promote",
+            proposal_id=PROPOSAL["proposal_id"],
+            promoted_by="tester",
+            output=str(link),
+        )
+    )
+
+    assert rc != 0
+    assert victim.read_text() == "keep me\n"
+    assert "symlink" in capsys.readouterr().err
+
+
+def test_promote_refuses_a_dangling_symlink(result_file, tmp_path):
+    """A symlink to a file that does not exist yet is the interesting case:
+    an existence check passes and the write then creates the target."""
+    target = tmp_path / "not_yet.yaml"
+    link = tmp_path / "skeleton.yaml"
+    link.symlink_to(target)
+
+    rc = run_proposals(
+        _args(
+            result_json=str(result_file),
+            proposals_action="promote",
+            proposal_id=PROPOSAL["proposal_id"],
+            promoted_by="tester",
+            output=str(link),
+        )
+    )
+
+    assert rc != 0
+    assert not target.exists()
+
+
+def test_promote_refuses_a_path_swapped_after_validation(result_file, tmp_path, capsys):
+    """The window the old two-step check left open, exercised directly."""
+    victim = tmp_path / "victim.yaml"
+    victim.write_text("keep me\n")
+    destination = tmp_path / "skeleton.yaml"
+
+    original_refuse = proposals_cmd._refuse_knowledge_tree
+
+    def _swap_then_allow(parent):
+        result = original_refuse(parent)
+        if not destination.exists() and not destination.is_symlink():
+            destination.symlink_to(victim)
+        return result
+
+    proposals_cmd._refuse_knowledge_tree = _swap_then_allow
+    try:
+        rc = run_proposals(
+            _args(
+                result_json=str(result_file),
+                proposals_action="promote",
+                proposal_id=PROPOSAL["proposal_id"],
+                promoted_by="tester",
+                output=str(destination),
+            )
+        )
+    finally:
+        proposals_cmd._refuse_knowledge_tree = original_refuse
+
+    assert rc != 0
+    assert victim.read_text() == "keep me\n"
+
+
+def test_promote_still_writes_to_a_fresh_path(result_file, tmp_path):
+    out_path = tmp_path / "nested" / "skeleton.yaml"
+    out_path.parent.mkdir()
+
+    rc = run_proposals(
+        _args(
+            result_json=str(result_file),
+            proposals_action="promote",
+            proposal_id=PROPOSAL["proposal_id"],
+            promoted_by="tester",
+            output=str(out_path),
+        )
+    )
+
+    assert rc == 0
+    assert "NOT a valid catalog entry" in out_path.read_text()
+
+
 @pytest.mark.parametrize("specialist,expected", [
     ("compute", "compute"),
     ("memory", "memory_transfer"),
