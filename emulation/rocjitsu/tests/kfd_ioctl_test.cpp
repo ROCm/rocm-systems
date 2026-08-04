@@ -762,6 +762,47 @@ TEST(RemoteDriverEmbeddedArrayTest, MapMemorySerializesDeviceIdsAcrossBufferGrow
   EXPECT_EQ(driver.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &args), -EINVAL);
 }
 
+TEST(RemoteDriverMmapTest, RejectsMappingLargerThanReceivedBacking) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+
+  constexpr size_t kPageSize = 4096;
+  int backing_fd = memfd_create("remote_mmap_test", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+  ASSERT_GE(backing_fd, 0);
+  ASSERT_EQ(ftruncate(backing_fd, kPageSize), 0);
+  ASSERT_EQ(fcntl(backing_fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW), 0);
+
+  std::jthread server([server_fd = sv[1], backing_fd] {
+    rocjitsu::RpcHeader request_header{};
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &request_header, sizeof(request_header)));
+    ASSERT_EQ(request_header.opcode, rocjitsu::RPC_MMAP);
+    ASSERT_EQ(request_header.payload_bytes, sizeof(rocjitsu::RpcMmapRequest));
+    rocjitsu::RpcMmapRequest request{};
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &request, sizeof(request)));
+
+    rocjitsu::RpcHeader response_header{};
+    response_header.opcode = rocjitsu::RPC_MMAP;
+    response_header.request_id = request_header.request_id;
+    response_header.payload_bytes = sizeof(rocjitsu::RpcMmapResponse);
+    rocjitsu::RpcMmapResponse response{};
+    std::array<uint8_t, sizeof(response_header) + sizeof(response)> response_buffer{};
+    std::memcpy(response_buffer.data(), &response_header, sizeof(response_header));
+    std::memcpy(response_buffer.data() + sizeof(response_header), &response, sizeof(response));
+    ASSERT_GT(rocjitsu::rpc_send_msg(server_fd, response_buffer.data(), response_buffer.size(),
+                                     &backing_fd, 1),
+              0);
+    ::close(backing_fd);
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver driver(sv[0]);
+  errno = 0;
+  void *mapping =
+      driver.mmap(nullptr, 2 * kPageSize, PROT_READ | PROT_WRITE, MAP_SHARED, /*offset=*/0);
+  EXPECT_EQ(mapping, MAP_FAILED);
+  EXPECT_EQ(errno, EINVAL);
+}
+
 TEST(RemoteDriverEmbeddedArrayTest, WaitEventsSerializesEventsAcrossBufferGrowth) {
   int sv[2];
   ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);

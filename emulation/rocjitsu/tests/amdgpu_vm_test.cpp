@@ -38,6 +38,7 @@ RJ_DIAGNOSTIC_POP
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <future>
 #include <limits>
 #include <memory>
 #include <new>
@@ -559,6 +560,40 @@ TEST(GpuMemoryTest, ReregisterProcessInvalidatesThreadLocalTranslationCaches) {
   EXPECT_EQ(memory.resolve_host_ptr(kAddr, kPid), second_page.data());
   EXPECT_EQ(memory.read8(kAddr, kPid), second_page[kOffset]);
   EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::CC);
+}
+
+TEST(GpuMemoryThreadingTest, UnregisterWaitsForBackingResolution) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kAddr = 0x40000000;
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  std::barrier resolver_entered(2);
+  std::barrier release_resolver(2);
+  memory.set_process_backing_resolver(
+      kPid, [&](uint64_t, size_t) -> std::optional<KfdProcess::ResolvedBacking> {
+        resolver_entered.arrive_and_wait();
+        release_resolver.arrive_and_wait();
+        return std::nullopt;
+      });
+
+  std::thread reader([&] { EXPECT_EQ(memory.resolve_host_ptr(kAddr, kPid), nullptr); });
+  resolver_entered.arrive_and_wait();
+
+  std::promise<void> unregister_complete;
+  std::future<void> unregister_result = unregister_complete.get_future();
+  std::thread unregister([&] {
+    memory.unregister_process(kPid);
+    unregister_complete.set_value();
+  });
+
+  EXPECT_EQ(unregister_result.wait_for(std::chrono::milliseconds(50)), std::future_status::timeout);
+  release_resolver.arrive_and_wait();
+  reader.join();
+  unregister.join();
+  EXPECT_EQ(unregister_result.wait_for(std::chrono::seconds(0)), std::future_status::ready);
 }
 
 TEST(GpuMemoryTest, PageTableEntryMutationsInvalidateCachedPtes) {

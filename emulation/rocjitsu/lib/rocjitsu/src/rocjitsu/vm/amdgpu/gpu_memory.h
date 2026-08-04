@@ -18,9 +18,11 @@
 #include <cassert>
 #include <cstring>
 #include <format>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <span>
 #include <string>
@@ -41,6 +43,13 @@ namespace amdgpu {
 /// issuing wave through the memory hierarchy.
 class GpuMemory : public simdojo::SparseMemory {
 public:
+  /// @brief Resolve a VMID-managed GPU range to allocation-owned backing.
+  /// @details A missing value means the range is unmanaged. A present but
+  /// inaccessible value prevents identity-pointer fallback. The returned guard
+  /// keeps accessible backing alive after VMID lookup completes.
+  using BackingResolver =
+      std::function<std::optional<KfdProcess::ResolvedBacking>(uint64_t, size_t)>;
+
   explicit GpuMemory(std::string name)
       : simdojo::SparseMemory(std::move(name)),
         // Function-static TLS translation caches may outlive a GpuMemory on a
@@ -76,6 +85,7 @@ public:
         .mutex = mu,
         .client_pid = 0,
         .generation = generation,
+        .backing_resolver = {},
     };
     // The VMID may now select a different page table even though neither page
     // table changed. Invalidate TLS entries that cached the old registration.
@@ -101,6 +111,16 @@ public:
       it->second.client_pid = client_pid;
   }
 
+  /// @brief Install the allocation-backing resolver for a registered VMID.
+  /// @details Resolver invocation is protected by vmid_mutex_ so unregistering
+  /// or replacing the VMID cannot race selection of its process backing.
+  void set_process_backing_resolver(uint32_t pid, BackingResolver resolver) {
+    std::unique_lock lk(vmid_mutex_);
+    auto it = vmid_table_.find(pid);
+    if (it != vmid_table_.end())
+      it->second.backing_resolver = std::move(resolver);
+  }
+
   /// @brief Enable passthrough for unmapped addresses (local/user-mode only).
   /// @details When true, addresses not found in the page table are treated as
   /// host pointers (GPU VA == host VA). This mirrors QEMU user-mode's identity
@@ -120,9 +140,16 @@ public:
     if (vmid == 0)
       return Mtype::RW;
     static thread_local PteCache cache;
-    return cached_walk(addr, vmid, cache, [](const KfdProcess::PageTableEntry *pte) {
-      return pte ? pte->mtype : Mtype::RW;
-    });
+    std::optional<Mtype> pte =
+        cached_walk(addr, vmid, cache, [](const KfdProcess::PageTableEntry *entry) {
+          return entry ? std::optional(entry->mtype) : std::nullopt;
+        });
+    if (pte)
+      return *pte;
+    std::optional<KfdProcess::ResolvedBacking> backing = resolve_process_backing(addr, 1, vmid);
+    if (backing && backing->gpu_accessible)
+      return backing->mtype;
+    return Mtype::RW;
   }
 
   uint32_t fetch32(uint64_t addr, uint32_t vmid = 0) const { return read32(addr, vmid); }
@@ -192,6 +219,17 @@ public:
       return;
     }
 
+    if (entry.backing_resolver) {
+      std::optional<KfdProcess::ResolvedBacking> backing = entry.backing_resolver(addr, size);
+      if (backing) {
+        if (backing->gpu_accessible)
+          atomic_rmw_mapped(addr, backing->page_base, fn);
+        else
+          atomic_rmw_fallback(addr, size, entry.client_pid, fn);
+        return;
+      }
+    }
+
     atomic_rmw_unmapped(addr, size, entry.client_pid, fn);
   }
 
@@ -218,8 +256,14 @@ public:
     std::shared_lock page_table_lock(*entry.mutex);
     const uint64_t page = addr >> PAGE_SHIFT;
     auto page_entry = entry.page_table->find(page);
-    if (page_entry == entry.page_table->end())
+    if (page_entry == entry.page_table->end()) {
+      page_table_lock.unlock();
+      vmid_lock.unlock();
+      std::optional<KfdProcess::ResolvedBacking> backing = resolve_process_backing(addr, 1, vmid);
+      if (backing && backing->gpu_accessible)
+        return {reinterpret_cast<uint64_t>(backing->range_base), backing->range_size};
       return {0, 0};
+    }
 
     uint64_t first_page = page;
     uint8_t *first_host_page = page_entry->second.host_ptr;
@@ -418,6 +462,7 @@ private:
     std::shared_mutex *mutex = nullptr;
     pid_t client_pid = 0;
     const uint64_t *generation = nullptr;
+    BackingResolver backing_resolver;
   };
 
   struct PteCache {
@@ -481,7 +526,20 @@ private:
     return fn(cache.found ? &cache.pte : nullptr);
   }
 
-  template <typename F> bool with_host_ptr(uint64_t addr, uint32_t vmid, F &&fn) const {
+  std::optional<KfdProcess::ResolvedBacking> resolve_process_backing(uint64_t addr, size_t size,
+                                                                     uint32_t vmid) const {
+    if (vmid == 0)
+      return std::nullopt;
+
+    std::shared_lock lock(vmid_mutex_);
+    std::unordered_map<uint32_t, VmidEntry>::const_iterator it = vmid_table_.find(vmid);
+    if (it == vmid_table_.end() || !it->second.backing_resolver)
+      return std::nullopt;
+    return it->second.backing_resolver(addr, size);
+  }
+
+  template <typename F>
+  bool with_host_ptr(uint64_t addr, size_t size, uint32_t vmid, F &&fn) const {
     if (vmid == 0) {
       auto *page = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
       if (!passthrough_ || addr >= kUserSpaceLimit || page == nullptr)
@@ -491,41 +549,53 @@ private:
     }
 
     static thread_local PteCache cache;
-    return cached_walk(addr, vmid, cache, [&](const KfdProcess::PageTableEntry *pte) {
-      if (pte) {
-        if (pte->host_ptr == nullptr)
-          return false;
-        fn(pte->host_ptr);
-        return true;
-      }
-      if (passthrough_ && addr < kUserSpaceLimit) {
-        auto *page = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
-        if (page == nullptr)
-          return false;
-        fn(page);
-        return true;
-      }
+    const int page_table_status =
+        cached_walk(addr, vmid, cache, [&](const KfdProcess::PageTableEntry *pte) {
+          if (!pte)
+            return 0;
+          if (pte->host_ptr == nullptr)
+            return -1;
+          fn(pte->host_ptr);
+          return 1;
+        });
+    if (page_table_status != 0)
+      return page_table_status > 0;
+
+    std::optional<KfdProcess::ResolvedBacking> backing = resolve_process_backing(addr, size, vmid);
+    if (backing) {
+      if (!backing->gpu_accessible)
+        return false;
+      fn(backing->page_base);
+      return true;
+    }
+
+    if (!passthrough_ || addr >= kUserSpaceLimit)
       return false;
-    });
+    auto *page = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
+    if (page == nullptr)
+      return false;
+    fn(page);
+    return true;
   }
 
   bool read_mapped(uint64_t addr, void *dst, size_t len, uint32_t vmid) const {
     if ((addr & PAGE_MASK) + len > PAGE_SIZE)
       return false;
-    return with_host_ptr(
-        addr, vmid, [&](const uint8_t *page) { std::memcpy(dst, page + (addr & PAGE_MASK), len); });
+    return with_host_ptr(addr, len, vmid, [&](const uint8_t *page) {
+      std::memcpy(dst, page + (addr & PAGE_MASK), len);
+    });
   }
 
   bool write_mapped(uint64_t addr, const void *src, size_t len, uint32_t vmid) {
     if ((addr & PAGE_MASK) + len > PAGE_SIZE)
       return false;
-    return with_host_ptr(addr, vmid,
+    return with_host_ptr(addr, len, vmid,
                          [&](uint8_t *page) { std::memcpy(page + (addr & PAGE_MASK), src, len); });
   }
 
   uint8_t *translate(uint64_t addr, uint32_t vmid) const {
     uint8_t *host_ptr = nullptr;
-    with_host_ptr(addr, vmid, [&](uint8_t *page) { host_ptr = page; });
+    with_host_ptr(addr, 1, vmid, [&](uint8_t *page) { host_ptr = page; });
     return host_ptr;
   }
 

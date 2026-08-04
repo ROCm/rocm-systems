@@ -2267,20 +2267,13 @@ RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, 
       if (lookup == RemoteDriver::MemfdLookup::kFound) {
         // memfd_out is a caller-owned dup; close it once we are done. Its
         // validity is independent of a concurrent RemoteDriver teardown/close.
-        auto total = static_cast<off_t>(length) + memfd_offset;
-        [[maybe_unused]] auto ft_rc = ftruncate(memfd_out, total);
-        fallocate(memfd_out, 0, memfd_offset, static_cast<off_t>(length));
         auto *raw = InterposerContext::real().mmap(
             addr, length, prot, (flags & ~MAP_ANONYMOUS) | MAP_SHARED, memfd_out, memfd_offset);
         // Preserve the mmap errno across close() (which may set its own).
         int mmap_errno = errno;
         InterposerContext::real().close(memfd_out);
-        if (raw != MAP_FAILED) {
-#ifdef MADV_POPULATE_WRITE
-          InterposerContext::real().madvise(raw, length, MADV_POPULATE_WRITE);
-#endif
+        if (raw != MAP_FAILED)
           return raw;
-        }
         // A daemon-shared range matched but the shared mapping failed. Fail
         // closed with the real errno rather than falling through to an anonymous
         // MAP_FIXED mapping, which would silently detach this GPUVM address from

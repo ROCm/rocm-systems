@@ -16,10 +16,13 @@
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "util/unique_handle.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <map>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -79,20 +82,64 @@ public:
   struct GpuAllocation {
     uint64_t gpu_va = 0;
     uint64_t size = 0;
+    uint64_t backing_size = 0;
     void *host_ptr = nullptr;
     uint32_t flags = 0;
+    amdgpu::Mtype backing_mtype = amdgpu::Mtype::RW;
     uint64_t handle = 0;
     int memfd = -1;
     uint32_t gpu_id = 0;
     bool user_va = false;
     bool imported = false;
     int dmabuf_fd = -1;
+    bool permanent_backing = false;
+    bool mapped_to_gpu = false;
+    bool backing_authoritative = false;
+    // Page-aligned allocation-relative intervals already consumed from an
+    // existing MAP_FIXED client reservation. Keys are inclusive starts and
+    // values are exclusive ends.
+    std::map<uint64_t, uint64_t> imported_client_extents;
     // True when the driver created host_ptr (mmap it itself) and must munmap it
     // on teardown. False for caller-owned pages (e.g. reused MAP_FIXED pages
     // from the thunk) that the driver must never unmap, since unmapping them
     // races with the owning process still accessing the memory.
     bool host_ptr_owned = false;
   };
+
+  /// @brief A stable lookup result for allocation-owned GPU backing.
+  /// @details An inaccessible result identifies a managed address that must not
+  /// fall through to identity-pointer translation. The guard keeps accessible
+  /// backing alive until the caller finishes the memory operation.
+  struct ResolvedBacking {
+    uint8_t *address = nullptr;
+    uint8_t *page_base = nullptr;
+    uint8_t *range_base = nullptr;
+    uint64_t range_size = 0;
+    amdgpu::Mtype mtype = amdgpu::Mtype::RW;
+    bool gpu_accessible = false;
+    std::shared_lock<std::shared_mutex> guard;
+  };
+
+  [[nodiscard]] static bool is_valid_gpu_range(uint64_t gpu_va, uint64_t size) {
+    return size != 0 && gpu_va <= UINT64_MAX - (size - 1);
+  }
+
+  /// @brief Whether an allocation already covers any page in a proposed range.
+  /// @details The caller must hold alloc_mutex_. GPU mappings are page-granular,
+  /// so byte-disjoint ranges sharing a page are treated as overlapping.
+  [[nodiscard]] bool overlaps_allocation_locked(uint64_t gpu_va, uint64_t size) const {
+    assert(is_valid_gpu_range(gpu_va, size));
+    const uint64_t first_page = gpu_va >> kPageShift;
+    const uint64_t end_page = ((gpu_va + size - 1) >> kPageShift) + 1;
+    for (const auto &[handle, alloc] : allocations_) {
+      (void)handle;
+      const uint64_t alloc_first_page = alloc.gpu_va >> kPageShift;
+      const uint64_t alloc_end_page = ((alloc.gpu_va + alloc.size - 1) >> kPageShift) + 1;
+      if (first_page < alloc_end_page && alloc_first_page < end_page)
+        return true;
+    }
+    return false;
+  }
 
   /// @brief Memory policy descriptor.
   struct MemoryPolicy {
@@ -254,6 +301,41 @@ public:
   /// @brief Return the mutation counter used by GpuMemory translation caches.
   const uint64_t *page_table_generation() const { return &page_table_generation_; }
 
+  /// @brief Resolve a managed GPU range to allocation-owned host backing.
+  /// @details Unmapped allocations still return a result with
+  /// gpu_accessible=false, preventing unsafe identity-pointer fallback. The
+  /// returned guard prevents teardown while accessible backing is in use.
+  [[nodiscard]] std::optional<ResolvedBacking> resolve_backing(uint64_t gpu_va, size_t size) const {
+    if (size == 0 || gpu_va > UINT64_MAX - (static_cast<uint64_t>(size) - 1))
+      return std::nullopt;
+
+    std::shared_lock lock(backing_ranges_mutex_);
+    auto it = std::upper_bound(
+        backing_ranges_.begin(), backing_ranges_.end(), gpu_va,
+        [](uint64_t addr, const BackingRange &range) { return addr < range.first; });
+    if (it == backing_ranges_.begin())
+      return std::nullopt;
+    --it;
+
+    const uint64_t offset = gpu_va - it->first;
+    if (offset >= it->size || static_cast<uint64_t>(size) > it->size - offset)
+      return std::nullopt;
+
+    const uintptr_t address_value = reinterpret_cast<uintptr_t>(it->host_base) + offset;
+    return ResolvedBacking{reinterpret_cast<uint8_t *>(address_value),
+                           reinterpret_cast<uint8_t *>(address_value - (gpu_va & (kPageSize - 1))),
+                           it->host_base,
+                           it->size,
+                           it->mtype,
+                           it->gpu_accessible,
+                           std::move(lock)};
+  }
+
+  /// @brief Republish allocation-backed address ranges after a state change.
+  /// @details The caller must hold alloc_mutex_. Acquiring the unique range lock
+  /// waits for in-flight GPU accesses before backing can be unmapped.
+  void refresh_backing_ranges_locked() { publish_backing_ranges_locked(); }
+
   mutable std::shared_mutex page_table_mutex_;
   PageTable page_table_;
 
@@ -271,6 +353,9 @@ public:
   std::mutex op_mutex_;
   mutable std::mutex alloc_mutex_;
   std::unordered_map<uint64_t, GpuAllocation> allocations_;
+  // Page-aligned CPU alias intervals. Keys are inclusive host addresses and
+  // values are exclusive ends.
+  std::map<uintptr_t, uintptr_t> cpu_mappings_;
   uint64_t next_handle_ = 1;
   uint64_t next_gpu_va_;
 
@@ -309,6 +394,42 @@ private:
   ///          this generation; all reads and writes occur while holding
   ///          page_table_mutex_, so the counter itself does not need atomics.
   uint64_t page_table_generation_{1};
+
+  struct BackingRange {
+    uint64_t first = 0;
+    uint64_t size = 0;
+    uint8_t *host_base = nullptr;
+    amdgpu::Mtype mtype = amdgpu::Mtype::RW;
+    bool gpu_accessible = false;
+  };
+
+  void publish_backing_ranges_locked() {
+    std::vector<BackingRange> ranges;
+    ranges.reserve(allocations_.size());
+    for (const auto &[handle, alloc] : allocations_) {
+      (void)handle;
+      if (!alloc.permanent_backing || !alloc.host_ptr)
+        continue;
+      assert(is_valid_gpu_range(alloc.gpu_va, alloc.size));
+      ranges.push_back({alloc.gpu_va, alloc.size, static_cast<uint8_t *>(alloc.host_ptr),
+                        alloc.backing_mtype, alloc.mapped_to_gpu});
+    }
+
+    std::sort(ranges.begin(), ranges.end(), [](const BackingRange &lhs, const BackingRange &rhs) {
+      return lhs.first < rhs.first;
+    });
+    for (size_t i = 1; i < ranges.size(); ++i) {
+      assert(ranges[i - 1].first <= ranges[i].first);
+      assert(ranges[i - 1].size <= ranges[i].first - ranges[i - 1].first &&
+             "overlapping GPU allocation backings");
+    }
+
+    std::unique_lock lock(backing_ranges_mutex_);
+    backing_ranges_ = std::move(ranges);
+  }
+
+  mutable std::shared_mutex backing_ranges_mutex_;
+  std::vector<BackingRange> backing_ranges_;
 };
 
 } // namespace rocjitsu

@@ -717,7 +717,20 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
       mapping_memfd = it->second;
   }
   if (mapping_memfd >= 0) {
-    [[maybe_unused]] auto ft_rc2 = ftruncate(mapping_memfd, static_cast<off_t>(length));
+    struct stat backing_stat {};
+    if (syscall(SYS_fstat, mapping_memfd, &backing_stat) != 0) {
+      const int saved_errno = errno;
+      if (memfd >= 0)
+        syscall(SYS_close, memfd);
+      errno = saved_errno;
+      return MAP_FAILED;
+    }
+    if (backing_stat.st_size < 0 || length > static_cast<uint64_t>(backing_stat.st_size)) {
+      if (memfd >= 0)
+        syscall(SYS_close, memfd);
+      errno = EINVAL;
+      return MAP_FAILED;
+    }
 
     // Pre-copy committed pages (code objects) from the existing anonymous
     // reservation into the memfd before MAP_FIXED replaces them. Uses a temp
@@ -747,18 +760,14 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
       }
     }
 
-    // QEMU vhost-user pattern: per-allocation memfd with F_SEAL_SHRINK (set at
-    // creation in alloc_memory_ioctl), MAP_SHARED|MAP_FIXED, then
-    // MADV_POPULATE_WRITE to pre-fault pages. This surfaces any shmem ENOSPC
-    // as errno rather than deferred SIGBUS on page fault.
+    // The allocation owns an already-sized memfd. Keep pages lazy: VRAM
+    // reservations can be tens of GiB and must not be physically populated by
+    // a CPU mapping alone.
     int mflags = MAP_SHARED;
     if (flags & MAP_FIXED)
       mflags |= MAP_FIXED;
     auto *mapped = safe_mmap(addr, length, PROT_READ | PROT_WRITE, mflags, mapping_memfd, 0);
-    if (mapped != MAP_FAILED)
-      syscall(SYS_madvise, mapped, length, MADV_POPULATE_WRITE);
-
-    if (memfd >= 0 && memfd != mapping_memfd)
+    if (memfd >= 0)
       syscall(SYS_close, memfd);
     return mapped;
   }

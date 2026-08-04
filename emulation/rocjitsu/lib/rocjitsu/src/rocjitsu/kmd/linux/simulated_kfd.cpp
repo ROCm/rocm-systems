@@ -25,7 +25,11 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <fcntl.h>
 #include <format>
+#include <iterator>
+#include <limits>
 #include <linux/types.h>
+#include <map>
+#include <optional>
 #include <sstream>
 #include <sys/mman.h>
 #include <sys/random.h>
@@ -36,6 +40,7 @@ RJ_DIAGNOSTIC_POP
 #endif
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -105,6 +110,147 @@ int safe_fstat(int fd, struct stat *st) { return libc_passthrough().fstat_fn(fd,
 /// (F_DUPFD_CLOEXEC, F_ADD_SEALS, F_GETFL/no-arg) used here forward cleanly.
 template <typename... Args> int safe_fcntl(int fd, int cmd, Args... args) {
   return libc_passthrough().fcntl(fd, cmd, args...);
+}
+
+std::optional<uint64_t> checked_page_aligned_size(uint64_t size) {
+  constexpr uint64_t page_mask = KfdProcess::kPageSize - 1;
+  if (size == 0 || size > UINT64_MAX - page_mask)
+    return std::nullopt;
+  return (size + page_mask) & ~page_mask;
+}
+
+template <typename Address>
+void merge_interval(std::map<Address, Address> &intervals, Address begin, Address end) {
+  assert(begin < end);
+
+  typename std::map<Address, Address>::iterator it = intervals.lower_bound(begin);
+  if (it != intervals.begin()) {
+    typename std::map<Address, Address>::iterator previous = std::prev(it);
+    if (previous->second >= begin) {
+      begin = previous->first;
+      end = std::max(end, previous->second);
+      it = intervals.erase(previous);
+    }
+  }
+
+  while (it != intervals.end() && it->first <= end) {
+    end = std::max(end, it->second);
+    it = intervals.erase(it);
+  }
+  intervals.emplace(begin, end);
+}
+
+std::vector<std::pair<uint64_t, uint64_t>>
+find_uncovered_extents(const std::map<uint64_t, uint64_t> &covered, uint64_t begin, uint64_t end) {
+  std::vector<std::pair<uint64_t, uint64_t>> uncovered;
+  uint64_t cursor = begin;
+  std::map<uint64_t, uint64_t>::const_iterator it = covered.upper_bound(begin);
+  if (it != covered.begin())
+    --it;
+
+  for (; it != covered.end() && cursor < end; ++it) {
+    if (it->second <= cursor)
+      continue;
+    if (it->first >= end)
+      break;
+    if (it->first > cursor)
+      uncovered.emplace_back(cursor, std::min(it->first, end));
+    cursor = std::max(cursor, it->second);
+  }
+  if (cursor < end)
+    uncovered.emplace_back(cursor, end);
+  return uncovered;
+}
+
+std::optional<uint64_t> assign_gpu_va_locked(KfdProcess &proc, uint64_t requested_va,
+                                             uint64_t size) {
+  if (requested_va != 0) {
+    if (!KfdProcess::is_valid_gpu_range(requested_va, size) ||
+        proc.overlaps_allocation_locked(requested_va, size))
+      return std::nullopt;
+    return requested_va;
+  }
+
+  std::optional<uint64_t> aligned_size = checked_page_aligned_size(size);
+  if (!aligned_size)
+    return std::nullopt;
+
+  uint64_t gpu_va = proc.next_gpu_va_;
+  while (gpu_va <= UINT64_MAX - *aligned_size) {
+    const uint64_t first_page = gpu_va >> KfdProcess::kPageShift;
+    const uint64_t end_page = ((gpu_va + *aligned_size - 1) >> KfdProcess::kPageShift) + 1;
+    uint64_t next_page = first_page;
+    for (const auto &[handle, alloc] : proc.allocations_) {
+      (void)handle;
+      assert(KfdProcess::is_valid_gpu_range(alloc.gpu_va, alloc.size));
+      const uint64_t alloc_first_page = alloc.gpu_va >> KfdProcess::kPageShift;
+      const uint64_t alloc_end_page =
+          ((alloc.gpu_va + alloc.size - 1) >> KfdProcess::kPageShift) + 1;
+      if (first_page < alloc_end_page && alloc_first_page < end_page)
+        next_page = std::max(next_page, alloc_end_page);
+    }
+    if (next_page == first_page) {
+      proc.next_gpu_va_ = gpu_va + *aligned_size;
+      return gpu_va;
+    }
+    constexpr uint64_t address_space_pages = (UINT64_MAX >> KfdProcess::kPageShift) + 1;
+    if (next_page >= address_space_pages)
+      return std::nullopt;
+    gpu_va = next_page << KfdProcess::kPageShift;
+  }
+  return std::nullopt;
+}
+
+struct LazyVramBacking {
+  int fd = -1;
+  void *mapping = MAP_FAILED;
+  uint64_t size = 0;
+};
+
+std::optional<LazyVramBacking> create_lazy_vram_backing(uint64_t requested_size) {
+  std::optional<uint64_t> aligned_size = checked_page_aligned_size(requested_size);
+  if (!aligned_size || *aligned_size > static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+      *aligned_size > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) {
+    errno = EOVERFLOW;
+    return std::nullopt;
+  }
+
+  int raw_fd = memfd_create("rocjitsu_vram", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+  if (raw_fd < 0)
+    return std::nullopt;
+
+  int fd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, 4096);
+  if (fd < 0) {
+    fd = raw_fd;
+  } else {
+    libc_passthrough().close(raw_fd);
+  }
+
+  if (ftruncate(fd, static_cast<off_t>(*aligned_size)) != 0) {
+    const int saved_errno = errno;
+    libc_passthrough().close(fd);
+    errno = saved_errno;
+    return std::nullopt;
+  }
+
+  void *mapping = safe_mmap(nullptr, static_cast<size_t>(*aligned_size), PROT_READ | PROT_WRITE,
+                            MAP_SHARED, fd, 0);
+  if (mapping == MAP_FAILED) {
+    const int saved_errno = errno;
+    libc_passthrough().close(fd);
+    errno = saved_errno;
+    return std::nullopt;
+  }
+
+  if (safe_fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW) != 0) {
+    const int saved_errno = errno;
+    libc_passthrough().munmap(mapping, static_cast<size_t>(*aligned_size));
+    libc_passthrough().close(fd);
+    errno = saved_errno;
+    return std::nullopt;
+  }
+
+  return LazyVramBacking{fd, mapping, *aligned_size};
 }
 
 } // namespace
@@ -368,10 +514,17 @@ int SimulatedKfd::open() {
   // DBG_TRAP self-resolution therefore requires a post-fork re-open.
   proc->set_client_pid(static_cast<pid_t>(getpid()));
   proc->event_state_.reset();
+  std::weak_ptr<KfdProcess> weak_proc = proc;
   for (auto &g : gpus_) {
     if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
       mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_,
                             proc->page_table_generation());
+      mem->set_process_backing_resolver(
+          pid,
+          [weak_proc](uint64_t gpu_va, size_t size) -> std::optional<KfdProcess::ResolvedBacking> {
+            auto process = weak_proc.lock();
+            return process ? process->resolve_backing(gpu_va, size) : std::nullopt;
+          });
       if (!daemon_mode_)
         mem->set_passthrough(true);
     }
@@ -430,10 +583,18 @@ uint32_t SimulatedKfd::open_process(pid_t client_pid) {
     if (client_pid > 0)
       proc->set_client_pid(client_pid);
     proc->event_state_.reset();
+    std::weak_ptr<KfdProcess> weak_proc = proc;
     for (auto &g : gpus_) {
       if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
         mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_,
                               proc->page_table_generation());
+        mem->set_process_backing_resolver(
+            pid,
+            [weak_proc](uint64_t gpu_va,
+                        size_t size) -> std::optional<KfdProcess::ResolvedBacking> {
+              auto process = weak_proc.lock();
+              return process ? process->resolve_backing(gpu_va, size) : std::nullopt;
+            });
         if (client_pid > 0)
           mem->set_process_client_pid(pid, client_pid);
       }
@@ -587,13 +748,21 @@ int SimulatedKfd::close(uint32_t process_id) {
     if (trace_enabled)
       leaked_handles.reserve(proc.allocations_.size());
     for (auto &[handle, alloc] : proc.allocations_) {
+      (void)handle;
+      if (alloc.permanent_backing)
+        alloc.mapped_to_gpu = false;
+    }
+    proc.refresh_backing_ranges_locked();
+    for (auto &[handle, alloc] : proc.allocations_) {
       ++leaked_allocations;
       leaked_bytes += alloc.size;
       if (trace_enabled)
         leaked_handles.push_back(handle);
       if (alloc.host_ptr && alloc.host_ptr_owned) {
-        unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
-        libc_passthrough().munmap(alloc.host_ptr, alloc.size);
+        if (!alloc.permanent_backing)
+          unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+        libc_passthrough().munmap(alloc.host_ptr,
+                                  alloc.permanent_backing ? alloc.backing_size : alloc.size);
         alloc.host_ptr = nullptr;
         alloc.host_ptr_owned = false;
       }
@@ -607,6 +776,10 @@ int SimulatedKfd::close(uint32_t process_id) {
       }
     }
     proc.allocations_.clear();
+    proc.refresh_backing_ranges_locked();
+    for (const auto &[begin, end] : proc.cpu_mappings_)
+      libc_passthrough().munmap(reinterpret_cast<void *>(begin), end - begin);
+    proc.cpu_mappings_.clear();
   }
 
   for (uint32_t qid : queue_ids) {
@@ -994,6 +1167,76 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
 
   auto &alloc = it->second;
 
+  if (alloc.permanent_backing) {
+    if (length == 0 || length > alloc.backing_size) {
+      errno = EINVAL;
+      return MAP_FAILED;
+    }
+
+    std::optional<uint64_t> rounded_length = checked_page_aligned_size(length);
+    if (!rounded_length || *rounded_length > alloc.backing_size) {
+      errno = EINVAL;
+      return MAP_FAILED;
+    }
+
+    if (daemon_mode_ && alloc.memfd >= 0 && alloc.host_ptr != nullptr)
+      return alloc.host_ptr;
+
+    const bool replaces_client_reservation =
+        alloc.user_va && (flags & MAP_FIXED) && addr != nullptr;
+
+    // Import each committed source extent at most once and only before GPU use
+    // makes the allocation-owned memfd authoritative.
+    if (!alloc.backing_authoritative && replaces_client_reservation) {
+      int prot_rc = libc_passthrough().mprotect(addr, length, PROT_READ | PROT_WRITE);
+      if (prot_rc == 0) {
+        constexpr size_t page_size = KfdProcess::kPageSize;
+        std::vector<std::pair<uint64_t, uint64_t>> uncovered =
+            find_uncovered_extents(alloc.imported_client_extents, 0, *rounded_length);
+        uint8_t *source = static_cast<uint8_t *>(addr);
+        uint8_t *destination = static_cast<uint8_t *>(alloc.host_ptr);
+        for (const auto &[extent_begin, extent_end] : uncovered) {
+          const uint64_t import_end = std::min<uint64_t>(extent_end, length);
+          if (extent_begin >= import_end)
+            continue;
+          const size_t import_size = static_cast<size_t>(import_end - extent_begin);
+          const size_t num_pages = (import_size + page_size - 1) / page_size;
+          std::vector<uint8_t> page_resident(num_pages);
+          if (mincore(source + extent_begin, import_size, page_resident.data()) != 0)
+            continue;
+          for (size_t i = 0; i < num_pages; ++i) {
+            if ((page_resident[i] & 1) == 0)
+              continue;
+            const size_t page_offset = i * page_size;
+            const size_t copy_size = std::min(page_size, import_size - page_offset);
+            std::memcpy(destination + extent_begin + page_offset,
+                        source + extent_begin + page_offset, copy_size);
+          }
+        }
+      }
+    }
+
+    int map_flags = MAP_SHARED;
+    if (flags & MAP_FIXED)
+      map_flags |= MAP_FIXED;
+    void *client_ptr = safe_mmap(addr, length, prot, map_flags, alloc.memfd, 0);
+    if (client_ptr == MAP_FAILED)
+      return MAP_FAILED;
+
+    if (replaces_client_reservation)
+      merge_interval(alloc.imported_client_extents, uint64_t{0}, *rounded_length);
+
+    const uintptr_t mapping_begin = reinterpret_cast<uintptr_t>(client_ptr);
+    if (*rounded_length > UINTPTR_MAX - mapping_begin) {
+      libc_passthrough().munmap(client_ptr, static_cast<size_t>(*rounded_length));
+      errno = EOVERFLOW;
+      return MAP_FAILED;
+    }
+    merge_interval(proc.cpu_mappings_, mapping_begin,
+                   mapping_begin + static_cast<uintptr_t>(*rounded_length));
+    return client_ptr;
+  }
+
   if (daemon_mode_ && alloc.memfd >= 0 && alloc.host_ptr != nullptr)
     return alloc.host_ptr;
 
@@ -1142,6 +1385,36 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
     return 0;
   }
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+  const uintptr_t unmap_begin = reinterpret_cast<uintptr_t>(addr);
+  std::optional<uint64_t> rounded_length = checked_page_aligned_size(length);
+  std::map<uintptr_t, uintptr_t>::iterator mapping = proc.cpu_mappings_.upper_bound(unmap_begin);
+  if (mapping != proc.cpu_mappings_.begin()) {
+    --mapping;
+    if (mapping->first <= unmap_begin && unmap_begin < mapping->second) {
+      if (!rounded_length || (unmap_begin & (KfdProcess::kPageSize - 1)) != 0 ||
+          *rounded_length > UINTPTR_MAX - unmap_begin) {
+        errno = EINVAL;
+        return -1;
+      }
+      const uintptr_t unmap_end = unmap_begin + static_cast<uintptr_t>(*rounded_length);
+      if (unmap_end > mapping->second) {
+        errno = EINVAL;
+        return -1;
+      }
+
+      const uintptr_t mapping_begin = mapping->first;
+      const uintptr_t mapping_end = mapping->second;
+      int rc = libc_passthrough().munmap(addr, static_cast<size_t>(*rounded_length));
+      if (rc != 0)
+        return rc;
+      proc.cpu_mappings_.erase(mapping);
+      if (mapping_begin < unmap_begin)
+        proc.cpu_mappings_.emplace(mapping_begin, unmap_begin);
+      if (unmap_end < mapping_end)
+        proc.cpu_mappings_.emplace(unmap_end, mapping_end);
+      return 0;
+    }
+  }
   for (auto &[handle, alloc] : proc.allocations_) {
     if (alloc.host_ptr == addr) {
       unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
@@ -1270,17 +1543,19 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
 
   bool user_provided_va = (args->va_addr != 0);
-  uint64_t va = args->va_addr;
-  if (va == 0) {
-    va = proc.next_gpu_va_;
-    proc.next_gpu_va_ += (args->size + 0xFFF) & ~0xFFFULL;
-  }
+  std::optional<uint64_t> aligned_size = checked_page_aligned_size(args->size);
+  if (!aligned_size)
+    return -EINVAL;
+
+  std::optional<uint64_t> assigned_va = assign_gpu_va_locked(proc, args->va_addr, *aligned_size);
+  if (!assigned_va)
+    return -EINVAL;
+  uint64_t va = *assigned_va;
 
   KfdProcess::GpuAllocation alloc{};
   alloc.gpu_va = va;
   alloc.size = args->size;
   alloc.flags = args->flags;
-  alloc.handle = proc.next_handle_++;
   alloc.host_ptr = nullptr;
   alloc.gpu_id = args->gpu_id;
   alloc.user_va = user_provided_va;
@@ -1288,10 +1563,29 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   auto alloc_mtype = pte_mtype_for_flags(args->flags);
   bool is_userptr = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) != 0;
   bool is_doorbell = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) != 0;
+  bool is_vram = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) != 0;
+  bool needs_permanent_backing = is_vram && !is_userptr && !is_doorbell;
+  alloc.backing_mtype = alloc_mtype;
+
+  if (needs_permanent_backing) {
+    if ((va & (KfdProcess::kPageSize - 1)) != 0)
+      return -EINVAL;
+    std::optional<LazyVramBacking> backing = create_lazy_vram_backing(alloc.size);
+    if (!backing)
+      return errno == EOVERFLOW ? -EOVERFLOW : -ENOMEM;
+    alloc.memfd = backing->fd;
+    alloc.host_ptr = backing->mapping;
+    alloc.host_ptr_owned = true;
+    alloc.backing_size = backing->size;
+    alloc.permanent_backing = true;
+    std::lock_guard<std::mutex> lk(owned_fds_mutex_);
+    owned_fds_.insert(alloc.memfd);
+  }
+
   if (is_userptr && !daemon_mode_) {
     alloc.host_ptr = reinterpret_cast<void *>(va);
     map_to_gpu(proc, va, reinterpret_cast<void *>(va), args->size, alloc_mtype);
-  } else if (daemon_mode_ || !user_provided_va) {
+  } else if (!needs_permanent_backing && (daemon_mode_ || !user_provided_va)) {
     auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (raw_fd >= 0) {
       alloc.memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, 4096);
@@ -1321,7 +1615,9 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
     }
   }
 
+  alloc.handle = proc.next_handle_++;
   proc.allocations_[alloc.handle] = alloc;
+  proc.refresh_backing_ranges_locked();
 
   args->handle = alloc.handle;
   args->va_addr = va;
@@ -1437,8 +1733,17 @@ int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
         proc.imported_dmabufs_.erase(dmabuf_it);
       }
     }
-    if (alloc.host_ptr && !alloc.user_va)
+    if (alloc.permanent_backing) {
+      alloc.mapped_to_gpu = false;
+      proc.refresh_backing_ranges_locked();
+      if (alloc.host_ptr) {
+        libc_passthrough().munmap(alloc.host_ptr, alloc.backing_size);
+        alloc.host_ptr = nullptr;
+        alloc.host_ptr_owned = false;
+      }
+    } else if (alloc.host_ptr && !alloc.user_va) {
       unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+    }
     if (alloc.memfd >= 0) {
       {
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
@@ -1450,6 +1755,7 @@ int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
     uint32_t freed_process_id = proc.process_id();
     uint64_t freed_handle = args->handle;
     proc.allocations_.erase(it);
+    proc.refresh_backing_ranges_locked();
 
     {
       std::lock_guard<std::mutex> ilk(ipc_mutex_);
@@ -1484,8 +1790,13 @@ int SimulatedKfd::map_memory_ioctl(KfdProcess &proc, void *arg) {
                       alloc.handle, alloc.gpu_va, alloc.size, args->n_devices,
                       alloc.host_ptr != nullptr);
   });
-  if (alloc.host_ptr)
+  if (alloc.permanent_backing) {
+    alloc.backing_authoritative = true;
+    alloc.mapped_to_gpu = true;
+    proc.refresh_backing_ranges_locked();
+  } else if (alloc.host_ptr) {
     map_to_gpu(proc, alloc.gpu_va, alloc.host_ptr, alloc.size, pte_mtype_for_flags(alloc.flags));
+  }
   args->n_success = args->n_devices;
   return 0;
 }
@@ -1500,8 +1811,12 @@ int SimulatedKfd::unmap_memory_ioctl(KfdProcess &proc, void *arg) {
     // releases it. Erasing here would leak those fds and make a later FREE a
     // no-op for this handle.
     auto &alloc = it->second;
-    if (alloc.host_ptr)
+    if (alloc.permanent_backing) {
+      alloc.mapped_to_gpu = false;
+      proc.refresh_backing_ranges_locked();
+    } else if (alloc.host_ptr) {
       unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+    }
   }
   args->n_success = args->n_devices;
   return 0;
@@ -1800,7 +2115,12 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
     // the local GPU sees writes from the importing GPU.  On real hardware
     // xGMI snoops handle this; in the simulator CC forces L2 invalidate
     // before every refetch, emulating the cross-GPU coherence protocol.
-    proc.set_page_mtype(alloc.gpu_va, alloc.size, amdgpu::Mtype::CC);
+    if (alloc.permanent_backing) {
+      alloc.backing_mtype = amdgpu::Mtype::CC;
+      proc.refresh_backing_ranges_locked();
+    } else {
+      proc.set_page_mtype(alloc.gpu_va, alloc.size, amdgpu::Mtype::CC);
+    }
 
     alloc_size = alloc.size;
     alloc_flags = alloc.flags;
