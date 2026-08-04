@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Record deterministic gfx1250 B0-to-A0 translation hashes."""
+"""Record and compare deterministic gfx1250 B0-to-A0 translation hashes."""
 
 from __future__ import annotations
 
@@ -31,7 +31,10 @@ PROFILE = {
     "output_mode": "code-object",
     "verify_idempotence": True,
 }
+COMPARE_UNCHANGED = 0
 ERROR = 1
+COMPARE_CHANGED = 2
+COMPARE_INCOMPATIBLE = 3
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -43,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "finalize":
             finalize_manifest(args)
             return 0
+        if args.command == "compare":
+            return compare_manifests(args)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return ERROR
@@ -76,6 +81,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     finalize_parser.add_argument("--source-commit", required=True)
     finalize_parser.add_argument("--corpus-commit", required=True)
     finalize_parser.add_argument("--rocm-sdk-version", required=True)
+
+    compare_parser = commands.add_parser(
+        "compare", help="compare a candidate manifest to a develop manifest"
+    )
+    compare_parser.add_argument("--baseline", type=Path, required=True)
+    compare_parser.add_argument("--candidate", type=Path, required=True)
+    compare_parser.add_argument("--markdown", type=Path, required=True)
+    compare_parser.add_argument("--max-details", type=int, default=50)
 
     return parser.parse_args(argv)
 
@@ -237,6 +250,117 @@ def finalize_manifest(args: argparse.Namespace) -> None:
     )
 
 
+def compare_manifests(args: argparse.Namespace) -> int:
+    if args.max_details <= 0:
+        raise ValueError("--max-details must be greater than zero")
+    baseline = _load_pair_manifest(args.baseline)
+    candidate = _load_pair_manifest(args.candidate)
+
+    compatibility_fields = (
+        "corpus_commit",
+        "input_manifest_sha256",
+        "package_lock_sha256",
+        "rocm_sdk_version",
+    )
+    incompatible = [
+        field
+        for field in compatibility_fields
+        if baseline["provenance"][field] != candidate["provenance"][field]
+    ]
+    baseline_pairs = _pairs_by_input(baseline)
+    candidate_pairs = _pairs_by_input(candidate)
+    removed = sorted(set(baseline_pairs) - set(candidate_pairs))
+    added = sorted(set(candidate_pairs) - set(baseline_pairs))
+
+    if incompatible or removed or added:
+        lines = [
+            "## gfx1250 B0-to-A0 translation baseline",
+            "",
+            "> [!WARNING]",
+            "> The PR result is not directly comparable to the latest develop baseline.",
+            "",
+        ]
+        if incompatible:
+            lines.extend(
+                [
+                    "Changed provenance:",
+                    "",
+                    "| Field | develop | PR |",
+                    "| --- | --- | --- |",
+                ]
+            )
+            for field in incompatible:
+                lines.append(
+                    f"| `{field}` | `{baseline['provenance'][field]}` | "
+                    f"`{candidate['provenance'][field]}` |"
+                )
+            lines.append("")
+        if removed or added:
+            lines.extend(
+                [
+                    f"Input-set difference: {len(removed)} removed, {len(added)} added.",
+                    "",
+                ]
+            )
+        _write_markdown(args.markdown, lines)
+        return COMPARE_INCOMPATIBLE
+
+    changed = [
+        digest
+        for digest in sorted(baseline_pairs)
+        if baseline_pairs[digest]["output_sha256"]
+        != candidate_pairs[digest]["output_sha256"]
+    ]
+    baseline_commit = baseline["provenance"]["rocm_systems_commit"]
+    candidate_commit = candidate["provenance"]["rocm_systems_commit"]
+    if not changed:
+        _write_markdown(
+            args.markdown,
+            [
+                "## gfx1250 B0-to-A0 translation baseline",
+                "",
+                f"No translated output SHA-256 changes across {len(baseline_pairs)} "
+                "successful corpus inputs.",
+                "",
+                f"- develop source: `{baseline_commit}`",
+                f"- PR source: `{candidate_commit}`",
+                "",
+            ],
+        )
+        return COMPARE_UNCHANGED
+
+    lines = [
+        "## gfx1250 B0-to-A0 translation baseline",
+        "",
+        "> [!WARNING]",
+        f"> This PR changes {len(changed)} translated output SHA-256 value(s).",
+        "",
+        f"Compared `{candidate_commit}` against develop baseline `{baseline_commit}`.",
+        "",
+        "| Input SHA-256 | Input bytes | develop output | develop bytes | "
+        "PR output | PR bytes |",
+        "| --- | ---: | --- | ---: | --- | ---: |",
+    ]
+    for digest in changed[: args.max_details]:
+        lines.append(
+            f"| `{digest}` | {baseline_pairs[digest]['input_bytes']:,} | "
+            f"`{baseline_pairs[digest]['output_sha256']}` | "
+            f"{baseline_pairs[digest]['output_bytes']:,} | "
+            f"`{candidate_pairs[digest]['output_sha256']}` | "
+            f"{candidate_pairs[digest]['output_bytes']:,} |"
+        )
+    if len(changed) > args.max_details:
+        lines.extend(
+            [
+                "",
+                f"Showing the first {args.max_details} of {len(changed)} changes.",
+            ]
+        )
+    lines.append("")
+    _write_markdown(args.markdown, lines)
+    return COMPARE_CHANGED
+
+
 def _record_fragment(directory: Path, record: dict) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     destination = directory / f"{record['input_sha256']}.json"
@@ -308,6 +432,82 @@ def _load_expected_failures(path: Path) -> set[str]:
     return set(failures)
 
 
+def _load_pair_manifest(path: Path) -> dict:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    required = {
+        "excluded_inputs",
+        "pairs",
+        "profile",
+        "provenance",
+        "schema_version",
+    }
+    if not isinstance(payload, dict) or set(payload) != required:
+        raise ValueError(f"{path} must contain exactly {sorted(required)}")
+    if payload["schema_version"] != 1:
+        raise ValueError(f"{path} field 'schema_version' must be 1")
+    if payload["profile"] != PROFILE:
+        raise ValueError(f"{path} does not describe the gfx1250 B0-to-A0 profile")
+    provenance_fields = {
+        "corpus_commit",
+        "expected_failures_sha256",
+        "expected_rewrites_sha256",
+        "input_manifest_sha256",
+        "package_lock_sha256",
+        "rocm_sdk_version",
+        "rocm_systems_commit",
+    }
+    provenance = payload["provenance"]
+    if not isinstance(provenance, dict) or set(provenance) != provenance_fields:
+        raise ValueError(f"{path} has invalid provenance fields")
+    for field in (
+        "expected_failures_sha256",
+        "expected_rewrites_sha256",
+        "input_manifest_sha256",
+        "package_lock_sha256",
+    ):
+        if not isinstance(provenance[field], str) or not SHA256_RE.fullmatch(
+            provenance[field]
+        ):
+            raise ValueError(f"{path} provenance field {field!r} is not SHA-256")
+    for field in ("corpus_commit", "rocm_systems_commit"):
+        _validate_git_sha(provenance[field], f"{path} provenance field {field!r}")
+    _validate_sdk_version(
+        provenance["rocm_sdk_version"],
+        f"{path} provenance field 'rocm_sdk_version'",
+    )
+    excluded = payload["excluded_inputs"]
+    if (
+        not isinstance(excluded, list)
+        or excluded != sorted(set(excluded))
+        or any(
+            not isinstance(digest, str) or not SHA256_RE.fullmatch(digest)
+            for digest in excluded
+        )
+    ):
+        raise ValueError(f"{path} field 'excluded_inputs' is not canonical")
+    pairs = _pairs_by_input(payload)
+    if list(pairs) != sorted(pairs):
+        raise ValueError(f"{path} field 'pairs' is not sorted by input SHA-256")
+    overlap = set(excluded) & set(pairs)
+    if overlap:
+        raise ValueError(f"{path} both excludes and records {_shown(overlap)}")
+    return payload
+
+
+def _pairs_by_input(manifest: dict) -> dict[str, dict]:
+    records = manifest["pairs"]
+    if not isinstance(records, list):
+        raise ValueError("manifest field 'pairs' must be a list")
+    pairs = {}
+    for record in records:
+        _validate_pair_record(record, "manifest pair")
+        digest = record.get("input_sha256")
+        if digest in pairs:
+            raise ValueError(f"manifest repeats input SHA-256 {digest}")
+        pairs[digest] = record
+    return pairs
+
+
 def _validate_pair_record(record: dict, description: str) -> None:
     expected_fields = {
         "input_bytes",
@@ -369,6 +569,11 @@ def _write_json(path: Path, payload: dict) -> None:
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def _write_markdown(path: Path, lines: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
 
 
 if __name__ == "__main__":
