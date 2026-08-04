@@ -229,7 +229,8 @@ ncclResult_t ncclPrepareTasksAndCollPreconnectFunc(struct ncclAsyncJob* job_) {
   CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (!job_->isThreadMain && ncclOsCpuCount(comm->cpuAffinity)) ncclOsSetAffinity(comm->cpuAffinity);
   NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, job->simInfo));
-  if (comm->cuMemSupport && needConnect) {
+  // Allow on-demand PAT connection without cuMem support (ROCm default), so PAT QPs can be created lazily.
+  if ((comm->cuMemSupport || algoNeedConnect[NCCL_ALGO_PAT]) && needConnect) {
     // Preconnect is not meant to be captured;
     // swap to relaxed mode so CUDA graph capture works correctly.
     cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
@@ -650,7 +651,8 @@ static ncclResult_t ncclPrepareTasksAndCollPreconnect(
     CUDACHECK(cudaSetDevice(comm->cudaDev));
     NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, simInfo));
 
-    if (comm->cuMemSupport && needConnect) {
+    // Allow on-demand PAT connection without cuMem support (ROCm default), so PAT QPs can be created lazily.
+    if ((comm->cuMemSupport || algoNeedConnect[NCCL_ALGO_PAT]) && needConnect) {
       ncclResult_t ret;
       struct ncclPreconnectJob* job;
       NEW_NOTHROW(job, ncclPreconnectJob);

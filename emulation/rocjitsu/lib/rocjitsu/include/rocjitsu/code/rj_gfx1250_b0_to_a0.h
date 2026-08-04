@@ -17,6 +17,14 @@
 extern "C" {
 #endif
 
+/// Provenance collected while translating one exact code-object ELF.
+typedef struct rj_gfx1250_b0_to_a0_translation_info_s {
+  /// 64-bit FNV-1a identity of the complete source ELF byte sequence.
+  uint64_t source_code_object_id;
+  /// Number of source instructions whose translated encoding changed.
+  size_t changed_instruction_count;
+} rj_gfx1250_b0_to_a0_translation_info_t;
+
 /// Translate one gfx1250 B0 AMDGPU code-object ELF for execution on gfx1250 A0.
 ///
 /// The input must be a standalone gfx1250 AMDGPU code object. On success, the
@@ -39,6 +47,26 @@ extern "C" {
 RJ_API_EXPORT rj_status_t rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size,
                                                         uint8_t **translated_elf,
                                                         size_t *translated_size);
+
+/// Translate one gfx1250 B0 code object and report source provenance.
+///
+/// This is the provenance-reporting form of rj_gfx1250_b0_to_a0_translate().
+/// @p info is cleared before argument validation. When all arguments are valid,
+/// source_code_object_id is populated before parsing, so failed translation
+/// attempts can still be associated with their exact input.
+///
+/// @param[in] source_elf Source code-object bytes.
+/// @param[in] source_size Number of bytes in @p source_elf.
+/// @param[out] translated_elf Newly allocated translated code-object bytes.
+/// @param[out] translated_size Number of bytes in @p translated_elf.
+/// @param[out] info Stable source identity and changed-instruction count.
+/// @return The same status values as rj_gfx1250_b0_to_a0_translate().
+#ifdef __cplusplus
+[[nodiscard]]
+#endif
+RJ_API_EXPORT rj_status_t rj_gfx1250_b0_to_a0_translate_with_info(
+    const void *source_elf, size_t source_size, uint8_t **translated_elf, size_t *translated_size,
+    rj_gfx1250_b0_to_a0_translation_info_t *info);
 
 /// Release storage returned by rj_gfx1250_b0_to_a0_translate().
 /// @param[in] translated_elf Allocation to release; NULL is accepted.

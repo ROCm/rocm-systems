@@ -336,6 +336,22 @@ class IsaProfile(ABC):
         return {}
 
     @property
+    def semantic_class_overrides(self) -> dict[str, str]:
+        """Per-instruction semantic-class refinements for this ISA.
+
+        Unlike :attr:`semantic_overrides`, these preserve the generic
+        derivation's operation, element size, and other metadata. Use this
+        when an ISA-specific instruction shape needs a different codegen
+        template but the remaining mnemonic-derived metadata is still valid.
+        """
+        return {}
+
+    @property
+    def ds_addtid_uses_m0_byte_base(self) -> bool:
+        """True when DS ADDTID addresses use M0 as a byte-address base."""
+        return False
+
+    @property
     def cmpx_writes_vcc(self) -> bool:
         """True if V_CMPX instructions write both EXEC and VCC.
 
@@ -1588,6 +1604,20 @@ class Gfx1250Profile(Rdna4Profile):
     @property
     def generated_arch_name(self) -> str | None:
         return 'gfx1250'
+
+    @property
+    def semantic_class_overrides(self) -> dict[str, str]:
+        return {
+            'DS_STORE_ADDTID_B32': 'ds_write_addtid',
+            'DS_STOREXCHG_2ADDR_RTN_B32': 'ds_atomic2',
+            'DS_STOREXCHG_2ADDR_RTN_B64': 'ds_atomic2',
+            'DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32': 'ds_atomic2',
+            'DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64': 'ds_atomic2',
+        }
+
+    @property
+    def ds_addtid_uses_m0_byte_base(self) -> bool:
+        return True
 
     _SKIP = frozenset(
         {

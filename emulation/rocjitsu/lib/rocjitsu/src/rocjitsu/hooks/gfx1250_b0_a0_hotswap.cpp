@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <cerrno>
+#include <cinttypes>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -52,12 +53,24 @@ bool verbose_logging() {
 void log(const char *format, ...) {
   if (!verbose_logging())
     return;
+  flockfile(stderr);
   std::fputs("[hsa-hotswap-rj] ", stderr);
   va_list args;
   va_start(args, format);
   std::vfprintf(stderr, format, args);
   va_end(args);
   std::fputc('\n', stderr);
+  funlockfile(stderr);
+}
+
+void log_translation(uint64_t source_id, const char *outcome, size_t changed, size_t input_bytes,
+                     size_t output_bytes, rj_status_t translation_status,
+                     hsa_status_t load_status) {
+  log("eager translation source_id=fnv1a64:%016" PRIx64
+      " input_revision=b0 output_revision=a0 outcome=%s changed=%zu"
+      " input_bytes=%zu output_bytes=%zu translation_status=%d status=%d",
+      source_id, outcome, changed, input_bytes, output_bytes, static_cast<int>(translation_status),
+      static_cast<int>(load_status));
 }
 
 template <typename Fn> hsa_status_t hsa_boundary(Fn &&fn) noexcept {
@@ -443,10 +456,18 @@ AgentStepping classify_agent(const OriginalApi &api, hsa_agent_t agent) {
   return revision == 0 ? AgentStepping::kA0 : AgentStepping::kB0OrLater;
 }
 
-bool any_agent_could_be_a0(const OriginalApi &api) {
+/// @brief Whether an agent-less load could land on a gfx1250 A0.
+/// @details kUnenumerable is a separate verdict only so the refusal can name agent
+/// enumeration as the cause; it is treated exactly like kPossible by callers. A tool
+/// loaded ahead of this hook in HSA_TOOLS_LIB owns hsa_iterate_agents_fn (this hook
+/// never patches it), so a failing enumeration usually means that tool refused, not
+/// that the machine has no agents.
+enum class A0Risk { kNone, kPossible, kUnenumerable };
+
+A0Risk assess_a0_risk(const OriginalApi &api) {
   auto *iterate = api.iterate_agents;
   if (iterate == nullptr)
-    return true;
+    return A0Risk::kUnenumerable;
   struct IterateData {
     const OriginalApi *api;
     bool found = false;
@@ -462,7 +483,11 @@ bool any_agent_could_be_a0(const OriginalApi &api) {
         return HSA_STATUS_SUCCESS;
       },
       &data);
-  return data.found || (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK);
+  if (data.found)
+    return A0Risk::kPossible;
+  if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+    return A0Risk::kUnenumerable;
+  return A0Risk::kNone;
 }
 
 hsa_status_t load_owned_bytes(hsa_executable_t executable, hsa_agent_t agent, const Blob &bytes,
@@ -646,23 +671,31 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
     // fixed B0-to-A0 profile.
     uint8_t *translated_data = nullptr;
     size_t translated_size = 0;
-    const rj_status_t translate_status = rj_gfx1250_b0_to_a0_translate(
-        source->data(), source->size(), &translated_data, &translated_size);
+    rj_gfx1250_b0_to_a0_translation_info_t info{};
+    const rj_status_t translate_status = rj_gfx1250_b0_to_a0_translate_with_info(
+        source->data(), source->size(), &translated_data, &translated_size, &info);
     if (translate_status != ROCJITSU_STATUS_SUCCESS || translated_data == nullptr ||
         translated_size == 0) {
       rj_gfx1250_b0_to_a0_free(translated_data);
+      log_translation(info.source_code_object_id, "translation_failed",
+                      info.changed_instruction_count, source->size(), 0, translate_status,
+                      HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
 
     Blob translated = copy_bytes(translated_data, translated_size);
     rj_gfx1250_b0_to_a0_free(translated_data);
-    if (translated == nullptr)
+    if (translated == nullptr) {
+      log_translation(info.source_code_object_id, "output_copy_failed",
+                      info.changed_instruction_count, source->size(), translated_size,
+                      translate_status, HSA_STATUS_ERROR_OUT_OF_RESOURCES);
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
 
     const hsa_status_t load_status =
         load_owned_bytes(executable, agent, translated, options, loaded, *api, original_load);
-    log("eager translated input_bytes=%zu output_bytes=%zu status=%d", source->size(),
-        translated_size, static_cast<int>(load_status));
+    log_translation(info.source_code_object_id, "translated", info.changed_instruction_count,
+                    source->size(), translated_size, translate_status, load_status);
     return load_status;
   });
 }
@@ -676,7 +709,15 @@ hsa_status_t HSA_API load_program_code_object(hsa_executable_t executable,
     if (api == nullptr)
       return HSA_STATUS_ERROR;
     auto *original = api->load_program;
-    if (any_agent_could_be_a0(*api))
+    const A0Risk risk = assess_a0_risk(*api);
+    // Same status either way -- callers must not have to distinguish these -- but the
+    // unenumerable case is logged separately so a co-loaded tool that refuses agent
+    // iteration is not misread as an A0 incompatibility.
+    if (risk == A0Risk::kUnenumerable) {
+      log("agent enumeration failed; refusing agent-less program load");
+      return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+    }
+    if (risk == A0Risk::kPossible)
       return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
     return original(executable, reader, options, loaded);
   });
@@ -750,5 +791,12 @@ extern "C" RJ_HOOK_EXPORT void rj_test_clear_retained_storage() {
   std::lock_guard lock(g_state.storage_mutex);
   g_state.readers.clear();
   g_state.executables.clear();
+}
+
+// Test-only: emit a deterministic translation record so concurrent logger tests
+// do not need to race the fake HSA loader state.
+extern "C" RJ_HOOK_EXPORT void rj_test_log_translation(uint64_t source_id, size_t changed) {
+  log_translation(source_id, "translated", changed, 64, 96, ROCJITSU_STATUS_SUCCESS,
+                  HSA_STATUS_SUCCESS);
 }
 #endif // RJ_HOTSWAP_TEST_HOOKS

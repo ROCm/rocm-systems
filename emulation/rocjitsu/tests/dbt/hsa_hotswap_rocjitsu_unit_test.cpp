@@ -10,10 +10,15 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <iterator>
 #include <new>
+#include <regex>
+#include <sstream>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -22,6 +27,7 @@ extern "C" bool OnLoad(HsaApiTable *, uint64_t, uint64_t, const char *const *);
 extern "C" void OnUnload();
 extern "C" size_t rj_test_retained_executable_buffer_count();
 extern "C" void rj_test_clear_retained_storage();
+extern "C" void rj_test_log_translation(uint64_t source_id, size_t changed);
 
 namespace {
 
@@ -287,6 +293,39 @@ TEST_F(HsaHotswapHookTest, UnloadRestoresAndAllowsReinstall) {
   EXPECT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
 }
 
+TEST_F(HsaHotswapHookTest, EmitsConcurrentTranslationRecordsAtomically) {
+  constexpr size_t kThreadCount = 8;
+  constexpr size_t kRecordsPerThread = 32;
+
+  ASSERT_EQ(setenv("HSA_HOTSWAP_VERBOSE", "1", 1), 0);
+  testing::internal::CaptureStderr();
+  std::vector<std::thread> workers;
+  workers.reserve(kThreadCount);
+  for (size_t thread_index = 0; thread_index < kThreadCount; ++thread_index) {
+    workers.emplace_back([thread_index] {
+      for (size_t record_index = 0; record_index < kRecordsPerThread; ++record_index) {
+        const uint64_t source_id = thread_index * kRecordsPerThread + record_index;
+        rj_test_log_translation(source_id, record_index);
+      }
+    });
+  }
+  for (auto &worker : workers)
+    worker.join();
+  const std::string log_text = testing::internal::GetCapturedStderr();
+  ASSERT_EQ(unsetenv("HSA_HOTSWAP_VERBOSE"), 0);
+
+  const std::regex record_pattern(
+      R"(^\[hsa-hotswap-rj\] eager translation source_id=fnv1a64:[0-9a-f]{16} input_revision=b0 output_revision=a0 outcome=translated changed=[0-9]+ input_bytes=64 output_bytes=96 translation_status=0 status=0$)");
+  std::istringstream lines(log_text);
+  std::string line;
+  size_t record_count = 0;
+  while (std::getline(lines, line)) {
+    EXPECT_TRUE(std::regex_match(line, record_pattern)) << line;
+    ++record_count;
+  }
+  EXPECT_EQ(record_count, kThreadCount * kRecordsPerThread);
+}
+
 // A rejected install must not leave the hook stuck. install() commits g_state.core
 // only AFTER its one fallible step (building the saved-table snapshot), so a
 // rejected or throwing install cannot latch core non-null and permanently reject
@@ -334,9 +373,13 @@ TEST_F(HsaHotswapHookTest, TranslatesGfx1250AndRetainsOutputUntilDestroy) {
   ASSERT_EQ(
       api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
       HSA_STATUS_SUCCESS);
-  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
-                                                              nullptr, nullptr),
-            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_VERBOSE", "1", 1), 0);
+  testing::internal::CaptureStderr();
+  const hsa_status_t load_status = api.core.hsa_executable_load_agent_code_object_fn(
+      kExecutable, kA0Agent, reader, nullptr, nullptr);
+  const std::string log_text = testing::internal::GetCapturedStderr();
+  ASSERT_EQ(unsetenv("HSA_HOTSWAP_VERBOSE"), 0);
+  ASSERT_EQ(load_status, HSA_STATUS_SUCCESS);
 
   ASSERT_GE(g_loaded_bytes.size(), rocjitsu::EI_MAGIC_SIZE);
   EXPECT_EQ(std::memcmp(g_loaded_bytes.data(), rocjitsu::EI_MAGIC, rocjitsu::EI_MAGIC_SIZE), 0);
@@ -344,6 +387,22 @@ TEST_F(HsaHotswapHookTest, TranslatesGfx1250AndRetainsOutputUntilDestroy) {
   EXPECT_NE(g_loaded_reader.handle, reader.handle);
   EXPECT_EQ(g_load_agent_calls, 1);
   EXPECT_EQ(rj_test_retained_executable_buffer_count(), 1u);
+
+  uint64_t identity = 14695981039346656037ULL;
+  for (uint8_t byte : source) {
+    identity ^= byte;
+    identity *= 1099511628211ULL;
+  }
+  std::ostringstream expected_identity;
+  expected_identity << "source_id=fnv1a64:" << std::hex << std::setfill('0') << std::setw(16)
+                    << identity;
+  EXPECT_NE(log_text.find("[hsa-hotswap-rj] eager translation "), std::string::npos) << log_text;
+  EXPECT_NE(log_text.find(expected_identity.str()), std::string::npos) << log_text;
+  EXPECT_NE(log_text.find(" input_revision=b0 output_revision=a0 outcome=translated changed="),
+            std::string::npos)
+      << log_text;
+  EXPECT_EQ(log_text.find(" changed=0 "), std::string::npos) << log_text;
+  EXPECT_NE(log_text.find(" translation_status=0 status=0"), std::string::npos) << log_text;
 
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecutable), HSA_STATUS_SUCCESS);
   EXPECT_EQ(rj_test_retained_executable_buffer_count(), 0u);

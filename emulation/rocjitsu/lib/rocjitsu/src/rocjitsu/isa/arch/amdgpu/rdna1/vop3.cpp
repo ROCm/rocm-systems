@@ -1136,8 +1136,8 @@ void VMovreldB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::RegisterAccess(wf).write_lane(rel_dst, lane,
-                                          amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    amdgpu::sdwa::write_lane<false>(*this, wf, rel_dst, lane,
+                                    amdgpu::RegisterAccess(wf).read_lane(src0, lane));
   }
 }
 
@@ -1171,8 +1171,8 @@ void VMovrelsB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::RegisterAccess(wf).write_lane(vdst, lane,
-                                          amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
+    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane,
+                                    amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
   }
 }
 
@@ -1895,39 +1895,38 @@ void VMacLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::RegisterAccess(wf).write_lane(
-        vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::fma(
-                [&]() {
-                  float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-                  if (inst_.abs & (1u << 0))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 0))
-                    sv = -sv;
-                  return sv;
-                }(),
-                [&]() {
-                  float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-                  if (inst_.abs & (1u << 1))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 1))
-                    sv = -sv;
-                  return sv;
-                }(),
-                std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vdst, lane)));
-            if (inst_.omod == 1)
-              v *= 2.0f;
-            else if (inst_.omod == 2)
-              v *= 4.0f;
-            else if (inst_.omod == 3)
-              v *= 0.5f;
-            return v;
-          }();
-          if (inst_.clamp)
-            v = std::clamp(v, 0.0f, 1.0f);
-          return v;
-        }()));
+    amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane, std::bit_cast<uint32_t>([&]() {
+      float v = [&]() {
+        float v = std::fma(
+            [&]() {
+              float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+              if (inst_.abs & (1u << 0))
+                sv = std::fabs(sv);
+              if (inst_.neg & (1u << 0))
+                sv = -sv;
+              return sv;
+            }(),
+            [&]() {
+              float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+              if (inst_.abs & (1u << 1))
+                sv = std::fabs(sv);
+              if (inst_.neg & (1u << 1))
+                sv = -sv;
+              return sv;
+            }(),
+            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vdst, lane)));
+        if (inst_.omod == 1)
+          v *= 2.0f;
+        else if (inst_.omod == 2)
+          v *= 4.0f;
+        else if (inst_.omod == 3)
+          v *= 0.5f;
+        return v;
+      }();
+      if (inst_.clamp)
+        v = std::clamp(v, 0.0f, 1.0f);
+      return v;
+    }()));
   }
 }
 
@@ -5570,7 +5569,7 @@ VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst)
 void VWritelaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t val = amdgpu::RegisterAccess(wf).read_scalar(src0);
   uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar(src1);
-  amdgpu::RegisterAccess(wf).write_lane(vdst, lane, val);
+  amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, val);
 }
 
 VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
@@ -6053,10 +6052,10 @@ void VPermlane16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     bool src_active = (exec & (1ULL << src_lane)) != 0;
     if (!src_active && !fi) {
       if (bound_ctrl)
-        amdgpu::RegisterAccess(wf).write_lane(vdst, lane, 0);
+        amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, 0);
       continue;
     }
-    amdgpu::RegisterAccess(wf).write_lane(vdst, lane, snap[src_lane]);
+    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, snap[src_lane]);
   }
 }
 
@@ -6109,10 +6108,10 @@ void VPermlanex16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     bool src_active = (exec & (1ULL << src_lane)) != 0;
     if (!src_active && !fi) {
       if (bound_ctrl)
-        amdgpu::RegisterAccess(wf).write_lane(vdst, lane, 0);
+        amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, 0);
       continue;
     }
-    amdgpu::RegisterAccess(wf).write_lane(vdst, lane, snap[src_lane]);
+    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, snap[src_lane]);
   }
 }
 

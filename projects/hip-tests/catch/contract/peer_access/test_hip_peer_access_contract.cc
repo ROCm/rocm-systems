@@ -1,0 +1,86 @@
+/*
+ * Copyright Advanced Micro Devices, Inc.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <hip/hip_runtime_api.h>
+#include <hip_test_common.hh>
+
+namespace {
+void DeviceCount(int* count) {
+  HIP_CHECK(hipGetDeviceCount(count));
+  if (*count <= 0) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+  }
+}
+}  // namespace
+
+// @asserts: hipDeviceEnablePeerAccess - rejects an out-of-range peer device ordinal (negative or >= device count)
+HIP_TEST_CASE(Contract_PeerAccess_HipDeviceEnablePeerAccess_EnableInvalidPeerId_IsRejected) {
+  int device_count = 0;
+  DeviceCount(&device_count);
+
+  REQUIRE(hipDeviceEnablePeerAccess(-1, 0) != hipSuccess);
+  REQUIRE(hipDeviceEnablePeerAccess(device_count, 0) != hipSuccess);
+}
+
+// @asserts: hipDeviceEnablePeerAccess - rejects a non-zero (reserved) flags value
+HIP_TEST_CASE(Contract_PeerAccess_HipDeviceEnablePeerAccess_EnableInvalidFlag_IsRejected) {
+  int current_device = 0;
+  HIP_CHECK(hipGetDevice(&current_device));
+
+  REQUIRE(hipDeviceEnablePeerAccess(current_device, ~0u) != hipSuccess);
+}
+
+// @asserts: hipDeviceDisablePeerAccess - rejects an out-of-range peer device ordinal (negative or >= device count)
+HIP_TEST_CASE(Contract_PeerAccess_HipDeviceDisablePeerAccess_DisableInvalidPeerId_IsRejected) {
+  int device_count = 0;
+  DeviceCount(&device_count);
+
+  REQUIRE(hipDeviceDisablePeerAccess(-1) != hipSuccess);
+  REQUIRE(hipDeviceDisablePeerAccess(device_count) != hipSuccess);
+}
+
+// @asserts: hipDeviceDisablePeerAccess - rejects disabling peer access that was never enabled
+HIP_TEST_CASE(Contract_PeerAccess_HipDeviceDisablePeerAccess_DisableNotEnabled_IsRejected) {
+  int current_device = 0;
+  HIP_CHECK(hipGetDevice(&current_device));
+
+  REQUIRE(hipDeviceDisablePeerAccess(current_device) != hipSuccess);
+}
+
+// @asserts: hipDeviceEnablePeerAccess - rejects enabling peer access from a device to itself
+HIP_TEST_CASE(Contract_PeerAccess_HipDeviceEnablePeerAccess_EnableSelf_IsRejected) {
+  int current_device = 0;
+  HIP_CHECK(hipGetDevice(&current_device));
+
+  REQUIRE(hipDeviceEnablePeerAccess(current_device, 0) != hipSuccess);
+}
+
+// @asserts: hipDeviceEnablePeerAccess - a redundant second enable and a redundant second disable each report a non-success error
+HIP_TEST_CASE(Contract_PeerAccess_HipDeviceEnablePeerAccess_EnableTwiceThenDisable_RoundTripsWhenAvailable) {
+  int device_count = 0;
+  DeviceCount(&device_count);
+  if (device_count < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+
+  int current_device = 0;
+  HIP_CHECK(hipGetDevice(&current_device));
+  const int peer_device = (current_device == 0) ? 1 : 0;
+
+  int can_access_peer = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, current_device, peer_device));
+  if (can_access_peer == 0) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+  }
+
+  HIP_CHECK(hipDeviceEnablePeerAccess(peer_device, 0));
+  const hipError_t second_enable = hipDeviceEnablePeerAccess(peer_device, 0);
+  HIP_CHECK(hipDeviceDisablePeerAccess(peer_device));
+  const hipError_t second_disable = hipDeviceDisablePeerAccess(peer_device);
+
+  REQUIRE(second_enable != hipSuccess);
+  REQUIRE(second_disable != hipSuccess);
+}

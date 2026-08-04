@@ -374,6 +374,7 @@ add_executable(
     l2_cache_test.cpp
     sparse_memory_test.cpp
     simdojo_sim_test.cpp
+    partitioning_test.cpp
     simulated_kfd_test.cpp
     decode_smoke_test.cpp
     buffer_operand_test.cpp
@@ -520,8 +521,29 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
-# ./rocjitsu_tests --gtest_filter='*Benchmark*').
-rj_add_gtest_tests(rocjitsu_tests TEST_FILTER -*Benchmark*)
+# ./rocjitsu_tests --gtest_filter='*Benchmark*'). The request-exit stress test
+# is registered separately so CTest can bound a deadlocked child process.
+rj_add_gtest_tests(
+    rocjitsu_tests
+    TEST_FILTER "-*Benchmark*:*RequestExitWakesAllPartitions*"
+)
+
+# RequestExitWakesAllPartitions may require several runs to show regression
+# (deadlock). Run 30 times with a 10 second timeout to boost chances of seeing
+# the failures. Usually fails within the first 5 times and 30 passing tests
+# takes about 2.5s in CI.
+rj_add_test(
+    NAME "TerminationTest.RequestExitWakesAllPartitions"
+    COMMAND
+        $<TARGET_FILE:rocjitsu_tests>
+        "--gtest_filter=TerminationTest.RequestExitWakesAllPartitions"
+        "--gtest_repeat=30"
+    TIMEOUT 10
+    INSTALL_COMMAND
+        "bin/rocjitsu_tests"
+        "--gtest_filter=TerminationTest.RequestExitWakesAllPartitions"
+        "--gtest_repeat=30"
+)
 
 # Exercise the Linux-only model ISA contract in a decoder-only final link.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -683,6 +705,18 @@ endif()
 rj_configure_target(launch_preload_test TEST)
 rj_add_gtest_tests(launch_preload_test)
 
+# --- CLI ROCm visibility tests ---
+# rocm_visibility.cpp ships in the launch-preload library for build convenience,
+# but its tests get their own executable so they mirror the source structure.
+
+add_executable(rocm_visibility_test rocm_visibility_test.cpp)
+target_link_libraries(
+    rocm_visibility_test
+    PRIVATE rocjitsu_cli_launch_preload GTest::gtest_main
+)
+rj_configure_target(rocm_visibility_test TEST)
+rj_add_gtest_tests(rocm_visibility_test)
+
 # --- DBI probe fixture test ---
 # Loads a real amdclang++-compiled rj_nop_probe device ELF and exercises the
 # probe symbol resolver against it. Needs the compiled fixture (amdclang++ +
@@ -759,7 +793,7 @@ target_include_directories(
 )
 target_link_libraries(
     rj_dbt_translate_smoke_test
-    PRIVATE rocjitsu_tooling GTest::gtest
+    PRIVATE rocjitsu_translate_cli GTest::gtest
 )
 rj_configure_target(rj_dbt_translate_smoke_test TEST)
 add_dependencies(rj_dbt_translate_smoke_test rj_dbt_translate)
@@ -950,6 +984,54 @@ rj_add_test(
         "bin/guest_kfd_test"
         "--gtest_filter=GuestKfdFailureTest.SimulatorOversizedLdsFailsCleanly"
 )
+rj_add_test(
+    NAME "GuestKfdFailureTest.PathOnlyAutomaticDbtHandoffFailsClosed"
+    COMMAND
+        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdFailureTest.PathOnlyAutomaticDbtHandoffFailsClosed
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
+        "--"
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdFailureTest.PathOnlyAutomaticDbtHandoffFailsClosed"
+)
+rj_add_test(
+    NAME "GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes"
+    COMMAND
+        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    # The test skips when the runtime directory it is handed is already deeper than
+    # the >4095-byte path it needs to build. Without this the skip would be reported
+    # as a pass and the lost coverage would be invisible.
+    SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
+        "--"
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes"
+)
+# Pure harness logic: no guest device, so no launcher wrapper.
+rj_add_test(
+    NAME "GuestKfdConfigTest.LongPathHandoffSkipsWhenRuntimeDirIsTooDeep"
+    COMMAND
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdConfigTest.LongPathHandoffSkipsWhenRuntimeDirIsTooDeep
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdConfigTest.LongPathHandoffSkipsWhenRuntimeDirIsTooDeep"
+)
 if(RJ_HAS_GFX1201_GPU)
     add_test(
         NAME "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
@@ -1046,7 +1128,6 @@ target_include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-        ${CMAKE_SOURCE_DIR}/lib/util/include
         ${CMAKE_BINARY_DIR}/include
         ${GENERATED_DIR}
 )
@@ -1058,7 +1139,9 @@ target_include_directories(
 target_link_libraries(
     hsa_hooks_unit_test
     PRIVATE
-        rocjitsu_hooks
+        # Test-only hook variant: same objects as rocjitsu_hooks plus the
+        # exported rj_hsa_dbt_set_topology_nodes_root_for_test seam.
+        rocjitsu_hooks_testing
         ${RJ_OBJECT_LIBS}
         util
         flatbuffers
@@ -1102,6 +1185,20 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_configure_target(hsa_hotswap_rocjitsu_unit_test TEST)
     gtest_discover_tests(hsa_hotswap_rocjitsu_unit_test)
 endif()
+
+# A separate loadable module is the only way to observe the force-scalar gate's
+# per-module scope: the gate is an inline variable with hidden visibility, so
+# nothing linked into the test executable can see the boundary. The test dlopens
+# this and compares what it reports against its own copy.
+add_library(util_force_scalar_probe MODULE util_force_scalar_probe.cpp)
+target_link_libraries(util_force_scalar_probe PRIVATE util)
+rj_configure_target(util_force_scalar_probe TEST)
+add_dependencies(rocjitsu_tests util_force_scalar_probe)
+target_compile_definitions(
+    rocjitsu_tests
+    PRIVATE
+        RJ_FORCE_SCALAR_PROBE_MODULE="$<TARGET_FILE:util_force_scalar_probe>"
+)
 
 # --- Interposer loader initialization regression tests ---
 
@@ -1480,7 +1577,6 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${CMAKE_SOURCE_DIR}/lib/util/include
                 ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
@@ -1512,13 +1608,13 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${CMAKE_SOURCE_DIR}/lib/util/include
                 ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
             hsa_hooks_test
             PRIVATE
                 ${RJ_OBJECT_LIBS}
+                util
                 ${HSA_RUNTIME64}
                 GTest::gtest
                 GTest::gtest_main
@@ -1600,7 +1696,6 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${CMAKE_SOURCE_DIR}/lib/util/include
                 ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
@@ -1750,13 +1845,13 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${CMAKE_SOURCE_DIR}/lib/util/include
                 ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
             hsa_dbi_nop_asm_test
             PRIVATE
                 ${RJ_OBJECT_LIBS}
+                util
                 ${HSA_RUNTIME64}
                 GTest::gtest
                 GTest::gtest_main
@@ -1828,13 +1923,13 @@ if(HSA_RUNTIME64)
                 PRIVATE
                     ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                     ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                    ${CMAKE_SOURCE_DIR}/lib/util/include
                     ${RJ_HSA_INCLUDE_DIR}
             )
             target_link_libraries(
                 hsa_dbi_nop_probe_test
                 PRIVATE
                     ${RJ_OBJECT_LIBS}
+                    util
                     ${HSA_RUNTIME64}
                     GTest::gtest
                     GTest::gtest_main
@@ -2457,7 +2552,8 @@ if(RJ_ENABLE_HIP_TESTS AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
         COMMAND
             ${AMDCXX} -x hip --offload-arch=gfx950 --rocm-path=${ROCM_PATH}
             -std=c++20 ${RJ_HIP_SANITIZER_FLAGS}
-            -I${CMAKE_SOURCE_DIR}/lib/util/include -o ${CVT_NARROW_BIN}
+            "-I$<JOIN:$<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>,;-I>"
+            -o ${CVT_NARROW_BIN}
             ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
             ${RJ_HIP_SANITIZER_LINK_FLAGS}
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp

@@ -10,7 +10,7 @@ from each instruction's mnemonic name and its encoding format name.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import re
@@ -2569,6 +2569,9 @@ def derive_all_semantics(isa_spec: IsaSpec) -> SemanticsSpec:
         SemanticsSpec containing all derivable instructions.
     """
     overrides = isa_spec.profile.semantic_overrides if isa_spec.profile else {}
+    class_overrides = (
+        isa_spec.profile.semantic_class_overrides if isa_spec.profile else {}
+    )
     instructions: dict[str, InstructionSemantics] = {}
     for enc in isa_spec.inst_encodings:
         for inst in enc.insts:
@@ -2586,5 +2589,8 @@ def derive_all_semantics(isa_spec: IsaSpec) -> SemanticsSpec:
                 continue
             sem = derive_semantics(inst.name, enc.enc_name)
             if sem is not None:
+                semantic_class = class_overrides.get(inst.name)
+                if semantic_class is not None:
+                    sem = replace(sem, semantic_class=semantic_class)
                 instructions[inst.name] = sem
     return SemanticsSpec(instructions)
