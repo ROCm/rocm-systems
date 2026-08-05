@@ -592,6 +592,28 @@ TEST_F(InitMicrotest, CommInitRankDev_PostInit_NullNewcomm_ReturnsInvalidArgumen
   EXPECT_EQ(ncclInvalidArgument,
             ncclCommInitRankDev(/*newcomm=*/nullptr, /*nranks=*/1, /*nId=*/1, &id, /*myrank=*/0, 0, &cfg, "t"));
 }
+// More post-init arms (ncclInit succeeds by default; order-independent). Note
+// nranks<1 is unreachable -- the pre-init guard requires 0 < nId <= nranks.
+TEST_F(InitMicrotest, CommInitRankDev_PostInit_NullConfig_ReturnsInvalidArgument) {
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+  EXPECT_EQ(ncclInvalidArgument,
+            ncclCommInitRankDev(&nc, /*nranks=*/1, /*nId=*/1, &id, /*myrank=*/0, 0, /*config=*/nullptr, "t"));
+}
+TEST_F(InitMicrotest, CommInitRankDev_PostInit_NegativeMyrank_ReturnsInvalidArgument) {
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  EXPECT_EQ(ncclInvalidArgument,
+            ncclCommInitRankDev(&nc, /*nranks=*/1, /*nId=*/1, &id, /*myrank=*/-1, 0, &cfg, "t"));
+}
+TEST_F(InitMicrotest, CommInitRankDev_PostInit_MyrankGeNranks_ReturnsInvalidArgument) {
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  EXPECT_EQ(ncclInvalidArgument,
+            ncclCommInitRankDev(&nc, /*nranks=*/1, /*nId=*/1, &id, /*myrank=*/1, 0, &cfg, "t"));
+}
 
 #if defined(HIP_HOST_UNCACHED_MEMORY)
 TEST_F(InitMicrotest, CheckHostUncacheMemSetting_Uncached_AlwaysSucceeds) {
