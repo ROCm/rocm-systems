@@ -149,16 +149,6 @@ find_package(Libva QUIET)
 find_package(Libdrm_amdgpu QUIET)
 find_package(Threads QUIET)
 
-# Check Libva version compatibility: requires libva >= 1.22
-if(Libva_FOUND)
-  if("${Libva_VERSION}" VERSION_GREATER_EQUAL "1.22")
-    message("-- ${White}\tLibva Version Supported${ColourReset}")
-  else()
-    set(Libva_FOUND FALSE)
-    message("-- ${Yellow}\tLibva Version Not Supported (found ${Libva_VERSION}, need >= 1.22)${ColourReset}")
-  endif()
-endif()
-
 if(ROCJPEG_ENABLE_ROCPROFILER_REGISTER)
   find_package(rocprofiler-register QUIET
     HINTS $ENV{rocprofiler_register_ROOT} $ENV{ROCPROFILER_REGISTER_ROOT} ${CMAKE_INSTALL_PREFIX}
