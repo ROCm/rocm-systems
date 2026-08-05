@@ -2334,38 +2334,13 @@ void VSExpF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VSExpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  if (exec != 0) {
-    amdgpu::RegisterAccess(wf).write_scalar(
-        vdst,
-        util::f32_to_f16_mode(
-            [&]() {
-              float v = [&]() {
-                float v = amdgpu::transcendental::exp_f32([&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ((opsel & 0x1u) != 0 ? (amdgpu::RegisterAccess(wf).read_scalar(src0) >> 16)
-                                           : amdgpu::RegisterAccess(wf).read_scalar(src0))));
-                  if (inst_.abs & (1u << 0))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 0))
-                    sv = -sv;
-                  return sv;
-                }());
-                if (inst_.omod == 1)
-                  v *= 2.0f;
-                else if (inst_.omod == 2)
-                  v *= 4.0f;
-                else if (inst_.omod == 3)
-                  v *= 0.5f;
-                return v;
-              }();
-              if (inst_.clamp)
-                v = std::clamp(v, 0.0f, 1.0f);
-              return v;
-            }(),
-            wf.fp16_ovfl()));
-  }
+  amdgpu::RegisterAccess(wf).write_scalar(
+      vdst,
+      amdgpu::pseudo_scalar::execute_f16(
+          amdgpu::pseudo_scalar::Operation::EXP2,
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(src0))),
+          (inst_.abs & 1u) != 0, (inst_.neg & 1u) != 0, wf.fp_round_mode_f16_f64(),
+          wf.fp_denorm_mode_f16_f64(), inst_.omod, inst_.clamp, wf.fp16_ovfl()));
 }
 
 void VSLogF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2373,38 +2348,13 @@ void VSLogF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VSLogF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  if (exec != 0) {
-    amdgpu::RegisterAccess(wf).write_scalar(
-        vdst,
-        util::f32_to_f16_mode(
-            [&]() {
-              float v = [&]() {
-                float v = amdgpu::transcendental::log_f32([&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ((opsel & 0x1u) != 0 ? (amdgpu::RegisterAccess(wf).read_scalar(src0) >> 16)
-                                           : amdgpu::RegisterAccess(wf).read_scalar(src0))));
-                  if (inst_.abs & (1u << 0))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 0))
-                    sv = -sv;
-                  return sv;
-                }());
-                if (inst_.omod == 1)
-                  v *= 2.0f;
-                else if (inst_.omod == 2)
-                  v *= 4.0f;
-                else if (inst_.omod == 3)
-                  v *= 0.5f;
-                return v;
-              }();
-              if (inst_.clamp)
-                v = std::clamp(v, 0.0f, 1.0f);
-              return v;
-            }(),
-            wf.fp16_ovfl()));
-  }
+  amdgpu::RegisterAccess(wf).write_scalar(
+      vdst,
+      amdgpu::pseudo_scalar::execute_f16(
+          amdgpu::pseudo_scalar::Operation::LOG2,
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(src0))),
+          (inst_.abs & 1u) != 0, (inst_.neg & 1u) != 0, wf.fp_round_mode_f16_f64(),
+          wf.fp_denorm_mode_f16_f64(), inst_.omod, inst_.clamp, wf.fp16_ovfl()));
 }
 
 void VSRcpF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2412,38 +2362,13 @@ void VSRcpF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VSRcpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  if (exec != 0) {
-    amdgpu::RegisterAccess(wf).write_scalar(
-        vdst,
-        util::f32_to_f16_mode(
-            [&]() {
-              float v = [&]() {
-                float v = amdgpu::transcendental::rcp_f32([&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ((opsel & 0x1u) != 0 ? (amdgpu::RegisterAccess(wf).read_scalar(src0) >> 16)
-                                           : amdgpu::RegisterAccess(wf).read_scalar(src0))));
-                  if (inst_.abs & (1u << 0))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 0))
-                    sv = -sv;
-                  return sv;
-                }());
-                if (inst_.omod == 1)
-                  v *= 2.0f;
-                else if (inst_.omod == 2)
-                  v *= 4.0f;
-                else if (inst_.omod == 3)
-                  v *= 0.5f;
-                return v;
-              }();
-              if (inst_.clamp)
-                v = std::clamp(v, 0.0f, 1.0f);
-              return v;
-            }(),
-            wf.fp16_ovfl()));
-  }
+  amdgpu::RegisterAccess(wf).write_scalar(
+      vdst,
+      amdgpu::pseudo_scalar::execute_f16(
+          amdgpu::pseudo_scalar::Operation::RCP,
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(src0))),
+          (inst_.abs & 1u) != 0, (inst_.neg & 1u) != 0, wf.fp_round_mode_f16_f64(),
+          wf.fp_denorm_mode_f16_f64(), inst_.omod, inst_.clamp, wf.fp16_ovfl()));
 }
 
 void VSRsqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2451,38 +2376,13 @@ void VSRsqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VSRsqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  if (exec != 0) {
-    amdgpu::RegisterAccess(wf).write_scalar(
-        vdst,
-        util::f32_to_f16_mode(
-            [&]() {
-              float v = [&]() {
-                float v = amdgpu::transcendental::rsq_f32([&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ((opsel & 0x1u) != 0 ? (amdgpu::RegisterAccess(wf).read_scalar(src0) >> 16)
-                                           : amdgpu::RegisterAccess(wf).read_scalar(src0))));
-                  if (inst_.abs & (1u << 0))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 0))
-                    sv = -sv;
-                  return sv;
-                }());
-                if (inst_.omod == 1)
-                  v *= 2.0f;
-                else if (inst_.omod == 2)
-                  v *= 4.0f;
-                else if (inst_.omod == 3)
-                  v *= 0.5f;
-                return v;
-              }();
-              if (inst_.clamp)
-                v = std::clamp(v, 0.0f, 1.0f);
-              return v;
-            }(),
-            wf.fp16_ovfl()));
-  }
+  amdgpu::RegisterAccess(wf).write_scalar(
+      vdst,
+      amdgpu::pseudo_scalar::execute_f16(
+          amdgpu::pseudo_scalar::Operation::RSQ,
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(src0))),
+          (inst_.abs & 1u) != 0, (inst_.neg & 1u) != 0, wf.fp_round_mode_f16_f64(),
+          wf.fp_denorm_mode_f16_f64(), inst_.omod, inst_.clamp, wf.fp16_ovfl()));
 }
 
 void VSSqrtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2490,38 +2390,13 @@ void VSSqrtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VSSqrtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  if (exec != 0) {
-    amdgpu::RegisterAccess(wf).write_scalar(
-        vdst,
-        util::f32_to_f16_mode(
-            [&]() {
-              float v = [&]() {
-                float v = amdgpu::transcendental::sqrt_f32([&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ((opsel & 0x1u) != 0 ? (amdgpu::RegisterAccess(wf).read_scalar(src0) >> 16)
-                                           : amdgpu::RegisterAccess(wf).read_scalar(src0))));
-                  if (inst_.abs & (1u << 0))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 0))
-                    sv = -sv;
-                  return sv;
-                }());
-                if (inst_.omod == 1)
-                  v *= 2.0f;
-                else if (inst_.omod == 2)
-                  v *= 4.0f;
-                else if (inst_.omod == 3)
-                  v *= 0.5f;
-                return v;
-              }();
-              if (inst_.clamp)
-                v = std::clamp(v, 0.0f, 1.0f);
-              return v;
-            }(),
-            wf.fp16_ovfl()));
-  }
+  amdgpu::RegisterAccess(wf).write_scalar(
+      vdst,
+      amdgpu::pseudo_scalar::execute_f16(
+          amdgpu::pseudo_scalar::Operation::SQRT,
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(src0))),
+          (inst_.abs & 1u) != 0, (inst_.neg & 1u) != 0, wf.fp_round_mode_f16_f64(),
+          wf.fp_denorm_mode_f16_f64(), inst_.omod, inst_.clamp, wf.fp16_ovfl()));
 }
 
 void VAddNcU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
