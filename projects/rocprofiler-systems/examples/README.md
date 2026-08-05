@@ -30,7 +30,7 @@ This directory contains example applications demonstrating various profiling sce
 | [thread-limit](thread-limit/) | Thread scaling stress test with batched Fibonacci workers | pthreads |
 | [parallel-overhead](parallel-overhead/) | Mutex vs. atomic synchronization overhead comparison | pthreads |
 | [code-coverage](code-coverage/) | Dual code-path execution for coverage analysis testing | pthreads |
-| [fork](fork/) | Multi-process forking from worker threads with child process profiling | pthreads, rocprofiler-sdk-roctx |
+| [fork](fork/) | Multi-process forking from worker threads with child process profiling | pthreads |
 
 ### Distributed Computing
 

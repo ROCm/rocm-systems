@@ -15,16 +15,10 @@ string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_DEBUG}")
 list(APPEND _FLAGS -fno-inline)
 
 find_package(Threads REQUIRED)
-if(NOT TARGET rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
-    find_package(rocprofiler-sdk-roctx REQUIRED)
-endif()
 
 # Basic fork example
 add_executable(fork-example fork.cpp)
-target_link_libraries(
-    fork-example
-    PRIVATE Threads::Threads pthread rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
-)
+target_link_libraries(fork-example PRIVATE Threads::Threads pthread)
 target_compile_options(fork-example PRIVATE ${_FLAGS})
 
 if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET fork-example)

@@ -64,8 +64,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   `rocprofsys.user` submodule, and the associated pytest coverage. Use
   [ROCTx](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-sdk-roctx.html)
   (`rocprofiler-sdk-roctx`) for general-purpose manual instrumentation
-  (starting/stopping tracing, named regions) instead; see the updated
-  `examples/fork` and `examples/roctx` for usage.
+  (starting/stopping tracing, named regions) instead; see `examples/roctx`
+  for usage.
 
   Causal profiling's `ROCPROFSYS_CAUSAL_PROGRESS`/`ROCPROFSYS_CAUSAL_BEGIN`/
   `ROCPROFSYS_CAUSAL_END` macros are unaffected: they now run on a new,
