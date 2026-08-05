@@ -2584,6 +2584,11 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
   size_t globalWorkOffset[3] = {0, 0, 0};
   amd::NDRangeContainer ndrange(1, globalWorkOffset, &globalWorkSize, &localWorkSize);
   address parameters = captureArguments(kernels_[kFillType]);
+  // Upgrade the fill dispatch's release fence to system scope. On spatially
+  // partitioned (DPX/NPS2) agents an agent-scope release does not make the fill
+  // writes system-visible, so a subsequent copy/read (e.g. multi-slice
+  // hipMemset3D followed by hipMemcpy3D) can observe stale data.
+  gpu().addSystemScope();
   result = gpu().submitKernelInternal(ndrange, *kernels_[kFillType], parameters, nullptr);
   releaseArguments(parameters);
   synchronize();
@@ -2674,6 +2679,11 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
 
     // Execute the blit
     address parameters = captureArguments(kernels_[fillType]);
+    // Upgrade the fill dispatch's release fence to system scope. On spatially
+    // partitioned (DPX/NPS2) agents an agent-scope release does not make the fill
+    // writes system-visible, so a subsequent copy/read (e.g. multi-slice
+    // hipMemset3D followed by hipMemcpy3D) can observe stale data.
+    gpu().addSystemScope();
     result = gpu().submitKernelInternal(ndrange, *kernels_[fillType], parameters, nullptr);
     releaseArguments(parameters);
   }
