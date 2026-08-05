@@ -534,6 +534,14 @@ class TestGfx1250Profile:
             )
             == 'alu'
         )
+        assert (
+            self.p.source_split_file_stem(
+                'ENC_VOP3',
+                'V_S_EXP_F32',
+                SimpleNamespace(semantic_class='pseudo_scalar_unary'),
+            )
+            == 'alu'
+        )
 
     def test_generated_source_split_file_matcher_is_scoped(self):
         units = [_SourceImplUnit('alu', ['impl']), _SourceImplUnit('cmpx', ['impl'])]
