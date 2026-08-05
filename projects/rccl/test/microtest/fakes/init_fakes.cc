@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <unordered_map>
 
@@ -78,7 +79,17 @@ Recorder& Recorder::instance() {
   return inst;
 }
 void Recorder::record(const char*) {}
+void Recorder::record(ncclComm_t*, int, const int*) {}  // CommInitAll
 }  // namespace rccl
+
+// Group boundary + unique-id seams reached by ncclCommInitAll / rank wrappers.
+// No-op success (balanced start/end); ncclGetUniqueId zeroes the id.
+ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
+ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
+ncclResult_t ncclGetUniqueId(ncclUniqueId* id) {
+  if (id) std::memset(id, 0, sizeof(*id));
+  return ncclSuccess;
+}
 
 // -------------------------------------------------------------------------
 // Group-job + GIN seams reached via ncclCommEnsureReady / ncclCommGetAsyncError.

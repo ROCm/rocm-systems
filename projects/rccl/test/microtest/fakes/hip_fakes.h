@@ -78,6 +78,15 @@ extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/, unsigned /
     g_hipExtMallocWithFlags;
 extern std::function<hipError_t(void* /*ptr*/)> g_hipFree;
 
+// Device inventory + current-device state (ncclCommInitAll, Tier-D). Defaults
+// succeed; g_deviceCount backs hipGetDeviceCount, g_currentDevice tracks
+// hipGetDevice/hipSetDevice. Tests inject faults or set the count.
+extern int g_deviceCount;
+extern int g_currentDevice;
+extern std::function<hipError_t(int* /*dev*/)> g_hipGetDevice;
+extern std::function<hipError_t(int /*dev*/)> g_hipSetDevice;
+extern std::function<hipError_t(int* /*count*/)> g_hipGetDeviceCount;
+
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.
 void ResetHipFakes();

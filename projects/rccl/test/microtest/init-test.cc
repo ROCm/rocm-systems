@@ -504,6 +504,47 @@ TEST_F(InitMicrotest, FillInfo_AllocOk_DmaBufSupported_EnablesGdrDirectly) {
   EXPECT_EQ(0, g_gdrSupportCalls);   // GDR fallback NOT called
 }
 
+// ===========================================================================
+// Tier D: ncclCommInitAll_impl (init.cc:3350) validation arms + device-count
+// model. cudaGetDevice runs before any validation; cudaGetDeviceCount gates the
+// devlist checks. (Full happy path / restoration lands with the D5 ncclInit
+// bring-up since the loop calls ncclCommInitRankDev.)
+// ===========================================================================
+TEST_F(InitMicrotest, CommInitAll_GetDeviceFault_StopsBeforeCount) {
+  g_hipGetDevice = [](int*) { return hipErrorInvalidValue; };
+  g_hipGetDeviceCount = [](int*) -> hipError_t {
+    ADD_FAILURE() << "device-count query must not run after a getDevice fault";
+    return hipErrorInvalidValue;
+  };
+  ncclComm_t comms[2] = {};
+  EXPECT_EQ(ncclUnhandledCudaError, ncclCommInitAll_impl(comms, 2, nullptr));
+}
+TEST_F(InitMicrotest, CommInitAll_NegativeNdev_ReturnsInvalidArgument) {
+  ncclComm_t comms[1] = {};
+  EXPECT_EQ(ncclInvalidArgument, ncclCommInitAll_impl(comms, -1, nullptr));
+}
+TEST_F(InitMicrotest, CommInitAll_NullComms_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclInvalidArgument, ncclCommInitAll_impl(nullptr, 2, nullptr));
+}
+TEST_F(InitMicrotest, CommInitAll_GetDeviceCountFault_ReturnsUnhandledCudaError) {
+  g_hipGetDeviceCount = [](int*) { return hipErrorInvalidValue; };
+  ncclComm_t comms[2] = {};
+  int devlist[2] = {0, 1};
+  EXPECT_EQ(ncclUnhandledCudaError, ncclCommInitAll_impl(comms, 2, devlist));
+}
+TEST_F(InitMicrotest, CommInitAll_InvalidDeviceInList_ReturnsInvalidArgument) {
+  g_deviceCount = 2;  // valid devices are 0..1
+  ncclComm_t comms[1] = {};
+  int devlist[1] = {5};  // out of range
+  EXPECT_EQ(ncclInvalidArgument, ncclCommInitAll_impl(comms, 1, devlist));
+}
+TEST_F(InitMicrotest, CommInitAll_DuplicateDevice_ReturnsInvalidUsage) {
+  g_deviceCount = 8;  // MULTI_RANK_GPU_ENABLE defaults 0 -> duplicates rejected
+  ncclComm_t comms[2] = {};
+  int devlist[2] = {0, 0};
+  EXPECT_EQ(ncclInvalidUsage, ncclCommInitAll_impl(comms, 2, devlist));
+}
+
 #if defined(HIP_HOST_UNCACHED_MEMORY)
 TEST_F(InitMicrotest, CheckHostUncacheMemSetting_Uncached_AlwaysSucceeds) {
   TopoComm t("gfx950:sramecc+");  // even gfx950 is OK when the build flag is set

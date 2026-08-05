@@ -139,6 +139,15 @@ std::function<hipError_t(void**, std::size_t, unsigned)>
     g_hipExtMallocWithFlags = DefaultHipExtMallocWithFlags;
 std::function<hipError_t(void*)> g_hipFree = DefaultHipFree;
 
+int g_deviceCount = 8;
+int g_currentDevice = 0;
+static hipError_t DefaultHipGetDevice(int* dev) { if (dev) *dev = g_currentDevice; return hipSuccess; }
+static hipError_t DefaultHipSetDevice(int dev) { g_currentDevice = dev; return hipSuccess; }
+static hipError_t DefaultHipGetDeviceCount(int* count) { if (count) *count = g_deviceCount; return hipSuccess; }
+std::function<hipError_t(int*)> g_hipGetDevice = DefaultHipGetDevice;
+std::function<hipError_t(int)> g_hipSetDevice = DefaultHipSetDevice;
+std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
+
 // Restore every HIP hook to its default. Called from ResetP2pFakes().
 void ResetHipFakes()
 {
@@ -152,6 +161,11 @@ void ResetHipFakes()
     g_hipGetDeviceProperties        = DefaultHipGetDeviceProperties;
     g_hipExtMallocWithFlags         = DefaultHipExtMallocWithFlags;
     g_hipFree                       = DefaultHipFree;
+    g_hipGetDevice                  = DefaultHipGetDevice;
+    g_hipSetDevice                  = DefaultHipSetDevice;
+    g_hipGetDeviceCount             = DefaultHipGetDeviceCount;
+    g_deviceCount                   = 8;
+    g_currentDevice                 = 0;
 }
 
 // ===========================================================================
@@ -235,17 +249,10 @@ hipError_t hipExtMallocWithFlags(void** ptr, size_t size, unsigned int flags)
 
 hipError_t hipFree(void* ptr) { return g_hipFree(ptr); }
 
-hipError_t hipGetDevice(int* deviceId)
-{
-    if (deviceId) *deviceId = 0;
-    return hipErrorInvalidValue;
-}
+hipError_t hipGetDevice(int* deviceId) { return g_hipGetDevice(deviceId); }
+hipError_t hipSetDevice(int deviceId) { return g_hipSetDevice(deviceId); }
 
-hipError_t hipGetDeviceCount(int* count)
-{
-    if (count) *count = 0;
-    return hipErrorInvalidValue;
-}
+hipError_t hipGetDeviceCount(int* count) { return g_hipGetDeviceCount(count); }
 
 // Device-model symbols routed through the controllable hooks above. After
 // hipify, init.cc's hipGetDeviceProperties call binds to hipGetDevicePropertiesR0600.
