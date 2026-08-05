@@ -416,3 +416,36 @@ On the other hand, ``arb_state_stall_`` fields indicate the type of instructions
 This information is useful for understanding how many instructions per cycle (IPC) are issued.
 
 For information about how to analyze stochastic PC sampling data, see :ref:`cdna3-cdna4-pc-sampling`.
+
+Stochastic PC sampling correction for internal-instruction skid (gfx1250)
+===========================================================================
+
+On the gfx1250 architecture, stochastic PC sampling can occasionally report a program counter
+that lands on an internal-only instruction, such as ``s_nop``, ``s_sleep``, ``s_wait*``,
+``s_barrier_wait``, or ``s_icache_inv``, while the sample's issue and stall-reason signals
+actually describe an adjacent, non-internal instruction. Because these internal instructions
+cannot themselves issue or stall in a way that produces such a signal, the signal has effectively
+leaked from a neighboring instruction onto the reported PC. Left uncorrected, this skid causes
+stalls and issue behavior to be silently attributed to the wrong instruction, which is misleading
+when using the profile to identify hotspots and the stalls underlying them.
+
+This correction is not implemented inside the ROCprofiler-SDK core sampling path. Identifying
+and correcting affected samples requires walking the disassembled instruction stream of each
+code object to classify instructions and build a lookup table of correction windows. This is
+one-time, per-code-object work that is well suited to a tool-side post-processing pass, but is
+not something the SDK's sampling path, which stays on or near the per-sample hot path, should take on.
+For this reason, the SDK's PC sample stream itself remains unmodified, and the correction is
+instead implemented in ``rocprofv3``.
+
+In ``rocprofv3``, the correction runs in two stages. At code-object load time, a build-side pass
+walks each symbol once and classifies every internal-like instruction into an
+``EXT1 -> INT_CHAIN -> EXT2`` window, where ``EXT1`` and ``EXT2`` are the external (non-internal)
+instructions bounding a run of internals; this classification is built once and stored for fast
+lookup. At sample time, an apply-side check flags only samples whose reported PC lands on an
+internal instruction and whose signal is inconsistent with that instruction being internal.
+Flagged samples are then corrected backward or forward to the appropriate boundary of their
+window, or dropped if the window is ambiguous or incomplete. This correction applies only to
+stochastic PC sampling on gfx1250; other architectures are unaffected.
+
+The correction is enabled by default and can be disabled by setting the
+``ROCPROF_PC_SAMPLING_CORRECTION`` environment variable to ``0``, ``false``, or ``off``.
