@@ -2156,7 +2156,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       // with the descriptor entry plus, when present, the kernarg-preload firmware
       // entry at +256, which hardware enters with unknown EXEC) and pass it to
       // LivenessAnalysis so EXEC-masked vector defs can be promoted to kills where
-      // EXEC is provably full, freeing more scratch registers.
+      // EXEC is provably full, freeing more scratch registers. Reference issue #9733.
       liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), /*exec=*/nullptr, liveness_options,
                                   scope_analysis_edges);
     }
