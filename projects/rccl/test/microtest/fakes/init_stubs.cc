@@ -1,22 +1,137 @@
 /*************************************************************************
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
- *
  * See LICENSE.txt for license information
  ************************************************************************/
-
-// Fail-loud stub floor + data-symbol definitions for the init.cc microtest
-// (AICOMRCCL-1685). The init.cc TU references the full communicator-init symbol
-// surface (~180 nccl/rccl/bootstrap/hip internals). The Tier A-D tests never
-// call the deep path (initTransportsRank / transport / proxy / topology / nvls /
-// gin / ras / net), but every referenced symbol must still be DEFINED for the
-// binary to link. Those get one-line fail-loud stubs here (abort if ever hit, so
-// a test that strays into the deep path fails immediately and visibly). The
-// controllable D5 / Tier A-D subset lives in init_fakes.cc / nccl_fakes.cc /
-// hip_fakes.cc instead.
-//
-// This file is populated iteratively from the reduced undefined-symbol set after
-// the real oracle TUs (argcheck/archinfo/utils) are linked with --gc-sections.
-
+// Fail-loud stub floor for src/init.cc deep-path symbols (AICOMRCCL-1685).
+// gc-sections retains ncclCommInitRankDev/ncclInit, whose bodies reference the
+// whole bootstrap/topology/transport/nvls/gin/proxy surface. Tier A-D tests
+// never CALL these (they return on validation arms), but the refs must LINK, so
+// each is an abort-on-call stub. Mostly auto-generated from header decls; see
+// gen_stubs.sh. Real fakes replace individual entries as deeper tests need them.
 #include <cstdlib>
-
-// (stubs added in the next bring-up iteration)
+#include <cstdint>
+#include <sched.h>
+#include <cstddef>
+#include "nccl.h"
+#include "os.h"   // ncclAffinity + ncclOs* declarations
+struct ncclBootstrapHandle;
+struct ncclComm;
+struct ncclCudaContext;
+struct ncclDevrWindow;
+struct ncclStrongStream;
+struct ncclTopoGraph;
+struct ncclTopoSystem;
+// --- auto-generated fail-loud stubs ---
+ncclResult_t amd_smi_init() { ::abort(); }
+ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) { ::abort(); }
+ncclResult_t bootstrapClose(void* commState) { ::abort(); }
+ncclResult_t bootstrapCreateRoot(struct ncclBootstrapHandle* handle, bool idFromEnv) { ::abort(); }
+ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle, struct ncclComm* comm) { ::abort(); }
+ncclResult_t bootstrapInit(int nHandles, void* handle, struct ncclComm* comm, struct ncclComm* parent) { ::abort(); }
+ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, int nranks, int tag) { ::abort(); }
+ncclResult_t bootstrapNetInit() { ::abort(); }
+ncclResult_t commSetUnrollFactor(struct ncclComm* comm) { ::abort(); }
+ncclResult_t initChannel(struct ncclComm* comm, int channelid) { ::abort(); }
+ncclResult_t ncclCeFinalize(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclCollNetChainBufferSetup(ncclComm_t comm) { ::abort(); }
+ncclResult_t ncclCollNetDirectBufferSetup(ncclComm_t comm) { ::abort(); }
+ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTopoGraph* graphs[]) { ::abort(); }
+void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
+ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) { ::abort(); }
+ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm) { ::abort(); }
+bool ncclDdaUseFabricPath(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, struct ncclDevrWindow** outWin) { ::abort(); }
+bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclEnvPluginInit(void) { ::abort(); }
+ncclResult_t ncclGetUserP2pLevel(int* level) { ::abort(); }
+ncclResult_t ncclGinFinalize(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclGinInit(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclGinInitFromParent(struct ncclComm* comm, struct ncclComm* parent) { ::abort(); }
+ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) { ::abort(); }
+bool ncclIommuPassthroughOk(const char* cmdline) { ::abort(); }
+ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclNetFinalize(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclNetInit(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclNetInitFromParent(struct ncclComm* comm, struct ncclComm* parent) { ::abort(); }
+ncclResult_t ncclNvlsBufferSetup(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclNvlsInit(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent) { ::abort(); }
+ncclResult_t ncclNvlsTreeConnect(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclNvlsTuning(struct ncclComm* comm) { ::abort(); }
+int ncclOsCpuCount(const ncclAffinity& affinity) { ::abort(); }
+ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { ::abort(); }
+size_t ncclOsGetPageSize() { ::abort(); }
+ncclResult_t ncclOsInitialize() { ::abort(); }
+ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) { ::abort(); }
+ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) { ::abort(); }
+void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { ::abort(); }
+ncclResult_t ncclProxyCreate(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclProxyDestroy(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclProxyShmUnlink(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclProxyStop(struct ncclComm* comm) { ::abort(); }
+int ncclPxnDisable(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclRegCleanup(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclStrongStreamConstruct(struct ncclStrongStream* ss) { ::abort(); }
+ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) { ::abort(); }
+ncclResult_t ncclStrongStreamSynchronize(struct ncclStrongStream* ss) { ::abort(); }
+ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclTopoCheckNicFused(struct ncclComm* comm, bool* fused) { ::abort(); }
+ncclResult_t ncclTopoCompute(struct ncclTopoSystem* system, struct ncclTopoGraph* graph) { ::abort(); }
+ncclResult_t ncclTopoComputeCommCPU(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclTopoDumpGraphs(struct ncclTopoSystem* system, int ngraphs, struct ncclTopoGraph** graphs) { ::abort(); }
+void ncclTopoFree(struct ncclTopoSystem* system) { ::abort(); }
+ncclResult_t ncclTopoGetCpuAffinity(struct ncclTopoSystem* system, int rank, ncclAffinity* affinity) { ::abort(); }
+ncclResult_t ncclTopoGetMinNetBw(struct ncclTopoSystem* system, int rank, float* bw) { ::abort(); }
+ncclResult_t ncclTopoGetNvbGpus(struct ncclTopoSystem* system, int rank, int* nranks, int** ranks) { ::abort(); }
+ncclResult_t ncclTopoGetPxnRanks(struct ncclComm* comm, int** intermediateRanks, int* nranks) { ::abort(); }
+ncclResult_t ncclTopoGetStrFromSys(const char* path, const char* fileName, char* strValue) { ::abort(); }
+ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** system, const char* dumpXmlFile) { ::abort(); }
+ncclResult_t ncclTopoInitTunerConstants(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclTopoPathAllDirectNVLink(struct ncclTopoSystem* system, bool* allNvlinkConnected) { ::abort(); }
+ncclResult_t ncclTopoPathAllNVLink(struct ncclTopoSystem* system, int* allNvLink) { ::abort(); }
+ncclResult_t ncclTopoPrint(struct ncclTopoSystem* system) { ::abort(); }
+ncclResult_t ncclTopoPrintGraph(struct ncclTopoSystem* system, struct ncclTopoGraph* graph) { ::abort(); }
+ncclResult_t ncclTopoSearchInit(struct ncclTopoSystem* system) { ::abort(); }
+ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCompCap, struct ncclTopoGraph** graphs) { ::abort(); }
+ncclResult_t ncclTransportPatConnect(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclTransportRingConnect(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclTransportTreeConnect(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclTreeBasePostset(struct ncclComm* comm, struct ncclTopoGraph* treeGraph) { ::abort(); }
+ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) { ::abort(); }
+ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm) { ::abort(); }
+int rcclGetTuningIndexForArch(const char* gfxarch) { ::abort(); }
+bool rcclUseAinic() { ::abort(); }
+// --- manual stubs: complex signatures, extern-C APIs, data/TLS ---
+struct ncclAsyncJob; struct ncclTopoRanks; struct ncclChannel;
+ncclResult_t bootstrapSplit(unsigned long, struct ncclComm*, struct ncclComm*, int, int, int*) { ::abort(); }
+ncclResult_t freeChannel(struct ncclChannel*, int, int, int, struct ncclComm*) { ::abort(); }
+ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob*, ncclResult_t(*)(struct ncclAsyncJob*), void(*)(struct ncclAsyncJob*), void(*)(void*), struct ncclComm*) { ::abort(); }
+ncclResult_t ncclTopoPostset(struct ncclComm*, int*, int*, struct ncclTopoRanks**, int*, struct ncclTopoGraph**, struct ncclComm*, int) { ::abort(); }
+ncclResult_t ncclTransportCheckP2pType(struct ncclComm*, bool*, bool*, bool*) { ::abort(); }
+ncclResult_t ncclTransportP2pConnect(struct ncclComm*, int, int, int*, int, int*, int) { ::abort(); }
+ncclResult_t ncclTransportP2pSetup(struct ncclComm*, struct ncclTopoGraph*, int, bool*) { ::abort(); }
+int64_t rcclParamHierarchicalAllGather() { ::abort(); }
+int64_t rcclParamPxnOptQpUsage() { ::abort(); }
+namespace latency_profiler { ncclResult_t collTraceInit(struct ncclComm*) { ::abort(); } ncclResult_t collTraceDestroy(struct ncclComm*) { ::abort(); } }
+ncclResult_t ncclCommDestroy(ncclComm_t) { ::abort(); }
+ncclResult_t ncclCommInitRank(ncclComm_t*, int, ncclUniqueId, int) { ::abort(); }
+ncclResult_t ncclCommSplit(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*) { ::abort(); }
+char ncclLastError[1024] = {};
+thread_local int ncclGroupDepth = 0;
+thread_local ncclResult_t ncclGroupError = ncclSuccess;
+const char* rcclGitHash = "microtest";
+int getROCmVersion() { return 60443484; }

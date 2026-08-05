@@ -80,6 +80,9 @@ Recorder& Recorder::instance() {
 }
 void Recorder::record(const char*) {}
 void Recorder::record(ncclComm_t*, int, const int*) {}  // CommInitAll
+ncclResult_t Recorder::record(rcclCall_t, int, int, ncclUniqueId*, ncclComm_t, int) { return ncclSuccess; }  // InitRankDev
+ncclResult_t Recorder::record(rcclCall_t, ncclComm_t) { return ncclSuccess; }  // finalize/destroy
+void Recorder::record(rcclCall_t, int, int, ncclUniqueId*, ncclConfig_t*, ncclComm_t) {}  // RankConfig
 }  // namespace rccl
 
 // Group boundary + unique-id seams reached by ncclCommInitAll / rank wrappers.

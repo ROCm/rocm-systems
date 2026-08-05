@@ -254,6 +254,15 @@ hipError_t hipSetDevice(int deviceId) { return g_hipSetDevice(deviceId); }
 
 hipError_t hipGetDeviceCount(int* count) { return g_hipGetDeviceCount(count); }
 
+// Deep-path HIP stubs (commAlloc/devCommSetup); not exercised by Tier A-D tests.
+hipError_t hipDeviceSetLimit(hipLimit_t, size_t) { return hipErrorInvalidValue; }
+hipError_t hipEventCreateWithFlags(hipEvent_t*, unsigned int) { return hipErrorInvalidValue; }
+hipError_t hipEventSynchronize(hipEvent_t) { return hipErrorInvalidValue; }
+hipError_t hipMemPoolCreate(hipMemPool_t*, const hipMemPoolProps*) { return hipErrorInvalidValue; }
+hipError_t hipMemPoolDestroy(hipMemPool_t) { return hipErrorInvalidValue; }
+hipError_t hipMemPoolSetAttribute(hipMemPool_t, hipMemPoolAttr, void*) { return hipErrorInvalidValue; }
+hipError_t hipPointerGetAttributes(hipPointerAttribute_t*, const void*) { return hipErrorInvalidValue; }
+
 // Device-model symbols routed through the controllable hooks above. After
 // hipify, init.cc's hipGetDeviceProperties call binds to hipGetDevicePropertiesR0600.
 hipError_t hipRuntimeGetVersion(int* version) { return g_hipRuntimeGetVersion(version); }
