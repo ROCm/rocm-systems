@@ -52,8 +52,11 @@ Run these four commands separately:
 
 1. `cmake -B build -DENABLE_EXTENDED_TESTS=ON`
 2. `make clean -C build`
-3. `make -j"$(nproc)" -C build`
+3. `make -j -C build`
 4. `make install -C build`
+
+(`make -j` lets make choose parallelism without a `$(nproc)` command substitution,
+which would otherwise trigger a permission prompt on every run.)
 
 ## Step 3 — Build all sample apps
 
