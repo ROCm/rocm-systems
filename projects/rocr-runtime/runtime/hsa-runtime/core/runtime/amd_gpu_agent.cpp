@@ -1346,7 +1346,7 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
     out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
   }
 
-  // gfx125+ fast path: single fused WaitSignal packet (one doorbell).
+  // gfx125+ fast path: WaitSignal packets in one doorbell submission.
   // Each chunk carries wait+copy+signal inline; no prologue signal needed.
   if (blit->isSDMA()) {
     BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
@@ -1516,25 +1516,32 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
 
   std::fill(engines.begin(), engines.end(), EngineSlot{coordinator, coord_idx});
 
+  constexpr size_t kLargeCopyMinSize = 1ull << 30;
+  constexpr uint32_t kMaxCopiesPerEngine = 8;
+  const bool use_large_copy_grouping =
+      std::all_of(size_list, size_list + num_entries,
+                  [](size_t size) { return size >= kLargeCopyMinSize; });
+
   // Fan out body entries across multiple engines unless capped to 1.
   if (!max_engines || max_engines > 1) {
-    if ((coordinator->IsGfx125Plus()) && total_sdma > 0) {
+    if (coordinator->IsGfx125Plus() && total_sdma > 0 && dst_agent_list &&
+        use_large_copy_grouping) {
+      // gfx125+ copies at or above 1 GiB: pack up to eight copies per engine,
+      // then move to the next engine. Smaller copies use the per-entry
+      // multi-engine fan-out path below.
       uint32_t eng_mask = 0;
       DmaPreferredEngine(*this, *this, &eng_mask);
-      uint32_t assigned = 0;
+
+      uint32_t num_engines = rocr::os::Popcount(eng_mask);
+      if (max_engines) num_engines = std::min(num_engines, max_engines);
       for (uint32_t d = 0; d < num_entries; ++d) {
-        // Rotate across engines within THIS copy (local index d), so entry 0
-        // lands on the coordinator and successive entries spread across the
-        // mask -- deterministic per call, no marching across API calls.
-        uint32_t eng_idx = NthSdmaEngine(eng_mask, d);
-        if (eng_idx) {
-          lazy_ptr<core::Blit>& blit = GetBlitObject(eng_idx);
-          if (blit->isSDMA()) {
-            engines[d] = {static_cast<BlitSdmaBase*>((*blit).get()), eng_idx};
-            ++assigned;
-          }
+        const uint32_t engine_slot =
+            (d / kMaxCopiesPerEngine) % num_engines;
+        const uint32_t eng_idx = NthSdmaEngine(eng_mask, engine_slot);
+        lazy_ptr<core::Blit>& blit = GetBlitObject(eng_idx);
+        if (blit->isSDMA()) {
+          engines[d] = {static_cast<BlitSdmaBase*>((*blit).get()), eng_idx};
         }
-        if (max_engines && assigned >= max_engines) break;
       }
     } else if (dst_agent_list) {
       std::set<uint32_t> usedEngines;
@@ -1643,9 +1650,9 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   }
 
   // Body deps:
-  // - fused + profiling: prologue waited on user deps, bodies just wait on prologue_signal.
-  // - fused + !profiling: no prologue, bodies wait on user dep_signals directly.
-  // - classic (!fused): bodies poll prologue_signal + user deps (classic only reads [0]).
+  // - gfx125+ with profiling: first body packet waits on prologue_signal.
+  // - gfx125+ without profiling: first body packet waits on user dep_signals directly.
+  // - classic: bodies poll prologue_signal + user deps (classic only reads [0]).
   std::vector<core::Signal*> body_deps;
   if (need_prologue) {
     if (fused) {
@@ -1674,10 +1681,10 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   hsa_status_t stat;
 
   if (fused) {
-    // === gfx125+ fused path: SubmitFusedCoordinator (1 doorbell for coord) ===
+    // === gfx125+ WaitSignal path (1 doorbell for coordinator) ===
 
-    // Arm: each entry decrements out_signal independently.
-    out_signal.AddRelaxed(num_entries);
+    // One final packet per engine group decrements out_signal.
+    out_signal.AddRelaxed(static_cast<uint32_t>(engine_groups.size()));
 
     // Gather coordinator group entries.
     std::vector<void*> coord_dsts;
@@ -1716,9 +1723,9 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       if (stat != HSA_STATUS_SUCCESS) return stat;
     }
 
-    // Fused coordinator: prologue + coord bodies + epilogue in one doorbell.
+    // Coordinator: prologue + coord bodies + epilogue in one doorbell.
     LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-             "SDMA FanOut(%s) FusedCoord: engine %02u, coord_entries=%zu, "
+             "SDMA FanOut(%s) Coordinator: engine %02u, coord_entries=%zu, "
              "other_groups=%zu, completion_signal=0x%zx, prologue_signal=%p",
              op_name, coord_idx, coord_dsts.size(),
              engine_groups.size() - (engine_groups.count(coord_idx) ? 1 : 0),
@@ -1726,7 +1733,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
              prologue_signal ? prologue_signal.get() : nullptr);
     stat = coordinator->SubmitFusedCoordinator(
         dep_signals, out_signal,
-        prologue_signal.get(), fused,
+        prologue_signal.get(),
         op, coord_dsts, coord_srcs, coord_sizes_a, coord_sizes_b,
         ind_src, ind_dst, body_deps);
     if (stat != HSA_STATUS_SUCCESS) return stat;
@@ -1848,11 +1855,9 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
 
   // Size thresholds for multi-destination copy path selection.
   // kMulticastMaxSize: gfx125+ multicast/fan-out crossover (256 KB).
-  //   At/below this the single-engine multicast packet wins; above it fan-out
-  //   across multiple SDMA engines delivers higher aggregate bandwidth. A
-  //   single-engine multicast serialises the writes to all destinations, so it
-  //   becomes bandwidth-bound well before 8 MB -- keep the crossover low so
-  //   larger multi-destination copies parallelise across engines.
+  //   At/below this the single-engine multicast packet wins. Above it,
+  //   DmaCopyFanOutOp uses per-entry multi-engine fan-out below 1 GiB and
+  //   packs up to eight copies per engine at or above 1 GiB.
   // kB2BMinSize/kB2BMaxSize: per-copy size window for linearB2B on non-gfx125+.
   //   Below kB2BMinSize the broadcast packet (2-dst) is used instead; above
   //   kB2BMaxSize fan-out parallelises across engines. Kept consistent with
@@ -1885,7 +1890,7 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
         const bool use_multicast = (mc_flag == Flag::SDMA_ENABLE) ||
             (mc_flag == Flag::SDMA_DEFAULT && op.size <= kMulticastMaxSize);
         if (use_multicast) {
-          // SubmitLinearCopyMulticastCommand picks the fused wait/signal packet
+          // SubmitLinearCopyMulticastCommand picks the WaitSignal packet
           // when profiling is off and the timestamp-capable plain packet when on.
           std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
           LogPrint(HSA_AMD_LOG_FLAG_SDMA,
