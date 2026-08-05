@@ -112,6 +112,13 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
         size_t sample_size =
             (control_ptr[se_index].wptr & wptr_mask) * sqttbuilder->GetWritePtrBlk();
 
+        // gfx11.0 reports WPTR as an address rather than an offset from the buffer base.
+        if(pm4_factory->GetGpuId() == aql_profile::GFX11_GPU_ID)
+        {
+            sample_size = sample_size - reinterpret_cast<uint64_t>(sample_ptr);
+            sample_size &= (1ull << 29) - 1;
+        }
+
         if(sample_size >= sample_capacity)
         {
             ERR_LOGGING("SQTT data out of bounds, sample_id({}) size({}/{})",
@@ -439,7 +446,9 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
         const size_t drained = (out->num_swaps + buffer_data.size() - 1) % buffer_data.size();
         out->data            = buffer_data.at(drained);
 
-        if(pm4_factory->IsGFX11())
+        // Restricted to gfx11.5: gfx11.0 reports WPTR as an address, not an offset, so the
+        // arithmetic below does not apply to it.
+        if(pm4_factory->GetGpuId() == aql_profile::GFX115X_GPU_ID)
         {
             // WPTR reports how far the hardware has written, in 32-byte units, plus which of the
             // two buffers it is writing into. Swap n hands out buffer n % 2, so if that is still
