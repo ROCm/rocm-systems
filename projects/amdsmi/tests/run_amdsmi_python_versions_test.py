@@ -21,8 +21,7 @@
 
 """
 run_amdsmi_python_versions_test.py
-==================================
-
+===========================
 The amdsmi loader and wrapper must behave identically across the range of
 CPython versions AMD SMI supports (3.6.8 through the latest release). This
 harness runs the version-independent loader contract tests under each
