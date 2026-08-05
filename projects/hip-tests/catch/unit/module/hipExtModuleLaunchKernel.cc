@@ -82,8 +82,7 @@ static bool searchRegExpr(const std::regex& expr, const char* filename) {
  *    - HIP_VERSION >= 5.7
  */
 HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr) {
-  // Open copyKernel.s and read the file
-  const std::regex regexp("uniform_work_group_size\\s*:\\s*[0-1]");
+  const std::regex regexp("\\.uniform_work_group_size:\\s*[0-1]");
   REQUIRE(true == searchRegExpr(regexp, "copyKernel.s"));
 }
 
@@ -103,11 +102,7 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr) {
  *    - HIP_VERSION >= 5.7
  */
 HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup) {
-  // first check if uniform_work_group_size = 1.
-  const std::regex regexp("uniform_work_group_size\\s*:\\s*1");
-  if (false == searchRegExpr(regexp, "copyKernel.s")) {
-    HIP_SKIP_TEST("test requires uniform work group size 1.");
-  }
+  const std::regex regexp("\\.uniform_work_group_size:\\s*1");
   REQUIRE(true == searchRegExpr(regexp, "copyKernel.s"));
   auto isEven = GENERATE(0, 1);
   // Calculate size

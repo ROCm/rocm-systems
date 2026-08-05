@@ -191,8 +191,12 @@ if(HIP_PLATFORM MATCHES "amd")
                   COMMENT "Compiling copyKernel.code")
   add_custom_target(copyKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code)
 
+  # -S emits an LLVM IR bundle rather than assembly once offload LTO is the
+  # compiler default, which drops the metadata CheckCodeObjAttr looks for, so
+  # LTO is disabled here. No architecture is passed because -S rejects more than
+  # one --offload-arch, and the attribute is architecture-independent anyway.
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
-                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -mcode-object-version=5 -S -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -mcode-object-version=5 --cuda-device-only -fno-offload-lto -S -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
