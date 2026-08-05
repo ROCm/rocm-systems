@@ -117,7 +117,8 @@ Resolution order (highest first):
 Release drops the debug-only `install.sh` flags (`--debug`, `--debug-fast`,
 `--enable-mpi-tests`); Debug adds `--debug` if the flags don't already select a
 debug flavor. `--build-dir`, `RCCL_LIB_PATH`, and `RCCL_BUILD_DIR` point at an
-already-built tree and take precedence over `--rccl-build-type`.
+already-built tree and take precedence over `--rccl-build-type`; their flavor is
+whatever was built there, so the runner can only guess it from the path.
 
 ### Perf configs must be Release
 
@@ -130,6 +131,15 @@ inference) and **hard-errors** if it still resolves to Debug — pass
 configs (`mi455_ainic_roce.json`, `mi355x_thor2_roce.json`,
 `mi300x_mellanox_ib.json`, `ainic.json`) therefore stay Debug by design; use the
 dedicated perf configs for numbers you can publish.
+
+A custom library path can't be checked this way, so a perf-only config pointed at
+one is warned only when the path itself has a `debug` directory component.
+
+The opposite direction is warned too: a Release build that runs
+`rccl-UnitTestsMPI` or `rccl-UnitTestsFixturesDebug` won't have those binaries, so
+their tests report `SKIPPED` and the run can still exit 0. The runner lists the
+missing binaries before the first test and repeats the reason in each skipped
+test's record. Pass `--rccl-build-type debug` to actually run them.
 
 A `rccl_tests_build_configuration.rccl_home` pointing at the other flavor's
 directory is redirected to the selected build, so `rccl-tests` never links
