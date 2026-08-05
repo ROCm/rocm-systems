@@ -808,8 +808,8 @@ reader_loop()
     ROCP_INFO << fmt::format("KFD dispatch-log reader: loop exited, total pairs seen = {}",
                              total_seen);
 
-    // Signal-less chain, reported from the reader too so the break point is
-    // visible even if teardown does not run. Silent unless the feature is active.
+    // Silent unless signal-less is active, so the default path logs exactly what
+    // it did before. The chain itself is summarised once, by teardown.
     uint64_t _ring_overruns = 0;
     uint64_t _ring_lost     = 0;
     for(size_t i = 0, _n = st.session_count.load(std::memory_order_acquire); i < _n; ++i)
@@ -818,13 +818,13 @@ reader_loop()
         _ring_lost += st.sessions[i].cursors.lost_records;
     }
 
-    // The signal-less chain itself is summarised once, by teardown.
-    ROCP_WARNING_IF(_ring_overruns > 0 || _ring_lost > 0) << fmt::format(
-        "KFD dispatch-log ring: {} lap(s), {} record(s) lost to laps, {} batch(es) dropped -- a "
-        "lost record is a lost START, which shows up as a start-unknown no-timing",
-        _ring_overruns,
-        _ring_lost,
-        st.batches_dropped.load(std::memory_order_relaxed));
+    ROCP_WARNING_IF(signal_less_feature_enabled() && (_ring_overruns > 0 || _ring_lost > 0))
+        << fmt::format(
+               "KFD dispatch-log ring: {} lap(s), {} record(s) lost to laps, {} batch(es) dropped "
+               "-- a lost record is a lost START, which shows up as a start-unknown no-timing",
+               _ring_overruns,
+               _ring_lost,
+               st.batches_dropped.load(std::memory_order_relaxed));
 }
 }  // namespace
 
