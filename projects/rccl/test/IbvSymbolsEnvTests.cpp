@@ -5,43 +5,38 @@
  ************************************************************************/
 
 #ifndef _GNU_SOURCE
-#define _GNU_SOURCE  // dlinfo()
+#define _GNU_SOURCE  // dlinfo(), dl_iterate_phdr()
 #endif
 
 #include <gtest/gtest.h>
 
 #include <dlfcn.h>
 #include <link.h>
+#include <unistd.h>
 #include <cstdlib>
+#include <fstream>
 #include <string>
 
 #include "ibvsymbols.h"
 
-// buildIbvSymbols() is compiled into this test target (it is hidden-visibility
-// in librccl and therefore not linkable from here). It resolves the libibverbs
-// path via ncclGetEnv(), which is likewise hidden in librccl. Provide the same
-// behavior as RCCL's built-in default env plugin
-// (src/plugin/env/env_v1.cc: ncclEnvGetEnv -> std::getenv) so the unit under
-// test reads the process environment directly, without linking the env-plugin
-// machinery. Keep it hidden so it only satisfies the locally-compiled
-// ibvsymbols.cc reference and never interposes librccl's own ncclGetEnv in
-// Debug builds (where librccl is compiled with -fvisibility=default).
+// buildIbvSymbols() is compiled straight into this test target for non-Debug
+// builds only (see CMakeLists.txt); Debug links librccl's own exported copy
+// instead, so this ncclGetEnv() stub is unused there. Kept hidden so it can
+// never interpose librccl's own ncclGetEnv in Debug builds.
 __attribute__((visibility("hidden")))
 const char* ncclGetEnv(const char* name) { return std::getenv(name); }
 
 namespace RcclUnitTesting
 {
-  // Whitebox coverage for the NCCL_IBVERBS_LIB dynamic-loader override in
-  // src/misc/ibvsymbols.cc (dlopen path). buildIbvSymbols() is not guarded by
-  // std::call_once (that lives in wrap_ibv_symbols), and the internal env
-  // plugin reads std::getenv() live, so each call re-reads the environment.
-  // These tests exercise:
-  //   - default load (env unset)               -> libibverbs.so[.1]
-  //   - explicit override to a valid soname     -> env slot (index 0) is used
-  //   - override to a nonexistent path          -> fallback loop to the defaults
-  // The all-paths-fail branch (ncclSystemError) is not reachable here: the two
-  // hardcoded fallbacks cannot be removed via env, so it requires a host with
-  // rdma-core absent and is left as a documented ceiling.
+  // Whitebox coverage for the NCCL_IBVERBS_LIB override in
+  // src/misc/ibvsymbols.cc. Covers: default load (env unset), override to a
+  // uniquely-located copy, and override to a nonexistent path (fallback).
+  // The all-paths-fail branch needs a host with no rdma-core and is left as
+  // a documented ceiling.
+  //
+  // Note: buildIbvSymbols()'s loader handle is a function-local static that
+  // is never dlclose()'d, so repeated calls in this process accumulate
+  // dlopen refs rather than releasing prior ones -- harmless here.
 
   namespace
   {
@@ -69,12 +64,8 @@ namespace RcclUnitTesting
       std::string saved_;
     };
 
-    // Resolves the absolute path of the loadable libibverbs on this host, or an
-    // empty string if neither soname can be opened. Using the resolved absolute
-    // path (rather than a bare soname) lets EnvOverrideValidSoname prove the env
-    // slot was actually used: buildIbvSymbols' hardcoded fallbacks only try the
-    // bare "libibverbs.so[.1]" names, so a load from an absolute path can only
-    // have come through NCCL_IBVERBS_LIB.
+    // Resolves the absolute path of the loadable libibverbs on this host, or
+    // an empty string if neither soname can be opened.
     std::string LibibverbsPath()
     {
       for (const char* soname : {"libibverbs.so.1", "libibverbs.so"})
@@ -91,9 +82,42 @@ namespace RcclUnitTesting
       return {};
     }
 
-    // True when libibverbs is installed and loadable on this host. When false,
-    // every case below is a hardware/environment SKIP rather than a failure.
     bool LibibverbsAvailable() { return !LibibverbsPath().empty(); }
+
+    // Byte-copies `src` to a uniquely-named temp file. NCCL_IBVERBS_LIB's
+    // hardcoded fallbacks only ever try "libibverbs.so[.1]", so a load from
+    // this path can only have come through the override, not a fallback.
+    std::string MakeUniqueLibCopy(const std::string& src)
+    {
+      char tmpl[] = "/tmp/ibvsymbols_test_XXXXXX";
+      int fd = mkstemp(tmpl);
+      if (fd < 0) return {};
+      close(fd);
+      std::string dst = tmpl;
+
+      std::ifstream in(src, std::ios::binary);
+      std::ofstream out(dst, std::ios::binary | std::ios::trunc);
+      if (!in || !out) { unlink(dst.c_str()); return {}; }
+      out << in.rdbuf();
+      if (!out) { unlink(dst.c_str()); return {}; }
+      return dst;
+    }
+
+    // Proof that NCCL_IBVERBS_LIB was actually honored: something dlopen'd
+    // this exact path. Success alone wouldn't rule out a silently-ignored
+    // override that happened to succeed via a fallback instead.
+    bool IsLoadedInProcess(const std::string& path)
+    {
+      struct Ctx { const std::string* path; bool found; } ctx{&path, false};
+      dl_iterate_phdr(
+        [](struct dl_phdr_info* info, size_t, void* data) -> int {
+          auto* c = static_cast<Ctx*>(data);
+          if (info->dlpi_name && *c->path == info->dlpi_name) { c->found = true; return 1; }
+          return 0;
+        },
+        &ctx);
+      return ctx.found;
+    }
 
     // A successful buildIbvSymbols() populates the whole function-pointer
     // table; spot-check representative entries that every provider exports.
@@ -120,27 +144,35 @@ namespace RcclUnitTesting
     ExpectSymbolsLoaded(symbols);
   }
 
-  // Env set to the resolved absolute path: the override slot (index 0) is taken
-  // first and dlopen succeeds, so the hardcoded fallbacks are never reached. An
-  // absolute path can only load via the env slot (the fallbacks try bare
-  // sonames only), so success here proves the override was honored.
+  // Env set to a uniquely-named copy of libibverbs, so a successful load can
+  // only be explained by the override, not a fallback coincidentally
+  // resolving to the same file. This is the one case that would fail
+  // outright if the NCCL_IBVERBS_LIB code were removed.
   TEST(IbvSymbolsEnv, EnvOverrideValidSoname)
   {
     std::string libPath = LibibverbsPath();
     if (libPath.empty())
       GTEST_SKIP() << "libibverbs not installed on this host";
 
+    std::string copyPath = MakeUniqueLibCopy(libPath);
+    if (copyPath.empty())
+      GTEST_SKIP() << "could not create a temp copy of libibverbs";
+
     ScopedEnv env;
-    env.set(libPath.c_str());
+    env.set(copyPath.c_str());
 
     ncclIbvSymbols symbols = {};
-    ASSERT_EQ(buildIbvSymbols(&symbols), ncclSuccess);
+    ncclResult_t result = buildIbvSymbols(&symbols);
+    unlink(copyPath.c_str());
+
+    ASSERT_EQ(result, ncclSuccess);
     ExpectSymbolsLoaded(symbols);
+    EXPECT_TRUE(IsLoadedInProcess(copyPath))
+        << "NCCL_IBVERBS_LIB override was not actually dlopen'd";
   }
 
-  // Env set to a nonexistent path: index 0 fails to dlopen, the loop continues
-  // and recovers via the hardcoded libibverbs.so[.1] fallback. This is the
-  // branch the override adds over the old hardcoded-only loader.
+  // Env set to a nonexistent path: index 0 fails to dlopen, the loop
+  // continues and recovers via the hardcoded libibverbs.so[.1] fallback.
   TEST(IbvSymbolsEnv, BogusPathFallsBackToDefault)
   {
     if (!LibibverbsAvailable())
