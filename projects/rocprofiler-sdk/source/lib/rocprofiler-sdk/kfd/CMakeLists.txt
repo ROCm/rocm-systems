@@ -19,7 +19,6 @@ set(ROCPROFILER_LIB_KFD_EVENT_HEADERS
     signal_less_gate.hpp
     no_signal_finalizer.hpp
     owner_registry.hpp
-    teardown.hpp
     record_pipe.hpp)
 
 target_sources(

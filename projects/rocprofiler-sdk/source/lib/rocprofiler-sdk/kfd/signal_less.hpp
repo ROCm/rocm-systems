@@ -26,7 +26,6 @@
 #include "lib/rocprofiler-sdk/kfd/no_signal_finalizer.hpp"
 #include "lib/rocprofiler-sdk/kfd/owner_registry.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
-#include "lib/rocprofiler-sdk/kfd/teardown.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
