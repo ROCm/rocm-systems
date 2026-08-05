@@ -88,7 +88,8 @@ note_signal_less(signal_less_counter which, uint64_t n = 1);
 
 // Snapshot indexed by signal_less_counter, so a new counter needs no mirror
 // struct and no copy loop -- add an enumerator and a name and it prints.
-using signal_less_counter_array = std::array<uint64_t, static_cast<size_t>(signal_less_counter::kCount)>;
+using signal_less_counter_array =
+    std::array<uint64_t, static_cast<size_t>(signal_less_counter::kCount)>;
 
 signal_less_counter_array
 signal_less_stats();

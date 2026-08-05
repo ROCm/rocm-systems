@@ -439,8 +439,8 @@ signal_less_teardown()
     join_signal_less_tasks();
 
     // The only signal-less summary: the reader does not print one too.
-    const auto _c       = signal_less_stats();
-    auto       _chain   = std::string{};
+    const auto _c     = signal_less_stats();
+    auto       _chain = std::string{};
     for(size_t i = 0; i < _c.size(); ++i)
         _chain += fmt::format("{}{}={}",
                               i == 0 ? "" : " ",

@@ -947,7 +947,6 @@ TEST(dlog_drain, pairing_census_counts_starts_eops_and_overwrites)
     EXPECT_EQ(st.pairing.unmatched_eops, 1u);
     EXPECT_EQ(st.pairing.starts_overwritten, 1u);
     EXPECT_EQ(st.pairing.pending_starts.size(), 1u);  // id 7 still waiting
-
 }
 
 // The region each record came from is preserved through the copy, so a raw dump

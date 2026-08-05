@@ -554,7 +554,7 @@ TEST(OwnerRegistry, quarantine_persists_after_the_collision_clears)
     hub.quarantine_slot(0, 40);
 
     reg.remove_queue(2);
-    EXPECT_TRUE(reg.is_injective(0, 40));    // ownership looks clean again...
+    EXPECT_TRUE(reg.is_injective(0, 40));       // ownership looks clean again...
     EXPECT_TRUE(slot_quarantined(hub, 0, 40));  // ...but the slot stays unusable
     EXPECT_FALSE(hub.can_register_batch({key_of(40, 9)}));
 }
@@ -941,14 +941,14 @@ struct reference_model
     std::map<std::pair<uint32_t, uint32_t>, model_state> state;    // (slot,id) -> state
     std::map<std::pair<uint32_t, uint32_t>, uint64_t>    corr_of;  // -> correlation id
 
-    std::set<uint32_t>                                   quarantined;
-    std::set<uint64_t>                                   ledger;
-    std::map<std::pair<uint32_t, uint32_t>, int>         emitted;
-    std::map<std::pair<uint32_t, uint32_t>, int>         retired;
+    std::set<uint32_t>                           quarantined;
+    std::set<uint64_t>                           ledger;
+    std::map<std::pair<uint32_t, uint32_t>, int> emitted;
+    std::map<std::pair<uint32_t, uint32_t>, int> retired;
 
     using key_t = std::pair<uint32_t, uint32_t>;
 
-    bool                                                 stopping = false;
+    bool stopping = false;
 
     // What ELIGIBILITY accepts. A proven or leaked key is no longer in the hub, so
     // only a still-pending one is inadmissible; the session mode and the permanent
@@ -1071,8 +1071,8 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
             case 2:
             case 3:  // EOP (sometimes under a lossy drain)
             {
-                auto       k             = random_key();
-                const bool loss_free     = (rng() % 4) != 0;
+                auto       k         = random_key();
+                const bool loss_free = (rng() % 4) != 0;
                 // No session-mode term: prove_eop completes an in-flight EOP even
                 // once teardown has begun.
                 const bool expect_proven = loss_free && model.at(k) == model_state::pending;
