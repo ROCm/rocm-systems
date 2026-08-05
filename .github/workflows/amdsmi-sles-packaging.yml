@@ -40,6 +40,7 @@ jobs:
   sles-packaging:
     name: SLES RPM packaging (openSUSE Leap 15.6)
     runs-on: ubuntu-22.04
+    timeout-minutes: 45
     container:
       image: opensuse/leap:15.6@sha256:79be7751205ea84559990fb76b1bec71e38d6fad41c70a4f6c921b803b58f421 # Leap 15.6 GA, 2026-07-29
 
