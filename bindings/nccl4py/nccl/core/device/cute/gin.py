@@ -407,7 +407,7 @@ class Gin:
             ``ncclGin_C`` struct value.
         """
         return ncclGin_C(
-            llvm.load(res=ncclGin_C._struct_type, addr=self.ptr, loc=loc, ip=ip)
+            llvm.load(ncclGin_C._struct_type, self.ptr, loc=loc, ip=ip)
         )
 
 

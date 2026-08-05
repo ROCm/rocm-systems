@@ -88,7 +88,7 @@ def _to_coop_value(x, *, loc=None, ip=None):
     if isinstance(x, ir.Value):
         return x
     if hasattr(x, "ptr"):
-        return llvm.load(res=ncclCoopAny._struct_type, addr=x.ptr, loc=loc, ip=ip)
+        return llvm.load(ncclCoopAny._struct_type, x.ptr, loc=loc, ip=ip)
     return _to_value(x)
 
 
