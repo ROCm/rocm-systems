@@ -544,6 +544,40 @@ TEST_F(InitMicrotest, CommInitAll_DuplicateDevice_ReturnsInvalidUsage) {
   int devlist[2] = {0, 0};
   EXPECT_EQ(ncclInvalidUsage, ncclCommInitAll_impl(comms, 2, devlist));
 }
+// Device restoration: the in-loop cudaSetDevice(dev) faults BEFORE
+// ncclCommInitRankDev (so we don't enter the real init path), and the exit arm
+// must still restore the original device via cudaSetDevice(oldDev).
+TEST_F(InitMicrotest, CommInitAll_SetTargetDeviceFault_RestoresOriginalDevice) {
+  int setCalls = 0, restoredTo = -99;
+  g_hipGetDevice = [](int* d) { if (d) *d = 3; return hipSuccess; };  // oldDev = 3
+  g_hipSetDevice = [&](int dev) -> hipError_t {
+    if (++setCalls == 1) return hipErrorInvalidValue;  // loop set(dev) faults
+    restoredTo = dev;                                  // exit set(oldDev)
+    return hipSuccess;
+  };
+  ncclComm_t comms[2] = {};
+  EXPECT_EQ(ncclUnhandledCudaError, ncclCommInitAll_impl(comms, 2, nullptr));
+  EXPECT_EQ(3, restoredTo);   // restored to the captured oldDev
+  EXPECT_GE(setCalls, 2);     // in-loop set + restore set
+}
+
+// --- Tier D: ncclCommInitRankDev (init.cc:3244) pre-ncclInit validation arms.
+// Only the nId checks run before ncclInit(); the post-init arms (null newcomm/
+// config, nranks/myrank) require the D5 real-ncclInit bring-up and land there. -
+TEST_F(InitMicrotest, CommInitRankDev_NIdNonPositive_ReturnsInvalidArgument) {
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  EXPECT_EQ(ncclInvalidArgument,
+            ncclCommInitRankDev(&nc, /*nranks=*/4, /*nId=*/0, &id, /*myrank=*/0, 0, &cfg, "t"));
+}
+TEST_F(InitMicrotest, CommInitRankDev_NIdGreaterThanNranks_ReturnsInvalidArgument) {
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  EXPECT_EQ(ncclInvalidArgument,
+            ncclCommInitRankDev(&nc, /*nranks=*/4, /*nId=*/5, &id, /*myrank=*/0, 0, &cfg, "t"));
+}
 
 #if defined(HIP_HOST_UNCACHED_MEMORY)
 TEST_F(InitMicrotest, CheckHostUncacheMemSetting_Uncached_AlwaysSucceeds) {
