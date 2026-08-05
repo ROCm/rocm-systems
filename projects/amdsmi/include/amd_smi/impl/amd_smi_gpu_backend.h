@@ -82,6 +82,19 @@ class IGPUBackend {
   virtual amdsmi_status_t GetFanSpeedMax(uint32_t, uint64_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
+  virtual amdsmi_status_t GetVcnBusyPercent(uint32_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
+  virtual amdsmi_status_t AllocFabricTelemetry(uint32_t, amdsmi_fabric_telemetry_t**) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  virtual amdsmi_status_t GetFabricTelemetryData(amdsmi_fabric_telemetry_t*) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  virtual amdsmi_status_t FreeFabricTelemetry(amdsmi_fabric_telemetry_t*) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  virtual amdsmi_status_t GetGpuFabricInfo(amdsmi_fabric_info_t*) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
 
   IGPUBackend(const IGPUBackend&) = delete;
   IGPUBackend& operator=(const IGPUBackend&) = delete;

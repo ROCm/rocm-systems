@@ -73,6 +73,9 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_uuid.h"
 #include "amd_smi/impl/xf86drm.h"
+#ifdef ENABLE_WSL_BACKEND
+#include "amd_smi/impl/amd_smi_wsl_device.h"
+#endif
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
@@ -1669,6 +1672,12 @@ amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_i
   if (board_path_str == nullptr || board_path_str->empty()) {
     return AMDSMI_STATUS_INVAL;
   }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
 
   rsmi_npm_info_t rsmi_npm_info;
   rsmi_status_t rstatus =
@@ -4698,6 +4707,11 @@ amdsmi_status_t amdsmi_get_vcn_busy_percent(amdsmi_processor_handle processor_ha
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* backend = gpudevice->backend()) {
+    return backend->GetVcnBusyPercent(vcn_busy_percent);
+  }
+#endif
   return smi_amdgpu_get_vcn_busy_percent(gpudevice, vcn_busy_percent);
 }
 
