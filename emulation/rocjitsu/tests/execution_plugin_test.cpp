@@ -18,6 +18,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
@@ -1277,6 +1278,90 @@ TEST(ExecutionPluginTest, SdwaInstructionReuseRestagesOriginalSource) {
   EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0xCCu);
 }
 
+TEST(ExecutionPluginTest, SdwaFloatingModifiersUseSemanticSourceWidth) {
+  for (bool force_scalar : {true, false}) {
+    SCOPED_TRACE(force_scalar ? "scalar" : "simd");
+    ForceScalarOverride execution_mode(force_scalar);
+    PluginFixture f(/*num_wf_slots=*/1);
+    auto *cu = f.cu();
+    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+
+    constexpr uint32_t kSrc0 = 2;
+    constexpr uint32_t kSrc1 = 3;
+    constexpr uint32_t kDst = 5;
+    const uint32_t vb = wf->vgpr_alloc().base;
+
+    cdna4::Vop2VopSdwaMachineInst add_f32{};
+    add_f32.src0 = amdgpu::SRC_SDWA;
+    add_f32.vsrc0 = kSrc0;
+    add_f32.vsrc1 = kSrc1;
+    add_f32.vdst = kDst;
+    add_f32.op = cdna4::kVAddF32Vop2;
+    add_f32.src0_sel = amdgpu::sdwa::DWORD;
+    add_f32.src0_abs = 1;
+    add_f32.src1_sel = amdgpu::sdwa::DWORD;
+    add_f32.dst_sel = amdgpu::sdwa::DWORD;
+    add_f32.dst_unused = amdgpu::sdwa::UNUSED_PAD;
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    std::unique_ptr<Instruction> f32_inst(
+        decoder->decode(reinterpret_cast<const uint32_t *>(&add_f32)));
+    ASSERT_NE(f32_inst, nullptr);
+    cu->write_vgpr(vb + kSrc0, 0, std::bit_cast<uint32_t>(-2.0f));
+    cu->write_vgpr(vb + kSrc1, 0, std::bit_cast<uint32_t>(0.5f));
+    cu->execute_instruction(f32_inst.get(), *wf);
+    EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), std::bit_cast<uint32_t>(2.5f));
+
+    cdna4::Vop1VopSdwaMachineInst cvt_bf16{};
+    cvt_bf16.src0 = amdgpu::SRC_SDWA;
+    cvt_bf16.vsrc0 = kSrc0;
+    cvt_bf16.vdst = kDst;
+    cvt_bf16.op = cdna4::kVCvtF32Bf16Vop1;
+    cvt_bf16.encoding = cdna4::encoding::kVop1 >> 2;
+    cvt_bf16.src0_sel = amdgpu::sdwa::WORD_0;
+    cvt_bf16.src0_abs = 1;
+    cvt_bf16.dst_sel = amdgpu::sdwa::DWORD;
+    cvt_bf16.dst_unused = amdgpu::sdwa::UNUSED_PAD;
+
+    std::unique_ptr<Instruction> bf16_inst(
+        decoder->decode(reinterpret_cast<const uint32_t *>(&cvt_bf16)));
+    ASSERT_NE(bf16_inst, nullptr);
+    ASSERT_EQ(std::string_view(bf16_inst->mnemonic()), "v_cvt_f32_bf16_e32");
+    cu->write_vgpr(vb + kSrc0, 0, 0xCAFE'C000u);
+    cu->execute_instruction(bf16_inst.get(), *wf);
+    EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), std::bit_cast<uint32_t>(2.0f));
+
+    for (uint32_t selection : {amdgpu::sdwa::WORD_0, amdgpu::sdwa::WORD_1}) {
+      SCOPED_TRACE(selection);
+      cdna4::Vop2VopSdwaMachineInst add_f16{};
+      add_f16.src0 = amdgpu::SRC_SDWA;
+      add_f16.vsrc0 = kSrc0;
+      add_f16.vsrc1 = kSrc1;
+      add_f16.vdst = kDst;
+      add_f16.op = cdna4::kVAddF16Vop2;
+      add_f16.src0_sel = selection;
+      add_f16.src0_abs = 1;
+      add_f16.src1_sel = selection;
+      add_f16.dst_sel = amdgpu::sdwa::DWORD;
+      add_f16.dst_unused = amdgpu::sdwa::UNUSED_PAD;
+
+      std::unique_ptr<Instruction> f16_inst(
+          decoder->decode(reinterpret_cast<const uint32_t *>(&add_f16)));
+      ASSERT_NE(f16_inst, nullptr);
+      const uint32_t shift = selection == amdgpu::sdwa::WORD_1 ? 16u : 0u;
+      const uint32_t selected_word_mask = uint32_t{0xFFFF} << shift;
+      cu->write_vgpr(vb + kSrc0, 0,
+                     (0xCAFE'BEEFu & ~selected_word_mask) | (uint32_t{0xC000} << shift));
+      cu->write_vgpr(vb + kSrc1, 0,
+                     (0x1234'5678u & ~selected_word_mask) | (uint32_t{0x3800} << shift));
+      cu->execute_instruction(f16_inst.get(), *wf);
+      EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), util::f32_to_f16(2.5f));
+    }
+  }
+}
+
 TEST(ExecutionPluginTest, SdwaVop2Src1SelectorReportsExactBytes) {
   ForceScalarOverride force_scalar(true);
   PluginFixture f(/*num_wf_slots=*/1);
@@ -1298,7 +1383,7 @@ TEST(ExecutionPluginTest, SdwaVop2Src1SelectorReportsExactBytes) {
   raw.vsrc0 = kSrc0;
   raw.vsrc1 = kSrc1;
   raw.vdst = kDst;
-  raw.op = 52; // v_add_u32
+  raw.op = cdna4::kVAddU32Vop2;
   raw.src0_sel = amdgpu::sdwa::DWORD;
   raw.src1_sel = amdgpu::sdwa::BYTE_2;
   raw.src1_sext = 1;
@@ -1329,17 +1414,19 @@ TEST(ExecutionPluginTest, SdwaVop2ScalarSelectorsUseSgprs) {
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
-  wf->set_exec(1);
 
   constexpr uint32_t kVectorSrc = 2;
   constexpr uint32_t kScalarSrc = 4;
   constexpr uint32_t kDst = 5;
+  constexpr uint32_t kActiveLane = 3;
+  constexpr uint64_t kActiveMask = uint64_t{1} << kActiveLane;
   const uint32_t vb = wf->vgpr_alloc().base;
   const uint32_t sb = wf->sgpr_alloc().base;
+  wf->set_exec(kActiveMask);
 
   auto run = [&](bool scalar_src1) {
     SCOPED_TRACE(scalar_src1 ? "scalar src1" : "scalar src0");
-    cu->write_vgpr(vb + kVectorSrc, 0, 10u);
+    cu->write_vgpr(vb + kVectorSrc, kActiveLane, 10u);
     cu->write_sgpr(sb + kScalarSrc, 0x11807F22u);
 
     cdna4::Vop2VopSdwaMachineInst raw{};
@@ -1347,7 +1434,7 @@ TEST(ExecutionPluginTest, SdwaVop2ScalarSelectorsUseSgprs) {
     raw.vsrc0 = scalar_src1 ? kVectorSrc : kScalarSrc;
     raw.vsrc1 = scalar_src1 ? kScalarSrc : kVectorSrc;
     raw.vdst = kDst;
-    raw.op = 52; // v_add_u32
+    raw.op = cdna4::kVAddU32Vop2;
     raw.src0_sel = scalar_src1 ? amdgpu::sdwa::DWORD : amdgpu::sdwa::BYTE_2;
     raw.src0_sext = scalar_src1 ? 0 : 1;
     raw.s0 = scalar_src1 ? 0 : 1;
@@ -1363,8 +1450,8 @@ TEST(ExecutionPluginTest, SdwaVop2ScalarSelectorsUseSgprs) {
     plugin->events.clear();
     cu->execute_instruction(inst.get(), *wf);
 
-    EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0xFFFFFF8Au);
-    expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {kVectorSrc}, 1u);
+    EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, kActiveLane), 0xFFFFFF8Au);
+    expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {kVectorSrc}, kActiveMask);
 
     uint32_t sgpr_reads = 0;
     for (const HookEvent &event : plugin->events)

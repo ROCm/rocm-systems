@@ -290,41 +290,41 @@ inline DppAccessPlan make_dpp8_access_plan(uint32_t wf_size, uint32_t lane_sel, 
   return plan;
 }
 
-inline void stage_dpp_operand(Operand *&src0, const DppAccessPlan &plan,
+inline void stage_dpp_operand(Operand *source, const DppAccessPlan &plan,
                               std::unique_ptr<StagedOperand> &storage, amdgpu::Wavefront &wf,
                               uint8_t source_byte_mask = 0) {
   RegisterAccess regs(wf);
-  if (src0->size_bits_ > 32) {
-    auto src_view = regs.read_operand64(*src0, plan.source_lane_mask);
+  if (source->size_bits_ > 32) {
+    auto src_view = regs.read_operand64(*source, plan.source_lane_mask);
     uint64_t result[64] = {};
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       const int source_lane = plan.source_lane_for_destination[lane];
       if (source_lane >= 0)
         result[lane] = src_view.lane(static_cast<uint32_t>(source_lane));
     }
-    storage = std::make_unique<StagedOperand>(*src0, result, static_cast<int>(wf.wf_size()));
+    storage = std::make_unique<StagedOperand>(*source, result, static_cast<int>(wf.wf_size()));
   } else {
     if (source_byte_mask == 0)
-      source_byte_mask = src0->size_bits_ == 16 ? rocjitsu::ExecutionPlugin::kLowHalfByteMask
-                                                : rocjitsu::ExecutionPlugin::kFullByteMask;
-    auto src_view = regs.read_operand(*src0, plan.source_lane_mask, source_byte_mask);
+      source_byte_mask = source->size_bits_ == 16 ? rocjitsu::ExecutionPlugin::kLowHalfByteMask
+                                                  : rocjitsu::ExecutionPlugin::kFullByteMask;
+    auto src_view = regs.read_operand(*source, plan.source_lane_mask, source_byte_mask);
     uint32_t result[64] = {};
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       const int source_lane = plan.source_lane_for_destination[lane];
       if (source_lane >= 0)
         result[lane] = src_view.lane(static_cast<uint32_t>(source_lane));
     }
-    storage = std::make_unique<StagedOperand>(*src0, result, static_cast<int>(wf.wf_size()));
+    storage = std::make_unique<StagedOperand>(*source, result, static_cast<int>(wf.wf_size()));
   }
 }
 
 /// @brief Pre-permute src0 for a DPP instruction.
 ///
 /// Reads all src0 VGPR lanes, applies the DPP permutation, creates a
-/// StagedOperand with the permuted data, and swaps the src0 pointer.
+/// StagedOperand with the permuted data, and returns it through storage.
 /// Called from VOP1/VOP2 execute_impl() when src0 == 250.
 ///
-/// @param[in,out] src0 Source operand pointer to replace.
+/// @param source Source operand to stage; the pointer is not retained or replaced.
 /// @param dpp_ctrl 9-bit DPP control value.
 /// @param row_mask 4-bit row mask.
 /// @param bank_mask 4-bit bank mask.
@@ -332,12 +332,12 @@ inline void stage_dpp_operand(Operand *&src0, const DppAccessPlan &plan,
 /// @param fi Fetch-inactive control (1 = read inactive source lanes, 0 = zero).
 /// @param[out] storage Owning pointer for the staged operand lifetime.
 /// @param wf Wavefront providing register state.
-inline void apply_dpp(Operand *&src0, uint32_t dpp_ctrl, uint32_t row_mask, uint32_t bank_mask,
+inline void apply_dpp(Operand *source, uint32_t dpp_ctrl, uint32_t row_mask, uint32_t bank_mask,
                       uint32_t bound_ctrl, uint32_t fi, std::unique_ptr<StagedOperand> &storage,
                       amdgpu::Wavefront &wf, uint8_t source_byte_mask = 0) {
   const DppAccessPlan plan =
       make_dpp_access_plan(wf.wf_size(), dpp_ctrl, row_mask, bank_mask, bound_ctrl, fi, wf.exec());
-  stage_dpp_operand(src0, plan, storage, wf, source_byte_mask);
+  stage_dpp_operand(source, plan, storage, wf, source_byte_mask);
 }
 
 inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel) {
@@ -345,11 +345,11 @@ inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel) {
   return (lane & ~7u) | sel;
 }
 
-inline void apply_dpp8(Operand *&src0, uint32_t lane_sel, uint32_t fi,
+inline void apply_dpp8(Operand *source, uint32_t lane_sel, uint32_t fi,
                        std::unique_ptr<StagedOperand> &storage, amdgpu::Wavefront &wf,
                        uint8_t source_byte_mask = 0) {
   const DppAccessPlan plan = make_dpp8_access_plan(wf.wf_size(), lane_sel, fi, wf.exec());
-  stage_dpp_operand(src0, plan, storage, wf, source_byte_mask);
+  stage_dpp_operand(source, plan, storage, wf, source_byte_mask);
 }
 
 } // namespace dpp
@@ -391,6 +391,71 @@ inline uint32_t sdwa_src_select(uint32_t val, uint32_t sel, bool sign_ext) {
   if (sign_ext && (word_val & 0x8000))
     return word_val | 0xFFFF0000u;
   return word_val;
+}
+
+/// @brief Floating-point representation used by SDWA source modifiers.
+///
+/// SDWA selection and sign extension apply to every source. Absolute-value and
+/// negate fields apply only to floating-point sources, and their sign bit
+/// depends on the semantic source type rather than the selector width.
+enum class SourceModifierFormat {
+  NONE,
+  F16,
+  BF16,
+  F32,
+};
+
+inline uint32_t apply_source_modifiers(uint32_t value, SourceModifierFormat format, bool negate,
+                                       bool absolute) {
+  uint32_t sign_bit = 0;
+  switch (format) {
+  case SourceModifierFormat::F16:
+  case SourceModifierFormat::BF16:
+    sign_bit = uint32_t{1} << 15;
+    break;
+  case SourceModifierFormat::F32:
+    sign_bit = uint32_t{1} << 31;
+    break;
+  case SourceModifierFormat::NONE:
+    return value;
+  }
+
+  if (absolute)
+    value &= ~sign_bit;
+  if (negate)
+    value ^= sign_bit;
+  return value;
+}
+
+/// @brief Stage one SDWA source for semantic execution.
+///
+/// Reads exactly the selected source bytes from active lanes, applies SDWA
+/// selection/sign extension and source abs/neg modifiers, and installs fresh
+/// instruction-owned storage for later delegate binding. Unmodified DWORD
+/// sources need no staging and clear any stale storage left by an earlier
+/// execution.
+inline void stage_source(Operand &source, uint32_t selection, bool sign_extend, bool negate,
+                         bool absolute, SourceModifierFormat modifier_format,
+                         std::unique_ptr<StagedOperand> &storage, Wavefront &wf) {
+  storage.reset();
+  const bool has_float_modifier =
+      modifier_format != SourceModifierFormat::NONE && (absolute || negate);
+  if (selection == DWORD && !has_float_modifier)
+    return;
+
+  const uint64_t exec = wf.exec();
+  const auto source_view =
+      RegisterAccess(wf).read_operand(source, exec, sdwa_src_byte_mask(selection));
+  uint32_t staged[StagedOperand::MAX_LANES] = {};
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if ((exec & (uint64_t{1} << lane)) == 0)
+      continue;
+
+    uint32_t value = sdwa_src_select(source_view.lane(lane), selection, sign_extend);
+    value = apply_source_modifiers(value, modifier_format, negate, absolute);
+    staged[lane] = value;
+  }
+  storage = std::make_unique<StagedOperand>(source, staged, static_cast<int>(wf.wf_size()));
 }
 
 /// @brief Merge an ALU result into a destination register per SDWA dst_sel.
