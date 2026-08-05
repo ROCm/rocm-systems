@@ -46,6 +46,7 @@ jobs:
   upgrade-downgrade:
     name: ${{matrix.name}}
     runs-on: ubuntu-22.04
+    timeout-minutes: 45
     container: ${{matrix.container}}
     strategy:
       fail-fast: false
@@ -88,7 +89,7 @@ jobs:
             git gcc gcc-c++ cmake make rpm-build file \
             libdrm-devel libnl3-devel libmnl-devel python3 sudo
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           # rocm-systems is a large monorepo; only the amdsmi project is needed.
           sparse-checkout: |
