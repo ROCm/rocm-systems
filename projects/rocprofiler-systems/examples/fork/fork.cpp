@@ -1,8 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-#include <rocprofiler-sdk-roctx/roctx.h>
-
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -36,7 +34,6 @@ run(const char* _name, int nchildren)
     pthread_barrier_init(&_barrier, nullptr, nchildren + 1);
     for(int i = 0; i < nchildren; ++i)
     {
-        roctxRangePushA("launch_child");
         auto _run = [&_barrier, &_children, i, _name](std::uint64_t _nsec) {
             pthread_barrier_wait(&_barrier);
             _children.at(i) = fork();
@@ -46,13 +43,9 @@ run(const char* _name, int nchildren)
                 print_info(_name);
                 printf("[%s][%i] child job starting...\n", _name, getpid());
                 auto _sleep = [=]() {
-                    roctxRangePushA("child_process_child_thread");
                     std::this_thread::sleep_for(std::chrono::seconds{ _nsec });
-                    roctxRangePop();
                 };
-                roctxRangePushA("child_process");
                 std::thread{ _sleep }.join();
-                roctxRangePop();
                 printf("[%s][%i] child job complete\n", _name, getpid());
                 exit(EXIT_SUCCESS);
             }
@@ -62,15 +55,12 @@ run(const char* _name, int nchildren)
             }
         };
         _threads.emplace_back(_run, i + 1);
-        roctxRangePop();
     }
 
     // all child threads should start executing their fork once this returns
     pthread_barrier_wait(&_barrier);
     // wait for the threads to successfully fork
     pthread_barrier_wait(&_barrier);
-
-    roctxRangePushA("wait_for_children");
 
     int   _status   = 0;
     pid_t _wait_pid = 0;
@@ -113,8 +103,6 @@ run(const char* _name, int nchildren)
     printf("[%s][%i] joining threads ...\n", _name, getpid());
     for(auto& itr : _threads)
         itr.join();
-
-    roctxRangePop();
 
     printf("[%s][%i] returning (error code: %i) ...\n", _name, getpid(), _status);
     return _status;
