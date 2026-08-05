@@ -64,6 +64,14 @@ extern std::function<hipError_t(void* /*data*/,
                                 hipDeviceptr_t /*ptr*/)>
     g_hipPointerGetAttribute;
 
+// Device model (init.cc, Tier-C): controllable runtime version + device
+// properties. Tests inject a specific arch (gfx942/gfx950), total memory, or a
+// fatal failure. hipGetDeviceProperties resolves to hipGetDevicePropertiesR0600
+// after hipify; g_hipGetDeviceProperties backs that symbol.
+extern std::function<hipError_t(int* /*version*/)> g_hipRuntimeGetVersion;
+extern std::function<hipError_t(hipDeviceProp_t* /*prop*/, int /*device*/)>
+    g_hipGetDeviceProperties;
+
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.
 void ResetHipFakes();

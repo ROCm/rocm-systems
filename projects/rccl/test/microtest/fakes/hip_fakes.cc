@@ -106,6 +106,28 @@ static hipError_t DefaultHipPointerGetAttribute(void* data,
 std::function<hipError_t(void*, hipPointer_attribute, hipDeviceptr_t)>
     g_hipPointerGetAttribute = DefaultHipPointerGetAttribute;
 
+// --- Device model (init.cc Tier-C): runtime version + device properties -----
+static hipError_t DefaultHipRuntimeGetVersion(int* version)
+{
+    if (version) *version = 60443484;  // plausible ROCm 6.x runtime version
+    return hipSuccess;
+}
+static hipError_t DefaultHipGetDeviceProperties(hipDeviceProp_t* prop, int)
+{
+    if (prop) {
+        *prop = hipDeviceProp_t{};
+        const char* arch = "gfx942:sramecc+:xnack-";
+        std::strncpy(prop->gcnArchName, arch, sizeof(prop->gcnArchName) - 1);
+        prop->gcnArchName[sizeof(prop->gcnArchName) - 1] = '\0';
+        prop->totalGlobalMem = static_cast<size_t>(64) << 30;
+        prop->warpSize = 64;
+    }
+    return hipSuccess;
+}
+std::function<hipError_t(int*)> g_hipRuntimeGetVersion = DefaultHipRuntimeGetVersion;
+std::function<hipError_t(hipDeviceProp_t*, int)>
+    g_hipGetDeviceProperties = DefaultHipGetDeviceProperties;
+
 // Restore every HIP hook to its default. Called from ResetP2pFakes().
 void ResetHipFakes()
 {
@@ -115,6 +137,8 @@ void ResetHipFakes()
     g_hipMemExportToShareableHandle = DefaultHipMemExportToShareableHandle;
     g_hipMemRelease                 = DefaultHipMemRelease;
     g_hipPointerGetAttribute        = DefaultHipPointerGetAttribute;
+    g_hipRuntimeGetVersion          = DefaultHipRuntimeGetVersion;
+    g_hipGetDeviceProperties        = DefaultHipGetDeviceProperties;
 }
 
 // ===========================================================================
@@ -209,6 +233,14 @@ hipError_t hipGetDeviceCount(int* count)
 {
     if (count) *count = 0;
     return hipErrorInvalidValue;
+}
+
+// Device-model symbols routed through the controllable hooks above. After
+// hipify, init.cc's hipGetDeviceProperties call binds to hipGetDevicePropertiesR0600.
+hipError_t hipRuntimeGetVersion(int* version) { return g_hipRuntimeGetVersion(version); }
+hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_t* prop, int device)
+{
+    return g_hipGetDeviceProperties(prop, device);
 }
 
 const char* hipGetErrorString(hipError_t) { return "[hip_fake] stub error"; }

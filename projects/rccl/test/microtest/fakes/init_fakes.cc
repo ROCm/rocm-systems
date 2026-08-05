@@ -102,6 +102,15 @@ void rcclSetDefaultBuffSizes(struct ncclComm*, int* defaults) {
 }
 void rcclSetP2pNetChunkSize(struct ncclComm*, int& sz) { sz = 1 << 17; }
 
+// checkHsaEnvSetting seams (controllable). Defaults: valid setting, firmware 0.
+bool g_validHsaScratch = true;
+int g_firmwareVersion = 0;
+bool validHsaScratchEnvSetting(const char* /*hsaScratchEnv*/, int /*hipRuntimeVersion*/,
+                               int /*firmwareVersion*/, const char* /*gcnArchName*/) {
+  return g_validHsaScratch;
+}
+int getFirmwareVersion() { return g_firmwareVersion; }
+
 // The NCCL_API dispatch symbol ncclCommGetAsyncError is emitted outside init.cc
 // (the api-trace layer, not linked here); ncclCommEnsureReady calls it. Route it
 // to the in-TU _impl (defined in the init-test.cc object via the UUT include).
@@ -116,4 +125,6 @@ void ResetInitFakes() {
   ResetNcclFakes();
   ClearMicroEnv();
   g_ginHasError = false;
+  g_validHsaScratch = true;
+  g_firmwareVersion = 0;
 }

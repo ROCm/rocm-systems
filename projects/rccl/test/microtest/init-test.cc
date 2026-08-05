@@ -378,3 +378,32 @@ TEST_F(InitMicrotest, GetAsyncError_GroupJobCompletes_AndClears) {
   EXPECT_EQ(ncclSuccess, e);
   EXPECT_EQ(nullptr, rc.get()->groupJob);  // completed -> cleared
 }
+
+// ===========================================================================
+// Tier C: GPU-facing helpers via the controllable device model (F1) + fault
+// injection. "mock various GPUs": g_hipGetDeviceProperties supplies gcnArchName;
+// g_hipRuntimeGetVersion / g_hipGetDeviceProperties inject fatal HIP errors.
+// ===========================================================================
+
+// checkHsaEnvSetting (init.cc:229): getenv + hipRuntimeGetVersion + firmware +
+// hipGetDeviceProperties + validHsaScratchEnvSetting. Returns success (WARN-only
+// on invalid setting); CUDACHECK maps a HIP error to ncclUnhandledCudaError.
+TEST_F(InitMicrotest, CheckHsaEnvSetting_AllSucceed_ReturnsSuccess) {
+  EXPECT_EQ(ncclSuccess, checkHsaEnvSetting());  // defaults: gfx942, valid
+}
+TEST_F(InitMicrotest, CheckHsaEnvSetting_RuntimeVersionFault_ReturnsUnhandledCudaError) {
+  g_hipRuntimeGetVersion = [](int*) { return hipErrorInvalidValue; };
+  g_hipGetDeviceProperties = [](hipDeviceProp_t*, int) -> hipError_t {
+    ADD_FAILURE() << "hipGetDeviceProperties must not be called after runtime fault";
+    return hipErrorInvalidValue;
+  };
+  EXPECT_EQ(ncclUnhandledCudaError, checkHsaEnvSetting());
+}
+TEST_F(InitMicrotest, CheckHsaEnvSetting_PropertiesFault_ReturnsUnhandledCudaError) {
+  g_hipGetDeviceProperties = [](hipDeviceProp_t*, int) { return hipErrorInvalidValue; };
+  EXPECT_EQ(ncclUnhandledCudaError, checkHsaEnvSetting());
+}
+TEST_F(InitMicrotest, CheckHsaEnvSetting_InvalidSetting_WarnsButSucceeds) {
+  g_validHsaScratch = false;  // validator false -> WARN, still ncclSuccess
+  EXPECT_EQ(ncclSuccess, checkHsaEnvSetting());
+}

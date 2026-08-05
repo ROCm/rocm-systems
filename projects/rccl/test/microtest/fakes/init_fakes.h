@@ -36,6 +36,11 @@ void ClearMicroEnv();                                    // back to real getenv
 // it to drive the ncclRemoteError precedence branch in ncclCommGetAsyncError.
 extern bool g_ginHasError;
 
+// checkHsaEnvSetting seams: validHsaScratchEnvSetting()'s verdict (true = OK,
+// no WARN) and getFirmwareVersion()'s value.
+extern bool g_validHsaScratch;
+extern int g_firmwareVersion;
+
 // Reset every init-layer fake to defaults. Cascades to ResetHipFakes() and
 // ResetNcclFakes(). Called from the fixture TearDown().
 void ResetInitFakes();
