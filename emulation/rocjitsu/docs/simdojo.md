@@ -262,9 +262,12 @@ its own incoming queues at the start of each barrier epoch (Phase 1).
 
 ## Topology and Partitioning
 
-The `Topology` owns the entire simulation graph: the root composite, all
-links, clock domains, and partition assignments. It serves as the single
-entry point for building and wiring a model.
+The `Topology` owns the component tree reachable from the root composite,
+all links, clock domains, and partition assignments. Link-endpoint owners
+outside the root tree are borrowed. Those external components and their ports
+must remain alive through every repartition and engine create, run, and
+shutdown operation that retains them. It serves as the single entry point for
+building and wiring a model.
 
 ### Building a Model
 
@@ -285,6 +288,7 @@ engine.topology().set_root(std::move(root));
 engine.topology().add_link(pipe_req_port, mem_req_port, /*latency=*/10);
 engine.topology().add_link(mem_resp_port, pipe_resp_port, /*latency=*/5);
 
+engine.topology().partition_balanced(4);
 engine.create();
 auto exit = engine.run();
 ```
@@ -515,16 +519,18 @@ empty but primaries are registered, returns true so the caller can poll.
 SimulationEngine engine({.max_ticks = 10000, .num_threads = 4});
 engine.topology().set_root(std::move(my_model));
 engine.topology().add_link(src_port, dst_port, latency);
-engine.create();       // partitions, initializes components
+engine.topology().partition_balanced(4);
+engine.create();       // validates partitions, initializes components
 // (user enqueues work via CP)
 auto exit = engine.run();   // starts up components, runs to completion
 engine.shutdown();    // called automatically by destructor if needed
 ```
 
-`create()` partitions the topology and calls `initialize()` on all
-components. `run()` calls `startup()` on all components and enters the
-event loop. `shutdown()` is called automatically by the destructor if the
-engine is still built.
+For multi-threaded engines, callers select a partition policy before
+`create()`. `create()` validates the selected partitions and calls
+`initialize()` on all components. `run()` calls `startup()` on all components
+and enters the event loop. `shutdown()` is called automatically by the
+destructor if the engine is still built.
 
 ## References
 

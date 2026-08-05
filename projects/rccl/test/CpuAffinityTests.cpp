@@ -23,11 +23,14 @@ namespace RcclUnitTesting
 {
   namespace
   {
-    // CPUs in the NUMA node the device hangs off, or -1 when sysfs does not expose it.
-    // RCCL narrows the calling thread to exactly this set, so the regression is only
-    // observable when the set is a strict subset of the process mask.
-    int GetDeviceLocalCpuCount(int device)
+    // Fill 'mask' with the CPUs in the NUMA node the device hangs off, and return the
+    // number of CPUs set, or -1 when sysfs does not expose it. RCCL narrows the calling
+    // thread to the intersection of the process mask and this set, so the behavior is
+    // only observable when this set is a strict subset of the process mask.
+    int GetDeviceLocalCpuMask(int device, cpu_set_t* mask)
     {
+      CPU_ZERO(mask);
+
       char busId[32];
       if (hipDeviceGetPCIBusId(busId, sizeof(busId), device) != hipSuccess) {
         return -1;
@@ -58,35 +61,54 @@ namespace RcclUnitTesting
         return -1;
       }
 
-      // Hex bitmap in comma-separated 32-bit groups, e.g. "00000000,0000ffff".
-      int count = 0;
+      // Hex bitmap in comma-separated 32-bit groups, most-significant group first,
+      // e.g. "00000000,0000ffff". Collect the nibbles first, then assign bit positions
+      // from the least-significant (rightmost) nibble upward.
+      char nibbles[CPU_SETSIZE / 4];
+      int numNibbles = 0;
       for (int c = fgetc(file); c != EOF; c = fgetc(file)) {
-        int nibble = -1;
-        if (c >= '0' && c <= '9') nibble = c - '0';
-        else if (c >= 'a' && c <= 'f') nibble = c - 'a' + 10;
-        if (nibble >= 0) {
-          count += __builtin_popcount(static_cast<unsigned>(nibble));
+        int value = -1;
+        if (c >= '0' && c <= '9') value = c - '0';
+        else if (c >= 'a' && c <= 'f') value = c - 'a' + 10;
+        if (value >= 0 && numNibbles < static_cast<int>(sizeof(nibbles))) {
+          nibbles[numNibbles++] = static_cast<char>(value);
         }
       }
       fclose(file);
+
+      int count = 0;
+      for (int i = 0; i < numNibbles; ++i) {
+        int value = nibbles[numNibbles - 1 - i];
+        for (int bit = 0; bit < 4; ++bit) {
+          if (value & (1 << bit)) {
+            int cpu = i * 4 + bit;
+            if (cpu < CPU_SETSIZE) {
+              CPU_SET(cpu, mask);
+              ++count;
+            }
+          }
+        }
+      }
       return count;
     }
   }
 
   /**
-   * \brief Verify the calling thread's CPU affinity is restored after ncclCommInitRank.
+   * \brief Verify the calling thread stays pinned to the GPU-local NUMA CPUs after ncclCommInitRank.
    *
-   * Regression guard for NCCL issue #2033 / AICOMRCCL-1537: initTransportsRank() must
-   * restore the mask it saved before applying the GPU-local one. Single-rank
-   * ncclCommInitRank runs initTransportsRank on the calling thread, so a leak is
-   * observable here. The check only bites when the GPU-local CPU set is a strict
-   * subset of the process mask (multi-NUMA hosts); elsewhere the invariant still holds
-   * but the regression is not exercised, which the test reports so that a pass is not
-   * mistaken for coverage.
+   * Guards the intentional RCCL 2.29.7 comm-init behavior restored in commit
+   * 1f36e555 (AICOMRCCL-1537): initTransportsRank() saves the caller's mask, pins the
+   * calling thread to the GPU-local NUMA CPUs so RCCL's host buffers are allocated
+   * locally, and on the exit path re-applies that GPU-local mask rather than restoring
+   * the original process mask. Single-rank ncclCommInitRank runs initTransportsRank on
+   * the calling thread, so the pinning is observable here. The check only bites when the
+   * GPU-local CPU set is a strict subset of the process mask (multi-NUMA hosts);
+   * elsewhere the invariant still holds but the behavior is not exercised, which the test
+   * reports so that a pass is not mistaken for coverage.
    * ******************************************************************************************/
-  TEST(CpuAffinity, RestoredAfterInitRank)
+  TEST(CpuAffinity, PinnedToLocalAfterInitRank)
   {
-    RUN_ISOLATED_TEST("CpuAffinity_RestoredAfterInitRank", []()
+    RUN_ISOLATED_TEST("CpuAffinity_PinnedToLocalAfterInitRank", []()
     {
       int numDevices;
       HIPCALL(hipGetDeviceCount(&numDevices));
@@ -119,14 +141,32 @@ namespace RcclUnitTesting
       ASSERT_EQ(sched_getaffinity(0, sizeof(before), &before), 0)
           << "sched_getaffinity failed: " << strerror(errno);
 
-      int localCpus = GetDeviceLocalCpuCount(0);
+      cpu_set_t localMask;
+      int localCpus = GetDeviceLocalCpuMask(0, &localMask);
+
+      // RCCL pins the calling thread to (process mask) AND (GPU-local mask). Predict that
+      // set from what we can read, so we can assert the exact mask below.
+      cpu_set_t expected;
+      CPU_ZERO(&expected);
+      bool haveExpected = false;
       if (localCpus < 0) {
         TEST_WARN("Could not read the NUMA-local CPU set of GPU 0 from sysfs, cannot tell "
                   "whether this host narrows the affinity mask.");
-      } else if (localCpus >= CPU_COUNT(&before)) {
-        TEST_WARN("GPU 0 is local to all %d CPUs of the process mask, so RCCL never narrows it "
-                  "here: the invariant is still checked, but the regression is not exercised. "
-                  "Real coverage requires a multi-NUMA host.", CPU_COUNT(&before));
+      } else {
+        CPU_AND(&expected, &before, &localMask);
+        haveExpected = true;
+        if (CPU_COUNT(&expected) == 0) {
+          // Empty intersection: RCCL's ncclOsCpuCount() guard skips the affinity call, so
+          // the calling thread keeps the process mask.
+          CPU_ZERO(&expected);
+          memcpy(&expected, &before, sizeof(before));
+          TEST_WARN("GPU 0 has no NUMA-local CPU in the process mask, so RCCL never pins "
+                    "here: the invariant is still checked, but the behavior is not exercised.");
+        } else if (CPU_COUNT(&expected) >= CPU_COUNT(&before)) {
+          TEST_WARN("GPU 0 is local to all %d CPUs of the process mask, so RCCL never narrows it "
+                    "here: the invariant is still checked, but the behavior is not exercised. "
+                    "Real coverage requires a multi-NUMA host.", CPU_COUNT(&before));
+        }
       }
 
       ncclComm_t comm;
@@ -145,9 +185,24 @@ namespace RcclUnitTesting
 
       ASSERT_EQ(getAffinityStatus, 0)
           << "sched_getaffinity failed: " << strerror(getAffinityErrno);
-      ASSERT_TRUE(CPU_EQUAL(&before, &after))
-          << "CPU affinity was not restored after ncclCommInitRank "
-          << "(NCCL issue #2033 / AICOMRCCL-1537 regression)";
+
+      // RCCL only ever narrows the mask, never widens it: 'after' must be a subset of 'before'.
+      cpu_set_t afterOutsideBefore;
+      CPU_ZERO(&afterOutsideBefore);
+      CPU_XOR(&afterOutsideBefore, &after, &before);
+      CPU_AND(&afterOutsideBefore, &afterOutsideBefore, &after);
+      ASSERT_EQ(CPU_COUNT(&afterOutsideBefore), 0)
+          << "CPU affinity gained CPUs outside the original process mask after ncclCommInitRank";
+
+      if (haveExpected) {
+        // Core regression guard (AICOMRCCL-1537): the calling thread stays pinned to the
+        // GPU-local NUMA CPUs rather than being restored to the original process mask.
+        ASSERT_TRUE(CPU_EQUAL(&expected, &after))
+            << "Calling thread was not left pinned to the GPU-local NUMA CPUs after "
+            << "ncclCommInitRank (expected " << CPU_COUNT(&expected) << " CPUs, got "
+            << CPU_COUNT(&after) << "): RCCL 2.29.7 comm-init affinity behavior "
+            << "(AICOMRCCL-1537) regressed";
+      }
     });
   }
 }
