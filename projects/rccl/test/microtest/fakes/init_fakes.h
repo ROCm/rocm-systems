@@ -46,6 +46,10 @@ extern int g_firmwareVersion;
 extern int g_gdrSupportValue;
 extern int g_gdrSupportCalls;
 
+// D5: ncclInit()-tree seams run real ncclInit() host-only. bootstrapNetInit
+// success is injectable so a (process-isolated) test can drive ncclInit failure.
+extern bool g_bootstrapNetInitFail;
+
 // Reset every init-layer fake to defaults. Cascades to ResetHipFakes() and
 // ResetNcclFakes(). Called from the fixture TearDown().
 void ResetInitFakes();

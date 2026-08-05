@@ -579,6 +579,20 @@ TEST_F(InitMicrotest, CommInitRankDev_NIdGreaterThanNranks_ReturnsInvalidArgumen
             ncclCommInitRankDev(&nc, /*nranks=*/4, /*nId=*/5, &id, /*myrank=*/0, 0, &cfg, "t"));
 }
 
+// --- D5: real ncclInit() runs host-only. This drives the whole init-once tree
+// (checkHsaEnvSetting, initEnv, setCpuStackSize->ncclOsInitialize, initGdrCopy,
+// bootstrapNetInit) via the controllable success seams, THEN the post-ncclInit
+// null-newcomm validation arm returns before ncclCalloc/ncclAsyncLaunch.
+// NOTE: ncclInit uses std::call_once, so this is the single in-process ncclInit
+// trigger; additional ncclInit outcomes (e.g. bootstrapNetInit failure) will be
+// process-isolated. ----------------------------------------------------------
+TEST_F(InitMicrotest, CommInitRankDev_PostInit_NullNewcomm_ReturnsInvalidArgument) {
+  ncclUniqueId id{};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  EXPECT_EQ(ncclInvalidArgument,
+            ncclCommInitRankDev(/*newcomm=*/nullptr, /*nranks=*/1, /*nId=*/1, &id, /*myrank=*/0, 0, &cfg, "t"));
+}
+
 #if defined(HIP_HOST_UNCACHED_MEMORY)
 TEST_F(InitMicrotest, CheckHostUncacheMemSetting_Uncached_AlwaysSucceeds) {
   TopoComm t("gfx950:sramecc+");  // even gfx950 is OK when the build flag is set

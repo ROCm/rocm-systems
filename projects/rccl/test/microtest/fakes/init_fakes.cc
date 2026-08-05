@@ -166,11 +166,35 @@ ncclResult_t ncclCommGetAsyncError(ncclComm_t comm, ncclResult_t* asyncError) {
   return ncclCommGetAsyncError_impl(comm, asyncError);
 }
 
+// D5: ncclInit()-tree seams -- controllable SUCCESS so real ncclInit() runs
+// host-only (moved from the fail-loud floor). bootstrapNetInit failure is
+// injectable to drive ncclInit's error arm (process-isolated tests).
+bool g_bootstrapNetInitFail = false;
+ncclResult_t bootstrapNetInit() { return g_bootstrapNetInitFail ? ncclSystemError : ncclSuccess; }
+void initEnv() {}
+ncclResult_t ncclOsInitialize() { return ncclSuccess; }
+void initNvtxRegisteredEnums() {}
+ncclResult_t ncclEnvPluginInit(void) { return ncclSuccess; }
+bool ncclIommuPassthroughOk(const char*) { return true; }
+// Canned /proc,/sys strings so ncclInit()'s tokenization stays well-formed
+// (>=3 whitespace tokens for /proc version).
+ncclResult_t ncclTopoGetStrFromSys(const char* /*path*/, const char* fileName, char* strValue) {
+  if (!strValue) return ncclSuccess;
+  if (fileName && std::strcmp(fileName, "version") == 0)
+    std::strcpy(strValue, "Linux version 6.8.0-microtest");
+  else if (fileName && std::strcmp(fileName, "numa_balancing") == 0)
+    std::strcpy(strValue, "0");
+  else
+    std::strcpy(strValue, "microtest");
+  return ncclSuccess;
+}
+
 void ResetInitFakes() {
   ResetHipFakes();
   ResetNcclFakes();
   ClearMicroEnv();
   g_ginHasError = false;
+  g_bootstrapNetInitFail = false;
   g_validHsaScratch = true;
   g_firmwareVersion = 0;
   g_gdrSupportValue = 0;

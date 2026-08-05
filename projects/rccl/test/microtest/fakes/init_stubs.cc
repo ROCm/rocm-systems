@@ -30,7 +30,6 @@ ncclResult_t bootstrapCreateRoot(struct ncclBootstrapHandle* handle, bool idFrom
 ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle, struct ncclComm* comm) { ::abort(); }
 ncclResult_t bootstrapInit(int nHandles, void* handle, struct ncclComm* comm, struct ncclComm* parent) { ::abort(); }
 ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, int nranks, int tag) { ::abort(); }
-ncclResult_t bootstrapNetInit() { ::abort(); }
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm) { ::abort(); }
 ncclResult_t initChannel(struct ncclComm* comm, int channelid) { ::abort(); }
 ncclResult_t ncclCeFinalize(struct ncclComm* comm) { ::abort(); }
@@ -48,14 +47,12 @@ bool ncclDdaUseFabricPath(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, struct ncclDevrWindow** outWin) { ::abort(); }
 bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclEnvPluginInit(void) { ::abort(); }
 ncclResult_t ncclGetUserP2pLevel(int* level) { ::abort(); }
 ncclResult_t ncclGinFinalize(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclGinInit(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclGinInitFromParent(struct ncclComm* comm, struct ncclComm* parent) { ::abort(); }
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) { ::abort(); }
-bool ncclIommuPassthroughOk(const char* cmdline) { ::abort(); }
 ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclNetFinalize(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclNetInit(struct ncclComm* comm) { ::abort(); }
@@ -68,7 +65,6 @@ ncclResult_t ncclNvlsTuning(struct ncclComm* comm) { ::abort(); }
 int ncclOsCpuCount(const ncclAffinity& affinity) { ::abort(); }
 ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { ::abort(); }
 size_t ncclOsGetPageSize() { ::abort(); }
-ncclResult_t ncclOsInitialize() { ::abort(); }
 ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) { ::abort(); }
 ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) { ::abort(); }
@@ -97,7 +93,6 @@ ncclResult_t ncclTopoGetCpuAffinity(struct ncclTopoSystem* system, int rank, ncc
 ncclResult_t ncclTopoGetMinNetBw(struct ncclTopoSystem* system, int rank, float* bw) { ::abort(); }
 ncclResult_t ncclTopoGetNvbGpus(struct ncclTopoSystem* system, int rank, int* nranks, int** ranks) { ::abort(); }
 ncclResult_t ncclTopoGetPxnRanks(struct ncclComm* comm, int** intermediateRanks, int* nranks) { ::abort(); }
-ncclResult_t ncclTopoGetStrFromSys(const char* path, const char* fileName, char* strValue) { ::abort(); }
 ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** system, const char* dumpXmlFile) { ::abort(); }
 ncclResult_t ncclTopoInitTunerConstants(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTopoPathAllDirectNVLink(struct ncclTopoSystem* system, bool* allNvlinkConnected) { ::abort(); }
@@ -138,8 +133,6 @@ const char* rcclGitHash = "microtest";
 
 // Missed by the generator (init*/extern-C names, ref-to-array, std::function).
 struct ncclTopoRanks;
-void initEnv() { ::abort(); }
-void initNvtxRegisteredEnums() { ::abort(); }
 ncclResult_t ncclTopoPreset(struct ncclComm*, struct ncclTopoGraph* (&)[7], struct ncclTopoRanks*) { ::abort(); }
 ncclResult_t rcclCheckRomeTopoModelIdxConsensus(int, std::function<int(int)>,
                                                 std::function<const char*(int)>,
