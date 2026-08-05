@@ -13,7 +13,6 @@ from profile_helpers import (
 )
 
 
-@pytest.mark.sets_func
 class TestSetsIntegration:
     # Ensure single pass for auto-discovered sets from YAML for the current GPU arch.
     @pytest.mark.parametrize("set_name", AVAILABLE_SETS, ids=lambda s: s)

@@ -9,7 +9,6 @@ import socket
 from pathlib import Path
 
 import common
-import pytest
 from profile_helpers import (
     CSVS,
     GPU_MODEL,
@@ -26,7 +25,6 @@ from profile_helpers import (
 )
 
 
-@pytest.mark.path
 def test_path(binary_handler_profile_rocprof_compute):
     workload_dir = common.get_output_dir()
     binary_handler_profile_rocprof_compute(config, workload_dir)
@@ -40,7 +38,6 @@ def test_path(binary_handler_profile_rocprof_compute):
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.path
 def test_path_rocflop(binary_handler_profile_rocprof_compute):
     # Test whether multiprocess workloads like rocflop are handled correctly
     workload_dir = common.get_output_dir()
@@ -57,7 +54,6 @@ def test_path_rocflop(binary_handler_profile_rocprof_compute):
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.path
 def test_path_no_native(binary_handler_profile_rocprof_compute):
     workload_dir = common.get_output_dir()
     options = ["--no-native-tool"]
@@ -72,7 +68,6 @@ def test_path_no_native(binary_handler_profile_rocprof_compute):
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.path
 def test_path_rocpd(
     binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
 ):
@@ -92,7 +87,6 @@ def test_path_rocpd(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.path
 def test_output_directory_hostname(binary_handler_profile_rocprof_compute, monkeypatch):
     """Test that %hostname% placeholder is replaced with the actual hostname."""
     from rocprof_compute_base import RocProfCompute
@@ -113,7 +107,6 @@ def test_output_directory_hostname(binary_handler_profile_rocprof_compute, monke
     common.clean_output_dir(config["cleanup"], workload_base_dir)
 
 
-@pytest.mark.path
 def test_output_directory_gpumodel(binary_handler_profile_rocprof_compute, monkeypatch):
     """Test that %gpumodel% placeholder is replaced with the GPU model name."""
     from rocprof_compute_base import RocProfCompute
@@ -135,7 +128,6 @@ def test_output_directory_gpumodel(binary_handler_profile_rocprof_compute, monke
     common.clean_output_dir(config["cleanup"], workload_base_dir)
 
 
-@pytest.mark.path
 def test_output_directory_rank_ignored_without_mpi(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):
@@ -156,7 +148,6 @@ def test_output_directory_rank_ignored_without_mpi(
     common.clean_output_dir(config["cleanup"], workload_base_dir)
 
 
-@pytest.mark.path
 def test_output_directory_rank_replaced_with_mpi(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):
@@ -181,7 +172,6 @@ def test_output_directory_rank_replaced_with_mpi(
     clear_rank_env(monkeypatch, SLURM_RANK_VAR, SLURM_SIZE_VAR)
 
 
-@pytest.mark.path
 def test_output_directory_env_variable(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):
@@ -203,7 +193,6 @@ def test_output_directory_env_variable(
     monkeypatch.delenv("ENV_1", raising=False)
 
 
-@pytest.mark.path
 def test_output_directory_env_variable_unset(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):
@@ -223,7 +212,6 @@ def test_output_directory_env_variable_unset(
     common.clean_output_dir(config["cleanup"], workload_base_dir)
 
 
-@pytest.mark.path
 def test_output_directory_all_placeholders_combined(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):
@@ -265,7 +253,6 @@ def test_output_directory_all_placeholders_combined(
     monkeypatch.delenv("ENV_1", raising=False)
 
 
-@pytest.mark.path
 def test_output_directory_default_with_rank(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):
@@ -311,7 +298,6 @@ def test_output_directory_default_with_rank(
     monkeypatch.delenv("PMI_RANK", raising=False)
 
 
-@pytest.mark.path
 def test_output_directory_default_without_rank(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):
@@ -350,7 +336,6 @@ def test_output_directory_default_without_rank(
     common.clean_output_dir(config["cleanup"], workload_base_dir)
 
 
-@pytest.mark.path
 def test_output_directory_no_name_with_output_dir(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):
@@ -374,7 +359,6 @@ def test_output_directory_no_name_with_output_dir(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.path
 def test_output_directory_no_name_no_output_dir(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):
@@ -402,7 +386,6 @@ def test_output_directory_no_name_no_output_dir(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.path
 def test_comprehensive_error_paths():
     """Simplified test for error path coverage"""
 

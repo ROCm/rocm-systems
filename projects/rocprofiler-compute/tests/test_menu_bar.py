@@ -196,3 +196,5 @@ class TestMenuButton:
         event = DropdownMenu.Closed()
 
         button.on_dropdown_closed(event)
+
+        assert button.is_open is False

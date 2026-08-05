@@ -287,15 +287,15 @@ endif()
 add_test(
     NAME test_profile_kernel_execution
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m
-        kernel_execution --junitxml=tests/test_profile_kernel_execution.xml ${COV_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_profile_kernel_execution.xml ${COV_OPTION}
         tests/test_profile_kernel_execution.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_dispatch
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m dispatch
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_profile_dispatch.xml ${COV_OPTION}
         tests/test_profile_dispatch.py ${WORKING_DIR_OPTION}
 )
@@ -303,7 +303,7 @@ add_test(
 add_test(
     NAME test_profile_sort
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m sort
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_profile_sort.xml ${COV_OPTION} tests/test_profile_sort.py
         ${WORKING_DIR_OPTION}
 )
@@ -319,7 +319,7 @@ add_test(
 add_test(
     NAME test_profile_path
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m path
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_profile_path.xml ${COV_OPTION} tests/test_profile_path.py
         ${WORKING_DIR_OPTION}
 )
@@ -367,7 +367,7 @@ add_test(
 add_test(
     NAME test_profile_section
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m section
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_profile_section.xml ${COV_OPTION}
         tests/test_profile_section.py ${WORKING_DIR_OPTION}
 )
@@ -375,7 +375,7 @@ add_test(
 add_test(
     NAME test_profile_sets_func
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m sets_func
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_profile_sets_func.xml ${COV_OPTION}
         tests/test_profile_sets_func.py ${WORKING_DIR_OPTION}
 )
@@ -383,9 +383,9 @@ add_test(
 add_test(
     NAME test_profile_live_attach_detach
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s -m
-        live_attach_detach --junitxml=tests/test_profile_live_attach_detach.xml
-        ${COV_OPTION} tests/test_profile_live_attach_detach.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s
+        --junitxml=tests/test_profile_live_attach_detach.xml ${COV_OPTION}
+        tests/test_profile_live_attach_detach.py ${WORKING_DIR_OPTION}
 )
 set_tests_properties(
     test_profile_live_attach_detach
@@ -423,7 +423,7 @@ if(MPI_CXX_COMPILER)
     add_test(
         NAME test_profile_multi_rank
         COMMAND
-            ${PYTHON_TEST_COMMAND} -m pytest -s -m multi_rank
+            ${PYTHON_TEST_COMMAND} -m pytest -s
             --junitxml=tests/test_profile_multi_rank.xml ${COV_OPTION}
             tests/test_profile_multi_rank.py ${WORKING_DIR_OPTION}
     )
@@ -460,7 +460,7 @@ add_test(
 add_test(
     NAME test_profile_triton_trace
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m triton_trace
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_profile_triton_trace.xml ${COV_OPTION}
         tests/test_profile_triton_trace.py ${WORKING_DIR_OPTION}
 )

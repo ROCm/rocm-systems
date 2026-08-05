@@ -6,7 +6,6 @@
 import inspect
 
 import common
-import pytest
 from profile_helpers import (
     CSVS,
     config,
@@ -16,7 +15,6 @@ from profile_helpers import (
 )
 
 
-@pytest.mark.kernel_execution
 def test_kernel(binary_handler_profile_rocprof_compute):
     options = ["--kernel", config["kernel_name_1"]]
     workload_dir = common.get_output_dir()

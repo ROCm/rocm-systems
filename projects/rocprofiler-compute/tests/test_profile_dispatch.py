@@ -15,7 +15,6 @@ from profile_helpers import (
 )
 
 
-@pytest.mark.dispatch
 def test_dispatch_0(binary_handler_profile_rocprof_compute):
     options = ["--dispatch", "1"]
     workload_dir = common.get_output_dir()
@@ -37,7 +36,6 @@ def test_dispatch_0(binary_handler_profile_rocprof_compute):
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.dispatch
 def test_dispatch_0_1(binary_handler_profile_rocprof_compute):
     options = ["--dispatch", "1:2"]
     workload_dir = common.get_output_dir()
@@ -56,7 +54,6 @@ def test_dispatch_0_1(binary_handler_profile_rocprof_compute):
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.dispatch
 def test_dispatch_2(binary_handler_profile_rocprof_compute):
     options = ["--dispatch", "1"]
     workload_dir = common.get_output_dir()
@@ -78,7 +75,6 @@ def test_dispatch_2(binary_handler_profile_rocprof_compute):
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.dispatch
 @pytest.mark.parametrize(
     "bad_value",
     ["0", "-1", "abc", "1:0", "5:3", "1:", ":3", "1:2:3"],

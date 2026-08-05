@@ -8,7 +8,6 @@ from pathlib import Path
 
 import common
 import pandas as pd
-import pytest
 from conftest import require_triton
 from profile_helpers import (
     config,
@@ -17,7 +16,6 @@ from profile_helpers import (
 from utils import csv_compression
 
 
-@pytest.mark.triton_trace
 def test_triton_trace_profile(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
@@ -140,7 +138,6 @@ def test_triton_trace_profile(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.triton_trace
 def test_ml_api_trace_torch_compile_triton(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,

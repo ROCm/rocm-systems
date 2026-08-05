@@ -9,7 +9,6 @@ import subprocess
 import time
 
 import common
-import pytest
 from profile_helpers import (
     attach_detach_interval_msec_no_delay,
     config,
@@ -18,7 +17,6 @@ from profile_helpers import (
 )
 
 
-@pytest.mark.live_attach_detach
 def test_live_attach_detach_block(
     binary_handler_profile_rocprof_compute,
 ):
@@ -76,7 +74,6 @@ def test_live_attach_detach_block(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.live_attach_detach
 def test_live_attach_detach_pc_sampling(
     binary_handler_profile_rocprof_compute,
 ):

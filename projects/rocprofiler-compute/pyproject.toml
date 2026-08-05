@@ -76,17 +76,9 @@ pythonpath = [
 ]
 
 markers = [
-    "section",
-    "kernel_execution",
     "misc",
-    "mem",
-    "sort",
-    "verbosity",
-    "dispatch",
     "list_metrics",
     "filter_block",
-    "filter_kernel",
-    "dispatch",
     "normal_unit",
     "max_stat",
     "time_unit",
@@ -96,9 +88,6 @@ markers = [
     "serial",
     "num_xcds_spec_class",
     "num_xcds_cli_output",
-    "sets_func",
-    "sets_perf",
-    "live_attach_detach",
     "roofline_validation",
     "roofline_dir",
     "roofline_extra_options",
@@ -111,9 +100,6 @@ markers = [
     "iteration_multiplexing_stochastic",
     "torch_ops",
     "torch_trace",
-    "triton_trace",
-    "multi_rank",
     "experimental_feature",
-    "skip",
     "tui",
 ]

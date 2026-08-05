@@ -19,7 +19,6 @@ from profile_helpers import (
 )
 
 
-@pytest.mark.multi_rank
 def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute):
     """
     Test multi-rank profiling of a non-MPI application.
@@ -61,7 +60,6 @@ def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.multi_rank
 def test_multi_rank_profiling_mpi_comm(
     binary_handler_profile_rocprof_compute,
 ):
@@ -117,7 +115,6 @@ def test_multi_rank_profiling_mpi_comm(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.multi_rank
 def test_wrapped_mpi(binary_handler_profile_rocprof_compute):
     """
     Test that using MPI launchers (mpirun, mpiexec, srun, orterun) after '--'
@@ -141,7 +138,6 @@ def test_wrapped_mpi(binary_handler_profile_rocprof_compute):
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.multi_rank
 def test_multi_rank_warning_application_replay(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):
@@ -174,7 +170,6 @@ def test_multi_rank_warning_application_replay(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.multi_rank
 def test_multi_rank_no_warning_with_iteration_multiplexing(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):

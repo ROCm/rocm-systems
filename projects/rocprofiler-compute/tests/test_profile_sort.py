@@ -7,7 +7,6 @@ import inspect
 from pathlib import Path
 
 import common
-import pytest
 from profile_helpers import (
     ROOF_ONLY_FILES,
     config,
@@ -17,7 +16,6 @@ from profile_helpers import (
 )
 
 
-@pytest.mark.sort
 def test_roof_sort_dispatches(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
@@ -51,7 +49,6 @@ def test_roof_sort_dispatches(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.sort
 def test_roof_sort_kernels(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
