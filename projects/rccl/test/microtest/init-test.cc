@@ -267,3 +267,66 @@ TEST_F(InitMicrotest, GetAsyncError_ReadyComm_ReturnsSuccess) {
   EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
   EXPECT_EQ(ncclSuccess, e);
 }
+
+// --- Tier B: ncclCommSetAsyncError (init.cc:3415) -- pure guard + atomic store -
+TEST_F(InitMicrotest, SetAsyncError_ValidState_StoresAndSucceeds) {
+  auto comm = std::make_unique<ncclComm>();
+  EXPECT_EQ(ncclSuccess, ncclCommSetAsyncError(comm.get(), ncclInProgress));
+  EXPECT_EQ(ncclInProgress, comm->asyncResult);
+}
+TEST_F(InitMicrotest, SetAsyncError_NegativeState_ReturnsInvalidArgument) {
+  auto comm = std::make_unique<ncclComm>();
+  EXPECT_EQ(ncclInvalidArgument, ncclCommSetAsyncError(comm.get(), (ncclResult_t)-1));
+}
+TEST_F(InitMicrotest, SetAsyncError_OutOfRangeState_ReturnsInvalidArgument) {
+  auto comm = std::make_unique<ncclComm>();
+  EXPECT_EQ(ncclInvalidArgument, ncclCommSetAsyncError(comm.get(), (ncclResult_t)ncclNumResults));
+}
+TEST_F(InitMicrotest, SetAsyncError_NullComm_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclInvalidArgument, ncclCommSetAsyncError(nullptr, ncclSuccess));
+}
+
+// --- Tier B: envConfigOverride (init.cc:2793) -- per-env override branches.
+// g_loadParam dispatches on the NCCL_PARAM env key; TearDown restores defaults. -
+namespace {
+// Fresh comm whose embedded config is all-UNDEF (via NCCL_CONFIG_INITIALIZER).
+std::unique_ptr<ncclComm> UndefConfigComm() {
+  auto comm = std::make_unique<ncclComm>();
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  comm->config = cfg;
+  return comm;
+}
+}  // namespace
+
+TEST_F(InitMicrotest, EnvConfigOverride_BlockingEnv_OverridesBlocking) {
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "COMM_BLOCKING") == 0 ? int64_t(1) : deft;
+  };
+  auto comm = UndefConfigComm();
+  EXPECT_EQ(ncclSuccess, envConfigOverride(comm.get()));
+  EXPECT_EQ(1, comm->config.blocking);
+}
+TEST_F(InitMicrotest, EnvConfigOverride_CgaClusterSizeTooBig_ClampedToMax) {
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "CGA_CLUSTER_SIZE") == 0 ? int64_t(NCCL_MAX_CGA_CLUSTER_SIZE + 1) : deft;
+  };
+  auto comm = UndefConfigComm();
+  EXPECT_EQ(ncclSuccess, envConfigOverride(comm.get()));
+  EXPECT_EQ(NCCL_MAX_CGA_CLUSTER_SIZE, comm->config.cgaClusterSize);
+}
+TEST_F(InitMicrotest, EnvConfigOverride_CgaClusterSizeInRange_Applied) {
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "CGA_CLUSTER_SIZE") == 0 ? int64_t(2) : deft;
+  };
+  auto comm = UndefConfigComm();
+  EXPECT_EQ(ncclSuccess, envConfigOverride(comm.get()));
+  EXPECT_EQ(2, comm->config.cgaClusterSize);
+}
+TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsPositive_Applied) {
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "MIN_CTAS") == 0 ? int64_t(3) : deft;
+  };
+  auto comm = UndefConfigComm();
+  EXPECT_EQ(ncclSuccess, envConfigOverride(comm.get()));
+  EXPECT_EQ(3, comm->config.minCTAs);
+}
