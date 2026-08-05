@@ -1,11 +1,47 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+# Runtime plugins share C++ objects with the host, so reject anything not built
+# from the same plugin-facing headers and toolchain before reading its metadata.
+set(_rj_plugin_contract_files
+    ${CMAKE_CURRENT_SOURCE_DIR}/execution_plugin.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/kernel_dispatch_info.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/plugin_abi.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/plugin_sink.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/wavefront_state.h
+)
+set_property(
+    DIRECTORY
+    APPEND
+    PROPERTY CMAKE_CONFIGURE_DEPENDS ${_rj_plugin_contract_files}
+)
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _rj_plugin_build_type)
+set(_rj_plugin_build_type_flags "${CMAKE_CXX_FLAGS_${_rj_plugin_build_type}}")
+set(_rj_plugin_contract_material
+    "${CMAKE_CXX_COMPILER}\n${CMAKE_CXX_COMPILER_ID}\n${CMAKE_CXX_COMPILER_VERSION}\n"
+    "${CMAKE_CXX_COMPILER_TARGET}\n${CMAKE_CXX_STANDARD}\n"
+    "${CMAKE_CXX_EXTENSIONS}\n${CMAKE_BUILD_TYPE}\n${CMAKE_CXX_FLAGS}\n"
+    "${_rj_plugin_build_type_flags}\n${CMAKE_SYSTEM_NAME}\n"
+    "${CMAKE_SYSTEM_PROCESSOR}\n${CMAKE_SIZEOF_VOID_P}\n"
+)
+foreach(_contract_file IN LISTS _rj_plugin_contract_files)
+    file(SHA256 "${_contract_file}" _contract_hash)
+    string(
+        APPEND _rj_plugin_contract_material
+        "${_contract_file}:${_contract_hash}\n"
+    )
+endforeach()
+string(SHA256 RJ_PLUGIN_BUILD_ID "${_rj_plugin_contract_material}")
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/plugin_build_identity.h.in
+    ${GENERATED_DIR}/plugin_build_identity.h
+    @ONLY
+)
+
 # Plugin logic as object libraries. These are linked both into the runtime
 # plugin shared objects (below) and into the unit-test binary, so they must
-# NOT contain the ABI export symbols (rocjitsu_plugin_metadata /
-# rocjitsu_plugin_create / rocjitsu_plugin_destroy) — those live in the
-# separate plugin_export.cpp sources compiled only into the shared objects.
+# NOT contain the contract export symbols — those live in the separate
+# plugin_export.cpp sources compiled only into the shared objects.
 rj_add_object_library(
     rocjitsu_plugin_logging
     logging/plugin.cpp
@@ -25,6 +61,7 @@ rj_add_object_library(
     plugin_loader.cpp
     plugin_config_resolver.cpp
 )
+target_include_directories(rocjitsu_plugin_loader PRIVATE ${GENERATED_DIR})
 # plugin_loader.cpp resolves plugins with dlopen/dlsym/dlclose/dlerror (via
 # util/dynamic_loader.h). On glibc < 2.34 those symbols live in a separate
 # libdl, so every target that links this object library must link it too;
@@ -38,7 +75,7 @@ target_link_libraries(
 
 # Runtime plugin shared objects are only meaningful on Linux (the interposer
 # platform). Each plugin is a `librocjitsu_plugin_<name>.so` that carries only
-# its own plugin logic plus the three ABI entry points, which a linker version
+# its own plugin logic plus the four contract entry points, which a linker version
 # script restricts to be the only exported symbols. It is fully self-contained
 # (any simulator code it references is statically bundled) and needs nothing
 # from librocjitsu.so (it is not linked against the interposer/simulator image).
@@ -86,7 +123,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 C_VISIBILITY_PRESET hidden
                 VISIBILITY_INLINES_HIDDEN ON
         )
-        # Restrict the dynamic symbol table to the three ABI entry points. The
+        # Restrict the dynamic symbol table to the four contract entry points. The
         # plugin's own default-visibility C API/flatbuffers symbols that the
         # visibility preset cannot hide are made local by the version script.
         target_link_options(

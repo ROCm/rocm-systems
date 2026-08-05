@@ -76,6 +76,12 @@ private:
   std::string file_directory_;
 };
 
+/// @brief Immutable-after-publication collection of execution plugins.
+///
+/// Configure sinks at construction and call add() before handing the group to
+/// simulation components. add() is not thread-safe; after publication, the
+/// plugin collection and sampled hook policy must remain immutable while
+/// callbacks may dispatch concurrently.
 class ExecutionPluginGroup final {
 public:
   explicit ExecutionPluginGroup(PluginSinkConfig config)
@@ -91,7 +97,7 @@ public:
       if (existing.plugin->name() == p->name())
         return false;
     p->slot_index_ = static_cast<uint32_t>(plugins_.size());
-    serialize_hot_hooks_ |= p->requires_serial_execution();
+    serialize_hot_hooks_ |= p->requires_serial_hot_hooks();
     SinkBundle sink = build_sink_bundle(p->name() + ".log");
     if (auto *configured_sink = sink.get())
       p->sink_ = configured_sink;
@@ -109,7 +115,7 @@ public:
 
   /// Whether high-frequency callbacks are serialized for this group. Plugin
   /// policy is sampled when each plugin is added so hot dispatch stays O(1).
-  bool requires_serial_execution() const { return serialize_hot_hooks_; }
+  bool requires_serial_hot_hooks() const { return serialize_hot_hooks_; }
 
   // -- Lifecycle (non-virtual) --
   void onInit() {
@@ -254,18 +260,25 @@ public:
 
 private:
   template <typename Callback> void dispatch_with_plugin_lock(Callback &&callback) {
-    std::lock_guard<std::mutex> lock(callback_mutex_);
+    if (plugins_.empty())
+      return;
+    std::lock_guard<std::recursive_mutex> lock(callback_mutex_);
     std::forward<Callback>(callback)();
   }
 
   template <typename Callback> void dispatch_with_optional_plugin_lock(Callback &&callback) {
+    if (plugins_.empty())
+      return;
     if (serialize_hot_hooks_)
       dispatch_with_plugin_lock(std::forward<Callback>(callback));
     else
       std::forward<Callback>(callback)();
   }
 
-  std::mutex callback_mutex_;
+  // Infrequent hooks may synchronously fire hot register hooks. Recursive
+  // acquisition preserves one cross-hook serialization domain without
+  // deadlocking that same-thread re-entry.
+  std::recursive_mutex callback_mutex_;
   bool serialize_hot_hooks_ = false;
 
   /// Internal fanout over sinks whose lifetime is guaranteed by the owning

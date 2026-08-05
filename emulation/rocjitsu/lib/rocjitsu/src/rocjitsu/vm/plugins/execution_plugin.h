@@ -29,7 +29,7 @@ namespace rocjitsu {
 /// Plugins receive callbacks at key points during simulation execution.
 /// All hooks have empty default implementations so plugins only override
 /// what they need. The no-plugin path has near-zero overhead (the
-/// default empty group's delegation loops iterate an empty vector).
+/// default empty group returns before locking or dispatch).
 ///
 /// Ownership: plugins are owned by an ExecutionPluginGroup via
 /// unique_ptr. The group itself is shared (via shared_ptr) between
@@ -57,8 +57,10 @@ public:
   /// must be serialized for this plugin. They run concurrently by default
   /// because each callback is scoped to one wavefront. Override after identifying
   /// shared mutable state that cannot be protected within the plugin. Infrequent
-  /// lifecycle and topology callbacks are always serialized by the group.
-  virtual bool requires_serial_execution() const { return false; }
+  /// lifecycle and topology callbacks are always serialized by the group. The
+  /// group samples this policy once when the plugin is added, so implementations
+  /// must return a stable value from construction onward.
+  virtual bool requires_serial_hot_hooks() const { return false; }
 
   // -- Lifecycle hooks ------------------------------------------------------
 
@@ -76,20 +78,20 @@ public:
   /// Called before every AMDGPU instruction is executed.
   /// Wavefront state reflects the state prior to the instruction's effects.
   /// May run concurrently across simulation partitions unless
-  /// requires_serial_execution() returns true.
+  /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
                                                 amdgpu::Wavefront & /*wf*/) {}
 
   /// Called after every AMDGPU instruction is executed.
   /// Wavefront state (wait targets, PC, etc.) reflects the instruction's effects.
   /// May run concurrently across simulation partitions unless
-  /// requires_serial_execution() returns true.
+  /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
                                                amdgpu::Wavefront & /*wf*/) {}
 
   /// Called when an AMDGPU memory instruction is routed to a pipeline.
   /// May run concurrently across simulation partitions unless
-  /// requires_serial_execution() returns true.
+  /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuRouteMemoryInstruction(const Instruction & /*inst*/,
                                               amdgpu::Wavefront & /*wf*/) {}
 
@@ -134,7 +136,7 @@ public:
   /// @param lane_mask Bit mask of lanes read by the instruction.
   /// @param byte_mask Sub-dword byte mask (kFullByteMask = full dword).
   /// May run concurrently across simulation partitions unless
-  /// requires_serial_execution() returns true.
+  /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuReadVgprLanes(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/,
                                      uint64_t /*lane_mask*/,
                                      uint8_t /*byte_mask*/ = kFullByteMask) {}
@@ -150,7 +152,7 @@ public:
   /// @param lane_mask Bit mask of lanes written by the instruction.
   /// @param byte_mask Sub-dword byte mask (kFullByteMask = full dword).
   /// May run concurrently across simulation partitions unless
-  /// requires_serial_execution() returns true.
+  /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/,
                                       uint64_t /*lane_mask*/,
                                       uint8_t /*byte_mask*/ = kFullByteMask) {}
@@ -159,7 +161,7 @@ public:
   /// @param wf Owning wavefront, or nullptr if the register is unallocated.
   /// @param physical_reg Physical register index in the SGPR file.
   /// May run concurrently across simulation partitions unless
-  /// requires_serial_execution() returns true.
+  /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuReadSgpr(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/) {}
 
   /// Called when all waves in a workgroup have reached s_barrier.

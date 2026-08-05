@@ -72,8 +72,10 @@ configured through a profile or an explicit `--config <file>`.
 
 ### Plugin loader contract
 
-Each same-build plugin `.so` exports three `extern "C"` functions:
+Each same-build plugin `.so` exports four `extern "C"` functions:
 
+- `const char *rocjitsu_plugin_build_identity()` — returns the generated
+  fingerprint of the plugin-facing headers and toolchain.
 - `const PluginMetadata *rocjitsu_plugin_metadata()` — returns a pointer
   to static metadata: `name`, `contact`, `version`, and a `config_schema`
   JSON string.
@@ -86,10 +88,11 @@ Each same-build plugin `.so` exports three `extern "C"` functions:
 Allocation and deallocation stay on the plugin side of the boundary: the
 host destroys each instance through the plugin's own
 `rocjitsu_plugin_destroy` export. Use the `ROCJITSU_DEFINE_PLUGIN` macro
-from `plugin_abi.h` to emit all three functions. The host validates the
-required exports before use. There is deliberately no ABI versioning or
-backward-compatibility check: rocjitsu and its tightly coupled plugins must be
-built together from matching headers and toolchains.
+from `plugin_abi.h` to emit all four functions. The host validates the required
+exports and compares the build identity before dereferencing metadata. The
+identity safely rejects stale builds; it is not ABI versioning or a
+backward-compatibility guarantee. Rocjitsu and its tightly coupled plugins must
+be built together from matching headers and toolchains.
 
 ### Config schema
 
@@ -110,8 +113,8 @@ and passes the resolved JSON object to `rocjitsu_plugin_create`.
 
 ## Plugin output
 
-Plugins write diagnostic output (race reports, profiling data, kernel
-logs) through a configurable sink system rather than directly to stderr.
+Plugins write diagnostic output (race reports and kernel logs) through a
+configurable sink system rather than directly to stderr.
 This makes output testable and redirectable.
 
 ### Sink configuration
@@ -211,23 +214,30 @@ Synchronization retires the corresponding outstanding operations.
 
 ### Dispatch threading
 
-Hook presence and callback policy are derived from the plugins contained by an
-`ExecutionPluginGroup`. An empty group has no hooks. The group divides hooks by
-frequency and synchronization cost:
+Callback policy is derived from the plugins contained by an
+`ExecutionPluginGroup`. An empty group returns before dispatch or locking. The
+group divides hooks by frequency and synchronization cost:
 
 - Lifecycle, dispatch, workgroup, wavefront, and barrier callbacks are
-  infrequent. The group takes one mutex before iterating its plugins, so these
-  callbacks cannot overlap across simulation partitions or with each other.
+  infrequent. The group takes one recursive mutex before iterating its plugins,
+  so these callbacks cannot overlap across simulation partitions or with each
+  other. Recursive acquisition lets a callback synchronously read registers and
+  fire register-observation hooks without deadlocking.
 - Instruction before/after, memory-routing, and register-access callbacks are
   high-frequency and run concurrently by default. Each callback is scoped to a
   wavefront below the simulation's shader-engine partition granularity.
 
 A plugin whose high-frequency callbacks reach shared mutable state may override
-`requires_serial_execution()` to return `true`. The group samples that policy
-when the plugin is added and then takes the same group mutex around every
-high-frequency callback, serializing it with the infrequent callbacks without a
-per-instruction scan of the plugin list. Plugins that protect their own shared
-state should retain the parallel default.
+`requires_serial_hot_hooks()` to return `true`. The group samples that stable
+policy once when the plugin is added and then takes the same group mutex around
+every high-frequency callback, serializing it with the infrequent callbacks
+without a per-instruction scan of the plugin list. Plugins that protect their
+own shared state should retain the parallel default.
+
+Pass the complete sink configuration to the group constructor and add plugins
+before publishing the group to simulation components. `add()` is not
+thread-safe, and the group must remain immutable while callbacks may dispatch
+concurrently.
 
 ## Adding a new plugin
 

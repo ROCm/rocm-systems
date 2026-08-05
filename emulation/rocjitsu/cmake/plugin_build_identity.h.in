@@ -1,0 +1,11 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+namespace rocjitsu {
+
+/// Deterministic fingerprint of the plugin-facing headers and host toolchain.
+inline constexpr char kPluginBuildIdentity[] = "@RJ_PLUGIN_BUILD_ID@";
+
+} // namespace rocjitsu

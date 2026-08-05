@@ -4,7 +4,7 @@
 /// @file plugin_sink.h
 /// @brief Output sink abstraction for the plugin system.
 ///
-/// Plugins produce diagnostic output (race reports, profiling data, kernel
+/// Plugins produce diagnostic output (race reports and kernel
 /// logs). Rather than writing directly to stderr, plugins write to a
 /// PluginSink. This decouples output destination from output generation:
 ///

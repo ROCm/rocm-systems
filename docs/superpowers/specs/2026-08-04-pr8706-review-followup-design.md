@@ -48,11 +48,13 @@ a compatibility promise.
 ## Tests and documentation
 
 - Combine a serial-hot-hook plugin with a halt callback that reads registers and
-  prove the callback returns with the snapshot populated.
+  use a subprocess watchdog to prove the callback returns with the snapshot
+  populated instead of hanging.
 - Exercise empty-group callbacks concurrently to cover the lock bypass.
 - Restore the previous-layout plugin fixture and assert rejection before create.
-- Give the positive overlap test a generous deadline and the two non-overlap
-  tests short bounds.
+- Stage the concurrency probes so the first callback is known to be active
+  before the second starts. Give the positive overlap watchdog a generous
+  deadline and the two non-overlap observations short bounds.
 - Update plugin docs for the renamed policy, separate hook categories, empty
   dispatch bypass, configure-before-publication contract, and same-build guard.
 - Remove the remaining profiling references from plugin output documentation
