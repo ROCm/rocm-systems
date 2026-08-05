@@ -17,14 +17,17 @@
 
 #include "core/util/poll_backoff.h"
 
+using rocr::core::kPollNapCeilingMixedUs;
 using rocr::core::kPollNapCeilingUs;
 using rocr::core::kPollNapFloorUs;
 using rocr::core::NextPollNapUs;
 
-// The documented bounds must be sane: a positive floor below the ceiling.
+// The documented bounds must be sane: a positive floor below the mixed-batch
+// ceiling, which in turn sits below the polling-only ceiling.
 TEST(PollBackoffTest, BoundsAreOrdered) {
   EXPECT_GT(kPollNapFloorUs, 0);
-  EXPECT_GT(kPollNapCeilingUs, kPollNapFloorUs);
+  EXPECT_GT(kPollNapCeilingMixedUs, kPollNapFloorUs);
+  EXPECT_GT(kPollNapCeilingUs, kPollNapCeilingMixedUs);
 }
 
 // Each step doubles the nap until it saturates at the ceiling.
@@ -49,6 +52,22 @@ TEST(PollBackoffTest, EscalatesByDoublingThenSaturates) {
 TEST(PollBackoffTest, CeilingIsFixedPoint) {
   EXPECT_EQ(NextPollNapUs(kPollNapCeilingUs), kPollNapCeilingUs);
   EXPECT_EQ(NextPollNapUs(2 * kPollNapCeilingUs), kPollNapCeilingUs);
+}
+
+// AsyncEventsLoop uses the smaller mixed-batch ceiling when interrupts are
+// available but a polling-only signal (IPC / DefaultSignal) forced the batch
+// into polling: escalation must saturate at that ceiling, never above it, and
+// the ceiling is likewise a fixed point.
+TEST(PollBackoffTest, MixedCeilingSaturates) {
+  int nap = kPollNapFloorUs;
+  while (nap < kPollNapCeilingMixedUs) {
+    nap = NextPollNapUs(nap, kPollNapCeilingMixedUs);
+    EXPECT_LE(nap, kPollNapCeilingMixedUs);
+  }
+  EXPECT_EQ(nap, kPollNapCeilingMixedUs);
+  EXPECT_EQ(NextPollNapUs(nap, kPollNapCeilingMixedUs), kPollNapCeilingMixedUs);
+  EXPECT_EQ(NextPollNapUs(2 * kPollNapCeilingMixedUs, kPollNapCeilingMixedUs),
+            kPollNapCeilingMixedUs);
 }
 
 // AsyncEventsLoop resets the nap to the floor on every new wait batch (via
