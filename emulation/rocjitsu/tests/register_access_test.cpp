@@ -107,7 +107,7 @@ struct Fixture {
     cfg.lds_size_kb = 64;
     cu = ComputeUnitCore::create("register_access_cu", cfg, &gpu_mem, &l2);
 
-    plugin_group = std::make_shared<ExecutionPluginGroup>();
+    plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto recorder = std::make_unique<RecordingPlugin>();
     plugin = recorder.get();
     plugin_group->add(std::move(recorder));

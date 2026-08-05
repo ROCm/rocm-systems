@@ -36,6 +36,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/soc.h"
+#include "scoped_temp.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 
@@ -57,11 +58,14 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <cstring>
 #include <format>
+#include <fstream>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <set>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -69,6 +73,8 @@ namespace {
 using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
 using namespace rocjitsu::plugins::race_detector;
+
+static_assert(!std::is_default_constructible_v<ExecutionPluginGroup>);
 
 // SOPP encoding: bits[31:23]=0x17F, bits[22:16]=op, bits[15:0]=simm16.
 constexpr uint32_t sopp(uint32_t op, uint16_t simm16 = 0) {
@@ -305,6 +311,31 @@ public:
     }
     events.push_back(e);
   }
+};
+
+/// Exercises the group contract that sinks remain alive through plugin
+/// destruction, including plugins that emit final output from their destructor.
+class DestructionTrackingSink : public PluginSink {
+public:
+  explicit DestructionTrackingSink(std::vector<std::string> &events) : events_(events) {}
+  ~DestructionTrackingSink() override { events_.push_back("sink"); }
+  void write(std::string_view msg) override { events_.push_back("write:" + std::string(msg)); }
+
+private:
+  std::vector<std::string> &events_;
+};
+
+class DestructorWritingPlugin : public ExecutionPlugin {
+public:
+  explicit DestructorWritingPlugin(std::vector<std::string> &events)
+      : ExecutionPlugin("destructor_writer"), events_(events) {}
+  ~DestructorWritingPlugin() override {
+    sink().write("destroyed\n");
+    events_.push_back("plugin");
+  }
+
+private:
+  std::vector<std::string> &events_;
 };
 
 class MfmaRacePlugin : public ExecutionPlugin {
@@ -613,7 +644,7 @@ struct PluginFixture {
 
   /// Attach an OrderingPlugin, fire onInit, and return a raw pointer to it.
   OrderingPlugin *attach_ordering_plugin() {
-    plugin_group_ = std::make_shared<ExecutionPluginGroup>();
+    plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto plugin = std::make_unique<OrderingPlugin>();
     auto *p = plugin.get();
     plugin_group_->add(std::move(plugin));
@@ -662,7 +693,7 @@ struct Wave32PluginFixture {
   }
 
   OrderingPlugin *attach_ordering_plugin() {
-    plugin_group = std::make_shared<ExecutionPluginGroup>();
+    plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto plugin = std::make_unique<OrderingPlugin>();
     auto *p = plugin.get();
     plugin_group->add(std::move(plugin));
@@ -1906,7 +1937,7 @@ TEST(ExecutionPluginTest, WmmaReadObservationSkipsConstantAccumulator) {
 
 TEST(ExecutionPluginTest, MfmaReadObservationReportsRace) {
   PluginFixture f(/*num_wf_slots=*/1);
-  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto plugin = std::make_unique<MfmaRacePlugin>();
   auto *race_plugin = plugin.get();
   f.plugin_group_->add(std::move(plugin));
@@ -1950,7 +1981,7 @@ TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
     util::set_force_scalar_for_testing(false);
 
     PluginFixture f(/*num_wf_slots=*/1);
-    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto plugin = std::make_unique<MfmaRacePlugin>();
     auto *race_plugin = plugin.get();
     f.plugin_group_->add(std::move(plugin));
@@ -2457,9 +2488,9 @@ TEST(DisasmCacheTest, DisassemblesOnlyFirstInstructionAtPc) {
 }
 
 TEST(RaceDetectorPluginOutputTest, DispatchLineUsesQuestionMarksForUnresolvedKernel) {
-  StringSink sink;
-  ExecutionPluginGroup plugin_group;
-  plugin_group.add_sink(&sink);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  ExecutionPluginGroup plugin_group(std::move(sink_config));
   ASSERT_TRUE(plugin_group.add(std::make_unique<plugins::race_detector::RaceDetectorPlugin>()));
 
   KernelDispatchInfo info{};
@@ -2470,9 +2501,9 @@ TEST(RaceDetectorPluginOutputTest, DispatchLineUsesQuestionMarksForUnresolvedKer
 }
 
 TEST(RaceDetectorPluginOutputTest, DispatchLineUsesReadableNameAndExactSymbol) {
-  StringSink sink;
-  ExecutionPluginGroup plugin_group;
-  plugin_group.add_sink(&sink);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  ExecutionPluginGroup plugin_group(std::move(sink_config));
   ASSERT_TRUE(plugin_group.add(std::make_unique<plugins::race_detector::RaceDetectorPlugin>()));
 
   KernelDispatchInfo info{};
@@ -2484,6 +2515,56 @@ TEST(RaceDetectorPluginOutputTest, DispatchLineUsesReadableNameAndExactSymbol) {
   EXPECT_NE(sink.str().find("[rocjitsu] Kernel dispatch: \"racy_kernel\" "
                             "symbol=\"_Z11racy_kernelPKfPf\"\n"),
             std::string::npos);
+}
+
+TEST(ExecutionPluginGroupTest, OwnsConfiguredSinkForRetainedGroupLifetime) {
+  std::vector<std::string> events;
+  std::shared_ptr<ExecutionPluginGroup> plugin_group;
+  {
+    PluginSinkConfig sink_config;
+    sink_config.emplace<DestructionTrackingSink>(events);
+    plugin_group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    ASSERT_TRUE(plugin_group->add(std::make_unique<DestructorWritingPlugin>(events)));
+  }
+
+  EXPECT_TRUE(events.empty());
+  plugin_group.reset();
+  EXPECT_EQ(events, (std::vector<std::string>{"write:destroyed\n", "plugin", "sink"}));
+}
+
+TEST(ExecutionPluginGroupTest, FansOutToEveryConfiguredSink) {
+  std::vector<std::string> events;
+  {
+    PluginSinkConfig sink_config;
+    sink_config.emplace<DestructionTrackingSink>(events);
+    sink_config.emplace<DestructionTrackingSink>(events);
+    ExecutionPluginGroup plugin_group(std::move(sink_config));
+    ASSERT_TRUE(plugin_group.add(std::make_unique<DestructorWritingPlugin>(events)));
+  }
+
+  ASSERT_EQ(events.size(), 5u);
+  EXPECT_EQ(events[0], "write:destroyed\n");
+  EXPECT_EQ(events[1], "write:destroyed\n");
+  EXPECT_EQ(events[2], "plugin");
+  EXPECT_EQ(std::count(events.begin() + 3, events.end(), "sink"), 2);
+}
+
+TEST(ExecutionPluginGroupTest, OwnsFileSinkThroughPluginDestruction) {
+  test::ScopedTempDirectory sink_directory("rocjitsu-plugin-sink-lifetime-");
+  const std::string log_path = sink_directory.path() + "/destructor_writer.log";
+  std::vector<std::string> events;
+  {
+    PluginSinkConfig sink_config;
+    sink_config.set_file_directory(sink_directory.path());
+    ExecutionPluginGroup plugin_group(std::move(sink_config));
+    ASSERT_TRUE(plugin_group.add(std::make_unique<DestructorWritingPlugin>(events)));
+  }
+
+  EXPECT_EQ(events, (std::vector<std::string>{"plugin"}));
+  std::ifstream log(log_path);
+  ASSERT_TRUE(log);
+  const std::string contents{std::istreambuf_iterator<char>(log), std::istreambuf_iterator<char>()};
+  EXPECT_EQ(contents, "destroyed\n");
 }
 
 } // namespace

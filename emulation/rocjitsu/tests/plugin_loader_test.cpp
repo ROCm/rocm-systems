@@ -41,28 +41,28 @@ protected:
 };
 
 TEST_F(PluginLoaderTest, LoadsMatchingAbi) {
-  rocjitsu::ExecutionPluginGroup group;
+  rocjitsu::ExecutionPluginGroup group(rocjitsu::PluginSinkConfig{});
   EXPECT_EQ(load("good", group), 1);
   EXPECT_EQ(group.num_plugins(), 1u);
   EXPECT_NE(trace().find("good:create\n"), std::string::npos);
 }
 
 TEST_F(PluginLoaderTest, RejectsAbiMismatchBeforeCreate) {
-  rocjitsu::ExecutionPluginGroup group;
+  rocjitsu::ExecutionPluginGroup group(rocjitsu::PluginSinkConfig{});
   EXPECT_EQ(load("badabi", group), 0);
   EXPECT_TRUE(group.empty());
   EXPECT_EQ(trace().find("badabi:create\n"), std::string::npos);
 }
 
 TEST_F(PluginLoaderTest, RejectsMissingRequiredExport) {
-  rocjitsu::ExecutionPluginGroup group;
+  rocjitsu::ExecutionPluginGroup group(rocjitsu::PluginSinkConfig{});
   EXPECT_EQ(load("missing", group), 0);
   EXPECT_TRUE(group.empty());
   EXPECT_EQ(trace().find("missing:create\n"), std::string::npos);
 }
 
 TEST_F(PluginLoaderTest, DestroysRejectedDuplicateBeforeUnload) {
-  rocjitsu::ExecutionPluginGroup group;
+  rocjitsu::ExecutionPluginGroup group(rocjitsu::PluginSinkConfig{});
   ASSERT_EQ(load("good", group), 1);
   ASSERT_EQ(load("duplicate", group), 0);
 
