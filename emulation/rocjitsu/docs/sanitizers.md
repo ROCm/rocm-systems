@@ -84,7 +84,7 @@ on download:
 rocjitsu-sanitizers/
 ├── bin/rj_waitcheck
 ├── lib/librocjitsu_dbi_hooks.so
-├── MANIFEST.json      # commit, run ID, build type, compiler, glibc baseline
+├── MANIFEST.json      # commit, run ID, build type, compiler, runtime baseline
 └── sha256sums.txt
 ```
 
@@ -95,11 +95,27 @@ export ROCJITSU_SANITIZER_HOOK="$PWD/rocjitsu-sanitizers/lib/librocjitsu_dbi_hoo
 ```
 
 The binaries are built in the same `therock_build_manylinux_x86_64` image the
-rest of the ROCm builds use (AlmaLinux 8, glibc 2.28) with `libstdc++` linked
-statically, so they carry no `libstdc++` dependency and run against any host
-`glibc` at least as new as the `minimum_glibc` value recorded in
-`MANIFEST.json`. Artifacts are retained for 30 days; build from source for
-anything older.
+rest of the ROCm builds use (AlmaLinux 8, glibc 2.28). `libstdc++`, `libgcc`,
+`zlib`, and `zstd` are all linked in statically, so glibc is the only thing
+either binary loads from the host:
+
+```console
+$ objdump -p lib/librocjitsu_dbi_hooks.so | grep NEEDED
+  NEEDED               libdl.so.2
+  NEEDED               libpthread.so.0
+  NEEDED               libm.so.6
+  NEEDED               libc.so.6
+  NEEDED               ld-linux-x86-64.so.2
+```
+
+`MANIFEST.json` records that set for both binaries under
+`shared_library_dependencies`, alongside `minimum_glibc` — the highest
+versioned glibc symbol they actually reference. A host that satisfies both
+runs the bundle; nothing else needs to be installed. The build fails if a
+dependency outside glibc ever appears, so the recorded set cannot drift from
+what the binaries require.
+
+Artifacts are retained for 30 days; build from source for anything older.
 
 ## Run waitcheck and ConSan together
 
