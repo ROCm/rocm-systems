@@ -2,7 +2,7 @@ name: TheRock CI for rccl
 
 on:
   schedule:
-    - cron: '17 6 * * 0'  # Weekly, Sunday 06:17 UTC
+    - cron: '17 6 * * *'  # Nightly, 06:17 UTC
   workflow_dispatch:
     inputs:
       artifact_run_id:
@@ -21,6 +21,10 @@ on:
         description: 'Teams webhook URL for test summary notifications'
         type: string
         default: ''
+      madengine_nodes:
+        description: 'Number of SLURM nodes for MADEngine workloads'
+        type: string
+        default: '2'
 
 permissions:
   contents: read
@@ -89,6 +93,7 @@ jobs:
       test_scope: ${{ inputs.test_scope || 'smoke' }}
       notify_email: ${{ inputs.notify_email || 'collectives-ci@amd.com' }}
       notify_webhook: ${{ inputs.notify_webhook }}
+      madengine_nodes: ${{ inputs.madengine_nodes || '2' }}
       cmake_options: >
         -DTHEROCK_ENABLE_ALL=OFF
         -DTHEROCK_BUILD_TESTING=ON

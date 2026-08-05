@@ -28,6 +28,10 @@ on:
       notify_webhook:
         type: string
         default: ''
+      madengine_nodes:
+        description: 'Number of SLURM nodes for MADEngine workloads'
+        type: string
+        default: '2'
 
 permissions:
   contents: read
@@ -208,3 +212,18 @@ jobs:
       artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
       notify_email: ${{ inputs.notify_email }}
       notify_webhook: ${{ inputs.notify_webhook }}
+
+  therock-test-madengine:
+    name: "Test MADEngine workloads (scheduled)"
+    if: ${{ !cancelled() && inputs.amdgpu_families == 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
+    needs: [therock-build-linux]
+    uses: ./.github/workflows/therock-rccl-test-madengine.yml
+    with:
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      artifact_group: ${{ inputs.artifact_group }}
+      test_runs_on: ruby-linux-slurm-scale-runner
+      artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
+      workload: llama-3.1-70b-training
+      nodes: ${{ inputs.madengine_nodes || '2' }}
+      notify_email: ${{ inputs.notify_email }}
+      teams_webhook: ${{ inputs.notify_webhook }}
