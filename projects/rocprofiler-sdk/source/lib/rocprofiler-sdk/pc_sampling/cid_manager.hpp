@@ -80,7 +80,7 @@ class PCSCIDManager
     /// Correlation IDs with the following property: no ROCr's buffer flush happened
     /// since a corresponding kernel completed
     std::vector<context::correlation_id*> q1;
-    /// Correlation IDs with the following property: exactly one ROCr's buffer flush occured
+    /// Correlation IDs with the following property: exactly one ROCr's buffer flush occurred
     /// since a corresponding kernel completed
     std::vector<context::correlation_id*> q2;
     /// A pointer to the PC sampling parser to be notified when the CID is retired.

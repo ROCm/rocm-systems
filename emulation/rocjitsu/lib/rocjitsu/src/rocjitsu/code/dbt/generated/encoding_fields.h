@@ -45,15 +45,20 @@ inline constexpr uint32_t kEnc_MIMG_NSA1 = 0x1E0;
 inline constexpr uint32_t kEnc_MIMG_NSA2 = 0x1E0;
 inline constexpr uint32_t kEnc_MIMG_NSA3 = 0x1E0;
 inline constexpr uint32_t kEnc_SOP1_INST_LITERAL = 0x17D;
+inline constexpr uint32_t kEnc_SOP1_INST_LITERAL64 = 0x17D;
 inline constexpr uint32_t kEnc_SOP2_INST_LITERAL = 0x100;
+inline constexpr uint32_t kEnc_SOP2_INST_LITERAL64 = 0x100;
 inline constexpr uint32_t kEnc_SOPC_INST_LITERAL = 0x17E;
+inline constexpr uint32_t kEnc_SOPC_INST_LITERAL64 = 0x17E;
 inline constexpr uint32_t kEnc_SOPK_INST_LITERAL = 0x174;
 inline constexpr uint32_t kEnc_VOP1_INST_LITERAL = 0xFC;
+inline constexpr uint32_t kEnc_VOP1_INST_LITERAL64 = 0xFC;
 inline constexpr uint32_t kEnc_VOP1_VOP_DPP = 0xFC;
 inline constexpr uint32_t kEnc_VOP1_VOP_DPP16 = 0xFC;
 inline constexpr uint32_t kEnc_VOP1_VOP_DPP8 = 0xFC;
 inline constexpr uint32_t kEnc_VOP1_VOP_SDWA = 0xFC;
 inline constexpr uint32_t kEnc_VOP2_INST_LITERAL = 0x0;
+inline constexpr uint32_t kEnc_VOP2_INST_LITERAL64 = 0x4;
 inline constexpr uint32_t kEnc_VOP2_VOP_DPP = 0x0;
 inline constexpr uint32_t kEnc_VOP2_VOP_DPP16 = 0x4;
 inline constexpr uint32_t kEnc_VOP2_VOP_DPP8 = 0x4;
@@ -66,11 +71,12 @@ inline constexpr uint32_t kEnc_VOP3P_VOP_DPP8 = 0x198;
 inline constexpr uint32_t kEnc_VOP3_INST_LITERAL = 0x1A8;
 inline constexpr uint32_t kEnc_VOP3_SDST_ENC = 0x1A2;
 inline constexpr uint32_t kEnc_VOP3_SDST_INST_LITERAL = 0x1AA;
-inline constexpr uint32_t kEnc_VOP3_SDST_VOP_DPP16 = 0x1A8;
-inline constexpr uint32_t kEnc_VOP3_SDST_VOP_DPP8 = 0x1A8;
+inline constexpr uint32_t kEnc_VOP3_SDST_VOP_DPP16 = 0x1AA;
+inline constexpr uint32_t kEnc_VOP3_SDST_VOP_DPP8 = 0x1AA;
 inline constexpr uint32_t kEnc_VOP3_VOP_DPP16 = 0x1A8;
 inline constexpr uint32_t kEnc_VOP3_VOP_DPP8 = 0x1A8;
 inline constexpr uint32_t kEnc_VOPC_INST_LITERAL = 0xF8;
+inline constexpr uint32_t kEnc_VOPC_INST_LITERAL64 = 0xF8;
 inline constexpr uint32_t kEnc_VOPC_VOP_DPP16 = 0xF8;
 inline constexpr uint32_t kEnc_VOPC_VOP_DPP8 = 0xF8;
 inline constexpr uint32_t kEnc_VOPC_VOP_SDWA_SDST_ENC = 0xF8;
@@ -263,6 +269,7 @@ struct SmemFields {
   uint32_t nv;
   uint32_t op;
   uint32_t sbase;
+  uint32_t scale_offset;
   uint32_t scope;
   uint32_t sdata;
   uint32_t soffset;
@@ -351,6 +358,7 @@ struct VflatFields {
   uint32_t nv;
   uint32_t op;
   uint32_t saddr;
+  uint32_t scale_offset;
   uint32_t scope;
   uint32_t sve;
   uint32_t th;
@@ -364,6 +372,7 @@ struct VglobalFields {
   uint32_t nv;
   uint32_t op;
   uint32_t saddr;
+  uint32_t scale_offset;
   uint32_t scope;
   uint32_t sve;
   uint32_t th;
@@ -485,6 +494,7 @@ struct VscratchFields {
   uint32_t nv;
   uint32_t op;
   uint32_t saddr;
+  uint32_t scale_offset;
   uint32_t scope;
   uint32_t sve;
   uint32_t th;
@@ -590,6 +600,13 @@ struct Sop1InstLiteralFields {
   uint32_t ssrc0;
 };
 
+struct Sop1InstLiteral64Fields {
+  uint32_t literal64;
+  uint32_t op;
+  uint32_t sdst;
+  uint32_t ssrc0;
+};
+
 struct Sop2InstLiteralFields {
   uint32_t op;
   uint32_t sdst;
@@ -598,9 +615,24 @@ struct Sop2InstLiteralFields {
   uint32_t ssrc1;
 };
 
+struct Sop2InstLiteral64Fields {
+  uint32_t literal64;
+  uint32_t op;
+  uint32_t sdst;
+  uint32_t ssrc0;
+  uint32_t ssrc1;
+};
+
 struct SopcInstLiteralFields {
   uint32_t op;
   uint32_t simm32;
+  uint32_t ssrc0;
+  uint32_t ssrc1;
+};
+
+struct SopcInstLiteral64Fields {
+  uint32_t literal64;
+  uint32_t op;
   uint32_t ssrc0;
   uint32_t ssrc1;
 };
@@ -615,6 +647,13 @@ struct SopkInstLiteralFields {
 struct Vop1InstLiteralFields {
   uint32_t op;
   uint32_t simm32;
+  uint32_t src0;
+  uint32_t vdst;
+};
+
+struct Vop1InstLiteral64Fields {
+  uint32_t literal64;
+  uint32_t op;
   uint32_t src0;
   uint32_t vdst;
 };
@@ -689,6 +728,14 @@ struct Vop1VopSdwaFields {
 struct Vop2InstLiteralFields {
   uint32_t op;
   uint32_t simm32;
+  uint32_t src0;
+  uint32_t vdst;
+  uint32_t vsrc1;
+};
+
+struct Vop2InstLiteral64Fields {
+  uint32_t literal64;
+  uint32_t op;
   uint32_t src0;
   uint32_t vdst;
   uint32_t vsrc1;
@@ -990,6 +1037,13 @@ struct Vop3VopDpp8Fields {
 struct VopcInstLiteralFields {
   uint32_t op;
   uint32_t simm32;
+  uint32_t src0;
+  uint32_t vsrc1;
+};
+
+struct VopcInstLiteral64Fields {
+  uint32_t literal64;
+  uint32_t op;
   uint32_t src0;
   uint32_t vsrc1;
 };

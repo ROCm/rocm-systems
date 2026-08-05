@@ -25,7 +25,7 @@
 /* Declare the template with a generic implementation */
 template <typename T>
 __device__ void wg_team_broadcast([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unused]] rocshmem_team_t team,
-                                  [[maybe_unused]] T *dest, [[maybe_unused]] const T *source, [[maybe_unused]] int nelem,
+                                  [[maybe_unused]] T *dest, [[maybe_unused]] const T *source, [[maybe_unused]] int nelems,
                                   [[maybe_unused]] int pe_root) {
   return;
 }
@@ -35,8 +35,8 @@ __device__ void wg_team_broadcast([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_u
   template <>                                                                 \
   __device__ void wg_team_broadcast<T>(                                       \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,    \
-      int nelem, int pe_root) {                                               \
-    rocshmem_ctx_##TNAME##_broadcast_wg(ctx, team, dest, source, nelem,       \
+      int nelems, int pe_root) {                                              \
+    rocshmem_ctx_##TNAME##_broadcast_wg(ctx, team, dest, source, nelems,      \
                                          pe_root);                            \
   }
 
@@ -85,7 +85,7 @@ __global__ void TeamBroadcastTest(int loop, int skip, long long int *start_time,
     wg_team_broadcast<T1>(ctx, teams[wg_id],
                           dest_buf,         // T* dest
                           source_buf,       // const T* source
-                          size,             // int nelement
+                          size,             // int nelems
                           0);               // int PE_root
   }
 
@@ -203,30 +203,21 @@ void TeamBroadcastTester<T1>::verifyResults(size_t size) {
   int idx = 0;
   T1 expected;
 
-  /**
-   * The verification routine here requires that the
-   * PE_root value is 0 which denotes that the
-   * sending processing element is rank 0.
-   *
-   * The difference in expected values arises from
-   * the specification for broadcast where the
-   * PE_root processing element does not copy the
-   * contents from its own source to dest during
-   * the broadcast.
-   */
+  // Verify correctness: all PEs (including root) receive source 
+  // buffer data in dest buffer
   for (unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
     for (int i = 0; i < num_elems; i++) {
       idx = wg_id * num_elems + i;
       if constexpr (std::is_same<T1, char>::value ||
                     std::is_same<T1, signed char>::value ||
                     std::is_same<T1, unsigned char>::value) {
-        expected = static_cast<T1>('a' + wg_id + (my_pe ? n_pes : 0));
+        expected = static_cast<T1>('a' + wg_id + n_pes);
       }
       else if constexpr (std::is_floating_point<T1>::value) {
-        expected = static_cast<T1>(3.14 + wg_id + (my_pe ? n_pes : 0));
+        expected = static_cast<T1>(3.14 + wg_id + n_pes);
       }
       else if constexpr (std::is_integral<T1>::value) {
-        expected = static_cast<T1>(wg_id + (my_pe ? n_pes : 0));
+        expected = static_cast<T1>(wg_id + n_pes);
       }
       if (dest_buf[idx] != expected) {
         std::cerr << "Data validation error at idx " << idx << std::endl;

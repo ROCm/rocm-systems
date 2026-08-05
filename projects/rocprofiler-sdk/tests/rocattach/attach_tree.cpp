@@ -35,10 +35,38 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
+
+static bool
+wait_for_attach_ready(pid_t pid)
+{
+    constexpr int max_wait_sec = 30;
+    auto          task_dir     = "/proc/" + std::to_string(pid) + "/task";
+
+    std::cout << "Waiting for rocp-bg-attach thread in PID " << pid << "...\n";
+    for(int elapsed = 0; elapsed < max_wait_sec; ++elapsed)
+    {
+        std::error_code ec;
+        for(const auto& entry : std::filesystem::directory_iterator(task_dir, ec))
+        {
+            if(!entry.is_directory()) continue;
+            std::ifstream comm(entry.path() / "comm");
+            std::string   name;
+            if(std::getline(comm, name) && name == "rocp-bg-attach")
+            {
+                std::cout << "Attachment ready (" << elapsed << "s elapsed)\n";
+                return true;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    std::cout << "Timed out after " << max_wait_sec << "s waiting for rocp-bg-attach thread\n";
+    return false;
+}
 
 #define ROCATTACH_CALL(func)                                                                       \
     {                                                                                              \
@@ -154,15 +182,42 @@ main(int argc, char** argv)
     }
     close(pipefd[0]);
 
-    // Parent process: wait for the child to exec and start running.
-    std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+    // Parent process: wait for the child and grandchild to be ready for attachment.
+    auto kill_children = [&]() {
+        kill(grandchild_pid, SIGKILL);
+        kill(child_pid, SIGKILL);
+        waitpid(grandchild_pid, nullptr, 0);
+        waitpid(child_pid, nullptr, 0);
+    };
+
+    if(!wait_for_attach_ready(child_pid))
+    {
+        kill_children();
+        return 1;
+    }
+    if(!wait_for_attach_ready(grandchild_pid))
+    {
+        kill_children();
+        return 1;
+    }
 
     setenv("ROCPROF_ATTACH_TOOL_LIBRARY", argv[2], true);
 
     // Attach to the child and any processes it may have spawned. Passing the
     // child PID to rocattach_attach_tree lets it discover the full subtree via
     // /proc without the caller enumerating descendants explicitly.
-    ROCATTACH_CALL(rocattach_attach_tree(child_pid));
+    {
+        std::cout << "starting call to rocattach_attach_tree(child_pid)" << std::endl;
+        rocattach_status_t status = rocattach_attach_tree(child_pid);
+        if(status != ROCATTACH_STATUS_SUCCESS)
+        {
+            std::cout << "error: call to rocattach_attach_tree(child_pid) returned non zero status "
+                      << status << std::endl;
+            kill_children();
+            return 1;
+        }
+        std::cout << "call to rocattach_attach_tree(child_pid) successful" << std::endl;
+    }
 
     // Verify that the tool library was loaded into both the child and the
     // grandchild by inspecting /proc/<pid>/maps. setup() calls
@@ -174,10 +229,7 @@ main(int argc, char** argv)
     if(!is_library_loaded(child_pid, tool_library))
     {
         std::cout << "error: tool library not found in child pid " << child_pid << " maps\n";
-        kill(grandchild_pid, SIGKILL);
-        kill(child_pid, SIGKILL);
-        waitpid(grandchild_pid, nullptr, 0);
-        waitpid(child_pid, nullptr, 0);
+        kill_children();
         return 1;
     }
     std::cout << "verified: child pid " << child_pid << " loaded the tool library\n";
@@ -186,24 +238,34 @@ main(int argc, char** argv)
     {
         std::cout << "error: tool library not found in grandchild pid " << grandchild_pid
                   << " maps\n";
-        kill(grandchild_pid, SIGKILL);
-        kill(child_pid, SIGKILL);
-        waitpid(grandchild_pid, nullptr, 0);
-        waitpid(child_pid, nullptr, 0);
+        kill_children();
         return 1;
     }
     std::cout << "verified: grandchild pid " << grandchild_pid << " loaded the tool library\n";
 
     // Let profiling run for a few seconds.
-    std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
     // Detach from the process tree symmetrically with how we attached.
-    ROCATTACH_CALL(rocattach_detach_tree(child_pid));
+    {
+        std::cout << "starting call to rocattach_detach_tree(child_pid)" << std::endl;
+        rocattach_status_t status = rocattach_detach_tree(child_pid);
+        if(status != ROCATTACH_STATUS_SUCCESS)
+        {
+            std::cout << "error: call to rocattach_detach_tree(child_pid) returned non zero status "
+                      << status << std::endl;
+            kill_children();
+            return 1;
+        }
+        std::cout << "call to rocattach_detach_tree(child_pid) successful" << std::endl;
+    }
 
     int grandchild_status = 0;
+    kill(grandchild_pid, SIGINT);
     waitpid(grandchild_pid, &grandchild_status, 0);
 
     int child_status = 0;
+    kill(child_pid, SIGINT);
     waitpid(child_pid, &child_status, 0);
 
     if(grandchild_status != 0)

@@ -226,6 +226,8 @@ sphinx-notfound-page==1.0.2
     # via rocm-docs-core
 sphinxcontrib-applehelp==1.0.8
     # via sphinx
+sphinxcontrib-datatemplates==0.11.0
+    # via -r requirements.in
 sphinxcontrib-devhelp==1.0.6
     # via sphinx
 sphinxcontrib-htmlhelp==2.0.5
@@ -234,6 +236,8 @@ sphinxcontrib-jsmath==1.0.1
     # via sphinx
 sphinxcontrib-qthelp==1.0.7
     # via sphinx
+sphinxcontrib-runcmd==0.2.0
+    # via sphinxcontrib-datatemplates
 sphinxcontrib-serializinghtml==1.1.10
     # via sphinx
 sqlalchemy==2.0.37

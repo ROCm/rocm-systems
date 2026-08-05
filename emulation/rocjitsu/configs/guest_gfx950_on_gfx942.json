@@ -1,0 +1,40 @@
+{
+  "dbt_guest": {
+    "enabled": true,
+    "guest_isa": "gfx950",
+    "host_isa": "gfx942",
+    "host_gpu_id": 0,
+    "guest_device": {
+      "gpu_id": 38144,
+      "gfx_target_version": 90500,
+      "vendor_id": 4098,
+      "device_id": 30112,
+      "family_id": 160,
+      "unique_id": 5929628898254127105,
+      "marketing_name": "AMD Instinct MI350X",
+      "drm_render_minor": 191,
+      "simd_count": 64,
+      "max_waves_per_simd": 8,
+      "num_shader_engines": 4,
+      "num_shader_arrays_per_engine": 2,
+      "num_cu_per_sh": 4,
+      "simd_per_cu": 4,
+      "wave_front_size": 64,
+      "max_slots_scratch_cu": 32,
+      "local_mem_size": 309237645312,
+      "lds_size_kb": 160,
+      "mem_width": 8192,
+      "mem_clk_max": 1600,
+      "l1_size_kb": 32,
+      "l1_line_size": 128,
+      "l1_assoc": 4,
+      "l2_size_kb": 4096,
+      "l2_line_size": 128,
+      "l2_assoc": 16,
+      "num_sdma_engines": 5,
+      "num_sdma_xgmi_engines": 12,
+      "num_cp_queues": 128,
+      "max_engine_clk_fcompute": 2400
+    }
+  }
+}

@@ -62,6 +62,7 @@ _VERSIONED_FIELDS: dict[str, dict[SchemaVersion, str]] = {
 
 # Top-level structure.
 ARCH = 'Architecture'
+ARCH_ID = 'ArchitectureId'
 ARCH_NAME = 'ArchitectureName'
 DOCUMENT = 'Document'
 ISA = 'ISA'
@@ -126,6 +127,7 @@ OPERAND_TYPE_NAME = 'OperandTypeName'
 OPERAND_TYPES = 'OperandTypes'
 OPERANDS = 'Operands'
 PREDEFINED_VAL = 'PredefinedValue'
+DATA_FORMAT_NAME = 'DataFormatName'
 
 # Operand attributes.
 OPERAND_ATTR_INPUT = 'Input'

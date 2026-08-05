@@ -13,13 +13,12 @@ pytestmark = [pytest.mark.unit_tests]
 
 
 # =============================================================================
-# Units tests
+# Unit tests
 # =============================================================================
 
 
+@pytest.mark.build_only
 @pytest.mark.class_name("unit-tests")
 class TestUnitTests(RocprofsysTest):
-    def test(self, rocprof_config):
-        if rocprof_config.is_installed:
-            pytest.skip("Test only runs in build mode")
+    def test(self):
         self.run_test("baseline", "rocprof-sys-unit-tests", no_base_env=True)

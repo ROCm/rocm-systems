@@ -12,6 +12,7 @@ README:
 | `test_smoke.py` | Single- and multi-PE torch-free tests via ctypes + HIP: `rocshmem_create_buffer`, `SymmetricBuffer` lifecycle, H2D/D2H roundtrip, stream-based put/get, `rocshmem_get_peer_buffer` |
 | `test_basic.py` | Single-PE: constants, `SymmetricBuffer`, `interop.torch` tensor helpers, barrier |
 | `test_collective.py` | Multi-PE: stream-based put/get, stream barriers, peer views, `interop.torch` RMA wrappers (data-verified) |
+| `test_memory.py` | Single-PE torch-free tests via ctypes + HIP: `rocshmem_calloc` (zero-init verified), `rocshmem_align` (alignment + invalid-arg), `rocshmem_buffer_register` / `rocshmem_buffer_unregister` / `rocshmem_buffer_unregister_all` |
 | `conftest.py` | Three-tier init ladder, `requires_torch` / `requires_multi_pe` markers |
 
 When `BUILD_PYTHON_TESTS=ON`, CMake installs these assets into the test

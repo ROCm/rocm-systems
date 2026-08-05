@@ -12,6 +12,7 @@
 // references ncclGinCtx / ncclGinDescriptorSmem; their primary declarations
 // live in gin_device_common.h, which must be included first.
 #include "nccl_device/coop.h"
+#include "nccl_device/impl/core__funcs.h" 
 #include "nccl_device/gin/gin_device_host_common.h"
 #include "nccl_device/gin/gin_device_common.h"
 #include "nccl_device/gin/proxy/gin_proxy.h"
@@ -57,8 +58,10 @@ __global__ void kernelConstructProxyOp(const OpCase* __restrict__ in,
   ncclGinProxyOp_t op;
   nccl::gin::proxy::constructProxyOp(
       op,
+      /*isGet=*/false,
+      /*isFlush=*/false,
       in[i].hasInline,
-      in[i].hasSignal,
+      in[i].hasSignal ? NCCL_GIN_SIGNAL_TYPE_INDEXED : NCCL_GIN_SIGNAL_TYPE_NONE,
       static_cast<ncclGinSignalOp_t>(in[i].signalOp),
       in[i].hasCounter);
   out[i] = static_cast<uint8_t>(op);
@@ -113,7 +116,7 @@ TEST_F(GinDeviceTest, ConstructProxyOp) {
 }
 
 // ---------------------------------------------------------------------------
-// BuildGfd_PutOnly: pack a 64-byte GFD for a non-inline put (no signal, no counter)
+// BuildGfd_PutOnly: pack a 128-byte GFD for a non-inline put (no signal, no counter)
 // ---------------------------------------------------------------------------
 
 __global__ void kernelBuildGfdPutOnly(ncclGinProxyGfd_t* gfd,
@@ -133,11 +136,13 @@ __global__ void kernelBuildGfdPutOnly(ncclGinProxyGfd_t* gfd,
       /*size=*/size,
       /*counterId=*/0,
       /*signalId=*/0,
-      /*signalVal=*/0);
+      /*signalVal=*/0,
+      /*signalWindow=*/nullptr,
+      /*signalOff=*/0);
 }
 
 TEST_F(GinDeviceTest, BuildGfd_PutOnly) {
-  static_assert(sizeof(ncclGinProxyGfd_t) == 64, "GFD must be 64 bytes");
+  static_assert(sizeof(ncclGinProxyGfd_t) == 128, "GFD must be 128 bytes");
 
   // Distinctive 48-bit values so bit-corruption in any qword is visible.
   // Each constant is a rotation of 0x0123456789ABCDEF truncated to 48 bits,
@@ -156,9 +161,9 @@ TEST_F(GinDeviceTest, BuildGfd_PutOnly) {
 
   const ncclGinProxyGfd_t gfd = d_gfd.download();
 
-  // Header qword: flag, op, size.
+  // Header qword: flag, size (op now lives in the headerExt qword).
   EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.flag), 1ULL);
-  EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.op),
+  EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeaderExt].headerExt.op),
             static_cast<uint64_t>(ncclGinProxyOpPut));
   EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.size), kSize);
 
@@ -187,12 +192,12 @@ TEST_F(GinDeviceTest, BuildGfd_PutOnly) {
   EXPECT_EQ(static_cast<uint32_t>(gfd.qword[ncclGinProxyGfdSignalVal].signalVal.signalValLow2), 0u);
   EXPECT_EQ(static_cast<uint32_t>(gfd.qword[ncclGinProxyGfdSignalVal].signalVal.signalValHigh), 0u);
 
-  // Reserved qword: end-of-GFD marker.
-  EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdReserved].flag.v), 1ULL);
+  // buildGfd flags every qword; the trailing qword is the end-of-GFD marker.
+  EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdQwords - 1].flag.v), 1ULL);
 }
 
 // ---------------------------------------------------------------------------
-// BuildGfd_Inline: pack a 64-byte GFD for an inline put (hasInline=true).
+// BuildGfd_Inline: pack a 128-byte GFD for an inline put (hasInline=true).
 //   T=uint32_t -> only inlineValLow holds data; sizeof(T)>4/>6 branches stay quiet.
 //   T=uint64_t -> value splits as 32 (Low) + 16 (Low2) + 16 (High) bits.
 // ---------------------------------------------------------------------------
@@ -213,11 +218,13 @@ __global__ void kernelBuildGfdInline(ncclGinProxyGfd_t* gfd, T srcVal,
       /*size=*/sizeof(T),
       /*counterId=*/0,
       /*signalId=*/0,
-      /*signalVal=*/0);
+      /*signalVal=*/0,
+      /*signalWindow=*/nullptr,
+      /*signalOff=*/0);
 }
 
 TEST_F(GinDeviceTest, BuildGfd_Inline) {
-  static_assert(sizeof(ncclGinProxyGfd_t) == 64, "GFD must be 64 bytes");
+  static_assert(sizeof(ncclGinProxyGfd_t) == 128, "GFD must be 128 bytes");
 
   constexpr uint64_t kDstOff    = 0x00009ABCDEF01234ULL;
   constexpr uint64_t kDstHandle = 0x0000DEF012345678ULL;
@@ -235,7 +242,7 @@ TEST_F(GinDeviceTest, BuildGfd_Inline) {
     const ncclGinProxyGfd_t gfd = d_gfd.download();
 
     EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.flag), 1ULL) << "u32";
-    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.op),
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeaderExt].headerExt.op),
               static_cast<uint64_t>(ncclGinProxyOpPut)) << "u32";
     EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.size),
               static_cast<uint64_t>(sizeof(uint32_t))) << "u32";
@@ -263,7 +270,7 @@ TEST_F(GinDeviceTest, BuildGfd_Inline) {
     EXPECT_EQ(static_cast<uint32_t>(gfd.qword[ncclGinProxyGfdSignalVal].signalVal.signalValLow2),  0u)   << "u32";
     EXPECT_EQ(static_cast<uint32_t>(gfd.qword[ncclGinProxyGfdSignalVal].signalVal.signalValHigh),  0u)   << "u32";
 
-    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdReserved].flag.v), 1ULL) << "u32";
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdQwords - 1].flag.v), 1ULL) << "u32";
   }
 
   // ---- uint64_t (8-byte): value splits across Low (32) + Low2 (16) + High (16) ----
@@ -277,7 +284,7 @@ TEST_F(GinDeviceTest, BuildGfd_Inline) {
     const ncclGinProxyGfd_t gfd = d_gfd.download();
 
     EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.flag), 1ULL) << "u64";
-    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.op),
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeaderExt].headerExt.op),
               static_cast<uint64_t>(ncclGinProxyOpPut)) << "u64";
     EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.size),
               static_cast<uint64_t>(sizeof(uint64_t))) << "u64";
@@ -313,7 +320,7 @@ TEST_F(GinDeviceTest, BuildGfd_Inline) {
     EXPECT_EQ(static_cast<uint32_t>(gfd.qword[ncclGinProxyGfdSignalVal].signalVal.signalValLow2),  0u)   << "u64";
     EXPECT_EQ(static_cast<uint32_t>(gfd.qword[ncclGinProxyGfdSignalVal].signalVal.signalValHigh),  0u)   << "u64";
 
-    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdReserved].flag.v), 1ULL) << "u64";
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdQwords - 1].flag.v), 1ULL) << "u64";
   }
 }
 
@@ -345,7 +352,9 @@ __global__ void kernelBuildGfdSignalAndCounter(ncclGinProxyGfd_t* gfd,
       /*size=*/size,
       /*counterId=*/counterId,
       /*signalId=*/signalId,
-      /*signalVal=*/signalVal);
+      /*signalVal=*/signalVal,
+      /*signalWindow=*/nullptr,
+      /*signalOff=*/0);
 }
 
 TEST_F(GinDeviceTest, BuildGfd_SignalAndCounter) {
@@ -379,7 +388,7 @@ TEST_F(GinDeviceTest, BuildGfd_SignalAndCounter) {
                               static_cast<uint64_t>(ncclGinProxyOpWithSignalAdd) |
                               static_cast<uint64_t>(ncclGinProxyOpWithCounter);
   EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.flag), 1ULL);
-  EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.op),   expectedOp);
+  EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeaderExt].headerExt.op),   expectedOp);
   EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.size), kSize);
 
   // Source + destination address qwords (non-inline path).
@@ -412,7 +421,7 @@ TEST_F(GinDeviceTest, BuildGfd_SignalAndCounter) {
       (static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdSignalVal].signalVal.signalValHigh) << 32);
   EXPECT_EQ(signalValRoundtrip, kSignalVal) << "signalVal 16+16+32 split round-trip";
 
-  EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdReserved].flag.v), 1ULL);
+  EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdQwords - 1].flag.v), 1ULL);
 }
 
 // ---------------------------------------------------------------------------
@@ -436,7 +445,9 @@ __global__ void kernelBuildGfdSizeClass(ncclGinProxyGfd_t* gfd, T srcVal) {
       /*size=*/sizeof(T),
       /*counterId=*/0,
       /*signalId=*/0,
-      /*signalVal=*/0);
+      /*signalVal=*/0,
+      /*signalWindow=*/nullptr,
+      /*signalOff=*/0);
 }
 
 TEST_F(GinDeviceTest, BuildGfd_SizeClasses) {
@@ -486,7 +497,7 @@ __global__ void kernelPostGfdOneSlot(ncclGinProxyGpuCtx_t* ctx,
 }
 
 TEST_F(GinDeviceTest, PostGfd_OneSlot) {
-  static_assert(sizeof(ncclGinProxyGfd_t) == 64, "GFD must be 64 bytes");
+  static_assert(sizeof(ncclGinProxyGfd_t) == 128, "GFD must be 128 bytes");
 
   constexpr uint32_t kNranks    = 2;
   constexpr uint32_t kQueueSize = 4;   // power of two: postGfd uses idx & (queueSize-1)
@@ -503,11 +514,12 @@ TEST_F(GinDeviceTest, PostGfd_OneSlot) {
   d_pis.zero();
   d_cis.zero();
 
-  // Input GFD: byte ramp 0x10..0x4F (64 unique non-zero bytes). Any byte the
-  // kernel fails to write will read back as 0, distinguishable from the input.
+  // Input GFD: byte ramp 0x10.. across the whole descriptor (unique non-zero
+  // bytes). Any byte the kernel fails to write will read back as 0,
+  // distinguishable from the input.
   ncclGinProxyGfd_t hostGfd{};
   uint8_t* gfdBytes = reinterpret_cast<uint8_t*>(&hostGfd);
-  for (int i = 0; i < 64; i++) gfdBytes[i] = static_cast<uint8_t>(0x10 + i);
+  for (size_t i = 0; i < sizeof(ncclGinProxyGfd_t); i++) gfdBytes[i] = static_cast<uint8_t>(0x10 + i);
   d_gfdIn.upload(hostGfd);
 
   // Ctx struct: aliases the device buffers above. counters/signals unused by postGfd.
@@ -539,7 +551,7 @@ TEST_F(GinDeviceTest, PostGfd_OneSlot) {
   // Slot 0 of peer 0's ring (queues[peer * queueSize + 0] = queues[0]) must hold
   // the input GFD byte-for-byte.
   const uint8_t* slotBytes = reinterpret_cast<const uint8_t*>(&queues[0]);
-  for (int i = 0; i < 64; i++) {
+  for (size_t i = 0; i < sizeof(ncclGinProxyGfd_t); i++) {
     EXPECT_EQ(slotBytes[i], gfdBytes[i])
         << "slot 0 byte " << i << " mismatch";
   }
@@ -547,7 +559,7 @@ TEST_F(GinDeviceTest, PostGfd_OneSlot) {
   // No other slot was written: peer 0 slots 1..3, plus all of peer 1.
   for (size_t s = 1; s < queues.size(); s++) {
     const uint8_t* zeroBytes = reinterpret_cast<const uint8_t*>(&queues[s]);
-    for (int i = 0; i < 64; i++) {
+    for (size_t i = 0; i < sizeof(ncclGinProxyGfd_t); i++) {
       EXPECT_EQ(zeroBytes[i], 0u) << "slot " << s << " byte " << i << " was unexpectedly written";
     }
   }
@@ -794,7 +806,10 @@ TEST_F(GinDeviceTest, PostGfd_PiCiOverflow) {
 
 __global__ void kernelResetSignal(ncclGinCtx ctx, ncclGinSignal_t signalId) {
   if (threadIdx.x != 0 || blockIdx.x != 0) return;
-  ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, signalId);
+  ncclGinSignalDescriptor signal{};
+  signal.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
+  signal.indexedSignal.signalId = signalId;
+  ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, signal);
 }
 
 TEST_F(GinDeviceTest, ResetSignal) {

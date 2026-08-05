@@ -12,7 +12,9 @@
 #include <numeric>
 
 HIP_TEST_CASE(Unit_hipMemcpyDtoHAsync_Positive_Basic) {
-  const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
+  const auto stream_type =
+      isQuickLevel() ? Streams::created
+                     : GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
   const StreamGuard stream_guard(stream_type);
 
   const auto f = [stream = stream_guard.stream()](void* dst, void* src, size_t count) {
@@ -54,7 +56,9 @@ HIP_TEST_CASE(Unit_hipMemcpyDtoHAsync_Negative_Parameters) {
 }
 
 HIP_TEST_CASE(Unit_hipMemcpyHtoDAsync_Positive_Basic) {
-  const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
+  const auto stream_type =
+      isQuickLevel() ? Streams::created
+                     : GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
   const StreamGuard stream_guard(stream_type);
 
   const auto f = [stream = stream_guard.stream()](void* dst, void* src, size_t count) {

@@ -2212,4 +2212,123 @@ TEST_P(KFDSVMRangeTest, MapAllHighAddr) {
     TEST_END
 }
 
+/*
+ * Test integer overflow protection in SVM attribute functions
+ * ROCM-26862: Verify overflow checks prevent stack buffer overflow
+ */
+TEST_P(KFDSVMRangeTest, IntegerOverflowProtection) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    if (!SVMAPISupported())
+        return;
+
+    int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+
+    if (!SVMAPISupported_GPU(defaultGPUNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << defaultGPUNode << std::endl;
+        return;
+    }
+
+    unsigned int BufferSize = PAGE_SIZE;
+    HsaSVMRange testBuffer(BufferSize, defaultGPUNode);
+    void *pBuf = testBuffer.As<void *>();
+
+    LOG() << "Testing integer overflow protection in SVM functions" << std::endl;
+
+    /* Test 1: Verify extremely large nattr triggers size limit check in hsaKmtSVMSetAttr
+     * The ioctl size field is limited to 14 bits (16383 bytes), which is reached before
+     * SIZE_MAX overflow. With sizeof(HSA_SVM_ATTRIBUTE)=8 and args header=24 bytes,
+     * the limit is ~2044 attributes. Test with a value that exceeds this.
+     */
+    {
+        // This value exceeds the ioctl size limit (14 bits = 16383 bytes max)
+        HSAuint32 nattr_too_large = 10000;
+        HSA_SVM_ATTRIBUTE *attrs = new HSA_SVM_ATTRIBUTE[2];  // Only allocate small array for test
+
+        attrs[0].type = HSA_SVM_ATTR_PREFETCH_LOC;
+        attrs[0].value = defaultGPUNode;
+        attrs[1].type = HSA_SVM_ATTR_PREFERRED_LOC;
+        attrs[1].value = defaultGPUNode;
+
+        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMSetAttr, m_hsakmt_current_ctx,
+                                           pBuf, BufferSize, nattr_too_large, attrs);
+
+        // Should fail with INVALID_PARAMETER due to size limit check
+        EXPECT_NE(status, HSAKMT_STATUS_SUCCESS)
+            << "hsaKmtSVMSetAttr should reject nattr that exceeds ioctl size limit";
+        EXPECT_EQ(status, HSAKMT_STATUS_INVALID_PARAMETER)
+            << "Expected INVALID_PARAMETER for size limit, got " << status;
+
+        delete[] attrs;
+        LOG() << "Test 1 (SetAttr size limit): PASSED - excessive nattr correctly rejected" << std::endl;
+    }
+
+    /* Test 2: Verify extremely large nattr triggers size limit check in hsaKmtSVMGetAttr */
+    {
+        HSAuint32 nattr_too_large = 10000;
+        HSA_SVM_ATTRIBUTE *attrs = new HSA_SVM_ATTRIBUTE[2];
+
+        attrs[0].type = HSA_SVM_ATTR_PREFETCH_LOC;
+        attrs[0].value = 0;
+        attrs[1].type = HSA_SVM_ATTR_PREFERRED_LOC;
+        attrs[1].value = 0;
+
+        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx,
+                                           pBuf, BufferSize, nattr_too_large, attrs);
+
+        // Should fail with INVALID_PARAMETER due to size limit check
+        EXPECT_NE(status, HSAKMT_STATUS_SUCCESS)
+            << "hsaKmtSVMGetAttr should reject nattr that exceeds ioctl size limit";
+        EXPECT_EQ(status, HSAKMT_STATUS_INVALID_PARAMETER)
+            << "Expected INVALID_PARAMETER for size limit, got " << status;
+
+        delete[] attrs;
+        LOG() << "Test 2 (GetAttr size limit): PASSED - excessive nattr correctly rejected" << std::endl;
+    }
+
+    /* Test 3: Verify edge case - maximum safe nattr works correctly */
+    {
+        // Use a reasonably large but safe nattr value
+        HSAuint32 nattr_safe = 10;
+        HSA_SVM_ATTRIBUTE *attrs = new HSA_SVM_ATTRIBUTE[nattr_safe];
+
+        for (HSAuint32 i = 0; i < nattr_safe; i++) {
+            attrs[i].type = HSA_SVM_ATTR_PREFETCH_LOC;
+            attrs[i].value = defaultGPUNode;
+        }
+
+        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMSetAttr, m_hsakmt_current_ctx,
+                                           pBuf, BufferSize, nattr_safe, attrs);
+
+        // Should succeed - this is a valid call
+        EXPECT_SUCCESS(status) << "hsaKmtSVMSetAttr should work with safe nattr";
+
+        delete[] attrs;
+        LOG() << "Test 3 (Safe nattr): PASSED - normal operation verified" << std::endl;
+    }
+
+    /* Test 4: Verify single attribute still works (regression test) */
+    {
+        HSA_SVM_ATTRIBUTE attr;
+        attr.type = HSA_SVM_ATTR_PREFETCH_LOC;
+        attr.value = defaultGPUNode;
+
+        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtSVMSetAttr, m_hsakmt_current_ctx,
+                                   pBuf, BufferSize, 1, &attr))
+            << "Single attribute SetAttr should still work";
+
+        attr.value = 0;
+        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx,
+                                   pBuf, BufferSize, 1, &attr))
+            << "Single attribute GetAttr should still work";
+
+        LOG() << "Test 4 (Single attr): PASSED - backward compatibility verified" << std::endl;
+    }
+
+    LOG() << "All integer overflow protection tests PASSED" << std::endl;
+    TEST_END
+}
+
 INSTANTIATE_TEST_CASE_P(, KFDSVMRangeTest,::testing::Values(0, 1));

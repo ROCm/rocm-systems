@@ -1188,6 +1188,7 @@ private:
   static std::unique_ptr<Instruction> decodeVDot4U32U8Vop3p(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeVDot8I32I4Vop3p(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeVDot8U32U4Vop3p(const MachineInst *opcode);
+  static std::unique_ptr<Instruction> decodeVop3pX2Prefix(const MachineInst *opcode);
   static std::unique_ptr<Instruction>
   decodeVMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *opcode);
   static std::unique_ptr<Instruction>

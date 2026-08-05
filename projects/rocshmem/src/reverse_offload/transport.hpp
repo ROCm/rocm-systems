@@ -59,6 +59,11 @@ class Transport {
                               ro_net_types type, volatile char *status,
                               bool blocking) = 0;
 
+  virtual void team_reduce_scatter(void *dst, void *src, int nreduce,
+                                   int win_id, int wg_id, MPI_Comm team,
+                                   ROCSHMEM_OP op, ro_net_types type,
+                                   volatile char *status, bool blocking) = 0;
+
   virtual void team_broadcast(void *dst, void *src, int size, int win_id,
                               int wg_id, MPI_Comm team, int PE_root,
                               ro_net_types type, volatile char *status,

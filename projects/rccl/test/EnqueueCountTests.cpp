@@ -33,7 +33,7 @@ TEST_F(EnqueueCountTests, ncclFuncSendCount_AllTests)
                 size_t result = ncclFuncSendCount(ncclFuncAllReduce, nRanks, count);
                 EXPECT_EQ(result, count);
             }
-        ),
+        ).withNumGpus(0),
 
         ProcessIsolatedTestRunner::TestConfig(
             "ncclFuncSendCount_Broadcast",
@@ -44,7 +44,7 @@ TEST_F(EnqueueCountTests, ncclFuncSendCount_AllTests)
                 size_t result = ncclFuncSendCount(ncclFuncBroadcast, nRanks, count);
                 EXPECT_EQ(result, count);
             }
-        ),
+        ).withNumGpus(0),
 
         ProcessIsolatedTestRunner::TestConfig(
             "ncclFuncSendCount_Reduce",
@@ -55,7 +55,7 @@ TEST_F(EnqueueCountTests, ncclFuncSendCount_AllTests)
                 size_t result = ncclFuncSendCount(ncclFuncReduce, nRanks, count);
                 EXPECT_EQ(result, count);
             }
-        ),
+        ).withNumGpus(0),
 
         ProcessIsolatedTestRunner::TestConfig(
             "ncclFuncSendCount_AllGather",
@@ -66,7 +66,7 @@ TEST_F(EnqueueCountTests, ncclFuncSendCount_AllTests)
                 size_t result = ncclFuncSendCount(ncclFuncAllGather, nRanks, count);
                 EXPECT_EQ(result, count);
             }
-        ),
+        ).withNumGpus(0),
 
         ProcessIsolatedTestRunner::TestConfig(
             "ncclFuncSendCount_ReduceScatter",
@@ -77,7 +77,7 @@ TEST_F(EnqueueCountTests, ncclFuncSendCount_AllTests)
                 size_t result = ncclFuncSendCount(ncclFuncReduceScatter, nRanks, count);
                 EXPECT_EQ(result, count * nRanks);
             }
-        ),
+        ).withNumGpus(0),
 
         ProcessIsolatedTestRunner::TestConfig(
             "ncclFuncSendCount_ZeroCount",
@@ -86,7 +86,7 @@ TEST_F(EnqueueCountTests, ncclFuncSendCount_AllTests)
                 size_t result = ncclFuncSendCount(ncclFuncAllReduce, 4, 0);
                 EXPECT_EQ(result, 0);
             }
-        )
+        ).withNumGpus(0)
     );
 }
 
@@ -107,7 +107,7 @@ TEST_F(EnqueueCountTests, ncclFuncRecvCount_AllTests)
                 size_t result = ncclFuncRecvCount(ncclFuncAllReduce, nRanks, count);
                 EXPECT_EQ(result, count);
             }
-        ),
+        ).withNumGpus(0),
 
         ProcessIsolatedTestRunner::TestConfig(
             "ncclFuncRecvCount_Broadcast",
@@ -118,7 +118,7 @@ TEST_F(EnqueueCountTests, ncclFuncRecvCount_AllTests)
                 size_t result = ncclFuncRecvCount(ncclFuncBroadcast, nRanks, count);
                 EXPECT_EQ(result, count);
             }
-        ),
+        ).withNumGpus(0),
 
         ProcessIsolatedTestRunner::TestConfig(
             "ncclFuncRecvCount_Reduce",
@@ -129,7 +129,7 @@ TEST_F(EnqueueCountTests, ncclFuncRecvCount_AllTests)
                 size_t result = ncclFuncRecvCount(ncclFuncReduce, nRanks, count);
                 EXPECT_EQ(result, count);
             }
-        ),
+        ).withNumGpus(0),
 
         ProcessIsolatedTestRunner::TestConfig(
             "ncclFuncRecvCount_AllGather",
@@ -140,7 +140,7 @@ TEST_F(EnqueueCountTests, ncclFuncRecvCount_AllTests)
                 size_t result = ncclFuncRecvCount(ncclFuncAllGather, nRanks, count);
                 EXPECT_EQ(result, count * nRanks);
             }
-        ),
+        ).withNumGpus(0),
 
         ProcessIsolatedTestRunner::TestConfig(
             "ncclFuncRecvCount_ReduceScatter",
@@ -151,7 +151,7 @@ TEST_F(EnqueueCountTests, ncclFuncRecvCount_AllTests)
                 size_t result = ncclFuncRecvCount(ncclFuncReduceScatter, nRanks, count);
                 EXPECT_EQ(result, count);
             }
-        ),
+        ).withNumGpus(0),
 
         ProcessIsolatedTestRunner::TestConfig(
             "ncclFuncRecvCount_ZeroCount",
@@ -160,7 +160,7 @@ TEST_F(EnqueueCountTests, ncclFuncRecvCount_AllTests)
                 size_t result = ncclFuncRecvCount(ncclFuncAllReduce, 4, 0);
                 EXPECT_EQ(result, 0);
             }
-        )
+        ).withNumGpus(0)
     );
 }
 
@@ -181,7 +181,7 @@ TEST_F(EnqueueCountTests, ncclFuncMaxSendRecvCount_AllTests)
                 size_t result = ncclFuncMaxSendRecvCount(ncclFuncAllReduce, nRanks, count);
                 EXPECT_EQ(result, count);
             }
-        ),
+        ).withNumGpus(0),
 
         ProcessIsolatedTestRunner::TestConfig(
             "ncclFuncMaxSendRecvCount_AllGather",
@@ -192,7 +192,7 @@ TEST_F(EnqueueCountTests, ncclFuncMaxSendRecvCount_AllTests)
                 size_t result = ncclFuncMaxSendRecvCount(ncclFuncAllGather, nRanks, count);
                 EXPECT_EQ(result, count * nRanks);
             }
-        ),
+        ).withNumGpus(0),
 
         ProcessIsolatedTestRunner::TestConfig(
             "ncclFuncMaxSendRecvCount_ReduceScatter",
@@ -203,7 +203,7 @@ TEST_F(EnqueueCountTests, ncclFuncMaxSendRecvCount_AllTests)
                 size_t result = ncclFuncMaxSendRecvCount(ncclFuncReduceScatter, nRanks, count);
                 EXPECT_EQ(result, count * nRanks);
             }
-        ),
+        ).withNumGpus(0),
 
         ProcessIsolatedTestRunner::TestConfig(
             "ncclFuncMaxSendRecvCount_ZeroCount",
@@ -212,7 +212,7 @@ TEST_F(EnqueueCountTests, ncclFuncMaxSendRecvCount_AllTests)
                 size_t result = ncclFuncMaxSendRecvCount(ncclFuncAllReduce, 4, 0);
                 EXPECT_EQ(result, 0);
             }
-        )
+        ).withNumGpus(0)
     );
 }
 
@@ -234,7 +234,7 @@ TEST_F(EnqueueCountTests, ncclFuncCounts_EdgeCases)
                 EXPECT_EQ(ncclFuncRecvCount(ncclFuncAllReduce, nRanks, count), count);
                 EXPECT_EQ(ncclFuncMaxSendRecvCount(ncclFuncAllReduce, nRanks, count), count);
             }
-        ),
+        ).withNumGpus(0),
 
         ProcessIsolatedTestRunner::TestConfig(
             "ncclFuncCounts_LargeRankCount",
@@ -249,7 +249,7 @@ TEST_F(EnqueueCountTests, ncclFuncCounts_EdgeCases)
                     count * nRanks
                 );
             }
-        )
+        ).withNumGpus(0)
     );
 }
 

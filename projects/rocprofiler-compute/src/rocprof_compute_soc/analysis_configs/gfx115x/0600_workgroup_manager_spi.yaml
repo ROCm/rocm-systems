@@ -1,0 +1,69 @@
+# =============================================================================
+# RDNA3.5 (gfx115x) - RDNA3.5 SPI (Shader Processor Input) Performance Metrics
+# =============================================================================
+# SPI handles wave scheduling and resource allocation to WGPs
+# =============================================================================
+
+Panel Config:
+  id: 600
+  title: Workgroup Manager (SPI)
+  data source:
+  # =========================================================================
+  # SPI Utilization
+  # =========================================================================
+  - metric_table:
+      id: 601
+      title: "SPI Utilization"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        SPI Busy:
+          # Use GRBM_SPI_BUSY (not SPI_BUSY): SPI_BUSY is summed over all SPI instances, so it
+          # can exceed GRBM_GUI_ACTIVE when multiple SEs are busy in the same cycle. GRBM counts
+          # "any SPI busy" vs GUI active.
+          avg: 100 * SUM(GRBM_SPI_BUSY) / SUM(GRBM_GUI_ACTIVE)
+          min: 100 * MIN(GRBM_SPI_BUSY / GRBM_GUI_ACTIVE)
+          max: 100 * MAX(GRBM_SPI_BUSY / GRBM_GUI_ACTIVE)
+          unit: Percent
+
+  # =========================================================================
+  # Wave Dispatch Statistics
+  # =========================================================================
+  - metric_table:
+      id: 602
+      title: "Wave Dispatch Statistics"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Compute Wave Dispatches:
+          avg: SUM(SPI_CSN_WAVE) / SUM($denom)
+          min: MIN(SPI_CSN_WAVE / $denom)
+          max: MAX(SPI_CSN_WAVE / $denom)
+          unit: (Count + $normUnit)
+        Wave Dispatch Rate:
+          avg: SUM(SPI_CSN_WAVE) / SUM(GRBM_GUI_ACTIVE)
+          min: MIN(SPI_CSN_WAVE / GRBM_GUI_ACTIVE)
+          max: MAX(SPI_CSN_WAVE / GRBM_GUI_ACTIVE)
+          unit: Waves/cycle
+
+  metrics_description:
+    SPI Busy: >-
+      Percentage of GPU active cycles where the Shader Processor Input is busy dispatching
+      wavefronts. High SPI busy indicates active workload dispatch. Low values may suggest
+      insufficient parallelism or dispatch bottlenecks limiting GPU utilization.
+    Compute Wave Dispatches: >-
+      Total number of compute wavefronts dispatched by the Shader Processor Input. This
+      represents the work scheduled for execution on the shader engines. Compare with
+      completed waves to identify dispatch-related bottlenecks.
+    Wave Dispatch Rate: >-
+      Average wavefronts dispatched per GPU active cycle. Values greater than one indicate
+      parallel dispatch across multiple shader engines. Low dispatch rates may indicate
+      workload submission bottlenecks or insufficient parallelism in the application.

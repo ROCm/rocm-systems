@@ -27,7 +27,7 @@ struct dynamic_library
 
     dynamic_library(std::string _env, std::string _fname,
                     int _flags = (RTLD_LAZY | RTLD_GLOBAL), bool _open = true,
-                    bool _query_env = true, bool _store = true);
+                    bool _query_env = true);
 
     ~dynamic_library();
 

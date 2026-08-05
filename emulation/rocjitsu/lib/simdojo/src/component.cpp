@@ -7,11 +7,6 @@
 
 namespace simdojo {
 
-void Component::run() {
-  while (step()) {
-  }
-}
-
 void Component::schedule_event(Event *event, Tick timestamp, std::unique_ptr<Message> message) {
   engine_->schedule_event(event, timestamp, std::move(message));
 }
@@ -30,20 +25,6 @@ Port *Component::find_port(PortID port_id) const {
   return nullptr;
 }
 
-void CompositeComponent::run() {
-  for (auto &child : children_)
-    child->run();
-}
-
-bool CompositeComponent::step() {
-  bool any_active = false;
-  for (auto &child : children_) {
-    if (child->step())
-      any_active = true;
-  }
-  return any_active;
-}
-
 Component *CompositeComponent::add_child(std::unique_ptr<Component> child) {
   assert(child->parent() == nullptr && "Component already has a parent - remove it first");
   child->set_parent(this);
@@ -51,6 +32,15 @@ Component *CompositeComponent::add_child(std::unique_ptr<Component> child) {
   Component *raw = child.get();
   children_.push_back(std::move(child));
   return raw;
+}
+
+void CompositeComponent::adopt_children(CompositeComponent &donor) {
+  for (auto &child : donor.children_) {
+    child->set_parent(this);
+    child->set_depth(depth() + 1);
+    children_.push_back(std::move(child));
+  }
+  donor.children_.clear();
 }
 
 Component *CompositeComponent::find_child(const std::string &name) const {

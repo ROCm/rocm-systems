@@ -12,6 +12,8 @@
 #include "simdojo/sim/component.h"
 
 #include <cstdint>
+#include <memory>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -26,43 +28,43 @@ namespace rocjitsu {
 /// Fully event-driven: the VM is a structural container. Its descendants
 /// (command processors) schedule and handle events through the engine.
 /// The Driver injects external work as async events.
+class SimulatedKfd;
+
 class VirtualMachine : public simdojo::CompositeComponent {
 public:
-  /// @brief Configuration for a VirtualMachine (the "system" being modeled).
   struct Config {
-    SoC::Config soc; ///< SoC hierarchy configuration.
+    SoC::Config soc;
   };
 
-  /// @brief Construct a virtual machine from configuration.
-  /// @param config Complete VM configuration.
   explicit VirtualMachine(const Config &config);
-
-  ~VirtualMachine() override = default;
+  VirtualMachine(std::unique_ptr<SoC> soc, bool daemon_mode = false);
+  VirtualMachine(std::vector<std::unique_ptr<SoC>> socs, std::vector<uint32_t> gpu_ids,
+                 bool daemon_mode = false);
+  ~VirtualMachine() override;
 
   VirtualMachine(const VirtualMachine &) = delete;
   VirtualMachine &operator=(const VirtualMachine &) = delete;
   VirtualMachine(VirtualMachine &&) = delete;
   VirtualMachine &operator=(VirtualMachine &&) = delete;
 
-  /// @brief Return the SoC root of the component hierarchy.
-  /// @returns Pointer to the SoC.
   SoC *soc() { return soc_; }
-  /// @returns Const pointer to the SoC.
   const SoC *soc() const { return soc_; }
-
-  /// @brief Convenience: return GPU memory from the SoC.
-  /// @returns Pointer to the GPU memory.
+  /// @brief Access the Nth SoC (GPU), or nullptr if idx is out of range.
+  SoC *soc(uint32_t idx) { return idx < socs_.size() ? socs_[idx] : nullptr; }
+  const SoC *soc(uint32_t idx) const { return idx < socs_.size() ? socs_[idx] : nullptr; }
+  /// @brief Number of SoCs (GPUs) in this VM. At least 1 for any constructed VM.
+  uint32_t num_socs() const { return static_cast<uint32_t>(socs_.size()); }
   amdgpu::GpuMemory *memory() { return soc_->memory(); }
-  /// @returns Const pointer to the GPU memory.
   const amdgpu::GpuMemory *memory() const { return soc_->memory(); }
-
-  /// @brief Return the configuration used to construct this VM.
-  /// @returns Const reference to the VM configuration.
   const Config &config() const { return config_; }
+
+  SimulatedKfd *driver() { return driver_.get(); }
 
 private:
   Config config_;
   SoC *soc_ = nullptr;
+  std::vector<SoC *> socs_;
+  std::unique_ptr<SimulatedKfd> driver_;
 };
 
 } // namespace rocjitsu

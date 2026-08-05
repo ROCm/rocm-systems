@@ -63,6 +63,9 @@ const unsigned int SDMA_OP_GCR = 17;
 const unsigned int SDMA_SUBOP_COPY_LINEAR = 0;
 // Broadcast linear copy uses the linear sub-op with the broadcast packet format.
 const unsigned int SDMA_SUBOP_COPY_LINEAR_BROADCAST = SDMA_SUBOP_COPY_LINEAR;
+// Indirect linear copy reuses the linear sub-op; the engine selects the indirect
+// packet format from the INDIRECT_SRC/INDIRECT_DST bits in the header DW.
+const unsigned int SDMA_SUBOP_COPY_INDIRECT = SDMA_SUBOP_COPY_LINEAR;
 const unsigned int SDMA_SUBOP_COPY_LINEAR_RECT = 4;
 const unsigned int SDMA_SUBOP_COPY_SWAP = 9;
 const unsigned int SDMA_SUBOP_COPY_MULTICAST = 10;

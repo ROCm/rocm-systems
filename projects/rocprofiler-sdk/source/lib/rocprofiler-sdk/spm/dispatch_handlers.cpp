@@ -219,10 +219,10 @@ pre_kernel_call(const context::context*                                  ctx,
 
 /**
  * @brief Callback called by HSA interceptor when the kernel has completed processing.
- * Destroys the depedency signal of barrier packet2
+ * Destroys the dependency signal of barrier packet2
  * Invokes KFD SPM stop
  * Removes entry in packet_return_map
- * Puts the aql packet into config's packets cache for re-use
+ * Puts the aql packet into config's packets cache for reuse
  */
 void
 post_kernel_call(const context::context*                           ctx,
@@ -255,6 +255,16 @@ post_kernel_call(const context::context*                           ctx,
                 {
                     ROCP_ERROR << "SPM KFD stop failed in post-kernel completion";
                 }
+                if(pkt->cb.record_cb)
+                {
+                    pkt->cb.record_cb(&pkt->cb.dispatch_data,
+                                      nullptr,
+                                      0,
+                                      ROCPROFILER_SPM_RECORD_FLAG_DISPATCH_END,
+                                      pkt->cb.user_data,
+                                      pkt->cb.record_callback_args);
+                }
+                pkt->clear();
                 rel_pkt = std::move(aql_pkt);
                 return;
             }

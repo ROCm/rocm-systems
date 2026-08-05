@@ -97,11 +97,7 @@ enum class GpuBlock : uint32
     Wgs      = 0x35,
     EaCpwd   = 0x36,
     EaSe     = 0x37,
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 926
-    RlcUser  = 0x38,
-#else
     RlcLocal = 0x38,
-#endif
     Count
 };
 
@@ -525,7 +521,7 @@ public:
     virtual Result GetGlobalCounterLayout(
         GlobalCounterLayout* pLayout) const = 0;
 
-    /// Adds the specified thread trace to be recorded as part of this perf experiment.
+    /// Addes the specified thread trace to be recorded as part of this perf experiment.
     ///
     /// @param [in] traceInfo Specifies what type of trace to record, which block instance to trace, and options, etc.
     ///

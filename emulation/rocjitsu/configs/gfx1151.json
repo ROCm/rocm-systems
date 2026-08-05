@@ -1,0 +1,103 @@
+{
+  "max_ticks": 10000000,
+  "num_threads": 1,
+  "exec_mode": "functional",
+  "vm": {
+    "arch": "rdna3_5",
+    "gpu": {
+      "device": {
+        "gpu_id": 5510,
+        "gfx_target_version": 110501,
+        "vendor_id": 4098,
+        "device_id": 5510,
+        "family_id": 145,
+        "unique_id": 0,
+        "marketing_name": "AMD Radeon Graphics",
+        "drm_render_minor": 128,
+        "revision_id": 0,
+        "pci_revision_id": 0,
+        "simd_count": 64,
+        "max_waves_per_simd": 16,
+        "num_shader_engines": 4,
+        "num_shader_arrays_per_engine": 2,
+        "num_cu_per_sh": 8,
+        "simd_per_cu": 2,
+        "wave_front_size": 32,
+        "max_slots_scratch_cu": 32,
+        "local_mem_size": 55319121920,
+        "vram_type": 9,
+        "lds_size_kb": 64,
+        "mem_width": 256,
+        "mem_clk_max": 1000,
+        "l1_size_kb": 32,
+        "l1_line_size": 128,
+        "l1_assoc": 4,
+        "l2_size_kb": 6144,
+        "l2_line_size": 128,
+        "l2_assoc": 16,
+        "num_sdma_engines": 1,
+        "num_sdma_xgmi_engines": 0,
+        "num_cp_queues": 8,
+        "max_engine_clk_fcompute": 2700,
+        "location_id": 49920,
+        "hive_id": 0,
+        "domain": 0
+      }
+    }
+  },
+  "topology": {
+    "root": {
+      "name": "soc",
+      "type": "soc",
+      "children": [
+        { "name": "vram", "type": "gpu_memory" },
+        {
+          "name": "xcd[0:1]",
+          "type": "xcd",
+          "children": [
+            { "name": "l2", "type": "l2_cache" },
+            { "name": "cp", "type": "command_processor" },
+            {
+              "name": "se[0:2]",
+              "type": "shader_engine",
+              "children": [
+                {
+                  "name": "cu[0:16]",
+                  "type": "compute_unit",
+                  "config": [
+                    { "key": "num_wf_slots", "value": "32" },
+                    { "key": "sgprs_per_wf", "value": "104" },
+                    { "key": "vgprs_per_wf", "value": "256" },
+                    { "key": "lds_size_kb", "value": "64" }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "links": [
+      {
+        "pattern": "xcd[i].cp.req_[j*16+k] -> xcd[i].se[j].cu[k].cpl",
+        "for_ranges": [
+          { "var_name": "i", "start": 0, "end": 1 },
+          { "var_name": "j", "start": 0, "end": 2 },
+          { "var_name": "k", "start": 0, "end": 16 }
+        ],
+        "latency": 1,
+        "weight": 2
+      },
+      {
+        "pattern": "xcd[i].se[j].cu[k].req -> xcd[i].l2.cpl_[j*16+k]",
+        "for_ranges": [
+          { "var_name": "i", "start": 0, "end": 1 },
+          { "var_name": "j", "start": 0, "end": 2 },
+          { "var_name": "k", "start": 0, "end": 16 }
+        ],
+        "latency": 1,
+        "weight": 10
+      }
+    ]
+  }
+}

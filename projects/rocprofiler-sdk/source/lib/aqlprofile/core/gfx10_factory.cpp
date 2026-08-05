@@ -127,7 +127,7 @@ const GpuBlockInfo* Gfx10Factory::block_table_[AQLPROFILE_BLOCKS_NUMBER] = {
     &GcrCounterBlockInfo,
     &GusCounterBlockInfo};
 
-// Pm4Factory create mathods
+// Pm4Factory create methods
 Pm4Factory*
 Pm4Factory::Gfx10Create(const AgentInfo* agent_info)
 {

@@ -17,12 +17,15 @@ freed when the last reference to the tensor is dropped — which may differ
 across PEs and cause hangs during finalization.
 """
 
-from typing import Sequence
+from typing import TYPE_CHECKING, Optional, Sequence
 
 import rocshmem4py
 
+if TYPE_CHECKING:
+    import torch
 
-def create_tensor(shape: Sequence[int], dtype) -> 'torch.Tensor':
+
+def create_tensor(shape: Sequence[int], dtype: 'torch.dtype') -> 'torch.Tensor':
     """Collectively allocate symmetric memory and return it as a PyTorch tensor.
 
     **Collective operation** — all PEs must call this function with identical
@@ -144,19 +147,23 @@ def free_tensor(tensor: 'torch.Tensor') -> None:
 # Tensor-aware RMA wrappers (portable across every rocSHMEM backend)
 # ---------------------------------------------------------------------------
 
-def _stream_handle(stream) -> int:
+def _stream_handle(stream: Optional['torch.cuda.Stream'] = None) -> int:
     """Return the raw hipStream_t handle for a torch.cuda.Stream.
 
     Defaults to ``torch.cuda.current_stream()`` when *stream* is None.
     """
-    import torch
+    try:
+        import torch
+    except ImportError:
+        raise ImportError("PyTorch is required for rocshmem4py.interop.torch.")
+
     if stream is None:
         stream = torch.cuda.current_stream()
     return stream.cuda_stream
 
 
 def put(dst: 'torch.Tensor', src: 'torch.Tensor', peer: int,
-        stream=None) -> None:
+        stream: Optional['torch.cuda.Stream'] = None) -> None:
     """Stream-ordered put: copy *src* (local) -> *dst* on *peer*.
 
     Tensor-aware wrapper over ``rocshmem_putmem_on_stream`` that works on
@@ -186,7 +193,7 @@ def put(dst: 'torch.Tensor', src: 'torch.Tensor', peer: int,
 
 
 def get(dst: 'torch.Tensor', src: 'torch.Tensor', peer: int,
-        stream=None) -> None:
+        stream: Optional['torch.cuda.Stream'] = None) -> None:
     """Stream-ordered get: copy *src* from *peer* -> *dst* (local).
 
     Tensor-aware wrapper over ``rocshmem_getmem_on_stream`` that works on
@@ -215,7 +222,7 @@ def get(dst: 'torch.Tensor', src: 'torch.Tensor', peer: int,
     )
 
 
-def barrier_all(stream=None) -> None:
+def barrier_all(stream: Optional['torch.cuda.Stream'] = None) -> None:
     """Stream-ordered collective barrier across all PEs.
 
     Thin wrapper over ``rocshmem_barrier_all_on_stream``.
@@ -227,3 +234,117 @@ def barrier_all(stream=None) -> None:
         Defaults to ``torch.cuda.current_stream()``.
     """
     rocshmem4py.rocshmem_barrier_all_on_stream(_stream_handle(stream))
+
+
+# ---------------------------------------------------------------------------
+# Heap-base helper for device kernels
+# ---------------------------------------------------------------------------
+
+def get_heap_bases(tensor: 'torch.Tensor') -> 'torch.Tensor':
+    """Return an int64 CUDA tensor of per-PE base addresses for a symmetric tensor.
+
+    The returned tensor has shape ``(n_pes,)``, dtype ``torch.int64``, on
+    the current CUDA device.  Device kernels can use this array to translate
+    a local symmetric pointer to a peer's pointer via
+    ``heap_bases[peer] + (local_ptr - heap_bases[my_pe])``.
+
+    Entries are 0 for PEs whose memory is not directly accessible from
+    the local PE (e.g. on the RO backend).  Device kernels using this
+    array must check for the zero entry or use the rocSHMEM device-side
+    bitcode wrappers (``rocshmem_putmem_wrapper`` etc.) instead of
+    arithmetic translation when targeting RO.
+
+    Parameters
+    ----------
+    tensor:
+        A symmetric tensor allocated by :func:`create_tensor` (must have
+        ``__symm_tensor__`` set).
+    """
+    try:
+        import torch
+    except ImportError:
+        raise ImportError("PyTorch is required for rocshmem4py.interop.torch.")
+
+    if not getattr(tensor, "__symm_tensor__", False):
+        raise ValueError(
+            "tensor is not a symmetric tensor (missing __symm_tensor__ "
+            "attribute). Use create_tensor() to allocate it."
+        )
+
+    bases = rocshmem4py.rocshmem_get_heap_bases(tensor.data_ptr())
+    return torch.tensor(bases, dtype=torch.int64, device="cuda")
+
+
+# ---------------------------------------------------------------------------
+# Tensor-aware team-scoped collectives
+# ---------------------------------------------------------------------------
+
+def alltoall(team: int, dst: 'torch.Tensor', src: 'torch.Tensor',
+             stream: Optional['torch.cuda.Stream'] = None) -> None:
+    """Stream-ordered all-to-all over a team.
+
+    Each PE in *team* sends ``src.nbytes / team_size`` bytes to every
+    other PE; the layout is concatenation of per-PE chunks in PE-order.
+
+    Parameters
+    ----------
+    team:
+        rocshmem team handle (intptr_t).  Use ``ROCSHMEM_TEAM_WORLD``
+        for the world team.
+    dst:
+        Destination tensor on the local PE (symmetric); must hold
+        ``team_size`` chunks.
+    src:
+        Source tensor on the local PE (symmetric); must match
+        ``dst.nbytes``.
+    stream:
+        Defaults to ``torch.cuda.current_stream()``.
+    """
+    if dst.nbytes != src.nbytes:
+        raise ValueError(
+            f"dst.nbytes ({dst.nbytes}) must match src.nbytes ({src.nbytes})"
+        )
+    team_size = rocshmem4py.rocshmem_team_n_pes(team)
+    if team_size <= 0:
+        raise ValueError(f"team has invalid size: {team_size}")
+    if src.nbytes % team_size != 0:
+        raise ValueError(
+            f"src.nbytes ({src.nbytes}) must be divisible by team size "
+            f"({team_size})"
+        )
+    rocshmem4py.rocshmem_alltoallmem_on_stream(
+        team, dst.data_ptr(), src.data_ptr(), src.nbytes // team_size,
+        _stream_handle(stream),
+    )
+
+
+def broadcast(team: int, dst: 'torch.Tensor', src: 'torch.Tensor',
+              pe_root: int, stream: Optional['torch.cuda.Stream'] = None) -> None:
+    """Stream-ordered broadcast over a team.
+
+    On the root PE the contents of *src* are copied to *dst* on every
+    other PE in *team*.  ``pe_root`` is in the team's PE space, not the
+    world PE space.
+
+    Parameters
+    ----------
+    team:
+        rocshmem team handle (intptr_t).
+    dst:
+        Destination tensor on the local PE (symmetric).
+    src:
+        Source tensor on the local PE (symmetric); only its contents on
+        the root PE matter.
+    pe_root:
+        Root PE index in *team*'s PE space.
+    stream:
+        Defaults to ``torch.cuda.current_stream()``.
+    """
+    if dst.nbytes != src.nbytes:
+        raise ValueError(
+            f"dst.nbytes ({dst.nbytes}) must match src.nbytes ({src.nbytes})"
+        )
+    rocshmem4py.rocshmem_broadcastmem_on_stream(
+        team, dst.data_ptr(), src.data_ptr(), src.nbytes, pe_root,
+        _stream_handle(stream),
+    )

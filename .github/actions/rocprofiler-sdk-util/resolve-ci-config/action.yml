@@ -1,0 +1,44 @@
+name: Resolve CI config
+description: Resolve runner labels from ROCm/therock-ci-config
+
+inputs:
+  config-path:
+    description: Local checkout path for the shared CI config
+    required: false
+    default: ci-config
+  fallback-gfx94x-runner:
+    description: Runner label to use if the shared CI config cannot be loaded
+    required: false
+    default: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+  fallback-gfx94x-sandbox-runner:
+    description: Sandbox runner label to use if the shared CI config cannot be loaded
+    required: false
+    default: linux-mi325-gpu-rocm-cpu-sandbox
+
+outputs:
+  gfx94x_runner:
+    description: Linux gfx94x test runner label
+    value: ${{ steps.runner.outputs.gfx94x_runner }}
+  gfx94x_sandbox_runner:
+    description: Linux gfx94x sandbox test runner label
+    value: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout CI config
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        repository: ROCm/therock-ci-config
+        ref: main
+        path: ${{ inputs.config-path }}
+      continue-on-error: true
+
+    - name: Resolve runner labels
+      id: runner
+      shell: bash
+      env:
+        CI_CONFIG_PATH: ${{ inputs.config-path }}
+        FALLBACK_GFX94X_RUNNER: ${{ inputs.fallback-gfx94x-runner }}
+        FALLBACK_GFX94X_SANDBOX_RUNNER: ${{ inputs.fallback-gfx94x-sandbox-runner }}
+      run: python3 "${GITHUB_ACTION_PATH}/resolve_ci_config.py"

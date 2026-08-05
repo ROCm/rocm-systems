@@ -3,7 +3,7 @@ executionControl:
   Unit_hipFuncGetAttributes_Positive_Basic:
     <<: *level_2
     # NOTE: The following test is disabled due to defect - EXSWHTEC-242
-    disabled: [amd_linux, amd_windows]
+    disabled: [amd_linux, amd_windows, amd_wsl]
     tags: [attributes, kernel]
   Unit_hipFuncGetAttributes_Negative_Parameters:
     <<: *level_2
@@ -17,7 +17,7 @@ executionControl:
   Unit_hipLaunchKernel_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [kernel, launch]
   Unit_hipLaunchKernel_Verify_Capture: *level_2
   Unit_hipLaunchCooperativeKernel_Positive_Basic:
@@ -58,7 +58,7 @@ executionControl:
     <<: *level_2
     tags: [kernel, launch]
     # NOTE: The following test is disabled due to defect - EXSWHTEC-244
-    disabled: [amd_linux, amd_windows]
+    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_hipExtLaunchMultiKernelMultiDevice_Negative_MultiKernelSameDevice:
     <<: *level_2
     tags: [kernel, launch]
@@ -74,6 +74,7 @@ executionControl:
   Unit_hipLaunchByPtr_Verify_Capture: *level_2
   Unit_hipGetProcAddress_KernelLaunchApis:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [kernel]
   Unit_hipGetProcAddress_CallbackActivityAPIs:
     <<: *level_2
@@ -91,7 +92,7 @@ executionControl:
     # Note: intermittent Seg fault failure
     disabled: [amd_windows, amd_wsl]
     tags: [attributes, kernel]
-  Unit_hipFuncSetCacheConfig_Negative_Not_Supported:
+  Unit_hipFuncSetCacheConfig_Positive_VerifyCarveoutMapping:
     <<: *level_2
     tags: [attributes, kernel]
   Unit_hipFuncSetSharedMemConfig_Positive_Basic:

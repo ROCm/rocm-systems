@@ -35,7 +35,7 @@ from .message_instructions import validate_message_instructions
 from .barrier_instructions import validate_barrier_instructions
 
 # Using Prefix Tree to classify the instruction type
-# I did this instead of the regex becuase I wanted to try if we could
+# I did this instead of the regex because I wanted to try if we could
 # generalize this approach for other types of instructions.
 # The dream scenario: We have a giant list of all instructions and their
 # types. Then we parse the list and dynamically determine the checks
@@ -87,14 +87,14 @@ instructions_with_types = [
     ("s_", "SCALAR"),  # Scalar instructions (general category)
     ("s_waitcnt", "WAITCNT"),  # WAITCNT (specific)
     ("s_sendmsg", "MESSAGE"),  # MESSAGE (specific)
-    ("s_barrier", "BARRIER"),  # BARRIER (specifix)
+    ("s_barrier", "BARRIER"),  # BARRIER (specific)
     ("s_swappc", "JUMP"),  # JUMP (specific)
     ("s_setpc", "JUMP"),  # JUMP
     ("s_setpc", "JUMP"),  # JUMP
     ("s_sleep", "JUMP"),  # JUMP
     ("s_branch", "BRANCH"),  # BRANCH
     ("s_cbranch", "BRANCH"),  # BRANCH (conditional)
-    ("s_wakeup", "OTHER"),  # OHTER
+    ("s_wakeup", "OTHER"),  # OTHER
     ("s_nop", "INTERNAL"),  # INTERNAL
     ("s_sleep", "INTERNAL"),  # INTERNAL
 ]
@@ -120,7 +120,7 @@ def classify_instruction_by_prefix(prefix_tree, instruction):
     # Classify based on the Trie (general classification)
     instruction_types = prefix_tree.get_instruction_type(base_instruction)
 
-    # aways use the specific type
+    # always use the specific type
     return instruction_types[-1]
 
 

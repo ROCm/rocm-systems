@@ -26,12 +26,14 @@ cmake_minimum_required(VERSION 3.16.3 FATAL_ERROR)
 ###############################################################################
 # PROJECT
 ###############################################################################
-include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/setup_project.cmake")
+  include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/setup_project.cmake)
+endif()
 project(rocshmem_examples VERSION 1.0.0 LANGUAGES CXX)
 
-find_package(hip REQUIRED PATHS /opt/rocm)
+find_package(hip REQUIRED)
 if (NOT TARGET roc::rocshmem)
-  find_package(rocshmem REQUIRED PATHS /opt/rocm)
+  find_package(rocshmem REQUIRED)
 endif()
 # In standalone mode (BUILD_TESTS_ONLY) MPI::MPI_CXX is not yet defined:
 # the parent CMakeLists.txt hasn't run, and find_package(rocshmem) only emits
@@ -41,6 +43,7 @@ endif()
 if (BUILD_TESTS_ONLY AND NOT USE_EXTERNAL_MPI STREQUAL "OFF")
   find_package(MPI)
 endif()
+message(STATUS "Found rocshmem: ${rocshmem_DIR} (found version \"${rocshmem_VERSION}\")")
 
 ###############################################################################
 # SOURCES
@@ -59,6 +62,14 @@ set(EXAMPLE_SOURCES
 if (MPI_CXX_FOUND)
   list(APPEND EXAMPLE_SOURCES
     rocshmem_init_attr_test.cc)
+
+  # rocshmem_user_mem_symm_test.cc exercises HIP VMM APIs
+  if(${ROCM_MAJOR_VERSION} GREATER 7 OR (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 2))
+    list(APPEND EXAMPLE_SOURCES rocshmem_user_mem_symm_test.cc)
+  else()
+    message(STATUS "Skipping rocshmem_user_mem_symm_test: requires ROCm 7.2 or newer (found ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION})")
+  endif()
+
   add_subdirectory(LL_MoE)
 else()
   message(WARNING "MPI not found or disabled (USE_EXTERNAL_MPI=OFF) — skipping rocshmem_init_attr_test and LL_MoE examples")

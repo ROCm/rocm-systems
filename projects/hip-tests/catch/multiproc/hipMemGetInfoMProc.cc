@@ -316,6 +316,7 @@ static bool testHiddenFreeMemFromChild() {
     // Wait for signal from parent
     read(fd_p2c[ReadEnd], &result_dummy, sizeof(result_dummy));
     close(fd_p2c[ReadEnd]);
+    HIP_CHECK(hipFree(d_ptr));
     exit(0);
   } else if (cPid > 0) {  // parent
     close(fd_c2p[WriteEnd]);

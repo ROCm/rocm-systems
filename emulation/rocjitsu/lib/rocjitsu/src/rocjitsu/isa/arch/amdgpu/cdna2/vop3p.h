@@ -18,6 +18,7 @@ class VPkMadI16Vop3p : public Vop3p {
 public:
   VPkMadI16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -28,6 +29,7 @@ class VPkMulLoU16Vop3p : public Vop3p {
 public:
   VPkMulLoU16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -37,6 +39,7 @@ class VPkAddI16Vop3p : public Vop3p {
 public:
   VPkAddI16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -46,6 +49,7 @@ class VPkSubI16Vop3p : public Vop3p {
 public:
   VPkSubI16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -82,6 +86,7 @@ class VPkMaxI16Vop3p : public Vop3p {
 public:
   VPkMaxI16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -91,6 +96,7 @@ class VPkMinI16Vop3p : public Vop3p {
 public:
   VPkMinI16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -100,6 +106,7 @@ class VPkMadU16Vop3p : public Vop3p {
 public:
   VPkMadU16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -110,6 +117,7 @@ class VPkAddU16Vop3p : public Vop3p {
 public:
   VPkAddU16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -119,6 +127,7 @@ class VPkSubU16Vop3p : public Vop3p {
 public:
   VPkSubU16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -128,6 +137,7 @@ class VPkMaxU16Vop3p : public Vop3p {
 public:
   VPkMaxU16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -137,6 +147,7 @@ class VPkMinU16Vop3p : public Vop3p {
 public:
   VPkMinU16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -146,6 +157,7 @@ class VPkFmaF16Vop3p : public Vop3p {
 public:
   VPkFmaF16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -156,6 +168,7 @@ class VPkAddF16Vop3p : public Vop3p {
 public:
   VPkAddF16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -165,6 +178,7 @@ class VPkMulF16Vop3p : public Vop3p {
 public:
   VPkMulF16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -174,6 +188,7 @@ class VPkMinF16Vop3p : public Vop3p {
 public:
   VPkMinF16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -183,6 +198,7 @@ class VPkMaxF16Vop3p : public Vop3p {
 public:
   VPkMaxF16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -202,6 +218,7 @@ class VMadMixloF16Vop3p : public Vop3p {
 public:
   VMadMixloF16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -212,6 +229,7 @@ class VMadMixhiF16Vop3p : public Vop3p {
 public:
   VMadMixhiF16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;

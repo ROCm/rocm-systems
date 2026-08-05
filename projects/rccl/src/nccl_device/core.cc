@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "core.h"
 #include "comm.h"
@@ -37,15 +38,15 @@ ncclTeam_t ncclTeamRail(ncclComm_t comm) {
   if (ncclSuccess != ncclDevrInitOnce(comm)) return ncclTeam_t{};
 
   ncclTeam_t ans;
-  ans.nRanks = comm->nRanks/comm->devrState.lsaSize;
-  ans.rank = comm->rank/comm->devrState.lsaSize;
+  ans.nRanks = comm->nRanks / comm->devrState.lsaSize;
+  ans.rank = comm->rank / comm->devrState.lsaSize;
   ans.stride = comm->devrState.lsaSize;
   return ans;
 }
 
 NCCL_API(int, ncclTeamRankToWorld, ncclComm_t comm, ncclTeam_t team, int rank);
 int ncclTeamRankToWorld(ncclComm_t comm, ncclTeam_t team, int rank) {
-  return comm->rank + (rank - team.rank)*team.stride;
+  return comm->rank + (rank - team.rank) * team.stride;
 }
 
 NCCL_API(int, ncclTeamRankToLsa, ncclComm_t comm, ncclTeam_t team, int rank);
@@ -53,5 +54,5 @@ int ncclTeamRankToLsa(ncclComm_t comm, ncclTeam_t team, int rank) {
   // Ignoring errors as above.
   if (ncclSuccess != ncclDevrInitOnce(comm)) return -1;
 
-  return comm->devrState.lsaSelf + (rank - team.rank)*team.stride;
+  return comm->devrState.lsaSelf + (rank - team.rank) * team.stride;
 }

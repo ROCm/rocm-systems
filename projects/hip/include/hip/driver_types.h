@@ -460,6 +460,10 @@ typedef enum hipMemcpyFlags {
   hipMemcpyFlagPreferOverlapWithCompute = 0x1, ///< Tries to overlap copy with compute work.
   hipMemcpyFlagExtPreferCE = 0x100,            ///< Prefer copy engine over compute engine.
   hipMemcpyFlagExtOpSwap = 0x200,              ///< Swap contents of src and dst.
+  hipMemcpyFlagExtOpIndirectSrc = 0x400,       ///< The src pointer holds the address of the real
+                                               ///< source pointer, read when the copy runs rather
+                                               ///< than when it is submitted.
+  hipMemcpyFlagExtOpIndirectDst = 0x800        ///< Same as IndirectSrc, but for the dst pointer.
 } hipMemcpyFlags;
 
 /**

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "backends/amd_smi/ainic_feature.hpp"  // defines AINIC_SUPPORTED (consumed by gpu.cpp)
+
 #include <amd_smi/amdsmi.h>
 #include <cstdint>
 

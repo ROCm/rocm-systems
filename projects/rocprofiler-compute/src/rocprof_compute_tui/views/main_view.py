@@ -12,6 +12,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Optional
 
+import pandas as pd
 from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -24,7 +25,6 @@ from rocprof_compute_tui.widgets.center_panel.center_area import CenterPanel
 from rocprof_compute_tui.widgets.menu_bar.menu_bar import MenuBar
 from rocprof_compute_tui.widgets.right_panel.right import RightPanel
 from rocprof_compute_tui.widgets.tabs.tabs_area import TabsArea
-from utils import file_io
 
 
 class MainView(Horizontal):
@@ -162,7 +162,7 @@ class MainView(Horizontal):
                 self.app.call_from_thread(ui_missing_sysinfo)
                 return
 
-            sys_info = file_io.load_sys_info(str(sysinfo_path)).iloc[0].to_dict()
+            sys_info = pd.read_csv(str(sysinfo_path)).iloc[0].to_dict()
             self.app.load_soc_specs(sys_info)
             analyzer.set_soc(self.app.soc)
 

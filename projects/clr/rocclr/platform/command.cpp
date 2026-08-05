@@ -63,6 +63,11 @@ Event::~Event() {
 
 // ================================================================================================
 AccumulateCommand::~AccumulateCommand() {
+  // When an external owner (e.g. the graph signal pool) reclaims the signals,
+  // do not destroy them here.
+  if (!owns_hw_events_) {
+    return;
+  }
   // Release all retained HW events per device
   for (auto& device_events_pair : hw_events_) {
     Device* dev = device_events_pair.first;
@@ -243,18 +248,39 @@ bool Event::awaitCompletion() {
             this, status());
     auto* queue = command().queue();
     if ((queue != nullptr) && queue->vdev()->ActiveWait()) {
+      // Active wait: yield in a tight loop. Bail out if the queue's worker
+      // thread is no longer alive, otherwise this spins forever during
+      // process teardown -- on Windows ExitProcess terminates worker threads
+      // before DLL_PROCESS_DETACH, so __hipUnregisterFatBinary ->
+      // SyncAllStreams -> finish() reaches here with no thread left to signal
+      // completion (ROCm/TheRock#999). Only meaningful when a real worker
+      // thread exists (handle != nullptr); direct dispatch has none.
       while (status() > CL_COMPLETE) {
+        if (queue->thread().handle() != nullptr && !amd::Os::isThreadAlive(queue->thread())) {
+          break;
+        }
         amd::Os::yield();
       }
     } else {
       ScopedLock lock(lock_);
 
-      // Wait until the status becomes CL_COMPLETE or negative.
+      // Wait until the status becomes CL_COMPLETE or negative. Bail out if the
+      // worker thread is dead -- nobody would signal the condition variable
+      // and we would block forever during teardown (see comment above).
       while (status() > CL_COMPLETE) {
+        if (queue != nullptr && queue->thread().handle() != nullptr &&
+            !amd::Os::isThreadAlive(queue->thread())) {
+          break;
+        }
         lock_.wait();
       }
     }
-    ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Event %p wait completed", this);
+    if (status() == CL_COMPLETE) {
+      ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Event %p wait completed", this);
+    } else {
+      ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT,
+              "Event %p wait aborted, worker thread no longer alive (status %d)", this, status());
+    }
   }
 
   return status() == CL_COMPLETE;

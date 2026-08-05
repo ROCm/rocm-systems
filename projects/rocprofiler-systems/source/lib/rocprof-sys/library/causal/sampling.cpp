@@ -3,6 +3,7 @@
 
 #include "library/causal/sampling.hpp"
 #include "binary/analysis.hpp"
+#include "common/env_vars.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
@@ -25,7 +26,6 @@
 #include <timemory/sampling/overflow.hpp>
 #include <timemory/sampling/sampler.hpp>
 #include <timemory/sampling/timer.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/variadic.hpp>
 
@@ -323,7 +323,7 @@ configure(bool _setup, std::int64_t _tid)
             auto _perf_error = _activate_perf_backend();
             if(!_perf_error)
             {
-                config::set_setting_value("ROCPROFSYS_CAUSAL_BACKEND",
+                config::set_setting_value(std::string{ env_vars::CAUSAL_BACKEND },
                                           std::string{ "perf" });
             }
             else
@@ -337,7 +337,7 @@ configure(bool _setup, std::int64_t _tid)
                     std::exit(1);
                 }
 
-                config::set_setting_value("ROCPROFSYS_CAUSAL_BACKEND",
+                config::set_setting_value(std::string{ env_vars::CAUSAL_BACKEND },
                                           std::string{ "timer" });
             }
         }
@@ -459,14 +459,10 @@ sampling_signals()
 }  // namespace
 
 template <typename ScopeT>
+    requires sampling_scope<ScopeT>
 void
 pause(ScopeT)
 {
-    static_assert(
-        tim::is_one_of<ScopeT,
-                       type_list<scope::thread_scope, scope::process_scope>>::value,
-        "Unsupported scope");
-
     if constexpr(std::is_same<ScopeT, scope::thread_scope>::value)
     {
         if(!_thread_paused) _thread_paused = false;
@@ -499,14 +495,10 @@ pause(ScopeT)
 }
 
 template <typename ScopeT>
+    requires sampling_scope<ScopeT>
 void
 resume(ScopeT)
 {
-    static_assert(
-        tim::is_one_of<ScopeT,
-                       type_list<scope::thread_scope, scope::process_scope>>::value,
-        "Unsupported scope");
-
     if constexpr(std::is_same<ScopeT, scope::thread_scope>::value)
     {
         if(!_thread_paused) _thread_paused = true;

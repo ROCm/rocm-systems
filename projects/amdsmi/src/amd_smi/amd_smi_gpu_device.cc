@@ -22,6 +22,10 @@
 
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 
+extern "C" {
+#include "ualoe_lib/ualoe_lib.h"
+}
+
 #include <dirent.h>
 #include <sys/types.h>
 
@@ -55,6 +59,45 @@ namespace amd::smi {
 
 // Constant for KFD context directory prefix
 static constexpr const char* kContextPrefix = "context_";
+
+AMDSmiGPUDevice::AMDSmiGPUDevice(uint32_t gpu_id, std::string path, amdsmi_bdf_t bdf,
+                                 AMDSmiDrm& drm)
+    : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU),
+      gpu_id_(gpu_id),
+      path_(path),
+      bdf_(bdf),
+      drm_(drm) {
+  populate_ifoe_fabric_bdf_list();
+}
+
+AMDSmiGPUDevice::AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm)
+    : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU), gpu_id_(gpu_id), drm_(drm) {
+  if (check_if_drm_is_supported()) this->get_drm_data();
+
+  populate_ifoe_fabric_bdf_list();
+}
+
+// Opens the IFoE/UALoE genl session; deferred (see get_ualoe_handle).
+void AMDSmiGPUDevice::open_ualoe_session() {
+  if (has_ifoe_related_bdf() && device_has_ualink()) {
+    auto ifoe_bdf_str = get_ifoe_bdf_string();
+    if (auto ualoe_status = ualoe_open(ifoe_bdf_str.c_str(), &ualoe_handle_); ualoe_status != 0) {
+      ualoe_handle_ = (-1);
+    }
+  }
+}
+
+ualoe_handle_t AMDSmiGPUDevice::get_ualoe_handle() {
+  std::call_once(ualoe_open_once_, [this]() { open_ualoe_session(); });
+  return ualoe_handle_;
+}
+
+AMDSmiGPUDevice::~AMDSmiGPUDevice() {
+  if (ualoe_handle_ != -1) {
+    ualoe_close(ualoe_handle_);
+    ualoe_handle_ = -1;
+  }
+}
 
 uint32_t AMDSmiGPUDevice::get_gpu_id() const { return gpu_id_; }
 
@@ -190,8 +233,12 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     process_info_cache_map.clear();
 
     status_code = rsmi_compute_process_info_get(nullptr, &cache_ptr->num_running_processes);
-    if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) ||
-        (cache_ptr->num_running_processes <= 0)) {
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
+      return status_code;
+    }
+    if (cache_ptr->num_running_processes <= 0) {
+      compute_process_list.clear();
+      cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
       return status_code;
     }
 
@@ -211,6 +258,8 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     }
 
     if (cache_ptr->num_running_processes <= 0) {
+      compute_process_list.clear();
+      cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
       return rsmi_status_t::RSMI_STATUS_SUCCESS;  // No processes running
     }
 
@@ -232,11 +281,29 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
    * This function retrieves the process information given in rsmi_proc_info_t
    * and populates the amdsmi_proc_info_t structure.
    */
+  // This device's KFD gpu id is stable for the whole process sweep, so resolve
+  // it once and reuse it for every process instead of recomputing it per
+  // process. It is forwarded to gpuvsmi_get_pid_info() so the per-process KFD
+  // lookup can skip rebuilding the entire KFD topology just to translate the
+  // BDF into this id.
+  const uint64_t kfd_gpu_id = get_kfd_gpu_id();
+  if (kfd_gpu_id == 0 || kfd_gpu_id == UINT64_MAX) {
+    // Without a cached id every per-process lookup falls back to a full KFD
+    // topology discovery (an expensive sysfs walk). Surface it once per device
+    // per sweep so the slow path is observable rather than silently degrading.
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__
+       << " | KFD gpu id unavailable for this device; per-process lookups will "
+          "fall back to full KFD topology discovery.";
+    LOG_WARN(ss);
+  }
+
   auto get_process_info = [&](const rsmi_process_info_t& rsmi_proc_info,
                               amdsmi_proc_info_t& amdsmi_proc_info) {
-    // amdsmi_proc_info_t gets populated with /proc information from gpuvsmi_get_pid_info()
-
-    auto status_code = gpuvsmi_get_pid_info(get_bdf(), rsmi_proc_info.process_id, amdsmi_proc_info);
+    // Pass this device's cached KFD gpu id (resolved once above) so the
+    // per-process lookup need not rebuild the KFD topology to derive it.
+    auto status_code =
+        gpuvsmi_get_pid_info(get_bdf(), rsmi_proc_info.process_id, amdsmi_proc_info, kfd_gpu_id);
     // If we cannot get the info from sysfs, save the minimum info
     if (status_code != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) {
       amdsmi_proc_info.pid = rsmi_proc_info.process_id;
@@ -249,7 +316,6 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     amdsmi_proc_info.sdma_usage = rsmi_proc_info.sdma_usage;
 
     // Safely handle KFD processes to get total memory_usage of the process
-    uint64_t kfd_gpu_id = get_kfd_gpu_id();
     std::string kfd_proc_path =
         "/sys/class/kfd/kfd/proc/" + std::to_string(rsmi_proc_info.process_id);
     std::string kfd_vram_file = "/vram_" + std::to_string(kfd_gpu_id);
@@ -491,7 +557,7 @@ namespace gpu_device::details {
 using UALoeLinkTypeMap_t = std::map<std::string_view, amdsmi_fabric_type_t>;
 inline const auto UALoeLinkTypeMap =
     UALoeLinkTypeMap_t{{"ualoe", amdsmi_fabric_type_t::AMDSMI_FABRIC_TYPE_UALOE},
-                       {"ualink", amdsmi_fabric_type_t::AMDSMI_FABRIC_TYPE_UALLINK}};
+                       {"ualink", amdsmi_fabric_type_t::AMDSMI_FABRIC_TYPE_UALINK}};
 
 using UALoeAddressModeTypeMap_t = std::map<std::string_view, amdsmi_fabric_npa_address_mode_t>;
 inline const auto UALoeAddressModeTypeMap = UALoeAddressModeTypeMap_t{
@@ -533,65 +599,57 @@ auto get_fabric_type(const std::string& link_value, amdsmi_fabric_info_t& local_
   const std::string_view fabric_type_sv{fabric_type_str};
   if (auto fabric_type_itr = UALoeLinkTypeMap.find(fabric_type_sv);
       fabric_type_itr != UALoeLinkTypeMap.end()) {
-    local_fabric_info.fabric_info.fabric_version.v1.fabric_type = fabric_type_itr->second;
+    local_fabric_info.fabric_info.v1.fabric_type = fabric_type_itr->second;
   } else {
-    local_fabric_info.fabric_info.fabric_version.v1.fabric_type =
-        amdsmi_fabric_type_t::AMDSMI_FABRIC_TYPE_UNKNOWN;
+    local_fabric_info.fabric_info.v1.fabric_type = amdsmi_fabric_type_t::AMDSMI_FABRIC_TYPE_UNKNOWN;
   }
 
   std::ostringstream outstream;
   outstream << __PRETTY_FUNCTION__ << " | Link value: " << link_value << " -> " << fabric_type_str
-            << " | fabric_type: " << local_fabric_info.fabric_info.fabric_version.v1.fabric_type
-            << " |";
+            << " | fabric_type: " << local_fabric_info.fabric_info.v1.fabric_type << " |";
   log_ualoe_file_info(std::move(outstream));
 }
 
 auto get_accelerator_id(const std::string& link_value, amdsmi_fabric_info_t& local_fabric_info)
     -> void {
-  auto result = parse_number_from_string<
-      decltype(local_fabric_info.fabric_info.fabric_version.v1.accelerator_id)>(link_value);
+  auto result = parse_number_from_string<decltype(local_fabric_info.fabric_info.v1.accelerator_id)>(
+      link_value);
   if (result.has_value()) {
-    local_fabric_info.fabric_info.fabric_version.v1.accelerator_id =
-        static_cast<decltype(local_fabric_info.fabric_info.fabric_version.v1.accelerator_id)>(
-            result.value());
+    local_fabric_info.fabric_info.v1.accelerator_id =
+        static_cast<decltype(local_fabric_info.fabric_info.v1.accelerator_id)>(result.value());
   }
 
   std::ostringstream outstream;
-  outstream << __PRETTY_FUNCTION__ << " | Link value: " << link_value << " | accelerator_id: "
-            << local_fabric_info.fabric_info.fabric_version.v1.accelerator_id << " |";
+  outstream << __PRETTY_FUNCTION__ << " | Link value: " << link_value
+            << " | accelerator_id: " << local_fabric_info.fabric_info.v1.accelerator_id << " |";
   log_ualoe_file_info(std::move(outstream));
 }
 
 auto get_bandwidth(const std::string& link_value, amdsmi_fabric_info_t& local_fabric_info) -> void {
   auto result =
-      parse_number_from_string<decltype(local_fabric_info.fabric_info.fabric_version.v1.bandwidth)>(
-          link_value);
+      parse_number_from_string<decltype(local_fabric_info.fabric_info.v1.bandwidth)>(link_value);
   if (result.has_value()) {
-    local_fabric_info.fabric_info.fabric_version.v1.bandwidth =
-        static_cast<decltype(local_fabric_info.fabric_info.fabric_version.v1.bandwidth)>(
-            result.value());
+    local_fabric_info.fabric_info.v1.bandwidth =
+        static_cast<decltype(local_fabric_info.fabric_info.v1.bandwidth)>(result.value());
   }
 
   std::ostringstream outstream;
   outstream << __PRETTY_FUNCTION__ << " | Link value: " << link_value
-            << " | bandwidth: " << local_fabric_info.fabric_info.fabric_version.v1.bandwidth
-            << " |";
+            << " | bandwidth: " << local_fabric_info.fabric_info.v1.bandwidth << " |";
   log_ualoe_file_info(std::move(outstream));
 }
 
 auto get_latency(const std::string& link_value, amdsmi_fabric_info_t& local_fabric_info) -> void {
   auto result =
-      parse_number_from_string<decltype(local_fabric_info.fabric_info.fabric_version.v1.latency)>(
-          link_value);
+      parse_number_from_string<decltype(local_fabric_info.fabric_info.v1.latency)>(link_value);
   if (result.has_value()) {
-    local_fabric_info.fabric_info.fabric_version.v1.latency =
-        static_cast<decltype(local_fabric_info.fabric_info.fabric_version.v1.latency)>(
-            result.value());
+    local_fabric_info.fabric_info.v1.latency =
+        static_cast<decltype(local_fabric_info.fabric_info.v1.latency)>(result.value());
   }
 
   std::ostringstream outstream;
   outstream << __PRETTY_FUNCTION__ << " | Link value: " << link_value
-            << " | latency: " << local_fabric_info.fabric_info.fabric_version.v1.latency << " |";
+            << " | latency: " << local_fabric_info.fabric_info.v1.latency << " |";
   log_ualoe_file_info(std::move(outstream));
 }
 
@@ -671,51 +729,43 @@ auto get_ppod_id(const std::string& link_value, std::array<PPodIDType_t, MaxElem
 
 auto get_ppod_size(const std::string& link_value, amdsmi_fabric_info_t& local_fabric_info) -> void {
   auto result =
-      parse_number_from_string<decltype(local_fabric_info.fabric_info.fabric_version.v1.ppod_size)>(
-          link_value);
+      parse_number_from_string<decltype(local_fabric_info.fabric_info.v1.ppod_size)>(link_value);
   if (result.has_value()) {
-    local_fabric_info.fabric_info.fabric_version.v1.ppod_size =
-        static_cast<decltype(local_fabric_info.fabric_info.fabric_version.v1.ppod_size)>(
-            result.value());
+    local_fabric_info.fabric_info.v1.ppod_size =
+        static_cast<decltype(local_fabric_info.fabric_info.v1.ppod_size)>(result.value());
   }
 
   std::ostringstream outstream;
   outstream << __PRETTY_FUNCTION__ << " | Link value: " << link_value
-            << " | ppod_size: " << local_fabric_info.fabric_info.fabric_version.v1.ppod_size
-            << " |";
+            << " | ppod_size: " << local_fabric_info.fabric_info.v1.ppod_size << " |";
   log_ualoe_file_info(std::move(outstream));
 }
 
 auto get_vpod_id(const std::string& link_value, amdsmi_fabric_info_t& local_fabric_info) -> void {
   auto result =
-      parse_number_from_string<decltype(local_fabric_info.fabric_info.fabric_version.v1.vpod_id)>(
-          link_value);
+      parse_number_from_string<decltype(local_fabric_info.fabric_info.v1.vpod_id)>(link_value);
   if (result.has_value()) {
-    local_fabric_info.fabric_info.fabric_version.v1.vpod_id =
-        static_cast<decltype(local_fabric_info.fabric_info.fabric_version.v1.vpod_id)>(
-            result.value());
+    local_fabric_info.fabric_info.v1.vpod_id =
+        static_cast<decltype(local_fabric_info.fabric_info.v1.vpod_id)>(result.value());
   }
 
   std::ostringstream outstream;
   outstream << __PRETTY_FUNCTION__ << " | Link value: " << link_value
-            << " | vpod_id: " << local_fabric_info.fabric_info.fabric_version.v1.vpod_id << " |";
+            << " | vpod_id: " << local_fabric_info.fabric_info.v1.vpod_id << " |";
   log_ualoe_file_info(std::move(outstream));
 }
 
 auto get_vpod_size(const std::string& link_value, amdsmi_fabric_info_t& local_fabric_info) -> void {
   auto result =
-      parse_number_from_string<decltype(local_fabric_info.fabric_info.fabric_version.v1.vpod_size)>(
-          link_value);
+      parse_number_from_string<decltype(local_fabric_info.fabric_info.v1.vpod_size)>(link_value);
   if (result.has_value()) {
-    local_fabric_info.fabric_info.fabric_version.v1.vpod_size =
-        static_cast<decltype(local_fabric_info.fabric_info.fabric_version.v1.vpod_size)>(
-            result.value());
+    local_fabric_info.fabric_info.v1.vpod_size =
+        static_cast<decltype(local_fabric_info.fabric_info.v1.vpod_size)>(result.value());
   }
 
   std::ostringstream outstream;
   outstream << __PRETTY_FUNCTION__ << " | Link value: " << link_value
-            << " | vpod_size: " << local_fabric_info.fabric_info.fabric_version.v1.vpod_size
-            << " |";
+            << " | vpod_size: " << local_fabric_info.fabric_info.v1.vpod_size << " |";
   log_ualoe_file_info(std::move(outstream));
 }
 
@@ -810,16 +860,15 @@ auto get_addr_mode(const std::string& link_value, amdsmi_fabric_info_t& local_fa
   const std::string_view addr_mode_sv{addr_mode_str};
   if (auto addr_mode_itr = UALoeAddressModeTypeMap.find(addr_mode_sv);
       addr_mode_itr != UALoeAddressModeTypeMap.end()) {
-    local_fabric_info.fabric_info.fabric_version.v1.addr_mode = addr_mode_itr->second;
+    local_fabric_info.fabric_info.v1.addr_mode = addr_mode_itr->second;
   } else {
-    local_fabric_info.fabric_info.fabric_version.v1.addr_mode =
+    local_fabric_info.fabric_info.v1.addr_mode =
         amdsmi_fabric_npa_address_mode_t::AMDSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN;
   }
 
   std::ostringstream outstream;
   outstream << __PRETTY_FUNCTION__ << " | Link value: " << link_value << " -> " << addr_mode_str
-            << " | addr_mode: " << local_fabric_info.fabric_info.fabric_version.v1.addr_mode
-            << " |";
+            << " | addr_mode: " << local_fabric_info.fabric_info.v1.addr_mode << " |";
   log_ualoe_file_info(std::move(outstream));
 }
 
@@ -833,16 +882,15 @@ auto get_accel_state(const std::string& link_value, amdsmi_fabric_info_t& local_
   const std::string_view accel_state_sv{accel_state_str};
   if (auto accel_state_itr = UALoeAcceleratorStateTypeMap.find(accel_state_sv);
       accel_state_itr != UALoeAcceleratorStateTypeMap.end()) {
-    local_fabric_info.fabric_info.fabric_version.v1.accel_state = accel_state_itr->second;
+    local_fabric_info.fabric_info.v1.accel_state = accel_state_itr->second;
   } else {
-    local_fabric_info.fabric_info.fabric_version.v1.accel_state =
+    local_fabric_info.fabric_info.v1.accel_state =
         amdsmi_fabric_accelerator_vpod_state_t::AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN;
   }
 
   std::ostringstream outstream;
   outstream << __PRETTY_FUNCTION__ << " | Link value: " << link_value << " -> " << accel_state_str
-            << " | accel_state: " << local_fabric_info.fabric_info.fabric_version.v1.accel_state
-            << " |";
+            << " | accel_state: " << local_fabric_info.fabric_info.v1.accel_state << " |";
   log_ualoe_file_info(std::move(outstream));
 }
 
@@ -1000,7 +1048,7 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
   LOG_TRACE(outstream);
 
   auto local_fabric_info = amdsmi_fabric_info_t{};
-  auto local_ppod_id = std::array<std::uint8_t, AMDSMI_MAX_UUID_ELEMENTS>{};
+  auto local_ppod_id = std::array<std::uint8_t, AMDSMI_FABRIC_PPOD_ID_SIZE>{};
   auto local_active_accelerators = std::array<gpu_device::details::AcceleratorArrayType_t,
                                               AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE>{};
   auto local_accelerators =
@@ -1026,45 +1074,40 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
    *      - 00000111 (last 3 bits are 1, all others 0)
    */
   // local_fabric_info.bdf.function_number = ((bdf_.function_number + kUALOE_BDF_OFFSET) & 0x07);
-  local_fabric_info.fabric_info.version =
-      std::numeric_limits<decltype(local_fabric_info.fabric_info.version)>::max();
+  local_fabric_info.fabric_version =
+      std::numeric_limits<decltype(local_fabric_info.fabric_version)>::max();
 
-  local_fabric_info.fabric_info.fabric_version.v1.fabric_type = static_cast<amdsmi_fabric_type_t>(
-      std::numeric_limits<
-          decltype(local_fabric_info.fabric_info.fabric_version.v1.fabric_type)>::max());
+  local_fabric_info.fabric_info.v1.fabric_type = static_cast<amdsmi_fabric_type_t>(
+      std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.fabric_type)>::max());
 
-  local_fabric_info.fabric_info.fabric_version.v1.accelerator_id = std::numeric_limits<
-      decltype(local_fabric_info.fabric_info.fabric_version.v1.accelerator_id)>::max();
+  local_fabric_info.fabric_info.v1.accelerator_id =
+      std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.accelerator_id)>::max();
 
-  local_fabric_info.fabric_info.fabric_version.v1.bandwidth = std::numeric_limits<
-      decltype(local_fabric_info.fabric_info.fabric_version.v1.bandwidth)>::max();
+  local_fabric_info.fabric_info.v1.bandwidth =
+      std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.bandwidth)>::max();
 
-  local_fabric_info.fabric_info.fabric_version.v1.latency =
-      std::numeric_limits<decltype(local_fabric_info.fabric_info.fabric_version.v1.latency)>::max();
+  local_fabric_info.fabric_info.v1.latency =
+      std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.latency)>::max();
 
   // Sentinel when sysfs provides no ppod_id: UUID 99999999-9999-9999-9999-999999999999 (16 × 0x99)
-  std::fill(std::begin(local_fabric_info.fabric_info.fabric_version.v1.ppod_id),
-            std::end(local_fabric_info.fabric_info.fabric_version.v1.ppod_id),
-            static_cast<std::uint8_t>(0x99));
+  std::fill(std::begin(local_fabric_info.fabric_info.v1.ppod_id),
+            std::end(local_fabric_info.fabric_info.v1.ppod_id), static_cast<std::uint8_t>(0x99));
 
-  local_fabric_info.fabric_info.fabric_version.v1.ppod_size = std::numeric_limits<
-      decltype(local_fabric_info.fabric_info.fabric_version.v1.ppod_size)>::max();
+  local_fabric_info.fabric_info.v1.ppod_size =
+      std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.ppod_size)>::max();
 
-  local_fabric_info.fabric_info.fabric_version.v1.vpod_id =
-      std::numeric_limits<decltype(local_fabric_info.fabric_info.fabric_version.v1.vpod_id)>::max();
+  local_fabric_info.fabric_info.v1.vpod_id =
+      std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.vpod_id)>::max();
 
-  local_fabric_info.fabric_info.fabric_version.v1.vpod_size = std::numeric_limits<
-      decltype(local_fabric_info.fabric_info.fabric_version.v1.vpod_size)>::max();
+  local_fabric_info.fabric_info.v1.vpod_size =
+      std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.vpod_size)>::max();
 
-  local_fabric_info.fabric_info.fabric_version.v1.addr_mode =
-      static_cast<amdsmi_fabric_npa_address_mode_t>(
-          std::numeric_limits<
-              decltype(local_fabric_info.fabric_info.fabric_version.v1.addr_mode)>::max());
+  local_fabric_info.fabric_info.v1.addr_mode = static_cast<amdsmi_fabric_npa_address_mode_t>(
+      std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.addr_mode)>::max());
 
-  local_fabric_info.fabric_info.fabric_version.v1.accel_state =
+  local_fabric_info.fabric_info.v1.accel_state =
       static_cast<amdsmi_fabric_accelerator_vpod_state_t>(
-          std::numeric_limits<
-              decltype(local_fabric_info.fabric_info.fabric_version.v1.accel_state)>::max());
+          std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.accel_state)>::max());
 
   std::fill(std::begin(local_active_accelerators), std::end(local_active_accelerators),
             std::numeric_limits<gpu_device::details::AcceleratorArrayType_t>::max());
@@ -1139,13 +1182,13 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
                                                         local_active_accelerators);
       std::copy(local_active_accelerators.data(),
                 (local_active_accelerators.data() + local_active_accelerators.size()),
-                local_fabric_info.fabric_info.fabric_version.v1.vpod_active_accelerators);
+                local_fabric_info.fabric_info.v1.vpod_active_accelerators);
       continue;
     }
     if (link_info_type_key == UALoeLinkInfo_t::LOCAL_ACCELS) {
       gpu_device::details::get_local_accelerators(ualoe_file_lines, local_accelerators);
       std::copy(local_accelerators.data(), (local_accelerators.data() + local_accelerators.size()),
-                local_fabric_info.fabric_info.fabric_version.v1.local_accelerators);
+                local_fabric_info.fabric_info.v1.local_accelerators);
       continue;
     }
 
@@ -1170,7 +1213,7 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
         case UALoeLinkInfo_t::PPOD_ID:
           gpu_device::details::get_ppod_id(link_value, local_ppod_id);
           std::copy(local_ppod_id.data(), (local_ppod_id.data() + local_ppod_id.size()),
-                    local_fabric_info.fabric_info.fabric_version.v1.ppod_id);
+                    local_fabric_info.fabric_info.v1.ppod_id);
           break;
 
         case UALoeLinkInfo_t::PPOD_SIZE:

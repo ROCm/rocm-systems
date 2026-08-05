@@ -1,0 +1,24 @@
+[package]
+name = "mirage_core"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+nix = { workspace = true }
+libc = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+inventory = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

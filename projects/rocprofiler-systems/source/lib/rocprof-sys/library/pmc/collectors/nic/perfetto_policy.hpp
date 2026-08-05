@@ -9,7 +9,6 @@
 #include "logger/debug.hpp"
 
 #include <cstdint>
-#include <timemory/units.hpp>
 
 #include <map>
 #include <memory>

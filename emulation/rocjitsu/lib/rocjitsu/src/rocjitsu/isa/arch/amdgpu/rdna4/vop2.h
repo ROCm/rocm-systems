@@ -21,6 +21,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+  Operand vcc;
 };
 
 class VAddF64Vop2 : public Vop2 {
@@ -271,8 +272,10 @@ public:
   VAddCoCiU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand vcc_in;
 };
 
 class VSubCoCiU32Vop2 : public Vop2 {
@@ -280,8 +283,10 @@ public:
   VSubCoCiU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand vcc_in;
 };
 
 class VSubrevCoCiU32Vop2 : public Vop2 {
@@ -289,8 +294,10 @@ public:
   VSubrevCoCiU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand vcc;
   Operand src0;
   Operand vsrc1;
+  Operand vcc_in;
 };
 
 class VAddNcU32Vop2 : public Vop2 {
@@ -335,8 +342,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand simm32;
   Operand vsrc1;
-  uint32_t simm32_;
 };
 
 class VFmaakF32Vop2 : public Vop2 {
@@ -346,7 +353,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-  uint32_t simm32_;
+  Operand simm32;
 };
 
 class VCvtPkRtzF16F32Vop2 : public Vop2 {
@@ -362,6 +369,7 @@ class VMinNumF16Vop2 : public Vop2 {
 public:
   VMinNumF16Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;
@@ -371,6 +379,7 @@ class VMaxNumF16Vop2 : public Vop2 {
 public:
   VMaxNumF16Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;
@@ -380,6 +389,7 @@ class VAddF16Vop2 : public Vop2 {
 public:
   VAddF16Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;
@@ -389,6 +399,7 @@ class VSubF16Vop2 : public Vop2 {
 public:
   VSubF16Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;
@@ -398,6 +409,7 @@ class VSubrevF16Vop2 : public Vop2 {
 public:
   VSubrevF16Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;
@@ -407,6 +419,7 @@ class VMulF16Vop2 : public Vop2 {
 public:
   VMulF16Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;
@@ -416,6 +429,7 @@ class VFmacF16Vop2 : public Vop2 {
 public:
   VFmacF16Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;
@@ -425,26 +439,29 @@ class VFmamkF16Vop2 : public Vop2 {
 public:
   VFmamkF16Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
+  Operand simm32;
   Operand vsrc1;
-  uint32_t simm32_;
 };
 
 class VFmaakF16Vop2 : public Vop2 {
 public:
   VFmaakF16Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;
-  uint32_t simm32_;
+  Operand simm32;
 };
 
 class VLdexpF16Vop2 : public Vop2 {
 public:
   VLdexpF16Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand vsrc1;

@@ -105,7 +105,6 @@ detect_launcher() {
 function run_mpirun {
     local np=$1
     local gtest_filter=$2
-
     local launcher family
     launcher=$(detect_launcher)
     family=$(launcher_family "$launcher")
@@ -113,7 +112,7 @@ function run_mpirun {
     # Env preamble: POSIX `env VAR=val` captures values at call time,
     # no side effects on the parent shell between test runs.
     local -a _env
-    _env=( env "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384" )
+    _env=( env "ROCSHMEM_DEBUG_LEVEL=WARN" "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384" )
     [[ -n "$ROCSHMEM_TEST_UUID" ]] && _env+=( "ROCSHMEM_TEST_UUID=$ROCSHMEM_TEST_UUID" )
 
     local -a cmd

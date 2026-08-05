@@ -1,0 +1,4 @@
+jobs:
+- pmc:
+  - CPC_ME1_DC0_SPI_BUSY
+  - CPC_UTCL1_STALL_ON_TRANSLATION

@@ -22,6 +22,7 @@
 #include "OCLDeviceQueries.h"
 #include "OCLDynamic.h"
 #include "OCLDynamicBLines.h"
+#include "OCLEmptyDeviceEnqueue.h"
 #include "OCLGenericAddressSpace.h"
 #include "OCLGetQueueThreadID.h"
 #include "OCLGlobalOffset.h"
@@ -93,6 +94,7 @@ TestEntry TestList[] = {
     TEST(OCLPlatformAtomics),
     TEST(OCLDeviceAtomic),
     TEST(OCLDynamicBLines),
+    TEST(OCLEmptyDeviceEnqueue),
     TEST(OCLUnalignedCopy),
     TEST(OCLBlitKernel),
     TEST(OCLRTQueue),

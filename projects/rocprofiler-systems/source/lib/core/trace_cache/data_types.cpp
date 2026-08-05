@@ -48,7 +48,7 @@ constexpr auto sequential_pred = [](const format_t& f) { return !f.process_paral
 
 enabled_formats_t::enabled_formats_t()
 : formats{ { format_kind::rocpd, true, get_use_rocpd(), "rocpd" },
-           { format_kind::perfetto, false, get_caching_perfetto(), "perfetto" },
+           { format_kind::perfetto, true, get_caching_perfetto(), "perfetto" },
            { format_kind::unified_memory, false, get_use_unified_memory_profiling(),
              "unified_memory" } }
 {}

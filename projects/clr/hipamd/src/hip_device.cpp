@@ -135,6 +135,8 @@ void Device::AddSafeStream(Stream* event_stream, Stream* wait_stream) {
 
 // ================================================================================================
 void Device::Reset() {
+  // Free any deferred IPC-event signals before tearing the device down.
+  DrainDeferredIpcSignals();
   {
     std::scoped_lock lock(lock_);
     auto pools_to_delete = std::exchange(mem_pools_, {});
@@ -283,6 +285,57 @@ void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
   }
   // Release freed memory for all memory pools on the device
   ReleaseFreedMemory();
+  // All of this device's work has been waited on, so the deferred IPC signals' barriers are
+  // complete; freeing them here won't block.
+  DrainDeferredIpcSignals();
+}
+
+// ================================================================================================
+void Device::CleanupDeferredIpcSignal(const DeferredIpcSignal& item) {
+  if (item.signal != nullptr) {
+    // Only armed signals (event != null) have an in-flight barrier to wait on; waiting on a
+    // never-recorded signal (still at its initial value) would hang forever.
+    if (item.event != nullptr) {
+      item.signal->Wait(1, amd::device::Signal::Condition::Lt, UINT64_MAX);
+    }
+    delete item.signal;
+  }
+  if (item.event != nullptr) {
+    item.event->release();
+  }
+}
+
+// ================================================================================================
+void Device::EnqueueDeferredIpcSignal(amd::device::Signal* signal, amd::Event* event) {
+  std::vector<DeferredIpcSignal> overflow;
+  {
+    std::scoped_lock lock(deferredIpcLock_);
+    // The queue is bounded by kDeferredIpcDrainThreshold; reserve up front (the buffer is
+    // moved out on each drain/overflow swap, so reserve again whenever it is empty) to avoid
+    // repeated reallocations as events are destroyed between drains.
+    if (deferredIpcSignals_.empty()) {
+      deferredIpcSignals_.reserve(kDeferredIpcDrainThreshold);
+    }
+    deferredIpcSignals_.push_back({signal, event});
+    if (deferredIpcSignals_.size() >= kDeferredIpcDrainThreshold) {
+      overflow.swap(deferredIpcSignals_);  // bounded: drain inline on overflow
+    }
+  }
+  for (const auto& item : overflow) {
+    CleanupDeferredIpcSignal(item);
+  }
+}
+
+// ================================================================================================
+void Device::DrainDeferredIpcSignals() {
+  std::vector<DeferredIpcSignal> pending;
+  {
+    std::scoped_lock lock(deferredIpcLock_);
+    pending.swap(deferredIpcSignals_);
+  }
+  for (const auto& item : pending) {
+    CleanupDeferredIpcSignal(item);
+  }
 }
 
 // ================================================================================================
@@ -346,6 +399,10 @@ const ResourceMeta* Device::lookupResource(uint32_t resId) {
 }
 
 Device::~Device() {
+  // Free any IPC signals still queued for deferred cleanup (e.g. events destroyed without a
+  // subsequent device sync) so they don't leak when the device goes away.
+  DrainDeferredIpcSignals();
+
   if ((IS_LINUX || !DEBUG_HIP_MEM_POOL_VMHEAP) && (default_mem_pool_ != nullptr)) {
     default_mem_pool_->release();
   }
@@ -523,8 +580,10 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   ::strncpy(deviceProps.name, info.boardName_, sizeof(info.boardName_));
   memcpy(deviceProps.uuid.bytes, info.uuid_, sizeof(info.uuid_));
   deviceProps.totalGlobalMem = info.globalMemSize_;
+  const size_t ldsPerMultiprocessor = static_cast<size_t>(info.localMemSizePerCU_) *
+      (deviceHandle->settings().enableWgpMode_ ? 2 : 1);
   deviceProps.sharedMemPerBlock = info.localMemSizePerCU_;
-  deviceProps.sharedMemPerMultiprocessor = info.localMemSizePerCU_;
+  deviceProps.sharedMemPerMultiprocessor = ldsPerMultiprocessor;
   deviceProps.regsPerBlock = info.availableRegistersPerCU_;
   deviceProps.warpSize = info.wavefrontWidth_;
   deviceProps.maxThreadsPerBlock = info.maxWorkGroupSize_;
@@ -568,7 +627,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.pciDomainID = info.pciDomainID;
   deviceProps.pciBusID = info.deviceTopology_.pcie.bus;
   deviceProps.pciDeviceID = info.deviceTopology_.pcie.device;
-  deviceProps.maxSharedMemoryPerMultiProcessor = info.localMemSizePerCU_;
+  deviceProps.maxSharedMemoryPerMultiProcessor = ldsPerMultiprocessor;
   deviceProps.canMapHostMemory = 1;
   deviceProps.regsPerMultiprocessor = info.availableRegistersPerCU_;
   snprintf(deviceProps.gcnArchName, sizeof(deviceProps.gcnArchName), "%s", isa.targetId());
@@ -677,7 +736,9 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   // access policy
   deviceProps.accessPolicyMaxWindowSize = 0;
   // cluster launch
-  deviceProps.clusterLaunch = info.clusterMaxSize_ > 0;
+  // A cluster of size 1 is a regular single-block launch (legal on all GPUs); clusterLaunch
+  // advertises multi-block cluster support, which only devices reporting a max size > 1 have.
+  deviceProps.clusterLaunch = info.clusterMaxSize_ > 1;
   // Mapping HIP array
   deviceProps.deferredMappingHipArraySupported = 0;
   // RDMA options
@@ -726,6 +787,8 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   const auto& isa = deviceHandle->isa();
   ::strncpy(deviceProps.name, info.boardName_, sizeof(deviceProps.name));
   deviceProps.totalGlobalMem = info.globalMemSize_;
+  const size_t ldsPerMultiprocessor = static_cast<size_t>(info.localMemSizePerCU_) *
+      (deviceHandle->settings().enableWgpMode_ ? 2 : 1);
   deviceProps.sharedMemPerBlock = info.localMemSizePerCU_;
   deviceProps.regsPerBlock = info.availableRegistersPerCU_;
   deviceProps.warpSize = info.wavefrontWidth_;
@@ -768,7 +831,7 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   deviceProps.pciDomainID = info.pciDomainID;
   deviceProps.pciBusID = info.deviceTopology_.pcie.bus;
   deviceProps.pciDeviceID = info.deviceTopology_.pcie.device;
-  deviceProps.maxSharedMemoryPerMultiProcessor = info.localMemSizePerCU_;
+  deviceProps.maxSharedMemoryPerMultiProcessor = ldsPerMultiprocessor;
   deviceProps.canMapHostMemory = 1;
   // FIXME: This should be removed, targets can have character names as well.
   deviceProps.gcnArch = isa.versionMajor() * 100 + isa.versionMinor() * 10 + isa.versionStepping();

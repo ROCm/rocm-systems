@@ -250,12 +250,12 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_MultiDev) {
  * Local function useful to create stream and memory copy and launch kernel
  */
 void MultiThreadMultiDevFunc(int DevId) {
-  HIP_CHECK(hipSetDevice(DevId));
+  HIP_CHECK_THREAD(hipSetDevice(DevId));
 
   int* h_a = reinterpret_cast<int*>(malloc(SIZE_BYTES));
-  REQUIRE(h_a != nullptr);
+  REQUIRE_THREAD(h_a != nullptr);
   int* output_ref = reinterpret_cast<int*>(malloc(SIZE_BYTES));
-  REQUIRE(output_ref != nullptr);
+  REQUIRE_THREAD(output_ref != nullptr);
 
   for (int i = 0; i < ARR_SIZE; i++) {
     h_a[i] = 2;
@@ -263,37 +263,40 @@ void MultiThreadMultiDevFunc(int DevId) {
   }
 
   hipStream_t stream;
-  HIP_CHECK(hipSetDevice(DevId));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK_THREAD(hipSetDevice(DevId));
+  HIP_CHECK_THREAD(hipStreamCreate(&stream));
 
   int* d_a = nullptr;
-  HIP_CHECK(hipMalloc(&d_a, SIZE_BYTES));
-  REQUIRE(d_a != nullptr);
-  HIP_CHECK(hipMemcpyAsync(d_a, h_a, SIZE_BYTES, hipMemcpyHostToDevice, stream));
+  HIP_CHECK_THREAD(hipMalloc(&d_a, SIZE_BYTES));
+  REQUIRE_THREAD(d_a != nullptr);
+  HIP_CHECK_THREAD(hipMemcpyAsync(d_a, h_a, SIZE_BYTES, hipMemcpyHostToDevice, stream));
 
   dim3 blocksPerGrid(1, 1, 1);
   dim3 threadsPerBlock(1, 1, 64);
 
   hipFunction_t funcPointer;
-  REQUIRE(hipGetFuncBySymbol(&funcPointer, reinterpret_cast<const void*>(hipKernel)) == hipSuccess);
+  REQUIRE_THREAD(hipGetFuncBySymbol(&funcPointer, reinterpret_cast<const void*>(hipKernel)) ==
+                 hipSuccess);
 
   void* kernelParam[] = {d_a};
   auto size = sizeof(kernelParam);
   void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
                               HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
 
-  REQUIRE(hipModuleLaunchKernel(funcPointer, blocksPerGrid.x, blocksPerGrid.y, blocksPerGrid.z,
-                                threadsPerBlock.x, threadsPerBlock.y, threadsPerBlock.z, 0, stream,
-                                nullptr, kernel_parameter) == hipSuccess);
+  REQUIRE_THREAD(hipModuleLaunchKernel(funcPointer, blocksPerGrid.x, blocksPerGrid.y,
+                                       blocksPerGrid.z, threadsPerBlock.x, threadsPerBlock.y,
+                                       threadsPerBlock.z, 0, stream, nullptr,
+                                       kernel_parameter) == hipSuccess);
 
-  HIP_CHECK(hipMemcpyAsync(h_a, d_a, SIZE_BYTES, hipMemcpyDeviceToHost, stream));
+  HIP_CHECK_THREAD(hipMemcpyAsync(h_a, d_a, SIZE_BYTES, hipMemcpyDeviceToHost, stream));
+  HIP_CHECK_THREAD(hipStreamSynchronize(stream));
 
-  REQUIRE(verifyResult(h_a, output_ref, ARR_SIZE) == true);
+  REQUIRE_THREAD(verifyResult(h_a, output_ref, ARR_SIZE) == true);
 
   free(h_a);
   free(output_ref);
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(d_a));
+  HIP_CHECK_THREAD(hipStreamDestroy(stream));
+  HIP_CHECK_THREAD(hipFree(d_a));
 }
 
 /**
@@ -325,4 +328,5 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_MultiDevMultiThread) {
   for (int dev = 0; (dev < deviceCount) && (dev < threads.size()); dev++) {
     threads[dev].join();
   }
+  HIP_CHECK_THREAD_FINALIZE();
 }

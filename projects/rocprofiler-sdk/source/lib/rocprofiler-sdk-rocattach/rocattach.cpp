@@ -201,6 +201,7 @@ build_environment_buffer()
     return environment_buffer;
 }
 
+// Returns the TID of the 'rocp-bg-attach' thread if found, or -1 if not found
 pid_t
 resolve_attach_tid(pid_t pid)
 {
@@ -222,18 +223,121 @@ resolve_attach_tid(pid_t pid)
         }
     }
 
-    ROCP_WARNING << "[rocprofiler-sdk-rocattach] Could not find 'rocp-bg-attach' thread in "
-                 << task_dir << ", falling back to pid " << pid;
-    return pid;
+    if(ec)
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Failed to scan " << task_dir
+                   << " for 'rocp-bg-attach' thread: " << ec.message();
+    }
+    else
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Could not find 'rocp-bg-attach' thread in "
+                   << task_dir;
+    }
+
+    return -1;
+}
+
+rocattach_status_t
+validate_target_absolute_tool_path(pid_t pid, const std::filesystem::path& tool_path)
+{
+    auto target_path =
+        std::filesystem::path{fmt::format("/proc/{}/root", pid)} / tool_path.relative_path();
+    std::error_code ec;
+    if(!std::filesystem::exists(target_path, ec))
+    {
+        if(ec)
+        {
+            // If host-side validation is blocked by procfs permissions or namespace
+            // restrictions, keep attachment best-effort and let target-side dlopen
+            // report the final load failure.
+            ROCP_WARNING << "[rocprofiler-sdk-rocattach] Could not validate tool library path '"
+                         << tool_path.string() << "' at " << target_path.string()
+                         << " from the target process mount namespace: " << ec.message();
+            return ROCATTACH_STATUS_SUCCESS;
+        }
+
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Tool library path '" << tool_path.string()
+                   << "' is absolute but is not visible at " << target_path.string()
+                   << " from the target process mount namespace. Attachment requires "
+                      "ROCPROF_ATTACH_TOOL_LIBRARY to name a library path that target-side "
+                      "dlopen can resolve.";
+        return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    if(!std::filesystem::is_regular_file(target_path, ec))
+    {
+        if(ec)
+        {
+            // If host-side validation is blocked by procfs permissions or namespace
+            // restrictions, keep attachment best-effort and let target-side dlopen
+            // report the final load failure.
+            ROCP_WARNING << "[rocprofiler-sdk-rocattach] Could not validate tool library path '"
+                         << tool_path.string() << "' at " << target_path.string()
+                         << " from the target process mount namespace: " << ec.message();
+            return ROCATTACH_STATUS_SUCCESS;
+        }
+
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Tool library path '" << tool_path.string()
+                   << "' is absolute but does not refer to a regular file at "
+                   << target_path.string() << " from the target process mount namespace.";
+        return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    return ROCATTACH_STATUS_SUCCESS;
 }
 
 rocattach_status_t
 setup(int pid)
 {
-    // Setup attachement for rocprofiler
+    // Setup attachment for rocprofiler
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attachment library rocattach_attach function called "
                   "for pid "
                << pid;
+
+    auto status = ROCATTACH_STATUS_SUCCESS;
+
+    // Build the tool library path before ptrace setup so invalid absolute paths
+    // fail before modifying target process state. Do not honor the user-controllable
+    // ROCPROF_ATTACH_TOOL_LIBRARY override in a secure-execution context (setuid/setgid,
+    // file capabilities, etc.), so an unprivileged user cannot cause a privileged attach
+    // helper to inject an arbitrary library.
+    constexpr auto default_tool_lib_path = std::string_view{"librocprofiler-sdk-tool.so"};
+    auto           tool_lib_path_env     = std::string{default_tool_lib_path};
+    auto           tool_lib_path_override =
+        rocprofiler::common::get_env_optional("ROCPROF_ATTACH_TOOL_LIBRARY");
+    if(rocprofiler::common::is_at_secure())
+    {
+        if(tool_lib_path_override)
+        {
+            ROCP_WARNING << "[rocprofiler-sdk-rocattach] Ignoring ROCPROF_ATTACH_TOOL_LIBRARY "
+                            "override in secure-execution context; using generic tool library "
+                         << default_tool_lib_path;
+        }
+    }
+    else if(tool_lib_path_override)
+    {
+        tool_lib_path_env = *tool_lib_path_override;
+    }
+    const char* tool_lib_path = tool_lib_path_env.c_str();
+    ROCP_TRACE << "[rocprofiler-sdk-rocattach] Tool library path: " << tool_lib_path;
+
+    auto tool_path = std::filesystem::path{tool_lib_path_env};
+    if(tool_path.empty())
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Tool library path must not be empty.";
+        return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    // Bare or relative library names must be resolved by dlopen in the target
+    // process using the target's loader search path and working directory.
+    if(tool_path.is_absolute())
+    {
+        status = validate_target_absolute_tool_path(pid, tool_path);
+        if(status != ROCATTACH_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
 
     auto*      sessions = CHECK_NOTNULL(get_sessions());
     session_t* session;
@@ -248,12 +352,22 @@ setup(int pid)
         }
 
         auto target_tid = resolve_attach_tid(pid);
+
+        if(target_tid < 0)
+        {
+            ROCP_ERROR << "[rocprofiler-sdk-rocattach] Cannot attach to process " << pid
+                       << ": 'rocp-bg-attach' thread not found. The target process does not "
+                          "appear to have attach support enabled. Start the target with "
+                          "ROCP_TOOL_ATTACH=1, or use a rocprofiler-register build configured "
+                          "with ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON.";
+            return ROCATTACH_STATUS_ERROR;
+        }
+
         ROCP_INFO << "[rocprofiler-sdk-rocattach] Attaching to PID " << pid
                   << " via background thread TID " << target_tid;
         sessions->emplace(pid, target_tid);
         session = &(sessions->at(pid).session);
     }
-    auto status = ROCATTACH_STATUS_SUCCESS;
 
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attempting attachment to pid " << pid;
     status = session->attach();
@@ -275,12 +389,7 @@ setup(int pid)
         return status;
     }
 
-    // Build and write tool library path to target process
-    auto tool_lib_path_env =
-        rocprofiler::common::get_env("ROCPROF_ATTACH_TOOL_LIBRARY", "librocprofiler-sdk-tool.so");
-    const char* tool_lib_path = tool_lib_path_env.c_str();
-    ROCP_TRACE << "[rocprofiler-sdk-rocattach] Tool library path: " << tool_lib_path;
-
+    // Build and write tool library path to target process.
     size_t               tool_lib_path_len = strlen(tool_lib_path) + 1;
     std::vector<uint8_t> tool_lib_buffer(tool_lib_path, tool_lib_path + tool_lib_path_len);
 
@@ -377,7 +486,7 @@ collect_process_tree(pid_t root_pid)
 rocattach_status_t
 teardown(int pid)
 {
-    // Setup attachement for rocprofiler
+    // Setup attachment for rocprofiler
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attachment library rocattach_detach function called "
                   "for pid "
                << pid;

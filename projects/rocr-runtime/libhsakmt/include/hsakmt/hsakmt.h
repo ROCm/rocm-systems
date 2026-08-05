@@ -437,6 +437,21 @@ hsaKmtGetQueueInfo(
     HsaQueueInfo *QueueInfo	//IN
 );
 
+/**
+ * Get the kernel-assigned internal queue ID from a queue handle.
+ *
+ * @param[in] QueueId Queue handle returned from hsaKmtCreateQueue
+ * @param[out] KernelInternalQueueId Pointer to receive the kernel's internal queue ID
+ *
+ * @returns HSAKMT_STATUS_SUCCESS on success
+ */
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetKernelQueueId(
+    HSA_QUEUEID QueueId,              //IN
+    HSAuint32 *KernelInternalQueueId  //OUT
+);
+
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtQueueRingDoorbell(
@@ -445,15 +460,15 @@ hsaKmtQueueRingDoorbell(
 );
 
 /**
-  Allows an HSA process to set/change the default and alternate memory coherency, before starting to dispatch. 
+  Allows an HSA process to set/change the default and alternate memory coherency, before starting to dispatch.
 */
 
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtSetMemoryPolicy(
     HSAuint32       Node,                       //IN
-    HSAuint32       DefaultPolicy,     	   	    //IN  
-    HSAuint32       AlternatePolicy,       	    //IN  
+    HSAuint32       DefaultPolicy,     	   	    //IN
+    HSAuint32       AlternatePolicy,       	    //IN
     void*           MemoryAddressAlternate,     //IN (page-aligned)
     HSAuint64       MemorySizeInBytes   	    //IN (page-aligned)
     );
@@ -601,6 +616,37 @@ hsaKmtDestroyExternalSemaphore(
     );
 
 /**
+  Enqueues a GPU-side signal of an imported external semaphore on
+  QueueId, ordered behind prior submissions. Handle must come from
+  hsaKmtImportExternalSemaphore on the same node as QueueId's device;
+  cross-adapter use returns HSAKMT_STATUS_INVALID_NODE_UNIT.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueueSignalExternalSemaphore(
+    HSA_QUEUEID                   QueueId,   //IN
+    HSA_EXTERNAL_SEMAPHORE_HANDLE Handle,    //IN
+    HSAuint64                     Value      //IN
+    );
+
+/**
+  Posts a GPU-side wait on an imported external semaphore. The wait
+  blocks any subsequent submissions on QueueId until the syncobj
+  reaches Value. The semaphore must have been imported via
+  hsaKmtImportExternalSemaphore on the same node as QueueId's device;
+  cross-adapter use returns HSAKMT_STATUS_INVALID_NODE_UNIT.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueueWaitExternalSemaphore(
+    HSA_QUEUEID                   QueueId,   //IN
+    HSA_EXTERNAL_SEMAPHORE_HANDLE Handle,    //IN
+    HSAuint64                     Value      //IN
+    );
+
+/**
  * Export a dmabuf handle and offset for a given memory address
  *
  * Validates that @MemoryAddress belongs to a valid allocation and that the
@@ -609,6 +655,8 @@ hsaKmtDestroyExternalSemaphore(
  * allocation. The memory will remain allocated even after the allocation is
  * freed by hsaKmtFreeMemory for as long as a dmabuf fd remains open or any
  * importer of that fd maintains an active reference to the memory.
+ * This is the legacy API that exports dmabuf from KFD interface. To export
+ * dmabuf from DRM interface, use hsaKmtHandleExport instead
  */
 
 HSAKMT_STATUS
@@ -723,7 +771,7 @@ HSAKMTAPI
 hsaKmtMapMemoryToGPU(
     void*           MemoryAddress,     //IN (page-aligned)
     HSAuint64       MemorySizeInBytes, //IN (page-aligned)
-    HSAuint64*      AlternateVAGPU     //OUT (page-aligned)     
+    HSAuint64*      AlternateVAGPU     //OUT (page-aligned)
     );
 
 /**
@@ -736,7 +784,7 @@ hsaKmtMapMemoryToGPUNodes(
     void*           MemoryAddress,         //IN (page-aligned)
     HSAuint64       MemorySizeInBytes,     //IN (page-aligned)
     HSAuint64*      AlternateVAGPU,        //OUT (page-aligned)
-    HsaMemMapFlags  MemMapFlags,           //IN
+    HsaMemFlags     MemFlags,              //IN
     HSAuint64       NumberOfNodes,         //IN
     HSAuint32*      NodeArray              //IN
     );
@@ -816,8 +864,8 @@ hsaKmtDbgRegister(
   Detaches the debugger process from the HW debug established by hsaKmtDbgRegister() API
 */
 
-HSAKMT_STATUS 
-HSAKMTAPI 
+HSAKMT_STATUS
+HSAKMTAPI
 hsaKmtDbgUnregister(
     HSAuint32       NodeId      //IN
     );
@@ -869,6 +917,19 @@ hsaKmtGetRuntimeCapabilities(
     HSAuint32	*caps_mask // OUT
     );
 
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetCoreRuntimeInfo(
+    struct kfd_runtime_info *runtime_info // OUT
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetCoreDeviceInfo(
+    HSAuint32 gpu_id, // IN
+    struct kfd_dbg_device_info_entry *device_info // OUT
+    );
+
 /**
   Enable debug trap.
 */
@@ -909,7 +970,7 @@ hsaKmtDbgGetQueueData(
     bool suspend_queues //In
     );
 
-/**   
+/**
   Check whether gpu firmware and kernel support debugging
 */
 HSAKMT_STATUS
@@ -1007,7 +1068,7 @@ HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtPmcStartTrace(
     HSATraceId  TraceId,                //IN
-    void*       TraceBuffer,            //IN (page aligned) 
+    void*       TraceBuffer,            //IN (page aligned)
     HSAuint64   TraceBufferSizeBytes    //IN (page aligned)
     );
 
@@ -1035,8 +1096,8 @@ hsaKmtPmcStopTrace(
   Sets trap handler and trap buffer to be used for all queues associated with the specified NodeId within this process context
 */
 
-HSAKMT_STATUS 
-HSAKMTAPI 
+HSAKMT_STATUS
+HSAKMTAPI
 hsaKmtSetTrapHandler(
     HSAuint32           NodeId,                   //IN
     void*               TrapHandlerBaseAddress,   //IN
@@ -1342,14 +1403,33 @@ hsaKmtModelEnabled(
 
 
 /**
+ * Forwards the SIGBUS delay
+ */
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtSetSigbusDelay(
+    HSAuint32 NodeId,    //IN
+    HSAuint32 DelayMs    //IN
+);
+
+
+/**
  *  Experimental APIs to abstract DRM calls to thunk
 */
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtHandleImport(
-    const HsaExternalHandleDesc* ImportDesc,
+    const HsaHandleImportDesc* ImportDesc,
     HsaHandleImportResult* ImportResult,
     HsaHandleImportFlags* Flags
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtHandleExport(
+    const HsaHandleExportDesc* ExportDesc,
+    HsaMemoryExportResult* ExportResult,
+    HsaHandleExportFlags* Flags
 );
 
 HSAKMT_STATUS
@@ -1359,7 +1439,8 @@ hsaKmtMemoryVaMap(
     HSAuint64 offset,
     HSAuint64 size,
     HSAuint64 addr,
-    HsaMemoryMapFlags flags
+    HsaMemoryMapFlags flags,
+    HSAuint32 NodeId
 );
 
 HSAKMT_STATUS
@@ -1368,7 +1449,8 @@ hsaKmtMemoryVaUnmap(
     HsaMemoryObjectHandle Handle,
     HSAuint64 offset,
     HSAuint64 size,
-    HSAuint64 addr
+    HSAuint64 addr,
+    HSAuint32 NodeId
 );
 
 HSAKMT_STATUS
@@ -1384,13 +1466,30 @@ hsaKmtMemHandleFree(
     HsaMemoryObjectHandle Handle
 );
 
+/**
+  Free a memory object handle without clearing its metadata.
+  Used for IPC exporter handles where we need to release the extra kernel
+  reference but preserve metadata for later IPC attach operations.
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemHandleFreePreserveMetadata(
+    HsaMemoryObjectHandle Handle
+);
+
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtMemoryGetCpuAddr(
   HsaAMDGPUDeviceHandle DeviceHandle,
   HsaMemoryObjectHandle MemoryHandle,
-  HSAint32* fd, // OUT
-  HSAuint64* cpu_addr // OUT
+  HSAuint64* cpu_addr // OUT for newer ROCr; legacy ROCr passes HSAint32* fd here
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetAmdGPUDeviceFd(
+  HsaAMDGPUDeviceHandle DeviceHandle, //IN
+  int *fd //OUT
 );
 
 #ifdef __cplusplus

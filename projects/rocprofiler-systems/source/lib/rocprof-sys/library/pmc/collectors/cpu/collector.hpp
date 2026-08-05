@@ -15,7 +15,7 @@ namespace rocprofsys::pmc::collectors::cpu
  * Specializes base::collector for CPU devices via procfs.
  * All CPU-specific behavior is defined in cpu_traits.
  *
- * @tparam DeviceProvider Type providing CPU enumeration and driver access
+ * @tparam DeviceProvider Type providing CPU enumeration and backend access
  * @tparam Config Configuration policy providing settings and output policies
  */
 template <typename DeviceProvider, typename Config>

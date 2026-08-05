@@ -1,11 +1,11 @@
 .. meta::
    :description: A library that can be loaded by ROCr to print the AMDGPU wavefront states
-   :keywords: rocr, debug agent, how to, user guide, usage, manual, example, env, var, environment, option
+   :keywords: ROCR, debug agent, how to, user guide, usage, manual, example, env, var, environment, option
 
 .. _debug-agent-user-guide:
 
 ============================
-ROCr Debug Agent user guide
+ROCR Debug Agent user guide
 ============================
 
 To display the source text location with the machine code instructions around the wavefront's Program Counter (PC), compile the AMD GPU code objects with ``-ggdb``.  In addition, you can optionally use ``-O0`` to achieve a more intuitive display of the source text location, as higher optimization levels can help to reorder machine code instructions. When ``-ggdb`` isn't used, the source line information is unavailable, and only machine code instructions starting at the
@@ -15,7 +15,7 @@ wavefront's PC are printed.
 
     /opt/rocm/bin/hipcc -O0 -ggdb -o my_program my_program.cpp
 
-To use the ROCr Debug Agent, set the ``HSA_TOOLS_LIB`` environment variable to the file name or path of the library:
+To use the ROCR Debug Agent, set the ``HSA_TOOLS_LIB`` environment variable to the file name or path of the library:
 
 .. code:: shell
 
@@ -172,6 +172,15 @@ The following table lists the supported options:
       is saved in a file with the name
       ``1_file____rocm-debug-agent_rocm-debug-agent-test_offset_14309_size_31336``.
 
+  * - ``-c``, ``--load-all-code-objects``
+    - Loads all code objects as soon as they're loaded by the runtime.
+
+  * - ``-z``, ``--lazy``
+    - Delays inspecting the content of all loaded code objects until after an
+      exception is reported. Note that the application mustn't free the code
+      objects' memory while they're loaded on the device. This option isn't
+      compatible with ``-c``.
+
   * - ``-o <file-path>``, ``--output=<file-path>``
     - Saves the output produced by the ROCdebug-agent in the specified file. By
       default, the output is redirected to ``stderr``.
@@ -187,7 +196,7 @@ The following table lists the supported options:
       none, info, warning, or error. The default log level is none.
 
   * - ``-h``, ``--help``
-    - Displays the usage and aborts the process.
+    - Displays a usage message and aborts the process.
 
 Known limitations
 ------------------

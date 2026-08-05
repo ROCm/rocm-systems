@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef _NCCL_DEVICE_GIN_BARRIER__TYPES_H_
 #define _NCCL_DEVICE_GIN_BARRIER__TYPES_H_
@@ -12,19 +13,22 @@
 
 struct ncclGinBarrierHandle {
   ncclGinSignal_t signal0;
-  ncclDevResourceHandle_t bufHandle;
+  ncclDevResourceHandle_t unused;
 };
 
-#if __CUDACC__
-template<typename Coop>
+#if NCCL_CHECK_CUDACC
+template <typename Coop>
 struct ncclGinBarrierSession_internal {
   Coop coop;
   ncclGin net;
   ncclTeam team;
   ncclGinBarrierHandle handle;
   int index;
-  uint32_t epoch;
   ncclGinSignal_t signal;
+
+  template <bool EnableTimeout>
+  NCCL_DEVICE_INLINE ncclResult_t syncInternal(Coop, cuda::memory_order ord, ncclGinFenceLevel fence,
+                                               uint64_t timeoutCycles);
 };
 #endif
 
