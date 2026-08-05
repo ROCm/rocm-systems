@@ -46,23 +46,15 @@ extern int rcclTelemetryEnabled;
 /* Initialize telemetry system - reads env vars, parses config, registers atexit handler */
 void rcclTelemetryInit(void);
 
-/* Flush telemetry to JSON file - called via atexit() or can be called manually */
+/* Flush telemetry to JSON file - called via atexit() or can be called manually.
+ * HW counters report deltas vs the baseline captured at device registration, so
+ * telemetry always covers the whole process lifetime. */
 void rcclTelemetryFlush(void);
 
-/* Bracketed-snapshot API. Begin zeros runtime stats + re-baselines
- * ethtool; End collects HW counters, computes deltas, writes JSON.
- * Per-process state, mutex-serialized; output_path NULL = default. */
-__attribute__((visibility("default")))
-void rcclTelemetrySnapshotBegin(void);
-
-__attribute__((visibility("default")))
-void rcclTelemetrySnapshotEnd(const char* output_path);
-
 /*
- * Lightweight per-device software-counter snapshot for per-collective bracketing.
+ * Lightweight per-device software-counter snapshot.
  *
- * Unlike the SnapshotBegin/End pair (which forks ethtool and writes JSON), this
- * only reads the atomic SW counters already maintained on the hot path. No file
+ * Reads only the atomic SW counters already maintained on the hot path. No file
  * I/O, no subprocess, no global reset — cheap enough to call around every
  * collective. A profiler plugin captures one at collective-start and one at
  * collective-stop, then subtracts to get per-collective deltas.
@@ -167,8 +159,8 @@ typedef struct {
   int64_t snap_init_tx_packets;
   int64_t snap_init_rx_packets;
 
-  /* Baselines for hw_counters[]/pfc_*[] — captured at SnapshotInit, subtracted
-   * from the current values at flush/SnapshotEnd so JSON reports deltas. */
+  /* Baselines for hw_counters[]/pfc_*[] — captured at device registration,
+   * subtracted from the current values at flush so JSON reports deltas. */
   int64_t snap_init_hw_counters[RCCL_TELEMETRY_MAX_HWC];
   int64_t snap_init_pfc_rx_frames[8];
   int64_t snap_init_pfc_tx_frames[8];

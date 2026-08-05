@@ -54,12 +54,6 @@ rcclTestsGetAlgoName_t rcclTestsGetAlgoName= NULL;
 rcclTestsGetSymkInfo_t rcclTestsGetSymkInfo = NULL;
 rcclTestsGetCollImplInfo_t rcclTestsGetCollImplInfo = NULL;
 
-/* RCCL telemetry bracketed-snapshot API (optional, resolved via dlsym). */
-typedef void (*rcclTelemetrySnapshotBegin_t)(void);
-typedef void (*rcclTelemetrySnapshotEnd_t)(const char* output_path);
-static rcclTelemetrySnapshotBegin_t rcclTelemetrySnapshotBeginFn = NULL;
-static rcclTelemetrySnapshotEnd_t   rcclTelemetrySnapshotEndFn   = NULL;
-
 static void loadRcclSyms() {
   // Resolve optional RCCL symbols from the already-loaded librccl.so.1 (via DT_NEEDED).
   // Avoid dlopen("librccl.so") which can double-load in build trees with non-symlinked libs.
@@ -69,11 +63,6 @@ static void loadRcclSyms() {
   rcclTestsGetSymkInfo      = (rcclTestsGetSymkInfo_t)     dlsym(RTLD_DEFAULT, "rcclSymKGetInfo");
   // Optional (newer librccl). Left NULL on older libs -> reporting falls back.
   rcclTestsGetCollImplInfo  = (rcclTestsGetCollImplInfo_t) dlsym(RTLD_DEFAULT, "rcclGetCollImplInfo");
-  rcclTelemetrySnapshotBeginFn =
-      (rcclTelemetrySnapshotBegin_t)dlsym(RTLD_DEFAULT, "rcclTelemetrySnapshotBegin");
-  rcclTelemetrySnapshotEndFn =
-      (rcclTelemetrySnapshotEnd_t)  dlsym(RTLD_DEFAULT, "rcclTelemetrySnapshotEnd");
-  (void)dlerror();
 }
 
 // RCCL_FLOAT8 support
@@ -957,12 +946,6 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   Barrier(args);
 
-  /* Optional RCCL telemetry bracket around this (size, in_place) loop. */
-  const char* telSnapDir = getenv("RCCL_TELEMETRY_SNAPSHOT_DIR");
-  if (telSnapDir != NULL && telSnapDir[0] != '\0' && rcclTelemetrySnapshotBeginFn != NULL) {
-    rcclTelemetrySnapshotBeginFn();
-  }
-
 #if HIP_VERSION >= 50221310
   std::vector<cudaGraph_t> graphs(args->nGpus);
   std::vector<cudaGraphExec_t> graphExec(args->nGpus);
@@ -1064,20 +1047,6 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   // Exclude per-iteration result processing from the reported time.
   double deltaSec = (blocking_coll == 3 ? collOnlySec : tim.elapsed())/(iters*agg_iters);
-
-  if (telSnapDir != NULL && telSnapDir[0] != '\0' && rcclTelemetrySnapshotEndFn != NULL) {
-    char snapHost[128] = "unknown";
-    (void)gethostname(snapHost, sizeof(snapHost) - 1);
-    snapHost[sizeof(snapHost) - 1] = '\0';
-    for (char* p = snapHost; *p; ++p) if (*p == '/') *p = '_';
-
-    char snapPath[1024];
-    snprintf(snapPath, sizeof(snapPath),
-             "%s/rccl_snapshot_%s_pid%d_bytes%zu_%s.json",
-             telSnapDir, snapHost, (int)getpid(),
-             (size_t)args->nbytes, in_place ? "inplace" : "outofplace");
-    rcclTelemetrySnapshotEndFn(snapPath);
-  }
   if (cudaGraphLaunches >= 1) deltaSec = deltaSec/cudaGraphLaunches;
 
   if (record) {
