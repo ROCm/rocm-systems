@@ -6,7 +6,6 @@
 #include "common/env_vars.hpp"
 #include "core/config.hpp"
 #include "core/state.hpp"
-#include "core/timemory.hpp"
 
 #include <optional>
 #include <string>
@@ -19,11 +18,9 @@ namespace rocprofsys::rocprofiler_sdk
 // singletons. Replaced by a mock in tests.
 struct default_sdk_externals
 {
-    using Settings = tim::settings;
-    static Settings* get_settings() { return ::rocprofsys::settings::instance(); }
-    static bool      get_use_rcclp() { return ::rocprofsys::config::get_use_rcclp(); }
-    static bool      get_use_ompt() { return ::rocprofsys::config::get_use_ompt(); }
-    static bool      get_use_unified_memory_profiling()
+    static bool get_use_rcclp() { return ::rocprofsys::config::get_use_rcclp(); }
+    static bool get_use_ompt() { return ::rocprofsys::config::get_use_ompt(); }
+    static bool get_use_unified_memory_profiling()
     {
         return ::rocprofsys::config::get_use_unified_memory_profiling();
     }

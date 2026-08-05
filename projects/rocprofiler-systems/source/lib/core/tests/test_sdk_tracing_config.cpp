@@ -14,8 +14,6 @@
 #include <string>
 #include <string_view>
 #include <tuple>
-#include <type_traits>
-#include <unordered_map>
 #include <utility>
 
 namespace rocprofsys::rocprofiler_sdk::testing
@@ -42,38 +40,35 @@ using mock_backend = ::rocprofsys::mock::rocprofiler_sdk::wrapper;
 // operation option maps, tracing info tables).
 enum backend_tag : int
 {
-    version_fields                               = 1,
-    version_formatted                            = 2,
-    version_caching                              = 3,
-    ops_throw_get_operations_callback            = 60,
-    ops_throw_get_operations_buffer              = 61,
-    ops_throw_get_backtrace_callback             = 62,
-    ops_throw_get_backtrace_buffer               = 63,
-    ops_throw_message                            = 64,
-    domain_settings_test                         = 80,
-    operation_settings_test                      = 81,
-    callback_backtrace_operations                = 84,
-    buffered_backtrace_operations                = 85,
-    callback_operations                          = 86,
-    buffered_operations                          = 87,
-    buffered_domains_memory_copy                 = 88,
-    buffered_domains_aliases                     = 89,
-    buffered_domains_kfd_events                  = 91,
-    buffered_domains_kfd_individual              = 92,
-    buffered_domains_allocation                  = 93,
-    buffered_domains_unified_memory              = 94,
-    buffered_domains_generic_lookup              = 95,
-    buffered_domains_invalid                     = 96,
-    buffered_domains_page_migration              = 97,
-    callback_domains_aliases                     = 98,
-    callback_domains_generic_lookup              = 99,
-    callback_domains_implicit_flags              = 100,
-    callback_domains_invalid                     = 101,
-    callback_domains_version_gating              = 102,
-    callback_domains_rocshmem_hipfile_supported  = 103,
-    callback_domains_rocshmem_hipfile_partial    = 104,
-    callback_domains_rocshmem_hipfile_below_gate = 105,
-    buffered_domains_kfd_disabled_runtime        = 106,
+    version_fields                              = 1,
+    version_formatted                           = 2,
+    version_caching                             = 3,
+    ops_throw_get_operations_callback           = 60,
+    ops_throw_get_operations_buffer             = 61,
+    ops_throw_get_backtrace_callback            = 62,
+    ops_throw_get_backtrace_buffer              = 63,
+    ops_throw_message                           = 64,
+    domain_settings_test                        = 80,
+    operation_settings_test                     = 81,
+    callback_backtrace_operations               = 84,
+    buffered_backtrace_operations               = 85,
+    callback_operations                         = 86,
+    buffered_operations                         = 87,
+    buffered_domains_memory_copy                = 88,
+    buffered_domains_aliases                    = 89,
+    buffered_domains_kfd_events                 = 91,
+    buffered_domains_kfd_individual             = 92,
+    buffered_domains_allocation                 = 93,
+    buffered_domains_unified_memory             = 94,
+    buffered_domains_generic_lookup             = 95,
+    buffered_domains_invalid                    = 96,
+    buffered_domains_page_migration             = 97,
+    callback_domains_aliases                    = 98,
+    callback_domains_generic_lookup             = 99,
+    callback_domains_implicit_flags             = 100,
+    callback_domains_invalid                    = 101,
+    callback_domains_rocshmem_hipfile_supported = 103,
+    buffered_domains_kfd_disabled_runtime       = 106,
 };
 
 // sdk_tracing_config no longer caches get_version()/get_callback_tracing_names()/
@@ -135,27 +130,12 @@ struct tagged_backend<buffered_domains_page_migration>
     static constexpr std::uint32_t compile_time_version = 500;
 };
 
-// ROCSHMEM_API (>= 1.3.4) and HIPFILE_API (>= 1.3.5) are gated by independent
-// compile-time/runtime version checks in get_callback_domains(). Overriding
-// compile_time_version to 10305 makes both `if constexpr` blocks compile in,
-// so the tests below can exercise the runtime formatted_version comparison.
+// ROCSHMEM_API (>= 1.3.4) and HIPFILE_API (>= 1.3.5) are gated by compile-time
+// `if constexpr` checks in get_callback_domains(). Overriding compile_time_version
+// to 10305 makes both blocks compile in, so the test below can exercise them.
 template <>
 struct tagged_backend<callback_domains_rocshmem_hipfile_supported>
 : cached_backend_methods<callback_domains_rocshmem_hipfile_supported, mock_backend>
-{
-    static constexpr std::uint32_t compile_time_version = 10305U;
-};
-
-template <>
-struct tagged_backend<callback_domains_rocshmem_hipfile_partial>
-: cached_backend_methods<callback_domains_rocshmem_hipfile_partial, mock_backend>
-{
-    static constexpr std::uint32_t compile_time_version = 10305U;
-};
-
-template <>
-struct tagged_backend<callback_domains_rocshmem_hipfile_below_gate>
-: cached_backend_methods<callback_domains_rocshmem_hipfile_below_gate, mock_backend>
 {
     static constexpr std::uint32_t compile_time_version = 10305U;
 };
@@ -228,92 +208,17 @@ make_callback_name_info()
     return table;
 }
 
-// ─── Settings mock (Externals::Settings) ──────────────────────────────────────
-//
-// tim::settings has no virtual methods and is dominated by member templates
-// (insert<Tp,Vp,Sp,Args...>, find<Sp>, at<Sp>) — it cannot be expressed as a
-// GMock interface (GMock requires concrete, non-template signatures). fake_settings
-// is a minimal in-memory stand-in implementing only what sdk_tracing_config actually
-// calls through Externals::Settings: insert<Tp,Tp>(...), find(key), at(key), and the
-// returned handle's get_choices()/set_choices()/get<Tp>(). Only std::string and
-// bool are ever used as Tp in production, so get<Tp>() only supports those two.
-
-class fake_setting_handle
-{
-public:
-    void set_choices(std::vector<std::string> choices) { m_choices = std::move(choices); }
-    const std::vector<std::string>& get_choices() const { return m_choices; }
-
-    template <typename Tp>
-    std::pair<bool, Tp> get() const
-    {
-        if constexpr(std::is_same_v<Tp, std::string>)
-            return { true, m_string_value };
-        else if constexpr(std::is_same_v<Tp, bool>)
-            return { true, m_bool_value };
-        else
-            static_assert(!sizeof(Tp), "fake_setting_handle::get<Tp>: unsupported Tp");
-    }
-
-    std::string              m_string_value = {};
-    bool                     m_bool_value   = false;
-    std::vector<std::string> m_choices      = {};
-};
-
-class fake_settings
-{
-public:
-    using handle_t = std::shared_ptr<fake_setting_handle>;
-    using map_t    = std::unordered_map<std::string, handle_t>;
-    using iterator = map_t::iterator;
-
-    iterator end() { return m_data.end(); }
-    iterator find(const std::string& key) { return m_data.find(key); }
-    handle_t at(const std::string& key) { return m_data.at(key); }
-
-    template <typename Tp, typename Vp, typename Sp, typename... Args>
-    std::pair<iterator, bool> insert(Sp&& env, const std::string& /*name*/,
-                                     const std::string& /*desc*/, Vp init, Args&&...)
-    {
-        auto handle = std::make_shared<fake_setting_handle>();
-        if constexpr(std::is_same_v<Tp, std::string>)
-            handle->m_string_value = init;
-        else if constexpr(std::is_same_v<Tp, bool>)
-            handle->m_bool_value = init;
-        return m_data.emplace(std::string{ std::forward<Sp>(env) }, std::move(handle));
-    }
-
-private:
-    map_t m_data{};
-};
-
-// Mirrors what config.cpp's configure_rocm_tracing_settings() does for the
-// ROCPROFSYS_ROCM_DOMAINS setting: registers it (with choices) so
-// get_callback_domains()/get_buffered_domains()'s
-// `Externals::get_settings()->at(ROCM_DOMAINS)->get_choices()` validation succeeds.
-template <typename Sut>
-void
-register_rocm_domains(const std::shared_ptr<fake_settings>& config)
-{
-    const auto domains = Sut::domain_settings();
-    config
-        ->insert<std::string, std::string>(
-            std::string{ ::rocprofsys::env_vars::ROCM_DOMAINS }, "rocm_domains", "desc",
-            domains.domain_defaults)
-        .first->second->set_choices(domains.domain_choices);
-}
-
 // ─── Externals mock ───────────────────────────────────────────────────────────
 //
 // get_callback_domains() / get_buffered_domains() read through the Externals
-// policy. Mocking it lets tests supply a private fake_settings registry and
-// control the RCCLP/OMPT/unified-memory-profiling flags without ever touching
-// rocprofsys::settings::instance().
+// policy. Mocking it lets tests control the RCCLP/OMPT/unified-memory-profiling
+// flags without ever touching rocprofsys::settings::instance(). ROCm domain
+// validity is checked via sut::domain_settings() directly (no longer through
+// Externals), so no settings registry needs to be mocked here.
 
 class gmock_sdk_externals
 {
 public:
-    MOCK_METHOD(fake_settings*, get_settings, ());
     MOCK_METHOD(bool, get_use_rcclp, ());
     MOCK_METHOD(bool, get_use_ompt, ());
     MOCK_METHOD(bool, get_use_unified_memory_profiling, ());
@@ -326,12 +231,9 @@ inline std::unique_ptr<gtest::StrictMock<gmock_sdk_externals>> g_mock_externals;
 
 struct mock_sdk_externals
 {
-    using Settings = fake_settings;
-
-    static auto* get_settings() { return g_mock_externals->get_settings(); }
-    static bool  get_use_rcclp() { return g_mock_externals->get_use_rcclp(); }
-    static bool  get_use_ompt() { return g_mock_externals->get_use_ompt(); }
-    static bool  get_use_unified_memory_profiling()
+    static bool get_use_rcclp() { return g_mock_externals->get_use_rcclp(); }
+    static bool get_use_ompt() { return g_mock_externals->get_use_ompt(); }
+    static bool get_use_unified_memory_profiling()
     {
         return g_mock_externals->get_use_unified_memory_profiling();
     }
@@ -605,23 +507,25 @@ TEST_F(sdk_tracing_config_test, operation_settings_registers_marker_api_domain_a
     const auto specs = sut::operation_settings();
 
     auto itr = std::ranges::find_if(specs, [](const auto& spec) {
-        return spec.all_operations_env == "ROCPROFSYS_ROCM_MARKER_API_OPERATIONS";
+        return spec.env_names.operations_include_env_name ==
+               "ROCPROFSYS_ROCM_MARKER_API_OPERATIONS";
     });
     ASSERT_NE(itr, specs.end());
 
-    EXPECT_EQ(itr->exclude_operations_env,
+    EXPECT_EQ(itr->env_names.operations_exclude_env_name,
               "ROCPROFSYS_ROCM_MARKER_API_OPERATIONS_EXCLUDE");
-    EXPECT_EQ(itr->annotate_backtrace_env,
+    EXPECT_EQ(itr->env_names.operations_annotate_backtrace_env_name,
               "ROCPROFSYS_ROCM_MARKER_API_OPERATIONS_ANNOTATE_BACKTRACE");
     EXPECT_THAT(itr->operation_choices, gtest::Not(gtest::IsEmpty()));
 }
 
 // ─── get_callback_domains ─────────────────────────────────────────────────────
 //
-// Every test below calls register_rocm_domains() (which calls domain_settings())
-// then get_callback_domains(), each of which independently calls
-// Wrapper::get_callback_tracing_names() once (2 total); get_buffer_tracing_names()
-// is only called by domain_settings() (1 total).
+// get_callback_domains() calls Wrapper::get_callback_tracing_names() directly and
+// also calls domain_settings() (to validate ROCm domain names), which calls both
+// get_buffer_tracing_names() and get_callback_tracing_names() again;
+// cached_backend_methods memoizes both per-Tag, so each mock still only fires once
+// per test despite the two call sites.
 
 TEST_F(sdk_tracing_config_domains_test,
        get_callback_domains_aliases_expand_to_exact_domains)
@@ -636,9 +540,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
@@ -652,9 +553,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .WillOnce(gtest::Return(std::string{ "hsa_api,hip_api,marker_api" }));
     EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
     EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
 
     EXPECT_THAT(
         sut::get_callback_domains(),
@@ -680,9 +578,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
@@ -696,9 +591,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .WillOnce(gtest::Return(std::string{ "rccl_api" }));
     EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
     EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
 
     EXPECT_THAT(sut::get_callback_domains(),
                 gtest::UnorderedElementsAre(backend_t::CALLBACK_TRACING_RCCL_API));
@@ -717,9 +609,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
@@ -733,9 +622,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .WillOnce(gtest::Return(std::string{}));
     EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(true));
     EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(true));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
 
     EXPECT_THAT(sut::get_callback_domains(),
                 gtest::UnorderedElementsAre(backend_t::CALLBACK_TRACING_RCCL_API,
@@ -754,9 +640,6 @@ TEST_F(sdk_tracing_config_domains_test, get_callback_domains_invalid_domain)
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
@@ -770,9 +653,6 @@ TEST_F(sdk_tracing_config_domains_test, get_callback_domains_invalid_domain)
         .WillOnce(gtest::Return(std::string{ "invalid_domain" }));
     EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
     EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
 
     try
     {
@@ -783,42 +663,6 @@ TEST_F(sdk_tracing_config_domains_test, get_callback_domains_invalid_domain)
         EXPECT_STREQ(error.what(),
                      "unsupported ROCPROFSYS_ROCM_DOMAINS value: invalid_domain");
     }
-}
-
-TEST_F(sdk_tracing_config_domains_test,
-       get_callback_domains_runtime_before_0_6_excludes_rccl_and_ompt)
-{
-    using backend_t = tagged_backend<callback_domains_version_gating>;
-    using sut       = sdk_tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 0;
-            *minor = 5;
-            *patch = 99;
-            return 0;
-        });
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "rccl_api,ompt" }));
-    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(true));
-    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(true));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
-
-    EXPECT_THAT(sut::get_callback_domains(), gtest::IsEmpty());
 }
 
 TEST_F(sdk_tracing_config_domains_test,
@@ -834,9 +678,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
@@ -850,96 +691,19 @@ TEST_F(sdk_tracing_config_domains_test,
         .WillOnce(gtest::Return(std::string{ "rocshmem_api,hipfile_api" }));
     EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
     EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
 
     EXPECT_THAT(sut::get_callback_domains(),
                 gtest::UnorderedElementsAre(backend_t::CALLBACK_TRACING_ROCSHMEM_API,
                                             backend_t::CALLBACK_TRACING_HIPFILE_API));
 }
 
-TEST_F(sdk_tracing_config_domains_test,
-       get_callback_domains_rocshmem_supported_hipfile_excluded_between_gates)
-{
-    using backend_t = tagged_backend<callback_domains_rocshmem_hipfile_partial>;
-    using sut       = sdk_tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
-    // formatted_version 1.3.4 clears the ROCSHMEM gate (>= 10304) but falls
-    // short of the HIPFILE gate (>= 10305).
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 1;
-            *minor = 3;
-            *patch = 4;
-            return 0;
-        });
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "rocshmem_api,hipfile_api" }));
-    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
-    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
-
-    EXPECT_THAT(sut::get_callback_domains(),
-                gtest::UnorderedElementsAre(backend_t::CALLBACK_TRACING_ROCSHMEM_API));
-}
-
-TEST_F(sdk_tracing_config_domains_test,
-       get_callback_domains_rocshmem_and_hipfile_excluded_below_both_gates)
-{
-    using backend_t = tagged_backend<callback_domains_rocshmem_hipfile_below_gate>;
-    using sut       = sdk_tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 1;
-            *minor = 3;
-            *patch = 3;
-            return 0;
-        });
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "rocshmem_api,hipfile_api" }));
-    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
-    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
-
-    EXPECT_THAT(sut::get_callback_domains(), gtest::IsEmpty());
-}
-
 // ─── get_buffered_domains ─────────────────────────────────────────────────────
 //
-// Every test below calls register_rocm_domains() (which calls domain_settings())
-// then get_buffered_domains(), each of which independently calls
-// Wrapper::get_buffer_tracing_names() once (2 total); get_callback_tracing_names()
-// is only called by domain_settings() (1 total).
+// get_buffered_domains() calls Wrapper::get_buffer_tracing_names() directly and
+// also calls domain_settings() (to validate ROCm domain names), which calls both
+// get_buffer_tracing_names() and get_callback_tracing_names() again;
+// cached_backend_methods memoizes both per-Tag, so each mock still only fires once
+// per test despite the two call sites.
 
 TEST_F(sdk_tracing_config_domains_test,
        get_buffered_domains_memory_copy_returns_memory_copy)
@@ -954,9 +718,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
@@ -968,9 +729,6 @@ TEST_F(sdk_tracing_config_domains_test,
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "memory_copy" }));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
     EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
         .Times(1)
         .WillOnce(gtest::Return(false));
@@ -992,9 +750,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
@@ -1006,9 +761,6 @@ TEST_F(sdk_tracing_config_domains_test,
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "hsa_api,hip_api,marker_api" }));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
     EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
         .Times(1)
         .WillOnce(gtest::Return(false));
@@ -1037,9 +789,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
@@ -1051,9 +800,6 @@ TEST_F(sdk_tracing_config_domains_test,
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "kfd_events" }));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
     EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
         .Times(1)
         .WillOnce(gtest::Return(false));
@@ -1081,9 +827,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
@@ -1097,9 +840,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .WillOnce(gtest::Return(
             std::string{ "kfd_page_fault, kfd_page_migrate, kfd_queue, kfd_event_queue, "
                          "kfd_event_unmap_from_gpu, kfd_event_dropped_events" }));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
     EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
         .Times(1)
         .WillOnce(gtest::Return(false));
@@ -1131,9 +871,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
@@ -1145,9 +882,6 @@ TEST_F(sdk_tracing_config_domains_test,
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "kfd_events" }));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
     EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
         .Times(1)
         .WillOnce(gtest::Return(false));
@@ -1168,9 +902,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
@@ -1182,9 +913,6 @@ TEST_F(sdk_tracing_config_domains_test,
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "memory_allocation" }));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
     EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
         .Times(1)
         .WillOnce(gtest::Return(false));
@@ -1206,9 +934,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
@@ -1220,9 +945,6 @@ TEST_F(sdk_tracing_config_domains_test,
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{}));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
     EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
         .Times(1)
         .WillOnce(gtest::Return(true));
@@ -1245,9 +967,6 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
@@ -1259,9 +978,6 @@ TEST_F(sdk_tracing_config_domains_test,
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "scratch_memory" }));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
     EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
         .Times(1)
         .WillOnce(gtest::Return(false));
@@ -1282,9 +998,6 @@ TEST_F(sdk_tracing_config_domains_test, get_buffered_domains_invalid_domain_thro
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
         .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
@@ -1296,9 +1009,6 @@ TEST_F(sdk_tracing_config_domains_test, get_buffered_domains_invalid_domain_thro
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "invalid_domain" }));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
 
     try
     {
@@ -1324,15 +1034,9 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    auto config = std::make_shared<fake_settings>();
-    register_rocm_domains<sut>(config);
-
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "page_migration" }));
-    EXPECT_CALL(*g_mock_externals, get_settings)
-        .Times(1)
-        .WillOnce(gtest::Return(config.get()));
 
     EXPECT_THAT(sut::get_buffered_domains(),
                 gtest::UnorderedElementsAre(

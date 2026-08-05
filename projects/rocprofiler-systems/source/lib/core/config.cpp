@@ -494,34 +494,40 @@ configure_rocm_tracing_settings(const std::shared_ptr<settings>& _config)
     auto registered_operation_settings = std::unordered_set<std::string>{};
     for(const auto& spec : sdk_tracing_config_t::operation_settings())
     {
-        if(registered_operation_settings.emplace(spec.all_operations_env).second)
+        if(registered_operation_settings
+               .emplace(spec.env_names.operations_include_env_name)
+               .second)
         {
-            ROCPROFSYS_CONFIG_SETTING(std::string, spec.all_operations_env,
-                                      "Inclusive filter for domain operations (for API "
-                                      "domains, this selects the functions to trace) "
-                                      "[regex supported]",
-                                      std::string{}, "rocm", "rocprofiler-sdk",
-                                      "advanced")
+            ROCPROFSYS_CONFIG_SETTING(
+                std::string, spec.env_names.operations_include_env_name,
+                "Inclusive filter for domain operations (for API "
+                "domains, this selects the functions to trace) "
+                "[regex supported]",
+                std::string{}, "rocm", "rocprofiler-sdk", "advanced")
                 ->set_choices(spec.operation_choices);
         }
-        if(registered_operation_settings.emplace(spec.exclude_operations_env).second)
+        if(registered_operation_settings
+               .emplace(spec.env_names.operations_exclude_env_name)
+               .second)
         {
-            ROCPROFSYS_CONFIG_SETTING(std::string, spec.exclude_operations_env,
-                                      "Exclusive filter for domain operations applied "
-                                      "after the inclusive filter (for API domains, "
-                                      "removes function from trace) [regex supported]",
-                                      std::string{}, "rocm", "rocprofiler-sdk",
-                                      "advanced")
+            ROCPROFSYS_CONFIG_SETTING(
+                std::string, spec.env_names.operations_exclude_env_name,
+                "Exclusive filter for domain operations applied "
+                "after the inclusive filter (for API domains, "
+                "removes function from trace) [regex supported]",
+                std::string{}, "rocm", "rocprofiler-sdk", "advanced")
                 ->set_choices(spec.operation_choices);
         }
-        if(registered_operation_settings.emplace(spec.annotate_backtrace_env).second)
+        if(registered_operation_settings
+               .emplace(spec.env_names.operations_annotate_backtrace_env_name)
+               .second)
         {
-            ROCPROFSYS_CONFIG_SETTING(std::string, spec.annotate_backtrace_env,
-                                      "Specification of domain operations which will "
-                                      "record a backtrace (for API domains, this is a "
-                                      "list of function names) [regex supported]",
-                                      std::string{}, "rocm", "rocprofiler-sdk",
-                                      "advanced")
+            ROCPROFSYS_CONFIG_SETTING(
+                std::string, spec.env_names.operations_annotate_backtrace_env_name,
+                "Specification of domain operations which will "
+                "record a backtrace (for API domains, this is a "
+                "list of function names) [regex supported]",
+                std::string{}, "rocm", "rocprofiler-sdk", "advanced")
                 ->set_choices(spec.operation_choices);
         }
     }
