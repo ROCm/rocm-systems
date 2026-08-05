@@ -60,24 +60,21 @@ Downstream tools (Optiq) hardcode the memory chart structure rather than consumi
 1. **gfx950 only**
 2. **Analyze mode only** (profiled data is assumed available)
 3. **Memory levels:** GL1, GL2, EA (where bottleneck equations exist today)
-4. **CLI renderer only** -- TUI and GUI renderers are out of scope, but the analysis result model must be renderer-agnostic
+4. **CLI renderer only** -- the analysis result model is renderer-agnostic to support future renderers
 
 ### Out of scope
 
 | Item | Notes |
 |------|-------|
-| Optiq database persistence | Optiq support is under active discussion; the analysis result model should be JSON-serializable to facilitate future integration, but the export schema may change when Optiq support lands |
-| TUI / GUI rendering of annotations | Future work -- would consume the same analysis result model |
-| Output format beyond CLI text | The final output format (CLI text, HTML, structured JSON) is a separate front-end concern. This design produces a renderer-agnostic analysis result model; how that model is presented (CLI Rich panels, HTML files, Optiq-consumed JSON) is decoupled and can evolve independently. See Open Items for the HTML rendering and Optiq JSON schema discussions. |
-| Optiq JSON schema contract | An agreement exists to drive memory chart rendering via a JSON schema consumed by Optiq. Defining or extending that schema is a downstream integration concern under active discussion. This design ensures `MemBwAnalysisResult` is JSON-serializable and structurally compatible with a future schema, but the schema definition itself is out of scope. |
+| TUI / GUI rendering | Future work -- would consume the same renderer-agnostic analysis result model |
+| Non-CLI output and Optiq integration (PS4) | HTML, structured JSON, Optiq database persistence, and the Optiq JSON schema contract are downstream concerns. `MemBwAnalysisResult` is JSON-serializable to support future integration, but defining export schemas is out of scope. See Open Items for the HTML rendering and Optiq discussions. |
 
 ---
 
 ## Assumptions
 
 - **[A1]** Bottleneck thresholds in the block 30 YAML comments (e.g. `>= 10%`) are the authoritative starting defaults unless overridden in the bottleneck tree spec.
-- **[A2]** This feature ships only for gfx950 with a working block 30 YAML and memory chart renderer.
-- **[A3]** The bottleneck tree evaluates on the same normalization scope as the memory chart. One evaluation per chart rendering.
+- **[A2]** The bottleneck tree evaluates on the same normalization scope as the memory chart. One evaluation per chart rendering.
 
 ---
 
@@ -156,6 +153,14 @@ The memory chart renderer currently receives a flat metric dictionary. Bottlenec
 
 A separate guidance rendering function is called after the chart renderer and concatenated for output.
 
+**Cross-block data flow.** This introduces a cross-block dependency: the memory chart renderer (block 3) receives a `MemBwAnalysisResult` derived from block 30 (`3000_mem_bw.yaml`) metrics. This is an intentional, temporary deviation from the convention that each block renders independently.
+
+Why it is acceptable:
+
+1. **Metadata crosses the boundary, not raw metrics.** The chart renderer receives a typed analytical object containing boolean states, display labels, and pre-rendered guidance text. It does not read block 30 DataFrames or reference block 30 metric keys. The evaluator (`membw/engine.py`) is the boundary: it consumes block 30 data and produces renderer-agnostic analysis results.
+2. **Phased path toward consolidation.** Block 30 metrics are planned to merge into block 3 (see Open Items: "Consolidate block 30 into memory chart"). At that point the cross-block dependency disappears. This phase introduces the evaluator and analysis result model while the metrics mature under the `--experimental --membw-analysis` gate.
+3. **Optional parameter.** When block 30 data is absent (wrong arch, missing counters, flag not set), `membw` is `None` and the chart renders exactly as it does today.
+
 ### Decision 3: How are bottleneck indicators displayed to the user?
 
 The CLI memory chart renderer uses Rich composable panels and grids to lay out the memory hierarchy. Each cache block is built via shared panel builders; edges between blocks are Rich text columns with formatted bandwidth and request flow labels.
@@ -180,19 +185,7 @@ The CLI memory chart renderer uses Rich composable panels and grids to lay out t
 - One block per active **leaf** bottleneck (max 5 per NFR4)
 - Template structure: Condition / Measured / Impact (next steps format TBD)
 
-### Decision 4: Cross-block data flow for analysis overlay
-
-The memory chart renderer (block 3) currently receives data only from its own panel (`0300_memory_chart.yaml`). This design introduces a cross-block dependency: the `MemBwAnalysisResult` passed to `plot_mem_chart()` is derived from block 30 (`3000_mem_bw.yaml`) metrics.
-
-This is an intentional, temporary deviation from the convention that each block renders independently.
-
-**Why it is acceptable:**
-
-1. **What crosses the boundary is metadata, not raw metrics.** The chart renderer receives a `MemBwAnalysisResult` -- a typed analytical object containing boolean states, display labels, and pre-rendered guidance text. It does not read block 30 DataFrames or reference block 30 metric keys. The evaluator (`membw/engine.py`) is the boundary: it consumes block 30 data and produces renderer-agnostic analysis results.
-2. **The design is a phased path toward full consolidation.** Block 30 metrics are planned to merge into block 3 (see Open Items: "Consolidate block 30 into memory chart"). At that point, the cross-block dependency disappears -- all data sources will be under panel 300. This phase introduces the evaluator, the analysis result model, and the rendering integration while the metrics are still maturing under the `--experimental --membw-analysis` gate.
-3. **The `membw` parameter is optional.** When block 30 data is absent (wrong arch, missing counters, flag not set), `membw` is `None` and the chart renders exactly as it does today. Block 3 has no hard dependency on block 30.
-
-### Decision 5: Metric aggregation contract
+### Decision 4: Metric aggregation contract
 
 All ratio metrics used by the bottleneck tree **must** use pairwise `SUM(numerator) / SUM(denominator)` aggregation across selected kernels/dispatches.
 
@@ -249,6 +242,12 @@ flowchart TD
     MC -- annotated chart --> TTY[tty.py<br/>CLI output]
     GR -- guidance text --> TTY
     B30T -- table string --> TTY
+
+    style TS fill:#e0f0ff,stroke:#3388cc
+    style ME fill:#e0f0ff,stroke:#3388cc
+    style ENG fill:#e0f0ff,stroke:#3388cc
+    style AR fill:#e0f0ff,stroke:#3388cc
+    style GR fill:#e0f0ff,stroke:#3388cc
 ```
 
 ---
@@ -321,13 +320,10 @@ End-to-end golden tests use the membw analysis test suite with baseline/optimize
 
 | Item | Owner | Target |
 |------|-------|--------|
-| Removal of `--experimental` gate for `--membw-analysis` | TBD | To be decided -- may happen in this phase or be deferred to future work |
-| Structured export for downstream tools (PS4) | TBD | Optiq support is under active discussion; export schema may change when it lands |
-| HTML rendering for memory chart | TBD | CLI terminal width constraints (NFR2) limit annotation density. An HTML output path (similar to roofline) would remove these constraints and enable richer visualization. This is a separate front-end improvement that can be pursued independently once the analysis result model is stable. |
-| Optiq JSON schema alignment | TBD | An existing agreement calls for driving memory chart rendering via a JSON schema consumed by Optiq. The `MemBwAnalysisResult` model adds new data (bottleneck annotations, guidance blocks) that the schema must accommodate. Schema definition should be coordinated with the Optiq team during implementation. |
+| Optiq integration (PS4) | TBD | Structured export and JSON schema alignment -- coordinate with Optiq team to define a schema that accommodates `MemBwAnalysisResult` (bottleneck annotations, guidance blocks) |
+| HTML rendering for memory chart | TBD | An HTML output path (similar to roofline) would remove CLI terminal width constraints (NFR2) and enable richer visualization |
 | Counter single-pass feasibility sign-off on MI350 hardware | TBD | Before shipping |
-| Guidance template content for all GL2/EA leaf nodes | TBD | UX phase |
-| Guidance "next steps" field -- content, format, and whether to include | TBD | LLD discussion item |
-| Whether to add severity ranking across bottleneck types for prioritized display | TBD | Future consideration |
+| Guidance content finalization | TBD | Template content for all GL2/EA leaf nodes, and whether to include a "next steps" field (content, format TBD) -- see LLD discussion items |
 | Whether optional impact normalization formulas live in YAML or code | TBD | Core phase |
-| Consolidate block 30 into memory chart | TBD | Future work -- when stable, merge tree-referenced metrics from `3000_mem_bw.yaml` into `0300_memory_chart.yaml`, discard remaining diagnostic tables, and remove `--membw-analysis` flag |
+| Severity ranking across bottleneck types for prioritized display | TBD | Future consideration |
+| Consolidate block 30 into memory chart | TBD | When stable, merge tree-referenced metrics into `0300_memory_chart.yaml`, remove `--membw-analysis` and `--experimental` gates |
