@@ -460,11 +460,17 @@ class FillInfoComm {
     comm_->ncclNet = net_.get();  // regMrDmaBuf == NULL -> dmaBuf unsupported
   }
   ncclComm* get() { return comm_.get(); }
+  ncclNet_t* net() { return net_.get(); }
  private:
   std::unique_ptr<ncclComm> comm_;
   std::unique_ptr<ncclSharedResources> sr_;
   std::unique_ptr<ncclNet_t> net_;
 };
+
+// A valid hsa export fn so pfn_hsa != NULL selects the DMA-BUF-supported arm.
+hsa_status_t FakeExportDmaBuf(const void*, size_t, int*, uint64_t*) {
+  return hsa_status_t(0);
+}
 }  // namespace
 
 TEST_F(InitMicrotest, FillInfo_ExtMallocFails_DisablesFineGrainAndContinues) {
@@ -484,6 +490,18 @@ TEST_F(InitMicrotest, FillInfo_AllocOk_DmaBufUnsupported_UsesGdrFallback) {
   EXPECT_TRUE(info.hasFineGrain);        // alloc succeeded
   EXPECT_EQ(1, g_gdrSupportCalls);       // dmaBuf unsupported -> fallback taken
   EXPECT_EQ(1, info.gdrSupport);         // value from the fallback
+}
+TEST_F(InitMicrotest, FillInfo_AllocOk_DmaBufSupported_EnablesGdrDirectly) {
+  FillInfoComm c;
+  // AMD dmaBufSupported arm: regMrDmaBuf present + pfn_hsa non-null -> ncclSuccess.
+  c.net()->regMrDmaBuf =
+      reinterpret_cast<decltype(c.net()->regMrDmaBuf)>(static_cast<uintptr_t>(0x1));
+  pfn_hsa_amd_portable_export_dmabuf = &FakeExportDmaBuf;
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_TRUE(info.hasFineGrain);
+  EXPECT_EQ(1, info.gdrSupport);     // set directly by the dmaBuf-supported path
+  EXPECT_EQ(0, g_gdrSupportCalls);   // GDR fallback NOT called
 }
 
 #if defined(HIP_HOST_UNCACHED_MEMORY)

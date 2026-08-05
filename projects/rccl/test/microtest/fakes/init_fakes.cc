@@ -161,4 +161,5 @@ void ResetInitFakes() {
   g_firmwareVersion = 0;
   g_gdrSupportValue = 0;
   g_gdrSupportCalls = 0;
+  pfn_hsa_amd_portable_export_dmabuf = nullptr;
 }
