@@ -115,4 +115,5 @@
 	url = https://github.com/abseil/abseil-cpp.git
 [submodule "projects/rocprofiler-sdk/external/rlog"]
 	path = projects/rocprofiler-sdk/external/rlog
-	url = https://github.com/ROCm/rlog.git
+	url = https://github.com/ROCm/rocmProfileData.git
+	branch = rlog
