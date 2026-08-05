@@ -34,7 +34,7 @@ classifiers = [
 dependencies = [
     "packaging",
     "numpy",
-    "cuda.core~=1.0",
+    "cuda-core~=1.0",
     "cuda-pathfinder>=1.5.4,<2.0.0",
 ]
 
@@ -42,12 +42,12 @@ dependencies = [
 cu12 = [
     "nvidia-nccl-cu12",
     "cuda-bindings~=12.0",
-    "nvidia-cutlass-dsl>=4.5.2,<5.0",
+    "nvidia-cutlass-dsl~=4.6",
 ]
 cu13 = [
     "nvidia-nccl-cu13",
     "cuda-bindings~=13.0",
-    "nvidia-cutlass-dsl[cu13]>=4.5.2,<5.0",
+    "nvidia-cutlass-dsl[cu13]~=4.6",
 ]
 
 [dependency-groups]
