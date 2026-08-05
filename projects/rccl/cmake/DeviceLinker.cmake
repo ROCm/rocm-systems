@@ -238,6 +238,15 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     ${DL_OPT_FLAGS}
     -std=c++17
     ${DL_HIP_COMPILER_FLAGS}
+    # -fPIC is required so amdclang++ emits GOT-relative relocations for
+    # cross-function calls inside the device .o files. Without it, larger
+    # ncclDevFunc_* bodies (e.g. unroll=8/16 reductions on f8e4m3/f8e5m2 or
+    # PAT/LL ReduceScatter) exceed the compiler's inlining threshold and
+    # produce R_AMDGPU_REL64 references, which `ld.lld -shared` then rejects
+    # against default-visibility symbols ("recompile with -fPIC"). Every
+    # other device compile step in this file already passes -fPIC; this
+    # brings the per-kernel OBJECT build in line with the rest.
+    -fPIC
   )
   target_compile_definitions(${_dev_target} PRIVATE RCCL_DEVICE_LINKER)
   target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
@@ -631,9 +640,56 @@ add_custom_command(
   VERBATIM
 )
 
+set(DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_fabric_ll.o")
+set(DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_fabric_ll128.o")
+
+add_custom_command(
+  OUTPUT  ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_all_reduce_fabric_ll.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_all_reduce_fabric_ll.cu.cpp
+  COMMENT "DL compile: dda_all_reduce_fabric_ll.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT  ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_all_reduce_fabric_ll128.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_all_reduce_fabric_ll128.cu.cpp
+  COMMENT "DL compile: dda_all_reduce_fabric_ll128.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
 set(DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_fabric.o")
 set(DDA_ALL_GATHER_FABRIC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_gather_fabric.o")
+set(DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_gather_fabric_ll.o")
+set(DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_gather_fabric_ll128.o")
 set(DDA_ALLTOALL_FABRIC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_alltoall_fabric.o")
+set(DDA_ALLTOALL_FABRIC_LL_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_alltoall_fabric_ll.o")
+set(DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_alltoall_fabric_ll128.o")
+set(DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_fabric_ll.o")
+set(DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_fabric_ll128.o")
 
 add_custom_command(
   OUTPUT  ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ}
@@ -674,6 +730,44 @@ add_custom_command(
 )
 
 add_custom_command(
+  OUTPUT  ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_all_gather_fabric_ll.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_all_gather_fabric_ll.cu.cpp
+  COMMENT "DL compile: dda_all_gather_fabric_ll.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT  ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_all_gather_fabric_ll128.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_all_gather_fabric_ll128.cu.cpp
+  COMMENT "DL compile: dda_all_gather_fabric_ll128.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
+add_custom_command(
   OUTPUT  ${DDA_ALLTOALL_FABRIC_FAT_OBJ}
   COMMAND ${DL_CLANG}
     -x hip ${DL_OFFLOAD_ARCH_FLAGS}
@@ -689,6 +783,110 @@ add_custom_command(
     ${HIPIFY_DIR}/src/dda_alltoall_fabric.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/dda_alltoall_fabric.cu.cpp
   COMMENT "DL compile: dda_alltoall_fabric.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT  ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_alltoall_fabric_ll.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_alltoall_fabric_ll.cu.cpp
+  COMMENT "DL compile: dda_alltoall_fabric_ll.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT  ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_alltoall_fabric_ll128.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_alltoall_fabric_ll128.cu.cpp
+  COMMENT "DL compile: dda_alltoall_fabric_ll128.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT  ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_reduce_scatter_fabric_ll.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_reduce_scatter_fabric_ll.cu.cpp
+  COMMENT "DL compile: dda_reduce_scatter_fabric_ll.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT  ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_reduce_scatter_fabric_ll128.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_reduce_scatter_fabric_ll128.cu.cpp
+  COMMENT "DL compile: dda_reduce_scatter_fabric_ll128.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
+# ===========================================================================
+# ce_reduce.cc: minimal device-only file containing ncclCeLocalReduceKernel
+# (__global__) and its host-callable launcher ncclCeLaunchLocalReduce.
+# Compiled with full HIP here so the fat binary is embedded in ce_reduce.o.
+# ce_coll.cc (main target, --offload-host-only) has no __global__ call sites
+# and therefore produces no undefined __hip_fatbin_<hash> reference.
+# ===========================================================================
+set(CE_REDUCE_FAT_OBJ "${DEVICE_BUILD_DIR}/ce_reduce.o")
+
+add_custom_command(
+  OUTPUT  ${CE_REDUCE_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${CE_REDUCE_FAT_OBJ}
+    ${HIPIFY_DIR}/src/device/ce_reduce.cc
+  DEPENDS ${HIPIFY_DIR}/src/device/ce_reduce.cc
+  COMMENT "DL compile: device/ce_reduce.cc (CE AllReduce reduce kernel)"
   VERBATIM
 )
 
@@ -731,7 +929,7 @@ endif()
 # Top-level target
 # ===========================================================================
 add_custom_target(device_linker_build ALL
-  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${SYM_FAT_OBJS}
+  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJ} ${SYM_FAT_OBJS}
 )
 add_dependencies(device_linker_build hipify_all copy_nccl_device_headers)
 
@@ -739,14 +937,23 @@ set(DEVICE_LINKER_OBJECTS
   ${COMMON_FAT_OBJ}
   ${ONERANK_FAT_OBJ}
   ${COLLECTIVES_FAT_OBJ}
+  ${CE_REDUCE_FAT_OBJ}
   ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
   ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
   ${DDA_ALL_GATHER_IPC_FAT_OBJ}
   ${DDA_ALLTOALL_IPC_FAT_OBJ}
   ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ}
+  ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ}
+  ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ}
   ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ}
   ${DDA_ALL_GATHER_FABRIC_FAT_OBJ}
+  ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ}
+  ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ}
   ${DDA_ALLTOALL_FABRIC_FAT_OBJ}
+  ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ}
+  ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ}
+  ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ}
+  ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ}
   ${SYM_FAT_OBJS}
 )
 

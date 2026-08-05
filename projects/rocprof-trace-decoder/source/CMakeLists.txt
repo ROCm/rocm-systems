@@ -1,21 +1,5 @@
 cmake_minimum_required(VERSION 3.16.0)
 
-if(NOT DEFINED VERSION_MAJOR)
-    set(VERSION_MAJOR 0)
-endif()
-
-if(NOT DEFINED VERSION_MINOR)
-    set(VERSION_MINOR 2)
-endif()
-
-if(NOT DEFINED VERSION_PATCH)
-    set(VERSION_PATCH 7)
-endif()
-
-project(
-    rocprof-trace-decoder
-    VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}
-    LANGUAGES C CXX)
 if(NOT DEFINED PROJECT_NAME)
     set(PROJECT_NAME "rocprof-trace-decoder")
 endif()
