@@ -37,6 +37,37 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace amdgpu {
 
+void CommandProcessor::configure_for_arch(rj_code_arch_t arch) {
+  // Matches llvm/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.cpp
+  // AMDGPUBaseInfo::getVGPREncodingGranule(): gfx1250 has
+  // Feature1024AddressableVGPRs, so Wave32 descriptors encode VGPR counts in
+  // 16-register blocks; other RDNA Wave32 targets use 8. LLVM's
+  // AMDGPULowerVGPREncoding.cpp handles the separate gfx1250 s_set_vgpr_msb
+  // high-bank indexing needed to access VGPRs above v255.
+  vgpr_granularity_ = 4;
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    vgpr_granularity_ = 16;
+  else if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+           arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+           arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+           arch == ROCJITSU_CODE_ARCH_RDNA4)
+    vgpr_granularity_ = 8;
+
+  // Matches LLVM's FeaturePackedTID: gfx90a and later CDNA targets, plus
+  // GFX11 and later RDNA targets, receive work-item IDs packed in v0.
+  packed_tid_ = arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+                arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+                arch == ROCJITSU_CODE_ARCH_RDNA3_5 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+                arch == ROCJITSU_CODE_ARCH_GFX1250;
+
+  sdma_packet_dialect_ = SdmaPacketDialect::Legacy;
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    sdma_packet_dialect_ = SdmaPacketDialect::Gfx1250;
+  else if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+           arch == ROCJITSU_CODE_ARCH_RDNA4)
+    sdma_packet_dialect_ = SdmaPacketDialect::Gfx11Plus;
+}
+
 namespace {
 
 // The supported cluster size must fit the M0 multicast mask captured at issue time.
@@ -475,10 +506,9 @@ void CommandProcessor::startup() {
   // thread). on_cu_idle() dispatches inline and calls ComputeUnitCore::schedule_work()
   // on those CUs, which mutates their non-atomic executing_/tick_event_ and pushes to
   // the partition event queue without synchronization — safe only same-partition. The
-  // recursive-bisection partitioner (topology.partition(), run in the engine's
-  // create() before startup) could in principle split a CP from a CU under
-  // num_threads > 1; assert here (after partitioning, before the run loop) so any such
-  // split fails loudly rather than silently racing.
+  // generic balanced partitioner could in principle split a CP from a CU under
+  // num_threads > 1; assert here (after partitioning, before the run loop) so any
+  // such split fails loudly rather than silently racing.
   for ([[maybe_unused]] const auto *cu : cus_)
     assert(cu->partition_id() == partition_id() &&
            "CommandProcessor and its compute units must share one partition");

@@ -22,7 +22,6 @@
 #include "fan_read.h"
 
 #include <gtest/gtest.h>
-#include <sys/stat.h>
 
 #include <cstdint>
 #include <iostream>
@@ -115,27 +114,17 @@ void TestFanRead::Run(void) {
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_rpms", "gpu=" + std::to_string(i), VERB(STANDARD));
       err = amdsmi_get_gpu_fan_rpms(processor_handles_[i], 0, &val_i64);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
-      struct stat dxg_st{};
-      bool on_wsl = (stat("/dev/dxg", &dxg_st) == 0);
-      if (err == AMDSMI_STATUS_NOT_SUPPORTED && on_wsl) {
-        // fan_rpms goes through rsmi_wrapper which returns NOT_SUPPORTED on WSL;
-        // fan_speed/fan_speed_max use the WSL backend directly.
-        DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_rpms", "gpu=" + std::to_string(i), VERB(STANDARD));
-        err = amdsmi_get_gpu_fan_rpms(processor_handles_[i], 0, nullptr);
-        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_NOT_SUPPORTED);
-        ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
-      } else {
-        CHK_ERR_ASRT(err)
-        IF_VERB(STANDARD) {
-          std::cout << "\t**Current fan RPMs: ";
-          std::cout << val_i64 << std::endl;
-        }
-        // Verify api support checking functionality is working
-        DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_rpms", "gpu=" + std::to_string(i), VERB(STANDARD));
-        err = amdsmi_get_gpu_fan_rpms(processor_handles_[i], 0, nullptr);
-        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-        ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+      CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) {
+        std::cout << "\t**Current fan RPMs: ";
+        std::cout << val_i64 << std::endl;
       }
+
+      // Verify api support checking functionality is working
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_rpms", "gpu=" + std::to_string(i), VERB(STANDARD));
+      err = amdsmi_get_gpu_fan_rpms(processor_handles_[i], 0, nullptr);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+      ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
     }
   }
 }

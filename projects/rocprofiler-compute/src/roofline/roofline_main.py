@@ -43,8 +43,19 @@ from utils.roofline_calc import (
 from utils.specs import MachineSpecs
 from utils.utils_analysis import get_matrix_ops_type
 
-# ROOFLINE_SUPPORTED lists the supported gfx architectures.
-ROOFLINE_SUPPORTED = list(SUPPORTED_DATATYPES.keys())
+# ROOFLINE_SUPPORTED lists the supported gfx architectures, check against this list
+# before doing any roofline-related work
+ROOFLINE_SUPPORTED = [
+    "gfx90a",
+    "gfx940",
+    "gfx941",
+    "gfx942",
+    "gfx950",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+]
 
 # One color per kernel from a high-contrast qualitative palette.
 _KERNEL_PALETTE: list[str] = pcolors.qualitative.Dark24 + pcolors.qualitative.Light24

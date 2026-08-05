@@ -154,7 +154,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
                    : "=v"(i4.i4)
                    : "v"(&src->i4));
 #elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-      i4.v4u = __builtin_amdgcn_global_load_b128((v4u_gptr)src->v, RCCL_SYSTEM_SYNCSCOPE);
+      // Comm FIFO buffers are uncached; use non-temporal loads so the flag poll
+      // never observes a stale cache line (no system-scope cache-bypass needed).
+      *((u64_gptr)i4.v) = __builtin_nontemporal_load((u64_gptr)src->v);
+      *((u64_gptr)i4.v + 1) = __builtin_nontemporal_load((u64_gptr)src->v + 1);
 #else
       *((u64_gptr)i4.v) = __builtin_nontemporal_load((u64_gptr)src->v);
       *((u64_gptr)i4.v + 1) = __builtin_nontemporal_load((u64_gptr)src->v + 1);
@@ -191,10 +194,12 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
                      : "=v"(line[i].i4)
                      : "v"(&src->i4));
 #elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-        line[i].v4u = __builtin_amdgcn_global_load_b128((v4u_gptr)src->v, RCCL_SYSTEM_SYNCSCOPE);
+        // Comm FIFO buffers are uncached; use non-temporal loads (no bypass).
+        line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
+        line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
 #else
-        line[i].v[0] = __builtin_nontemporal_load(src->v);
-        line[i].v[1] = __builtin_nontemporal_load(src->v + 1);
+        line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
+        line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
 #endif
 #else
         asm volatile("ld.volatile.global.v4.u32 {%0,%1,%2,%3}, [%4];"
@@ -218,7 +223,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
                    : "=v"(line[i].i4)
                    : "v"(&src->i4));
 #elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-      line[i].v4u = __builtin_amdgcn_global_load_b128((v4u_gptr)src->v, RCCL_SYSTEM_SYNCSCOPE);
+      // Comm FIFO buffers are uncached; use non-temporal loads (no bypass).
+      line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
+      line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
 #else
       line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
       line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
@@ -244,8 +251,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     i4.data2 = (val >> 32);
     i4.flag2 = flag;
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-    // System scope store that bypasses the hardware caches, should generate global_store_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950.
-    __builtin_amdgcn_global_store_b128((v4u_gptr)dst->v, i4.v4u, RCCL_SYSTEM_SYNCSCOPE);
+    // Comm FIFO buffers are uncached; use plain stores (no system-scope cache
+    // bypass) for higher store throughput and lower register pressure.
+    *((u64_gptr)dst->v) = *((u64_gptr)i4.v);
+    *((u64_gptr)dst->v + 1) = *((u64_gptr)i4.v + 1);
 #else
 #if defined(__gfx1200__) || defined(__gfx1201__)
     __hip_atomic_store((u64_gptr)dst->v, i4.v[0], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
@@ -408,7 +417,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 
   __device__ void storeData(T* dst, uint64_t val, int eltN) {
     if (__all((reinterpret_cast<uintptr_t>(dst) & (sizeof(T) - 1)) == 0 && sizeof(T) * eltN == sizeof(val))) {
-      *((u64_gptr)dst) = val;
+      // Cache-bypassing (system-scope) store to the user output buffer.
+      store(reinterpret_cast<uint64_t*>(dst), val);
       return;
     }
     union {
@@ -421,8 +431,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       // Yes, for some template arguments this code will be unreachable.  That's fine.
       // coverity[dead_error_line]
       if (i == 0 || i < eltN)
-        // store(dst+i, elt[i]);
-        dst[i] = elt[i];
+        // Cache-bypassing (system-scope) store to the user output buffer.
+        store(dst + i, elt[i]);
     }
   }
 
