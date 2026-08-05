@@ -165,7 +165,8 @@ TEST(SemanticScratchAllocator, PrefersKernelUnusedOverSiteDeadVgpr) {
   auto blocks = build_scratch_test_blocks();
   auto scope = scratch_test_scope(blocks);
   const ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/64};
-  const LivenessAnalysis liveness{KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec)};
+  const LivenessAnalysis liveness{KernelBlockScope(scope),
+                                  std::make_unique<ExecMaskAnalysis>(exec)};
   auto site = blocks.front()->instructions().begin();
   ++site;
   ASSERT_NE(site, blocks.front()->instructions().end());
@@ -189,7 +190,8 @@ TEST(SemanticScratchAllocator, KernelUnusedSearchSkipsForbiddenWindow) {
   auto blocks = build_scratch_test_blocks();
   auto scope = scratch_test_scope(blocks);
   const ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/64};
-  const LivenessAnalysis liveness{KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec)};
+  const LivenessAnalysis liveness{KernelBlockScope(scope),
+                                  std::make_unique<ExecMaskAnalysis>(exec)};
   auto site = blocks.front()->instructions().begin();
   ++site;
   ASSERT_NE(site, blocks.front()->instructions().end());
@@ -227,7 +229,8 @@ TEST(SemanticScratchAllocator, GprIndexModeWriteBypassesKernelUnusedTier) {
   options.arch = ROCJITSU_CODE_ARCH_CDNA4;
   options.text = scratch_test_text(code);
   const ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/64};
-  const LivenessAnalysis liveness{KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options};
+  const LivenessAnalysis liveness{KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                                  options};
   auto site = blocks.front()->instructions().begin();
   std::advance(site, 2);
   ASSERT_NE(site, blocks.front()->instructions().end());
@@ -252,7 +255,8 @@ TEST(SemanticScratchAllocator, SiteDeadTierCanGrowDescriptor) {
   auto blocks = build_scratch_test_blocks();
   auto scope = scratch_test_scope(blocks);
   const ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/64};
-  const LivenessAnalysis liveness{KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec)};
+  const LivenessAnalysis liveness{KernelBlockScope(scope),
+                                  std::make_unique<ExecMaskAnalysis>(exec)};
   const Instruction &site = *blocks.front()->instructions().begin();
 
   // The sole descriptor-allocated register v0 is read at this site, so the

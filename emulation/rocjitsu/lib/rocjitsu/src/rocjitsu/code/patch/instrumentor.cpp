@@ -561,9 +561,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     if (block != nullptr && entry_offset_set.contains(block->start_offset()))
       entry_blocks.push_back(block);
   }
-  auto exec = std::make_unique<ExecMaskAnalysis>(
-      KernelBlockScope(liveness_scope), obj_.kernel_wavefront_size(arch_), liveness_edges,
-      entry_blocks);
+  auto exec = std::make_unique<ExecMaskAnalysis>(KernelBlockScope(liveness_scope),
+                                                 obj_.kernel_wavefront_size(arch_), liveness_edges,
+                                                 entry_blocks);
   const LivenessAnalysis liveness{
       KernelBlockScope(liveness_scope), std::move(exec), {}, liveness_edges};
 

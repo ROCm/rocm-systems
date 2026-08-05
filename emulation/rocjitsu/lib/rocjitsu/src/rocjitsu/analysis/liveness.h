@@ -147,8 +147,7 @@ public:
   /// provably full. Ownership is moved into the analysis. Defaults to null: with
   /// no EXEC analysis every EXEC-masked vector def is treated as `Unknown`, so
   /// the conservative behavior (never promote such a def to a kill) is preserved.
-  LivenessAnalysis(KernelBlockScope blocks,
-                   std::unique_ptr<ExecMaskAnalysis> exec = nullptr,
+  LivenessAnalysis(KernelBlockScope blocks, std::unique_ptr<ExecMaskAnalysis> exec = nullptr,
                    LivenessAnalysisOptions options = {},
                    std::span<const ScopedCfgEdge> extra_edges = {});
   ~LivenessAnalysis();

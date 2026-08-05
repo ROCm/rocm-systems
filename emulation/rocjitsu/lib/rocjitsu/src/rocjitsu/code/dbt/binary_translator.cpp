@@ -2157,8 +2157,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       // entry at +256, which hardware enters with unknown EXEC) and pass it to
       // LivenessAnalysis so EXEC-masked vector defs can be promoted to kills where
       // EXEC is provably full, freeing more scratch registers. Reference issue #9733.
-      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), /*exec=*/nullptr, liveness_options,
-                                  scope_analysis_edges);
+      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), /*exec=*/nullptr,
+                                  liveness_options, scope_analysis_edges);
     }
 
     std::unique_ptr<Gfx1250VgprMsbAnalysis> wmma_completion_wait_vgpr_msb;

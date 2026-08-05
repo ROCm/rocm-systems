@@ -301,7 +301,8 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks, std::span<const ScopedCf
     }
   }
 
-  const std::vector<BlockEffect> block_effects = summarize_all_block_exec_effects(blocks, wave_size_);
+  const std::vector<BlockEffect> block_effects =
+      summarize_all_block_exec_effects(blocks, wave_size_);
 
   const auto rpo = reverse_post_order(blocks);
   std::deque<size_t> worklist;
