@@ -15,7 +15,7 @@
 | **GL2** | Second-level graphics cache (L2 / TCC path). |
 | **EA** | Efficiency Arbiter -- demarcation between L2 and the memory fabric (HBM, GMI, PCIe). |
 | **Optiq** | Downstream performance visualization tool (internal consumer). |
-| **`--membw-analysis`** | CLI flag enabling Memory Bandwidth Analysis (block 30). Note: the flag is `--membw-analysis`, not `--mem-bw-analysis`. |
+| **`--membw-analysis`** | CLI flag enabling Memory Bandwidth Analysis (block 30).|
 | **`normal_unit`** | Normalization unit (e.g. per-wave, per-cycle) used to scale displayed metric values. |
 
 ### Requirement prefixes

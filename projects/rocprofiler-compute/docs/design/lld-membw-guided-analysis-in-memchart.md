@@ -601,107 +601,15 @@ def render_membw_guidance(membw: MemBwAnalysisResult) -> str:
     ...  # called by tty.py after plot_mem_chart; concatenated for stdout
 ```
 
+> **Demo mockups only -- fake data, for visualization purposes only.** The screenshots below illustrate the rich layout capabilities of the memory chart with bottleneck annotations overlaid. They do not represent real profiling output.
+
 ### Example: UTCL1-stall workload
 
-The diagram below shows the full gfx950 memory chart with a GL1 UTCL1-stall bottleneck active. The VL1D panel gains a stall indicator row, and a guidance section appears below the chart. Red-highlighted blocks indicate bottleneck annotations.
-
-```mermaid
-block-beta
-    columns 9
-
-    space:6 XGMI["XGMI\nRead/Write/Atomic BW"]:1 space:2
-
-    SCOPE1["| ------ GPU (XCD) -------------------------"]:5 SCOPE2["| ---- Fabric / Memory ---- |"]:4
-
-    KERNEL["Kernel\n---------\nShader Core\nWave\nExecution"]:1
-    REQ["Non-buffer\nRead : 6.55e+05\nWrite : 1.50e+05\nAtomic : 0\n \nBuffer\nRead : 0 - Write : 0\nAtomic : 0\n \nLDS\nRead : 0 - Write : 0\nAtomic : 0 - Instr : 0\n \nSMEM  Read : 5.43e+05\n \nICACHE  Read : 9.82e+10"]:1
-    L1["[!] VL1D\nHit 44.0% ####....\n[!] TCP<-UTCL1 18.7%\n-----------------\nLDS\n-----------------\nsL1D\nHit 99.0% ########\n-----------------\nL1I\nHit 100.0% ########"]:1
-    L1L2BW["Read BW\n512.9 MB/s ->\n<- Write BW\n182.2 MB/s\n<- -> Atomic BW\n0.0 B/s\n \n \n \nRead BW 9.2 KB/s ->\n \nRead BW 239.6 KB/s ->"]:1
-    L2["L2\nHit 31.0%\n###....."]:1
-    L2BW["Read BW\n0.4 B/s ->\n \n<- Write/Atomic\nBW 0.1 B/s"]:1
-    DF["Data\nFabric"]:1
-    MALL_UMC["MALL\n \nUMC"]:1
-    HBM["HBM\nRead BW 0.4 B/s\nWrite BW 0.1 B/s\nAtomic BW 0.0 B/s"]:1
-
-    space:6 PCIE["PCIe\nRead/Write/Atomic BW"]:1 space:2
-
-    GUIDE["Memory Bandwidth Analysis -- 1 bottleneck detected\n--------------------------------------------------\n[!] [GL1] TCP stalled by UTCL1\n  Condition : TCP stalled by UTCL1 >= 10%\n  Measured  : 18.7% (threshold: 10.0%)\n  Impact    : Address translation pressure -- TCP blocked waiting on L1 TLB"]:9
-
-    KERNEL --> REQ
-    REQ --> L1
-    L1 --> L1L2BW
-    L1L2BW --> L2
-    L2 --> L2BW
-    L2BW --> DF
-    DF --> MALL_UMC
-    MALL_UMC --> HBM
-    XGMI --> DF
-    DF --> PCIE
-
-    style REQ fill:none,stroke:none
-    style L1L2BW fill:none,stroke:none
-    style L2BW fill:none,stroke:none
-    style SCOPE1 fill:none,stroke:none
-    style SCOPE2 fill:none,stroke:none
-    style L1 fill:#fdd,stroke:#c00,color:#900
-    style GUIDE fill:#fdd,stroke:#c00,color:#900
-```
-
-**Where the annotation is injected:** `_build_l1_stack()` calls `build_cache_panel("VL1D", rows, ...)`. When `membw` is supplied and `gl1_tcp_utcl1_stall` is active, an additional row `("[!] TCP<-UTCL1", 18.7, "%", COLORS["stall"])` is appended to the rows list. The guidance section is rendered by `render_membw_guidance()` and printed after the chart and legend.
+![UTCL1-stall workload demo](images/demo-membw-utcl1-stall.png)
 
 ### Example: HBM BW-bound workload
 
-This workload saturates HBM bandwidth. Both GL2 and EA bottleneck nodes fire -- the L2 panel gains a stall indicator row, and the HBM panel gains an annotation. The L2->Fabric edge BW values would be colored red by `bw_color()` since utilization exceeds 80% of peak.
-
-```mermaid
-block-beta
-    columns 9
-
-    space:6 XGMI["XGMI\nRead/Write/Atomic BW"]:1 space:2
-
-    SCOPE1["| ------ GPU (XCD) -------------------------"]:5 SCOPE2["| ---- Fabric / Memory ---- |"]:4
-
-    KERNEL["Kernel\n---------\nShader Core\nWave\nExecution"]:1
-    REQ["Non-buffer\nRead : 1.24e+08\nWrite : 3.10e+07\nAtomic : 0\n \nBuffer\nRead : 0 - Write : 0\nAtomic : 0\n \nLDS\nRead : 0 - Write : 0\nAtomic : 0 - Instr : 0\n \nSMEM  Read : 1.02e+04\n \nICACHE  Read : 8.41e+10"]:1
-    L1["VL1D\nHit 45.2% ####....\n-----------------\nLDS\n-----------------\nsL1D\nHit 97.8% ########\n-----------------\nL1I\nHit 99.0% ########"]:1
-    L1L2BW["Read BW\n410 GB/s ->\n<- Write BW\n95 GB/s\n<- -> Atomic BW\n0.0 B/s\n \n \n \nRead BW 1.1 KB/s ->\n \nRead BW 201 KB/s ->"]:1
-    L2["[!] L2\nHit 38.1% ###.....\n[!] HBM BW bound\n34.2%"]:1
-    L2BW["Read BW\n2.9 TB/s ->\n \n<- Write/Atomic\nBW 720 GB/s\n(>80% util)"]:1
-    DF["Data\nFabric"]:1
-    MALL_UMC["MALL\n \nUMC"]:1
-    HBM["[!] HBM\nRead BW 2.8 TB/s\nWrite BW 680 GB/s\nAtomic BW 0.0 B/s\n[!] EA HBM read\n28.1%"]:1
-
-    space:6 PCIE["PCIe\nRead/Write/Atomic BW"]:1 space:2
-
-    GUIDE["Memory Bandwidth Analysis -- 2 bottlenecks detected\n--------------------------------------------------\n[!] [GL2] HBM BW bound -- Combined Credit Pressure\n  Condition : Combined HBM credit stall >= 10%\n  Measured  : 34.2% (threshold: 10.0%)\n  Impact    : L2 stalled waiting for HBM read+write credits\n\n[!] [EA] HBM read bandwidth bound\n  Condition : HBM read credit stall >= 10%\n  Measured  : 28.1% (threshold: 10.0%)\n  Impact    : EA read path saturated by HBM bandwidth"]:9
-
-    KERNEL --> REQ
-    REQ --> L1
-    L1 --> L1L2BW
-    L1L2BW --> L2
-    L2 --> L2BW
-    L2BW --> DF
-    DF --> MALL_UMC
-    MALL_UMC --> HBM
-    XGMI --> DF
-    DF --> PCIE
-
-    style REQ fill:none,stroke:none
-    style L1L2BW fill:none,stroke:none
-    style L2BW fill:none,stroke:none
-    style SCOPE1 fill:none,stroke:none
-    style SCOPE2 fill:none,stroke:none
-    style L2 fill:#fdd,stroke:#c00,color:#900
-    style L2BW fill:#fdd,stroke:#c00,color:#900
-    style HBM fill:#fdd,stroke:#c00,color:#900
-    style GUIDE fill:#fdd,stroke:#c00,color:#900
-```
-
-**Where annotations are injected:**
-- **L2 panel:** `_build_l2_panel()` calls `build_cache_panel("L2", rows, ...)`. When `gl2_mem_bw_bound` is active, append `("[!] HBM BW bound", 34.2, "%", COLORS["stall"])`.
-- **HBM panel:** `_build_hbm_content()` returns the content string for the HBM `_ip_block()`. When `ea_hbm_bw_bound` is active, append `"[!] EA HBM read 28.1%"` to the content.
-- **L2->Fabric edges:** `bw_color()` receives `value=2.9e12` and `peak=3.2e12`, computes 91% utilization, returns `"red"`. The edge label text is rendered in red Rich markup.
-- **Guidance:** Two blocks rendered by `render_membw_guidance()`, printed after the legend.
+![HBM BW-bound workload demo](images/demo-membw-hbm-bw-bound.png)
 
 ---
 
