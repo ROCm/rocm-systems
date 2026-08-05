@@ -286,14 +286,18 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
                        nullptr);
     }
 
-    auto shared_signal = std::shared_ptr<hsa_signal_t>{};
+    auto unique_signal = make_signal();
+    // Raised up front so the producer parks on it instead of racing past a zeroed signal.
+    signal_reset(*unique_signal);
+    auto shared_signal = std::shared_ptr<hsa_signal_t>(std::move(unique_signal));
+
+    // Copied because the producer takes ownership of control_packet_copy below, while the packets
+    // are only submitted once that thread is running.
+    auto start_packets = control_packet_copy->before_krn_pkt;
+    ROCP_FATAL_IF(start_packets.empty()) << "ATT start packet list is empty";
 
     if(params.num_buffers > 1)
     {
-        auto unique_signal = make_signal();
-        signal_reset(*unique_signal);
-        shared_signal = std::shared_ptr<hsa_signal_t>(std::move(unique_signal));
-
         // Find unique shader engine ID from mask
         int64_t shader_engine_id = 0;
         for(uint64_t i = 0; (params.shader_engine_mask >> i) != 0; i++)
@@ -312,11 +316,6 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         // Wire each slot to its CPU staging buffer. Slots default to FREE.
         for(size_t i = 0; i < worker_data->num_buffers; i++)
             worker_data->buffers[i].memory = worker_data->queue->cpu_buffers.at(i);
-
-        // Kept alive past the move below, since the packets are submitted after the producer
-        // that takes ownership of control_packet_copy is already running.
-        auto start_packets = control_packet_copy->before_krn_pkt;
-        ROCP_FATAL_IF(start_packets.empty()) << "ATT start packet list is empty";
 
         auto producer_data             = triple_buffer_producer_data_t{};
         producer_data.producer_running = worker_flag;
@@ -349,28 +348,16 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
             internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
         }
 
-        // Hardware buffers can fill before a newly-created producer gets its first CPU timeslice.
-        // Start the worker first, then enable the trace, and do not return to the application
-        // until the producer has finished its first status poll.
+        // Hardware buffers can fill before a newly-created producer gets its first CPU timeslice,
+        // so hold the trace off until the producer is parked on the start signal.
         while(!worker_data->producer_waiting.load(std::memory_order_acquire))
             std::this_thread::yield();
-
-        // The producer is waiting on this signal, so it must be raised even when the trace is
-        // already shutting down, or that thread would never exit.
-        att_queue_submit_signal_last(*queue, start_packets, *shared_signal);
-
-        while(!worker_data->producer_ready.load(std::memory_order_acquire) &&
-              worker_flag->load() == WORKER_FLAG_RUNNING)
-            std::this_thread::yield();
     }
-    else
-    {
-        // Submit without waiting so multiple agents can be launched in parallel. The caller waits
-        // on all returned signals after every agent has been started.
-        auto unique_signal =
-            att_queue_submit_signal_last(*queue, control_packet_copy->before_krn_pkt);
-        shared_signal = std::shared_ptr<hsa_signal_t>(std::move(unique_signal));
-    }
+
+    // Submitted without waiting so multiple agents can be launched in parallel; the caller waits
+    // on every returned signal once all agents have started. The producer waits on this signal
+    // too, so it must be raised even when the trace is already shutting down.
+    att_queue_submit_signal_last(*queue, start_packets, *shared_signal);
     return shared_signal;
 }
 

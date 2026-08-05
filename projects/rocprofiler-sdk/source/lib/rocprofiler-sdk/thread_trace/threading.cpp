@@ -187,7 +187,6 @@ producer_loop(
 
     auto     start_t0 = std::chrono::system_clock::now();
     bool     do_sleep{false};
-    bool     startup_poll_completed{false};
     uint64_t next_chunk_index = 0;
     int64_t  shader_engine_id = parameters.shader_engine_id;
 
@@ -301,13 +300,7 @@ producer_loop(
 
         // PHASE 1: Poll SQTT buffer status
         att_queue_submit(queue, &buffer_packet.query_status, &submit_signal.sig);
-        const bool query_completed = submit_wait_timeout();
-        if(!startup_poll_completed)
-        {
-            parameters.shared->producer_ready.store(true, std::memory_order_release);
-            startup_poll_completed = true;
-        }
-        if(!query_completed) break;
+        if(!submit_wait_timeout()) break;
 
         if(auto status = buffer_packet.query_buffer_status())
         {
