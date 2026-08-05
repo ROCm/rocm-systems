@@ -14,6 +14,8 @@
 #include <string>
 #include <unordered_map>
 
+#include "recorder.h"
+
 namespace {
 // Scripted environment overrides. When a name is present, its value (which may
 // be an explicit "absent" -> nullptr) is returned; otherwise fall through to
@@ -60,6 +62,33 @@ int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }
 int64_t ncclParamNvtxDisable() { return g_loadParam("NVTX_DISABLE", 0); }
 int64_t ncclParamPatEnable() { return g_loadParam("PAT_ENABLE", 2); }
 int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_REG_ENABLE", 1); }
+
+// -------------------------------------------------------------------------
+// Recorder: pure instrumentation -> no-op fake. Only the overloads reached by
+// the currently-tested init.cc paths are defined (record(const char*) covers
+// the getters / version / async-error). More overloads are added as Tier-D
+// (InitAll/Destroy/InitRank) lands.
+// -------------------------------------------------------------------------
+namespace rccl {
+Recorder::Recorder() {}
+Recorder::~Recorder() {}
+Recorder& Recorder::instance() {
+  static Recorder inst;
+  return inst;
+}
+void Recorder::record(const char*) {}
+}  // namespace rccl
+
+// -------------------------------------------------------------------------
+// Group-job + GIN seams reached via ncclCommEnsureReady / ncclCommGetAsyncError.
+// Success/no-op defaults; ncclGinQueryLastError reports "no error".
+// -------------------------------------------------------------------------
+ncclResult_t ncclGroupJobAbort(struct ncclGroupJob*) { return ncclSuccess; }
+ncclResult_t ncclGroupJobComplete(struct ncclGroupJob*) { return ncclSuccess; }
+ncclResult_t ncclGinQueryLastError(struct ncclGinState*, bool* hasError) {
+  if (hasError) *hasError = false;
+  return ncclSuccess;
+}
 
 void ResetInitFakes() {
   ResetHipFakes();

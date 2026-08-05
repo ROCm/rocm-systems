@@ -50,6 +50,19 @@
 #define RCCL_PARAM_NCCL_ALIAS(name, env, deftVal) \
   int64_t rcclParam##name() { return g_loadParam(("RCCL_" env), (deftVal)); }
 
+// Neutralize the NVTX3 range macros: pull in nvtx.h now (guarded, so init.cc's
+// re-include is a no-op), then redefine the range macros to no-ops so init.cc
+// references no roctx_scoped_range_in symbols (NVTX is pure instrumentation).
+#include "nvtx.h"
+#undef NCCL_NVTX3_FUNC_RANGE
+#define NCCL_NVTX3_FUNC_RANGE ((void)0)
+#undef NVTX3_RANGE
+#define NVTX3_RANGE(...) ((void)0)
+#undef NVTX3_RANGE_ADD_PAYLOAD
+#define NVTX3_RANGE_ADD_PAYLOAD(...) ((void)0)
+#undef NVTX3_FUNC_WITH_PARAMS
+#define NVTX3_FUNC_WITH_PARAMS(...) ((void)0)
+
 // getenv seam (plan F2): active ONLY around the UUT include. init.cc's direct
 // getenv("HSA_NO_SCRATCH_RECLAIM")/("HSA_FORCE_FINE_GRAIN_PCIE") reads route
 // through micro_getenv (defined in init_fakes.cc, where this macro is inactive).
@@ -180,4 +193,75 @@ TEST_F(InitMicrotest, ParseCommConfig_ValidDefault_ReturnsSuccessAndAssigns) {
   EXPECT_EQ(ncclSuccess, parseCommConfig(comm.get(), &cfg));
   EXPECT_EQ(1, comm->config.blocking);                       // undef -> default 1
   EXPECT_EQ(NCCL_CTA_POLICY_DEFAULT, comm->config.CTAPolicy);  // undef -> default
+}
+
+// --- Tier B: getters + version + async-error (init.cc:4224+) ---
+// CommCheck/PtrCheck are the REAL argcheck.cc oracles; a "ready" comm has valid
+// magics and abortFlag->0 so ncclCommEnsureReady takes the async-error path,
+// which returns ncclSuccess for a zero-inited comm (no proxy/gin/groupJob).
+namespace {
+class ReadyComm {
+ public:
+  ReadyComm() : comm_(new ncclComm{}) {
+    comm_->startMagic = comm_->endMagic = NCCL_MAGIC;
+    comm_->abortFlag = &abortFlag_;  // COMPILER_ATOMIC_LOAD derefs this -> 0
+  }
+  ncclComm* get() { return comm_.get(); }
+ private:
+  uint32_t abortFlag_ = 0;
+  std::unique_ptr<ncclComm> comm_;
+};
+}  // namespace
+
+TEST_F(InitMicrotest, CommCount_NullComm_ReturnsInvalidArgument) {
+  int c = -1;
+  EXPECT_EQ(ncclInvalidArgument, ncclCommCount_impl(nullptr, &c));
+}
+TEST_F(InitMicrotest, CommCount_CorruptedMagic_ReturnsInvalidArgument) {
+  auto comm = std::make_unique<ncclComm>();  // magics 0 -> corrupt
+  int c = -1;
+  EXPECT_EQ(ncclInvalidArgument, ncclCommCount_impl(comm.get(), &c));
+}
+TEST_F(InitMicrotest, CommCount_NullOut_ReturnsInvalidArgument) {
+  ReadyComm rc;
+  EXPECT_EQ(ncclInvalidArgument, ncclCommCount_impl(rc.get(), nullptr));
+}
+TEST_F(InitMicrotest, CommCount_ReadyComm_ReturnsNRanks) {
+  ReadyComm rc;
+  rc.get()->nRanks = 8;
+  int c = -1;
+  EXPECT_EQ(ncclSuccess, ncclCommCount_impl(rc.get(), &c));
+  EXPECT_EQ(8, c);
+}
+TEST_F(InitMicrotest, CommCuDevice_ReadyComm_ReturnsCudaDev) {
+  ReadyComm rc;
+  rc.get()->cudaDev = 3;
+  int d = -1;
+  EXPECT_EQ(ncclSuccess, ncclCommCuDevice_impl(rc.get(), &d));
+  EXPECT_EQ(3, d);
+}
+TEST_F(InitMicrotest, CommUserRank_ReadyComm_ReturnsRank) {
+  ReadyComm rc;
+  rc.get()->rank = 5;
+  int r = -1;
+  EXPECT_EQ(ncclSuccess, ncclCommUserRank_impl(rc.get(), &r));
+  EXPECT_EQ(5, r);
+}
+TEST_F(InitMicrotest, GetVersion_NullOut_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclInvalidArgument, ncclGetVersion_impl(nullptr));
+}
+TEST_F(InitMicrotest, GetVersion_ReturnsVersionCode) {
+  int v = 0;
+  EXPECT_EQ(ncclSuccess, ncclGetVersion_impl(&v));
+  EXPECT_EQ(NCCL_VERSION_CODE, v);
+}
+TEST_F(InitMicrotest, GetAsyncError_NullComm_ReturnsInvalidArgument) {
+  ncclResult_t e = ncclSuccess;
+  EXPECT_EQ(ncclInvalidArgument, ncclCommGetAsyncError_impl(nullptr, &e));
+}
+TEST_F(InitMicrotest, GetAsyncError_ReadyComm_ReturnsSuccess) {
+  ReadyComm rc;
+  ncclResult_t e = ncclInProgress;
+  EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
+  EXPECT_EQ(ncclSuccess, e);
 }
