@@ -608,11 +608,12 @@ kernel_hardware_entry_offsets(std::span<const KdTranslation> kernels) {
 /// collected by their owning subsystems. This helper adds ordinary text symbols
 /// demonstrably consumed through an allocated relocation and anonymous
 /// R_AMDGPU_RELATIVE64 addends into .text. Symbol visibility alone is not an
-/// executable-entry contract: ROCr ignores ordinary STT_FUNC/STT_NOTYPE symbols
-/// during executable symbol loading unless a relocation consumes them, and the
-/// patcher intentionally does not require unreferenced tooling/debug symbols to
-/// have output mappings. Keeping those symbols out of this set makes reachability,
-/// relocation, and final verification agree on which entries DBT preserves.
+/// executable-entry contract: ROCr does not promote an ordinary STT_FUNC merely
+/// because it is visible and resolves STT_NOTYPE externally rather than from its
+/// text st_value. The patcher intentionally does not require unreferenced
+/// tooling/debug symbols to have output mappings. Keeping those symbols out of
+/// this set makes reachability, relocation, and final verification agree on
+/// which entries DBT preserves.
 [[nodiscard]] std::optional<std::vector<uint64_t>>
 text_relocation_block_leaders(std::span<const uint8_t> image, const Section &text) {
   if (!elf_image_contains(image, 0, sizeof(Elf64_Ehdr)))
@@ -641,7 +642,10 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
   }
 
   std::vector<uint64_t> leaders;
-  std::unordered_map<size_t, std::unordered_set<uint32_t>> allocated_relocation_symbols;
+  // The bool records whether any static/explicit-target reference admitted the
+  // symbol under the pre-existing policy. Dynamic ROCr references use the
+  // narrower loader contract and admit only executable STT_FUNC entries.
+  std::unordered_map<size_t, std::unordered_map<uint32_t, bool>> allocated_relocation_symbols;
 
   for (size_t relocation_section_index = 0; relocation_section_index < shdrs.size();
        ++relocation_section_index) {
@@ -670,10 +674,15 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
 
       const uint32_t relocation_type = elf_reloc_type(relocation.r_info);
       const uint32_t symbol_index = elf_reloc_sym(relocation.r_info);
-      if (relocation_type == R_AMDGPU_ABS64 && symbol_index != 0) {
+      const bool rocr_dynamic = is_et_dyn_rocr_dynamic_relocation_section(ehdr, relocs);
+      const bool has_dynamic_symbol_value =
+          rocr_dynamic && rocr_dynamic_rela_has_relocatable_symbol_value(relocation);
+      const bool has_legacy_static_entry =
+          !rocr_dynamic && relocation_type == R_AMDGPU_ABS64 && symbol_index != 0;
+      if (has_dynamic_symbol_value || has_legacy_static_entry) {
         if (relocs.sh_link >= shdrs.size())
           return std::nullopt;
-        allocated_relocation_symbols[relocs.sh_link].insert(symbol_index);
+        allocated_relocation_symbols[relocs.sh_link][symbol_index] |= has_legacy_static_entry;
       }
 
       if (ehdr.e_type != ET_DYN || relocation_type != R_AMDGPU_RELATIVE64 ||
@@ -699,15 +708,16 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
     }
 
     const size_t count = symtab.sh_size / sizeof(Elf64_Sym);
-    for (const uint32_t symbol_index : symbol_indices) {
+    for (const auto &[symbol_index, legacy_static_entry] : symbol_indices) {
       if (symbol_index >= count)
         return std::nullopt;
       Elf64_Sym symbol{};
       std::memcpy(&symbol, image.data() + symtab.sh_offset + symbol_index * sizeof(Elf64_Sym),
                   sizeof(symbol));
       const uint8_t symbol_type = elf_symbol_type(symbol.st_info);
-      if (symbol.st_shndx != *text_index ||
-          (symbol_type != kElfSymbolTypeFunc && symbol_type != kElfSymbolTypeNone)) {
+      const bool executable_entry = elf_symbol_is_executable_entry(symbol_type) ||
+                                    (legacy_static_entry && symbol_type == kElfSymbolTypeNone);
+      if (symbol.st_shndx != *text_index || !executable_entry) {
         continue;
       }
 

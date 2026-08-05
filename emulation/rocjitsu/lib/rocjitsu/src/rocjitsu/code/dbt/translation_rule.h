@@ -444,8 +444,7 @@ public:
   RewriteDischargeContext context = RewriteDischargeContext::Instruction;
 
   [[nodiscard]] static constexpr RewriteDischarge
-  checked(ResidualExpandFn predicate,
-          RewriteDischargeContext required_context = RewriteDischargeContext::Instruction) {
+  checked(ResidualExpandFn predicate, RewriteDischargeContext required_context) {
     return {RewriteDischargeDisposition::Checked, predicate, nullptr, required_context};
   }
 
@@ -595,6 +594,22 @@ class RewriteRegistry {
 public:
   std::span<const TranslationRule> opcode_rules;
   std::span<const RegisteredInstructionRewrite> instruction_rules;
+
+  /// @brief Whether a non-opcode rule requires contextual final-stream analysis.
+  ///
+  /// @details These predicates cannot be evaluated safely by the streaming
+  /// verifier because their neighboring instructions do not exist until the CFG
+  /// is built. Conservatively request that CFG independent of the lowering
+  /// selector, which is allowed to differ from the residual predicate.
+  [[nodiscard]] constexpr bool instruction_rewrites_require_basic_block() const {
+    for (const RegisteredInstructionRewrite &rule : instruction_rules) {
+      if (rule.discharge.disposition == RewriteDischargeDisposition::Checked &&
+          rule.discharge.context == RewriteDischargeContext::BasicBlock) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   [[nodiscard]] constexpr bool has_complete_discharge() const {
     if (opcode_rules.empty() && instruction_rules.empty())

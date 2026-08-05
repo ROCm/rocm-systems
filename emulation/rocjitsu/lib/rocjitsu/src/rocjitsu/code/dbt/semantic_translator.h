@@ -109,10 +109,11 @@ public:
   /// caller can use this during a constant-memory linear decode.
   [[nodiscard]] bool instruction_local_residual_rewrite_applies(const Instruction &inst) const;
 
-  /// @brief Whether @p inst selects a residual predicate requiring a decoded basic block.
+  /// @brief Whether final-stream analysis at @p inst requires a decoded basic block.
   ///
-  /// @details A true result requires the final-stream verifier to fall back to
-  /// full CFG construction before deciding whether the rewrite was discharged.
+  /// @details Opcode rules are selected by @p inst. A registered non-opcode
+  /// BasicBlock rule forces a conservative fallback because its residual
+  /// predicate may require neighbors before it can decide whether it applies.
   [[nodiscard]] bool residual_rewrite_needs_basic_block(const Instruction &inst) const;
 
   [[nodiscard]] bool has_rules() const {
@@ -144,6 +145,7 @@ private:
   std::span<const RegisteredInstructionRewrite> instruction_rewrite_rules_;
   std::vector<uint32_t> expand_rule_keys_;          ///< Packed keys parallel to expand_rules_.
   std::vector<uint64_t> expand_rule_encoding_bits_; ///< Cheap encoding prefilter for hot scans.
+  bool instruction_rewrites_require_basic_block_ = false;
   rj_code_arch_t host_arch_;
 };
 

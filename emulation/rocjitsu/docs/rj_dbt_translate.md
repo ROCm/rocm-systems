@@ -133,11 +133,22 @@ the output object.
 
 Executable entries use the same preservation contract as translation and ELF
 patching: kernel descriptors, relocation-backed function tables, allocated
-`R_AMDGPU_ABS64` relocations to ordinary text symbols, and
-`R_AMDGPU_RELATIVE64` addends into `.text`. Global or weak
-`STT_FUNC`/`STT_NOTYPE` symbols without such a runtime reference are symbol-table
-metadata, not independent execution roots. They do not acquire a translation
-scope or an output-offset requirement merely because of their binding.
+target-less dynamic zero-addend `R_AMDGPU_ABS32_LO`, `R_AMDGPU_ABS32_HI`,
+`R_AMDGPU_ABS64`, and `R_AMDGPU_ABS32` relocations to ordinary text symbols, and
+`R_AMDGPU_RELATIVE64` addends into `.text`. The explicit-symbol forms store,
+respectively, the low 32 bits, high 32 bits, full 64 bits, or truncated 32 bits
+of the relocated symbol value.
+
+ROCr derives dynamic `STT_OBJECT`, `STT_AMDGPU_HSA_KERNEL`, and `STT_FUNC`
+addresses from `st_value`; only `STT_FUNC` is treated here as a
+relocation-backed executable entry. ROCr instead resolves `STT_NOTYPE` as an
+external agent symbol by name, so a text-defined `STT_NOTYPE` relocation is not
+accepted as a local code reference. Global or weak `STT_FUNC` symbols without a
+supported runtime reference remain symbol-table metadata rather than independent
+execution roots.
+Relocations with an explicit section target retain the translator's existing
+static/metadata policy; the ROCr dynamic-loader allowlist above does not redefine
+their symbol or relocation-type rules.
 Relocation sections explicitly targeting non-allocated sections are likewise
 metadata and do not create executable entries. If a runtime-referenced source
 entry is emitted at multiple output placements, materialization fails closed:

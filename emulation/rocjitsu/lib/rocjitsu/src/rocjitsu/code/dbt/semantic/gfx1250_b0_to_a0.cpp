@@ -40,7 +40,7 @@ namespace {
 [[nodiscard]] bool cvt_sr_fp8_f32_e5m3_residual(const Instruction &inst);
 
 [[nodiscard]] constexpr RewriteDischarge checked_discharge(ResidualExpandFn check) {
-  return RewriteDischarge::checked(check);
+  return RewriteDischarge::checked(check, RewriteDischargeContext::Instruction);
 }
 
 [[nodiscard]] constexpr RewriteDischarge block_checked_discharge(ResidualExpandFn check) {

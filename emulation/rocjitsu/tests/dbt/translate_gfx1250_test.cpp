@@ -3670,14 +3670,29 @@ TEST(BinaryTranslatorE2E, RejectsAmbiguousRuntimeEntryClonedAcrossKernelScopes) 
 TEST(BinaryTranslatorE2E, PreservesUniqueRelocationBackedTextEntries) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   constexpr uint64_t kReferencedEntry = sizeof(uint32_t);
+  struct RelocationCase {
+    rocjitsu::test_support::TestRuntimeTextRelocation fixture;
+    uint32_t relocation_type;
+  };
+  constexpr std::array relocation_cases = {
+      RelocationCase{rocjitsu::test_support::TestRuntimeTextRelocation::Abs64,
+                     rocjitsu::R_AMDGPU_ABS32_LO},
+      RelocationCase{rocjitsu::test_support::TestRuntimeTextRelocation::Abs64,
+                     rocjitsu::R_AMDGPU_ABS32_HI},
+      RelocationCase{rocjitsu::test_support::TestRuntimeTextRelocation::Abs64,
+                     rocjitsu::R_AMDGPU_ABS64},
+      RelocationCase{rocjitsu::test_support::TestRuntimeTextRelocation::Abs64,
+                     rocjitsu::R_AMDGPU_ABS32},
+      RelocationCase{rocjitsu::test_support::TestRuntimeTextRelocation::Relative64,
+                     rocjitsu::R_AMDGPU_RELATIVE64},
+  };
 
-  for (const auto relocation : {rocjitsu::test_support::TestRuntimeTextRelocation::Abs64,
-                                rocjitsu::test_support::TestRuntimeTextRelocation::Relative64}) {
-    SCOPED_TRACE(relocation == rocjitsu::test_support::TestRuntimeTextRelocation::Abs64 ? "ABS64"
-                                                                                       : "RELATIVE64");
+  for (const RelocationCase &test_case : relocation_cases) {
+    SCOPED_TRACE(test_case.relocation_type);
     auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_two_kernel_descriptors(
         {kGfx1250SEndpgm, kGfx1250SEndpgm}, rocjitsu::test_support::TestRuntimeTextReference{
-                                                .relocation = relocation,
+                                                .relocation = test_case.fixture,
+                                                .relocation_type = test_case.relocation_type,
                                                 .target_text_offset = kReferencedEntry,
                                             });
     rocjitsu::write_value_for_test<uint32_t>(image, offsetof(rocjitsu::Elf64_Ehdr, e_flags),
@@ -3720,7 +3735,8 @@ TEST(BinaryTranslatorE2E, PreservesUniqueRelocationBackedTextEntries) {
     ASSERT_NE(rela, output_shdrs.end());
     const auto relocation_record =
         rocjitsu::read_elf_struct_for_test<rocjitsu::Elf64_Rela>(result.elf_bytes, rela->sh_offset);
-    if (relocation == rocjitsu::test_support::TestRuntimeTextRelocation::Relative64) {
+    EXPECT_EQ(rocjitsu::elf_reloc_type(relocation_record.r_info), test_case.relocation_type);
+    if (test_case.fixture == rocjitsu::test_support::TestRuntimeTextRelocation::Relative64) {
       EXPECT_EQ(relocation_record.r_addend, static_cast<int64_t>(expected_vaddr));
       continue;
     }
@@ -8571,6 +8587,23 @@ TEST(SemanticTranslator, Gfx1250RegistryHasCompleteDischargeContracts) {
   const std::array duplicate_rules = {registry.opcode_rules[0], registry.opcode_rules[0]};
   const rocjitsu::RewriteRegistry duplicate_registry{duplicate_rules, {}};
   EXPECT_FALSE(duplicate_registry.has_complete_discharge());
+
+  const rocjitsu::RegisteredInstructionRewrite divergent_selector_rule{
+      "divergent-selector",
+      +[](const rocjitsu::Instruction &) { return false; },
+      +[](const rocjitsu::Instruction &, uint64_t, std::span<const uint8_t>,
+          const rocjitsu::LivenessAnalysis &,
+          rocjitsu::TranslationContext &) { return rocjitsu::ExpandResult::not_handled(); },
+      false,
+      rocjitsu::RewriteDischarge::checked(
+          +[](const rocjitsu::Instruction &) { return true; },
+          rocjitsu::RewriteDischargeContext::BasicBlock),
+  };
+  const std::array divergent_selector_rules = {divergent_selector_rule};
+  const rocjitsu::RewriteRegistry divergent_selector_registry{{}, divergent_selector_rules};
+  EXPECT_TRUE(divergent_selector_registry.has_complete_discharge());
+  EXPECT_TRUE(divergent_selector_registry.instruction_rewrites_require_basic_block())
+      << "CFG fallback must not depend on the lowering selector";
 
   const rocjitsu::RegisteredInstructionRewrite &flat_scratch = registry.instruction_rules.front();
   EXPECT_STREQ(flat_scratch.name, "flat-scratch-base-64bit-source");

@@ -36,6 +36,7 @@ enum class TestRuntimeTextRelocation : uint8_t {
 
 struct TestRuntimeTextReference {
   TestRuntimeTextRelocation relocation = TestRuntimeTextRelocation::Abs64;
+  uint32_t relocation_type = R_AMDGPU_ABS64;
   uint64_t target_text_offset = 0;
 };
 

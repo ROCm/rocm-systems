@@ -579,8 +579,16 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
       Elf64_Sym symbol{};
       std::memcpy(&symbol, image.data() + symtab.sh_offset + symbol_index * sizeof(symbol),
                   sizeof(symbol));
+      const bool rocr_dynamic = is_et_dyn_rocr_dynamic_relocation_section(ehdr, relocs);
+      const bool relative64 = elf_reloc_type(rela.r_info) == R_AMDGPU_RELATIVE64;
+      const bool ordinary_symbol = elf_symbol_type(symbol.st_info) != kElfSymbolTypeSection;
+      const bool follows_relocated_symbol =
+          rocr_dynamic ? rocr_dynamic_rela_follows_relocated_symbol(rela, symbol) : ordinary_symbol;
+      // Preserve HEAD's mapping requirement for a redundant text symbol on
+      // RELATIVE64. ROCr derives the stored target from the addend, but still
+      // resolves the referenced symbol before dispatching on relocation type.
       if (symbol.st_shndx == text_index &&
-          elf_symbol_type(symbol.st_info) != kElfSymbolTypeSection) {
+          (follows_relocated_symbol || (rocr_dynamic && relative64 && ordinary_symbol))) {
         referenced_by_symtab[relocs.sh_link].insert(symbol_index);
       }
     }
@@ -1144,8 +1152,8 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
   const uint64_t text_addr_hi = text.sh_addr + text_size_;
 
   // Return the referenced symbol only when it is defined in .text. Keeping the
-  // complete symbol is necessary because ordinary named symbols and STT_SECTION
-  // symbols require different relocation strategies.
+  // complete symbol is necessary because the shared relocation policy also
+  // classifies how the runtime derives its address.
   auto text_symbol = [&](const Elf64_Shdr &symtab, uint32_t sym_index) -> std::optional<Elf64_Sym> {
     if (symtab.sh_entsize != sizeof(Elf64_Sym))
       return std::nullopt;
@@ -1177,15 +1185,13 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
     const size_t count = relocs.sh_size / entsize;
     for (size_t i = 0; i < count; ++i) {
       const uint64_t offset = relocs.sh_offset + i * entsize;
+      Elf64_Rela rela{};
       uint64_t r_offset = 0;
       uint64_t r_info = 0;
-      int64_t r_addend = 0;
       if (is_rela) {
-        Elf64_Rela rela{};
         std::memcpy(&rela, image_.data() + offset, sizeof(rela));
         r_offset = rela.r_offset;
         r_info = rela.r_info;
-        r_addend = rela.r_addend;
       } else {
         Elf64_Rel rel{};
         std::memcpy(&rel, image_.data() + offset, sizeof(rel));
@@ -1205,8 +1211,14 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
         // symbol leaves the source offset in the addend, while REL keeps an
         // implicit addend at the relocation place; neither form can be repaired
         // safely without interpreting the individual relocation type.
-        if (!is_rela || elf_symbol_type(symbol->st_info) == kElfSymbolTypeSection ||
-            r_addend != 0) {
+        const bool rocr_dynamic = is_et_dyn_rocr_dynamic_relocation_section(header, relocs);
+        const bool relative64 = elf_reloc_type(r_info) == R_AMDGPU_RELATIVE64;
+        const bool ordinary_symbol = elf_symbol_type(symbol->st_info) != kElfSymbolTypeSection;
+        const bool supported_rela =
+            rocr_dynamic ? ((relative64 && ordinary_symbol) ||
+                            rocr_dynamic_rela_follows_relocated_symbol(rela, *symbol))
+                         : ordinary_symbol;
+        if (!is_rela || rela.r_addend != 0 || !supported_rela) {
           return true;
         }
         continue;
@@ -1217,7 +1229,7 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
       // replace_text() remaps an in-text addend exactly. Other symbol-zero forms
       // provide no generic way to identify a .text target here.
       if (is_rela && elf_reloc_type(r_info) == R_AMDGPU_RELATIVE64) {
-        const uint64_t target = static_cast<uint64_t>(r_addend);
+        const uint64_t target = static_cast<uint64_t>(rela.r_addend);
         if (target >= text_addr_lo && target < text_addr_hi)
           continue;
       }

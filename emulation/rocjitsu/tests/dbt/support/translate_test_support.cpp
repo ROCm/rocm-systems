@@ -667,7 +667,8 @@ make_minimal_amdgpu_elf_with_two_kernel_descriptors(
     Elf64_Rela relocation{};
     relocation.r_offset = rodata_vaddr + 2 * kKernelDescriptorSize;
     if (runtime_text_reference->relocation == TestRuntimeTextRelocation::Abs64) {
-      relocation.r_info = (static_cast<uint64_t>(3) << 32) | R_AMDGPU_ABS64;
+      relocation.r_info = (static_cast<uint64_t>(3) << 32) |
+                          static_cast<uint64_t>(runtime_text_reference->relocation_type);
     } else {
       relocation.r_info = R_AMDGPU_RELATIVE64;
       relocation.r_addend =
@@ -722,7 +723,7 @@ make_minimal_amdgpu_elf_with_two_kernel_descriptors(
     shdrs[6].sh_offset = rela_offset;
     shdrs[6].sh_size = sizeof(Elf64_Rela);
     shdrs[6].sh_link = 3;
-    shdrs[6].sh_info = 2;
+    shdrs[6].sh_info = SHN_UNDEF;
     shdrs[6].sh_addralign = alignof(Elf64_Rela);
     shdrs[6].sh_entsize = sizeof(Elf64_Rela);
   }

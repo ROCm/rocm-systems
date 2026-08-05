@@ -176,10 +176,14 @@ inline constexpr uint32_t SHT_NOBITS = 8; // ELF spec: section occupies no file 
 inline constexpr uint32_t SHT_REL = 9;
 inline constexpr uint32_t SHT_DYNSYM = 11;
 
-// AMDGPU ELF relocation types used by linked code-object function tables.
-// Keep the numeric values local to the ELF layer so DBT does not depend on
-// LLVM's ELF headers merely to inspect loader relocations.
+// AMDGPU ELF relocation types used by linked code objects. Keep the numeric
+// values local to the ELF layer so DBT does not depend on LLVM's ELF headers
+// merely to inspect loader relocations.
+inline constexpr uint32_t R_AMDGPU_NONE = 0;
+inline constexpr uint32_t R_AMDGPU_ABS32_LO = 1;
+inline constexpr uint32_t R_AMDGPU_ABS32_HI = 2;
 inline constexpr uint32_t R_AMDGPU_ABS64 = 3;
+inline constexpr uint32_t R_AMDGPU_ABS32 = 6;
 inline constexpr uint32_t R_AMDGPU_RELATIVE64 = 13;
 
 inline constexpr uint8_t kElfSymbolBindLocal = 0;
@@ -187,10 +191,11 @@ inline constexpr uint8_t kElfSymbolBindGlobal = 1;
 inline constexpr uint8_t kElfSymbolBindWeak = 2;
 inline constexpr uint8_t kElfSymbolVisibilityHidden = 2;   // STV_HIDDEN
 inline constexpr uint8_t kElfSymbolVisibilityInternal = 1; // STV_INTERNAL
-inline constexpr uint8_t kElfSymbolTypeNone = 0;           // STT_NOTYPE
-inline constexpr uint8_t kElfSymbolTypeObject = 1;         // STT_OBJECT
-inline constexpr uint8_t kElfSymbolTypeFunc = 2;           // STT_FUNC
-inline constexpr uint8_t kElfSymbolTypeSection = 3;        // STT_SECTION
+inline constexpr uint8_t kElfSymbolTypeNone = 0;             // STT_NOTYPE
+inline constexpr uint8_t kElfSymbolTypeObject = 1;           // STT_OBJECT
+inline constexpr uint8_t kElfSymbolTypeFunc = 2;             // STT_FUNC
+inline constexpr uint8_t kElfSymbolTypeSection = 3;          // STT_SECTION
+inline constexpr uint8_t kElfSymbolTypeAmdGpuHsaKernel = 10; // STT_AMDGPU_HSA_KERNEL
 
 inline constexpr uint8_t elf_symbol_bind(uint8_t info) { return info >> 4; }
 inline constexpr uint8_t elf_symbol_type(uint8_t info) { return info & 0xf; }
@@ -340,6 +345,60 @@ struct Elf64_Rela {
   uint64_t r_info;
   int64_t r_addend;
 };
+
+/// @brief Whether ROCr's dynamic loader forms this relocation from a symbol value.
+inline constexpr bool rocr_dynamic_relocation_uses_symbol_value(uint32_t relocation_type) {
+  switch (relocation_type) {
+  case R_AMDGPU_ABS32_LO:
+  case R_AMDGPU_ABS32_HI:
+  case R_AMDGPU_ABS64:
+  case R_AMDGPU_ABS32:
+    return true;
+  default:
+    return false;
+  }
+}
+
+/// @brief Whether ROCr derives this dynamic symbol's runtime address from st_value.
+inline constexpr bool rocr_dynamic_symbol_address_follows_st_value(uint8_t symbol_type) {
+  switch (symbol_type) {
+  case kElfSymbolTypeObject:
+  case kElfSymbolTypeFunc:
+  case kElfSymbolTypeAmdGpuHsaKernel:
+    return true;
+  default:
+    return false;
+  }
+}
+
+/// @brief Whether this symbol type can introduce a relocation-backed code entry.
+inline constexpr bool elf_symbol_is_executable_entry(uint8_t symbol_type) {
+  return symbol_type == kElfSymbolTypeFunc;
+}
+
+/// @brief Whether a supported RELA record can follow a separately relocated symbol value.
+///
+/// @details Callers establish that the relocation place is allocated and that
+/// the symbol belongs to the section being rewritten. An explicit zero addend
+/// leaves the complete target in st_value, so relocating that symbol is enough
+/// for the symbol-valued relocation encodings supported by the runtime loader.
+inline constexpr bool rocr_dynamic_rela_has_relocatable_symbol_value(const Elf64_Rela &relocation) {
+  return elf_reloc_sym(relocation.r_info) != 0 && relocation.r_addend == 0 &&
+         rocr_dynamic_relocation_uses_symbol_value(elf_reloc_type(relocation.r_info));
+}
+
+/// @brief Whether ROCr's dynamic path can follow this symbol-valued RELA reference.
+inline constexpr bool rocr_dynamic_rela_follows_relocated_symbol(const Elf64_Rela &relocation,
+                                                                 const Elf64_Sym &symbol) {
+  return rocr_dynamic_rela_has_relocatable_symbol_value(relocation) &&
+         rocr_dynamic_symbol_address_follows_st_value(elf_symbol_type(symbol.st_info));
+}
+
+/// @brief Whether this supported ET_DYN section uses ROCr's dynamic relocation policy.
+inline constexpr bool is_et_dyn_rocr_dynamic_relocation_section(const Elf64_Ehdr &ehdr,
+                                                                const Elf64_Shdr &relocs) {
+  return ehdr.e_type == ET_DYN && relocs.sh_info == SHN_UNDEF;
+}
 
 /// @brief Return whether a relocation record applies to storage loaded at runtime.
 ///

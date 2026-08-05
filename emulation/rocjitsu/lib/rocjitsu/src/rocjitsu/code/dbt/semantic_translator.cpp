@@ -56,7 +56,10 @@ SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host
                                        ProcessorRevision output_revision)
     : rewrite_registry_(rewrite_registry_for(guest, host, input_revision, output_revision)),
       expand_rules_(rewrite_registry_.opcode_rules),
-      instruction_rewrite_rules_(rewrite_registry_.instruction_rules), host_arch_(host) {
+      instruction_rewrite_rules_(rewrite_registry_.instruction_rules),
+      instruction_rewrites_require_basic_block_(
+          rewrite_registry_.instruction_rewrites_require_basic_block()),
+      host_arch_(host) {
   expand_rule_keys_.reserve(expand_rules_.size());
   uint16_t max_encoding_id = 0;
   for (const TranslationRule &rule : expand_rules_) {
@@ -156,17 +159,14 @@ bool SemanticTranslator::instruction_local_residual_rewrite_applies(const Instru
 }
 
 bool SemanticTranslator::residual_rewrite_needs_basic_block(const Instruction &inst) const {
+  if (instruction_rewrites_require_basic_block_)
+    return true;
   const TranslationRule *rule = find_expand_rule(inst);
   if (rule != nullptr && rule->discharge.disposition == RewriteDischargeDisposition::Checked &&
       rule->discharge.context == RewriteDischargeContext::BasicBlock) {
     return true;
   }
-  return std::ranges::any_of(
-      instruction_rewrite_rules_, [&](const RegisteredInstructionRewrite &candidate) {
-        return candidate.discharge.disposition == RewriteDischargeDisposition::Checked &&
-               candidate.discharge.context == RewriteDischargeContext::BasicBlock &&
-               candidate.applies != nullptr && candidate.applies(inst);
-      });
+  return false;
 }
 
 bool SemanticTranslator::residual_rewrite_applies(const Instruction &inst,
