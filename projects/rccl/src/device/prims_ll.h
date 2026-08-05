@@ -71,7 +71,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
   inline __device__ void barrier() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     if (nthreads != WARP_SIZE)
-#if defined(__gfx942__) || (defined(__gfx950__) && defined(HIP_HOST_UNCACHED_MEMORY))
+#if defined(__gfx942__) || (defined(__gfx950__) && defined(HIP_HOST_UNCACHED_MEMORY)) || defined(__gfx1250__)
       barrier_generic(__threadfence_block(), nthreads, barrier_next, barriers);
 #else
       barrier_generic(__threadfence(), nthreads, barrier_next, barriers);

@@ -1209,30 +1209,41 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
                       std::min(gang_factor, properties_.NumSdmaXgmiEngines);
   }
 
+  // For non-gang H2D/D2H copies, bypass the gang lock entirely.
+  // H2D uses BlitHostToDev, D2H uses BlitDevToHost. Since they use separate engines 
+  // and separate blit objects, no serialization needed.
+  if (gang_factor == 1) {
+    const bool is_h2d = (src_agent.device_type() == core::Agent::kAmdCpuDevice);
+    SetCopyRequestRefCount(true);
+    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
+    lazy_ptr<core::Blit>& blit = GetBlitObject(is_h2d ? BlitHostToDev : BlitDevToHost);
+    std::vector<core::Signal*> no_gang;
+    return blit->SubmitLinearCopyCommand(dst, src, size, dep_signals, out_signal, no_gang);
+  }
+
+  // Gang copy path
   std::lock_guard<std::mutex> lock(sdma_gang_lock_);
   // Manage internal gang signals
   std::vector<core::Signal*> gang_signals;
-  if (gang_factor > 1) {
-    for (int i = 0; i < gang_factor - 1; i++) {
-      core::Signal *gang_signal;
+  for (int i = 0; i < gang_factor - 1; i++) {
+    core::Signal *gang_signal;
 
-      // Initial value is 2 where 1 is for gang-leader to ack and
-      // 1 for non-leader gang item to decrement
-      gang_signal = new core::DefaultSignal(2);
+    // Initial value is 2 where 1 is for gang-leader to ack and
+    // 1 for non-leader gang item to decrement
+    gang_signal = new core::DefaultSignal(2);
 
-      // Fall back to non-gang copy
-      if (!gang_signal->IsValid()) {
-        for (int j = 0; j < gang_signals.size(); j++) gang_signals[j]->DestroySignal();
-        gang_factor = 1;
-        break;
-      }
-
-      core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
-                                         core::Signal::Convert(gang_signal),
-                                         HSA_SIGNAL_CONDITION_EQ, 0, GangCopyCompleteHandler,
-                                         reinterpret_cast<void*>(gang_signal));
-      gang_signals.push_back(gang_signal);
+    // Fall back to non-gang copy
+    if (!gang_signal->IsValid()) {
+      for (int j = 0; j < gang_signals.size(); j++) gang_signals[j]->DestroySignal();
+      gang_factor = 1;
+      break;
     }
+
+    core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
+                                       core::Signal::Convert(gang_signal),
+                                       HSA_SIGNAL_CONDITION_EQ, 0, GangCopyCompleteHandler,
+                                       reinterpret_cast<void*>(gang_signal));
+    gang_signals.push_back(gang_signal);
   }
 
   // Bind the Blit object that will drive this copy operation
@@ -4250,12 +4261,32 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
   // Reset per-XCC state for a fresh session. PcSamplingStop uses -1 on the
   // done signals as an exit sentinel to wake worker threads, so restore the
   // expected initial values before creating new monitoring threads.
+  //
+  // Also reset device-side counters (buf_write_val, buf_written_val0/1) to ensure
+  // host and device agree on buffer parity. Without this, a previous session could
+  // leave buf_write_val with bit 63 set to 1 (buffer 1), while host resets which_buffer
+  // to 0, causing a parity mismatch where trap handlers increment buf_written_val1
+  // but host waits on buf_written_val0.
   for (uint32_t xcc_id = 0; xcc_id < pcs_data->num_xcc; xcc_id++) {
     pcs_data->xcc_data[xcc_id].host_write_offset = 0;
     pcs_data->xcc_data[xcc_id].host_read_offset = 0;
     HSA::hsa_signal_store_screlease(pcs_data->xcc_data[xcc_id].done_sig0, 1);
     HSA::hsa_signal_store_screlease(pcs_data->xcc_data[xcc_id].done_sig1, 1);
     pcs_data->xcc_data[xcc_id].which_buffer = 0;
+
+    // Reset device-side counters to ensure buffer parity agreement.
+    // Use DmaFill (shader blit) which works for both large-BAR and non-large-BAR systems,
+    // consistent with how PcSamplingCreateFromId initializes device memory.
+    if (pcs_data->xcc_data[xcc_id].device_data) {
+      if (DmaFill(&pcs_data->xcc_data[xcc_id].device_data->buf_write_val, 0, 2) !=
+              HSA_STATUS_SUCCESS ||
+          DmaFill(&pcs_data->xcc_data[xcc_id].device_data->buf_written_val0, 0, 1) !=
+              HSA_STATUS_SUCCESS ||
+          DmaFill(&pcs_data->xcc_data[xcc_id].device_data->buf_written_val1, 0, 1) !=
+              HSA_STATUS_SUCCESS) {
+        return HSA_STATUS_ERROR;
+      }
+    }
   }
   pcs_data->consumer_exit.store(false, std::memory_order_relaxed);
   pcs_data->pending_flush_count = 0;
@@ -4519,13 +4550,12 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
         : &pcs_data->xcc_data[xcc_id].device_data->buf_written_val1;
 
     // Wait for GPU to finish writing samples (per-XCC isolation eliminates contention)
-    // Check session.isActive() to avoid spinning forever if GPU hangs or session is stopping.
+    // Check session.isActive() to avoid spinning forever if session is stopping.
     uint32_t expected_written = (uint32_t)sample_count;
 
     while (rocr::atomic::Load(bwv_written, std::memory_order_acquire) < expected_written) {
-      // Exit early if session is being stopped - prevents infinite spin on GPU hang
+      // Exit early if session is being stopped - prevents infinite spin during shutdown
       if (!session.isActive()) {
-        // Treat remaining expected samples as lost
         uint32_t actual_written = rocr::atomic::Load(bwv_written, std::memory_order_acquire);
         if (actual_written < expected_written) {
           pcs_data->xcc_data[xcc_id].lost_sample_count.fetch_add(
