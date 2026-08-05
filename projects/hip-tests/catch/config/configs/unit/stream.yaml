@@ -496,3 +496,6 @@ stream:
   Unit_hipSharedQueueAnyOrderOverlap_GraphUnaffected:
     <<: *level_2
     tags: [synchronization, overlap]
+  Unit_hipSharedQueueAnyOrderOverlap_StreamWaitValueDependencyHonored:
+    <<: *level_2
+    tags: [synchronization, overlap]

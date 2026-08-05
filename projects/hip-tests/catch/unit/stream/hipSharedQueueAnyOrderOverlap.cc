@@ -9,30 +9,15 @@
  * @{
  * @ingroup StreamTest
  * Correctness tests for the shared-queue any-order overlap optimization
- * (DEBUG_HIP_SHARED_QUEUE_ANYORDER). When more streams are created than the HW
- * queue pool (GPU_MAX_HW_QUEUES, default 4), the extra streams are recycled onto
- * shared HW queues. With the flag ON, a kernel's AQL barrier bit is cleared when its
- * in-stream order is already preserved, letting independent streams overlap on the ring.
+ * (DEBUG_HIP_SHARED_QUEUE_ANYORDER). When more streams than the HW queue pool
+ * (GPU_MAX_HW_QUEUES, default 4) are created, the extras share HW queues; with the
+ * flag ON a kernel's AQL barrier bit is cleared when its in-stream order is already
+ * preserved, letting independent streams overlap on the ring.
  *
- * These tests assert properties that must hold regardless of the flag:
- *   1. Independent oversubscribed streams always produce correct results.
- *   2. Explicit cross-stream dependencies (hipStreamWaitEvent) are always honored,
- *      because the optimization skips any launch that carries an event wait.
- *   3. Intra-stream ordering survives the sole-tenant -> shared transition: a
- *      dispatch issued while a stream is alone on the ring is still tracked, so a
- *      later same-stream dispatch is never misread as a "first dispatch" and cleared.
- *   4. A later kernel observes an internal same-stream predecessor (the fillBuffer
- *      behind hipMemsetAsync, an async copy) -- these must not be treated as absent.
- *   5. Stream priority pools, the null/blocking stream, and async copies keep their
- *      ordering.
- *   6. HIP graphs (dependency edges) are unaffected -- the optimization must not
- *      perturb intra-graph ordering.
- *
- * To exercise the ON path, run with DEBUG_HIP_SHARED_QUEUE_ANYORDER=1 (optionally
- * GPU_MAX_HW_QUEUES=1 to force a single shared ring); every test must still pass.
- * Per-packet barrier-bit placement and the cooperative-kernel exclusion are checked
- * by asserting the observable ordering those choices must preserve, rather than by
- * inspecting packets directly.
+ * Each test below asserts a property that must hold with the flag OFF and ON. Run
+ * with DEBUG_HIP_SHARED_QUEUE_ANYORDER=1 (optionally GPU_MAX_HW_QUEUES=1 to force a
+ * single shared ring) to exercise the ON path; correctness is checked via observable
+ * ordering, not by inspecting packets.
  */
 
 #include <hip_test_common.hh>
@@ -81,9 +66,8 @@ __global__ void ReadLastByteKernel(const unsigned char* buf, size_t n, int* seen
 /**
  * Test Description
  * ------------------------
- *  - Create far more streams than the HW queue pool so they oversubscribe shared
- *    rings, run an independent chain of increment kernels per stream on its own
- *    buffer slot, and verify every slot has the exact expected count.
+ *  - Oversubscribe the HW queue pool with independent per-stream increment chains
+ *    (each on its own buffer slot); every slot must have the exact expected count.
  * Test source
  * ------------------------
  *  - unit/stream/hipSharedQueueAnyOrderOverlap.cc
@@ -129,11 +113,9 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_Independence") {
 /**
  * Test Description
  * ------------------------
- *  - Set up producer/consumer stream pairs that oversubscribe the HW queue pool,
- *    linking each consumer to its producer with hipEventRecord/hipStreamWaitEvent.
- *    The producer writes late and the consumer reads early, so a missed dependency
- *    would surface as a stale read. Verify the consumer always observes the
- *    producer's write, proving the optimization never drops an explicit wait.
+ *  - Oversubscribed producer/consumer pairs linked by hipEventRecord/
+ *    hipStreamWaitEvent (producer writes late, consumer reads early). The consumer
+ *    must never see a stale value -- the optimization skips launches with an event wait.
  * Test source
  * ------------------------
  *  - unit/stream/hipSharedQueueAnyOrderOverlap.cc
@@ -186,12 +168,10 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_EventDependencyHonored") {
 /**
  * Test Description
  * ------------------------
- *  - Guards intra-stream ordering across the sole-tenant -> shared transition. A
- *    fresh stream A (sole tenant) issues a long kernel that writes BASE, a second
- *    stream B then joins the shared ring, and A issues a dependent kernel that adds
- *    DELTA to the same buffer. If A's second dispatch were misclassified as a "first
- *    dispatch" and had its barrier bit cleared, it would race A's first kernel and
- *    the sum would be wrong. Fresh streams each iteration retrigger the transition.
+ *  - Guards intra-stream order across the sole-tenant -> shared transition: stream A
+ *    writes BASE (long kernel), stream B joins the ring, then A adds DELTA to the same
+ *    buffer. If A's second dispatch were misread as a "first dispatch" and cleared it
+ *    would race A0, so the sum must equal BASE+DELTA. Fresh streams each iteration.
  * Test source
  * ------------------------
  *  - unit/stream/hipSharedQueueAnyOrderOverlap.cc
@@ -239,12 +219,10 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_IntraStreamOrderAcrossActivation")
 /**
  * Test Description
  * ------------------------
- *  - Guards ordering against an internal same-stream predecessor. Several co-resident
- *    streams (a warm-up dispatch makes the ring genuinely shared) each do a large
- *    hipMemsetAsync -- whose device-side fillBuffer is a compute dispatch on the same
- *    ring -- immediately followed by a kernel that reads the LAST byte written by that
- *    memset. If the kernel's barrier bit were cleared without accounting for the
- *    memset predecessor, the kernel would race the fill and read a stale byte.
+ *  - Guards ordering against an internal same-stream predecessor: on a shared ring, a
+ *    large hipMemsetAsync (its device fillBuffer is a compute dispatch) is followed by
+ *    a kernel reading the last byte written. A wrongly cleared barrier would race the
+ *    fill and read a stale byte.
  * Test source
  * ------------------------
  *  - unit/stream/hipSharedQueueAnyOrderOverlap.cc
@@ -342,9 +320,8 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_PriorityStreamsIndependence") {
 /**
  * Test Description
  * ------------------------
- *  - The null/blocking stream runs on a dedicated queue (excluded from the
- *    optimization). Its dependency chain must stay ordered while many async streams
- *    hammer the shared ring in between; the async streams must also be correct.
+ *  - The null/blocking stream (dedicated queue, excluded from the opt) keeps its chain
+ *    ordered while many async streams hammer the shared ring; async streams stay correct.
  * Test source
  * ------------------------
  *  - unit/stream/hipSharedQueueAnyOrderOverlap.cc
@@ -389,10 +366,9 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_NullStreamOrdering") {
 /**
  * Test Description
  * ------------------------
- *  - HIP graphs must be unaffected by the optimization. Build a graph with several
- *    independent same-buffer dependency chains (forcing oversubscription onto shared
- *    rings), instantiate once and launch many times; the chained sum proves every
- *    intra-graph edge survived.
+ *  - HIP graphs must be unaffected: independent same-buffer dependency chains
+ *    (oversubscribed), instantiated once and launched many times; the chained sum
+ *    proves every intra-graph edge survived.
  * Test source
  * ------------------------
  *  - unit/stream/hipSharedQueueAnyOrderOverlap.cc
@@ -447,6 +423,74 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_GraphUnaffected") {
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(s));
   for (auto& b : buf) HIP_CHECK(hipFree(b));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Barrier-value fence on a shared ring: a hipStreamWaitValue32 consumer must
+ *    always observe its hipStreamWriteValue32 producer's payload. Must hold with
+ *    DEBUG_HIP_SHARED_QUEUE_ANYORDER OFF, ON, and ON with GPU_MAX_HW_QUEUES=1.
+ * Test source
+ * ------------------------
+ *  - unit/stream/hipSharedQueueAnyOrderOverlap.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ *  - Stream wait-value support (hipDeviceAttributeCanUseStreamWaitValue)
+ */
+TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_StreamWaitValueDependencyHonored") {
+  int waitValueSupported = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&waitValueSupported, hipDeviceAttributeCanUseStreamWaitValue, 0));
+  if (waitValueSupported == 0) {
+    HIP_SKIP_TEST("hipStreamWaitValue not supported on this device");
+    return;
+  }
+
+  // A few pairs oversubscribe the 4-queue pool so fences land on shared rings (functional, not stress).
+  constexpr int kPairs = 3;  // 6 streams > default pool (4) -> shared rings
+  constexpr int kReps = 5;
+  constexpr int kBusyIters = 1000;
+
+  std::vector<hipStream_t> prod(kPairs), cons(kPairs);
+  std::vector<uint32_t*> flag(kPairs);
+  std::vector<int*> payload(kPairs), seen(kPairs);
+  for (int p = 0; p < kPairs; ++p) {
+    HIP_CHECK(hipStreamCreate(&prod[p]));
+    HIP_CHECK(hipStreamCreate(&cons[p]));
+    HIP_CHECK(hipMalloc(&flag[p], sizeof(uint32_t)));
+    HIP_CHECK(hipMalloc(&payload[p], sizeof(int)));
+    HIP_CHECK(hipMalloc(&seen[p], sizeof(int)));
+    HIP_CHECK(hipMemset(flag[p], 0, sizeof(uint32_t)));
+  }
+
+  // Monotonic flag + Gte wait: a stale prior value can't fire early, so payload != it is a real ordering bug.
+  std::vector<int> hSeen(kPairs);
+  for (int it = 1; it <= kReps; ++it) {
+    for (int p = 0; p < kPairs; ++p) {
+      // Producer publishes the payload late (after a spin), then raises the flag to it.
+      ProducerKernel<<<dim3(1), dim3(1), 0, prod[p]>>>(payload[p], it, kBusyIters);
+      HIP_CHECK(hipStreamWriteValue32(prod[p], flag[p], static_cast<uint32_t>(it), 0));
+      // Consumer waits on the flag via a barrier-value fence, then reads the payload.
+      HIP_CHECK(hipStreamWaitValue32(cons[p], flag[p], static_cast<uint32_t>(it),
+                                     hipStreamWaitValueGte, 0xFFFFFFFF));
+      ConsumerKernel<<<dim3(1), dim3(1), 0, cons[p]>>>(payload[p], seen[p]);
+    }
+    for (int p = 0; p < kPairs; ++p) {
+      HIP_CHECK(hipStreamSynchronize(cons[p]));
+      HIP_CHECK(hipMemcpy(&hSeen[p], seen[p], sizeof(int), hipMemcpyDeviceToHost));
+      INFO("pair " << p << " iteration " << it);
+      REQUIRE(hSeen[p] == it);  // consumer must observe the producer's payload
+    }
+  }
+
+  for (int p = 0; p < kPairs; ++p) {
+    HIP_CHECK(hipFree(flag[p]));
+    HIP_CHECK(hipFree(payload[p]));
+    HIP_CHECK(hipFree(seen[p]));
+    HIP_CHECK(hipStreamDestroy(prod[p]));
+    HIP_CHECK(hipStreamDestroy(cons[p]));
+  }
 }
 
 /**

@@ -2058,8 +2058,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
 
   TrackQueueProgress(barrier_packet_, index, external_signal);
 
-  // Barrier/fence packets always carry the AQL barrier bit, so they fence everything before them on
-  // the ring. Record the slot so a later independent dispatch can safely clear its own bit.
+  // Record this fence slot for the any-order decision (NOP dep-signal splits are harmless: the real barrier records a higher slot).
   if (DEBUG_HIP_SHARED_QUEUE_ANYORDER != 0 && !dedicated_queue_) {
     roc_device_.SharedQueueRecordBarrier(gpu_queue_, index);
   }
@@ -2147,6 +2146,11 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
 
   TrackQueueProgress(barrier_value_packet_, index, external_signal);
+
+  // A barrier-value packet also fences the ring, so record its slot like an ordinary barrier.
+  if (DEBUG_HIP_SHARED_QUEUE_ANYORDER != 0 && !dedicated_queue_) {
+    roc_device_.SharedQueueRecordBarrier(gpu_queue_, index);
+  }
 
   WaitForQueueSlot(index, queueMask);
   hsa_amd_barrier_value_packet_t* aql_loc = &(reinterpret_cast<hsa_amd_barrier_value_packet_t*>(
