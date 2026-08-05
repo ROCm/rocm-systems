@@ -74,3 +74,13 @@ def set_github_output(outputs: Mapping[str, str]):
     with open(output_file, "a") as f:
         for k, v in outputs.items():
             f.write(f"{k}={v}\n")
+
+
+def append_step_summary(summary: str):
+    """Appends markdown to GITHUB_STEP_SUMMARY (or prints if not in CI)."""
+    summary_file = os.environ.get("GITHUB_STEP_SUMMARY", "")
+    if not summary_file:
+        print(summary)
+        return
+    with open(summary_file, "a", encoding="utf-8") as f:
+        f.write(summary)
