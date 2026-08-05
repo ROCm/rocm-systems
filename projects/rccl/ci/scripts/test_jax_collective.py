@@ -8,7 +8,7 @@ This script handles:
   4. Running pytest on pmap_test.py and shard_map_test.py
 
 Usage from GitHub Actions:
-  python .github/scripts/test_jax_collective.py \
+  python projects/rccl/ci/scripts/test_jax_collective.py \
       --artifact-dir ./build \
       --jax-src ./jax-src \
       --results-log ./jax_collective_results.log

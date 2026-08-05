@@ -8,7 +8,7 @@ This script handles:
   4. Running pytest on test_c10d_nccl.py
 
 Usage from GitHub Actions:
-  python .github/scripts/test_pytorch_c10d.py \
+  python projects/rccl/ci/scripts/test_pytorch_c10d.py \
       --artifact-dir ./build \
       --pytorch-src ./pytorch-src \
       --results-log ./pytorch_c10d_results.log
