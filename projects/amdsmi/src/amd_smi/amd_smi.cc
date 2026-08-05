@@ -1650,6 +1650,13 @@ amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
     return AMDSMI_STATUS_INVAL;
   }
 
+#ifdef ENABLE_WSL_BACKEND
+  amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+  amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  if (auto* b = gpu_device->backend()) return b->GetTempMetric(sensor_type, metric, temperature);
+#endif
+
   // Get the PLX temperature from the gpu_metrics
   if (sensor_type == AMDSMI_TEMPERATURE_TYPE_PLX) {
     amdsmi_gpu_metrics_t metric_info;
@@ -4239,6 +4246,15 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
   if (pgpu_metrics == nullptr) {
     return AMDSMI_STATUS_INVAL;  // Return error if pgpu_metrics is null
   }
+
+#ifdef ENABLE_WSL_BACKEND
+  {
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
+    if (r != AMDSMI_STATUS_SUCCESS) return r;
+    if (auto* b = gpu_device->backend()) return b->GetGpuMetricsInfo(pgpu_metrics);
+  }
+#endif
 
   *pgpu_metrics = amdsmi_gpu_metrics_t{};
   rsmi_gpu_metrics_t rsmi_metrics{};
