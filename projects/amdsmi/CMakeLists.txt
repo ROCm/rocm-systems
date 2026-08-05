@@ -124,6 +124,11 @@ include(GNUInstallDirs)
 option(BUILD_TESTS "Build test suite" OFF)
 option(ENABLE_ASAN_PACKAGING "" OFF)
 
+# WSL/WDDM GPU backend. Default OFF so native builds and CI are unchanged. When
+# ON, the WSL intercept hooks and mock backend are compiled
+option(ENABLE_WSL_BACKEND "Build the experimental WSL (WDDM/dxg) GPU backend" OFF)
+set(AMDSMI_ENABLE_WSL_BACKEND ${ENABLE_WSL_BACKEND})
+
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
     option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
 else()
@@ -204,13 +209,13 @@ generic_package()
 
 # Dependencies
 find_package(Threads REQUIRED)
+find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
 pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
 
 # Netlink libraries for network interface functionality (required)
 # TheRock RUNTIME_DEPS automatically configure PKG_CONFIG_PATH for bundled sysdeps
-find_package(PkgConfig REQUIRED)
 
 # Try to use CMake config files first (bundled sysdeps provide these)
 find_package(libnl CONFIG QUIET)
