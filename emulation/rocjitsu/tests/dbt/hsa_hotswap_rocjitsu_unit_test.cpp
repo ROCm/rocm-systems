@@ -5,6 +5,10 @@
 
 #include "hsa/hsa_api_trace_minimal.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "support/gfx1250_test_code_object.h"
 
 #include <array>
 #include <atomic>
@@ -18,10 +22,12 @@
 #include <iterator>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <regex>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unistd.h>
 #include <unordered_map>
 #include <vector>
 
@@ -30,6 +36,9 @@ extern "C" void OnUnload();
 extern "C" size_t rj_test_retained_executable_buffer_count();
 extern "C" void rj_test_clear_retained_storage();
 extern "C" void rj_test_log_translation(uint64_t source_id, size_t changed);
+extern "C" void
+rj_test_log_translation_diagnostic(uint64_t source_id,
+                                   const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic);
 extern "C" uint64_t rj_test_translation_count();
 extern "C" uint64_t rj_test_translation_memo_bytes();
 extern "C" void rj_test_set_translation_memo_capacity(uint64_t bytes);
@@ -240,6 +249,21 @@ std::vector<uint8_t> make_invalid_gfx1250_elf() {
   return image;
 }
 
+void expect_failure_dump(const std::string &log_text, const std::vector<uint8_t> &source) {
+  std::smatch match;
+  const std::regex path_pattern(
+      R"(path=([^;\s]+); please file a bug report and attach this code object)");
+  ASSERT_TRUE(std::regex_search(log_text, match, path_pattern)) << log_text;
+  const std::string path = match[1].str();
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input) << path;
+  const std::vector<uint8_t> dumped((std::istreambuf_iterator<char>(input)),
+                                    std::istreambuf_iterator<char>());
+  EXPECT_EQ(dumped, source);
+  input.close();
+  EXPECT_EQ(unlink(path.c_str()), 0) << path;
+}
+
 #ifdef GFX1250_B0_TO_A0_FIXTURE
 std::vector<uint8_t> read_translation_fixture() {
   std::ifstream input(GFX1250_B0_TO_A0_FIXTURE, std::ios::binary);
@@ -276,15 +300,26 @@ struct FakeApi {
 class HsaHotswapHookTest : public ::testing::Test {
 protected:
   void SetUp() override {
+    const char *verbose = std::getenv("HSA_HOTSWAP_VERBOSE");
+    if (verbose != nullptr)
+      saved_verbose_ = verbose;
     OnUnload();
     // Production storage is process-lifetime (not freed on reinstall), so clear it
     // here to isolate the retention lifecycle between test cases.
     rj_test_clear_retained_storage();
     reset_fakes();
   }
-  void TearDown() override { OnUnload(); }
+  void TearDown() override {
+    OnUnload();
+    rj_test_clear_retained_storage();
+    if (saved_verbose_)
+      (void)setenv("HSA_HOTSWAP_VERBOSE", saved_verbose_->c_str(), 1);
+    else
+      (void)unsetenv("HSA_HOTSWAP_VERBOSE");
+  }
 
   FakeApi api;
+  std::optional<std::string> saved_verbose_;
 };
 
 TEST_F(HsaHotswapHookTest, InstallsOnlyTheEightEntryEagerSurface) {
@@ -450,7 +485,7 @@ TEST_F(HsaHotswapHookTest, TranslationFailureDoesNotLoadOrRetain) {
       << log_text;
   EXPECT_NE(log_text.find("[hsa-hotswap-rj] error: translation diagnostic "), std::string::npos)
       << log_text;
-  EXPECT_NE(log_text.find(" severity=error kind=invalid-code-object "), std::string::npos)
+  EXPECT_NE(log_text.find(" severity=error kind=input-invalid-code-object "), std::string::npos)
       << log_text;
   EXPECT_NE(log_text.find(" message=source is not a valid gfx1250 AMDGPU code object"),
             std::string::npos)
@@ -458,6 +493,53 @@ TEST_F(HsaHotswapHookTest, TranslationFailureDoesNotLoadOrRetain) {
   EXPECT_NE(log_text.find(" outcome=translation_failed "), std::string::npos) << log_text;
   EXPECT_NE(log_text.find(" translation_status="), std::string::npos) << log_text;
   EXPECT_NE(log_text.find(" status="), std::string::npos) << log_text;
+  expect_failure_dump(log_text, source);
+}
+
+TEST_F(HsaHotswapHookTest, RendersTranslatorDiagnosticsAndDumpsFailedSource) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  constexpr auto conversion =
+      rocjitsu::gfx1250::build_vop3(rocjitsu::gfx1250::kVCvtPkFp8F32Vop3,
+                                    {.vdst = 30, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2});
+  constexpr uint32_t kEndpgm = 0xBFB00000u;
+  const std::array<uint32_t, 3> text = {conversion[0], conversion[1], kEndpgm};
+  const auto source = rocjitsu::test_support::make_gfx1250_code_object(text);
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
+      HSA_STATUS_SUCCESS);
+
+  ASSERT_EQ(unsetenv("HSA_HOTSWAP_VERBOSE"), 0);
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  const std::string log_text = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(g_load_agent_calls, 0);
+  EXPECT_NE(log_text.find("[hsa-hotswap-rj] error: translation diagnostic "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" severity=error kind=translator-expand-missing "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" guest_offset=.text+0x0 mnemonic=v_cvt_pk_fp8_f32 "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" required=Add a semantic expansion rule for this mnemonic."),
+            std::string::npos)
+      << log_text;
+  expect_failure_dump(log_text, source);
+}
+
+TEST_F(HsaHotswapHookTest, DiagnosticPrefixMatchesWarningSeverity) {
+  const rj_gfx1250_b0_to_a0_diagnostic_t diagnostic{
+      "warning", "translator-data-only", 0, 0, "", "test warning", 0,
+  };
+  testing::internal::CaptureStderr();
+  rj_test_log_translation_diagnostic(0x1234, &diagnostic);
+  const std::string log_text = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log_text.find("[hsa-hotswap-rj] warning: translation diagnostic "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" severity=warning kind=translator-data-only "), std::string::npos)
+      << log_text;
+  EXPECT_EQ(log_text.find("[hsa-hotswap-rj] error:"), std::string::npos) << log_text;
 }
 
 // The translated backing storage retained for an A0 load must SURVIVE OnUnload()
@@ -846,14 +928,18 @@ TEST_F(HsaHotswapMemoTest, RemembersARefusalInsteadOfRepeatingIt) {
   const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
   constexpr size_t kLoads = 256;
 
+  testing::internal::CaptureStderr();
   for (size_t load = 0; load < kLoads; ++load)
-    ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT) << load;
+    EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT) << load;
+  const std::string log_text = testing::internal::GetCapturedStderr();
 
   // A refusal is a property of the bytes: reaching it once is enough, and every
   // later load must reach the same answer without re-deriving it.
   EXPECT_EQ(rj_test_translation_count(), 1u);
   EXPECT_EQ(g_load_agent_calls, 0);
   EXPECT_EQ(rj_test_retained_executable_buffer_count(), 0u);
+  EXPECT_NE(log_text.find(" outcome=translation_failed "), std::string::npos) << log_text;
+  EXPECT_NE(log_text.find(" outcome=reused_failure "), std::string::npos) << log_text;
 }
 
 #ifdef GFX1250_B0_TO_A0_FIXTURE

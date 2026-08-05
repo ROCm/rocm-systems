@@ -8,17 +8,13 @@
 ///
 /// - `HSA_HOTSWAP_VERBOSE` -- debug logging to stderr. Changes what is reported,
 ///   never what is done. Errors are always reported, independently of this flag.
-/// - `HSA_HOTSWAP_DUMP_DIR` -- write each intercepted source code object to this
-///   existing directory for offline diagnosis.
-/// - `HSA_HOTSWAP_DUMP_ONLY` -- when nonzero, dump intercepted code objects and
-///   pass them to the lower loader without translation. Intended only for
-///   collecting an input for offline translation.
 ///
 /// `HSA_HOTSWAP_DISABLE` belongs to CLR rather than this hook: it stops CLR
 /// forwarding anything here at all.
 
 #include "hsa/hsa_api_trace_minimal.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/code_object_identity.h"
 #include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
 
 #include <algorithm>
@@ -67,55 +63,67 @@ bool verbose_logging() {
   return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
 }
 
-bool dump_only() {
-  const char *value = std::getenv("HSA_HOTSWAP_DUMP_ONLY");
-  return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
-}
-
 void log(const char *format, ...) noexcept;
 void log_error(const char *format, ...) noexcept;
 
-uint64_t exact_source_id(std::span<const uint8_t> bytes) noexcept {
-  constexpr uint64_t kOffsetBasis = 14695981039346656037ULL;
-  constexpr uint64_t kPrime = 1099511628211ULL;
-  uint64_t value = kOffsetBasis;
-  for (const uint8_t byte : bytes) {
-    value ^= byte;
-    value *= kPrime;
+#if defined(RJ_HOTSWAP_TEST_HOOKS)
+std::mutex g_test_dump_mutex;
+std::vector<std::string> g_test_dump_paths;
+void remember_test_dump(const char *path) noexcept {
+  try {
+    std::lock_guard lock(g_test_dump_mutex);
+    g_test_dump_paths.emplace_back(path);
+  } catch (...) {
   }
-  return value;
 }
+#else
+void remember_test_dump(const char *) noexcept {}
+#endif
 
-void dump_source_for_diagnostics(std::span<const uint8_t> bytes) noexcept {
-  const char *directory = std::getenv("HSA_HOTSWAP_DUMP_DIR");
-  if (directory == nullptr || directory[0] == '\0')
-    return;
-
-  char path[4096];
-  const uint64_t source_id = exact_source_id(bytes);
-  const int length = std::snprintf(path, sizeof(path), "%s/gfx1250-%016" PRIx64 "-%zu.elf",
-                                   directory, source_id, bytes.size());
+void dump_failed_source(std::span<const uint8_t> bytes) noexcept {
+  const uint64_t source_id = rocjitsu::stable_code_object_id(bytes.data(), bytes.size());
+  char path[256];
+  const int length = std::snprintf(
+      path, sizeof(path), "/tmp/rocjitsu-gfx1250-b0-to-a0-%016" PRIx64 "-XXXXXX.elf", source_id);
   if (length < 0 || static_cast<size_t>(length) >= sizeof(path)) {
-    log_error("diagnostic dump path is too long source_id=fnv1a64:%016" PRIx64, source_id);
+    log_error("translation failed and its source code object could not be saved: path is too long "
+              "source_id=fnv1a64:%016" PRIx64 "; please file a bug report",
+              source_id);
     return;
   }
 
-  FILE *output = std::fopen(path, "wb");
+  const int descriptor = mkstemps(path, 4);
+  if (descriptor < 0) {
+    log_error("translation failed and its source code object could not be saved "
+              "source_id=fnv1a64:%016" PRIx64 " errno=%d; please file a bug report",
+              source_id, errno);
+    return;
+  }
+  FILE *output = fdopen(descriptor, "wb");
   if (output == nullptr) {
-    log_error("diagnostic dump open failed source_id=fnv1a64:%016" PRIx64 " path=%s errno=%d",
-              source_id, path, errno);
+    const int saved_errno = errno;
+    close(descriptor);
+    unlink(path);
+    log_error("translation failed and its source code object could not be saved "
+              "source_id=fnv1a64:%016" PRIx64 " path=%s errno=%d; please file a bug report",
+              source_id, path, saved_errno);
     return;
   }
   const size_t written = std::fwrite(bytes.data(), 1, bytes.size(), output);
   const int close_status = std::fclose(output);
   if (written != bytes.size() || close_status != 0) {
-    log_error("diagnostic dump write failed source_id=fnv1a64:%016" PRIx64
-              " path=%s written=%zu expected=%zu errno=%d",
-              source_id, path, written, bytes.size(), errno);
+    const int saved_errno = errno;
+    unlink(path);
+    log_error("translation failed and its source code object could not be saved "
+              "source_id=fnv1a64:%016" PRIx64
+              " path=%s written=%zu expected=%zu errno=%d; please file a bug report",
+              source_id, path, written, bytes.size(), saved_errno);
     return;
   }
-  log("diagnostic dump source_id=fnv1a64:%016" PRIx64 " input_bytes=%zu path=%s", source_id,
-      bytes.size(), path);
+  log_error("translation failed; source code object saved source_id=fnv1a64:%016" PRIx64
+            " input_bytes=%zu path=%s; please file a bug report and attach this code object",
+            source_id, bytes.size(), path);
+  remember_test_dump(path);
 }
 
 void write_log(bool enabled, const char *level, const char *format, va_list args) noexcept {
@@ -147,8 +155,8 @@ void log_error(const char *format, ...) noexcept {
 void log_translation(uint64_t source_id, const char *outcome, size_t changed, size_t input_bytes,
                      size_t output_bytes, rj_status_t translation_status,
                      hsa_status_t load_status) noexcept {
-  const bool failed = translation_status != ROCJITSU_STATUS_SUCCESS ||
-                      load_status != HSA_STATUS_SUCCESS;
+  const bool failed =
+      translation_status != ROCJITSU_STATUS_SUCCESS || load_status != HSA_STATUS_SUCCESS;
   if (!failed && !verbose_logging())
     return;
   flockfile(stderr);
@@ -164,8 +172,8 @@ void log_translation(uint64_t source_id, const char *outcome, size_t changed, si
   funlockfile(stderr);
 }
 
-void log_translation_diagnostic(
-    uint64_t source_id, const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic) noexcept {
+void log_translation_diagnostic(uint64_t source_id,
+                                const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic) noexcept {
   if (diagnostic == nullptr)
     return;
   const char *severity = diagnostic->severity != nullptr ? diagnostic->severity : "unknown";
@@ -175,9 +183,9 @@ void log_translation_diagnostic(
 
   flockfile(stderr);
   std::fprintf(stderr,
-               "[hsa-hotswap-rj] error: translation diagnostic "
+               "[hsa-hotswap-rj] %s: translation diagnostic "
                "source_id=fnv1a64:%016" PRIx64 " severity=%s kind=%s",
-               source_id, severity, kind);
+               severity, source_id, severity, kind);
   if (diagnostic->has_guest_offset)
     std::fprintf(stderr, " guest_offset=.text+0x%" PRIx64, diagnostic->guest_offset);
   if (mnemonic[0] != '\0')
@@ -982,11 +990,8 @@ Blob read_file_region(hsa_file_t file, size_t offset, size_t requested_size) {
 }
 
 hsa_status_t capture_reader(const OriginalApi &api, hsa_code_object_reader_t *reader, Blob bytes) {
-  if (bytes != nullptr) {
-    dump_source_for_diagnostics(*bytes);
-    if (store_reader(*reader, std::move(bytes)))
-      return HSA_STATUS_SUCCESS;
-  }
+  if (bytes != nullptr && store_reader(*reader, std::move(bytes)))
+    return HSA_STATUS_SUCCESS;
   (void)api.destroy_reader(*reader);
   *reader = {};
   return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -1264,10 +1269,6 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
     Blob source = lookup_reader(reader);
     if (source == nullptr)
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
-    if (dump_only()) {
-      log("diagnostic dump-only pass-through input_bytes=%zu", source->size());
-      return original_load(executable, agent, reader, options, loaded);
-    }
     if (!is_gfx1250(source))
       return load_owned_bytes(executable, agent, source, options, loaded, *api, original_load);
 
@@ -1328,8 +1329,7 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
     translation.status = rj_gfx1250_b0_to_a0_translate(
         source->data(), source->size(), &translated_data, &translated_size, &translation.info,
         [](const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic, void *user_data) noexcept {
-          const auto *info =
-              static_cast<const rj_gfx1250_b0_to_a0_translation_info_t *>(user_data);
+          const auto *info = static_cast<const rj_gfx1250_b0_to_a0_translation_info_t *>(user_data);
           log_translation_diagnostic(info->source_code_object_id, diagnostic);
         },
         &translation.info);
@@ -1337,6 +1337,7 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
     if (translation.status != ROCJITSU_STATUS_SUCCESS || translated_data == nullptr ||
         translated_size == 0) {
       rj_gfx1250_b0_to_a0_free(translated_data);
+      dump_failed_source(*source);
       // Remember a refusal only when it is a verdict on the bytes. The translator
       // reports an environmental failure -- an allocation it could not make, an
       // exception it could not attribute -- with a status that promises nothing
@@ -1473,6 +1474,13 @@ extern "C" RJ_HOOK_EXPORT size_t rj_test_retained_executable_buffer_count() {
 // expects to observe a translation cannot do so once an earlier case has already
 // paid for the same bytes.
 extern "C" RJ_HOOK_EXPORT void rj_test_clear_retained_storage() {
+  std::vector<std::string> dump_paths;
+  {
+    std::lock_guard lock(g_test_dump_mutex);
+    dump_paths.swap(g_test_dump_paths);
+  }
+  for (const std::string &path : dump_paths)
+    (void)unlink(path.c_str());
   {
     std::lock_guard lock(g_state.storage_mutex);
     g_state.readers.clear();
@@ -1584,5 +1592,13 @@ extern "C" RJ_HOOK_EXPORT uint64_t rj_test_translation_memo_bytes() {
 extern "C" RJ_HOOK_EXPORT void rj_test_log_translation(uint64_t source_id, size_t changed) {
   log_translation(source_id, "translated", changed, 64, 96, ROCJITSU_STATUS_SUCCESS,
                   HSA_STATUS_SUCCESS);
+}
+
+// Test-only: render one diagnostic without arranging a translator result solely
+// to select its severity.
+extern "C" RJ_HOOK_EXPORT void
+rj_test_log_translation_diagnostic(uint64_t source_id,
+                                   const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic) {
+  log_translation_diagnostic(source_id, diagnostic);
 }
 #endif // RJ_HOTSWAP_TEST_HOOKS

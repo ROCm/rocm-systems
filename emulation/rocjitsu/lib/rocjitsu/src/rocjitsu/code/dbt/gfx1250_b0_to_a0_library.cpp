@@ -16,12 +16,30 @@
 
 namespace {
 
+constexpr char kSeverityWarning[] = "warning";
+constexpr char kSeverityError[] = "error";
+constexpr char kKindApiInvalidArgument[] = "api-invalid-argument";
+constexpr char kKindInputInvalidCodeObject[] = "input-invalid-code-object";
+constexpr char kKindResultNotDispatchable[] = "result-not-dispatchable";
+constexpr char kKindOutputAllocationFailed[] = "output-allocation-failed";
+constexpr char kKindTranslationOutOfMemory[] = "translation-out-of-memory";
+constexpr char kKindTranslationException[] = "translation-exception";
+constexpr char kKindTranslatorUnsupportedGuestArch[] = "translator-unsupported-guest-arch";
+constexpr char kKindTranslatorKernelDescriptor[] = "translator-kernel-descriptor";
+constexpr char kKindTranslatorLegalization[] = "translator-legalization";
+constexpr char kKindTranslatorExpandMissing[] = "translator-expand-missing";
+constexpr char kKindTranslatorExpandFailed[] = "translator-expand-failed";
+constexpr char kKindTranslatorDataOnly[] = "translator-data-only";
+constexpr char kKindTranslatorNothingToTranslate[] = "translator-nothing-to-translate";
+constexpr char kKindTranslatorResourceLimit[] = "translator-resource-limit";
+constexpr char kKindTranslatorKernelSkipped[] = "translator-kernel-skipped";
+
 const char *diagnostic_severity_name(rocjitsu::DiagnosticSeverity severity) noexcept {
   switch (severity) {
   case rocjitsu::DiagnosticSeverity::Warning:
-    return "warning";
+    return kSeverityWarning;
   case rocjitsu::DiagnosticSeverity::Error:
-    return "error";
+    return kSeverityError;
   }
   return "unknown";
 }
@@ -29,23 +47,23 @@ const char *diagnostic_severity_name(rocjitsu::DiagnosticSeverity severity) noex
 const char *diagnostic_kind_name(rocjitsu::DiagnosticKind kind) noexcept {
   switch (kind) {
   case rocjitsu::DiagnosticKind::UnsupportedGuestArch:
-    return "unsupported-guest-arch";
+    return kKindTranslatorUnsupportedGuestArch;
   case rocjitsu::DiagnosticKind::KernelDescriptor:
-    return "kernel-descriptor";
+    return kKindTranslatorKernelDescriptor;
   case rocjitsu::DiagnosticKind::Legalization:
-    return "legalization";
+    return kKindTranslatorLegalization;
   case rocjitsu::DiagnosticKind::ExpandMissing:
-    return "expand-missing";
+    return kKindTranslatorExpandMissing;
   case rocjitsu::DiagnosticKind::ExpandFailed:
-    return "expand-failed";
+    return kKindTranslatorExpandFailed;
   case rocjitsu::DiagnosticKind::DataOnly:
-    return "data-only";
+    return kKindTranslatorDataOnly;
   case rocjitsu::DiagnosticKind::NothingToTranslate:
-    return "nothing-to-translate";
+    return kKindTranslatorNothingToTranslate;
   case rocjitsu::DiagnosticKind::ResourceLimit:
-    return "resource-limit";
+    return kKindTranslatorResourceLimit;
   case rocjitsu::DiagnosticKind::KernelSkipped:
-    return "kernel-skipped";
+    return kKindTranslatorKernelSkipped;
   }
   return "unknown";
 }
@@ -91,7 +109,7 @@ void emit_diagnostics(rj_gfx1250_b0_to_a0_diagnostic_callback_t callback, void *
     for (const std::string &item : diagnostic.required_work) {
       const rj_gfx1250_b0_to_a0_diagnostic_t required{
           view.severity, view.kind, view.has_guest_offset, view.guest_offset, view.mnemonic,
-          item.c_str(), 1,
+          item.c_str(),  1,
       };
       invoke_diagnostic_callback(callback, required, user_data);
     }
@@ -100,10 +118,11 @@ void emit_diagnostics(rj_gfx1250_b0_to_a0_diagnostic_callback_t callback, void *
 
 } // namespace
 
-rj_status_t rj_gfx1250_b0_to_a0_translate(
-    const void *source_elf, size_t source_size, uint8_t **translated_elf, size_t *translated_size,
-    rj_gfx1250_b0_to_a0_translation_info_t *info,
-    rj_gfx1250_b0_to_a0_diagnostic_callback_t diagnostic_callback, void *user_data) {
+rj_status_t
+rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size, uint8_t **translated_elf,
+                              size_t *translated_size, rj_gfx1250_b0_to_a0_translation_info_t *info,
+                              rj_gfx1250_b0_to_a0_diagnostic_callback_t diagnostic_callback,
+                              void *user_data) {
   if (translated_elf)
     *translated_elf = nullptr;
   if (translated_size)
@@ -112,7 +131,7 @@ rj_status_t rj_gfx1250_b0_to_a0_translate(
     *info = {};
 
   if (!source_elf || source_size == 0 || !translated_elf || !translated_size || !info) {
-    emit_diagnostic(diagnostic_callback, user_data, "error", "invalid-argument",
+    emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindApiInvalidArgument,
                     "translation received an invalid input or output argument");
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   }
@@ -123,7 +142,7 @@ rj_status_t rj_gfx1250_b0_to_a0_translate(
     const auto *source_bytes = static_cast<const uint8_t *>(source_elf);
     rocjitsu::AmdGpuCodeObject source(source_bytes, source_size);
     if (!source.is_valid() || source.target_id() != ROCJITSU_CODE_TARGET_GFX1250) {
-      emit_diagnostic(diagnostic_callback, user_data, "error", "invalid-code-object",
+      emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindInputInvalidCodeObject,
                       "source is not a valid gfx1250 AMDGPU code object");
       return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
     }
@@ -147,14 +166,14 @@ rj_status_t rj_gfx1250_b0_to_a0_translate(
     if (result.elf_bytes.empty() || !result.dispatchable()) {
       emit_diagnostics(diagnostic_callback, user_data, result.diagnostics);
       if (result.diagnostics.empty())
-        emit_diagnostic(diagnostic_callback, user_data, "error", "nothing-to-translate",
+        emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindResultNotDispatchable,
                         "translation produced no dispatchable code object");
       return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
     }
 
     auto *output = static_cast<uint8_t *>(std::malloc(result.elf_bytes.size()));
     if (!output) {
-      emit_diagnostic(diagnostic_callback, user_data, "error", "resource-limit",
+      emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindOutputAllocationFailed,
                       "could not allocate the translated code object");
       return ROCJITSU_STATUS_OUT_OF_RESOURCES;
     }
@@ -164,14 +183,15 @@ rj_status_t rj_gfx1250_b0_to_a0_translate(
     *translated_size = result.elf_bytes.size();
     return ROCJITSU_STATUS_SUCCESS;
   } catch (const std::bad_alloc &) {
-    emit_diagnostic(diagnostic_callback, user_data, "error", "resource-limit",
+    emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindTranslationOutOfMemory,
                     "translation ran out of memory");
     return ROCJITSU_STATUS_OUT_OF_RESOURCES;
   } catch (const std::exception &error) {
-    emit_diagnostic(diagnostic_callback, user_data, "error", "exception", error.what());
+    emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindTranslationException,
+                    error.what());
     return ROCJITSU_STATUS_ERROR;
   } catch (...) {
-    emit_diagnostic(diagnostic_callback, user_data, "error", "exception",
+    emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindTranslationException,
                     "translation threw an unknown exception");
     return ROCJITSU_STATUS_ERROR;
   }

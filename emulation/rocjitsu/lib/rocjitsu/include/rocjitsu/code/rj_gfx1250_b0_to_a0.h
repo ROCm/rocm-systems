@@ -30,6 +30,13 @@ typedef struct rj_gfx1250_b0_to_a0_translation_info_s {
 /// All string pointers are valid only for the duration of the callback. A
 /// required-work item is delivered as a separate view with @c required_work set;
 /// its kind and source location identify the diagnostic it belongs to.
+///
+/// @c severity and @c kind are stable matching keys, not display strings. Severity
+/// is currently @c warning or @c error. Kind values distinguish translator
+/// diagnostics from API, input, translation-result, allocation, and exception
+/// failures. Consumers
+/// must accept unknown future keys. @c mnemonic, @c message, and required-work
+/// text are human-readable and may change.
 typedef struct rj_gfx1250_b0_to_a0_diagnostic_s {
   const char *severity;
   const char *kind;
@@ -73,13 +80,10 @@ typedef void (*rj_gfx1250_b0_to_a0_diagnostic_callback_t)(
 #ifdef __cplusplus
 [[nodiscard]]
 #endif
-RJ_API_EXPORT rj_status_t rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size,
-                                                        uint8_t **translated_elf,
-                                                        size_t *translated_size,
-                                                        rj_gfx1250_b0_to_a0_translation_info_t *info,
-                                                        rj_gfx1250_b0_to_a0_diagnostic_callback_t
-                                                            diagnostic_callback,
-                                                        void *user_data);
+RJ_API_EXPORT rj_status_t rj_gfx1250_b0_to_a0_translate(
+    const void *source_elf, size_t source_size, uint8_t **translated_elf, size_t *translated_size,
+    rj_gfx1250_b0_to_a0_translation_info_t *info,
+    rj_gfx1250_b0_to_a0_diagnostic_callback_t diagnostic_callback, void *user_data);
 
 /// Release storage returned by rj_gfx1250_b0_to_a0_translate().
 /// @param[in] translated_elf Allocation to release; NULL is accepted.
