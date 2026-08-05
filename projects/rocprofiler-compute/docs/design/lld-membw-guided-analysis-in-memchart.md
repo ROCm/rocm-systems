@@ -580,7 +580,9 @@ The gfx9 memory chart renderer uses Rich composable panels and grids (10-column 
 
 ### `plot_mem_chart()` signature change
 
-This is the point where block 30 derived data enters the block 3 renderer (see HLD Decision 2: Cross-block data flow for analysis overlay). The `membw` parameter carries a `MemBwAnalysisResult` -- a renderer-agnostic analytical object, not raw block 30 metrics. When `None`, the chart renders exactly as it does today. This cross-block dependency is temporary; it disappears when block 30 metrics consolidate into block 3.
+This is the point where block 30 derived data enters the block 3 renderer (see HLD Decision 4: Cross-block data flow for analysis overlay). The `membw` parameter carries a `MemBwAnalysisResult` -- a renderer-agnostic analytical object, not raw block 30 metrics. When `None`, the chart renders exactly as it does today. This cross-block dependency is temporary; it disappears when block 30 metrics consolidate into block 3.
+
+The existing `normal_unit` parameter feeds only the chart heading string (e.g. `"3. Memory Chart (Normalization: per_kernel)"`). It is not passed to the tree evaluator and does not affect bottleneck annotation values. Bottleneck indicator metrics use hardware cycle counter denominators and are independent of `--normal-unit` by construction (see HLD NFR5).
 
 ```python
 def plot_mem_chart(

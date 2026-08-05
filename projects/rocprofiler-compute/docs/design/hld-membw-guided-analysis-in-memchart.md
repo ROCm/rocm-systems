@@ -117,6 +117,7 @@ The `--membw-analysis` flag is currently checked in multiple independent callsit
 - **[NFR2]** Minimum terminal width for full chart rendering: 240 columns. Narrower terminals or piped output fall back to tabular guidance without chart annotations (chart may truncate with a warning).
 - **[NFR3]** Bottleneck indicators must be visible without color: every annotation includes a symbol prefix (e.g. `[!]`) in addition to optional color.
 - **[NFR4]** Maximum active guidance blocks displayed: 5. Overflow: `...and N more (see block 30 for full detail)`.
+- **[NFR5]** Bottleneck indicator metrics are independent of `--normal-unit`. All 21 tree-referenced metrics use hardware cycle counter denominators (e.g. `SUM(TCP_GATE_EN2_sum)`, `SUM(TCC_BUSY_sum)`) baked into their formulas -- never `$denom`. The chart heading's normalization label (e.g. `Normalization: per_kernel`) applies to traffic count metrics in the memory chart only and must not be interpreted as governing bottleneck annotation values. The tree spec validator must enforce this invariant: no tree-referenced metric may contain `$denom` in its formula.
 
 ---
 
@@ -327,3 +328,4 @@ End-to-end golden tests use the membw analysis test suite with baseline/optimize
 | Whether optional impact normalization formulas live in YAML or code | TBD | Core phase |
 | Severity ranking across bottleneck types for prioritized display | TBD | Future consideration |
 | Consolidate block 30 into memory chart | TBD | When stable, merge tree-referenced metrics into `0300_memory_chart.yaml`, remove `--membw-analysis` and `--experimental` gates |
+| User-understandable IP block terminology | TBD | Internal hardware acronyms (TCP, TCC, TA, TD, UTCL1, EA, etc.) appear in metric names, chart labels, guidance text, and bottleneck node labels. A tool-wide audit and terminology strategy (rename, alias, or translation layer) is needed to improve comprehensibility for users unfamiliar with GPU microarchitecture. Scope is not limited to this feature. |
