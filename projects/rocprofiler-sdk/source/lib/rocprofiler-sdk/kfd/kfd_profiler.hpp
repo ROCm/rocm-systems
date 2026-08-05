@@ -24,29 +24,16 @@
 
 #include <cstdint>
 
-// KFD dispatch-log profiler: startup probe + GPU support discovery.
-//
-// This is the entry gate for the KFD dispatch-log timestamp source. At startup
-// init_kfd_profiler() probes the running kernel for the profiler ioctl ABI and
-// discovers which GPUs expose the dispatch-log sysfs descriptor. Every failure
-// is silent and complete: the entire KFD path is skipped and all dispatches
-// fall back to hsa_amd_profiling_get_dispatch_time(). Nothing here ever changes
-// the completion-signal lifecycle.
-//
-// Lifecycle: init_kfd_profiler() is called from queue_interposition::
-// interposition_init(), i.e. only when inline interposition -- the sole path that
-// produces a correlation key -- is selected; shutdown_kfd_profiler() from
-// kfd::finalize(). State is owned by the translation unit (kfd_profiler.cpp), not
-// exposed as bare globals.
+// KFD dispatch-log profiler: startup probe + GPU support discovery. Every
+// failure is silent and complete -- the KFD path is skipped and dispatches fall
+// back to hsa_amd_profiling_get_dispatch_time(). Never touches signal lifecycle.
 
 namespace rocprofiler
 {
 namespace kfd
 {
-// Run the startup probe: env opt-out, open /dev/kfd, profiler VERSION ioctl,
-// ABI version check, then GPU discovery. The outcome is published through
-// kfd_dispatch_log_available(). Safe to call more than once (idempotent).
-// Never throws.
+// Env opt-out, open /dev/kfd, profiler VERSION ioctl, ABI check, GPU discovery.
+// Idempotent, never throws. Outcome published via kfd_dispatch_log_available().
 void
 init_kfd_profiler();
 
@@ -54,34 +41,22 @@ init_kfd_profiler();
 void
 shutdown_kfd_profiler();
 
-// Latch the dispatch-log path off. Async-signal-safe (one atomic store), so it
-// is callable from the pthread_atfork child handler.
+// Async-signal-safe (one atomic store), so the atfork child handler can call it.
 void
 disable_kfd_dispatch_log();
 
-// Gates ensure_reader_session() and the queue-destroy doorbell retirement. True
-// only after the ABI probe passed, >=1 supported GPU was discovered, and
-// start_kfd_reader() succeeded; false again in a forked child.
+// True only after the ABI probe passed, >=1 supported GPU was found, and the
+// reader started; false again in a forked child.
 bool
 kfd_dispatch_log_available();
 
-// True when the given KFD gpu_id exposes the dispatch_log_format sysfs node
-// (gfx9.4.3 / 9.4.4 / 9.5.0 / gfx12.0.1). Unsupported GPUs fall back to HSA
-// without affecting other GPUs.
+// gfx9.4.3 / 9.4.4 / 9.5.0 / gfx12.0.1. Unsupported GPUs fall back to HSA.
 bool
 gpu_supports_dispatch_log(uint32_t gpu_id);
 
-// Arm the dispatch-log ring(s), called when a context that traces kernel dispatch
-// starts.
-//
-// Deliberately NOT done at startup: installing the HSA table says nothing about
-// whether anyone wants kernel traces, and arming registers a GTT buffer and opens
-// a firmware stream. Configuration time is still early enough that the ring is
-// live before the first dispatch, and a tool that configures tracing later simply
-// arms later -- sessions are per-GPU and independent of queues. The first-dispatch
-// fallback in ensure_reader_session() still covers anything in between.
-//
-// Idempotent and safe to call from any context start.
+// Called when a context tracing kernel dispatch starts, not at startup: arming
+// registers a GTT buffer and opens a firmware stream, and installing the HSA
+// table says nothing about whether anyone wants kernel traces. Idempotent.
 void
 arm_dispatch_log_sessions();
 }  // namespace kfd

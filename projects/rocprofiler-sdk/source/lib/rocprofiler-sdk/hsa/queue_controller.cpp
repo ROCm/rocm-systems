@@ -391,12 +391,9 @@ QueueController::add_queue(hsa_queue_t*           id,
         });
     });
 
-    // Register doorbell ownership for EVERY live compute queue, at creation and
-    // regardless of whether a dispatch-log session exists yet -- so a queue that
-    // predates the session is already accounted for, and a queue that never
-    // dispatches still counts as an owner of its slot. A queue whose doorbell
-    // cannot be resolved is registered with no slot, which makes every slot on its
-    // GPU non-injective (it could be the second owner of any of them).
+    // EVERY live compute queue, at creation: a queue that predates the session or
+    // never dispatches still owns its slot. A queue whose doorbell cannot be
+    // resolved registers with no slot, making every slot on its GPU non-injective.
     if(const auto* _queue = get_queue(*id))
     {
         auto _slot = std::optional<uint32_t>{};
@@ -424,32 +421,27 @@ QueueController::destroy_queue(hsa_queue_t* id)
     // return if queue does not exist
     if(!queue) return;
 
-    // Signal-less generation/reuse closure (design requirement 4), before the
-    // doorbell generation is bumped. The lock sequence is load-bearing:
+    // Signal-less generation/reuse closure, before the doorbell generation is
+    // bumped. The lock sequence is load-bearing:
     //
-    //   1. begin_close: takes the hub lock and RELEASES it (stops new reservations)
-    //   2. fence:       takes gate_lock and releases it, holding NO hub lock
-    //   3. finish_close: takes the hub lock again (strand + quarantine), releases
+    //   1. begin_close: takes the hub lock and RELEASES it
+    //   2. fence:       takes gate_lock, holding NO hub lock
+    //   3. finish_close: takes the hub lock again (strand + quarantine)
     //
     // The enqueue path holds gate_lock while taking the hub lock, so this path
-    // must never hold the hub lock while waiting on gate_lock; it holds at most
+    // must never hold the hub lock while waiting on gate_lock. It holds at most
     // one of the two at any instant, so no cycle exists.
-    // Between the fence and the strand, give the records that are still in flight
-    // a bounded chance to land. Queue::sync() below does NOT cover this: it waits
-    // on _active_kernels, which only the legacy path increments, so for an inline
-    // signal-less dispatch it returns immediately without waiting for either the
-    // kernel or its firmware record. Without this wait a destroy discards every
-    // dispatch whose EOP had not been paired yet.
     //
-    // Only what remains after the deadline is stranded, exactly as before.
+    // Queue::sync() below does NOT cover the in-flight records: it waits on
+    // _active_kernels, which only the legacy path increments, so for an inline
+    // signal-less dispatch it returns immediately.
     const auto _queue_token = queue->get_id().handle;
     kfd::begin_close_signal_less_queue(_queue_token);
     queue_interposition::fence_queue_gate(id);
-    // Wait for the hardware to finish this queue's dispatches BEFORE deciding
-    // anything was lost: Queue::sync() below only waits on _active_kernels, which
-    // the inline path never increments, so it returns immediately for signal-less
-    // work. The QueueState is still alive here -- destroy_queue_state() runs
-    // further down -- and gate_lock was fenced above, so next_submit_pos is final.
+    // Wait for the hardware to finish this queue's dispatches BEFORE deciding what
+    // to strand: an unfinished kernel has no EOP record yet. QueueState is still
+    // alive here (destroy_queue_state() runs further down) and gate_lock was fenced
+    // above, so next_submit_pos is final.
     kfd::drain_close_signal_less_queue(_queue_token, [id](uint64_t _deadline_ns) {
         return queue_interposition::wait_queue_hw_drained(id, _deadline_ns);
     });
@@ -462,9 +454,7 @@ QueueController::destroy_queue(hsa_queue_t* id)
     // the two are independent.
     if(kfd::kfd_dispatch_log_available()) kfd::doorbell_map().on_queue_destroyed(queue->get_id());
 
-    // Drop this queue's doorbell ownership so a surviving co-owner becomes the
-    // sole owner again. After the closure above the slot stays quarantined in the
-    // hub for the rest of the process regardless.
+    // Drop this queue's ownership so a surviving co-owner becomes injective again.
     kfd::remove_live_queue(_queue_token);
 
     queue_interposition::destroy_queue_state(id);
@@ -837,9 +827,7 @@ capture_doorbell_key(uint32_t               gpu_id,
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         const auto* sig =
             reinterpret_cast<const amd_signal_t*>(intercept_queue->doorbell_signal.handle);
-        // hardware_doorbell_ptr aliases other union members for non-doorbell kinds
-        // (a legacy intercept queue exposes a USER-kind signal), so reading it
-        // there would yield a bogus key instead of a clean HSA fallback.
+    // hardware_doorbell_ptr aliases other union members for non-doorbell kinds.
         if(sig->kind == AMD_SIGNAL_KIND_DOORBELL || sig->kind == AMD_SIGNAL_KIND_LEGACY_DOORBELL)
             hwptr = reinterpret_cast<uint64_t>(sig->hardware_doorbell_ptr);
     }

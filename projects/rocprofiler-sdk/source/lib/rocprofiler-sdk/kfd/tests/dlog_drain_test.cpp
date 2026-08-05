@@ -473,11 +473,9 @@ TEST(dlog_drain, overrun_counted_once_per_drain)
     EXPECT_EQ(st.cursors.lost_records, 12u - 8u + 1u);
 }
 
-// --- Phase 0: ring-size env-var parsing (U16). Only a plain decimal integer in
-// [1, kDlogMaxRingKb] is accepted; everything else returns 0 so the caller warns
-// and uses the default. The unit is KiB: the driver accepts sub-MiB rings (the
-// 80 KiB default) and rejects >=1 MiB ones, so MiB granularity could not express
-// a working size. ---
+// Only a plain decimal in [1, kDlogMaxRingKb] is accepted; everything else
+// returns 0 so the caller warns and uses the default. The unit is KiB because
+// the driver accepts sub-MiB rings and rejects >=1 MiB ones.
 TEST(dlog_ring_size, env_value_parsing)
 {
     constexpr uint64_t kb = 1024;
@@ -515,11 +513,9 @@ TEST(dlog_ring_size, env_value_parsing)
     EXPECT_EQ(dlog_ring_bytes_from_kb_str(std::string(64, '9')), 0u);
 }
 
-// The snap makes every requested size driver-legal. REGISTER_BUFFER requires
-// buffer_size == num_regions * 20 * region_record_count with a power-of-two
-// region_record_count <= 2^24; the 80 * 2^k lattice satisfies that for both
-// ASIC region counts (2 on gfx12, 4 on gfx9.4.x/9.5.0) without knowing which one
-// applies, because num_regions is only reported after the size is chosen.
+// REGISTER_BUFFER requires buffer_size == num_regions * 20 * region_record_count
+// with a power-of-two region_record_count <= 2^24; the 80 * 2^k lattice satisfies
+// that for both ASIC region counts without knowing which one applies.
 TEST(dlog_ring_size, snap_yields_a_driver_legal_size)
 {
     // Any requested size, however arbitrary, lands on the lattice inside bounds
@@ -591,10 +587,8 @@ TEST(dlog_ring_size, snap_boundaries)
     EXPECT_EQ(dlog_snap_ring_bytes(kDlogMaxRingBytes - 1), 335544320u);
 }
 
-// The sizing math the session performs on the parsed value is validated BEFORE
-// use: any snapped value fits the uint32 buffer_size ioctl field, and the
-// derived sizes (arr_bytes, signal_off, alloc_size, stride, aperture candidate)
-// cannot overflow uint64.
+// The sizing math is validated BEFORE use: any snapped value fits the uint32
+// buffer_size field and the derived sizes cannot overflow uint64.
 TEST(dlog_ring_size, accepted_sizes_keep_the_session_math_in_range)
 {
     for(uint64_t k : {uint64_t{1}, kDlogMinRingBytes / 1024, uint64_t{8192}, kDlogMaxRingKb})
@@ -781,9 +775,7 @@ TEST(dlog_drain, erase_slot_drops_only_that_slots_retained_starts)
     EXPECT_EQ(st.pairing.erase_slot(7, 1024), 0u);  // idempotent
 }
 
-// ---------------------------------------------------------------------------
 // Bounded SPSC handoff between the ring-copier and the record processor
-// ---------------------------------------------------------------------------
 
 // Batches come out in the order they went in, with their contents intact.
 TEST(record_pipe, preserves_batch_order_and_contents)

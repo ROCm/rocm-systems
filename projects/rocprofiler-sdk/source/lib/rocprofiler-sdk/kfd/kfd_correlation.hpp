@@ -25,38 +25,21 @@
 #include "lib/rocprofiler-sdk/kfd/doorbell_map.hpp"
 #include "lib/rocprofiler-sdk/kfd/results_map.hpp"
 
-// Process-wide shared instances of the two KFD dispatch-log maps: DoorbellMap
-// (queue <-> doorbell identity, used to build a correlation_key at enqueue) and
-// ResultsMap (firmware timing keyed by that correlation_key). Each is a single
-// object for the whole process (see DoorbellMap notes): the interceptor paths
-// (enqueue) and the KFD reader thread operate on the same instances. Backed by
-// common::static_object so teardown is ordered at library unload.
-
 namespace rocprofiler
 {
 namespace kfd
 {
-// queue_id <-> doorbell_off (+ generation) translation, populated from SDK
-// queue lifecycle. Read on the enqueue path, written on queue create/destroy.
+// One instance per process: the enqueue paths and the reader thread share it.
 DoorbellMap&
 doorbell_map();
 
-// firmware timing keyed by correlation_key. Deposited by the reader thread,
-// taken in get_dispatch_time().
+// Deposited by the reader thread, taken in get_dispatch_time().
 ResultsMap&
 results_map();
 
-// THE single gate for emitting KFD timestamps.
-//
-// Selecting a firmware record as a dispatch's timestamp is only sound once that
-// record is provably from the current, uniquely-owning queue generation (design
-// requirements 3 and 4: all-live-queue owner injectivity plus generation-reuse
-// closure). Until the whole signal-less path exists this returns false and every
-// dispatch keeps the Phase 1 behavior -- HSA timestamps, signals retained, the
-// rendezvous skipped entirely so it costs nothing.
-//
-// Defined in signal_less.cpp as the env feature flag AND the fully-wired master
-// switch; the latter is what keeps it false while the feature is being landed.
+// The single gate for emitting KFD timestamps: selecting a firmware record is
+// only sound once it is provably from the current, uniquely-owning queue
+// generation. False keeps every dispatch on HSA timestamps, signals retained.
 bool
 kfd_selection_enabled();
 }  // namespace kfd

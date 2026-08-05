@@ -22,33 +22,10 @@
 
 #pragma once
 
-// The signal-less teardown order (design requirement 7).
-//
-// This ordering is the ONLY one that guarantees no EOP-proven completion is
-// stranded and no task is enqueued after the task group is joined, so it is
-// factored into one place, templated on the steps, and unit-tested for order --
-// a future edit that reorders it fails a test instead of producing a rare
-// use-after-free at exit.
-//
-// Why each step must precede the next:
-//   1. stop_new_reservations   - eligibility must fail first, or step 2 races new
-//                                PENDING entries into existence behind it.
-//   2. quiesce_interceptor     - fences in-flight registration/publication, so
-//                                after it no NEW PENDING can appear at all.
-//   3. stop_and_join_reader    - final status + final drain, THEN join. Only the
-//                                reader creates PENDING -> EOP_PROVEN transitions
-//                                and retry-owner insertions, so nothing can be
-//                                added to the retry owner after this returns.
-//   4. flush_retry_owner       - steps 1-3 guarantee no producer remains, so the
-//                                flush is final; anything still held is finalized
-//                                IN PLACE on this (teardown) thread.
-//   5. leak_remaining_pending  - whatever never got an EOP becomes LEAKED and is
-//                                ledgered, so correlation_id_finalize skips it.
-//   6. join_task_group         - safe only now: steps 1-4 mean no producer can
-//                                submit another task (invariant 12).
-//
-// Step 7 (queue_controller_fini / kfd::finalize / correlation_id_finalize with
-// the loss-ledger skip) is the caller's existing finalization, which runs after.
+// Signal-less teardown order (design requirement 7). Each step exists to make the
+// next one final: reservations must stop before the interceptor is fenced, and the
+// reader must be joined before the retry-owner flush, or work is still arriving.
+// Ordering is unit-tested; reordering it strands EOP-proven work at exit.
 
 namespace rocprofiler
 {

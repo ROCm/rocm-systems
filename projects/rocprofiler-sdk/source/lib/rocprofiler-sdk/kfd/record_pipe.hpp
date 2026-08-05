@@ -30,29 +30,21 @@
 #include <cstdint>
 #include <vector>
 
-// Bounded single-producer / single-consumer handoff of copied record batches,
-// between the ring-copier (producer) and the record processor (consumer).
+// Bounded SPSC handoff of copied record batches, from the ring-copier to the
+// record processor.
 //
-// The slots ARE the buffer pool: each holds a vector whose capacity is reused, so
-// steady-state operation allocates nothing. A batch is only ever touched by one
-// side at a time, and which side owns it is decided entirely by the two indices.
+// The slots ARE the buffer pool: each holds a vector whose capacity is reused,
+// so steady state allocates nothing.
 //
-// The producer NEVER blocks. If the consumer has fallen behind and no slot is
-// free, acquire() returns nullptr and the caller drops the batch and counts it --
-// blocking would stall the ring read and cause exactly the overrun this split
-// exists to avoid, and growing without bound would trade a bounded data loss for
-// an unbounded memory one.
+// The producer NEVER blocks. With no free slot acquire() returns nullptr and the
+// caller drops the batch: blocking would stall the ring read and cause the very
+// overrun this split avoids, and growing unbounded would trade a bounded data
+// loss for an unbounded memory one.
 //
-// MEMORY ORDERING (the whole correctness argument):
-//   producer: fills slot[tail % N]  ->  m_tail.store(tail + 1, release)
-//   consumer: m_tail.load(acquire)  ->  reads slot[head % N]
-// The release/acquire pair on m_tail publishes the filled bytes: everything the
-// producer wrote before the store is visible to the consumer after the load.
-//   consumer: done with slot        ->  m_head.store(head + 1, release)
-//   producer: m_head.load(acquire)  ->  reuses that slot
-// The release/acquire pair on m_head publishes the slot's availability, so the
-// producer cannot overwrite a batch the consumer is still reading.
-// Each index has exactly one writer, so neither is a read-modify-write.
+// MEMORY ORDERING: the release/acquire pair on m_tail publishes the filled bytes
+// to the consumer; the pair on m_head publishes the slot's availability, so the
+// producer cannot overwrite a batch the consumer is still reading. Each index
+// has exactly one writer, so neither is a read-modify-write.
 
 namespace rocprofiler
 {

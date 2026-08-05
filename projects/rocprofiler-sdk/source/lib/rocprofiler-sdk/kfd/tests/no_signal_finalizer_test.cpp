@@ -99,9 +99,7 @@ struct fake_proven
 };
 }  // namespace
 
-// ---------------------------------------------------------------------------
 // The finalizer's three outcomes
-// ---------------------------------------------------------------------------
 
 // start_ticks known + conversion + sanity OK -> RESULT_READY: one record with the
 // converted KFD timestamps, correlation id retired exactly once.
@@ -267,9 +265,7 @@ TEST(no_signal_finalizer, throwing_emit_still_retires_exactly_once)
     EXPECT_EQ(obs.retires, 1);
 }
 
-// ---------------------------------------------------------------------------
 // Bounded retry owner: an EOP-proven completion is never dropped
-// ---------------------------------------------------------------------------
 
 // A temporary rejection parks the entry; a later flush submits it successfully.
 TEST(retry_owner, temporary_rejection_is_retried_on_flush)
@@ -362,9 +358,7 @@ TEST(retry_owner, is_bounded_and_never_drops_a_completion)
     EXPECT_EQ(owner.size(), 0u);
 }
 
-// ---------------------------------------------------------------------------
 // Unit 6: the strict teardown order (design requirement 7)
-// ---------------------------------------------------------------------------
 
 namespace
 {
@@ -536,13 +530,11 @@ TEST(signal_less_teardown, flush_with_nothing_held_finalizes_nothing)
     EXPECT_EQ(owner.size(), 0u);
 }
 
-// ---------------------------------------------------------------------------
 // Rejection-cause reporting
 //
 // The no-timing breakdown is only useful if each cause is attributed correctly:
 // shape-ii and a rejected sanity clause need opposite fixes, so a mislabelled
 // counter would send the next investigation the wrong way.
-// ---------------------------------------------------------------------------
 
 TEST(no_signal_finalizer, reports_the_exact_rejection_cause)
 {

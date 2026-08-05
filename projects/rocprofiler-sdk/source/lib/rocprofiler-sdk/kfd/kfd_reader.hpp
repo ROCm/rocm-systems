@@ -22,15 +22,12 @@
 
 #pragma once
 
-// KFD dispatch-log reader thread.
+// KFD dispatch-log reader thread: a background thread owning the dispatch-log
+// data ring. It sets up the KFD session, drains firmware records, pairs
+// dispatch_start + eop, and deposits paired timings into the ResultsMap.
 //
-// A dedicated background thread (modeled on kfd.cpp's poll_kfd_t bg_thread) that
-// owns the dispatch-log data ring: it sets up the KFD session (register buffer /
-// open stream / mmap), drains firmware records, pairs dispatch_start + eop, binds
-// doorbells into the DoorbellMap, and deposits paired timings into the ResultsMap
-// keyed by correlation_key.
-//
-// Lifecycle: start_kfd_reader() is called from init_kfd_profiler() once the ABID
+// Started from init_kfd_profiler(), stopped from shutdown_kfd_profiler(); both
+// idempotent and safe when the dispatch-log is unavailable.
 // probe + GPU discovery succeed; stop_kfd_reader() from shutdown_kfd_profiler().
 // Both are idempotent and safe to call when KFD dispatch-log is unavailable.
 
@@ -40,11 +37,9 @@ namespace rocprofiler
 {
 namespace kfd
 {
-// Start the reader thread. No-op if already running. Safe to call regardless of
-// whether any GPU supports dispatch-log (it simply idles if there is nothing to
-// read). Returns true once the reader thread is running and the fork handler is
-// registered; on false the caller must not advertise the dispatch-log as
-// available (the reader has already released everything it acquired).
+// No-op if already running, and safe regardless of whether any GPU supports
+// dispatch-log. On false the caller must not advertise the dispatch-log as
+// available; the reader has already released everything it acquired.
 bool
 start_kfd_reader();
 
@@ -52,53 +47,29 @@ start_kfd_reader();
 void
 stop_kfd_reader();
 
-// Ensure the dispatch-log session exists, set up for the given gpu_id. Returns
-// true only when a live session belongs to THIS gpu_id, i.e. when firmware
-// records for this GPU will actually be drained; callers must leave the
-// correlation key invalid (HSA fallback) otherwise.
-//
-// Scope: a SINGLE process-wide session, established for the first supported GPU
-// that calls this. Once that session is up, a call for a different gpu_id is a
-// no-op returning false -- a second GPU does not get its own session and its
-// dispatches fall back to HSA. Multi-GPU sessions are not supported.
+// Ensure a dispatch-log session exists for the given gpu_id. Returns true only
+// when a live session belongs to THIS gpu_id; callers must otherwise leave the
+// correlation key invalid and fall back to HSA.
 bool
 ensure_reader_session(uint32_t gpu_id);
 
-// Arm the dispatch-log ring at CONFIGURATION time, before any queue exists.
-//
-// The firmware only writes records once the buffer is registered and the stream
-// is open, so establishing that on the first dispatch means the earliest
-// dispatches produce nothing -- the ring comes up underneath them. Called from
-// init_kfd_profiler() once the probe has published availability and the reader is
-// running.
-//
-// Unlike ensure_reader_session(), a failure that might only mean "the device is
-// not usable yet" does NOT latch the session off; the first dispatch retries
-// through ensure_reader_session(). Only a permanent ABI/geometry mismatch latches.
+// Arm the ring before any queue exists: firmware only records once the buffer is
+// registered, so arming on first dispatch loses the earliest dispatches. Unlike
+// ensure_reader_session(), a merely-too-early failure does not latch the GPU off.
 bool
 arm_reader_session_early(uint32_t gpu_id);
 
-// Ask the reader to drop everything it retains for a page-relative doorbell slot
-// whose queue was destroyed. The reader's retained starts are reader-thread-owned,
-// so a destroying thread posts a request instead of touching them; the reader
-// consumes it on its next pass. Results, which sit behind their own lock, are
-// dropped immediately here.
+// Retained starts are processor-thread-owned, so a destroying thread posts a
+// request rather than touching them; results have their own lock and go now.
 void
 request_reader_slot_purge(uint32_t gpu_id, uint32_t doorbell_slot);
 
-// Break the reader out of its poll so it copies the ring now rather than up to a
-// poll interval from now. Used by the close drain, which is waiting on records
-// the reader has not picked up yet. Safe from any thread; a no-op if no reader.
+// Break the reader out of its poll so it copies now. Safe from any thread.
 void
 nudge_reader();
 
-// Block until the reader has completed a full drain cycle that began after this
-// call, so every firmware record it already held has been turned into a handoff.
-// This is the (b) fence of a hub-aware sync.
-//
-// Bounded: returns false if the reader does not advance within the timeout rather
-// than hanging finalization. Returns true immediately when no reader/session is
-// live, since there is then nothing to drain.
+// Block until a full drain cycle has completed, so records already held became
+// handoffs. Bounded: returns false on timeout rather than hanging finalization.
 bool
 wait_for_reader_drain_barrier(uint64_t timeout_ns = 100'000'000);
 }  // namespace kfd

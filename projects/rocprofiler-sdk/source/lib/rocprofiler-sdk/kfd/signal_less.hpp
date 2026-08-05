@@ -37,10 +37,8 @@
 #include <functional>
 #include <optional>
 
-// Signal-less kernel-dispatch completion: the owned payload the hub carries for
-// each pending dispatch, plus the process-wide hub instance. The feature flag and
-// the eligibility decision live in signal_less_gate.hpp (no tracing/HSA headers,
-// so the decision table is unit-testable on its own).
+// The owned payload the hub carries for each pending dispatch, plus the
+// process-wide hub instance. Flag and eligibility live in signal_less_gate.hpp.
 
 namespace rocprofiler
 {
@@ -51,13 +49,10 @@ struct correlation_id;
 
 namespace kfd
 {
-// Everything the no-signal finalizer needs to emit a record and retire the
-// correlation id, held BY VALUE. Deliberately holds no raw `Queue&`, no HSA
-// signal handle, and no code-object pointer (invariant 10): the queue is
-// identified by a stable token and the agent by its rocprofiler id, so the
-// payload stays valid even if the queue is destroyed while the dispatch is in
-// flight. `correlation_id` is a refcount handle whose reference was already
-// taken at enqueue; releasing it is the finalizer's job.
+// Held BY VALUE, with no raw `Queue&`, HSA signal handle or code-object pointer:
+// the queue is a stable token and the agent a rocprofiler id, so the payload
+// survives the queue being destroyed mid-flight. `correlation_id`'s reference
+// was taken at enqueue; releasing it is the finalizer's job.
 struct pending_payload
 {
     using callback_record_t = rocprofiler_callback_tracing_kernel_dispatch_data_t;
@@ -78,66 +73,54 @@ using signal_less_hub_t = DispatchHub<pending_payload>;
 signal_less_hub_t&
 signal_less_hub();
 
-// Live doorbell ownership across every compute queue the SDK knows about, and the
-// per-queue lazy-profiling bookkeeping. Both are process-wide.
-//
-// LOCK ORDERING: the registry lock is never held while the hub lock is taken, and
-// vice versa -- callers take one, release it, then take the other.
+// LOCK ORDERING: the registry lock is never held while the hub lock is taken,
+// or vice versa -- callers take one, release it, then take the other.
 OwnerRegistry&
 owner_registry();
 
 ProfilingEnableTracker&
 profiling_tracker();
 
-// Queue lifecycle hooks. add_live_queue() registers ownership and, when it
-// discovers a second live owner, quarantines the slot in the hub (leaking that
-// slot's pending entries per P1) AFTER releasing the registry lock.
+// Registers ownership; on discovering a second live owner it quarantines the
+// slot in the hub (leaking that slot's pending entries) AFTER releasing the
+// registry lock.
 void
 add_live_queue(uint64_t queue_token, uint32_t gpu_id, std::optional<uint32_t> doorbell_slot);
 
 void
 remove_live_queue(uint64_t queue_token);
 
-// Generation/reuse closure on queue destroy (design requirement 4), split into
-// the two halves the lock ordering demands.
-//
-// STEP 1, before the caller fences the queue's gate_lock: stop new signal-less
-// reservations on the slot. Takes and RELEASES the hub lock, so the caller never
-// holds it while waiting on gate_lock -- the enqueue path holds gate_lock while
-// taking the hub lock, so the reverse nesting would deadlock.
+// Generation/reuse closure on destroy, step 1 of 2: stop new reservations on the
+// slot, before the caller fences the queue's gate_lock. Takes and RELEASES the
+// hub lock -- the enqueue path holds gate_lock while taking the hub lock, so
+// holding it across the fence would invert that order and deadlock.
 void
 begin_close_signal_less_queue(uint64_t queue_token);
 
-// STEP 2, after the fence: strand whatever is still pending on the slot (P1, no
-// record and no retire) and quarantine it permanently, so a queue that reuses the
-// doorbell is signal-path-only and a stale late record can never be matched to
-// it. Must be called with NO lock held.
+// Step 2, after the fence: strand whatever is still pending (no record, no
+// retire) and quarantine the slot permanently, so a queue that reuses the
+// doorbell is signal-path-only. Must be called with NO lock held.
 void
 finish_close_signal_less_queue(uint64_t queue_token);
 
-// How the KFD reader reaches the completion machinery without depending on the
-// HSA interposition layer (which in turn depends on the hub). The interposition
-// layer installs these once at init, before any queue -- and therefore any
-// eligible batch -- can exist.
+// How the reader reaches the completion machinery without depending on the HSA
+// interposition layer (which depends on the hub). Installed once at init,
+// before any queue -- and therefore any eligible batch -- can exist.
 struct signal_less_ops
 {
-    // Hand a proven completion to the async task group. Must move out of `p` ONLY
-    // when returning `accepted`; on rejection the entry is left intact so the
-    // retry owner can finalize it later.
+    // Must move out of `p` ONLY when returning `accepted`; on rejection the
+    // entry is left intact for the retry owner.
     std::function<submit_result(signal_less_hub_t::proven&)> submit = {};
 
-    // Run the no-signal finalizer synchronously on the CALLING thread. Used only
-    // by the retry-owner flush, which runs on the teardown thread -- never on the
-    // reader thread.
+    // Runs on the CALLING thread. Used only by the retry-owner flush, which is
+    // the teardown thread -- never the reader.
     std::function<void(signal_less_hub_t::proven&&)> finalize_in_place = {};
 
-    // Fence in-flight interceptor registration/publication on every live queue by
-    // taking and releasing each queue's gate_lock. Must be called holding no other
-    // lock (teardown step 2, and the (a) fence of a hub-aware sync).
+    // Takes and releases every live queue's gate_lock. Must be called holding no
+    // other lock.
     std::function<void()> quiesce_interceptor = {};
 
-    // Join the async task group, i.e. wait for every already-submitted completion
-    // to finish executing (teardown step 6, and the (d) fence of a hub-aware sync).
+    // Wait for every already-submitted completion to finish executing.
     std::function<void()> join_task_group = {};
 };
 

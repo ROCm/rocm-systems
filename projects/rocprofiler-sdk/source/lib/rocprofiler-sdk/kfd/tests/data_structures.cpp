@@ -58,9 +58,7 @@ elapsed_ms_since(uint64_t start_ns)
 }
 }  // namespace
 
-// ---------------------------------------------------------------------------
 // correlation_key
-// ---------------------------------------------------------------------------
 TEST(correlation_key, equality_and_hash)
 {
     auto a = correlation_key{7, 100, 0};
@@ -76,9 +74,7 @@ TEST(correlation_key, equality_and_hash)
     EXPECT_NE(hash(a), hash(c));
 }
 
-// ---------------------------------------------------------------------------
 // kfd_time_is_sane: the KFD-result-vs-HSA-fallback decision in get_dispatch_time
-// ---------------------------------------------------------------------------
 TEST(kfd_time_is_sane, accepts_interval_inside_the_dispatch_window)
 {
     EXPECT_TRUE(kfd_time_is_sane(/*start*/ 150, /*end*/ 250, /*enqueue*/ 100, /*now*/ 300));
@@ -86,10 +82,7 @@ TEST(kfd_time_is_sane, accepts_interval_inside_the_dispatch_window)
     EXPECT_TRUE(kfd_time_is_sane(100, 300, 100, 300));
 }
 
-// A converted firmware end legitimately lands a few ms past a CPU `now` sampled
-// right behind it -- the tick-conversion correlation is only periodically
-// re-synced. Measured at 2.0-2.7 ms on gfx1201; rejecting that discarded every
-// record, so the upper bound carries kKfdFutureSlackNs of tolerance.
+// A converted firmware end legitimately lands a few ms past a CPU `now`.
 TEST(kfd_time_is_sane, accepts_a_converted_end_slightly_past_now)
 {
     constexpr uint64_t now = 1'000'000'000;
@@ -113,9 +106,7 @@ TEST(kfd_time_is_sane, rejects_records_outside_the_dispatch_window)
     EXPECT_FALSE(kfd_time_is_sane(150, 150, 100, 300));  // zero-length interval
 }
 
-// ---------------------------------------------------------------------------
 // DoorbellMap
-// ---------------------------------------------------------------------------
 TEST(DoorbellMap, bind_and_lookup)
 {
     auto e = DoorbellMap{}.bind_and_resolve(0, qid(42), /*doorbell_off=*/7);
@@ -243,9 +234,7 @@ TEST(DoorbellMap, bind_and_resolve_follows_queue_to_new_doorbell)
     EXPECT_EQ(b.doorbell_off, 8u);
 }
 
-// ---------------------------------------------------------------------------
 // ResultsMap
-// ---------------------------------------------------------------------------
 TEST(ResultsMap, deposit_take_roundtrip)
 {
     auto m   = ResultsMap{};
@@ -302,10 +291,8 @@ TEST(ResultsMap, evict_stale_tolerates_future_timestamp)
     EXPECT_TRUE(m.take(correlation_key{7, 1, 0}).has_value());  // still retained
 }
 
-// ---------------------------------------------------------------------------
 // Phase 1 rendezvous (wait_take). Replaces the one-shot take() that silently
 // used HSA timestamps whenever a firmware record was merely late.
-// ---------------------------------------------------------------------------
 
 // U3a, deposit-before-waiter: the result is already there, so the wait resolves
 // immediately (no deadline consumed) and resolves exactly ONCE.
@@ -475,21 +462,12 @@ TEST(ResultsMap, hsa_fallback_is_counted)
     EXPECT_EQ(m.stats().fallbacks, 2u);
 }
 
-// ---------------------------------------------------------------------------
 // Phase 1 option (b) feature gate
-// ---------------------------------------------------------------------------
 
-// KFD result SELECTION must stay OFF until the whole signal-less path exists:
-// emitting a firmware timestamp is only sound once owner-injectivity and
-// generation-reuse closure are in place. get_dispatch_time() skips the entire KFD
-// block while this is false, which is what makes every dispatch deterministically
-// report HSA timestamps.
-//
-// kfd_selection_enabled() is the env feature flag AND the fully-wired master
-// switch. The machinery is complete, so the guarantee that matters now is that it
-// stays OFF unless the operator opts in: with ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS
-// unset -- the default in every test process -- no KFD timestamp is selected and
-// get_dispatch_time() skips the whole KFD block.
+// kfd_selection_enabled() is the env feature flag AND the fully-wired switch.
+// The machinery is complete, so what matters now is that it stays OFF unless the
+// operator opts in: with the env var unset -- the default in every test process
+// -- get_dispatch_time() skips the whole KFD block.
 TEST(kfd_selection_gate, off_by_default_without_the_env_opt_in)
 {
     static_assert(signal_less_fully_wired(), "the signal-less machinery is complete");
@@ -513,10 +491,7 @@ TEST(ResultsMap, erase_slot_drops_only_that_slot)
     EXPECT_EQ(m.erase_slot(0, 7), 0u);  // idempotent
 }
 
-// A firmware record from one GPU must never match a dispatch enqueued on
-// another. Doorbell slots and dispatch indices are per-GPU and both restart from
-// low values, so the same (slot, index, generation) legitimately occurs on every
-// GPU -- gpu_id is what keeps them apart.
+// A firmware record from one GPU must never match a dispatch enqueued on another.
 TEST(correlation_key, gpu_id_prevents_cross_gpu_matching)
 {
     auto on_gpu0 = correlation_key{7, 100, 0, /*gpu_id=*/0};

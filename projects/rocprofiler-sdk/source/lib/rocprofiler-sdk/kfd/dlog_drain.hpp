@@ -23,15 +23,12 @@
 #pragma once
 
 // Pure dispatch-log ring drain logic, factored out of kfd_reader.cpp so it can be
-// unit-tested against an in-memory buffer without a GPU, an mmap, or the reader's
-// singletons. The reader wraps this with the mmap pointers and the doorbell/results
-// singletons; the test wraps it with a hand-built buffer and recording callbacks.
+// unit-tested against an in-memory buffer without a GPU or the reader's
+// singletons.
 //
-// Ring geometry: the buffer holds `num_regions` regions, each with its own
-// wptr[i]/rptr[i] and `region_record_count` slots (per-region, a power of two).
-// Region i's records occupy slots [i*region_record_count, (i+1)*region_record_count).
-// Multiple queues can multiplex into one region; records carry their own
-// (doorbell_off, dispatch_id), so interleaving within a region is expected.
+// Ring geometry: `num_regions` regions, each with its own wptr[i]/rptr[i] and
+// `region_record_count` slots (a power of two). Multiple queues can multiplex
+// into one region; records carry their own (doorbell_off, dispatch_id).
 
 #include <cstdint>
 #include <cstring>
@@ -51,22 +48,15 @@ constexpr uint32_t kFwRecBytes = 20;
 // more regions than this is rejected rather than partially drained.
 constexpr uint32_t kMaxRegions = 8;
 
-// Dispatch-log ring size, overridable via ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB
-// (KiB granularity: the useful sizes start below 1 MiB).
+// Dispatch-log ring size, overridable via ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB.
 //
 // REGISTER_BUFFER only accepts buffer_size == num_regions * 20 *
 // region_record_count with region_record_count a power of two <= 2^24, and
-// num_regions is ASIC-fixed (2 on gfx12, 4 on gfx9.4.x/9.5.0) but is not reported
-// until STREAM_OP_INFO, i.e. AFTER the size has to be chosen. 80 * 2^k satisfies
-// the rule for both counts -- region_record_count is 2^(k+1) at 2 regions and 2^k
-// at 4 -- so it needs no advance knowledge of num_regions. k is capped at 23 to
-// keep the 2-region count <= 2^24, which makes 80 * 2^23 == 640 MiB the largest
-// accepted size. Requested sizes are snapped DOWN onto this lattice so a
-// reasonable-looking value (128 KiB, say) can never become an EINVAL that
-// disables the dispatch log for the whole process.
-//
-// Every downstream size (arr_bytes, signal_off, alloc_size, stride, aperture
-// candidates) is computed in uint64 from a value <= 640 MiB and cannot overflow.
+// num_regions is ASIC-fixed but not reported until STREAM_OP_INFO, i.e. AFTER
+// the size must be chosen. 80 * 2^k satisfies the rule at both 2 and 4 regions,
+// so it needs no advance knowledge. k is capped at 23, making 640 MiB the
+// largest accepted size. Requests are snapped DOWN onto this lattice so a
+// reasonable-looking value can never become an EINVAL that disables the feature.
 constexpr uint64_t kDlogMinRingBytes = 80ull << 10;  // 80 KiB; also the default
 constexpr uint64_t kDlogMaxRingBytes = 80ull << 23;  // 640 MiB
 constexpr uint64_t kDlogMaxRingKb    = 0xFFFFFFFFull / 1024;  // parse domain (uint32 field)
@@ -84,10 +74,7 @@ dlog_snap_ring_bytes(uint64_t want)
     return sz;
 }
 
-// Parse a ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB value. Returns the requested size
-// in bytes (still to be snapped), or 0 for anything that is not a plain decimal
-// integer in [1, kDlogMaxRingKb] -- empty, zero, negative, trailing junk, or too
-// large. The caller warns and falls back to kDlogMinRingBytes.
+// Returns the requested byte count, or 0 to mean "use the default".
 inline uint64_t
 dlog_ring_bytes_from_kb_str(std::string_view v)
 {
@@ -117,15 +104,13 @@ struct fw_record
 static_assert(sizeof(fw_record) == kFwRecBytes,
               "fw_record must match the 20-byte firmware record layout");
 
-// One completion the drain is reporting.
+// `start_known` distinguishes the two EOP shapes: a matched START+EOP pair, and
+// an EOP whose START was lost to a ring overwrite -- which still proves the
+// kernel completed but carries no interval.
 //
-// `start_known` distinguishes the two EOP shapes: a matched START+EOP pair
-// (start_ticks valid), and an EOP whose START was lost to a ring overwrite --
-// which still proves the kernel completed but carries no interval.
-//
-// `loss_free` is the drain's verdict for the region this record came from: false
-// means the producer lapped the reader before or during the scan, so the records
-// around the collision may be torn and nothing may be published from them.
+// `loss_free` false means the producer lapped the reader before or during the
+// scan, so records around the collision may be torn and nothing may be
+// published from them.
 struct drained_record
 {
     uint32_t doorbell_off = 0;
@@ -136,10 +121,7 @@ struct drained_record
     bool     loss_free    = true;
 };
 
-// One record copied out of the shared ring, carrying the copier's loss verdict
-// for the region it came from. The verdict travels with the record because
-// pairing happens later, on another thread, by which time the ring cursors have
-// already moved on.
+    // Carries the copier's loss verdict, since pairing happens on another thread.
 struct copied_record
 {
     fw_record rec       = {};
@@ -185,20 +167,14 @@ struct pair_state
 
     uint64_t unmatched_eops = 0;  // EOPs whose START was lost (shape ii)
 
-    // Pairing census. If starts_seen is far below eops_seen the firmware is not
-    // giving us a pairable START for every dispatch; if they match but eops go
-    // unmatched anyway, the two record types disagree on the key. Those are
-    // different bugs, so the counts are kept apart.
+    // Pairing census: starts_seen far below eops_seen means the firmware is not
+    // emitting STARTs, which is a different bug from a pairing mismatch.
     uint64_t starts_seen       = 0;
     uint64_t eops_seen         = 0;
     uint64_t starts_overwritten = 0;  // a START replaced a retained START on the same key
 
-    // Per-doorbell tally. The pairing key is (doorbell_off, dispatch_id) and the
-    // map is region-agnostic and session-lived, so a START and its EOP can only
-    // fail to meet if they carry DIFFERENT keys. Counting each record type per
-    // doorbell shows that directly: a doorbell with starts but no eops, paired
-    // with one that has eops but no starts, means the two record types disagree
-    // about which doorbell a dispatch belongs to.
+    // The pairing key is (doorbell_off, dispatch_id), so a START and EOP that
+    // disagree on doorbell_off can never pair.
     struct doorbell_tally
     {
         uint64_t starts    = 0;
@@ -230,10 +206,7 @@ struct pair_state
         return removed;
     }
 
-    // Retained starts sharing a doorbell, with one example dispatch id. Asked
-    // after an orphaned EOP: if starts DO exist for the same doorbell but under
-    // other ids, START and EOP disagree about the id rather than the START being
-    // missing.
+    // Retained starts sharing a doorbell, with one example dispatch id.
     std::pair<size_t, uint32_t> starts_with_doorbell(uint32_t doorbell_off) const
     {
         size_t   count   = 0;
@@ -269,19 +242,13 @@ struct pair_state
 };
 
 // STAGE 1 (reader thread): copy raw records out of the shared ring, as fast as
-// possible and touching nothing else.
+// possible and touching nothing else. This is the only code reading the volatile
+// mapping, and the time spent there is the window in which the producer can lap
+// us -- so NO lock, no map, no pairing or timestamp math. Returns the number
+// copied, or 0 on invalid geometry.
 //
-// This is the only code that reads the volatile mapping, and the time it spends
-// there is the window in which the producer can lap us -- so it takes NO lock,
-// consults no map, does no pairing, timestamp math or dispatch bookkeeping. It
-// memcpys the bytes into caller-owned storage and moves the cursor on.
-//
-// `out.emplace_back(copied_record)` receives the records in ring order. Returns
-// the number copied, or 0 on invalid geometry.
-//
-// ORDERING: the copy of a region's slots happens BEFORE the release-store that
-// publishes the new rptr, so the kernel cannot observe the slots as free while we
-// are still reading them.
+// ORDERING: a region's slots are copied BEFORE the release-store publishing the
+// new rptr, so the kernel cannot see the slots as free while we are reading.
 template <typename OutT>
 uint64_t
 copy_pipes(const uint8_t*           records_base,
@@ -314,10 +281,8 @@ copy_pipes(const uint8_t*           records_base,
         uint64_t       scan = cursors.rptr[p];
         if(w <= scan) continue;
 
-        // The producer lapped us: the slots it has already overwritten are gone.
-        // Count them, skip past them, and carry on -- the rest of this region is
-        // still valid, and the records we do copy are marked so a consumer will
-        // not complete a dispatch from a possibly-torn one.
+    // The producer lapped us: slots it already overwrote are gone, and those it
+    // is writing now may be torn.
         const bool lossy = cursors.note_overrun(w - scan, region_slots);
         if(w - scan > region_slots) scan = w - region_slots + 1;
 
@@ -342,11 +307,7 @@ copy_pipes(const uint8_t*           records_base,
 }
 
 // STAGE 2 (processor thread): pair start/eop out of an already-copied batch.
-//
-// Runs off the ring entirely, so it may take locks and consult maps freely.
-// on_record(const drained_record&) is invoked for every EOP in batch order.
-// Returns the matched start+eop pair count; EOPs whose START was lost are
-// reported with start_known=false and counted in state.unmatched_eops.
+// No ring access, so it may take locks and do timestamp work.
 template <typename OnRecord>
 uint64_t
 pair_records(const copied_record* records,
@@ -370,10 +331,7 @@ pair_records(const copied_record* records,
         {
             ++state.starts_seen;
             ++state.per_doorbell[rec.doorbell_off].starts;
-            // Overwrite: dispatch_id is only low-32, so a key can recur; a
-            // collision means the prior start is stale. Counted, because a burst
-            // of overwrites would mean concurrent dispatches are colliding on the
-            // key rather than recurring over time.
+        // dispatch_id is only low-32, so a key can recur.
             if(state.pending_starts.count(key) != 0) ++state.starts_overwritten;
             state.pending_starts[key] = pair_state::pending_start{ts, now_ns};
             continue;

@@ -69,9 +69,7 @@ namespace
 {
 constexpr int kEventfdFlags = EFD_CLOEXEC | EFD_NONBLOCK;
 
-// In-flight batches between the copier and the processor. Deep enough to ride out
-// a processor hiccup, small enough that a stalled processor costs bounded memory
-// rather than unbounded growth.
+// Deep enough that a brief processor stall does not force the copier to drop.
 constexpr size_t kBatchPipeDepth = 16;
 
 // Upper bound on armed GPUs. One session per GPU that supports dispatch-log.
@@ -84,12 +82,7 @@ constexpr uint64_t kProcessorEvictIntervalNs = 1'000'000'000ull;  // 1 s
 constexpr uint64_t kStartMaxAgeNs            = 5'000'000'000ull;  // 5 s
 constexpr uint64_t kResultMaxAgeNs           = 5'000'000'000ull;  // 5 s
 
-// Start/eop pairing state, owned exclusively by the processor thread.
-//
-// One map PER GPU. Doorbell slots and dispatch indices are per-GPU and both
-// restart from low values, so a single shared map would let a START from one GPU
-// pair with an EOP from another and report a foreign start timestamp. Keeping
-// them apart makes that impossible by construction rather than by key hygiene.
+// Owned exclusively by the processor thread, so none of it needs a lock.
 struct processor_state
 {
     std::unordered_map<uint32_t, pair_state> by_gpu = {};
@@ -97,11 +90,7 @@ struct processor_state
     pair_state& for_gpu(uint32_t gpu_id) { return by_gpu[gpu_id]; }
 };
 
-// Dispatch-log ring size in bytes. Validated before any sizing math uses it: the
-// result is always a snapped value in [kDlogMinRingBytes, kDlogMaxRingBytes], so it
-// fits the uint32 buffer_size ioctl field and satisfies the driver's shape rule.
-// Should a future ASIC reject it anyway, REGISTER_BUFFER fails and the existing
-// setup-failed path warns and falls back to HSA timestamps.
+// Validated before any sizing math uses it.
 uint64_t
 ring_bytes()
 {
@@ -130,9 +119,6 @@ ring_bytes()
     return _bytes;
 }
 
-// fw_record, the 20-byte record layout, the kRec* type constants, kFwRecBytes, the
-// ring_cursors bookkeeping, and the copy_pipes()/pair_records() logic all live in the
-// header-only dlog_drain.hpp so the drain is unit-testable without a GPU.
 static_assert(kFwRecBytes == KFD_DISPATCH_LOG_FW_RECORD_BYTES,
               "dlog_drain.hpp fw record size must match the UAPI");
 
@@ -149,9 +135,7 @@ round_up_page(size_t x)
     return (x + p - 1) & ~(p - 1);
 }
 
-// One dispatch-log data-ring session for a single GPU. The reader allocates a
-// GTT buffer, registers it, opens a RAW_MMAP stream against its own pid, and
-// mmaps the layout.
+// One dispatch-log data-ring session for a single GPU.
 struct dlog_session
 {
     uint32_t gpu_id       = 0;
@@ -164,21 +148,14 @@ struct dlog_session
 
     kfd_dlog_stream_info info = {};
 
-    // Ring cursors + loss counters. Touched ONLY by the ring-copier thread, so no
-    // lock is needed. Start/eop pairing state deliberately does NOT live here --
-    // it belongs to the processor thread (see processor_state).
+    // Touched ONLY by the ring-copier thread.
     ring_cursors cursors = {};
 
-    // Per-session, so one GPU failing to arm never disables another. `ready`
-    // publishes a fully-built session to the copier (release/acquire); `failed`
-    // latches a permanently unusable GPU.
+    // Per-session, so one GPU failing to arm never disables another.
     std::atomic<bool> ready  = {false};
     std::atomic<bool> failed = {false};
 };
 
-// Reader thread state. Single instance via static_object (ordered teardown). Its
-// destructor stops+joins the thread so a joinable std::thread is never
-// destroyed (would call std::terminate). Mirrors poll_kfd_t in kfd.cpp.
 struct reader_state
 {
     std::thread       thread  = {};
@@ -188,34 +165,24 @@ struct reader_state
 
     int kfd_fd = -1;
 
-    // One session per armed GPU. A fixed array rather than a container so the
-    // atfork child handler can walk it with plain indexing -- no allocation, no
-    // container invariants to be caught mid-mutation.
+    // Fixed array, not a container, so the atfork child handler can walk it with
+    // plain indexing -- no allocation, no iterator invalidation.
     std::array<dlog_session, kMaxSessions> sessions      = {};
     std::atomic<size_t>                    session_count = {0};
 
-    // Session is set up on the app thread (ensure_reader_session, via
-    // create_queue) and drained on the reader thread. setup_mu serializes setup;
-    // session_ready publishes the completed session to the reader (acquire/release
-    // so the reader sees a fully-built session before it drains).
+    // Set up on the app thread, torn down on the finalize thread.
     std::mutex setup_mu = {};
     // True once ANY session is armed: lets the reader pick its poll cadence
     // without walking the array on every iteration.
     std::atomic<bool> any_session_ready = {false};
-    // Latched when the reader can never serve a session: setup_session() failed
-    // (no aperture, alloc, ABI, geometry -- all permanent, and retrying would
-    // repeat 128 alloc ioctls plus a warning on every dispatch), the reader failed
-    // to start, or we are in a forked child. Checked before setup_mu is taken, so a
-    // latched reader never makes a dispatch block on that mutex. Cleared only by
-    // stop_reader().
+    // Latched when the reader can never serve a session, as opposed to a single
+    // GPU failing to arm.
     std::atomic<bool> reader_unavailable = {false};
     // Bumped once per completed drain pass. A sync point waits for it to advance
     // twice, which proves a whole pass ran after the request.
     std::atomic<uint64_t> drain_epoch = {0};
 
-    // Handoff to the processor. The copier is the sole producer, the processor the
-    // sole consumer, so this is lock-free on both sides and the copier never waits
-    // on the processor.
+    // Copier is the sole producer, processor the sole consumer.
     record_pipe<kBatchPipeDepth> pipe = {};
     std::thread                  processor_thread = {};
     std::atomic<uint64_t>        batches_dropped  = {0};
@@ -227,9 +194,6 @@ struct reader_state
     reader_state& operator=(const reader_state&) = delete;
 };
 
-// Slots whose queue was destroyed, waiting for the reader to purge its retained
-// starts. Written by destroying app threads, consumed by the processor; pair_state
-// itself therefore stays reader-owned and is never touched cross-thread.
 std::mutex&
 purge_mutex()
 {
@@ -276,29 +240,17 @@ get_gpuvm_aperture(int kfd, uint32_t gpu_id, uint64_t* base, uint64_t* limit)
 }
 
 // Allocate + map a GTT buffer, register it for dispatch-log, open a RAW_MMAP
-// stream, and mmap the layout. The create_queue trigger guarantees the device is
-// acquired before this runs, so the raw KFD allocation does not race init.
+// stream, and mmap the layout.
 //
-// ALLOCATION DESIGN (why raw KFD alloc, not HSA memory pools):
-// The dispatch-log RAW_MMAP consumption path requires a buffer the KFD driver
-// itself allocated. An HSA-pool buffer (hsa_amd_memory_pool_allocate) is accepted
-// by DLOG_REGISTER_BUFFER, but mmap() on the resulting stream_fd fails with
-// EOPNOTSUPP -- the driver only maps stream buffers it owns. Using HSA would
-// therefore force the READ_RECORDS consumption mode (a kernel-mediated copy per
-// drain), abandoning the zero-copy read that is the feature's whole overhead
-// advantage. Hence the raw-KFD + RAW_MMAP path.
-//
-// Forward declaration: setup_session arms a scope_destructor that unwinds
-// partially-acquired resources via teardown_session on any failure return after
-// the GTT allocation succeeds (disarmed only on the success path).
+// Raw KFD alloc, not an HSA memory pool: DLOG_REGISTER_BUFFER accepts a pool
+// buffer but mmap() on the resulting stream_fd then fails EOPNOTSUPP, since the
+// driver only maps stream buffers it owns. HSA would force READ_RECORDS mode (a
+// kernel copy per drain), losing the zero-copy read the feature exists for.
 void
 teardown_session(int kfd, dlog_session* s);
 
-// Whether a failed setup can be retried later. Anything that depends on the KFD
-// device being usable -- aperture lookup, the GTT allocation, buffer
-// registration, opening the stream, the mapping -- may simply be too early when
-// setup runs at process init, so it is retryable. A geometry or layout mismatch
-// is an ABI disagreement that will never resolve, so it is permanent.
+// Whether a failed setup can be retried later: anything depending on device
+// readiness can, an ABI or geometry mismatch cannot.
 bool
 setup_session(int kfd, uint32_t gpu_id, dlog_session* s, bool* permanent = nullptr)
 {
@@ -342,9 +294,7 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s, bool* permanent = nullp
     s->buffer_va    = alloc.va_addr;
     s->alloc_handle = alloc.handle;
 
-    // From here on, resources are acquired (GTT alloc, then map/register/stream/
-    // mmap). Any early return must unwind them. Arm a scope guard that tears down
-    // the partially-built session unless we reach the success path and disarm it.
+    // From here on resources are acquired, so every failure return must unwind.
     bool                     success = false;
     common::scope_destructor cleanup{[&]() {
         if(!success) teardown_session(kfd, s);
@@ -398,9 +348,7 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s, bool* permanent = nullp
     }
     s->info = sinfo.info;
 
-    // Reject any geometry copy_pipes() would silently refuse to drain (record
-    // size, region count beyond the cursor storage, non-power-of-two slot count),
-    // so setup fails loudly instead of reporting ready and draining nothing.
+    // Reject any geometry copy_pipes() would silently refuse to drain.
     const uint32_t rrc = s->info.region_record_count;
     if(s->info.fw_record_size != kFwRecBytes || s->info.num_regions == 0 ||
        s->info.num_regions > kMaxRegions || rrc == 0 || (rrc & (rrc - 1)) != 0)
@@ -415,10 +363,6 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s, bool* permanent = nullp
         return false;
     }
 
-    // The offsets below are driver-supplied and are used to form pointers that are
-    // read (records, wptr) AND written (rptr), so every array must lie inside the
-    // mapping. Subtract instead of add so the bounds check cannot overflow, and
-    // reject a mmap_size whose page round-up wrapped.
     s->smap_len              = round_up_page(s->info.mmap_size);
     const uint64_t rec_bytes = static_cast<uint64_t>(s->info.num_regions) * rrc * kFwRecBytes;
     const uint64_t ptr_bytes = static_cast<uint64_t>(s->info.num_regions) * sizeof(uint64_t);
@@ -499,26 +443,18 @@ teardown_session(int kfd, dlog_session* s)
     }
 }
 
-// STAGE 1, reader thread: copy whatever the ring holds into a batch and get out.
-//
-// This is the ONLY code that touches the volatile mapping, and every microsecond
-// spent here widens the window in which the firmware can lap us -- so it takes no
-// lock, consults no map, and does no pairing or timestamp work. On success the
-// batch is published to the processor; if the processor has fallen a full pipe
-// behind there is no free slot, and we DROP the batch rather than block, because
-// blocking the ring read is what causes the overruns we are trying to avoid.
-//
-// Returns the number of records copied.
+// STAGE 1, reader thread: copy the ring into a batch and get out. This is the
+// ONLY code touching the volatile mapping, and every microsecond here widens
+// the window for the firmware to lap us -- so no lock, no map, no pairing. If
+// the processor is a full pipe behind we DROP the batch rather than block,
+// since blocking the ring read causes the very overruns this avoids.
 uint64_t
 copy_records(reader_state& st)
 {
     uint64_t _total = 0;
     const size_t _n = st.session_count.load(std::memory_order_acquire);
 
-    // One reader walks every armed ring. The rings are independent -- each has its
-    // own wptr/rptr and its own cursors -- so this is the single-session copier in
-    // a loop, with the same per-region acquire/release: the wptr acquire-load
-    // happens before the copy, and the rptr release-store after it, per session.
+    // The rings are independent, so one GPU lapping cannot stall another.
     for(size_t i = 0; i < _n; ++i)
     {
         auto& _s = st.sessions[i];
@@ -532,10 +468,8 @@ copy_records(reader_state& st)
         auto* _batch = st.pipe.acquire();
         if(!_batch)
         {
-            // No free slot. Do NOT read the ring: leaving the records for the next
-            // pass keeps rptr where it is, which is the honest thing to do -- the
-            // producer may lap us, and that shows up as an overrun rather than as
-            // a silent hole.
+        // Do NOT read the ring: leaving the records for the next pass loses less
+        // than copying them somewhere we cannot publish.
             st.batches_dropped.fetch_add(1, std::memory_order_relaxed);
             continue;
         }
@@ -554,17 +488,12 @@ copy_records(reader_state& st)
     return _total;
 }
 
-// STAGE 2, processor thread: everything the reader used to do inline.
-//
-// Pairs start/eop, resolves the doorbell generation, drives the hub, and either
-// hands a proven completion to the task group or deposits a signal-path result.
-// All the lock-taking work lives here, off the ring-reading path. It still runs
-// no client callback itself: hand_off_proven() submits to the task group, which
-// is where invariant 11 puts the callback.
-// Env-gated raw dump of what the firmware actually wrote. Capped, and off unless
-// ROCPROFILER_KFD_DISPATCH_LOG_TRACE=1. This is the decisive check for an
-// orphaned EOP: it shows whether a START with the same (doorbell, dispatch_id)
-// appears in the stream at all, and which region each record came from.
+// STAGE 2, processor thread: pairs start/eop, resolves the generation, drives
+// the hub. All the lock-taking work lives here, off the ring-reading path. It
+// runs no client callback itself; hand_off_proven() submits to the task group.
+// The raw dump below is off unless ROCPROFILER_KFD_DISPATCH_LOG_TRACE=1 and is
+// the decisive check for an orphaned EOP: it shows whether a START with the
+// same (doorbell, dispatch_id) appears in the stream at all.
 void
 trace_raw_records(const record_batch& batch)
 {
@@ -605,9 +534,7 @@ process_batch(processor_state& proc, const record_batch& batch)
         _pairing,
         batch.now_ns,
         [&_pairing, _gpu](const drained_record& rec) {
-            // An orphaned EOP: report whether retained STARTs exist for the SAME
-            // doorbell under a DIFFERENT id, which would mean the two record types
-            // disagree about the id rather than the START being absent.
+        // An orphaned EOP: report whether STARTs were retained for the same slot.
             if(!rec.start_known)
             {
                 static const bool _trace =
@@ -632,11 +559,7 @@ process_batch(processor_state& proc, const record_batch& batch)
             // only ever match a dispatch enqueued on the same GPU.
             auto key = correlation_key{slot, rec.dispatch_id, gen, _gpu};
 
-            // Signal-less dispatch: this EOP IS the completion event (G3). Both
-            // shapes route here -- a matched pair carries start_ticks, an EOP whose
-            // START was lost proves completion with the interval unknown. Under a
-            // lossy region prove_eop refuses, so a possibly-torn record completes
-            // nothing.
+            // Signal-less: this EOP IS the completion event.
             if(rec.start_known) signal_less_hub().note_start(key, rec.start_ticks);
             if(auto _proven = signal_less_hub().prove_eop(key, rec.end_ticks, rec.loss_free))
             {
@@ -655,16 +578,11 @@ process_batch(processor_state& proc, const record_batch& batch)
         });
 }
 
-// Overrun report. The ring lapped us, so those records are gone -- but the data
-// we DID copy is still valid, so this reports and carries on.
-//
-// It deliberately does NOT disable signal-less. The old behavior poisoned the
-// session on the first overrun, which turned a bounded, already-known loss into a
-// process-wide loss of the feature. Dispatches whose records were lapped simply
-// never complete from firmware; everything else keeps working.
-//
-// Rate-limited to one line per escalating episode so a sustained overrun cannot
-// flood the log. Reader thread only, so the statics need no lock.
+// The ring lapped us, so those records are gone -- but what we DID copy is still
+// valid, so this reports and carries on rather than poisoning the session: an
+// overrun is a bounded, already-known loss, not a reason to lose the feature
+// process-wide. Rate-limited per escalating episode. Reader thread only, so
+// the statics need no lock.
 void
 report_overrun(uint32_t gpu_id, const ring_cursors& c, uint64_t batches_dropped)
 {
@@ -757,11 +675,8 @@ stop_reader()
 
 reader_state::~reader_state() { stop_reader(); }
 
-// pthread_atfork child handler. Only the forking thread survives into the child,
-// so the reader is gone while its joinable std::thread handle, fds and mapping are
-// inherited. Permanently disable the reader in the child (dispatches there use HSA
-// timestamps); there is deliberately no restart path. Async-signal-safe: scalar
-// state reset only -- never join, close, munmap, ioctl or allocate here.
+// pthread_atfork child handler. Only the forking thread survives, so this does
+// atomic stores and fd/mapping drops only -- no lock, no allocation, no join.
 void
 disable_reader_in_child()
 {
@@ -769,9 +684,6 @@ disable_reader_in_child()
     // the DoorbellMap lock a vanished thread may have been holding.
     disable_kfd_dispatch_log();
 
-    // Mark the signal-less epoch stale and abandon the Phase-2 shared objects that
-    // already exist. Atomic scalar stores only -- it constructs nothing, locks
-    // nothing, allocates nothing and logs nothing (see its definition).
     signal_less_abandon_in_child();
 
     auto& st = state();
@@ -780,18 +692,13 @@ disable_reader_in_child()
     // survive the fork, so a child dispatch must not reach it.
     st.reader_unavailable.store(true, std::memory_order_relaxed);
     st.running = false;  // makes stop_reader() and ~reader_state() no-ops
-    // Abandon the handles of the vanished threads. Not detach(): that would touch
-    // a pthread descriptor fork has already reclaimed in the child. The pipe and
-    // its batches are abandoned in place -- no consumer exists to drain them, and
-    // the child never produces because the reader is disabled above.
+    // Not detach(): that would leave the handle believing a thread exists.
     new(&st.thread) std::thread{};
     new(&st.processor_thread) std::thread{};
     st.wake_fd = -1;
     st.kfd_fd  = -1;
-    // Drop ownership of every inherited stream fd / mapping / GTT allocation so
-    // the child can never tear down kernel objects that belong to the parent.
-    // Plain indexed scalar stores over a fixed array: no allocation, no locking,
-    // no container invariants to trip over.
+    // Dropping ownership without freeing: the parent still owns them, and a free
+    // here would corrupt its state.
     const size_t _n = st.session_count.load(std::memory_order_relaxed);
     for(size_t i = 0; i < _n && i < kMaxSessions; ++i)
     {
@@ -803,11 +710,7 @@ disable_reader_in_child()
     st.session_count.store(0, std::memory_order_relaxed);
 }
 
-// The processor thread. Sole consumer of the pipe; owns all pairing state.
-//
-// It runs until the reader has stopped AND the pipe is empty, so every batch the
-// reader published is processed before teardown continues -- nothing the firmware
-// gave us is dropped just because the process is shutting down.
+// Sole consumer of the pipe; owns all pairing state, so it needs no lock for it.
 void
 processor_loop()
 {
@@ -831,11 +734,8 @@ processor_loop()
         process_batch(proc, *_batch);
         st.pipe.pop();
 
-        // Slots whose queue was destroyed: the pairing state is ours, so the purge
-        // happens here rather than on the reader. Each request names the GPU it
-        // belongs to, and only that GPU's pairing state is touched -- slot numbers
-        // repeat across GPUs, so purging every one would drop live retained starts
-        // belonging to a queue that is still running.
+        // The pairing state is ours, so the purge happens here rather than on the
+        // destroying thread.
         {
             auto _reqs = std::vector<std::pair<uint32_t, uint32_t>>{};
             {
@@ -884,10 +784,8 @@ processor_loop()
             _p.starts_overwritten,
             _p.pending_starts.size());
 
-        // Per-doorbell breakdown. The pairing key is (doorbell_off, dispatch_id)
-        // within one GPU, so a doorbell carrying STARTs but no EOPs alongside one
-        // carrying EOPs but no STARTs means the two record types disagree about
-        // the doorbell -- which no change to the pairing scope could fix.
+                    // The pairing key is (doorbell_off, dispatch_idx), so a START and EOP
+                    // disagreeing on doorbell_off can never pair.
         for(const auto& itr : _p.per_doorbell)
         {
             ROCP_WARNING << fmt::format(
@@ -908,31 +806,22 @@ reader_loop()
 {
     auto& st = state();
 
-    // The session is established lazily by ensure_reader_session() on the
-    // app/queue-creation thread (which guarantees the agent cache is ready). Here
-    // we simply drain whatever has been published.
     auto     wake          = pollfd{.fd = st.wake_fd, .events = POLLIN, .revents = 0};
     uint64_t total_seen    = 0;
     uint64_t last_evict_ns = common::timestamp_ns();
 
     while(!st.stop.load(std::memory_order_acquire))
     {
-        // Poll cadence: 1 ms while a session is live (records must be drained
-        // promptly), but a coarse 100 ms before any session is published so the
-        // reader is not a 1000-wakeup/sec idle spinner during the (possibly long)
-        // window before the first GPU queue is created. stop_reader() writes wake_fd
-        // to break either wait immediately.
+            // 1 ms while a session is live; records must be drained faster than the
+            // firmware can lap the ring.
         const int _timeout_ms = st.any_session_ready.load(std::memory_order_acquire) ? 1 : 100;
         int       rc          = ::poll(&wake, 1, _timeout_ms);
         if(rc < 0 && errno != EINTR)
         {
-            // Reader dead: nothing will drain the ring again, so publish that
-            // terminally. Clearing session_ready + latching setup_failed is the
-            // same permanent-unavailable state setup failure uses, and makes
-            // ensure_reader_session() refuse to hand out new correlation keys;
-            // dispatches already in flight simply miss and use HSA timestamps.
-            // kfd_dispatch_log_available() is deliberately left alone so queue
-            // destroy still retires doorbell-map entries.
+            // Nothing will drain the ring again, so publish that terminally: this is
+            // the same permanent-unavailable state setup failure uses.
+            // kfd_dispatch_log_available() is deliberately left alone so queue destroy
+            // still retires doorbell-map entries.
             st.any_session_ready.store(false, std::memory_order_release);
             st.reader_unavailable.store(true, std::memory_order_release);
             // No record can be deposited again: release anyone waiting on one
@@ -992,9 +881,6 @@ reader_loop()
     // The reader is done: nothing else will be deposited.
     results_map().abandon_waiters();
 
-    // Misses are dispatches whose completion path found no firmware record.
-    // Fallbacks are eligible dispatches that reported HSA timestamps anyway --
-    // in Phase 1 that is every one of them, because KFD selection is gated off.
     const auto _stats = results_map().stats();
     ROCP_INFO << fmt::format(
         "KFD dispatch-log reader: loop exited, total pairs seen = {}, completion-path "
@@ -1077,9 +963,8 @@ start_kfd_reader()
         return false;
     }
 
-    // Must be registered before the thread exists: a fork in between would leave the
-    // child with a joinable handle to a vanished thread and no handler to abandon it
-    // (std::terminate from ~reader_state).
+// Registered before the thread exists: a fork in between would inherit a reader
+// thread with no handler to abandon it.
     if(pthread_atfork(nullptr, nullptr, disable_reader_in_child) != 0)
     {
         ROCP_WARNING << "KFD dispatch-log reader: pthread_atfork failed, reader not started";
@@ -1169,18 +1054,13 @@ request_reader_slot_purge(uint32_t gpu_id, uint32_t doorbell_slot)
 
 namespace
 {
-// Shared by the eager (init-time) and lazy (first-dispatch) paths.
-//
-// latch_retryable distinguishes the two: at first dispatch the device is
-// certainly usable, so any failure is treated as permanent and latched -- that is
-// what stops every later dispatch repeating 128 alloc ioctls and a warning. At
-// init the device may simply not be ready yet, so a retryable failure must NOT
-// latch, or an attempt that was merely early would disable the feature for the
-// whole process. A genuinely permanent cause latches either way.
-// The armed session for this GPU, or nullptr. Reader/enqueue read this without a
-// lock: session_count is release-stored after a session is fully built, and each
-// session's `ready` flag is release-stored last, so an acquiring reader either
-// sees a complete session or none.
+// latch_retryable: at first dispatch the device is certainly usable, so any
+// failure is permanent and latching stops every later dispatch repeating 128
+// alloc ioctls. At init the device may just not be ready, so a retryable
+// failure must not disable the feature process-wide.
+// Returns the armed session for this GPU, or nullptr. Read without a lock:
+// session_count and each `ready` flag are release-stored after the session is
+// fully built, so an acquirer sees either a complete session or none.
 dlog_session*
 find_session(reader_state& st, uint32_t gpu_id)
 {
@@ -1269,9 +1149,7 @@ ensure_reader_session(uint32_t gpu_id)
 bool
 arm_reader_session_early(uint32_t gpu_id)
 {
-    // Config-time path: arm the ring before any kernel can dispatch, so the
-    // firmware is already recording when the first one runs. A failure that might
-    // only mean "too early" does not latch; ensure_reader_session() retries.
+// Arm before any kernel can dispatch, so the ring is live under the first one.
     return establish_session(gpu_id, /*latch_retryable=*/false);
 }
 }  // namespace kfd

@@ -20,10 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// Unit tests for the signal-less pending-completion hub (dispatch_hub.hpp).
-// The hub is templated on its payload and holds no singletons, so the whole
-// state machine and every rendezvous invariant is exercised here without a GPU,
-// the HSA runtime, or the reader thread (test seam S2).
+// Unit tests for the signal-less pending-completion hub. The hub is templated on
+// its payload and holds no singletons, so the whole state machine is exercised
+// here without a GPU, the HSA runtime, or the reader thread.
 
 #include "lib/rocprofiler-sdk/kfd/dispatch_hub.hpp"
 #include "lib/rocprofiler-sdk/kfd/no_signal_finalizer.hpp"
@@ -128,9 +127,7 @@ register_one(hub_t& hub, correlation_key key, uint64_t corr_id = 1, uint64_t que
 }
 }  // namespace
 
-// ---------------------------------------------------------------------------
 // U1: the state machine -- every legal transition, illegal ones rejected
-// ---------------------------------------------------------------------------
 
 TEST(DispatchHub, register_then_prove_completes_once)
 {
@@ -222,9 +219,7 @@ TEST(DispatchHub, unmatched_start_is_dropped)
     EXPECT_EQ(hub.live_entries(), 0u);
 }
 
-// ---------------------------------------------------------------------------
 // Invariant 1 / U2: whole-batch atomicity
-// ---------------------------------------------------------------------------
 
 TEST(DispatchHub, batch_registers_all_or_none)
 {
@@ -260,9 +255,7 @@ TEST(DispatchHub, duplicate_key_within_batch_rejected)
     EXPECT_EQ(hub.live_entries(), 0u);
 }
 
-// ---------------------------------------------------------------------------
 // Invariant 4 / U4: result-vs-loss has exactly one winner
-// ---------------------------------------------------------------------------
 
 TEST(DispatchHub, prove_and_leak_race_has_one_winner)
 {
@@ -318,9 +311,7 @@ TEST(DispatchHub, concurrent_prove_vs_leak_resolves_each_key_once)
     EXPECT_EQ(tracked_payload::live.load(), 0);
 }
 
-// ---------------------------------------------------------------------------
 // P1 loss policy: poison, ledger, tombstones (U11, U14, U15)
-// ---------------------------------------------------------------------------
 
 // U15: the loud warning needs dispatches AND unique correlation ids separately --
 // a batch shares one correlation id with one reference per dispatch.
@@ -395,9 +386,7 @@ TEST(DispatchHub, tombstone_growth_is_bounded_by_poisoning)
     EXPECT_EQ(hub.mode(), session_mode::loss_poisoned);
 }
 
-// ---------------------------------------------------------------------------
 // Invariant 9 / requirements 3+4: slot quarantine and generation closure
-// ---------------------------------------------------------------------------
 
 // U12: a slot with a second live owner is quarantined -- pending work on it is
 // leaked and nothing may reserve it again for the rest of the process.
@@ -442,9 +431,7 @@ TEST(DispatchHub, close_queue_leaks_its_outstanding_work)
     EXPECT_EQ(hub.outstanding(88), 1u);
 }
 
-// ---------------------------------------------------------------------------
 // U18: teardown
-// ---------------------------------------------------------------------------
 
 TEST(DispatchHub, teardown_leaks_still_pending_entries)
 {
@@ -463,9 +450,7 @@ TEST(DispatchHub, teardown_leaks_still_pending_entries)
     EXPECT_FALSE(register_one(hub, key_of(4, 3)));
 }
 
-// ---------------------------------------------------------------------------
 // U19: fork
-// ---------------------------------------------------------------------------
 
 // The child handler is one atomic store; afterwards every operation
 // short-circuits without touching the inherited map or mutex, so the child can
@@ -489,9 +474,7 @@ TEST(DispatchHub, child_epoch_short_circuits_every_operation)
     EXPECT_TRUE(hub.poison(session_mode::child_stale).first.empty());
 }
 
-// ---------------------------------------------------------------------------
 // Payload ownership (U17 core): exactly one owner, cleanup exactly once
-// ---------------------------------------------------------------------------
 
 TEST(DispatchHub, payload_has_exactly_one_owner_across_every_terminal)
 {
@@ -520,9 +503,7 @@ TEST(DispatchHub, payload_has_exactly_one_owner_across_every_terminal)
     EXPECT_EQ(tracked_payload::live.load(), before);
 }
 
-// ---------------------------------------------------------------------------
 // Enqueue-side batch admission: the hub pre-check the eligibility decision uses
-// ---------------------------------------------------------------------------
 
 // Eligibility must be final BEFORE any packet is modified, so it asks the hub up
 // front whether the batch's keys are admissible. The answer must match what
@@ -568,9 +549,7 @@ TEST(DispatchHub, can_register_batch_refuses_quarantine_tombstone_and_duplicates
     EXPECT_FALSE(hub.can_register_batch({key_of(7, 1)}));
 }
 
-// ---------------------------------------------------------------------------
 // Feature flag + eligibility decision table
-// ---------------------------------------------------------------------------
 
 // Default OFF: only an explicit, recognised enable turns the feature on, so a
 // typo, an empty value, or an unrelated string can never activate it.
@@ -666,9 +645,7 @@ TEST(signal_less_flag, eligibility_requires_every_condition)
     }
 }
 
-// ---------------------------------------------------------------------------
 // Unit 3: EOP shape (ii), overrun leak-and-shout, and the finalize skip
-// ---------------------------------------------------------------------------
 
 // Shape (ii): an EOP whose START was lost still proves completion for the unique
 // current PENDING entry, with start_ticks unknown -> COMPLETED_NO_TIMING.
@@ -760,9 +737,7 @@ TEST(DispatchHub, loss_ledger_selects_exactly_the_leaked_ids)
     EXPECT_EQ(retired, (std::vector<uint64_t>{11, 33}));
 }
 
-// ---------------------------------------------------------------------------
 // Unit 4: live doorbell-owner registry (requirement 3)
-// ---------------------------------------------------------------------------
 
 // One live queue on a slot is the sole owner, so records for it are unambiguous
 // and a batch on that queue can be eligible.
@@ -899,9 +874,7 @@ TEST(OwnerRegistry, remove_and_reregister_keep_counts_exact)
     EXPECT_EQ(reg.live_queues(), 0u);
 }
 
-// ---------------------------------------------------------------------------
 // Unit 4: lazy HW-profiling enable
-// ---------------------------------------------------------------------------
 
 // A queue enables profiling exactly once, on its first signal-path batch; a queue
 // that only ever runs signal-less batches never enables it.
@@ -935,9 +908,7 @@ TEST(ProfilingEnableTracker, laziness_is_tied_to_the_feature_being_active)
         << "lazy profiling must stay off until the operator opts in";
 }
 
-// ---------------------------------------------------------------------------
 // Unit 5: generation/reuse closure on queue destroy (requirement 4)
-// ---------------------------------------------------------------------------
 
 // The whole destroy sequence: a queue with in-flight signal-less work goes away,
 // its pending entries are stranded, and the slot becomes signal-path-only so a
@@ -1061,9 +1032,7 @@ TEST(DispatchHub, concurrent_destroy_and_registration_stay_consistent)
     EXPECT_EQ(tracked_payload::live.load(), 0);
 }
 
-// ---------------------------------------------------------------------------
 // Unit 7: fork epoch / child abandonment (requirement 8, U19)
-// ---------------------------------------------------------------------------
 
 namespace
 {
@@ -1240,14 +1209,10 @@ TEST(fork_safety, child_survives_a_fork_taken_under_contention)
     busy.join();
 }
 
-// ---------------------------------------------------------------------------
-// Unit 8: stateful model / property test
-//
-// Drives the hub + retry owner + no-signal finalizer through a randomized but
-// SEEDED event sequence against a small reference model, asserting the plan's
-// completion invariants after EVERY event. This is the highest coverage-per-
-// effort test in the plan: it explores interleavings no hand-written case does.
-// ---------------------------------------------------------------------------
+// Unit 8: stateful model / property test.
+// Drives the hub + retry owner + finalizer through a SEEDED random event
+// sequence against a reference model, asserting the completion invariants
+// after every event: it explores interleavings no hand-written case does.
 
 namespace
 {
@@ -1540,9 +1505,7 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
     EXPECT_EQ(tracked_payload::live.load(), payloads_before);
 }
 
-// ---------------------------------------------------------------------------
 // Drain-before-strand on queue close
-// ---------------------------------------------------------------------------
 
 // The close path polls this to decide whether anything is still in flight.
 TEST(DispatchHub, pending_for_slot_counts_only_that_slots_live_entries)

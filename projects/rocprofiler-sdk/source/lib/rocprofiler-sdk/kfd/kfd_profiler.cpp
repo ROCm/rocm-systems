@@ -54,9 +54,7 @@ namespace kfd
 {
 namespace
 {
-// Minimum profiler ABI. The reader issues the unified-profiler and stream-fd
-// ioctl encodings vendored in kfd_dlog_uapi.h, so anything older than that
-// header's ABI would be sent incompatible ioctls.
+    // The reader issues the unified-profiler ioctls, which need this ABI.
 constexpr uint32_t kMinProfilerAbiVersion = KFD_IOC_PROFILER_VERSION_NUM;
 
 // Translation-unit-owned state. Not exposed as bare globals; only the accessor
@@ -189,10 +187,8 @@ init_kfd_profiler()
                              st.abi_version,
                              st.supported_gpu_ids.size());
 
-    // The ring is NOT armed here. Installing the HSA table says nothing about
-    // whether anyone wants kernel traces, and arming would register a GTT buffer
-    // and open a firmware stream for a tool that never asked. It is armed when a
-    // context that traces kernel dispatch starts -- see arm_dispatch_log_sessions().
+    // NOT armed here: installing the HSA table says nothing about whether anyone
+    // wants kernel traces. Armed when a kernel-dispatch-tracing context starts.
 }
 
 void
@@ -210,9 +206,7 @@ shutdown_kfd_profiler()
 void
 disable_kfd_dispatch_log()
 {
-    // Reached from the atfork child handler: state() is always already
-    // constructed (the handler is registered only after init succeeded), so this
-    // is a single lock-free atomic store and nothing else.
+    // Reached from the atfork child handler, so it must not construct state.
     state().available = false;
 }
 
@@ -228,12 +222,9 @@ arm_dispatch_log_sessions()
     auto& st = state();
     if(!st.available) return;
 
-    // Arm every GPU that supports dispatch-log. Arming one the application never
-    // dispatches on is harmless -- its ring simply stays empty and the reader
-    // walks it for nothing -- and it is the only way to be ready for whichever
-    // GPU the application does use. Sessions are independent: a retryable failure
-    // on one leaves it to retry on first dispatch, a permanent failure leaves
-    // that GPU on HSA timestamps, and neither affects the others.
+    // Arming a GPU the application never dispatches on is harmless -- its ring
+    // stays empty -- and is the only way to be ready for whichever it does use.
+    // Sessions are independent, so one GPU's failure never affects another.
     size_t _armed = 0;
     for(uint32_t _gpu_id : st.supported_gpu_ids)
     {

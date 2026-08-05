@@ -39,10 +39,8 @@
 // evict_stale() reclaims entries the completion path never took (dispatch
 // completed via HSA fallback before its record arrived) to prevent leaks.
 //
-// deposit() is an event: it notifies wait_take(), so the completion path can wait
-// for a record that is merely late instead of one-shot take()ing and silently
-// substituting HSA timestamps. That rendezvous is the Phase 1 race-seal; it is
-// only entered when kfd_selection_enabled() is true.
+// deposit() notifies wait_take(), so the completion path can wait for a record
+// that is merely late instead of silently substituting HSA timestamps.
 
 namespace rocprofiler
 {
@@ -83,17 +81,13 @@ public:
     std::optional<kfd_timing_result> take(const correlation_key& key);
 
     // Rendezvous form of take(): block until the reader deposits this key, the
-    // waiters are abandoned, or the ABSOLUTE steady_now_ns() deadline passes, then
-    // take. deadline_ns == 0 means do not block (plain take). The predicate is
-    // re-evaluated under the lock on every wakeup, so a deposit racing the start of
-    // the wait cannot be lost and a spurious wakeup cannot end the wait early.
-    //
-    // Blocks the calling completion thread: the caller must hold no other KFD lock.
+    // waiters are abandoned, or the ABSOLUTE deadline passes. deadline_ns == 0
+    // means do not block. The predicate is re-evaluated under the lock on every
+    // wakeup, so a racing deposit cannot be lost. The caller must hold no other
+    // KFD lock.
     std::optional<kfd_timing_result> wait_take(const correlation_key& key, uint64_t deadline_ns);
 
-    // Terminal: no further results can be deposited (reader dead or stopped). Wakes
-    // every waiter and makes later waits return immediately instead of burning
-    // their deadline on a reader that will never answer.
+    // Terminal: no further results can be deposited.
     void abandon_waiters();
 
     // Count an eligible dispatch that reported HSA timestamps anyway, so a source
@@ -109,10 +103,9 @@ public:
     // and unit-testable. Returns the number of entries evicted.
     size_t evict_stale(uint64_t now_ns, uint64_t max_age_ns);
 
-    // Cumulative take() outcomes. A miss means a completed dispatch looked up a
-    // valid correlation key before the reader had deposited its firmware record
-    // (or the record never arrived) and silently fell back to HSA timestamps --
-    // the only externally visible symptom of that race.
+    // A miss means a completed dispatch looked up a valid key before the reader
+    // deposited the record (or it never arrived) and fell back to HSA -- the only
+    // externally visible symptom of that race.
     struct take_stats
     {
         uint64_t hits      = 0;

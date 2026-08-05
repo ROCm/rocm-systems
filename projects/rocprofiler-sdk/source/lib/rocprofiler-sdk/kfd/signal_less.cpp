@@ -166,15 +166,14 @@ signal_less_child_stale()
 void
 signal_less_abandon_in_child()
 {
-    // Async-signal-safe by construction: every statement below is either an atomic
-    // scalar store or a load of an already-initialized static pointer. Nothing
-    // locks, allocates, logs, joins, or frees.
+    // Async-signal-safe by construction: every statement is an atomic scalar store
+    // or a load of an already-initialized static pointer. Nothing locks,
+    // allocates, logs, joins or frees.
     //
-    // static_object<T>::get() returns the placement-new'd pointer WITHOUT
-    // constructing it, so an object this process never created stays uncreated --
-    // there is nothing to abandon in that case. These accessors must live in this
-    // TU: static_object's default context type is per-translation-unit, so get()
-    // from anywhere else would observe a different (null) instantiation.
+    // static_object<T>::get() returns the pointer WITHOUT constructing it, so an
+    // object this process never created stays uncreated. These accessors must
+    // live in this TU: static_object's context type is per-TU, so get() from
+    // elsewhere would observe a different (null) instantiation.
     g_child_stale.store(true, std::memory_order_release);
 
     if(auto* _hub = common::static_object<signal_less_hub_t>::get()) _hub->abandon_in_child();
@@ -210,10 +209,8 @@ hand_off_proven(signal_less_hub_t::proven&& p)
     // The executor is closing: stop trying, the flush will finalize what is held.
     if(_result == submit_result::rejected_permanent) retry().close();
 
-    // Deliberately NOT finalized here. This runs on the reader thread, which must
-    // never execute a client callback (invariant 11), and an EOP-proven entry can
-    // never become LEAKED -- so it is parked until the teardown flush finalizes it
-    // on a normal SDK thread.
+    // Deliberately NOT finalized here: this is the reader thread, which must
+    // never run a client callback.
     if(!retry().hold(std::move(p), _ops.finalize_in_place))
         ROCP_WARNING << "KFD dispatch-log: signal-less retry owner is full; a completion was "
                         "finalized on the calling thread";
@@ -253,12 +250,8 @@ add_live_queue(uint64_t queue_token, uint32_t gpu_id, std::optional<uint32_t> do
     auto _result = owner_registry().add_queue(queue_token, gpu_id, doorbell_slot);
     if(_result != OwnerRegistry::add_result::collision) return;
 
-    // A second live queue owns this slot, so a firmware record on it can no longer
-    // be attributed to one dispatch. Quarantine it for the rest of the process:
-    // that strands whatever was pending on the slot (P1, no record and no retire)
-    // and refuses every later reservation for it, so both owners fall back to the
-    // signal path. Done AFTER add_queue returned, so the registry lock is not held
-    // while the hub lock is taken.
+    // A second live owner means a firmware record on this slot can no longer be
+    // attributed to one queue.
     auto _stranded = signal_less_hub().quarantine_slot(gpu_id, *doorbell_slot);
     if(_stranded.empty()) return;
 
@@ -282,13 +275,10 @@ begin_close_signal_less_queue(uint64_t queue_token)
     signal_less_hub().mark_slot_closing(*_gpu, *_slot);
 }
 
-// Per-queue ceiling on the close drain. Measurement on the reported repro: a
-// 300 ms post-drain delay took loss from ~46% to ~0, so the natural
-// kernel-completion + copy + pair latency for those workloads sits under that.
-// 250 ms covers it with the poll granularity to spare while staying comfortably
-// sub-second, so a single queue destroy never feels hung. Tunable because the
-// right value is workload-dependent -- a long-running kernel needs more, a
-// latency-sensitive teardown wants less.
+// Per-queue ceiling on the close drain. On the reported repro a 300 ms delay
+// took loss from ~46% to ~0, so the natural completion+copy+pair latency sits
+// under that; 250 ms covers it while staying sub-second. Tunable because the
+// right value is workload-dependent.
 uint64_t
 close_drain_budget_ns()
 {
@@ -336,12 +326,11 @@ drain_close_signal_less_queue(uint64_t                             queue_token,
     const uint64_t _start    = steady_now_ns();
     const uint64_t _deadline = _start + _budget;
 
-    // PHASE 1: wait for the hardware to finish. Until it has, the EOP records for
-    // its in-flight dispatches do not exist yet, so polling the hub would see a
-    // low pending count, return early, and strand kernels that were merely still
-    // running. Standard tracing gets this from Queue::sync() waiting on
-    // _active_kernels; the inline path never increments that, so we wait on the
-    // queue's own read index instead.
+    // PHASE 1: until the hardware has finished, the EOP records for in-flight
+    // dispatches do not exist yet, so polling the hub would see a low pending
+    // count and strand kernels that were merely still running. Standard tracing
+    // gets this from Queue::sync() waiting on _active_kernels; the inline path
+    // never increments that, so we wait on the queue's own read index.
     const bool _hw_drained = wait_hw_drained ? wait_hw_drained(_deadline) : true;
 
     // PHASE 2: now the records exist, wait for the reader to pair them. No lock is
@@ -554,10 +543,7 @@ signal_less_quiesce()
 bool
 kfd_selection_enabled()
 {
-    // Emitting a KFD timestamp requires the whole signal-less path, not just the
-    // env flag: until it is fully wired this stays false and every dispatch keeps
-    // the Phase 1 behavior (HSA timestamps, signals retained). A forked child is
-    // never eligible regardless.
+    // Emitting a KFD timestamp requires the whole signal-less path.
     if(g_child_stale.load(std::memory_order_acquire)) return false;
     return signal_less_feature_enabled() && signal_less_fully_wired();
 }

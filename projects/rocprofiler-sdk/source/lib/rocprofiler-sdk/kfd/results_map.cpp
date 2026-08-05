@@ -51,14 +51,12 @@ ResultsMap::deposit(const correlation_key& key, const kfd_timing_result& result)
 {
     {
         auto lk = std::lock_guard<std::mutex>{m_mutex};
-        // emplace = insert-if-absent (first-writer-wins). A correlation_key is
-        // unique per in-flight dispatch, so a collision should not occur; if one does,
-        // keep the first (real) pairing rather than overwrite with a later spurious one.
+    // First-writer-wins: a correlation key is unique per in-flight dispatch, so a
+    // second deposit is a stale duplicate.
         m_data.emplace(key, result);
     }
-    // Notified outside the lock. One deposit wakes every waiter because the map is
-    // keyed per dispatch and waiters are few (one per in-flight completion batch);
-    // each re-checks its own key and sleeps again.
+    // Notified outside the lock. One deposit wakes every waiter, which is correct
+    // because each re-tests its own key.
     m_cv.notify_all();
 }
 

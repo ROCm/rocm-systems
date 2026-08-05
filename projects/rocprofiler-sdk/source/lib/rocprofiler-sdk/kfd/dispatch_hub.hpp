@@ -34,35 +34,30 @@
 #include <utility>
 #include <vector>
 
-// DispatchHub: the pending-completion registry for signal-less kernel dispatch
-// (design plan "Rendezvous invariants (hub)").
+// DispatchHub: the pending-completion registry for signal-less kernel dispatch.
 //
 // An inline batch registers one entry per dispatch BEFORE its packets publish.
-// The KFD reader later proves completion from a firmware EOP record and takes
-// ownership of the entry's payload; a loss event (ring overrun, reader death,
-// slot quarantine, queue close, teardown) instead leaks it. Those two outcomes
-// compete for a single winner under one lock:
+// The reader later proves completion from a firmware EOP and takes ownership of
+// the payload; a loss event (overrun, reader death, quarantine, close, teardown)
+// instead leaks it. Those two outcomes compete for a single winner under one
+// lock:
 //
 //     ABSENT --register_batch--> PENDING(start_ticks: none|present)
 //     PENDING --prove_eop (loss-free drain)--> EOP_PROVEN   (payload handed out)
 //     PENDING --leak/poison/quarantine/close/teardown--> LEAKED (payload handed
 //                                                                out, NOT retired)
 //
-// EOP_PROVEN, RESULT_READY and COMPLETED_NO_TIMING are all completion outcomes:
-// once an entry leaves PENDING through prove_eop() it can never become LEAKED,
+// Once an entry leaves PENDING through prove_eop() it can never become LEAKED,
 // which is why proven entries leave the map entirely -- ownership moves to the
-// caller (task group / retry owner) and the hub cannot hand it out twice. The
-// worker's later choice between RESULT_READY and COMPLETED_NO_TIMING is a
-// property of the payload, not of the hub.
+// caller and the hub cannot hand it out twice.
 //
 // THREADING: exactly one mutex, and the hub NEVER invokes caller code while
-// holding it -- every operation returns owned values and the caller acts on them
-// afterwards (invariant 11). PayloadT is only default-constructed, moved, and
-// destroyed; a payload destructor therefore never runs under the hub lock except
-// for the entry being overwritten, which cannot happen (no-overwrite, invariant 3).
+// holding it -- every operation returns owned values the caller acts on
+// afterwards. PayloadT is only default-constructed, moved and destroyed, so a
+// payload destructor never runs under the hub lock.
 //
 // PayloadT is a template parameter so the hub is unit-testable with a fake
-// payload and carries no dependency on the HSA queue session types (test seam S2).
+// payload and carries no dependency on the HSA queue session types.
 
 namespace rocprofiler
 {
@@ -82,10 +77,8 @@ enum class entry_state : uint8_t
 enum class session_mode : uint8_t
 {
     running = 0,
-    // Retained for the tombstone cap and for reader death -- a ring overrun no
-    // longer poisons the session. An overrun's data is already lost; taking the
-    // whole feature down for the rest of the process turned a bounded loss into a
-    // total one, so the reader now reports it and keeps collecting.
+    // Retained for the tombstone cap and reader death -- a ring overrun no longer
+    // poisons the session, since that turned a bounded loss into a total one.
     loss_poisoned,
     reader_dead,
     stopping,
@@ -104,9 +97,8 @@ template <typename PayloadT>
 class DispatchHub
 {
 public:
-    // What a caller registers for one dispatch. `correlation_id` is a value, never
-    // dereferenced by the hub: it exists to count unique ids in a loss report and
-    // to populate the loss ledger that correlation_id_finalize() must skip.
+    // `correlation_id` is a value, never dereferenced by the hub: it counts unique
+    // ids in a loss report and populates the ledger finalize must skip.
     struct registration
     {
         correlation_key key            = {};
@@ -135,10 +127,7 @@ public:
         PayloadT        payload        = {};
     };
 
-    // Tombstones are unbounded in principle, so cap them. Exceeding the cap
-    // poisons the session rather than evicting a tombstone: forgetting one would
-    // let a recurring low-32 dispatch id reactivate a leaked key (U11), and
-    // poisoning merely turns signal-less off for the process.
+    // Tombstones are unbounded in principle, so cap them.
     static constexpr size_t kMaxTombstones = 8192;
 
     DispatchHub()  = default;
@@ -149,11 +138,9 @@ public:
 
     // --- enqueue side -----------------------------------------------------
 
-    // Whole-batch atomic registration (invariant 1): validates every entry first
-    // and inserts either all or none. Rejects when the session is not running, a
-    // key is already live or tombstoned, a slot is quarantined, or the batch
-    // contains a duplicate key -- no overwrite semantics anywhere (invariant 3).
-    // The caller must fall back to the signal path for the WHOLE batch on false.
+    // Whole-batch atomic: validates every entry first and inserts all or none.
+    // No overwrite semantics anywhere. The caller must fall back to the signal
+    // path for the WHOLE batch on false.
     bool register_batch(std::vector<registration>&& batch)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
@@ -181,12 +168,8 @@ public:
         return true;
     }
 
-    // Would register_batch() accept these keys right now? Used by the enqueue-side
-    // eligibility decision, which must be final BEFORE any packet is modified: a
-    // batch that skipped its completion signals cannot be un-skipped once the
-    // packets are staged. The inline path holds the queue's gate_lock, and keys
-    // carry the queue's own submit index, so no other thread can claim these keys
-    // between this check and the registration.
+    // Would register_batch() accept these keys right now? Advisory only: the
+    // authoritative check is register_batch() itself, under the same lock.
     bool can_register_batch(const std::vector<correlation_key>& keys) const
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
@@ -203,9 +186,7 @@ public:
 
     // --- reader side ------------------------------------------------------
 
-    // A firmware START record. Stored on the live entry and cleared only by a
-    // terminal transition -- never aged out, so a legitimately long kernel is not
-    // stranded (correctness requirement 2, U8). An unmatched START is dropped.
+    // Cleared only by the entry leaving PENDING.
     bool note_start(const correlation_key& key, uint64_t start_ticks)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
@@ -218,15 +199,12 @@ public:
         return true;
     }
 
-    // A firmware EOP proves the kernel completed (G3). Takes ownership of the
-    // entry exactly once; the loser of a race against a loss transition gets
-    // nullopt. `drain_loss_free` is the reader's wptr verdict for the drain that
-    // produced this record: an EOP observed under an overrun proves nothing about
-    // WHICH dispatch it belongs to, so it completes nothing (U9).
-    //
-    // A key with no live entry is REJECTED, never cached (U3b): a result with no
-    // pending owner is stale or ambiguous and must not be applied to a later
-    // same-key dispatch.
+    // A firmware EOP proves the kernel completed. Takes ownership exactly once;
+    // the loser of a race against a loss transition gets nullopt.
+    // `drain_loss_free` is the reader's wptr verdict: an EOP observed under an
+    // overrun proves nothing about WHICH dispatch it belongs to, so it completes
+    // nothing. A key with no live entry is REJECTED, never cached -- a result
+    // with no pending owner must not be applied to a later same-key dispatch.
     std::optional<proven> prove_eop(const correlation_key& key,
                                     uint64_t               end_ticks,
                                     bool                   drain_loss_free)
@@ -267,10 +245,7 @@ public:
         return out;
     }
 
-    // Ring overrun / permanent loss: leak every still-matchable entry, latch
-    // LOSS_POISONED so nothing registers or completes again, and report the counts
-    // for the single loud warning (P1 leak-and-shout, U15). Payloads are returned
-    // so the caller releases them off-lock; correlation ids are NOT retired.
+    // Leak every still-matchable entry and latch the terminal mode.
     std::pair<std::vector<leaked>, loss_stats> poison(session_mode terminal_mode)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return {};
@@ -280,11 +255,8 @@ public:
         return leak_all_locked();
     }
 
-    // Queue destroy has begun for this slot. Eligibility must stop RESERVING on it
-    // immediately, but a batch that already passed eligibility and skipped its
-    // completion signals must still be able to register -- the destroy path fences
-    // those in flight before it leaks and quarantines. So this deliberately does
-    // NOT make register_batch() fail; only the eligibility query consults it.
+    // Eligibility must stop RESERVING the slot before the queue's gate_lock is
+    // fenced, or a batch can slip in behind the fence.
     void mark_slot_closing(uint32_t gpu_id, uint32_t doorbell_slot)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return;
@@ -299,10 +271,7 @@ public:
         return m_closing.count({gpu_id, doorbell_slot}) != 0;
     }
 
-    // Slot collision (requirement 3) or queue close / generation bump
-    // (requirement 4): leak everything still pending on the slot and make it
-    // permanently unusable, so no later owner or reused generation can register
-    // against it again (invariant 9, U12/U13).
+    // Slot collision or queue close / generation bump.
     std::vector<leaked> quarantine_slot(uint32_t gpu_id, uint32_t doorbell_slot)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return {};
@@ -362,9 +331,8 @@ public:
 
     // --- queries ----------------------------------------------------------
 
-    // correlation_id_finalize() must NOT force-retire a leaked id (requirement 6,
-    // U14): its kernel may still be running and its references were deliberately
-    // not dropped.
+    // correlation_id_finalize() must NOT force-retire a leaked id: its kernel may
+    // still be running.
     bool is_ledgered(uint64_t correlation_id) const
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
@@ -388,9 +356,7 @@ public:
         return (it == m_outstanding.end()) ? 0 : it->second;
     }
 
-    // Dispatches still awaiting a firmware EOP on this doorbell slot -- exactly
-    // what quarantine_slot() would strand. The close path polls this so it can
-    // wait for records that are still in flight instead of discarding them.
+    // Exactly what the close drain waits on.
     size_t pending_for_slot(uint32_t gpu_id, uint32_t doorbell_slot) const
     {
         if(m_abandoned.load(std::memory_order_acquire)) return 0;
@@ -437,13 +403,10 @@ public:
 
     // --- fork -------------------------------------------------------------
 
-    // pthread_atfork child handler (requirement 8). Async-signal-safe: ONE atomic
-    // store, no mutex, no allocation, no map access, no logging. EVERY operation
-    // -- mutating and query alike -- tests this BEFORE it would take m_mu, so a
-    // child never touches an inherited mutex that a vanished thread may have held
-    // locked at the moment of the fork.
-    //
-    // The abandoned state is deliberately one-way: nothing un-abandons a child.
+    // pthread_atfork child handler. Async-signal-safe: ONE atomic store, no mutex,
+    // allocation, map access or logging. EVERY operation tests this BEFORE it
+    // would take m_mu, so a child never touches an inherited mutex a vanished
+    // thread may have held locked. One-way: nothing un-abandons a child.
     void abandon_in_child() { m_abandoned.store(true, std::memory_order_release); }
 
     bool abandoned() const { return m_abandoned.load(std::memory_order_acquire); }

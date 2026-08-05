@@ -213,10 +213,8 @@ void
 destroy_queue_state(const hsa_queue_t* queue);
 
 // Wait out any in-flight process_doorbell_impl() for this queue by taking and
-// immediately releasing its gate_lock. Used by the destroy path to fence
-// registration/publication before it strands and quarantines the queue's doorbell
-// slot. The caller MUST hold no hub or owner-registry lock: the enqueue path holds
-// gate_lock while taking those, so the reverse nesting would deadlock.
+// releasing its gate_lock. The caller MUST hold no hub or owner-registry lock:
+// the enqueue path holds gate_lock while taking those, so the reverse deadlocks.
 void
 fence_queue_gate(const hsa_queue_t* queue);
 
@@ -225,10 +223,8 @@ fence_queue_gate(const hsa_queue_t* queue);
 void
 fence_all_queue_gates();
 
-/// The hardware queue has consumed every packet we submitted, i.e. all of its
-/// dispatches have completed and their firmware records are producible. This is
-/// the inline path's analogue of `_active_kernels == 0`, which only the legacy
-/// path maintains.
+/// The hardware queue has consumed every packet we submitted. The inline path's
+/// analogue of `_active_kernels == 0`, which only the legacy path maintains.
 inline bool
 hw_queue_drained(uint64_t real_rdid, uint64_t next_submit_pos)
 {
@@ -236,14 +232,11 @@ hw_queue_drained(uint64_t real_rdid, uint64_t next_submit_pos)
 }
 
 /// Wait, bounded by an absolute kfd::steady_now_ns() deadline, until this queue's
-/// hardware read index has caught up with everything we submitted -- so a closing
-/// queue's kernels are actually finished and their EOP records exist before the
-/// caller decides anything was lost.
+/// hardware read index has caught up with everything we submitted, so a closing
+/// queue's EOP records exist before the caller decides anything was lost.
 ///
-/// Returns true if it drained, false on deadline. True immediately when the queue
-/// has no interposition state or no submissions. Takes no lock: the read index is
-/// a plain acquire load, and next_submit_pos is final because the caller fenced
-/// gate_lock first.
+/// False on deadline; true immediately with no state or no submissions. Takes no
+/// lock: next_submit_pos is final because the caller fenced gate_lock first.
 bool
 wait_queue_hw_drained(const hsa_queue_t* queue, uint64_t deadline_ns);
 

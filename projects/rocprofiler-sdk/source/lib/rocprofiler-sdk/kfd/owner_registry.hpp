@@ -32,23 +32,17 @@
 #include <unordered_set>
 #include <utility>
 
-// Reverse doorbell-owner registry (design requirement 3) and the lazy
-// HW-profiling bookkeeping.
+// Reverse doorbell-owner registry and the lazy HW-profiling bookkeeping.
 //
 // A firmware record identifies its queue only by a page-relative doorbell slot,
-// so selecting a record for a dispatch is only sound when exactly ONE live queue
-// owns that slot. This tracks ownership for EVERY live compute queue the SDK
-// knows about -- populated at queue creation, so a queue that existed before the
-// dispatch-log session was established is already in it, and a queue that has
-// never dispatched still counts as an owner.
+// so selecting a record is only sound when exactly ONE live queue owns that
+// slot. Ownership is tracked for EVERY live compute queue, populated at queue
+// creation, so a queue that predates the session or has never dispatched still
+// counts as an owner.
 //
-// Both types are free of the HSA and tracing headers so the ownership rules are
-// unit-testable with an injected (queue, slot) resolver (test seam S4).
-//
-// LOCK ORDERING: this registry's mutex is NEVER held while the hub's mutex is
-// taken, or vice versa. Every operation returns a verdict and the caller acts on
-// it after releasing the lock, so the two locks are never nested in either
-// direction and cannot deadlock.
+// LOCK ORDERING: this mutex is NEVER held while the hub's is taken, or vice
+// versa. Every operation returns a verdict the caller acts on after releasing
+// the lock, so the two are never nested in either direction.
 
 namespace rocprofiler
 {
@@ -70,11 +64,7 @@ public:
     OwnerRegistry(const OwnerRegistry&) = delete;
     OwnerRegistry& operator=(const OwnerRegistry&) = delete;
 
-    // Register a live compute queue. `slot` is nullopt when the queue's doorbell
-    // could not be resolved -- such a queue could be the second owner of ANY slot,
-    // so it disables signal-less for its whole GPU while it lives.
-    //
-    // Re-registering an existing token replaces its previous ownership.
+    // `slot` is nullopt when the queue's doorbell has not resolved yet.
     add_result add_queue(uint64_t queue_token, uint32_t gpu_id, std::optional<uint32_t> slot)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return add_result::slot_unknown;
@@ -99,13 +89,8 @@ public:
         remove_locked(queue_token);
     }
 
-    // Exactly one live owner for this slot on this GPU, and every live queue on
-    // the GPU has a known slot. A queue whose slot is unknown could be the second
-    // owner, so its presence makes every slot on that GPU non-injective.
-    //
-    // Note this deliberately says nothing about quarantine: a slot that once
-    // collided stays quarantined in the hub for the rest of the process even after
-    // one of the colliding queues dies and ownership looks injective again.
+    // Exactly one live owner for this slot on this GPU. False also when the slot
+    // is unknown, so an unresolved doorbell is never treated as injective.
     bool is_injective(uint32_t gpu_id, uint32_t slot) const
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
@@ -114,9 +99,7 @@ public:
         return owners_locked(gpu_id, slot) == 1;
     }
 
-    // The slot this queue owns, if it is live and its doorbell resolved. Used by
-    // the destroy path, which must know the slot without dereferencing a queue
-    // that is already being torn down.
+    // The slot this queue owns, if it is live and its doorbell resolved.
     std::optional<uint32_t> slot_of(uint64_t queue_token) const
     {
         if(m_abandoned.load(std::memory_order_acquire)) return std::nullopt;
@@ -158,10 +141,8 @@ public:
         return m_by_queue.size();
     }
 
-    // pthread_atfork child handler (requirement 8). One atomic store; every
-    // operation above tests it BEFORE taking m_mu, so a forked child never touches
-    // the inherited mutex or map. An abandoned registry reports no live queues and
-    // no known slot, which is what makes every slot non-injective in the child.
+    // pthread_atfork child handler. One atomic store; every operation checks it
+    // before taking the mutex.
     void abandon_in_child() { m_abandoned.store(true, std::memory_order_release); }
 
     bool abandoned() const { return m_abandoned.load(std::memory_order_acquire); }

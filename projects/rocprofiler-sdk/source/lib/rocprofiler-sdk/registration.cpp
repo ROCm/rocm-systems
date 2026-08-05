@@ -1014,13 +1014,11 @@ finalize()
         auto num_clients = get_num_clients();
         set_fini_status(-1);
 
-        // Signal-less teardown, steps 1-6 of the design plan's requirement 7, in
-        // the one order that leaves no EOP-proven completion stranded and lets no
-        // task be enqueued after the task group is joined. It must precede the
-        // sequence below: queue_controller_fini joins the async task group, and
-        // correlation_id_finalize consults the loss ledger this populates.
-        //
-        // A no-op unless signal-less is active, so the ordering below is unchanged.
+        // Signal-less teardown steps 1-6, in the one order that strands no
+        // EOP-proven completion. Must precede the sequence below:
+        // queue_controller_fini joins the task group, and correlation_id_finalize
+        // consults the loss ledger this populates. No-op unless signal-less is
+        // active.
         kfd::signal_less_teardown();
 
         hsa::async_copy_fini();

@@ -417,9 +417,8 @@ async_signal_handler(hsa_signal_t                            completion_signal,
         }
         if(registration::get_fini_status() != 0)
         {
-            // Tearing down, but the kernel is still live. Wait a bounded grace period
-            // for it rather than either abandoning a dispatch that was about to
-            // finish or blocking teardown indefinitely on one that will not.
+        // Tearing down, but the kernel is still live: wait a bounded grace period
+        // rather than tear the interval.
             constexpr auto fini_grace = std::chrono::seconds{1};
             const auto     _now       = std::chrono::steady_clock::now();
             if(fini_deadline == std::chrono::steady_clock::time_point{})
@@ -452,14 +451,12 @@ async_signal_handler(hsa_signal_t                            completion_signal,
         std::this_thread::sleep_for(std::chrono::microseconds{delay_us});
     }
 
-    // Finalization can end the wait above while the kernel is still live. Everything
-    // below assumes it finished: hsa_amd_profiling_get_dispatch_time would report a
-    // half-written interval, releasing a pooled signal would hand it to a later
-    // dispatch while the GPU can still decrement it, and subtracting an app signal
-    // would let the app observe completion before its kernel ended. So abandon the
-    // batch instead -- emit nothing and leave every signal untouched. The signals
-    // and the correlation-id references are deliberately not reclaimed here;
-    // process teardown owns them at this point.
+        // Finalization can end the wait above while the kernel is still live, and
+        // everything below assumes it finished: the profiling interval would be
+        // half-written, a released pooled signal could still be decremented by the
+        // GPU, and subtracting an app signal would let the app observe completion
+        // early. So abandon the batch -- emit nothing, touch no signal. Process
+        // teardown owns the signals and correlation-id references at this point.
     if(!completed)
     {
         ROCP_WARNING << fmt::format(
@@ -470,9 +467,7 @@ async_signal_handler(hsa_signal_t                            completion_signal,
         return;
     }
 
-    // ONE absolute deadline for the whole batch's firmware rendezvous, so a batch
-    // cannot spend the full wait once per packet. Only consumed when KFD selection
-    // is enabled (Phase 2); in Phase 1 get_dispatch_time() never waits.
+        // ONE absolute deadline for the whole batch's firmware rendezvous.
     constexpr uint64_t kKfdRendezvousNs = 5'000'000;  // 5 ms
     session->kfd_deadline_ns            = kfd::steady_now_ns() + kKfdRendezvousNs;
 
@@ -507,10 +502,8 @@ async_signal_handler(hsa_signal_t                            completion_signal,
     }
 }
 
-// Lazy HW-profiling enable: a queue turns profiling on the first time it takes
-// the SIGNAL path, and never if every one of its batches is signal-less. Called
-// before the batch publishes, so profiling is on before the dispatch it belongs
-// to can complete. No-op unless lazy mode is active.
+// A queue turns profiling on the first time it takes the signal path, so a queue
+// that only ever goes signal-less never enables it.
 void
 enable_profiling_for_signal_batch(Queue* queue)
 {
@@ -527,14 +520,12 @@ enable_profiling_for_signal_batch(Queue* queue)
         << "Could not enable profiler for a queue taking the signal path";
 }
 
-// The no-signal finalizer. Runs on an async task-group worker -- or, for a
-// permanently rejected submission, on the thread flushing the retry owner -- and
-// NEVER on the reader thread or under a hub lock.
+// The no-signal finalizer. Runs on a task-group worker, or on the thread
+// flushing the retry owner -- never on the reader thread or under a hub lock.
 //
 // There is deliberately no HSA fallback: a signal-less dispatch never had an SDK
 // signal and the app may already have destroyed its own, so a convert/sanity
-// failure emits no record but still retires the correlation id (the EOP already
-// proved the kernel finished).
+// failure emits no record but still retires the correlation id.
 void
 no_signal_finalize(kfd::signal_less_hub_t::proven&& proven)
 {
@@ -610,10 +601,8 @@ no_signal_finalize(kfd::signal_less_hub_t::proven&& proven)
         case kfd::finalize_reason::ready: break;
     }
 
-    // Diagnostic capped on REJECTIONS, not on finalizations: the first few
-    // completions usually succeed, so a cap on all of them shows only passing
-    // cases and hides the ones that actually failed. Off unless
-    // ROCPROFILER_KFD_DISPATCH_LOG_TRACE=1.
+    // Capped on REJECTIONS, not finalizations: the first few rejections are the
+    // diagnostic, and a steady stream of them must not flood the log.
     {
         static const bool _trace = common::get_env("ROCPROFILER_KFD_DISPATCH_LOG_TRACE", false);
         static auto       _traced = std::atomic<int>{0};
@@ -687,17 +676,15 @@ is_dispatch_packet(const rocprofiler_packet& pkt)
     return false;
 }
 
-// Per-BATCH signal-less eligibility (design plan "Eligibility"), decided ONCE
-// before any packet is touched. It has to be final up front: a batch that has
-// skipped its completion signals cannot be moved back onto the signal path after
-// its packets are staged, so even "will the hub accept these keys" is answered
-// here. If ANY packet fails, the WHOLE batch keeps the signal path -- there are no
-// mixed-mode batches. App-signal presence is deliberately not an input (P3).
+// Per-BATCH signal-less eligibility, decided ONCE before any packet is touched.
+// It must be final up front: a batch that has skipped its completion signals
+// cannot be moved back onto the signal path, so even "will the hub accept these
+// keys" is answered here. If ANY packet fails, the WHOLE batch keeps the signal
+// path.
 //
-// On success keys_out is indexed BY PACKET INDEX and holds the key for each
-// dispatch packet (nullopt for the others), so the registration below uses the
-// exact keys the hub validated here rather than re-deriving them from a second
-// doorbell lookup that could observe a different generation.
+// keys_out is indexed BY PACKET INDEX, so registration uses the exact keys the
+// hub validated here rather than re-deriving them from a second doorbell lookup
+// that could observe a different generation.
 bool
 signal_less_batch_eligible(Queue*                                            queue,
                            const rocprofiler_packet*                         packets,
@@ -707,9 +694,7 @@ signal_less_batch_eligible(Queue*                                            que
 {
     keys_out->clear();
 
-    // Cheapest gate first: with the feature off (the default) this is one
-    // predictable branch and NO extra session or doorbell work, so the signal
-    // path is bit-for-bit what it was before signal-less existed.
+    // Cheapest gate first: with the feature off this is one relaxed load.
     if(kfd::signal_less_child_stale()) return false;
     if(!kfd::signal_less_feature_enabled() || !kfd::signal_less_fully_wired()) return false;
 
@@ -991,22 +976,14 @@ write_interceptor(Queue*                                queue,
             // create a reference for short hand access
             auto& kernel_packet = _packet_data.kernel_packet;
 
-            // KFD dispatch-log: capture this kernel packet's HSA queue write index.
-            // Inline path is strict 1:1 forwarding (no injected packets), so the
-            // write index of packet i is simply base + i. Low 32 bits match the
-            // firmware record's dispatch_id. The doorbell + generation that
-            // complete the correlation key are resolved below.
+            // Inline path is strict 1:1 forwarding, so the write index of packet i is
+            // base + i, whose low 32 bits match the firmware dispatch_id.
             //
-            // ASSUMPTION: base + i equals the slot firmware stamps only while this
-            // SDK is the sole packet-modifying layer on the queue. Any other agent
-            // that injects, drops, or reorders packets (a second HSA queue
-            // interceptor, a layered tool, or a future SDK path that itself emits
-            // extra packets) shifts the true hardware slot away from base + i, so
-            // the low-32 index no longer matches the firmware dispatch_id and this
-            // dispatch will mis-correlate. There is no cross-layer accounting for
-            // that shift; if it becomes possible, derive the index from the actual
-            // wrapped-queue submit position instead (e.g. an intercept marker
-            // packet callback) rather than base + i.
+            // ASSUMPTION: that holds only while this SDK is the sole packet-modifying
+            // layer on the queue. Any agent that injects, drops or reorders packets
+            // shifts the true hardware slot away from base + i and this dispatch will
+            // mis-correlate. If that becomes possible, derive the index from the actual
+            // wrapped-queue submit position instead.
             _packet_data.kfd_dispatch_idx_low32 =
                 static_cast<uint32_t>((_base_pkt_index + i) & 0xFFFFFFFFULL);
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
@@ -1032,11 +1009,8 @@ write_interceptor(Queue*                                queue,
                 return nullptr;
             };
 
-            // P3: a signal-less batch does not touch the packet's completion signal
-            // at all -- no pooled borrow, no copy-modify, no +1. The packet the GPU
-            // sees is byte-identical to what the app submitted (app signal present
-            // or null), and the SDK learns completion from the firmware EOP record
-            // instead. packet_data.completion_signal stays null for such a batch.
+            // P3: a signal-less batch does not touch the packet's completion signal,
+            // app-provided or not.
             if(!_signal_less_batch)
             {
                 // No barrier packet: borrow a pooled signal if needed, then bump value by 1.
@@ -1079,11 +1053,8 @@ write_interceptor(Queue*                                queue,
             // firmware records to this dispatch. If anything is unavailable,
             // kfd_correlation_key_valid stays false -> HSA fallback.
             {
-                // The inline path does not go through QueueController::create_queue,
-                // so this is where the session is triggered. Idempotent, and true
-                // only when the live session belongs to THIS GPU -- a dispatch on any
-                // other GPU has no reader draining its records, so it must stay on
-                // HSA timestamps.
+                // The inline path does not go through QueueController::create_queue, so
+                // ownership is registered here instead.
                 const auto _gpu_id = queue->get_agent().get_rocp_agent()->gpu_id;
                 if(kfd::ensure_reader_session(static_cast<uint32_t>(_gpu_id)))
                 {
@@ -1122,16 +1093,12 @@ write_interceptor(Queue*                                queue,
                 thr_id,
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
 
-            // Signal-less: stage this dispatch's owned pending entry. The whole
-            // batch is registered below, before the packets publish, so a firmware
-            // record can never arrive for a dispatch the hub has not heard of.
-            // The payload holds value data and stable ids only -- no Queue&, no
-            // context pointers beyond the validated tracing_data, no signal handle.
-            //
-            // Staged HERE, after the enqueue-phase callbacks and after the external
-            // correlation ids are mapped: a snapshot taken earlier carries ids that
-            // were never mapped for this dispatch, and the completion record built
-            // from it would be wrong.
+                // Signal-less: stage this dispatch's owned pending entry. The payload
+                // holds value data and stable ids only -- no Queue&, no signal handle.
+                //
+                // Staged HERE, after the enqueue callbacks and after external correlation
+                // ids are mapped: an earlier snapshot carries ids never mapped for this
+                // dispatch, and the record built from it would be wrong.
             if(_signal_less_batch && _signal_less_keys[i].has_value())
             {
                 auto _reg           = kfd::signal_less_hub_t::registration{};
@@ -1186,20 +1153,15 @@ write_interceptor(Queue*                                queue,
         // publishes, since its completion will read HSA timestamps.
         if(!_signal_less_batch) enable_profiling_for_signal_batch(queue);
 
-        // Register the whole batch BEFORE the writer publishes any packet, so the
-        // reader can never drain a firmware record for a dispatch the hub does not
-        // know about. Eligibility already asked the hub to accept these keys while
-        // holding the queue's gate_lock, and the keys carry this queue's own submit
-        // indices, so no other thread can have claimed them since.
+        // Register the whole batch BEFORE the writer publishes any packet, so a
+        // firmware record can never arrive for a dispatch the hub has not seen.
         const auto _signal_less_count = _signal_less_regs.size();
         if(_signal_less_batch &&
            !kfd::signal_less_hub().register_batch(std::move(_signal_less_regs)))
         {
             kfd::note_signal_less(kfd::signal_less_counter::register_refused);
-            // Unreachable by the argument above. The packets have already skipped
-            // their completion signals and cannot be put back on the signal path,
-            // so the only safe outcome is the leak-and-shout policy: these
-            // dispatches emit no record and their correlation ids are not retired.
+        // Unreachable by the argument above; the packets have already skipped their
+        // signals, so there is no way back to the signal path.
             ROCP_WARNING << "KFD dispatch-log: signal-less batch registration was refused after "
                             "eligibility accepted it; these dispatches will not complete";
         }
@@ -1209,10 +1171,7 @@ write_interceptor(Queue*                                queue,
                                   _signal_less_count);
         }
 
-        // A signal-less batch has no completion signal to wait on -- the firmware
-        // EOP record is its completion event -- so no async waiter is armed for it
-        // and the hub entry owns the correlation-id references until the reader
-        // hands it to the finalizer.
+        // A signal-less batch has no completion signal to wait on.
         if(!_info_session.packet_data.empty() && !_signal_less_batch)
         {
             last_completion_signal = _info_session.packet_data.back().completion_signal;
@@ -1291,9 +1250,8 @@ wait_queue_hw_drained(const hsa_queue_t* queue, uint64_t deadline_ns)
 void
 fence_all_queue_gates()
 {
-    // Copy the states out from under the registry lock FIRST: taking a gate_lock
-    // while holding the registry lock would nest two locks the enqueue path also
-    // touches. Each gate is then fenced holding nothing else.
+    // Copy the states out from under the registry lock FIRST: taking a queue's
+    // gate_lock while holding it would invert the established order.
     auto _states = std::vector<queue_state_ptr_t>{};
     get_queue_registry().rlock([&_states](const auto& map) {
         _states.reserve(map.size());
@@ -1714,9 +1672,7 @@ interposition_init(CoreApiTable* core_table, bool enabled)
     // TODO(rocprofiler-sdk): root-cause the attachment-mode deadlock so it can be enabled there.
     s_intercept_dynamic.store(!registration::supports_attachment(), std::memory_order_release);
 
-    // Install the signal-less completion hooks before any queue -- and therefore
-    // any eligible batch or firmware record -- can exist, so the reader thread
-    // never observes a half-installed set.
+    // Before any queue -- and therefore any eligible batch -- can exist.
     {
         auto _ops                = kfd::signal_less_ops{};
         _ops.submit              = submit_no_signal_finalize;

@@ -69,12 +69,10 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
                                              packet_data.kfd_generation,
                                              packet_data.kfd_gpu_id};
 
-        // Rendezvous rather than a one-shot take(): wait for the reader to deposit
-        // this dispatch's record instead of silently using HSA because the record
-        // was merely late. The wait ends at the batch's single absolute deadline,
-        // when the reader is declared dead, or on deposit. No lock is held across
-        // it. The reader thread's evict_stale reclaims any result never taken here,
-        // so the results map stays bounded without an erase on this path.
+        // Rendezvous rather than a one-shot take(), so a merely-late record does not
+        // silently fall back to HSA. Ends at the batch's absolute deadline, on
+        // reader death, or on deposit; no lock is held across it. evict_stale
+        // reclaims anything never taken here, so the map stays bounded.
         auto kfd_result = kfd::results_map().wait_take(corr_key, session.kfd_deadline_ns);
 
         // Converting firmware ticks needs the agent; without it we cannot emit KFD
@@ -99,9 +97,8 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
                                    kfd::kfd_time_is_sane(
                                        kfd_start_sys, kfd_end_sys, session.enqueue_ts, _now);
 
-            // Emit the bounds-checked firmware timestamps as-is: they are already
-            // system-domain, and adjust_profiling_time() would re-scale them under
-            // ROCPROFILER_CI_FREQ_SCALE_TIMESTAMPS and widen the tighter HW interval.
+            // Already system-domain; adjust_profiling_time() would re-scale them
+            // under ROCPROFILER_CI_FREQ_SCALE_TIMESTAMPS and widen the HW interval.
             if(_kfd_sane) return profiling_time{HSA_STATUS_SUCCESS, kfd_start_sys, kfd_end_sys};
             // convert failed or record failed the sanity guard: fall through to HSA.
         }
