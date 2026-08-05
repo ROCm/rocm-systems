@@ -23,7 +23,7 @@ build is required (pure static analysis), so it is safe as a fast PR gate.
 
 import argparse
 import json
-import os
+from pathlib import Path
 import re
 import sys
 
@@ -31,16 +31,15 @@ import sys
 # from any working directory. Layout:
 #   <repo>/projects/hip-tests/catch/contract/tools/check_contract_coverage.py
 #   <repo>/projects/hip/include/hip/hip_runtime_api.h
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-CONTRACT_DIR = os.path.dirname(_THIS_DIR)                       # catch/contract
-_CATCH_DIR = os.path.dirname(CONTRACT_DIR)                      # catch
-_HIP_TESTS_DIR = os.path.dirname(_CATCH_DIR)                    # projects/hip-tests
-_PROJECTS_DIR = os.path.dirname(_HIP_TESTS_DIR)                 # projects
-REPO_ROOT = os.path.dirname(_PROJECTS_DIR)                      # <repo>
+_THIS_DIR = Path(__file__).resolve().parent
+CONTRACT_DIR = _THIS_DIR.parent                                 # catch/contract
+_CATCH_DIR = CONTRACT_DIR.parent                                # catch
+_HIP_TESTS_DIR = _CATCH_DIR.parent                              # projects/hip-tests
+_PROJECTS_DIR = _HIP_TESTS_DIR.parent                           # projects
+REPO_ROOT = _PROJECTS_DIR.parent                                # <repo>
 
-HEADER_PATH = os.path.join(
-    REPO_ROOT, "projects", "hip", "include", "hip", "hip_runtime_api.h")
-ALLOWLIST_PATH = os.path.join(CONTRACT_DIR, "uncovered_apis.txt")
+HEADER_PATH = REPO_ROOT / "projects" / "hip" / "include" / "hip" / "hip_runtime_api.h"
+ALLOWLIST_PATH = CONTRACT_DIR / "uncovered_apis.txt"
 
 # Names that are parsed as prototypes but are not public contract targets. These
 # are excluded from the denominator entirely (they never count as covered or as
@@ -75,8 +74,7 @@ def _strip_comments(text):
 
 def declared_apis(header_path=HEADER_PATH):
     """Return the set of declared public HIP APIs (the coverage denominator)."""
-    with open(header_path, encoding="utf-8", errors="replace") as handle:
-        source = _strip_comments(handle.read())
+    source = _strip_comments(Path(header_path).read_text(encoding="utf-8", errors="replace"))
     names = set()
     for match in _DECL_RE.finditer(source):
         name = match.group(1)
@@ -91,22 +89,19 @@ def declared_apis(header_path=HEADER_PATH):
 def covered_apis(contract_dir=CONTRACT_DIR):
     """Return the set of HIP APIs called by any contract-test source."""
     called = set()
-    for root, _dirs, files in os.walk(contract_dir):
-        for name in files:
-            if name.startswith("test_hip_") and name.endswith("_contract.cc"):
-                path = os.path.join(root, name)
-                with open(path, encoding="utf-8", errors="replace") as handle:
-                    for match in _CALL_RE.finditer(handle.read()):
-                        called.add(match.group(1))
+    for path in Path(contract_dir).rglob("test_hip_*_contract.cc"):
+        for match in _CALL_RE.finditer(path.read_text(encoding="utf-8", errors="replace")):
+            called.add(match.group(1))
     return called
 
 
 def load_allowlist(allowlist_path=ALLOWLIST_PATH):
     """Return {api_name: reason} parsed from the allowlist file."""
     entries = {}
-    if not os.path.exists(allowlist_path):
+    path = Path(allowlist_path)
+    if not path.exists():
         return entries
-    with open(allowlist_path, encoding="utf-8", errors="replace") as handle:
+    with path.open(encoding="utf-8", errors="replace") as handle:
         for raw in handle:
             line = raw.strip()
             if not line or line.startswith("#"):
@@ -206,9 +201,8 @@ def main(argv=None):
                         help="path to uncovered_apis.txt (default: repo-relative)")
     args = parser.parse_args(argv)
 
-    if not os.path.exists(args.header):
-        sys.stderr.write("error: header not found: {}\n".format(args.header))
-        return 2
+    if not Path(args.header).exists():
+        parser.error("header not found: {}".format(args.header))
 
     report = compute(args.header, args.contract_dir, args.allowlist)
 
