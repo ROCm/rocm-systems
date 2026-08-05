@@ -17,9 +17,16 @@ Module layout
 
 import os
 import ctypes
+from importlib.metadata import version as _dist_version, PackageNotFoundError
 from typing import Sequence, Optional, Any
 
-__version__ = "0.1.0"
+try:
+    # Single source of truth for the package version: the installed
+    # distribution metadata (rocshmem4py-<ver>[+rocshmem<lib-ver>]), which
+    # setup.py derives from pyproject.toml plus the linked rocSHMEM version.
+    __version__ = _dist_version("rocshmem4py")
+except PackageNotFoundError:
+    __version__ = "0.0.0+unknown"
 __author__ = "Advanced Micro Devices, Inc."
 
 try:
@@ -92,6 +99,14 @@ except ImportError as e:
         "Ensure rocSHMEM is installed and LD_LIBRARY_PATH includes "
         "the rocSHMEM library path."
     ) from e
+
+# rocSHMEM (C++) library version this extension was statically linked against,
+# baked into the compiled module. None if built against an older extension
+# that predates this attribute.
+try:
+    from _rocshmem4py import __rocshmem_version__
+except ImportError:
+    __rocshmem_version__ = None
 
 
 # Distinct Python sentinels for the two special team handles.  Both are
@@ -217,6 +232,7 @@ _HOST_API_BINDINGS = tuple(
 
 __all__ = [
     '__version__',
+    '__rocshmem_version__',
     *_HOST_API_BINDINGS,
     'ROCSHMEM_TEAM_INVALID',
     'ROCSHMEM_TEAM_WORLD',
@@ -518,7 +534,7 @@ def init_with_torch(group: Optional[Any] = None,
 
     For the launcher x backend matrix and the structural reason RO requires
     ``mpirun``, see the project README:
-    https://github.com/ROCm/rocm-systems/blob/develop/projects/rocshmem/python/README.md#troubleshooting
+    https://github.com/ROCm/rocm-systems/blob/develop/python/rocshmem/README.md#troubleshooting
     """
     try:
         import torch
