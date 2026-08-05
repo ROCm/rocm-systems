@@ -161,7 +161,7 @@ public:
         // for position management; extending the critical section to cover the
         // actual memcpy closes the window that TSan (correctly) flags.
         //
-        auto _thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
+        auto thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
         std::lock_guard scope{ m_mutex };
 
         auto*  buf      = reserve_memory_space(bytes_to_reserve);
@@ -185,7 +185,7 @@ private:
     {
         // Hold m_mutex for the full read so store() cannot write into the
         // region we are draining to the file.
-        auto _thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
+        auto thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
         std::lock_guard guard{ m_mutex };
 
         size_t _head = m_head;
