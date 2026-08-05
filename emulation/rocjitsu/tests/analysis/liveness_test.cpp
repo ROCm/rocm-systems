@@ -4278,8 +4278,7 @@ TEST(GeneratedInstDefUse, D16StoreDoesNotDefineData) {
 // pre-RDNA4 MTBUF counterparts. Before the fix it decoded as an unclassified nop
 // with no implicit_uses override. VDATA is word1[0:7] (=5).
 TEST(GeneratedInstDefUse, D16TypedFormatLoadUnderVbufferReadsDestination) {
-  auto inst =
-      decode_rdna4({0xC4220000U, 0x00000005U}); // tbuffer_load_d16_format_x, vdata=5
+  auto inst = decode_rdna4({0xC4220000U, 0x00000005U}); // tbuffer_load_d16_format_x, vdata=5
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "tbuffer_load_d16_format_x");
 
@@ -4294,16 +4293,14 @@ TEST(GeneratedInstDefUse, D16TypedFormatLoadUnderVbufferReadsDestination) {
 // (buffer_load_short_d16, MUBUF op 36 on CDNA3), toggling only LDS. VDATA is
 // word1[8:15] (=5).
 TEST(GeneratedInstDefUse, D16BufferLoadLdsBitSuppressesDestinationRead) {
-  auto normal =
-      decode_cdna3({0xE0900000U, 0x00000500U}); // buffer_load_short_d16, vdata=5, lds=0
+  auto normal = decode_cdna3({0xE0900000U, 0x00000500U}); // buffer_load_short_d16, vdata=5, lds=0
   ASSERT_NE(normal, nullptr);
   ASSERT_EQ(std::string_view(normal->mnemonic()), "buffer_load_short_d16");
   InstDefUse normal_idu(*normal);
   EXPECT_TRUE(normal_idu.uses.contains({RegClass::VGPR, 5, 1}))
       << "LDS clear: the preserved half of vdata is a read";
 
-  auto lds =
-      decode_cdna3({0xE0910000U, 0x00000500U}); // ...same, lds=1 (bit 16 set)
+  auto lds = decode_cdna3({0xE0910000U, 0x00000500U}); // ...same, lds=1 (bit 16 set)
   ASSERT_NE(lds, nullptr);
   ASSERT_EQ(std::string_view(lds->mnemonic()), "buffer_load_short_d16");
   InstDefUse lds_idu(*lds);
