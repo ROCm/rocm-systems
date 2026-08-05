@@ -117,6 +117,8 @@ public:
   bool packed_tid() const { return packed_tid_; }
   void set_sdma_packet_dialect(SdmaPacketDialect dialect) { sdma_packet_dialect_ = dialect; }
   SdmaPacketDialect sdma_packet_dialect() const { return sdma_packet_dialect_; }
+  /// @brief Configure launch and packet behavior derived from the GPU architecture.
+  void configure_for_arch(rj_code_arch_t arch);
   /// @brief Update doorbell_base for all queues belonging to a process.
   /// @details Called when the doorbell page is mmap'd after queue creation.
   void set_doorbell_base(uint32_t process_id, void *base);

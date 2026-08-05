@@ -181,14 +181,7 @@ bool hsakmtRuntime::ReserveLocalHeapSpace() {
     if (device == nullptr) {
       return false;
     }
-    // For APU, use non local memory(shared GPU memory) as GPU memory,
-    // because it has small local memory
-    if (device->IsDgpu()) {
-        total_local_size += rocr::AlignUp(device->LocalHeapSize(), align) * 2;
-    } else {
-        total_local_size += rocr::AlignUp(
-            std::max(device->LocalHeapSize(), device->NonLocalHeapSize()), align) * 2;
-    }
+    total_local_size += rocr::AlignUp(device->VramTotal(), align) * 2;
   }
   local_heap_space_start_ = 0;
   local_heap_space_size_ = total_local_size;

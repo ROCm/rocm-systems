@@ -1,0 +1,77 @@
+/*
+ * Copyright Advanced Micro Devices, Inc.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <cstring>
+
+#include <hip/hip_runtime_api.h>
+#include <hip_test_common.hh>
+
+namespace {
+constexpr hipError_t kKnownErrors[] = {hipSuccess, hipErrorInvalidValue, hipErrorNotSupported};
+
+void RequireNonEmptyString(const char* value) {
+  REQUIRE(value != nullptr);
+  REQUIRE(std::strlen(value) > 0);
+}
+}  // namespace
+
+// @asserts: hipDrvGetErrorName - returns a non-null, non-empty name string for known error codes
+HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorName_KnownCode_ReturnsNonEmptyString) {
+  for (hipError_t error : kKnownErrors) {
+    const char* name = nullptr;
+    HIP_CHECK(hipDrvGetErrorName(error, &name));
+    RequireNonEmptyString(name);
+  }
+}
+
+// @asserts: hipDrvGetErrorString - returns a non-null, non-empty message string for known error codes
+HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorString_KnownCode_ReturnsNonEmptyString) {
+  for (hipError_t error : kKnownErrors) {
+    const char* message = nullptr;
+    HIP_CHECK(hipDrvGetErrorString(error, &message));
+    RequireNonEmptyString(message);
+  }
+}
+
+// @asserts: hipDrvGetErrorName - repeated queries for the same code yield identical name strings
+HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorName_Default_RepeatedQueryIsStable) {
+  for (hipError_t error : kKnownErrors) {
+    const char* first_name = nullptr;
+    const char* second_name = nullptr;
+    HIP_CHECK(hipDrvGetErrorName(error, &first_name));
+    HIP_CHECK(hipDrvGetErrorName(error, &second_name));
+
+    RequireNonEmptyString(first_name);
+    RequireNonEmptyString(second_name);
+    REQUIRE(std::strcmp(first_name, second_name) == 0);
+  }
+}
+
+// @asserts: hipDrvGetErrorString - repeated queries for the same code yield identical message strings
+HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorString_Default_RepeatedQueryIsStable) {
+  for (hipError_t error : kKnownErrors) {
+    const char* first_message = nullptr;
+    const char* second_message = nullptr;
+    HIP_CHECK(hipDrvGetErrorString(error, &first_message));
+    HIP_CHECK(hipDrvGetErrorString(error, &second_message));
+
+    RequireNonEmptyString(first_message);
+    RequireNonEmptyString(second_message);
+    REQUIRE(std::strcmp(first_message, second_message) == 0);
+  }
+}
+
+// @asserts: hipDrvGetErrorName - rejects an unknown/invalid error code with a non-success status
+HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorName_InvalidCode_IsRejected) {
+  const char* name = nullptr;
+  REQUIRE(hipDrvGetErrorName(static_cast<hipError_t>(-1), &name) != hipSuccess);
+}
+
+// @asserts: hipDrvGetErrorString - rejects an unknown/invalid error code with a non-success status
+HIP_TEST_CASE(Contract_DriverError_HipDrvGetErrorString_InvalidCode_IsRejected) {
+  const char* message = nullptr;
+  REQUIRE(hipDrvGetErrorString(static_cast<hipError_t>(-1), &message) != hipSuccess);
+}

@@ -1533,41 +1533,6 @@ def test_mnemonic_fallbacks_cover_unmodeled_read_write_outputs():
         )
 
 
-def test_gfx1250_generated_operand_merges_packed_16bit_destinations(
-    gfx1250_generated_root: Path,
-):
-    operand_cpp = (gfx1250_generated_root / 'operand.cpp').read_text()
-    operand_exec_cpp = (gfx1250_generated_root / 'operand_exec.cpp').read_text()
-    operand_h = (gfx1250_generated_root / 'operand.h').read_text()
-
-    assert 'if (ev >= 0 && ev <= 127)' in operand_cpp
-    assert 'packed_16bit_vgpr_dst(packed_16bit_dst_' in operand_cpp
-    assert 'packed->shift ? 0x0000ffffu : 0xffff0000u' in operand_exec_cpp
-    assert 'uint8_t write_byte_mask = packed->shift' in operand_exec_cpp
-    assert 'rocjitsu::ExecutionPlugin::kHighHalfByteMask' in operand_exec_cpp
-    assert 'rocjitsu::ExecutionPlugin::kLowHalfByteMask' in operand_exec_cpp
-    assert (
-        'amdgpu::RegisterAccess(wf.cu()).read_vgpr_storage(idx, lane);'
-        in operand_exec_cpp
-    )
-    assert (
-        'amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, merged, write_byte_mask);'
-        in operand_exec_cpp
-    )
-    assert (
-        'amdgpu::RegisterAccess(wf.cu()).write_vgpr(wf.vgpr_alloc().base + voff, lane, val);'
-        in operand_exec_cpp
-    )
-    assert (
-        'amdgpu::RegisterAccess(wf.cu()).write_vgpr64(idx, lane, val);'
-        in operand_exec_cpp
-    )
-    assert 'amdgpu::apply_gpr_idx(wf, off, false)' in operand_exec_cpp
-    assert 'void Operand::write_lane_chunk' in operand_cpp
-    assert 'void write_lane_chunk(amdgpu::Wavefront &wf' in operand_h
-    assert 'bool packed_16bit_dst = false' in operand_h
-
-
 def test_gfx1250_generated_vop2_uses_packed_16bit_vsrc1(
     gfx1250_generated_root: Path,
 ):
@@ -1625,12 +1590,10 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
 
     mov_b16 = _generated_method_body(vop1_exec, 'VMovB16Vop1', 'VMovB64Vop1')
     assert 'read_lane(src0, lane)' in mov_b16
-    assert 'write_lane(\n        vdst, lane,' in mov_b16
     assert 'wf.vgpr_alloc().base + ((inst_.src0 - 256) & 0x7fu)' not in mov_b16
 
     fmac_f16 = _generated_method_body(vop2_exec, 'VFmacF16Vop2', 'VFmamkF16Vop2')
     assert 'read_lane(vdst, lane)' in fmac_f16
-    assert 'write_lane(\n        vdst, lane,' in fmac_f16
     assert 'base + (inst_.vdst & 0x7fu), lane)' not in fmac_f16
 
     for name, next_name in (
@@ -1763,24 +1726,18 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' not in unary
     assert 'read_vop3_true16_src' not in unary
     assert 'write_vop3_true16_dst' not in unary
-    assert 'amdgpu::RegisterAccess(wf).write_lane(' in unary
-    assert 'inst.vdst, lane' in unary
 
     binary = _shared_execute_body(execute_shared, 'v_add_f16_vop3', 'v_add_f32_vop2')
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_F16' in binary
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' not in binary
     assert 'read_vop3_true16_src' not in binary
     assert 'write_vop3_true16_dst' not in binary
-    assert 'amdgpu::RegisterAccess(wf).write_lane(' in binary
-    assert 'inst.vdst, lane' in binary
 
     ternary = _shared_execute_body(execute_shared, 'v_fma_f16_vop3', 'v_fma_f32_vop3')
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in ternary
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' not in ternary
     assert 'read_vop3_true16_src' not in ternary
     assert 'write_vop3_true16_dst' not in ternary
-    assert 'amdgpu::RegisterAccess(wf).write_lane(' in ternary
-    assert 'inst.vdst, lane' in ternary
 
     true16_unary = _generated_method_body(
         gfx1250_vop3_alu, 'VCeilF16Vop3', 'VTruncF16Vop3'
@@ -2036,7 +1993,7 @@ def test_gfx1250_generated_vop1_dpp8_uses_src0_marker_for_fi(
     assert 'apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_' in body
 
 
-def test_gfx1250_generated_dpp_cleanup_resolves_high_destination_bank(
+def test_gfx1250_generated_dpp_execution_needs_no_destination_cleanup(
     gfx1250_generated_root: Path,
 ):
     vop1 = (gfx1250_generated_root / 'vop1_exec.cpp').read_text()
@@ -2048,52 +2005,113 @@ def test_gfx1250_generated_dpp_cleanup_resolves_high_destination_bank(
         _generated_method_body(vop1, 'VMovB32Vop1', 'VReadfirstlaneB32Vop1'),
         _generated_method_body(vop2, 'VAddNcU32Vop2', 'VSubNcU32Vop2'),
         _generated_method_body(vop3, 'VAddF32Vop3', 'VSubF32Vop3'),
-        _generated_method_body(vop3p, 'VPkMadI16Vop3p', 'VPkMulLoU16Vop3p'),
+        _generated_method_body(vop3p, 'VFmaMixF32Vop3p', 'VFmaMixloF16Vop3p'),
     )
 
     for body in bodies:
-        assert 'amdgpu::RegisterAccess(wf).read_operand_storage(vdst, ln)' in body
-        assert (
-            'amdgpu::RegisterAccess(wf).write_operand_storage(vdst, ln, sdwa_old_dst_[ln]);'
-            in body
-        )
-        assert 'write_vgpr(vb + inst_.vdst, ln, sdwa_old_dst_[ln])' not in body
+        assert body.count('inst_.src0 == amdgpu::SRC_DPP') == 1
+        assert 'write_operand_storage' not in body
+        assert 'write_vgpr_storage' not in body
 
     cvt_f64 = _generated_method_body(vop1, 'VCvtF64I32Vop1', 'VCvtF32I32Vop1')
-    assert 'uint64_t sdwa_old_dst_[64] = {};' in cvt_f64
-    assert 'amdgpu::RegisterAccess(wf).read_operand_storage64(vdst, ln)' in cvt_f64
-    assert (
-        'amdgpu::RegisterAccess(wf).write_operand_storage64(vdst, ln, sdwa_old_dst_[ln]);'
-        in cvt_f64
-    )
+    assert 'write_operand_storage64' not in cvt_f64
+    assert cvt_f64.count('inst_.src0 == amdgpu::SRC_DPP') == 1
 
 
-def test_generated_64bit_dpp_cleanup_preserves_both_physical_dwords(
+def test_generated_64bit_dpp_execution_needs_no_physical_cleanup(
     amdgpu_generated_root: Path,
 ):
-    for arch in (
-        'cdna1',
-        'cdna2',
-        'cdna3',
-        'cdna4',
-        'rdna1',
-        'rdna2',
-        'rdna3',
-        'rdna3_5',
-        'rdna4',
-    ):
+    for arch in ('cdna2', 'cdna3', 'cdna4'):
         vop1 = _execution_source_path(
             amdgpu_generated_root / arch / 'vop1.cpp'
         ).read_text()
         cvt_f64 = _generated_method_body(vop1, 'VCvtF64I32Vop1', 'VCvtF32I32Vop1')
 
-        assert 'uint64_t sdwa_old_dst_[64] = {};' in cvt_f64, arch
-        assert 'read_vgpr_storage64(vb + inst_.vdst, ln)' in cvt_f64, arch
-        assert 'write_vgpr_storage64(vb + inst_.vdst, ln,' in cvt_f64, arch
-        assert 'read_operand_storage64(vdst, ln)' not in cvt_f64, arch
+        assert 'write_vgpr_storage64(vb + inst_.vdst, ln,' not in cvt_f64, arch
+        assert cvt_f64.count('inst_.src0 == amdgpu::SRC_DPP') == 1, arch
 
 
-def test_generated_dpp_cleanup_uses_full_write_mask_for_dpp16(
+def test_cdna4_generated_vop1_sdwa_availability_is_instruction_specific(
+    amdgpu_generated_root: Path,
+):
+    vop1 = (amdgpu_generated_root / 'cdna4' / 'vop1.cpp').read_text()
+
+    supported = _generated_constructor_body(vop1, 'VMovB32Vop1')
+    unsupported = _generated_constructor_body(vop1, 'VCvtF64I32Vop1')
+
+    assert 'reinterpret_cast<const Vop1VopSdwaMachineInst *>' in supported
+    assert 'V_MOV_B32 does not support SDWA' not in supported
+    assert (
+        'throw util::InvalidInst("V_CVT_F64_I32 does not support SDWA", "");'
+        in unsupported
+    )
+
+
+def test_gfx1250_generated_vop1_dpp8_availability_is_instruction_specific(
+    gfx1250_generated_root: Path,
+):
+    vop1 = (gfx1250_generated_root / 'vop1.cpp').read_text()
+    constructor = _generated_constructor_body(vop1, 'VCvtF64I32Vop1')
+
+    assert 'reinterpret_cast<const Vop1VopDpp16MachineInst *>' in constructor
+    assert 'reinterpret_cast<const Vop1VopDpp8MachineInst *>' not in constructor
+    assert (
+        'throw util::InvalidInst("V_CVT_F64_I32 does not support DPP8", "");'
+        in constructor
+    )
+
+
+def test_rdna4_generated_vop3_dpp_availability_is_instruction_specific(
+    rdna4_generated_root: Path,
+):
+    vop3 = (rdna4_generated_root / 'vop3.cpp').read_text()
+    vop3p = (rdna4_generated_root / 'vop3p.cpp').read_text()
+
+    supported = _generated_constructor_body(vop3, 'VAddF32Vop3')
+    unsupported_vop3 = _generated_constructor_body(vop3, 'VAddF64Vop3')
+    unsupported_vop3p = _generated_constructor_body(vop3p, 'VPkAddF16Vop3p')
+
+    assert 'reinterpret_cast<const Vop3VopDpp16MachineInst *>' in supported
+    assert 'reinterpret_cast<const Vop3VopDpp8MachineInst *>' in supported
+    assert 'V_ADD_F32 does not support DPP' not in supported
+    assert (
+        'throw util::InvalidInst("V_ADD_F64 does not support DPP", "");'
+        in unsupported_vop3
+    )
+    assert (
+        'throw util::InvalidInst("V_PK_ADD_F16 does not support DPP", "");'
+        in unsupported_vop3p
+    )
+
+
+def test_generated_vop_execution_has_no_instruction_storage_bypass(
+    amdgpu_generated_root: Path,
+):
+    forbidden = (
+        'read_operand_storage',
+        'write_operand_storage',
+        'read_vgpr_storage',
+        'write_vgpr_storage',
+        'sdwa_old_dst_',
+    )
+    model_sources = sorted(
+        path
+        for path in amdgpu_generated_root.glob('*/vop*.cpp')
+        if '_exec' not in path.stem
+    )
+    assert model_sources
+    for path in model_sources:
+        execution_path = _execution_source_path(path)
+        source = execution_path.read_text()
+        for token in forbidden:
+            assert token not in source, (execution_path, token)
+
+    shared_execute = (amdgpu_generated_root / 'shared' / 'execute_shared.h').read_text()
+    assert 'sdwa::write_lane<' in shared_execute
+    assert 'sdwa::write_lane64<' in shared_execute
+
+
+def test_generated_dpp_execution_uses_effective_lane_mask_for_dpp16(
     amdgpu_generated_root: Path,
 ):
     vop1_arches = (
@@ -2109,23 +2127,23 @@ def test_generated_dpp_cleanup_uses_full_write_mask_for_dpp16(
         'gfx1250',
     )
     vopc_names = {
-        'cdna1': 'vopc.cpp',
-        'cdna2': 'vopc.cpp',
-        'cdna3': 'vopc.cpp',
-        'cdna4': 'vopc.cpp',
         'rdna3': 'vopc.cpp',
         'rdna3_5': 'vopc.cpp',
         'rdna4': 'vopc.cpp',
         'gfx1250': 'vopc_cmp.cpp',
     }
 
+    shared_execute = (amdgpu_generated_root / 'shared' / 'execute_shared.h').read_text()
+    assert 'uint64_t exec = dpp::execution_lane_mask(inst, wf);' in shared_execute
+
     for arch in vop1_arches:
         arch_root = amdgpu_generated_root / arch
         vop1 = _execution_source_path(arch_root / 'vop1.cpp').read_text()
 
         body = _generated_method_body(vop1, 'VMovB32Vop1', 'VReadfirstlaneB32Vop1')
-        assert 'amdgpu::dpp::dpp_write_mask(' in body
-        assert 'dpp_bound_ctrl_' in body
+        assert 'write_operand_storage' not in body
+        assert 'write_vgpr_storage' not in body
+        assert body.count('inst_.src0 == amdgpu::SRC_DPP') == 1
         assert 'dpp_bound_ctrl_, dpp_fi_' in body
 
     for arch, vopc_name in vopc_names.items():
@@ -2149,7 +2167,9 @@ def test_rdna1_2_generated_vopc_dpp_is_explicitly_unsupported(
         start = vopc.index('VCmpEqU32Vopc::VCmpEqU32Vopc')
         end = vopc.index('void VCmpEqU32Vopc::execute_impl', start)
         ctor = vopc[start:end]
-        assert 'throw util::UnimplementedInst("VOPC DPP");' in ctor, arch
+        assert (
+            'throw util::InvalidInst("V_CMP_EQ_U32 does not support DPP", "");' in ctor
+        ), arch
         assert (
             'amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)'
             in ctor
@@ -2165,10 +2185,6 @@ def test_rdna1_2_generated_vopc_dpp_is_explicitly_unsupported(
 
 def test_generated_cmpx_dpp_cleanup_preserves_exec(amdgpu_generated_root: Path):
     vopc_paths = {
-        'cdna1': amdgpu_generated_root / 'cdna1' / 'vopc.cpp',
-        'cdna2': amdgpu_generated_root / 'cdna2' / 'vopc.cpp',
-        'cdna3': amdgpu_generated_root / 'cdna3' / 'vopc.cpp',
-        'cdna4': amdgpu_generated_root / 'cdna4' / 'vopc.cpp',
         'rdna3': amdgpu_generated_root / 'rdna3' / 'vopc.cpp',
         'rdna3_5': amdgpu_generated_root / 'rdna3_5' / 'vopc.cpp',
         'rdna4': amdgpu_generated_root / 'rdna4' / 'vopc.cpp',
@@ -2325,7 +2341,6 @@ def test_generated_rdna4_vop3_cvt_f32_f16_applies_true16_source_modifiers(
     assert 'if (inst_.abs & (1u << 0))' in body
     assert 'src = std::fabs(src);' in body
     assert 'if (inst_.neg & (1u << 0))' in body
-    assert 'amdgpu::RegisterAccess(wf).write_lane(vdst, lane,' in body
     assert 'std::bit_cast<uint32_t>(src)' in body
 
 
