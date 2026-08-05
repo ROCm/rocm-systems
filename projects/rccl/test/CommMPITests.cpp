@@ -11,6 +11,8 @@
 #include "TestChecks.hpp"
 #include "ResourceGuards.hpp"
 
+#include "comm.h"
+
 #include <cstdlib>
 #include <string>
 
@@ -549,6 +551,75 @@ TEST_F(DestroySubsysMPITest, DestroySubsys_IncludesDestroyNoise)
 
     ASSERT_MPI_TRUE(hit_comm_free);
     ASSERT_MPI_TRUE(hit_colltrace);
+}
+
+/**
+ * @class GinRmaContextMPITest
+ * @brief Inspects the GIN and RMA plugin contexts bound at communicator init
+ *        time. No data path is stood up, only the plugin state is read.
+ */
+class GinRmaContextMPITest : public ConfigCommMPITestBase
+{
+protected:
+    // ncclCommInitChildComm() derives shareResources from the parent config, not
+    // from the config handed to ncclCommSplit(), so splitShare has to be set here.
+    void applyConfig(ncclConfig_t& config) override
+    {
+        config.splitShare = 1;
+    }
+
+    std::string configLabel() const override
+    {
+        return "splitShare=1";
+    }
+
+    struct ncclComm* ActiveComm()
+    {
+        return reinterpret_cast<struct ncclComm*>(getActiveCommunicator());
+    }
+};
+
+/**
+ * @test GinRmaContextMPITest.RmaAndGinFinalizeWithSplitComm
+ * @brief With both plugins initialized, RMA and GIN must hold separate
+ *        contexts that a split child inherits and finalize can release.
+ */
+TEST_F(GinRmaContextMPITest, RmaAndGinFinalizeWithSplitComm)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    struct ncclComm* parent = ActiveComm();
+    ASSERT_MPI_TRUE(parent != nullptr);
+    ASSERT_MPI_TRUE(parent->sharedRes != nullptr);
+
+    if(parent->sharedRes->ginState.ncclGin == nullptr || parent->rmaState.rmaProxyState.ncclGin == nullptr)
+    {
+        GTEST_SKIP() << "Requires both the GIN and RMA plugins enabled on this host";
+    }
+
+    // One internal backend serves both roles, so the contexts are distinct
+    // only when RMA owns a separate field.
+    ASSERT_MPI_TRUE(parent->ginContext != nullptr);
+    ASSERT_MPI_TRUE(parent->rmaGinContext != nullptr);
+    ASSERT_MPI_TRUE(parent->ginContext != parent->rmaGinContext);
+
+    // The parent shares its resources, so the child inherits both contexts
+    // instead of initializing the plugins again.
+    ncclComm_t splitComm = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclCommSplit(getActiveCommunicator(), 0, getTestMpiRank(), &splitComm, nullptr));
+
+    struct ncclComm* child = reinterpret_cast<struct ncclComm*>(splitComm);
+    ASSERT_MPI_TRUE(child->sharedRes == parent->sharedRes);
+    ASSERT_MPI_TRUE(child->ginContext == parent->ginContext);
+    ASSERT_MPI_TRUE(child->rmaGinContext == parent->rmaGinContext);
+
+    // Destroy the parent first so the child holds the last reference and
+    // finalizes both plugins against the contexts it inherited.
+    ASSERT_MPI_EQ(ncclSuccess, cleanupTestCommunicator());
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommDestroy(splitComm));
 }
 
 #endif // MPI_TESTS_ENABLED
