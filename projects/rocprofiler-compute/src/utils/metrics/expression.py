@@ -10,8 +10,47 @@ import re
 
 import astunparse
 
+from utils.logger import console_error
 from utils.utils_common import SUPPORTED_FIELD
 from utils.utils_counter_defs import SUPPORTED_DENOM
+
+ALLOWED_AST_NODES: frozenset[type] = frozenset({
+    ast.Module,
+    ast.Expr,
+    ast.Expression,
+    ast.Constant,
+    ast.Name,
+    ast.Tuple,
+    ast.List,
+    ast.BinOp,
+    ast.UnaryOp,
+    ast.Compare,
+    ast.BoolOp,
+    ast.IfExp,
+    ast.Call,
+    ast.Subscript,
+    ast.Slice,
+    ast.Index,
+    ast.Load,
+    ast.Add,
+    ast.Sub,
+    ast.Mult,
+    ast.Div,
+    ast.FloorDiv,
+    ast.Mod,
+    ast.Pow,
+    ast.USub,
+    ast.UAdd,
+    ast.Not,
+    ast.Eq,
+    ast.NotEq,
+    ast.Lt,
+    ast.Gt,
+    ast.LtE,
+    ast.GtE,
+    ast.And,
+    ast.Or,
+})
 
 SUPPORTED_CALL: dict[str, str] = {
     # If the below has a single arg, like(expr), it is an aggr,
@@ -39,6 +78,11 @@ SUPPORTED_CALL: dict[str, str] = {
 
 class CodeTransformer(ast.NodeTransformer):
     """Python AST visitor to transform user equation strings to df format."""
+
+    def generic_visit(self, node: ast.AST) -> ast.AST:
+        if type(node) not in ALLOWED_AST_NODES:
+            raise ValueError(f"Disallowed expression element: {type(node).__name__}")
+        return super().generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> ast.Call:
         self.generic_visit(node)
@@ -142,8 +186,11 @@ def build_eval_string(equation: str) -> str:
 
     # convert equation string to intermediate expression in df array format
     ast_node = ast.parse(equation_string)
-    transformer = CodeTransformer()
-    transformer.visit(ast_node)
+    try:
+        transformer = CodeTransformer()
+        transformer.visit(ast_node)
+    except ValueError as exc:
+        console_error(f"Invalid metric expression '{equation}': {exc}")
 
     equation_string = astunparse.unparse(ast_node)
 

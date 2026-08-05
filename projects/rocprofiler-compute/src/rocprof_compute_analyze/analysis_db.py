@@ -30,6 +30,7 @@ from utils.file_io import (
 )
 from utils.logger import (
     console_debug,
+    console_error,
     console_warning,
     demarcate,
 )
@@ -587,8 +588,11 @@ class db_analysis(OmniAnalyze_Base):
                 value,
             )
             ast_node = ast.parse(value)
-            transformer = CodeTransformer()
-            transformer.visit(ast_node)
+            try:
+                transformer = CodeTransformer()
+                transformer.visit(ast_node)
+            except ValueError as exc:
+                console_error(f"Invalid metric expression '{value}': {exc}")
             value = astunparse.unparse(ast_node)
             value = value.replace("raw_pmc_df", "pmc_df")
             value = value.replace("pmc_df['sys_info']", "sys_info")
@@ -605,7 +609,7 @@ class db_analysis(OmniAnalyze_Base):
                 warnings.simplefilter("always", RuntimeWarning)
                 eval_result = eval(
                     compile(value, "<string>", "eval"),
-                    {},  # no globals
+                    {"__builtins__": {}},
                     {
                         # only locals
                         "pmc_df": pmc_df,
