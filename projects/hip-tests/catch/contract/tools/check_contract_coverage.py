@@ -15,8 +15,9 @@ coverage methodology in ``projects/hip-tests/CONTRACT_COVERAGE.md``.
 
 Exit status (with --check): non-zero if there is any declared API that is neither
 covered by a contract test nor listed in the allowlist, if the allowlist has stale
-entries, or if ``CONTRACT_COVERAGE.md``'s snapshot block has drifted. Without
---check the script only reports and always exits 0.
+entries, if a contract case name violates the structured naming convention, or if
+``CONTRACT_COVERAGE.md``'s snapshot block has drifted. Without --check the script
+only reports and always exits 0.
 
 Runs anywhere with Python 3.6+ and the standard library only; no ROCm, GPU, or
 build is required (pure static analysis), so it is safe as a fast PR gate.
@@ -65,6 +66,8 @@ _DECL_RE = re.compile(
 
 # Any hipXxx( token in a contract source counts as exercising that API.
 _CALL_RE = re.compile(r"\b(hip[A-Za-z0-9_]+)\s*\(")
+_CASE_RE = re.compile(r"HIP_TEST_CASE\s*\(\s*([A-Za-z0-9_]+)\s*\)")
+_NAME_SEGMENT_RE = re.compile(r"^(?:[A-Z][A-Za-z0-9]*|[0-9]+D[A-Za-z0-9]*)$")
 _SNAPSHOT_RE = re.compile(
     r"<!--\s*contract-coverage-snapshot\s*(.*?)\s*-->",
     re.DOTALL,
@@ -139,6 +142,41 @@ def contract_test_counts(contract_dir=CONTRACT_DIR):
         domains.add(path.parent.name)
         tests += path.read_text(encoding="utf-8", errors="replace").count("HIP_TEST_CASE(")
     return tests, len(domains)
+
+
+def _iter_contract_cases(contract_dir=CONTRACT_DIR):
+    """Yield (path, case_name) for every contract HIP_TEST_CASE."""
+    root = Path(contract_dir)
+    for path in root.rglob("test_hip_*_contract.cc"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for match in _CASE_RE.finditer(text):
+            yield path, match.group(1)
+
+
+def _case_name_violation(name):
+    """Return a naming violation reason, or None when the case name is valid."""
+    parts = name.split("_")
+    if len(parts) != 5:
+        return "expected 5 underscore-separated segments"
+    if parts[0] != "Contract":
+        return "expected first segment to be Contract"
+    for part in parts[1:]:
+        if not _NAME_SEGMENT_RE.match(part):
+            return "segment {!r} is not PascalCase".format(part)
+    if not parts[2].startswith("Hip"):
+        return "subject segment {!r} must start with Hip".format(parts[2])
+    return None
+
+
+def naming_violations(contract_dir=CONTRACT_DIR):
+    """Return structured contract-case naming violations."""
+    root = Path(contract_dir)
+    violations = []
+    for path, name in _iter_contract_cases(root):
+        reason = _case_name_violation(name)
+        if reason:
+            violations.append("{}: {} ({})".format(path.relative_to(root), name, reason))
+    return sorted(violations)
 
 
 def load_coverage_snapshot(doc_path=COVERAGE_DOC_PATH):
@@ -234,7 +272,7 @@ def compute(header_path=HEADER_PATH, contract_dir=CONTRACT_DIR,
     }
 
 
-def _print_summary(report, doc_drift):
+def _print_summary(report, doc_drift, name_violations):
     print("HIP contract-test coverage")
     print("  declared public APIs : {}".format(report["declared_count"]))
     print("  covered by a test    : {}".format(report["covered_count"]))
@@ -267,6 +305,12 @@ def _print_summary(report, doc_drift):
         for item in doc_drift:
             print("  {}".format(item))
         print("")
+    if name_violations:
+        print("Contract case naming violations:")
+        for item in name_violations:
+            print("  {}".format(item))
+        print("Expected: Contract_<DomainPascal>_<Subject>_<Scenario>_<ExpectedOutcome>")
+        print("")
     if report["violations"]:
         print("RESULT: FAIL - {} API(s) need a contract test or an "
               "allowlist entry.".format(len(report["violations"])))
@@ -278,6 +322,8 @@ def _print_summary(report, doc_drift):
         print("RESULT: FAIL - allowlist is out of date (see above).")
     elif doc_drift:
         print("RESULT: FAIL - CONTRACT_COVERAGE.md snapshot is out of date (see above).")
+    elif name_violations:
+        print("RESULT: FAIL - contract case names do not match the required convention.")
     else:
         print("RESULT: OK - every declared API is covered or justifiably allowlisted.")
 
@@ -306,6 +352,7 @@ def main(argv=None):
 
     report = compute(args.header, args.contract_dir, args.allowlist)
     doc_drift = snapshot_drift(report, args.contract_dir, args.coverage_doc)
+    name_violations = naming_violations(args.contract_dir)
 
     if args.list_uncovered:
         for name in report["uncovered"]:
@@ -314,12 +361,14 @@ def main(argv=None):
         printable = {k: v for k, v in report.items() if k != "allowlist"}
         printable["allowlist"] = report["allowlist"]
         printable["coverage_doc_drift"] = doc_drift
+        printable["naming_violations"] = name_violations
         print(json.dumps(printable, indent=2, sort_keys=True))
     else:
-        _print_summary(report, doc_drift)
+        _print_summary(report, doc_drift, name_violations)
 
     failed = bool(report["violations"] or report["allowlisted_stale"]
-                  or report["allowlisted_redundant"] or doc_drift)
+                  or report["allowlisted_redundant"] or doc_drift
+                  or name_violations)
     if args.check and failed:
         return 1
     return 0
