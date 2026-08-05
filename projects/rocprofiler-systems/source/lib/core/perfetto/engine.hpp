@@ -9,9 +9,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <mutex>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -89,11 +87,11 @@ private:
     static void        collect_thunk(void* engine, int pid, const void* data,
                                      std::size_t size) noexcept;
 
-    engine_config                                     m_cfg{};
-    Backend                                           m_backend{};
-    bool                                              m_running{ false };
-    std::optional<std::reference_wrapper<trace_sink>> m_active_sink{};
-    session_ptr                                       m_session{};
+    engine_config m_cfg{};
+    Backend       m_backend{};
+    bool          m_running{ false };
+    trace_sink*   m_active_sink{ nullptr };
+    session_ptr   m_session{};
 
     std::mutex                                 m_collector_mutex{};
     std::unordered_map<int, std::vector<char>> m_collected_bytes{};
