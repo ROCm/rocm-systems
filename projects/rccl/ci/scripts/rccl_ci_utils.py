@@ -53,7 +53,8 @@ def override_bundled_rccl(rccl_lib_dir: Path) -> None:
         replaced += 1
 
     if replaced == 0:
-        log.warning("No bundled librccl.so found to replace; LD_LIBRARY_PATH may suffice")
+        log.error("No bundled librccl.so found to replace — tests would run against pip RCCL")
+        sys.exit(1)
     else:
         log.info("Replaced %d bundled librccl.so file(s) with CI-built version", replaced)
 
