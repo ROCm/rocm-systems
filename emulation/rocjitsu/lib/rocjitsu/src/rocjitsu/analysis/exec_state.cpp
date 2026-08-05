@@ -173,11 +173,60 @@ enum class Combinator { Other, Copy, Or };
   return (a == ExecState::Full && b == ExecState::Full) ? ExecState::Full : ExecState::Unknown;
 }
 
-[[nodiscard]] ExecState block_transfer(ExecState in, BasicBlock &block, uint32_t wave_size) {
-  ExecState state = in;
-  for (const auto &inst : block.instructions())
-    state = transfer(state, inst, wave_size);
-  return state;
+/// @brief A block's whole transfer function over the two-point lattice.
+///
+/// @details Since every per-instruction transfer is either a constant
+/// (AllOnes -> Full, Narrowing -> Unknown) or the identity (Preserve/None), the
+/// composition over a block is fully determined by its *last* constant EXEC
+/// write. Summarizing it once lets the worklist apply a block in O(1) instead of
+/// re-walking (and re-classifying) the whole instruction list on every re-visit.
+enum class BlockEffect : uint8_t {
+  Identity,     ///< No constant EXEC write: out == in.
+  ConstFull,    ///< Last constant write is all-ones: out == Full.
+  ConstUnknown, ///< Last constant write narrows EXEC: out == Unknown.
+};
+
+[[nodiscard]] BlockEffect summarize_block_exec_effect(BasicBlock &block, uint32_t wave_size) {
+  BlockEffect effect = BlockEffect::Identity;
+  for (const auto &inst : block.instructions()) {
+    switch (classify(inst, wave_size)) {
+    case ExecWrite::AllOnes:
+      effect = BlockEffect::ConstFull;
+      break;
+    case ExecWrite::Narrowing:
+      effect = BlockEffect::ConstUnknown;
+      break;
+    case ExecWrite::Preserve:
+    case ExecWrite::None:
+      break;
+    }
+  }
+  return effect;
+}
+
+/// @brief Summarize every in-scope block's transfer function once, up front, so
+/// the fixpoint worklist can apply each block in O(1) without re-walking (and
+/// re-classifying) its instructions on every re-visit.
+[[nodiscard]] std::vector<BlockEffect> summarize_all_block_exec_effects(KernelBlockScope blocks,
+                                                                        uint32_t wave_size) {
+  std::vector<BlockEffect> effects(blocks.size(), BlockEffect::Identity);
+  for (size_t i = 0; i < blocks.size(); ++i) {
+    if (blocks[i] != nullptr)
+      effects[i] = summarize_block_exec_effect(*blocks[i], wave_size);
+  }
+  return effects;
+}
+
+[[nodiscard]] ExecState apply_block_effect(BlockEffect effect, ExecState in) {
+  switch (effect) {
+  case BlockEffect::ConstFull:
+    return ExecState::Full;
+  case BlockEffect::ConstUnknown:
+    return ExecState::Unknown;
+  case BlockEffect::Identity:
+    break;
+  }
+  return in;
 }
 
 } // namespace
@@ -194,6 +243,7 @@ ExecMaskAnalysis::ExecMaskAnalysis(KernelBlockScope blocks, uint8_t wave_size,
 void ExecMaskAnalysis::analyze(KernelBlockScope blocks, std::span<const ScopedCfgEdge> extra_edges,
                                std::span<const BasicBlock *const> entry_blocks) {
   states_.assign(blocks.size(), BlockExec{});
+  block_index_.reserve(blocks.size());
   for (size_t i = 0; i < blocks.size(); ++i) {
     if (blocks[i] != nullptr)
       block_index_.emplace(blocks[i], i);
@@ -251,6 +301,8 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks, std::span<const ScopedCf
     }
   }
 
+  const std::vector<BlockEffect> block_effects = summarize_all_block_exec_effects(blocks, wave_size_);
+
   const auto rpo = reverse_post_order(blocks);
   std::deque<size_t> worklist;
   std::vector<bool> in_worklist(blocks.size(), false);
@@ -293,7 +345,7 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks, std::span<const ScopedCf
       in = acc.value_or(ExecState::Unknown);
     }
 
-    const ExecState out = block_transfer(in, *block, wave_size_);
+    const ExecState out = apply_block_effect(block_effects[idx], in);
     if (in != states_[idx].in || out != states_[idx].out) {
       states_[idx].in = in;
       states_[idx].out = out;
@@ -302,7 +354,14 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks, std::span<const ScopedCf
     }
   }
 
-  // Materialize the EXEC state entering each instruction.
+  // Materialize the EXEC state entering each instruction. Size before_ once from
+  // the total instruction count so the per-instruction inserts never rehash.
+  size_t total_instructions = 0;
+  for (const BasicBlock *block : blocks) {
+    if (block != nullptr)
+      total_instructions += block->num_instructions();
+  }
+  before_.reserve(total_instructions);
   for (size_t i = 0; i < blocks.size(); ++i) {
     BasicBlock *block = blocks[i];
     if (block == nullptr)

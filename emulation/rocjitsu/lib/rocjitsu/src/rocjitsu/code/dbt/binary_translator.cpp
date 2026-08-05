@@ -2151,7 +2151,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       // every EXEC-masked vector def is treated as `Unknown` and so is never
       // promoted to a kill, keeping scratch allocation conservative.
       //
-      // TODO: Once ExecMaskAnalysis is performance-optimized, build one here (seeded
+      // TODO: Once ExecMaskAnalysis is performance-optimized and ensures that it
+      // doesn't have any waitalu/hazard analysis interference, build one here (seeded
       // with the descriptor entry plus, when present, the kernarg-preload firmware
       // entry at +256, which hardware enters with unknown EXEC) and pass it to
       // LivenessAnalysis so EXEC-masked vector defs can be promoted to kills where
