@@ -13,6 +13,7 @@
 
 #include "rocjitsu/code/dbt/translation_store.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -315,6 +316,61 @@ TEST_F(TranslationStoreTest, ALineBreakingIdentityIsRefusedRatherThanStored) {
   // The ordinary identity still works, so this is refusal and not a dead store.
   put(*store, kObject);
   EXPECT_EQ(get(*store), kObject);
+}
+
+TEST_F(TranslationStoreTest, TheCapCountsManifestsNotJustObjects) {
+  // An entry is the object and its manifest. Counting only objects lets the
+  // manifests accumulate entirely outside the cap: with tiny objects the
+  // manifest dominates, so the bytes on disk ran to many times the limit while
+  // the store reported it was well inside it.
+  auto store = open("pair-a");
+  store->set_capacity_for_test(8192);
+
+  const std::vector<uint8_t> tiny{'x'};
+  for (int i = 0; i < 400; ++i) {
+    const std::vector<uint8_t> source{static_cast<uint8_t>(i), static_cast<uint8_t>(i >> 8)};
+    store->store(store->key_for(source, kIdentity), tiny, kIdentity);
+  }
+
+  uint64_t on_disk = 0;
+  for (const auto &item : std::filesystem::recursive_directory_iterator(root_))
+    if (std::filesystem::is_regular_file(item))
+      on_disk += std::filesystem::file_size(item);
+
+  EXPECT_LE(on_disk, 8192u) << "bytes on disk must respect the cap, manifests included";
+  EXPECT_EQ(store->size_for_test(), on_disk) << "the store must report what it occupies";
+}
+
+TEST_F(TranslationStoreTest, AManifestWithNoObjectIsReclaimed) {
+  // What a process killed between the two renames leaves behind. It can never
+  // satisfy a lookup, and if eviction does not remove it nothing ever will.
+  auto store = open("pair-a");
+  put(*store, kObject);
+  ASSERT_EQ(get(*store), kObject);
+
+  const std::filesystem::path entries = std::filesystem::path(root_) / "pair-a" / "v1";
+  for (const auto &item : std::filesystem::directory_iterator(entries))
+    if (item.path().extension() == ".obj")
+      std::filesystem::remove(item.path());
+  ASSERT_GT(store->size_for_test(), 0u) << "the orphan manifest must still be accounted";
+
+  // Age it past the threshold that separates an abandoned write from one still
+  // in progress, then re-open: the sweep runs once when the store opens.
+  for (const auto &item : std::filesystem::directory_iterator(entries))
+    std::filesystem::last_write_time(item.path(), std::filesystem::file_time_type::clock::now() -
+                                                      std::chrono::hours(1));
+  auto reopened = open("pair-a");
+  EXPECT_TRUE(get(*reopened).empty());
+
+  size_t orphans = 0;
+  for (const auto &item : std::filesystem::directory_iterator(entries)) {
+    if (item.path().extension() != ".man")
+      continue;
+    auto object = item.path();
+    object.replace_extension(".obj");
+    orphans += std::filesystem::exists(object) ? 0 : 1;
+  }
+  EXPECT_EQ(orphans, 0u) << "an orphan manifest must be reclaimed";
 }
 
 TEST_F(TranslationStoreTest, AGroupWritableStoreRootIsStillUsable) {

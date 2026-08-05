@@ -15,6 +15,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 #include <dirent.h>
@@ -473,9 +474,12 @@ enum class DirectoryTrust {
 }
 
 struct Entry {
+  /// Key without the .obj/.man suffix, so one entry covers the pair.
   std::string name;
+  /// Object plus manifest, which is what the entry actually occupies.
   uint64_t size = 0;
   time_t used = 0;
+  bool has_object = false;
 };
 
 /// @brief True when @p domain names exactly one directory beneath the root.
@@ -668,16 +672,39 @@ std::vector<Entry> TranslationStore::Impl::scan_locked() const {
     close(scan_fd);
     return entries;
   }
+  // An entry is the object AND its manifest. Counting only the object lets the
+  // manifests accumulate outside the cap entirely -- 400 one-byte objects under
+  // an 8192-byte cap left 100400 bytes on disk while the store reported 400 --
+  // and makes eviction give back less than it appears to.
+  //
+  // A manifest whose object is missing is counted too, under its own name. That
+  // is what a process killed between the two renames leaves behind: it belongs
+  // to no entry, is never a lookup hit, and nothing would otherwise reclaim it.
+  std::unordered_map<std::string, Entry> by_key;
   while (const dirent *item = readdir(dir)) {
     const std::string_view name(item->d_name);
-    if (!name.ends_with(".obj"))
+    const bool is_object = name.ends_with(".obj");
+    if (!is_object && !name.ends_with(".man"))
       continue;
     struct stat info {};
     if (fstatat(dir_fd_, item->d_name, &info, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISREG(info.st_mode))
       continue;
-    entries.push_back({std::string(name), static_cast<uint64_t>(info.st_size), info.st_mtime});
+    std::string key(name.substr(0, name.size() - 4));
+    Entry &entry = by_key[key];
+    if (entry.name.empty())
+      entry.name = key;
+    entry.size += static_cast<uint64_t>(info.st_size);
+    // The object's timestamp is the one lookups refresh, so it decides eviction
+    // order whenever there is an object at all.
+    if (is_object || entry.used == 0) {
+      entry.used = info.st_mtime;
+      entry.has_object = entry.has_object || is_object;
+    }
   }
   closedir(dir);
+  entries.reserve(by_key.size());
+  for (auto &[key, entry] : by_key)
+    entries.push_back(std::move(entry));
   return entries;
 }
 
@@ -694,7 +721,17 @@ void TranslationStore::Impl::sweep_abandoned_locked() const {
   }
   const time_t now = time(nullptr);
   while (const dirent *item = readdir(dir)) {
-    if (std::string_view(item->d_name).find(".tmp.") == std::string_view::npos)
+    const std::string_view name(item->d_name);
+    // A manifest published without its object is the other way a writer can die
+    // mid-entry: the manifest is renamed first, so a kill between the two leaves
+    // one that can never satisfy a lookup and that eviction only ever reaches
+    // under cap pressure. The same age threshold applies for the same reason --
+    // below it, the writer may simply still be working.
+    const bool orphan_manifest =
+        name.ends_with(".man") &&
+        faccessat(dir_fd_, (std::string(name.substr(0, name.size() - 4)) + ".obj").c_str(), F_OK,
+                  0) != 0;
+    if (!orphan_manifest && name.find(".tmp.") == std::string_view::npos)
       continue;
     struct stat info {};
     if (fstatat(dir_fd_, item->d_name, &info, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISREG(info.st_mode))
@@ -755,12 +792,16 @@ bool TranslationStore::Impl::reserve_space_locked(uint64_t needed) {
   std::sort(entries.begin(), entries.end(),
             [](const Entry &a, const Entry &b) { return a.used < b.used; });
   const uint64_t target = cap / 1000u * kEvictTargetPermille;
+  // A manifest with no object first, whatever its age. It can never satisfy a
+  // lookup, so reclaiming it frees space at no cost to the hit rate -- and if
+  // nothing here removed it, nothing ever would.
+  std::stable_partition(entries.begin(), entries.end(),
+                        [](const Entry &entry) { return !entry.has_object; });
   for (const Entry &entry : entries) {
-    if (used + needed <= target)
+    if (used + needed <= target && entry.has_object)
       break;
-    std::string manifest = entry.name.substr(0, entry.name.size() - 4) + ".man";
-    unlinkat(dir_fd_, entry.name.c_str(), 0);
-    unlinkat(dir_fd_, manifest.c_str(), 0);
+    unlinkat(dir_fd_, (entry.name + ".obj").c_str(), 0);
+    unlinkat(dir_fd_, (entry.name + ".man").c_str(), 0);
     used -= std::min(used, entry.size);
   }
   return used + needed <= cap;
