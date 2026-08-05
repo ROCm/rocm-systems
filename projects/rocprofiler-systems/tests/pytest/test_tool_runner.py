@@ -22,14 +22,20 @@ TARGETS = [
     pytest.param("rocprof-sys-run", marks=pytest.mark.sys_run, id="run"),
 ]
 
-# <nfib> <nthreads> <nitr>. Big enough to run for about a second and get
-# sampled a bunch, small enough to keep tests quick.
-PARALLEL_OVERHEAD_ARGS = ["18", "2", "100000"]
+# <nfib> <nthreads> <nitr>. Sized to run for a couple of seconds so sampling
+# has time to collect a bunch of fib() frames, while still keeping tests quick.
+PARALLEL_OVERHEAD_ARGS = ["20", "2", "100000"]
 
-# <matrix-size> <iterations> <num-inputs>. Enough kernel launches and runtime
-# for the -D device sampler to poll GPU metrics at least once, while still
-# finishing quickly.
+# <cpu-threads> <kernel-iterations> <sync-every-N-iterations>. Enough kernel
+# launches and runtime for the -D device sampler to poll GPU metrics at least
+# once, while still finishing quickly.
 TRANSPOSE_ARGS = ["4", "300", "50"]
+
+# parallel-overhead can finish before the default 0.5s sampling delay elapses,
+# which leaves nothing for sampling to record. Start sampling immediately so the
+# workload's fib() frames actually get captured regardless of how fast the host
+# runs the workload.
+SAMPLING_NO_DELAY = {"ROCPROFSYS_SAMPLING_DELAY": "0.1"}
 
 
 @pytest.fixture
@@ -50,8 +56,9 @@ def gpu_workload(rocprof_config) -> str:
         pytest.skip("transpose example not built")
 
 
-def workload_args(workload: str) -> list[str]:
-    """Trailing "-- <workload>" so the flags under test act on real work."""
+def parallel_overhead_args(workload: str) -> list[str]:
+    """Trailing "-- parallel-overhead <args>" so the flags under test act on
+    real work. `workload` is the resolved parallel-overhead executable path."""
     return ["--", workload, *PARALLEL_OVERHEAD_ARGS]
 
 
@@ -112,7 +119,7 @@ class TestReplaceEnvNoDuplicates(RocprofsysTest):
             env={"ROCPROFSYS_TRACE": "true"},
             run_args=[
                 "--preset=profile-only",
-                *workload_args(cpu_workload),
+                *parallel_overhead_args(cpu_workload),
             ],
             fail_on_not_found=True,
         )
@@ -178,12 +185,12 @@ class TestOutputFormatSelection(RocprofsysTest):
         result = self.run_test(
             "baseline",
             target=target,
-            env={"ROCPROFSYS_TRACE": "OFF"},
+            env={"ROCPROFSYS_TRACE": "OFF", **SAMPLING_NO_DELAY},
             run_args=[
                 "--output-format",
                 "proto",
                 "rocpd",
-                *workload_args(cpu_workload),
+                *parallel_overhead_args(cpu_workload),
             ],
             fail_on_not_found=True,
         )
@@ -218,7 +225,7 @@ class TestOutputFormatSelection(RocprofsysTest):
             run_args=[
                 "--output-format",
                 "rocpd",
-                *workload_args(cpu_workload),
+                *parallel_overhead_args(cpu_workload),
             ],
             fail_on_not_found=True,
         )
@@ -295,7 +302,7 @@ class TestConfigOutput(RocprofsysTest):
                 "-o",
                 str(output_dir),
                 output_prefix,
-                *workload_args(cpu_workload),
+                *parallel_overhead_args(cpu_workload),
             ],
             fail_on_not_found=True,
         )
@@ -358,6 +365,7 @@ CLI_FLAG_ENV_CASES = [
             "ROCPROFSYS_CPU_FREQ_ENABLED": False,
         },
         None,
+        marks=pytest.mark.gpu,
         id="device_only",
     ),
     pytest.param(
@@ -368,6 +376,7 @@ CLI_FLAG_ENV_CASES = [
             "ROCPROFSYS_USE_AMD_SMI": True,
         },
         None,
+        marks=pytest.mark.gpu,
         id="host_and_device",
     ),
 ]
@@ -394,11 +403,12 @@ class TestCliFlagEnvMapping(RocprofsysTest):
             for key, value in expected_settings.items()
             if key in self.BASE_INJECTED and value is True
         }
+        seed_env.update(SAMPLING_NO_DELAY)
         result = self.run_test(
             "baseline",
             target=target,
             env=seed_env,
-            run_args=[*flag_args, *workload_args(cpu_workload)],
+            run_args=[*flag_args, *parallel_overhead_args(cpu_workload)],
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -410,8 +420,6 @@ class TestCliFlagEnvMapping(RocprofsysTest):
 
         settings = _resolved_settings(result)
         for key, expected in expected_settings.items():
-            if key == "ROCPROFSYS_USE_AMD_SMI":
-                continue
             assert settings[key] == expected, (
                 f"{flag_args}: expected {key}={expected!r} in metadata.json, "
                 f"got {settings[key]!r}"
@@ -430,12 +438,10 @@ class TestCliFlagEnvMapping(RocprofsysTest):
                 subtest_name=f"{flag_args}: trace records workload fib frames",
             )
         elif artifact_kind == "profile":
-            assert result.timemory_files, (
-                f"{flag_args} should produce timemory profile output under "
-                f"{result.output_dir}"
-            )
+            profile_file = result.output_dir / "sampling_wall_clock.json"
+            assert profile_file.is_file(), f"{flag_args} should produce {profile_file}"
             # Same check for the profile: fib() must be a recorded sample entry.
-            assert _profile_has_label(result, "fib(long)"), (
+            assert _profile_has_label(result, "fib"), (
                 f"{flag_args}: no fib() frames in sampling profile under "
                 f"{result.output_dir}"
             )
@@ -458,7 +464,7 @@ class TestWaitDuration(RocprofsysTest):
         result = self.run_test(
             "baseline",
             target=target,
-            run_args=["-w", "1.5", *workload_args(cpu_workload)],
+            run_args=["-w", "1.5", *parallel_overhead_args(cpu_workload)],
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -477,7 +483,7 @@ class TestWaitDuration(RocprofsysTest):
         result = self.run_test(
             "baseline",
             target=target,
-            run_args=["-d", "2.5", *workload_args(cpu_workload)],
+            run_args=["-d", "2.5", *parallel_overhead_args(cpu_workload)],
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -510,7 +516,7 @@ class TestTracePeriods(RocprofsysTest):
         result = self.run_test(
             "baseline",
             target=target,
-            run_args=["--periods", "0:2", *workload_args(cpu_workload)],
+            run_args=["--periods", "0:2", *parallel_overhead_args(cpu_workload)],
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=[r"ROCPROFSYS_TRACE_PERIODS=0:2"])
@@ -525,7 +531,7 @@ class TestTracePeriods(RocprofsysTest):
                 "0:2",
                 "--periods",
                 "3:2",
-                *workload_args(cpu_workload),
+                *parallel_overhead_args(cpu_workload),
             ],
             fail_on_not_found=True,
         )

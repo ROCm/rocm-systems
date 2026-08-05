@@ -264,11 +264,10 @@ class TestConfig(RocprofsysTest):
             "cli_flag_invalid_trace_duration.cfg",
             skip_filter=True,
         )
-        env = MINIMAL_RUNTIME_ENV.copy()
         result = self.run_test(
             "sys_run",
             target=config_target,
-            env=env,
+            env=MINIMAL_RUNTIME_ENV,
             sys_run_args=["-c", str(config_file)],
             fail_on_pass=True,
         )
