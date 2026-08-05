@@ -9945,8 +9945,9 @@ run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t opsel, uint32_t src0_value
   cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
-  // Both banks must be addressable: a banked operand resolves to reg + 256.
-  cfg.vgprs_per_wf = 512;
+  // Every bank must be addressable: a role's two-bit selector resolves an
+  // operand to reg + 256 * selector, so the file has to span all four.
+  cfg.vgprs_per_wf = 1024;
   cfg.lds_size_kb = 64;
   auto cu = rocjitsu::amdgpu::ComputeUnitCore::create("gfx1250_e5m3", cfg, &gpu_mem, &l2);
   if (cu == nullptr) {
@@ -10058,14 +10059,15 @@ TEST(BinaryTranslatorE2E, Gfx1250E5m3StochasticReplacementMatchesReferenceConver
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250E5m3ReplacementsHonorPerRoleVgprBanks) {
-  // Only two banks are addressable, so no single mode can separate all three
-  // roles. Raising each role's bank on its own does: whichever pair a lowering
-  // confuses, one of these modes has them differ, and the operand then resolves
-  // to a register nothing wrote instead of one that happens to hold the answer.
+  // Every mode gives src0, src1 and the destination three different banks, so a
+  // lowering that forwards one role's selector in place of another's resolves to
+  // a register nothing wrote rather than one that happens to hold the answer.
+  // Rotating through them puts each role on each of selectors 1, 2 and 3, which
+  // is what catches a selector whose high bit is dropped.
   static constexpr std::array<uint8_t, 3> modes = {
-      1u,      // src0 in the high bank.
-      1u << 2, // src1 in the high bank.
-      1u << 6, // destination in the high bank.
+      0xC9u, // src0 bank 1, src1 bank 2, destination bank 3.
+      0x87u, // src0 bank 3, src1 bank 1, destination bank 2.
+      0x4Eu, // src0 bank 2, src1 bank 3, destination bank 1.
   };
   static constexpr std::array<uint32_t, 6> kValues = {0x00000000u, 0x37000000u, 0x3F800000u,
                                                       0x47E00000u, 0x47F80000u, 0x7FC00000u};
