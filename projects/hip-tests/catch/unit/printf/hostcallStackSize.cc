@@ -25,12 +25,6 @@ std::string expectedOutput() {
   }
   return reference;
 }
-
-bool hostcallSupported() {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  return pcieAtomic != 0;
-}
 }  // namespace
 
 /**
@@ -49,9 +43,7 @@ bool hostcallSupported() {
  *    - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_Printf_HostcallLargeStaticTls_Positive) {
-  if (!hostcallSupported()) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
-  }
+  CHECK_PCIE_ATOMIC_SUPPORT
 
   hip::SpawnProc proc("hostcallStackSize_exe", true);
   REQUIRE(proc.run() == 0);
@@ -75,9 +67,7 @@ HIP_TEST_CASE(Unit_Printf_HostcallLargeStaticTls_Positive) {
  *    - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_Printf_HostcallUndersizedStackRequest_Positive) {
-  if (!hostcallSupported()) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
-  }
+  CHECK_PCIE_ATOMIC_SUPPORT
 
   hip::SpawnProc proc("hostcallStackSize_exe", true);
   proc.setEnv("CQ_THREAD_STACK_SIZE", "32768");

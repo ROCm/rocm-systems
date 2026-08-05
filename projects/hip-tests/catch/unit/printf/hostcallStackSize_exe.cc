@@ -10,8 +10,8 @@
 //
 // glibc allocates a thread's static TLS out of the stack mapping requested through
 // pthread_attr_setstacksize(), so a request that cannot also hold the process' static TLS is
-// refused with EINVAL. TLS_PAD_KIB bytes of initial-exec TLS put this process in the same
-// position as an application that links libraries with large PT_TLS segments.
+// refused with EINVAL. The initial-exec TLS below puts this process in the same position as an
+// application that links libraries with large PT_TLS segments.
 //
 // The device printf() makes the compiler declare hidden_hostcall_buffer, so dispatching the
 // kernel creates the listener thread.
@@ -20,12 +20,9 @@
 
 #include <cstdio>
 
-#ifndef TLS_PAD_KIB
-#define TLS_PAD_KIB 512
-#endif
-
 namespace {
-constexpr size_t kTlsPadBytes = static_cast<size_t>(TLS_PAD_KIB) * 1024;
+// Comfortably above the 256 KiB (CQ_THREAD_STACK_SIZE) stack the listener used to request.
+constexpr size_t kTlsPadBytes = 512 * 1024;
 constexpr int kThreads = 4;
 }  // namespace
 
