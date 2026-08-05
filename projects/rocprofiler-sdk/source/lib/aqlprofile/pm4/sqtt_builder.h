@@ -148,8 +148,8 @@ public:
     // Returns size of block in bytes per increment in WPTR
     virtual size_t GetWritePtrBlk() const = 0;
     // Returns the STATUS bits that stay set while a trace is running, or 0 if this architecture
-    // has no such indication.
-    virtual size_t GetTraceOwnerMask() const = 0;
+    // is not known to stop a trace on its own.
+    virtual size_t GetTraceBusyMask() const = 0;
     // Returns number of bits used for TTrace buffer alignment (e.g. 12 for 4KB alignment)
     virtual size_t BufferAlignment() const = 0;
 };
@@ -186,7 +186,11 @@ public:
     virtual size_t GetWritePtrMask() const override { return Primitives::TT_WRITE_PTR_MASK; };
     // Returns size of block in bytes per increment in WPTR
     virtual size_t GetWritePtrBlk() const override { return 32; };
-    virtual size_t GetTraceOwnerMask() const override { return Primitives::TT_OWNER_MASK; };
+    virtual size_t GetTraceBusyMask() const override
+    {
+        // Only gfx11 is known to drop a trace part way through a dispatch.
+        return Primitives::GFXIP_LEVEL == 11 ? Primitives::sqtt_busy_mask() : 0;
+    };
     // Returns number of bits used for TTrace buffer alignment (e.g. 12 for 4KB alignment)
     virtual size_t BufferAlignment() const override { return Primitives::TT_BUFF_ALIGN_SHIFT; }
 
@@ -843,7 +847,7 @@ public:
                                            Primitives::COPY_DATA_SEL_COUNT_1DW_PRM,
                                            false);
 
-        // The owner id in STATUS is the only way to tell whether the trace is still running.
+        // STATUS carries the BUSY bit, which is the only indication that the trace is running.
         if(Primitives::GFXIP_LEVEL == 11)
             builder.BuildCopyRegDataPacket(cmd_buffer,
                                            Primitives::SQ_THREAD_TRACE_STATUS_ADDR,

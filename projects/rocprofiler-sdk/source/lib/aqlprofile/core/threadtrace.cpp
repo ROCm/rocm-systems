@@ -428,8 +428,10 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
     // Either per-buffer full bit requests a swap; the swap counter selects the buffer to drain.
     out->needs_swap = (status & sqttbuilder->GetBufferFullMask()) != 0;
 
-    const size_t owner_mask = sqttbuilder->GetTraceOwnerMask();
-    out->trace_stopped      = owner_mask != 0 && (control.status & owner_mask) == 0;
+    // BUSY stays set for as long as the trace is running, so a clear bit means the hardware
+    // stopped it on its own and it has to be started again to capture the rest of the dispatch.
+    const size_t busy_mask = sqttbuilder->GetTraceBusyMask();
+    out->trace_stopped     = busy_mask != 0 && (control.status & busy_mask) == 0;
 
     auto it = manager->config.buffer_data.find(shader_engine_id);
     if(it == manager->config.buffer_data.end()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;

@@ -790,9 +790,7 @@ public:
         TT_CONTROL_FULL_MASK =
             SQ_THREAD_TRACE_STATUS2__BUF0_FULL_MASK | SQ_THREAD_TRACE_STATUS2__BUF1_FULL_MASK,
         TT_WRITE_PTR_MASK = SQ_THREAD_TRACE_WPTR__OFFSET_MASK,
-        TT_LOCKDOWN_FAIL  = SQ_THREAD_TRACE_STATUS2__PACKET_LOST_BUF_NO_LOCKDOWN_MASK,
-        // Set to the id of whoever started the trace, and cleared once the trace stops running.
-        TT_OWNER_MASK = SQ_THREAD_TRACE_STATUS__OWNER_VMID_MASK
+        TT_LOCKDOWN_FAIL  = SQ_THREAD_TRACE_STATUS2__PACKET_LOST_BUF_NO_LOCKDOWN_MASK
     };
 
     static uint32_t sqtt_busy_mask()
