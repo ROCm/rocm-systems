@@ -338,7 +338,7 @@ def generate_summary_report(summary: dict, rccl_lib: Path) -> str:
         f"",
         f"PyTorch:    {torch.__version__}",
         f"RCCL:       {rccl_lib}",
-        f"GPUs:       {torch.cuda.device_count()}x {torch.cuda.get_device_name(0)}",
+        f"GPUs:       {torch.cuda.device_count()}x {torch.cuda.get_device_name(0) if torch.cuda.device_count() > 0 else 'N/A'}",
         f"",
         f"Results:    {summary['summary_line']}",
     ]
