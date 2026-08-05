@@ -2563,6 +2563,15 @@ static const std::map<rsmi_compute_partition_type_t, std::string>
         {RSMI_COMPUTE_PARTITION_SPX, "SPX"},         {RSMI_COMPUTE_PARTITION_DPX, "DPX"},
         {RSMI_COMPUTE_PARTITION_TPX, "TPX"},         {RSMI_COMPUTE_PARTITION_QPX, "QPX"}};
 
+static const std::map<std::string, rsmi_compute_partition_mem_alloc_mode_t>
+    mapStringToRSMIMemAllocModeTypes{{"CAPPING", RSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING},
+                                     {"ALL", RSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL}};
+
+static const std::map<rsmi_compute_partition_mem_alloc_mode_t, std::string>
+    mapRSMIToStringMemAllocModeTypes{{RSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID, "UNKNOWN"},
+                                     {RSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING, "CAPPING"},
+                                     {RSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL, "ALL"}};
+
 static const std::map<rsmi_memory_partition_type_t, std::string>
     mapRSMIToStringMemoryPartitionTypes{{RSMI_MEMORY_PARTITION_UNKNOWN, "UNKNOWN"},
                                         {RSMI_MEMORY_PARTITION_NPS1, "NPS1"},
@@ -3447,7 +3456,8 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
       return RSMI_STATUS_NOT_SUPPORTED;
     }
 
-    *temperature = static_cast<int64_t>(val_ui16) * CENTRIGRADE_TO_MILLI_CENTIGRADE;
+    // Multiple by 1000 to convert from Centigrade to mCentigrade
+    *temperature = static_cast<int64_t>(val_ui16) * 1000;
 
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Success "
@@ -3785,45 +3795,6 @@ rsmi_status_t rsmi_dev_gpu_reset(uint32_t dv_ind) {
      << getRSMIStatusString(ret, false);
   LOG_INFO(ss);
   return ret;
-
-  CATCH
-}
-
-rsmi_status_t rsmi_dev_amdgpu_driver_reload(void) {
-  TRY std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-  // TODO(amdsmi_team): technically, we should block for all devices
-  // As this is a global operation, we can use a mutex to ensure
-  // that only one thread is trying to restart the driver at a time.
-  uint32_t dv_ind = 0;  // Default to first device
-  DEVICE_MUTEX
-  GET_DEV_FROM_INDX
-
-  rsmi_status_t restartRet = dev->restartAMDGpuDriver();
-
-  // Attempting to speed up processing time
-  bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
-  if (restartRet != RSMI_STATUS_SUCCESS) {
-    if (is_logger_enabled) {
-      ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-         << " | Fail - restart AMD GPU detected"
-         << " | Device #: " << dv_ind << " | Type: AMDGPU Driver Reload"
-         << " | Cause: AMDGPU Driver Reload failed "
-         << " | Returning = " << getRSMIStatusString(restartRet, false);
-      LOG_ERROR(ss);
-    }
-    return restartRet;
-  }
-
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-       << " | Success - if restart completed successfully"
-       << " | Device #: " << dv_ind << " | Type: AMDGPU Driver Reload"
-       << " | Returning = " << getRSMIStatusString(restartRet, false);
-    LOG_INFO(ss);
-  }
-  return restartRet;
 
   CATCH
 }
@@ -6003,6 +5974,90 @@ rsmi_status_t rsmi_dev_compute_partition_set(uint32_t dv_ind,
      << " | Returning = " << getRSMIStatusString(returnResponse) << " |";
   LOG_TRACE(ss);
 
+  return returnResponse;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_compute_partition_mem_alloc_mode_get(
+    uint32_t dv_ind, rsmi_compute_partition_mem_alloc_mode_t* mode) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, dv_ind = " << dv_ind;
+  LOG_TRACE(ss);
+  if (mode == nullptr) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Fail | Cause: mode pointer was null"
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string mode_str;
+  DEVICE_MUTEX
+  rsmi_status_t ret =
+      get_dev_value_str(amd::smi::kDevComputePartitionMemAllocMode, dv_ind, &mode_str);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Fail | Device #: " << dv_ind
+       << " | Cause: could not read compute_partition_mem_alloc_mode"
+       << " | Returning = " << getRSMIStatusString(ret) << " |";
+    LOG_ERROR(ss);
+    return ret;
+  }
+
+  auto it = mapStringToRSMIMemAllocModeTypes.find(mode_str);
+  if (it == mapStringToRSMIMemAllocModeTypes.end()) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Fail | Device #: " << dv_ind << " | Data: " << mode_str
+       << " | Cause: unexpected value read from sysfs"
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+
+  *mode = it->second;
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+     << " | Success | Device #: " << dv_ind << " | Data: " << mode_str
+     << " | Returning = " << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |";
+  LOG_TRACE(ss);
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_compute_partition_mem_alloc_mode_set(
+    uint32_t dv_ind, rsmi_compute_partition_mem_alloc_mode_t mode) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
+  LOG_TRACE(ss);
+  REQUIRE_ROOT_ACCESS
+
+  // Unlike rsmi_dev_compute_partition_set, do not read-before-write here.
+  // The mem-alloc-mode sysfs attribute is a cheap store; writing the same value
+  // again is a no-op with no hardware reconfigure side effects, so an unconditional
+  // write is correct and avoids a TOCTOU window between the read and write.
+  std::string newModeStr;
+  switch (mode) {
+    case RSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING:
+    case RSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL:
+      newModeStr = mapRSMIToStringMemAllocModeTypes.at(mode);
+      break;
+    case RSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID:
+    default:
+      ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+         << " | Fail | Device #: " << dv_ind << " | Cause: requested mode was invalid"
+         << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+      LOG_ERROR(ss);
+      return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  GET_DEV_FROM_INDX
+  DEVICE_MUTEX
+  int ret = dev->writeDevInfo(amd::smi::kDevComputePartitionMemAllocMode, newModeStr);
+  rsmi_status_t returnResponse = amd::smi::ErrnoToRsmiStatus(ret);
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+     << " | " << (returnResponse == RSMI_STATUS_SUCCESS ? "Success" : "Fail")
+     << " | Device #: " << dv_ind << " | Data: " << newModeStr
+     << " | Returning = " << getRSMIStatusString(returnResponse) << " |";
+  LOG_TRACE(ss);
   return returnResponse;
   CATCH
 }

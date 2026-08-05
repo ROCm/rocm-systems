@@ -166,14 +166,39 @@ enum : int32_t {
 #define COMPUTE_PGM_RSRC3_GFX10_PLUS(NAME, SHIFT, WIDTH)                                           \
   AMDHSA_BITS_ENUM_ENTRY(COMPUTE_PGM_RSRC3_GFX10_PLUS_##NAME, SHIFT, WIDTH)
 enum : int32_t {
-  COMPUTE_PGM_RSRC3_GFX10_PLUS(SHARED_VGPR_COUNT, 0, 4), // GFX10+
-  COMPUTE_PGM_RSRC3_GFX10_PLUS(INST_PREF_SIZE, 4, 6),    // GFX11+
-  COMPUTE_PGM_RSRC3_GFX10_PLUS(TRAP_ON_START, 10, 1),    // GFX11+
-  COMPUTE_PGM_RSRC3_GFX10_PLUS(TRAP_ON_END, 11, 1),      // GFX11+
+  COMPUTE_PGM_RSRC3_GFX10_PLUS(SHARED_VGPR_COUNT, 0, 4), // GFX10-GFX11 only
+  COMPUTE_PGM_RSRC3_GFX10_PLUS(INST_PREF_SIZE, 4, 6),    // GFX11 only; 8 bits on GFX12+
+  COMPUTE_PGM_RSRC3_GFX10_PLUS(TRAP_ON_START, 10, 1),    // GFX11 only
+  COMPUTE_PGM_RSRC3_GFX10_PLUS(TRAP_ON_END, 11, 1),      // GFX11 only
   COMPUTE_PGM_RSRC3_GFX10_PLUS(RESERVED0, 12, 19),
   COMPUTE_PGM_RSRC3_GFX10_PLUS(IMAGE_OP, 31, 1), // GFX11+
 };
 #undef COMPUTE_PGM_RSRC3_GFX10_PLUS
+
+// Compute program resource register 3 for GFX12+. Mirrors llvm-project's
+// llvm/include/llvm/Support/AMDHSAKernelDescriptor.h. GFX12 repurposes several
+// GFX10/GFX11 fields, so the GFX10_PLUS names above must not be used against a
+// GFX12+ descriptor: SHARED_VGPR_COUNT becomes reserved, INST_PREF_SIZE widens
+// from 6 to 8 bits (absorbing the GFX11 TRAP_ON_START/TRAP_ON_END bits), and
+// bits 13..21 carry GFX12/GFX125-only controls.
+#define COMPUTE_PGM_RSRC3_GFX12_PLUS(NAME, SHIFT, WIDTH)                                           \
+  AMDHSA_BITS_ENUM_ENTRY(COMPUTE_PGM_RSRC3_GFX12_PLUS_##NAME, SHIFT, WIDTH)
+#define COMPUTE_PGM_RSRC3_GFX125(NAME, SHIFT, WIDTH)                                               \
+  AMDHSA_BITS_ENUM_ENTRY(COMPUTE_PGM_RSRC3_GFX125_##NAME, SHIFT, WIDTH)
+enum : int32_t {
+  COMPUTE_PGM_RSRC3_GFX12_PLUS(RESERVED0, 0, 4),
+  COMPUTE_PGM_RSRC3_GFX12_PLUS(INST_PREF_SIZE, 4, 8),
+  COMPUTE_PGM_RSRC3_GFX12_PLUS(RESERVED1, 12, 1),
+  COMPUTE_PGM_RSRC3_GFX12_PLUS(GLG_EN, 13, 1),
+  COMPUTE_PGM_RSRC3_GFX125(NAMED_BAR_CNT, 14, 3),
+  COMPUTE_PGM_RSRC3_GFX125(ENABLE_DYNAMIC_VGPR, 17, 1),
+  COMPUTE_PGM_RSRC3_GFX125(TCP_SPLIT, 18, 3),
+  COMPUTE_PGM_RSRC3_GFX125(ENABLE_DIDT_THROTTLE, 21, 1),
+  COMPUTE_PGM_RSRC3_GFX12_PLUS(RESERVED2, 22, 9),
+  COMPUTE_PGM_RSRC3_GFX12_PLUS(IMAGE_OP, 31, 1),
+};
+#undef COMPUTE_PGM_RSRC3_GFX125
+#undef COMPUTE_PGM_RSRC3_GFX12_PLUS
 
 // Kernel code properties. Must be kept backwards compatible.
 #define KERNEL_CODE_PROPERTY(NAME, SHIFT, WIDTH)                                                   \
@@ -193,6 +218,15 @@ enum : int32_t {
 };
 #undef KERNEL_CODE_PROPERTY
 
+// Kernarg preload specification.
+#define KERNARG_PRELOAD_SPEC(NAME, SHIFT, WIDTH)                                                   \
+  AMDHSA_BITS_ENUM_ENTRY(KERNARG_PRELOAD_SPEC_##NAME, SHIFT, WIDTH)
+enum : int32_t {
+  KERNARG_PRELOAD_SPEC(LENGTH, 0, 7),
+  KERNARG_PRELOAD_SPEC(OFFSET, 7, 9),
+};
+#undef KERNARG_PRELOAD_SPEC
+
 // Kernel descriptor. Must be kept backwards compatible.
 struct kernel_descriptor_t {
   uint32_t group_segment_fixed_size;
@@ -205,7 +239,8 @@ struct kernel_descriptor_t {
   uint32_t compute_pgm_rsrc1;
   uint32_t compute_pgm_rsrc2;
   uint16_t kernel_code_properties;
-  uint8_t reserved2[6];
+  uint16_t kernarg_preload;
+  uint8_t reserved3[4];
 };
 
 enum : uint32_t {
@@ -219,7 +254,8 @@ enum : uint32_t {
   COMPUTE_PGM_RSRC1_OFFSET = 48,
   COMPUTE_PGM_RSRC2_OFFSET = 52,
   KERNEL_CODE_PROPERTIES_OFFSET = 56,
-  RESERVED2_OFFSET = 58,
+  KERNARG_PRELOAD_OFFSET = 58,
+  RESERVED3_OFFSET = 60,
 };
 
 static_assert(sizeof(kernel_descriptor_t) == 64, "invalid size for kernel_descriptor_t");
@@ -247,8 +283,10 @@ static_assert(offsetof(kernel_descriptor_t, compute_pgm_rsrc2) == COMPUTE_PGM_RS
 static_assert(offsetof(kernel_descriptor_t, kernel_code_properties) ==
                   KERNEL_CODE_PROPERTIES_OFFSET,
               "invalid offset for kernel_code_properties");
-static_assert(offsetof(kernel_descriptor_t, reserved2) == RESERVED2_OFFSET,
-              "invalid offset for reserved2");
+static_assert(offsetof(kernel_descriptor_t, kernarg_preload) == KERNARG_PRELOAD_OFFSET,
+              "invalid offset for kernarg_preload");
+static_assert(offsetof(kernel_descriptor_t, reserved3) == RESERVED3_OFFSET,
+              "invalid offset for reserved3");
 
 } // end namespace amdhsa
 } // end namespace llvm

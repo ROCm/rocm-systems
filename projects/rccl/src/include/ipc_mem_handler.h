@@ -28,7 +28,7 @@
  *   NCCLCHECK(handler.getPeerDeviceMemPtr(peerRank, &peerPtr));
  */
 class ncclIpcMemHandler {
- public:
+public:
   ncclIpcMemHandler(void* bootstrap, int rank, int nranks);
   ncclIpcMemHandler(const ncclIpcMemHandler&) = delete;
   ncclIpcMemHandler& operator=(const ncclIpcMemHandler&) = delete;
@@ -40,7 +40,7 @@ class ncclIpcMemHandler {
   ncclResult_t exchangeMemPtrs();
   ncclResult_t getPeerDeviceMemPtr(int peerRank, void** outPeerPtr) const;
 
- private:
+private:
   void* bootstrap_;
   const int rank_;
   const int nranks_;

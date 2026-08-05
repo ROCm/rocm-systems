@@ -28,14 +28,34 @@ else
 NCCL_OS_DEFINE := -DNCCL_OS_WINDOWS
 endif
 
+# topo_expl bypasses RCCL's CMake configuration, so reproduce the two
+# compile-time feature probes needed by headers it imports.
+HAVE_HIP_FABRIC_API := $(shell printf '%s\n' \
+  '#include <hip/hip_runtime_api.h>' \
+  'int main() { hipMemFabricHandle_t h{}; (void)h; auto fn = &hipMemImportFromShareableHandle; (void)fn; }' | \
+  $(HIPCC) -x c++ -std=c++17 -fsyntax-only -D__HIP_PLATFORM_AMD__ -I$(ROCM_PATH)/include - \
+  >/dev/null 2>&1 && echo yes || echo no)
+ifeq ($(HAVE_HIP_FABRIC_API),yes)
+FEATURE_DEFINES += -DHIP_FABRIC_API
+endif
+
+HAVE_AMDSMI_FABRIC_API := $(shell printf '%s\n' \
+  '#include <amd_smi/amdsmi.h>' \
+  'int main() { amdsmi_fabric_info_t info{}; (void)info; }' | \
+  $(HIPCC) -x c++ -std=c++17 -fsyntax-only -I$(ROCM_PATH)/include - \
+  >/dev/null 2>&1 && echo yes || echo no)
+ifeq ($(HAVE_AMDSMI_FABRIC_API),yes)
+FEATURE_DEFINES += -DAMDSMI_FABRIC_DIRECT
+endif
+
 CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION) \
            -std=c++17 \
            -Wl,--gc-sections -fgpu-rdc \
            -Iinclude -Itest -Ihipify_rccl/include -Ihipify_rccl/include/plugin \
 		   -Ihipify_rccl/include/nccl_device \
-           -Ihipify_rccl/src/device/include -Ihipify_rccl/graph -I/opt/rocm/include/ \
+           -Ihipify_rccl/src/device/include -Ihipify_rccl/graph -I$(ROCM_PATH)/include/ \
            -DTOPO_EXPL -DENABLE_TRACE -DENABLE_LL128 -DNVTX_NO_IMPL -DRCCL_EXPOSE_STATIC \
-           $(NCCL_OS_DEFINE) \
+           $(NCCL_OS_DEFINE) $(FEATURE_DEFINES) \
            -lpthread
 
 TOPO_EXPL_FILES = src/$(EXE).cpp src/topo_expl_api.cpp src/model.cpp src/topo_expl_impl.cpp src/utils.cpp src/stubs.cc test/topo_expl_tests.cpp
@@ -131,6 +151,13 @@ hipify:
 	cp hipify_rccl/include/nccl_device/core.h hipify_rccl/include/nccl_device/core_tmp.h
 	cp hipify_rccl/include/nccl_device/comm.h hipify_rccl/include/nccl_device/comm_tmp.h
 	cp hipify_rccl/include/nccl_device/gin.h hipify_rccl/include/nccl_device/gin_tmp.h
+	# PATCH 3b: The param/ headers (param.h, common.h, utils.h) collide in basename
+	# with include/{param,utils}.h and device/common.h, so the main RCCL build's
+	# add_file_unique() renames the staged copies to *_tmp.h. Sources reference the
+	# _tmp names (see src/include/param/param.h), so mirror those staged names here.
+	cp hipify_rccl/include/param/param.h hipify_rccl/include/param/param_tmp.h
+	cp hipify_rccl/include/param/common.h hipify_rccl/include/param/common_tmp.h
+	cp hipify_rccl/include/param/utils.h hipify_rccl/include/param/utils_tmp.h
 	# PATCH 4: Add missing NVTX stub macros for topo_expl build
 	echo '#define NCCL_NVTX3_FUNC_RANGE do {} while(0)' >> hipify_rccl/include/nvtx.h
 	echo 'inline void initNvtxRegisteredEnums() {}' >> hipify_rccl/include/nvtx.h

@@ -10,6 +10,14 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
+# These tests currently fail only on gfx1151. Detect the system architecture and disable
+# the tests there, while leaving them enabled elsewhere.
+rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-hip-graph-bubbles-gfx-info ECHO)
+set(HIP_GRAPH_BUBBLES_DISABLED OFF)
+if("gfx1151" IN_LIST rocprofiler-sdk-hip-graph-bubbles-gfx-info)
+    set(HIP_GRAPH_BUBBLES_DISABLED ON)
+endif()
+
 set(HIP_GRAPH_BUBBLES_ENVIRONMENT)
 if(DEFINED ENV{ROCM_PATH} AND EXISTS "$ENV{ROCM_PATH}/lib/rocm_sysdeps/lib")
     list(APPEND HIP_GRAPH_BUBBLES_ENVIRONMENT
@@ -27,10 +35,12 @@ function(add_hip_graph_bubbles_kernel_trace_test SUFFIX NUM_KERNELS NUM_ITERATIO
         COMMAND
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace -d
             ${OUTPUT_DIR} -o out --output-format csv pftrace --
-            $<TARGET_FILE:hip-graph-bubbles> ${NUM_KERNELS} ${NUM_ITERATIONS} 256 25
+            $<TARGET_FILE:hip-graph-bubbles> ${NUM_KERNELS} ${NUM_ITERATIONS}
+            ${NUM_ITERATIONS} 256 25
         DEPENDS hip-graph-bubbles
         TIMEOUT ${TIMEOUT_SECS}
         LABELS "integration-tests"
+        DISABLED "${HIP_GRAPH_BUBBLES_DISABLED}"
         ENVIRONMENT ${HIP_GRAPH_BUBBLES_ENVIRONMENT}
         FIXTURES_SETUP ${TEST_NAME}
         FAIL_REGULAR_EXPRESSION
@@ -52,6 +62,7 @@ function(add_hip_graph_bubbles_kernel_trace_test SUFFIX NUM_KERNELS NUM_ITERATIO
              ${NUM_ITERATIONS}
         TIMEOUT ${TIMEOUT_SECS}
         LABELS "integration-tests"
+        DISABLED "${HIP_GRAPH_BUBBLES_DISABLED}"
         FIXTURES_REQUIRED ${TEST_NAME})
 endfunction()
 

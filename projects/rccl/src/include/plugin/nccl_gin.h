@@ -14,7 +14,7 @@
 #include <stdint.h>
 
 #define NCCL_GIN_HANDLE_MAXSIZE 128
-#define MAX_GIN_SIZE (1024*1024*1024L) // Rather than send INT_MAX which is 2G-1, send a power of two.
+#define MAX_GIN_SIZE (1024 * 1024 * 1024L) // Rather than send INT_MAX which is 2G-1, send a power of two.
 
 // Max number of ncclNet objects which can live in the same process
 #ifndef NCCL_GIN_MAX_PLUGINS
@@ -24,11 +24,13 @@
 #define NCCL_GIN_SIGNAL_OP_INC 0x1
 #define NCCL_GIN_SIGNAL_OP_ADD 0x2
 
+#include "gin/gin_v13.h"
 #include "gin/gin_v12.h"
 #include "gin/gin_v11.h"
 
-typedef ncclGin_v12_t ncclGin_t;
+typedef ncclGin_v13_t ncclGin_t;
+typedef ncclGinConfig_v13_t ncclGinConfig_t;
 
-#define NCCL_GIN_PLUGIN_SYMBOL ncclGinPlugin_v12
+#define NCCL_GIN_PLUGIN_SYMBOL ncclGinPlugin_v13
 
 #endif // end include guard

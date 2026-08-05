@@ -4,8 +4,9 @@
 /// @file gfx12_cache_flags.h
 /// @brief GFX12 (RDNA4) memory coherency flag → Mtype mapping.
 ///
-/// RDNA4 uses a packed SCOPE field (2 bits) and a TH (temporal hint)
-/// field (2–3 bits depending on instruction format).  There are no
+/// RDNA4 uses a packed SCOPE field (2 bits) and a TH field (2–3 bits depending
+/// on instruction format).  For load/store instructions TH is a temporal hint;
+/// for atomics the same field encodes atomic-return mode.  There are no
 /// GLC/DLC/SLC fields.
 ///
 /// SCOPE encoding:
@@ -35,11 +36,19 @@ namespace amdgpu {
 /// @brief Non-temporal TH value for GFX12.
 inline constexpr uint8_t GFX12_TH_NT = 1;
 
+/// @brief Atomic-return TH value for GFX12 atomic memory instructions.
+inline constexpr uint8_t GFX12_TH_ATOMIC_RETURN = 1;
+
 /// @brief Derive Mtype from GFX12 (RDNA4) coherency flags.
 /// @param scope_val 2-bit SCOPE field value.
 /// @param th        Temporal hint field value (1 = non-temporal).
 [[nodiscard]] inline constexpr Mtype mtype_from_flags_gfx12(uint8_t scope_val, uint8_t th) {
   return mtype_from_scope_nt(scope_val, th == GFX12_TH_NT);
+}
+
+/// @brief Return true when a GFX12 atomic instruction writes back the old value.
+[[nodiscard]] inline constexpr bool gfx12_atomic_returns(uint8_t th) {
+  return th == GFX12_TH_ATOMIC_RETURN;
 }
 
 } // namespace amdgpu

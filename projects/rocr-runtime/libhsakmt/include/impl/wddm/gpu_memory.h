@@ -202,6 +202,8 @@ public:
   inline void IncSharedReference() { desc_.flags.is_imported_from_same_process++; }
   inline uint32_t DecSharedReference() { return (desc_.flags.is_imported_from_same_process == 0) ? 0 : --desc_.flags.is_imported_from_same_process; }
   inline bool IsSharedFromSameProcess() const { return desc_.flags.is_imported_from_same_process > 0; }
+  inline uint32_t IncMappingCount() { return ++mapping_count_; }
+  inline uint32_t DecMappingCount() { return (mapping_count_ == 0) ? 0 : --mapping_count_; }
   inline bool IsPhysicalCreated() const { return is_phymem_created; }
 
   WinAllocationHandle GetAllocationHandle(size_t index) const { return alloc_handles_ptr_[index]; }
@@ -221,6 +223,11 @@ public:
   ErrorCode MapMemoryToVirtualAddress(bool create_phys_mem = true);
   ErrorCode MakeResident();
   ErrorCode Evict();
+
+  // Pin/unpin kSystem allocations into RAM via D3DKMTLock2/Unlock2. Held for
+  // the allocation lifetime to prevent KMD-side eviction/trim of backing pages.
+  ErrorCode LockSystemMemory();
+  ErrorCode UnlockSystemMemory();
   ErrorCode CreatePhysicalMemory();
   ErrorCode FreePhysicalMemory();
 
@@ -258,6 +265,10 @@ private:
   int mem_fd_; // IPC sigal's sys mem fd
 
   bool is_phymem_created = false; // status of physical memory allocation
+  bool is_sysmem_locked_ = false; // kSystem allocation pinned via D3DKMTLock2
+
+  // Number of outstanding GPU mappings of a user pointer.
+  uint32_t mapping_count_ = 1;
 
   DISALLOW_COPY_AND_ASSIGN(GpuMemory);
 };

@@ -117,7 +117,7 @@ Collect the following information about the RCCL installation and configuration.
       export NCCL_DEBUG=VERSION
 
 *  Run rccl-tests and collect the results. For information on how to build and run rccl-tests, see the
-   `rccl-tests GitHub <https://github.com/ROCm/rccl-tests/blob/develop/README.md>`_.
+   `rccl-tests GitHub <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl-tests/README.md>`_.
 
 *  Collect the RCCL logging information. Enable the debug logs, 
    then run rccl-tests or any e2e workload to collect the logs. Use the 
@@ -135,7 +135,7 @@ Using the RCCL Replayer
 The RCCL Replayer is a debugging tool designed to analyze and replay the collective logs obtained from RCCL runs. 
 It can be helpful when trying to reproduce problems, because it uses dummy data and doesn't have any dependencies 
 on non-RCCL calls. For more information, 
-see `RCCL Replayer GitHub documentation <https://github.com/ROCm/rccl/tree/develop/tools/RcclReplayer>`_.
+see `RCCL Replayer GitHub documentation <https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/tools/RcclReplayer>`_.
 
 You must build the RCCL Replayer before you can use it. To build it, run these commands. Ensure ``MPI_DIR`` is set to 
 the path where MPI is installed.
@@ -239,7 +239,7 @@ To use the RCCL tests to collect the RCCL benchmark data, follow these steps:
 
 #. Build MPI, RCCL, and rccl-tests. To download and install MPI, see either 
    `OpenMPI <https://www.open-mpi.org/software/ompi/v5.0/>`_ or `MPICH <https://www.mpich.org/>`_.
-   To learn how to build and run rccl-tests, see the `rccl-tests GitHub <https://github.com/ROCm/rccl-tests/blob/develop/README.md>`_.
+   To learn how to build and run rccl-tests, see the `rccl-tests GitHub <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl-tests/README.md>`_.
 
 #. Run rccl-tests with MPI and collect the performance numbers.
 
@@ -249,3 +249,40 @@ RCCL and NCCL comparisons
 If you are also using NVIDIA hardware or NCCL and notice a performance gap between the two systems,
 collect the system and performance data on the NVIDIA platform. 
 Provide both sets of data to the support team.
+
+.. _heterogeneous-nic-counts:
+
+Ranks with different NIC counts
+===============================
+
+On multi-NIC systems, a job can end up with an inconsistent number of network
+(NET) devices per rank, for example when ranks are launched with different
+``NCCL_SOCKET_IFNAME`` or ``NCCL_IB_HCA`` values, or when nodes in the job have a
+different number of NICs. Historically this only became visible much later during
+transport setup as an obscure connection or timeout failure.
+
+During communicator initialization RCCL now gathers each rank's local NET device
+count and compares them. When they differ, rank 0 logs the offending ranks and
+the min/max counts, for example:
+
+.. code:: shell
+
+   NCCL INFO Local Net device counts across ranks: min 1 max 2
+   NCCL INFO Rank 1 has 1 local Net devices (max 2).
+
+The reaction is controlled by ``NCCL_IGNORE_NET_MISMATCH`` (and the CollNet
+equivalent ``NCCL_IGNORE_COLLNET_MISMATCH``):
+
+*  ``NCCL_IGNORE_NET_MISMATCH=1`` (the default) continues, logging the mismatch at ``INFO`` level::
+
+      NCCL INFO Detected mixed local Net device counts across ranks (min 1, max 2). Ignoring due to NCCL_IGNORE_NET_MISMATCH.
+
+*  ``NCCL_IGNORE_NET_MISMATCH=0`` fails initialization with ``ncclSystemError``
+   so the misconfiguration is caught immediately::
+
+      NCCL WARN Detected mixed local Net device counts across ranks (min 1, max 2). Set NCCL_IGNORE_NET_MISMATCH=1 to continue.
+
+If you hit this warning, verify that every rank selects the same set of NICs
+(consistent ``NCCL_SOCKET_IFNAME`` / ``NCCL_IB_HCA``) and that all nodes expose
+the same NIC count. Set ``NCCL_IGNORE_NET_MISMATCH=0`` in CI or bring-up to turn a
+heterogeneous-NIC misconfiguration into an immediate, explicit failure.

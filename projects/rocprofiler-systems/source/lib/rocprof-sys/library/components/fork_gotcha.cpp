@@ -3,6 +3,7 @@
 
 #include "api.hpp"
 
+#include "common/env_vars.hpp"
 #include "core/config.hpp"
 #include "core/perfetto.hpp"
 #include "core/perfetto_fwd.hpp"
@@ -54,8 +55,8 @@ prefork_setup()
     if(get_state() < State::Active && !config::settings_are_configured())
         rocprofsys_init_library_hidden();
 
-    rocprofsys::set_env("ROCPROFSYS_PRELOAD", "0", 1);
-    rocprofsys::set_env("ROCPROFSYS_ROOT_PROCESS", process::get_id(), 0);
+    rocprofsys::set_env(env_vars::PRELOAD, "0", 1);
+    rocprofsys::set_env(env_vars::ROOT_PROCESS, process::get_id(), 0);
     rocprofsys_reset_preload_hidden();
     LOG_INFO("fork() called on PID {} (rank: {}), TID {}", process::get_id(), dmp::rank(),
              threading::get_id());

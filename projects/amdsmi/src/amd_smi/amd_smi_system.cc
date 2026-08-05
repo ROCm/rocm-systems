@@ -477,7 +477,13 @@ amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
     AMDSmiAINICDevice::AINICInfo ai_nic_info = {};
     amdsmi_status_t status = populate_amd_ainic_device(ainic_ctx_, bdfid, ai_nic_info);
     if (status != AMDSMI_STATUS_SUCCESS) {
-      return status;
+      // Skip a NIC that fails to populate so one bad device can't abort
+      // discovery for the rest. populate_amd_ainic_device() logs via CHK_AMDNIC_RET
+      std::ostringstream ss;
+      ss << __func__ << ": Skipping AI-NIC discovery entry " << nic_idx
+         << " BDF=" << (bdf_str ? bdf_str : "(null)") << " amdsmi_status=" << status;
+      LOG_INFO(ss);
+      continue;
     }
     ai_nic_info_.emplace_back(ai_nic_info);
 

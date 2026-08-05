@@ -18,11 +18,13 @@
 #include "state.h"
 #include "stats.h"
 
+#include <bit>
 #include <cerrno>
 #include <cstdint>
 #include <hip/hip_runtime_api.h>
 #include <memory>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 #include <sys/types.h>
@@ -77,7 +79,11 @@ try {
         return {hipFileInvalidValue, hipSuccess};
     }
 
-    switch (descr->type) {
+    // A C caller may pass a type outside the enum's valid range, and an
+    // lvalue-to-rvalue load of such a value as the enum type is undefined
+    // behavior. Reinterpret the bits as the underlying integer type instead.
+    auto type = std::bit_cast<std::underlying_type_t<hipFileFileHandleType_t>>(descr->type);
+    switch (type) {
         case hipFileHandleTypeOpaqueFD: {
             UnregisteredFile uf{descr->handle.fd};
             *fh = Context<DriverState>::get()->registerFile(std::move(uf));
@@ -174,11 +180,10 @@ getCachedBackends()
     return backends;
 }
 
-ssize_t
-hipFileIo(IoType type, hipFileHandle_t fh, const void *buffer_base, size_t size, hoff_t file_offset,
-          hoff_t buffer_offset, const vector<shared_ptr<Backend>> &backends)
-try {
-    auto [file, buffer] = Context<DriverState>::get()->getFileAndBuffer(fh, buffer_base);
+static shared_ptr<Backend>
+selectBackend(const vector<shared_ptr<Backend>> &backends, const shared_ptr<IFile> &file,
+              const shared_ptr<IBuffer> &buffer, size_t size, hoff_t file_offset, hoff_t buffer_offset)
+{
     int                      score{-1};
     std::shared_ptr<Backend> backend{};
 
@@ -199,7 +204,18 @@ try {
         }
     }
 
-    return backend->io(type, file, buffer, size, file_offset, buffer_offset);
+    return backend;
+}
+
+ssize_t
+hipFileIo(IoType type, hipFileHandle_t fh, const void *buffer_base, size_t size, hoff_t file_offset,
+          hoff_t buffer_offset, const vector<shared_ptr<Backend>> &backends)
+try {
+    auto [file, buffer] = Context<DriverState>::get()->getFileAndBuffer(fh, buffer_base);
+
+    std::shared_ptr<Backend> backend{selectBackend(backends, file, buffer, size, file_offset, buffer_offset)};
+
+    return backend->io(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset);
 }
 catch (const DriverNotInitialized &) {
     return -hipFileDriverNotInitialized;
@@ -390,6 +406,10 @@ try {
     hipFileInit();
     (void)flags; // Unused at this time.
 
+    if (iocbp == nullptr && nr > 0) {
+        return {hipFileInvalidValue, hipSuccess};
+    }
+
     std::shared_ptr<IBatchContext> batch_context = Context<DriverState>::get()->getBatchContext(batch_idp);
     batch_context->submit_operations(iocbp, nr);
 
@@ -445,7 +465,8 @@ catch (...) {
 
 static hipFileError_t
 hipFileIOAsync(IoType io_type, hipFileHandle_t fh, void *buffer_base, size_t *size_p, hoff_t *file_offset_p,
-               hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p, hipStream_t hipStream)
+               hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p, hipStream_t hipStream,
+               const vector<shared_ptr<Backend>> &backends)
 try {
     if (Context<DriverState>::get()->getRefCount() == 0) {
         ensureDriverInit();
@@ -456,8 +477,12 @@ try {
 
     auto [file, buffer, stream] =
         Context<DriverState>::get()->getFileBufferAndStream(fh, buffer_base, hipStream);
-    Fallback().async_io(io_type, file, buffer, size_p, file_offset_p, buffer_offset_p, bytes_transferred_p,
-                        stream);
+
+    std::shared_ptr<Backend> backend{
+        selectBackend(backends, file, buffer, *size_p, *file_offset_p, *buffer_offset_p)};
+
+    backend->async_io(io_type, file, buffer, size_p, file_offset_p, buffer_offset_p, bytes_transferred_p,
+                      stream);
 
     return {hipFileSuccess, hipSuccess};
 }
@@ -483,7 +508,7 @@ hipFileReadAsync(hipFileHandle_t fh, void *buffer_base, size_t *size_p, hoff_t *
 try {
     hipFileInit();
     return hipFileIOAsync(IoType::Read, fh, buffer_base, size_p, file_offset_p, buffer_offset_p, bytes_read_p,
-                          stream);
+                          stream, getCachedBackends());
 }
 catch (...) {
     return handle_exception();
@@ -495,7 +520,7 @@ hipFileWriteAsync(hipFileHandle_t fh, void *buffer_base, size_t *size_p, hoff_t 
 try {
     hipFileInit();
     return hipFileIOAsync(IoType::Write, fh, buffer_base, size_p, file_offset_p, buffer_offset_p,
-                          bytes_written_p, stream);
+                          bytes_written_p, stream, getCachedBackends());
 }
 catch (...) {
     return handle_exception();

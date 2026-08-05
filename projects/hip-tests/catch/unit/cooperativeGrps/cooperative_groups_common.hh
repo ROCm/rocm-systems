@@ -9,6 +9,7 @@
 #include <hip_test_common.hh>
 #include <hip/hip_cooperative_groups.h>
 #include <hip/cooperative_groups/hip_reduce.h>
+#include <hip/cooperative_groups/hip_scan.h>
 #include <cmd_options.hh>
 #include "../math/math_common.hh"
 namespace {

@@ -48,22 +48,24 @@ static inline int getCurrentDevice() {
 /**
  * Helper function to perform Memory copy and kernel operations
  */
-static void performOperations() {
+static void performOperations(bool threadSafe = false) {
   int hostMem[N];
   for (int i = 0; i < N; i++) {
     hostMem[i] = 5;
   }
   int* devMem = nullptr;
-  HIP_CHECK(hipMalloc(&devMem, N * sizeof(int)));
-  HIP_CHECK(hipMemcpy(devMem, hostMem, N * sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipMalloc(&devMem, N * sizeof(int)));
+  HIP_CHECK_OPT_THREAD(threadSafe,
+                       hipMemcpy(devMem, hostMem, N * sizeof(int), hipMemcpyHostToDevice));
 
   doubleKernel<<<1, N>>>(devMem, N);
 
-  HIP_CHECK(hipMemcpy(hostMem, devMem, N * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK_OPT_THREAD(threadSafe,
+                       hipMemcpy(hostMem, devMem, N * sizeof(int), hipMemcpyDeviceToHost));
   for (int i = 0; i < N; i++) {
-    REQUIRE(hostMem[i] == 10);
+    REQUIRE_OPT_THREAD(threadSafe, hostMem[i] == 10);
   }
-  HIP_CHECK(hipFree(devMem));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipFree(devMem));
 }
 
 /**
@@ -289,8 +291,9 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_Positive_Cases) {
  * ------------------------
  *  - This test case checks the behavior of hipSetValidDevices
  *  - in multi process scenario, check the current device at start in
- *  - Parant and child process and set different devices in child and parent
+ *  - Parent and child process and set different devices in child and parent
  *  - using hipSetValidDevices and validate.
+ *  - The child runs as a separately spawned process (hipSetValidDevicesMultiProc)
  * Test source
  * ------------------------
  *  - unit/device/hipSetValidDevices.cc
@@ -304,34 +307,25 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_MultiProcess) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
-  auto pid = fork();
-  REQUIRE(pid >= 0);
+  // Spawn the child process first so it initializes the runtime independently and
+  // runs concurrently with the parent's own hipSetValidDevices path.
+  hip::SpawnProc proc("hipSetValidDevicesMultiProc", true);
+  REQUIRE(proc.spawn() == 0);
 
-  if (pid != 0) {  // Parent process
-    REQUIRE(getCurrentDevice() == 0);
+  // Parent process path.
+  REQUIRE(getCurrentDevice() == 0);
 
-    int length = 2;
-    int deviceArr[2] = {1, 0};
-    HIP_CHECK(hipSetValidDevices(deviceArr, length));
+  int length = 2;
+  int deviceArr[2] = {1, 0};
+  HIP_CHECK(hipSetValidDevices(deviceArr, length));
 
-    REQUIRE(getCurrentDevice() == 1);
-    performOperations();
+  REQUIRE(getCurrentDevice() == 1);
+  performOperations();
 
-    int status;
-    REQUIRE(wait(&status) >= 0);
-
-  } else {  // Child process
-    REQUIRE(getCurrentDevice() == 0);
-
-    int length = 2;
-    int device_arr_c[2] = {0, 1};
-    HIP_CHECK(hipSetValidDevices(device_arr_c, length));
-
-    REQUIRE(getCurrentDevice() == 0);
-    performOperations();
-
-    exit(0);
-  }
+  // The child must complete its own validation and exit cleanly.
+  int childExit = proc.wait();
+  INFO("Child process output:\n" << proc.getOutput());
+  REQUIRE(childExit == 0);
 }
 #endif
 
@@ -339,14 +333,17 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_MultiProcess) {
  * Helper function used in multi threaded scenario to set Valid devices
  */
 void launchFunction(int deviceId) {
-  REQUIRE(getCurrentDevice() == 0);
+  int device = -1;
+  HIP_CHECK_THREAD(hipGetDevice(&device));
+  REQUIRE_THREAD(device == 0);
 
   int length = 1;
   int deviceArr[1] = {deviceId};
-  HIP_CHECK(hipSetValidDevices(deviceArr, length));
+  HIP_CHECK_THREAD(hipSetValidDevices(deviceArr, length));
 
-  REQUIRE(getCurrentDevice() == deviceId);
-  performOperations();
+  HIP_CHECK_THREAD(hipGetDevice(&device));
+  REQUIRE_THREAD(device == deviceId);
+  performOperations(true);
 }
 
 /**
@@ -376,6 +373,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_MultiThread) {
       std::thread thread(launchFunction, deviceId);
       thread.join();
     }
+    HIP_CHECK_THREAD_FINALIZE();
   }
 
   SECTION("Parallel") {
@@ -386,6 +384,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_MultiThread) {
     for (int t = 0; (t < deviceCount) && (t < threads.size()); t++) {
       threads[t].join();
     }
+    HIP_CHECK_THREAD_FINALIZE();
   }
 }
 

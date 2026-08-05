@@ -59,30 +59,7 @@ struct is_unique_pointer<std::unique_ptr<Tp>> : std::true_type
 {};
 
 template <typename Tp>
-struct is_optional : std::false_type
-{};
-
-template <typename Tp>
-struct is_optional<std::optional<Tp>> : std::true_type
-{};
-
-template <typename Tp>
-struct can_stringify
-{
-private:
-    static constexpr auto sfinae(int) -> decltype(std::declval<std::ostream&>()
-                                                      << std::declval<Tp>(),
-                                                  bool())
-    {
-        return true;
-    }
-
-    static constexpr auto sfinae(long) { return false; }
-
-public:
-    static constexpr bool value = sfinae(0);
-    constexpr auto        operator()() const { return sfinae(0); }
-};
+concept string_like = requires(std::ostream& _os, const Tp& _v) { _os << _v; };
 
 template <size_t N, typename Tp, bool>
 struct tuple_element_impl;

@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
+#include <array>
 
 namespace rocjitsu {
 namespace cdna4 {
@@ -232,6 +233,7 @@ class VMadMixloF16Vop3p : public Vop3p {
 public:
   VMadMixloF16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -242,6 +244,7 @@ class VMadMixhiF16Vop3p : public Vop3p {
 public:
   VMadMixhiF16Vop3p(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -373,22 +376,24 @@ public:
 
 class VMfmaF3216x16x128F8f6f4Vop3pMfma : public Vop3pMfma {
 public:
-  VMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *inst);
+  VMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *inst, bool has_vop3px2_prefix = false);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
+  std::array<uint32_t, 4> raw_words_{};
 };
 
 class VMfmaF3232x32x64F8f6f4Vop3pMfma : public Vop3pMfma {
 public:
-  VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *inst);
+  VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *inst, bool has_vop3px2_prefix = false);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
+  std::array<uint32_t, 4> raw_words_{};
 };
 
 class VMfmaF3216x16x32Bf16Vop3pMfma : public Vop3pMfma {

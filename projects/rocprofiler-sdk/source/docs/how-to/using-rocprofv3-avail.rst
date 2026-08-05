@@ -49,7 +49,7 @@ The ``rocprofv3-avail list`` command displays the list of agents and hardware co
 
    rocprofv3-avail list
 
-The output contains the logical node id, name, and the list of Performace Monitoring Counters (PMC) supported on the agent.
+The output contains the logical node id, name, and the list of Performance Monitoring Counters (PMC) supported on the agent.
 
 Sample output (truncated):
 
@@ -89,6 +89,14 @@ Sample output (truncated):
   .. code-block:: bash
 
    rocprofv3-avail list --pc-sampling
+
+  Note that the option ``-d`` is not applicable here.
+
+- To list the agents supporting SPM, use:
+
+  .. code-block:: bash
+
+   rocprofv3-avail list --spm-config
 
   Note that the option ``-d`` is not applicable here.
 
@@ -172,6 +180,14 @@ Sample output (truncated):
 
   Note that ``-d`` option is not applicable here.
 
+- To list the supported SPM configurations for each agent that supports SPM, use:
+
+   .. code-block:: bash
+
+   rocprofv3-avail info --spm-config
+
+  Note that ``-d`` option is not applicable here.
+   
 pmc-check option
 -----------------
 

@@ -5,7 +5,7 @@ myst:
     "keywords": "amdsmi, lib, cli, system, management, interface, amdgpu, admin, sys"
 ---
 
-# AMD SMI documentation
+# AMD SMI {{ AMDSMI_VERSION }}
 
 The AMD System Management Interface (AMD SMI) library offers a unified tool for
 managing and monitoring GPUs, particularly in high-performance computing
@@ -32,6 +32,7 @@ AMD SMI is the successor to [ROCm SMI](https://github.com/ROCm/rocm-systems/tree
 :::{grid-item-card} Install
 * [Library and CLI tool installation](./install/install.md)
 * [Build from source](./install/build.md)
+* [Packaging and install paths](./packaging.md)
 :::
 
 :::{grid-item-card} How to
@@ -44,21 +45,21 @@ AMD SMI is the successor to [ROCm SMI](https://github.com/ROCm/rocm-systems/tree
 :::
 
 :::{grid-item-card} Reference
-* [C++ API](./reference/amdsmi-cpp-api.md)
-  * [Modules](../doxygen/docBin/html/topics)
-  * [Files](../doxygen/docBin/html/files)
-  * [Globals](../doxygen/docBin/html/globals)
-  * [Data structures](../doxygen/docBin/html/annotated)
-  * [Data fields](../doxygen/docBin/html/functions_data_fields)
+* [C++ API](./reference/amdsmi-cpp-api/index.md)
+  * [Functions](./reference/amdsmi-cpp-api/functions.md)
+  * [Types](./reference/amdsmi-cpp-api/types.md)
+  * [Defines](./reference/amdsmi-cpp-api/defines.md)
 * [Python API](./reference/amdsmi-py-api.md)
 * [Go API](./reference/amdsmi-go-api.md)
 :::
 
 :::{grid-item-card} Conceptual
 * [GPU partitioning](./conceptual/partition.md)
+* [GPU reset behavior](./conceptual/gpu-reset-behavior.md)
 * [GPU violations](./conceptual/gpu-violations.md)
 * [Performance determinism](./conceptual/perf-determinism.md)
 * [Reliability, availability, serviceability](./conceptual/ras.md)
+* [Test suite design](./conceptual/test-design.md)
 :::
 
 :::{grid-item-card} Tutorials

@@ -58,21 +58,24 @@ add_library(rocprofiler-sdk::rocprofiler-sdk-output-library ALIAS
             rocprofiler-sdk-output-library)
 target_sources(rocprofiler-sdk-output-library PRIVATE ${TOOL_OUTPUT_SOURCES}
                                                       ${TOOL_OUTPUT_HEADERS})
+# targets linking to this library should also link to the
+# rocprofiler-sdk::rocprofiler-sdk-sqlite3 target if the target is a shared library. Do
+# not link to the sqlite3 library here because the Python bindings target should not
+# directly link to the sqlite3 library.
 target_link_libraries(
     rocprofiler-sdk-output-library
     PUBLIC rocprofiler-sdk::rocprofiler-sdk-rocpd-library
            rocprofiler-sdk::rocprofiler-sdk-aqlprofile
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
             rocprofiler-sdk::rocprofiler-sdk-build-flags
-            rocprofiler-sdk::rocprofiler-sdk-memcheck
+            rocprofiler-sdk::rocprofiler-sdk-sanitizer
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-cereal
             rocprofiler-sdk::rocprofiler-sdk-perfetto
             rocprofiler-sdk::rocprofiler-sdk-otf2
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-dw
-            rocprofiler-sdk::rocprofiler-sdk-elf
-            rocprofiler-sdk::rocprofiler-sdk-sqlite3)
+            rocprofiler-sdk::rocprofiler-sdk-elf)
 
 target_compile_definitions(rocprofiler-sdk-output-library
                            PRIVATE PROJECT_BINARY_DIR="${PROJECT_BINARY_DIR}")

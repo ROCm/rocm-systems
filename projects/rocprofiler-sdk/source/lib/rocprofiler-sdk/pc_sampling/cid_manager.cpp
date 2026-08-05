@@ -49,16 +49,16 @@ PCSCIDManager::manage_cids_implicit(const pc_samples_copy_fn_t& pc_samples_copy_
         // Note: two buffer flushes happened since kernels of q3's CIDs completed.
         q3 = std::move(q2);
         // Move all CIDs from q1 to q2.
-        // Note: exactly one buffer flush occured since kernels of q2's CIDs completed.
+        // Note: exactly one buffer flush occurred since kernels of q2's CIDs completed.
         q2 = std::move(q1);
 
         // We move CIDs from one queue to another to reflect that an implicit ROCr's buffer flush
-        // occured. move from q1 to q2 reflects the first buffer flush since kernels of q1's CIDs
+        // occurred. move from q1 to q2 reflects the first buffer flush since kernels of q1's CIDs
         // completed move from q2 to local q3 reflects the second buffer flush since kernels of q2's
         // CIDs completed.
 
         // Empty the q1 to indicate that there are no CIDs with the following property:
-        // no buffer flush occured since the kernel of CID is marked completed.
+        // no buffer flush occurred since the kernel of CID is marked completed.
         q1.clear();
 
         // The code that follows does not change the state of the PCSCIDManager, so release the lock
@@ -68,7 +68,7 @@ PCSCIDManager::manage_cids_implicit(const pc_samples_copy_fn_t& pc_samples_copy_
     // Copy PC samples from the ROCr's buffer to the SDK's buffer by invoking the passed function.
     pc_samples_copy_fn();
 
-    // Exactly two implicit buffer flushes occured since kernels of q3's CIDs completed.
+    // Exactly two implicit buffer flushes occurred since kernels of q3's CIDs completed.
     // Since all PC samples corresponding to these CIDs are placed in the SDK's buffer,
     // decrement their reference counters to indicate that PC sampling service will not use
     // these CIDs anymore.

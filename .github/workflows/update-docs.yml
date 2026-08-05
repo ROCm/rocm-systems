@@ -27,6 +27,13 @@ jobs:
   trigger-rtd:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout docs-config only
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .github/docs-config.json
+          sparse-checkout-cone-mode: false
+
       - name: Get changed files using GitHub REST API
         id: diff
         env:
@@ -73,11 +80,16 @@ jobs:
           )
 
           for project in $changed_projects; do
-            slug="advanced-micro-devices-$project"
-            if echo "$project_list" | grep -Fxq "$slug"; then
+
+            # Load the map and look up the rtd_slug by project name (folder name)
+            project_slug=$(jq -r --arg folder_name "$project" \
+              '.projects[] | select(.folder == $folder_name) | .rtd_slug' \
+              .github/docs-config.json)
+
+            if echo "$project_list" | grep -Fxq "$project_slug"; then
               latest_branch=$(curl -s \
                   -H "Authorization: Token $RTD_TOKEN" \
-                  "https://app.readthedocs.com/api/v3/projects/$slug/" \
+                  "https://app.readthedocs.com/api/v3/projects/$project_slug/" \
                   | jq -r ".default_branch" \
                   | tr -d '[:space:]')
               echo "Latest branch for $project: $latest_branch"
@@ -85,7 +97,7 @@ jobs:
                 echo "Detected latest release branch, trigger builds for 'latest' version"
                 response=$(curl -f -s -X POST \
                       -H "Authorization: Token $RTD_TOKEN" \
-                      "https://readthedocs.com/api/v3/projects/$slug/versions/latest/builds/") || {
+                      "https://readthedocs.com/api/v3/projects/$project_slug/versions/latest/builds/") || {
                       echo "Failed to trigger RTD build for $project. Response: $response"
                       exit 1
                     }
@@ -94,7 +106,7 @@ jobs:
               echo "Triggering RTD build for $project, version: $version_slug"
               response=$(curl -f -s -X POST \
                   -H "Authorization: Token $RTD_TOKEN" \
-                  "https://readthedocs.com/api/v3/projects/$slug/versions/$version_slug/builds/") || {
+                  "https://readthedocs.com/api/v3/projects/$project_slug/versions/$version_slug/builds/") || {
                   echo "Failed to trigger RTD build for $project. Response: $response"
                   exit 1
               }

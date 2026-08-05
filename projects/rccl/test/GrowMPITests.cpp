@@ -1168,4 +1168,48 @@ TEST_F(GrowMPITest, Grow_NewRankNRanksEqualExisting)
     }
 }
 
+// Grow from a 1-rank parent straight to the full world, then run a SendRecv ring
+// (p2p channels) and an AllReduce (ring channels). The 1->world jump forces the
+// largest topology-class change, under which ranks must still agree on the
+// channel count; a mismatch surfaces as a bootstrap "Message truncated" / hang
+// during the grow or its first collective. Strongest on a multi-node allocation,
+// where the single->multi-node arch-cap flip makes the counts diverge.
+TEST_F(GrowMPITest, Grow_ChannelReconciliation_OneToWorld_SendRecv)
+{
+    if (MPIEnvironment::world_size < 3) {
+        GTEST_SKIP() << "Channel-reconciliation grow needs >=3 ranks to force a "
+                        "topology-class change (1 -> world)";
+    }
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+
+    // 1-rank parent on rank 0 only; everyone else joins as new ranks.
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(1, &initialComm_));
+
+    ncclUniqueId growId{};
+    if (wr == 0) {
+        ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(initialComm_, &growId));
+    }
+    MPI_Bcast(&growId, sizeof(growId), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    // rank 0 is the lone existing rank; ranks 1..world-1 all join at once.
+    if (wr == 0) {
+        ASSERT_EQ(ncclSuccess,
+                  ncclCommGrow(initialComm_, worldSize, &growId, -1, &grownComm_, nullptr));
+    } else {
+        ASSERT_EQ(ncclSuccess,
+                  ncclCommGrow(nullptr, worldSize, &growId, wr, &grownComm_, nullptr));
+    }
+    ASSERT_MPI_NE(grownComm_, nullptr);
+
+    int grownCount = -1;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(grownComm_, &grownCount));
+    ASSERT_MPI_EQ(grownCount, worldSize);
+
+    // SendRecv ring exercises the p2p channels (the path that truncates when
+    // p2pnChannels disagrees across ranks). AllReduce too, to cover ring channels.
+    ASSERT_MPI_TRUE(runSendRecvRing(grownComm_, worldSize));
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
+}
+
 #endif // MPI_TESTS_ENABLED

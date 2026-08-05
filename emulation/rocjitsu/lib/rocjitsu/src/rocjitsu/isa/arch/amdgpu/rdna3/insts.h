@@ -26,5 +26,6 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna3/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/vopd.h"
 
 #endif // ROCJITSU_ISA_ARCH_AMDGPU_RDNA3_INSTS_H_

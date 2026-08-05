@@ -92,7 +92,7 @@ public:
     AQLPacket()          = default;
     virtual ~AQLPacket() = default;
 
-    // Keep move constuctors (i.e. std::move())
+    // Keep move constructors (i.e. std::move())
     AQLPacket(AQLPacket&& other) = default;
     AQLPacket& operator=(AQLPacket&& other) = default;
 
@@ -269,6 +269,7 @@ struct sqtt_buffer_status_t
 {
     void*                        data{};
     uint64_t                     size{};
+    uint64_t                     read_offset{};
     hsa_ext_amd_aql_pm4_packet_t packet{};
     bool                         gpu_full{};
 };

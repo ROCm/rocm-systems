@@ -29,7 +29,7 @@ project(
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
-find_package(rocJPEG)
+find_package(rocjpeg)
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
 
@@ -38,10 +38,10 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 
 set(rocjpeg-tracing-env "${PRELOAD_ENV}")
 
-set(rocJPEG_IMAGE_DIR "${rocJPEG_ROOT_DIR}/share/rocjpeg/images")
-if(TARGET rocjpeg-demo AND NOT EXISTS "${rocJPEG_IMAGE_DIR}")
+set(rocjpeg_IMAGE_DIR "${rocjpeg_ROOT_DIR}/share/rocjpeg/images")
+if(TARGET rocjpeg-demo AND NOT EXISTS "${rocjpeg_IMAGE_DIR}")
     message(
-        WARNING "Unable to find image directory for rocjpeg tests: ${rocJPEG_IMAGE_DIR}")
+        WARNING "Unable to find image directory for rocjpeg tests: ${rocjpeg_IMAGE_DIR}")
     set(IS_DISABLED ON)
 endif()
 
@@ -58,7 +58,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json csv pftrace
         otf2 --log-level env --
         $<IF:$<TARGET_EXISTS:rocjpeg-demo>,$<TARGET_FILE:rocjpeg-demo>,rocjpeg-demo> -i
-        ${rocJPEG_IMAGE_DIR}
+        ${rocjpeg_IMAGE_DIR}
     DEPENDS rocjpeg-demo
     TIMEOUT 45
     LABELS "integration-tests"

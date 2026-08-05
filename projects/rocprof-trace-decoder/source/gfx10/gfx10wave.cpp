@@ -21,11 +21,15 @@
 // SOFTWARE.
 
 #include "gfx10wave.h"
+
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <map>
+#include <new>
 #include <utility>
 #include <vector>
+
 #include "gfx11/gfx11wave.h"
 #include "gfx12/gfx12wave.h"
 #include "mi400/mi400wave.h"
@@ -129,7 +133,11 @@ enum EINST
     einst_final
 };
 
-static std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
+// clang-format off
+using instruction_table_t = std::unordered_map<int, mapped_inst_t>;
+alignas(instruction_table_t) static std::byte table_map_to_common_type_storage[sizeof(instruction_table_t)];
+static instruction_table_t& table_map_to_common_type =
+    *::new (static_cast<void*>(table_map_to_common_type_storage)) instruction_table_t{
     {(int) EINST::salu,              {WaveInstCategory::SALU, 1} },
     {(int) EINST::smem_rd,           {WaveInstCategory::SMEM, 1} },
     {(int) EINST::smem_wr,           {WaveInstCategory::SMEM, 1} },
@@ -209,6 +217,7 @@ static std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
     {(int) EINST::subv_loop_begin,   {WaveInstCategory::SALU, 1} },
     {(int) EINST::subv_loop_end,     {WaveInstCategory::SALU, 1} }
 };
+// clang-format on
 
 mapped_inst_t map_to_common_type(int einst, int dprate, int derate)
 {
@@ -232,9 +241,10 @@ wave_t::wave_t(
     bool exbarw,
     uint8_t me,
     uint8_t pipe,
-    uint8_t wg
+    uint8_t wg,
+    uint8_t cluster
 ) :
-WaveDataInternal(target_wgp, tg_simd, slot, token.time, addr, exbarw, me, pipe, wg)
+WaveDataInternal(target_wgp, tg_simd, slot, token.time, addr, exbarw, me, pipe, wg, cluster)
 {
     this->last_state_cycle = token.time;
     this->cur_state = WaveslotState::WS_IDLE;
@@ -273,7 +283,7 @@ void wave_t::update_state(WaveslotState new_state, int64_t time)
     this->cur_state = new_state;
 }
 
-void wave_t::new_pc(int64_t time, int64_t pc, CodeobjTableTranslator& table)
+void wave_t::new_pc(int64_t time, int64_t pc, const CachedTable& table)
 {
     update_barrier_gfx11(time);
     if (pc_infos.empty() || trap_status != WaveTrapStatus::TRAP_RESTORED) return;
@@ -325,11 +335,6 @@ void wave_t::apply_immediate(int64_t token_time)
     update_state(WaveslotState::WS_WAIT, time);
     update_state(WaveslotState::WS_EXEC, token_time + 1);
 }
-
-#ifdef SQTT_LOGGING
-static std::vector<const char*> INST_CATEGORIES = {
-    "NONE", "SMEM", "SALU", "VMEM", "FLAT", "LDS", "VALU", "JUMP", "NEXT", "IMMED", "MESSAGE", "CONTEXT", "BVH"};
-#endif
 
 void wave_t::update_barrier_gfx11(int64_t token_time)
 {

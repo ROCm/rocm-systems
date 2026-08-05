@@ -75,10 +75,8 @@ class ListDevicesCommands:
         except amdsmi_exception.AmdSmiLibraryException:
             bdf = "N/A"
 
-        try:
-            uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(args.gpu)
-        except amdsmi_exception.AmdSmiLibraryException:
-            uuid = "N/A"
+        # Use CUID for UUID if available, fall back to the standard UUID if not
+        uuid = self.helpers.get_gpu_cuid_or_uuid(args.gpu)
 
         try:
             kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(args.gpu)
@@ -427,7 +425,7 @@ class ListDevicesCommands:
         self.logger.output = {}
         self.logger.clear_multiple_devices_output()
 
-        if self.helpers.is_brcm_switch_initialized():
+        if self.helpers.is_brcm_switch_initialized() and args.switch:
             self.list_switch(args, False, switch=args.switch)
 
         self.logger.output = {}

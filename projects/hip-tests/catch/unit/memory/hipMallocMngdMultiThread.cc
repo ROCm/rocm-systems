@@ -83,7 +83,7 @@ static void LaunchKrnl2(int* Hmm, size_t NumElms, int InitVal, int HmmMem) {
   }
   dim3 dimBlock(blockSize, 1, 1);
   dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < (isQuickLevel() ? 1 : 2); ++i) {
     KrnlWth2MemTypes<<<dimGrid, dimBlock, 0, strm>>>(ptr, Hmm, NumElms);
   }
   HIPCHECK(hipStreamSynchronize(strm));
@@ -119,7 +119,7 @@ static void LaunchKrnl3(int* Dptr, size_t NumElms, int InitVal) {
   HIPCHECK(hipMallocManaged(&Hmm, (sizeof(int) * NumElms)));
   dim3 dimBlock(blockSize, 1, 1);
   dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < (isQuickLevel() ? 1 : 2); ++i) {
     KrnlWth2MemTypes<<<dimGrid, dimBlock, 0, strm>>>(Hmm, Dptr, NumElms);
   }
   HIPCHECK(hipStreamSynchronize(strm));
@@ -147,7 +147,7 @@ static void LaunchKrnl5(int* Hmm1, size_t NumElms, int InitVal, int KerneltoLaun
   HIPCHECK(hipMallocManaged(&Hmm2, (sizeof(int) * NumElms)));
   dim3 dimBlock(blockSize, 1, 1);
   dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < (isQuickLevel() ? 1 : 2); ++i) {
     if (KerneltoLaunch == 0) {
       KrnlWth2MemTypes<<<dimGrid, dimBlock, 0, strm>>>(Hmm2, Hmm1, NumElms);
     } else {

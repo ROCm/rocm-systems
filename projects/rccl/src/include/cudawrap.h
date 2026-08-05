@@ -28,51 +28,56 @@ extern CUmemAllocationHandleType ncclCuMemHandleType;
 #define CUPFN(symbol) pfn_##symbol
 
 // Check CUDA PFN driver calls
-#define CUCHECK(cmd) do {				      \
-    CUresult err = pfn_##cmd;				      \
-    if( err != CUDA_SUCCESS ) {				      \
-      const char *errStr;				      \
-      (void) pfn_cuGetErrorString(err, &errStr);	      \
-      WARN("Cuda failure %d '%s'", err, errStr);	      \
-      return ncclUnhandledCudaError;			      \
-    }							      \
-} while(false)
+#define CUCHECK(cmd) \
+  do { \
+    CUresult err = pfn_##cmd; \
+    if (err != CUDA_SUCCESS) { \
+      const char* errStr; \
+      (void)pfn_cuGetErrorString(err, &errStr); \
+      WARN("Cuda failure %d '%s'", err, errStr); \
+      return ncclUnhandledCudaError; \
+    } \
+  } while (false)
 
-#define CUCALL(cmd) do {				      \
-    pfn_##cmd;				                \
-} while(false)
+#define CUCALL(cmd) \
+  do { \
+    pfn_##cmd; \
+  } while (false)
 
-#define CUCHECKGOTO(cmd, res, label) do {		      \
-    CUresult err = pfn_##cmd;				      \
-    if( err != CUDA_SUCCESS ) {				      \
-      const char *errStr;				      \
-      (void) pfn_cuGetErrorString(err, &errStr);	      \
-      WARN("Cuda failure %d '%s'", err, errStr);	      \
-      res = ncclUnhandledCudaError;			      \
-      goto label;					      \
-    }							      \
-} while(false)
+#define CUCHECKGOTO(cmd, res, label) \
+  do { \
+    CUresult err = pfn_##cmd; \
+    if (err != CUDA_SUCCESS) { \
+      const char* errStr; \
+      (void)pfn_cuGetErrorString(err, &errStr); \
+      WARN("Cuda failure %d '%s'", err, errStr); \
+      res = ncclUnhandledCudaError; \
+      goto label; \
+    } \
+  } while (false)
 
 // Report failure but clear error and continue
-#define CUCHECKIGNORE(cmd) do {						\
-    CUresult err = pfn_##cmd;						\
-    if( err != CUDA_SUCCESS ) {						\
-      const char *errStr;						\
-      (void) pfn_cuGetErrorString(err, &errStr);			\
-      INFO(NCCL_ALL,"%s:%d Cuda failure %d '%s'", __FILE__, __LINE__, err, errStr); \
-    }									\
-} while(false)
+#define CUCHECKIGNORE(cmd) \
+  do { \
+    CUresult err = pfn_##cmd; \
+    if (err != CUDA_SUCCESS) { \
+      const char* errStr; \
+      (void)pfn_cuGetErrorString(err, &errStr); \
+      INFO(NCCL_ALL, "%s:%d Cuda failure %d '%s'", __FILE__, __LINE__, err, errStr); \
+    } \
+  } while (false)
 
-#define CUCHECKTHREAD(cmd, args) do {					\
-    CUresult err = pfn_##cmd;						\
-    if (err != CUDA_SUCCESS) {						\
-      INFO(NCCL_INIT,"%s:%d -> %d [Async thread]", __FILE__, __LINE__, err); \
-      args->ret = ncclUnhandledCudaError;				\
-      return args;							\
-    }									\
-} while(0)
+#define CUCHECKTHREAD(cmd, args) \
+  do { \
+    CUresult err = pfn_##cmd; \
+    if (err != CUDA_SUCCESS) { \
+      INFO(NCCL_INIT, "%s:%d -> %d [Async thread]", __FILE__, __LINE__, err); \
+      args->ret = ncclUnhandledCudaError; \
+      return args; \
+    } \
+  } while (0)
 
-#define DECLARE_CUDA_PFN_EXTERN(symbol,version) extern PFN_##symbol##_v##version pfn_##symbol
+#define DECLARE_CUDA_PFN_EXTERN(symbol, version) extern PFN_##symbol##_v##version pfn_##symbol
 
 #if CUDART_VERSION >= 11030
 /* CUDA Driver functions loaded with cuGetProcAddress for versioning */
@@ -130,18 +135,22 @@ extern int ncclCudaDriverVersionCache;
 extern bool ncclCudaLaunchBlocking; // initialized by ncclCudaLibraryInit()
 
 // Checks whether the given stream is the legacy null stream.
+// [RCCL] Guard against redefinition when both cudawrap.h and rocmwrap.h are
+// pulled into the same translation unit (e.g. via alloc.h on HIP builds).
+#ifndef NCCL_CUDA_STREAM_IS_LEGACY_NULL_DEFINED
+#define NCCL_CUDA_STREAM_IS_LEGACY_NULL_DEFINED
 inline ncclResult_t ncclCudaStreamIsLegacyNull(cudaStream_t stream, bool* isLegacy) {
 #if CUDART_VERSION >= 12000
   unsigned long long nullStreamId, legacyNullStreamId;
   CUDACHECK(cudaStreamGetId(NULL, &nullStreamId));
   CUDACHECK(cudaStreamGetId(cudaStreamLegacy, &legacyNullStreamId));
-  *isLegacy = (stream == cudaStreamLegacy) ||
-              ((stream == NULL) && (nullStreamId == legacyNullStreamId));
+  *isLegacy = (stream == cudaStreamLegacy) || ((stream == NULL) && (nullStreamId == legacyNullStreamId));
 #else
   *isLegacy = (stream == NULL) || (stream == cudaStreamLegacy);
 #endif
   return ncclSuccess;
 }
+#endif
 
 // [RCCL] Guard against redefinition when both cudawrap.h and rocmwrap.h are
 // pulled into the same translation unit (e.g. via alloc.h on HIP builds).

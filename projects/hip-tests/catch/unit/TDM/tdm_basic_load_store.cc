@@ -5,6 +5,8 @@
 #include <string>
 
 #if defined(__clang__) && defined(__HIP__)
+typedef int v4i __attribute__((ext_vector_type(4)));
+typedef int v8i __attribute__((ext_vector_type(8)));
 __global__ void  TDM_load_store_tester([[maybe_unused]] const int* data,
                                        [[maybe_unused]] int* result,
                                        [[maybe_unused]] int sizex,
@@ -26,14 +28,16 @@ __global__ void  TDM_load_store_tester([[maybe_unused]] const int* data,
     group1.tileDim0(sizex);
     group1.tileDim1(sizey);
 
-    __builtin_amdgcn_tensor_load_to_lds_d2(group0.m_bitfield, group1.m_bitfield, 0);
+    v4i v4i_zeros{0, 0, 0, 0};
+    v8i v8i_zeros{0, 0, 0, 0, 0, 0, 0, 0};
+    __builtin_amdgcn_tensor_load_to_lds(group0.m_bitfield, group1.m_bitfield, v4i_zeros, v4i_zeros, v8i_zeros, 0);
     __builtin_amdgcn_s_wait_tensorcnt(0);
     __syncthreads();
 
     // write back to global
 
     group0.globalAddr((uintptr_t)result);
-    __builtin_amdgcn_tensor_store_from_lds_d2(group0.m_bitfield, group1.m_bitfield, 0);
+    __builtin_amdgcn_tensor_store_from_lds(group0.m_bitfield, group1.m_bitfield, v4i_zeros, v4i_zeros, v8i_zeros, 0);
     __builtin_amdgcn_s_wait_tensorcnt(0);
 
     #endif // #if defined(__gfx1250__) || defined(__gfx1251__)
@@ -48,7 +52,7 @@ TEST_CASE("TDM_Basic_load_2d")
     HIP_CHECK(hipGetDeviceProperties(&props, device));
     const std::string arch(props.gcnArchName);
     if (arch.find("gfx1250") == std::string::npos && arch.find("gfx1251") == std::string::npos) {
-        HipTest::HIP_SKIP_TEST("TDM_Basic_load_2d requires gfx1250 or gfx1251");
+        HIP_SKIP_TEST("TDM_Basic_load_2d requires gfx1250 or gfx1251");
         return;
     }
 #endif
@@ -72,7 +76,7 @@ TEST_CASE("TDM_Basic_load_2d")
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipMemcpy(result.ptr(), result_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
 
-    for(int i =0; i < alloc_size;++i)
+    for(int i = 0; i < kAllocSize; ++i)
     {
         REQUIRE(result.ptr()[i] == input.ptr()[i]);
     }

@@ -167,6 +167,22 @@ inline void LaunchDelayKernel(const std::chrono::milliseconds interval, const hi
   Delay<<<1, 1, 0, stream>>>(interval.count(), ticks_per_ms);
 }
 
+// Keeps a stream busy for at least `interval` by enqueuing a host callback that
+// sleeps on the host. The duration is measured with the host clock, so it does
+// not depend on hipDeviceAttributeWallClockRate being accurate the way the
+// GPU-side Delay kernel does. Prefer this in synchronization tests that only
+// need the stream to stay un-drained for a controlled time.
+inline void DelayHostCallback(void* user_data) {
+  const auto ms = reinterpret_cast<int64_t>(user_data);
+  std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+}
+
+inline void LaunchDelayHostFunc(const std::chrono::milliseconds interval,
+                                const hipStream_t stream = nullptr) {
+  HIPCHECK(hipLaunchHostFunc(stream, DelayHostCallback,
+                             reinterpret_cast<void*>(interval.count())));
+}
+
 template <typename... Attributes>
 inline bool DeviceAttributesSupport(const int device, Attributes... attributes) {
   constexpr auto DeviceAttributeSupport = [](const int device,

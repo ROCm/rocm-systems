@@ -12,16 +12,17 @@
 #include "nccl.h"
 #include "nccl_common.h"
 
+#include "tuner/tuner_v6.h"
 #include "tuner/tuner_v5.h"
 #include "tuner/tuner_v4.h"
 #include "tuner/tuner_v3.h"
 #include "tuner/tuner_v2.h"
 
-typedef ncclTuner_v5_t ncclTuner_t;
+typedef ncclTuner_v6_t ncclTuner_t;
 typedef ncclTunerConstants_v5_t ncclTunerConstants_t;
-typedef ncclNvlDomainInfo_v5_t ncclNvlDomainInfo_t;
+typedef ncclNvlDomainInfo_v6_t ncclNvlDomainInfo_t;
 
-#define NCCL_TUNER_PLUGIN_SYMBOL "ncclTunerPlugin_v5"
+#define NCCL_TUNER_PLUGIN_SYMBOL "ncclTunerPlugin_v6"
 
 #define NCCL_ALGO_UNDEF -1
 #define NCCL_ALGO_TREE 0
@@ -41,10 +42,13 @@ typedef ncclNvlDomainInfo_v5_t ncclNvlDomainInfo_t;
 
 #define NCCL_ALGO_PROTO_IGNORE -1.0
 
-#define NCCL_NUM_UNROLLS 3 // 1/2/4
+#define NCCL_NUM_UNROLLS 6 // 1/2/4/8/16/32
 #define NCCL_UNROLL_1 0
 #define NCCL_UNROLL_2 1
 #define NCCL_UNROLL_4 2
+#define NCCL_UNROLL_8 3
+#define NCCL_UNROLL_16 4
+#define NCCL_UNROLL_32 5
 
 #define NCCL_NUM_FLOATS 6 // half/float/double/rccl_bfloat16/rccl_float8/rccl_bfloat8
 

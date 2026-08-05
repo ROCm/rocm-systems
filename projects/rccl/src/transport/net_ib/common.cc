@@ -8,7 +8,7 @@
 #include "common.h"
 #include "p2p_resiliency.h"
 
-char ncclIbIfName[MAX_IF_NAME_SIZE+1];
+char ncclIbIfName[MAX_IF_NAME_SIZE + 1];
 union ncclSocketAddress ncclIbIfAddr;
 
 int ncclNMergedIbDevs = -1;
@@ -20,12 +20,16 @@ int ncclIbRelaxedOrderingEnabled = 0;
 ncclProfilerCallback_t ncclProfilerFunction;
 
 NCCL_PARAM(IbSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
-NCCL_PARAM(IbPrepostReceiveWorkRequests, "IB_PREPOST_RECEIVE_WORK_REQUESTS", 0);
-NCCL_PARAM(IbAsyncEvents,"IB_RETURN_ASYNC_EVENTS",1);
+NCCL_PARAM(IbPrepostReceiveWorkRequests, "IB_PREPOST_RECEIVE_WORK_REQUESTS", -2);
+NCCL_PARAM(IbAsyncEvents, "IB_RETURN_ASYNC_EVENTS", 1);
+extern int ncclParamIbReceiverSideMatchingScheme();
+extern int ncclParamIbOooRq();
+extern int ncclParamIbResiliencyPortFailover();
 
 ncclResult_t ncclIbStatsCheckFatalCount(struct ncclIbStats* stat, const char* funcName) {
   if (ncclParamIbAsyncEvents() && COMPILER_ATOMIC_LOAD(&stat->fatalErrorCount, std::memory_order_relaxed)) {
-    WARN("communicator encountered a fatal error (detected in %s)", funcName);
+    ERROR("RCCL encountered a communication fatal error (detected in %s)\n", funcName);
+    ERROR("RCCL cannot recover from this network failure and now exiting. Please check the network health.");
     return ncclSystemError;
   }
   return ncclSuccess;
@@ -33,19 +37,24 @@ ncclResult_t ncclIbStatsCheckFatalCount(struct ncclIbStats* stat, const char* fu
 
 struct ncclIbNetCommDevBase* ncclIbGetNetCommDevBase(ncclIbNetCommBase* base, int devIndex) {
   if (base->isSend) {
-    struct ncclIbSendComm* sComm = (struct ncclIbSendComm*) base;
+    struct ncclIbSendComm* sComm = (struct ncclIbSendComm*)base;
     return &sComm->devs[devIndex].base;
   } else {
-    struct ncclIbRecvComm* rComm = (struct ncclIbRecvComm*) base;
+    struct ncclIbRecvComm* rComm = (struct ncclIbRecvComm*)base;
     return &rComm->devs[devIndex].base;
   }
 }
 
 ncclResult_t ncclIbBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend) {
   for (int i = 0; i < NCCL_IB_MAX_QPS; i++) {
-    baseComm->qps[i].devIndex= -1;
-    baseComm->qps[i].remDevIdx= -1;
+    baseComm->qps[i].devIndex = -1;
+    baseComm->qps[i].remDevIdx = -1;
     baseComm->activeQps[i] = &baseComm->qps[i];
+    baseComm->qps[i].eceSupported = 0;
+    baseComm->qps[i].ece = {0};
+    memset(&baseComm->qps[i].initAttr, 0, sizeof(baseComm->qps[i].initAttr));
+    memset(&baseComm->qps[i].rtrAttr, 0, sizeof(baseComm->qps[i].rtrAttr));
+    memset(&baseComm->qps[i].rtsAttr, 0, sizeof(baseComm->qps[i].rtsAttr));
   }
   baseComm->nqps = -1;
   baseComm->splitDataOnQps = ncclParamIbSplitDataOnQps();
@@ -54,27 +63,41 @@ ncclResult_t ncclIbBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend)
   baseComm->ready = 0;
 
   NCCLCHECK(ncclIbResiliencyInit(baseComm, &baseComm->resiliency));
+  baseComm->recvMatchingScheme =
+    ncclParamIbReceiverSideMatchingScheme() == -2 ? BY_INDEX : ncclParamIbReceiverSideMatchingScheme();
+
+  if (ncclParamIbOooRq() || (ncclParamIbResiliencyPortFailover() == 1)) {
+    baseComm->recvMatchingScheme = BY_ID;
+    if (ncclParamIbReceiverSideMatchingScheme() == BY_INDEX) {
+      INFO(NCCL_NET, "NET/IB: %s: Overriding matching scheme to ID-based (%d)", __func__, BY_ID);
+    }
+  }
 
   return ncclSuccess;
 }
 
 ncclResult_t ncclIbRecvCommInit(struct ncclIbRecvComm* recvComm) {
   NCCLCHECK(ncclIbBaseCommInit(&recvComm->base, false));
-  recvComm->ibRecvWorkRequest = {
-    .wr_id = NCCL_IB_RECV_WR_ID_DUMMY,
-    .next = NULL,
-    .sg_list = NULL,
-    .num_sge = 0
-  };
+  recvComm->ibRecvWorkRequest = {.wr_id = NCCL_IB_RECV_WR_ID_DUMMY, .next = NULL, .sg_list = NULL, .num_sge = 0};
+
+  recvComm->prepostReceiveWorkRequests =
+    (ncclParamIbPrepostReceiveWorkRequests() == -2) ? false : ncclParamIbPrepostReceiveWorkRequests();
+
   if (recvComm->base.resiliency) {
     if (ncclParamIbPrepostReceiveWorkRequests() == 0) {
-      WARN("NET/IB: %s: Resiliency requires pre-posted receive work requests. Enabling pre-posting.", __func__);
+      INFO(NCCL_NET, "NET/IB: %s: Overriding pre-posting to true (1).", __func__);
     }
     recvComm->prepostReceiveWorkRequests = true;
-  } else {
-    recvComm->prepostReceiveWorkRequests = (ncclParamIbPrepostReceiveWorkRequests() == 1);
   }
-  INFO(NCCL_NET, "NET/IB: %s: Receive work requests will be %s", __func__, recvComm->prepostReceiveWorkRequests ? "pre-posted" : "posted on-demand");
+  if (ncclParamIbOooRq()) {
+    if (ncclParamIbPrepostReceiveWorkRequests() == 0) {
+      INFO(NCCL_NET, "NET/IB: %s: OOO RQ is enabled, Overriding pre-posting to true (1).", __func__);
+    }
+    recvComm->prepostReceiveWorkRequests = true;
+  }
+
+  INFO(NCCL_NET, "NET/IB: %s: Receive work requests will be %s", __func__,
+       recvComm->prepostReceiveWorkRequests ? "pre-posted" : "posted on-demand");
   return ncclSuccess;
 }
 
@@ -88,12 +111,16 @@ void* ncclIbAsyncThreadMain(void* args) {
   struct ncclIbDev* dev = (struct ncclIbDev*)args;
   while (1) {
     struct ibv_async_event event;
-    if (ncclSuccess != wrap_ibv_get_async_event(dev->context, &event)) { break; }
-    char *str;
+    if (ncclSuccess != wrap_ibv_get_async_event(dev->context, &event)) {
+      break;
+    }
+    char* str;
     struct ibv_cq* cq = event.element.cq;    // only valid if CQ error
     struct ibv_qp* qp = event.element.qp;    // only valid if QP error
     struct ibv_srq* srq = event.element.srq; // only valid if SRQ error
-    if (ncclSuccess != wrap_ibv_event_type_str(&str, event.event_type)) { break; }
+    if (ncclSuccess != wrap_ibv_event_type_str(&str, event.event_type)) {
+      break;
+    }
     switch (event.event_type) {
     case IBV_EVENT_DEVICE_FATAL:
       // the above is device fatal error
@@ -140,7 +167,9 @@ void* ncclIbAsyncThreadMain(void* args) {
       break;
     }
     // acknowledgment needs to happen last to avoid user-after-free
-    if (ncclSuccess != wrap_ibv_ack_async_event(&event)) { break; }
+    if (ncclSuccess != wrap_ibv_ack_async_event(&event)) {
+      break;
+    }
   }
   return NULL;
 }

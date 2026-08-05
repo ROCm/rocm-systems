@@ -51,6 +51,11 @@ set_source_files_properties(getDeviceCount_exe.cc PROPERTIES LANGUAGE ${GPGPU_LA
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS getDeviceCount)
 target_link_libraries(getDeviceCount ${GPGPU_LINKER_LIBRARIES})
 
+add_executable(hipSetValidDevicesMultiProc EXCLUDE_FROM_ALL hipSetValidDevicesMultiProc_Exe.cc)
+set_source_files_properties(hipSetValidDevicesMultiProc_Exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipSetValidDevicesMultiProc)
+target_link_libraries(hipSetValidDevicesMultiProc ${GPGPU_LINKER_LIBRARIES})
+
 add_executable(chkUUIDFrmChildProc_Exe EXCLUDE_FROM_ALL chkUUIDFrmChildProc_Exe.cc)
 add_executable(chkUUIDInGrandChild_Exe EXCLUDE_FROM_ALL chkUUIDInGrandChild_Exe.cc)
 add_executable(setuuidGetDevCount EXCLUDE_FROM_ALL setuuidGetDevCount_Exe.cc)
@@ -100,7 +105,7 @@ endif()
 hip_add_exe_to_target(NAME DeviceTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-add_dependencies(build_tests getDeviceCount chkUUIDFrmChildProc_Exe chkUUIDInGrandChild_Exe setuuidGetDevCount multipleUUID setEnvInChildProc uuidList)
+add_dependencies(build_tests getDeviceCount hipSetValidDevicesMultiProc chkUUIDFrmChildProc_Exe chkUUIDInGrandChild_Exe setuuidGetDevCount multipleUUID setEnvInChildProc uuidList)
 #Disabled below two executable due to the defect ticket SWDEV-467665
 if(0)
 add_dependencies(build_tests passUUIDToGrandChild_Exe ResetUUIDInChild_Exe)

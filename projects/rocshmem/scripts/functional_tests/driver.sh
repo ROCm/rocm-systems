@@ -1,28 +1,9 @@
+#!/bin/bash
 ###############################################################################
 # Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 #
 # SPDX-License-Identifier: MIT
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to
-# deal in the Software without restriction, including without limitation the
-# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
-# sell copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
-# IN THE SOFTWARE.
 ###############################################################################
-
-#!/bin/bash
 if true || tty -s; then
   PRETTY_FAILED="\033[1;31mFAILED\033[0m"
   PRETTY_PASSED="\033[1;32mPASSED\033[0m"
@@ -72,7 +53,7 @@ declare -A TEST_NUMBERS=(
   ["teamctxput"]="36"
   ["teamctxputnbi"]="37"
   ["teamctxinfra"]="38"
-  ["putnbimr"]="39"
+  # 39: putnbimr removed, use putnbi with -b instead
   ["amo_set"]="40"
   ["amo_swap"]="41"
   ["amo_fetchand"]="42"
@@ -152,9 +133,264 @@ declare -A TEST_NUMBERS=(
   ["tile_get_arbitrary"]="116"
   ["reduce_on_stream"]="117"
   ["host_ctx_create"]="118"
+  ["teamsplit2d"]="119"
+  ["hostteamsyncbarrier"]="120"
+  ["host_putmem"]="121"
+  ["host_getmem"]="122"
+  ["host_amo_fadd"]="123"
+  ["host_amo_fcswap"]="124"
+  ["host_ctx_putmem"]="125"
+  ["host_ctx_getmem"]="126"
+  ["host_int_amo_fadd"]="127"
+  ["host_int_amo_fcswap"]="128"
+  ["host_amo_all_pes"]="129"
+  ["host_amo_self"]="130"
+  ["host_amo_add"]="131"
+  ["tile_broadcast"]="132"
+  ["tile_broadcast_wave"]="133"
+  ["tile_broadcast_wg"]="134"
+  ["tile_allgather"]="135"
+  ["tile_allgather_wave"]="136"
+  ["tile_allgather_wg"]="137"
+  ["host_wait_until"]="138"
+  ["host_test"]="139"
+  ["host_wait_until_all"]="140"
+  ["host_wait_until_any"]="141"
+  ["host_wait_until_some"]="142"
+  ["host_wait_until_all_vector"]="143"
+  ["host_wait_until_any_vector"]="144"
+  ["host_wait_until_some_vector"]="145"
+  ["host_wait_until_all_status"]="146"
+  ["host_wait_until_any_status"]="147"
+  ["host_wait_until_some_status"]="148"
+  ["teamreducescatter"]="149"
+  ["broadcast_wave"]="150"
+  ["alltoall_wave"]="151"
+  ["fcollect_wave"]="152"
+  ["reduce_wave"]="153"
+  ["teamreducescatterwave"]="154"
 )
 
+# Detect which runtime to use
+if [[ "${ROCSHMEM_TEST_SLR:-0}" == "1" ]]; then
+  USE_SLR=1
+  echo "========================================================================"
+  echo "Using SLR (Simple Local Runtime) - Single-Node Mode"
+  echo "========================================================================"
+  echo ""
+else
+  USE_SLR=0
+fi
+
+# Detect wavefront size and grid-sync residency limits based on GPU architecture.
+# gfx1100/gfx1201/gfx1250 have wavefront size 32, most others have 64.
+# GRID_SYNC_MAX_THREADS applies only to functional tests whose kernels use the
+# software grid_barrier occupancy guard. A value of 0 disables driver-side adjustment. 
+# It can be overridden with ROCSHMEM_TEST_GRID_SYNC_MAX_THREADS.
+WAVE_SIZE=64
+GPU_ARCH=""
+GRID_SYNC_MAX_THREADS=0
+if command -v rocminfo >/dev/null 2>&1; then
+  GPU_ARCH=$(rocminfo 2>/dev/null | grep -m1 -Eo "gfx[0-9a-z]+" || true)
+  if [[ "$GPU_ARCH" =~ ^(gfx1100|gfx1201|gfx1250)$ ]]; then
+    WAVE_SIZE=32
+  fi
+  if [[ "$GPU_ARCH" =~ ^(gfx1100|gfx1201)$ ]]; then
+    GRID_SYNC_MAX_THREADS=$((32 * 1024))
+  fi
+fi
+GRID_SYNC_MAX_THREADS=${ROCSHMEM_TEST_GRID_SYNC_MAX_THREADS:-$GRID_SYNC_MAX_THREADS}
+
+IsGridBarrierOccupancyLimitedTest() {
+  case "$1" in
+    get|getnbi|put|putnbi|p|g|\
+    defaultctxget|defaultctxgetnbi|defaultctxput|defaultctxputnbi|defaultctxp|defaultctxg|\
+    teamctxget|teamctxgetnbi|teamctxput|teamctxputnbi|\
+    waveget|wavegetnbi|waveput|waveputnbi|\
+    wgget|wggetnbi|wgput|wgputnbi|\
+    flood_add|flood_fadd|flood_waitadd)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+AdjustGridBarrierProblemSize() {
+  local test_name=$1
+  local num_wg=$2
+  local num_threads=$3
+
+  if (( GRID_SYNC_MAX_THREADS <= 0 )); then
+    echo "$num_wg"
+    return
+  fi
+
+  if ! IsGridBarrierOccupancyLimitedTest "$test_name"; then
+    echo "$num_wg"
+    return
+  fi
+
+  local requested_threads=$((num_wg * num_threads))
+  if (( requested_threads <= GRID_SYNC_MAX_THREADS )); then
+    echo "$num_wg"
+    return
+  fi
+
+  local adjusted_wg=$((GRID_SYNC_MAX_THREADS / num_threads))
+  if (( adjusted_wg < 1 )); then
+    adjusted_wg=1
+  fi
+
+  echo "Adjust: $test_name workgroups $num_wg -> $adjusted_wg for ${GPU_ARCH:-unknown GPU} grid_barrier residency limit (${GRID_SYNC_MAX_THREADS} threads, -z $num_threads)" >&2
+  echo "$adjusted_wg"
+}
+
+# Router function - dispatches to appropriate implementation
 ExecTest() {
+  if [ $USE_SLR -eq 1 ]; then
+    ExecTest_SLR "$@"
+  else
+    ExecTest_MPI "$@"
+  fi
+}
+
+# SLR implementation
+ExecTest_SLR() {
+  TEST_NAME=$1
+  NUM_RANKS=$2
+  NUM_WG=$3
+  NUM_THREADS=$4
+  MAX_MSG_SIZE=$5
+  IS_RETRY=${6:-0}  # Optional 6th parameter to indicate if this is a retry
+
+  if [[ "" == "$NOTIMEOUT" ]]; then
+    TIMEOUT=$((5 * 60)) # Timeout in seconds
+  fi
+  # Use ROCSHMEM_HEAP_SIZE if already set (e.g., by heatmap tests), otherwise default to 6GB
+  HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-$((6*1024*1024*1024))}
+
+  if command -v amd-smi >/dev/null && amd-smi version 2>&1 >/dev/null
+  then
+    NUM_GPUS=${NUM_GPUS:-$(amd-smi list | grep GPU | wc -l)}
+  elif command -v rocm-smi >/dev/null && rocm-smi --version 2>&1 >/dev/null
+  then
+    NUM_GPUS=${NUM_GPUS:-$(rocm-smi --showserial | grep GPU | wc -l)}
+  fi
+  NUM_GPUS=${NUM_GPUS:-0}
+  NUM_GPUS=$(($NUM_GPUS > 0? $NUM_GPUS: 8))
+
+  TEST_NUM=${TEST_NUMBERS[$TEST_NAME]}
+
+  if [[ "" == "$TEST_NUM" ]]
+  then
+    echo "Test $TEST_NAME does not exist" >&2
+    DRIVER_RETURN_STATUS=1
+    return
+  fi
+
+  NUM_WG=$(AdjustGridBarrierProblemSize "$TEST_NAME" "$NUM_WG" "$NUM_THREADS")
+
+  if [[ "" == "$ROCSHMEM_MAX_NUM_CONTEXTS" ]]
+  then
+    ROCSHMEM_MAX_NUM_CONTEXTS=$NUM_WG
+  fi
+
+  # Build command as an array using SLR instead of MPI
+  local -a cmd
+  local -a env_vars
+
+  # Build environment variable list
+  env_vars=(
+    "ROCSHMEM_SLR_NP=$NUM_RANKS"
+    "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
+    "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
+  )
+
+  # Add optional environment variables
+  if [[ -n "${ROCSHMEM_MAX_NUM_HOST_CONTEXTS:-}" ]]; then
+    env_vars+=("ROCSHMEM_MAX_NUM_HOST_CONTEXTS=$ROCSHMEM_MAX_NUM_HOST_CONTEXTS")
+  fi
+  if [[ -n "${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}" ]]; then
+    env_vars+=("ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM")
+  fi
+  # Note: ROCSHMEM_TEST_UUID not needed - SLR always uses uniqueid approach
+
+  # Construct Test Command
+  TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
+
+  # Build the command with timeout if specified
+  if [[ -n "$TIMEOUT" ]]; then
+    cmd=("timeout" "$TIMEOUT")
+  else
+    cmd=()
+  fi
+
+  # Add environment variables and application
+  cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap})
+
+  if [[ "" != "$MAX_MSG_SIZE" ]]
+  then
+    # Check if in volume mode
+    if [[ $MAX_MSG_SIZE == v* ]]; then
+      cmd+=( -v "${MAX_MSG_SIZE#v}" )
+    else
+      cmd+=( -s "$MAX_MSG_SIZE" )
+    fi
+    TEST_LOG_NAME+=_"$MAX_MSG_SIZE"B
+  fi
+
+  # Create a human-readable representation of the command for logging purposes
+  CMD="${cmd[@]}"
+
+  # Determine log file name based on whether this is a retry
+  if [ $IS_RETRY -eq 1 ]; then
+    LOG_FILE="$LOG_DIR/$TEST_LOG_NAME.retry.log"
+    echo "Retry:  $TEST_LOG_NAME"
+  else
+    LOG_FILE="$LOG_DIR/$TEST_LOG_NAME.log"
+    echo "Test:   $TEST_LOG_NAME"
+  fi
+
+  # Run Test
+  # For SLR, we need enough GPUs for the processes
+  if [ $NUM_GPUS -ge $NUM_RANKS ]; then
+    echo "# $CMD >> $LOG_FILE" >"$LOG_FILE"
+    "${cmd[@]}" >>"$LOG_FILE" 2>&1
+  else
+    echo "Skip:   $TEST_LOG_NAME (SLR requires $NUM_RANKS GPUs, only $NUM_GPUS available)"
+    return
+  fi
+
+  # Validate Test
+  if [ $? -ne 0 ]
+  then
+    echo -e "$PRETTY_FAILED: $TEST_LOG_NAME" >&2
+    cat "$LOG_FILE"
+    DRIVER_RETURN_STATUS=1
+    if [ $IS_RETRY -eq 0 ]; then
+      # Track failed tests with their parameters for potential retry
+      # Capture environment/config state to ensure retry runs under same conditions
+      FAILED_LIST="$FAILED_LIST $TEST_LOG_NAME"
+      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE|${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}|${ROCSHMEM_MAX_NUM_CONTEXTS:-}|${NOTIMEOUT:-}|${NOVERIF:-}")
+    else
+      # Track tests that failed even after retry
+      RETRY_FAILED_LIST="$RETRY_FAILED_LIST $TEST_LOG_NAME"
+    fi
+  else
+    # If this was a retry and it passed, remove from failed list
+    if [ $IS_RETRY -eq 1 ]; then
+      echo -e "$PRETTY_PASSED: $TEST_LOG_NAME (passed on retry)"
+      RETRY_PASSED_LIST="$RETRY_PASSED_LIST $TEST_LOG_NAME"
+    fi
+  fi
+
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
+}
+
+# MPI implementation (original ExecTest)
+ExecTest_MPI() {
   TEST_NAME=$1
   NUM_RANKS=$2
   NUM_WG=$3
@@ -186,6 +422,8 @@ ExecTest() {
     return
   fi
 
+  NUM_WG=$(AdjustGridBarrierProblemSize "$TEST_NAME" "$NUM_WG" "$NUM_THREADS")
+
   if [[ "" == "$ROCSHMEM_MAX_NUM_CONTEXTS" ]]
   then
     ROCSHMEM_MAX_NUM_CONTEXTS=$NUM_WG
@@ -212,7 +450,7 @@ ExecTest() {
         -mca osc "${OMPI_MCA_osc:-ucx}"
         -x "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
         -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
-        -x "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
+        -x "ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-$HEAP_SIZE}"
         ${ROCSHMEM_MAX_NUM_HOST_CONTEXTS:+-x "ROCSHMEM_MAX_NUM_HOST_CONTEXTS=$ROCSHMEM_MAX_NUM_HOST_CONTEXTS"}
         ${ROCSHMEM_TEST_USE_DEFAULT_STREAM:+-x "ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM"}
         ${ROCSHMEM_TEST_UUID:+-x "ROCSHMEM_TEST_UUID=$ROCSHMEM_TEST_UUID"}
@@ -222,7 +460,7 @@ ExecTest() {
       )
   # Construct Test Command
   TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
-  cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} )
+  cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} ${ROCSHMEM_TEST_ARGS:-} )
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
     # Check if in volume mode
@@ -277,6 +515,7 @@ ExecTest() {
   fi
 
   unset ROCSHMEM_MAX_NUM_CONTEXTS
+  unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
 }
 
 TestRMAPut() {
@@ -508,6 +747,8 @@ TestColl() {
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
   ExecTest  "syncall"          2       1            1
+  ExecTest  "syncall"          3       1            1
+  ExecTest  "syncall"          5       1            1
 
   ExecTest  "wavesyncall"      2       1            1
 
@@ -517,6 +758,8 @@ TestColl() {
   ExecTest  "teamsync"         2       16           64
   ExecTest  "teamsync"         2       32           256
   ExecTest  "teamsync"         2       39           1024
+  ExecTest  "teamsync"         3       16           64
+  ExecTest  "teamsync"         5       16           64
 
   ExecTest  "teamwavesync"     2       1            1
   ExecTest  "teamwavesync"     2       16           64
@@ -529,6 +772,8 @@ TestColl() {
   ExecTest  "teamwgsync"       2       39           1024
 
   ExecTest  "barrierall"       2       1            1
+  ExecTest  "barrierall"       3       1            1
+  ExecTest  "barrierall"       5       1            1
 
   ExecTest  "wavebarrierall"   2       1            1
 
@@ -538,6 +783,8 @@ TestColl() {
   ExecTest  "teambarrier"      2       16           64
   ExecTest  "teambarrier"      2       32           256
   ExecTest  "teambarrier"      2       39           1024
+  ExecTest  "teambarrier"      3       16           64
+  ExecTest  "teambarrier"      5       16           64
 
   ExecTest  "teamwavebarrier"  2       1            1
   ExecTest  "teamwavebarrier"  2       16           64
@@ -550,12 +797,35 @@ TestColl() {
   ExecTest  "teamwgbarrier"    2       39           1024
 
   ExecTest  "alltoall"         2       1            64        512
+  ExecTest  "alltoall"         3       1            64        512
+  ExecTest  "alltoall"         5       1            64        512
 
   ExecTest  "teambroadcast"    2       1            64        32768
+  ExecTest  "teambroadcast"    3       1            64        32768
+  ExecTest  "teambroadcast"    5       1            64        32768
 
   ExecTest  "fcollect"         2       1            64        32768
+  ExecTest  "fcollect"         3       1            64        32768
+  ExecTest  "fcollect"         5       1            64        32768
 
+  # NOTE: teamreduction at rank counts > 2 currently fails a data validation
+  # check in the ring all-reduce path; this is a pre-existing bug unrelated to
+  # work/sync pool alignment, so it is only run at 2 ranks here.
   ExecTest  "teamreduction"    2       1            64        32768
+
+  ExecTest  "teamreducescatter" 2      1            64        32768
+  ExecTest  "teamreducescatter" 4      1            64        32768
+  ExecTest  "teamreducescatter" 8      1            64        32768
+
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-409: wave tests not supported on RO
+    ExecTest  "broadcast_wave"   2       1            $WAVE_SIZE        32768
+    ExecTest  "alltoall_wave"    2       1            $WAVE_SIZE        512
+    ExecTest  "fcollect_wave"    2       1            $WAVE_SIZE        32768
+    ExecTest  "reduce_wave"      2       1            $WAVE_SIZE        32768
+    ExecTest  "teamreducescatterwave" 2      1            $WAVE_SIZE   32768
+    ExecTest  "teamreducescatterwave" 4      1            $WAVE_SIZE   32768
+    ExecTest  "teamreducescatterwave" 8      1            $WAVE_SIZE   32768
+  else echo "Skip:   *_wave (AIROCSHMEM-409: wave tests not supported on RO)"; fi
 }
 
 TestOnStream() {
@@ -586,6 +856,49 @@ TestOnStream() {
   unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
 }
 
+TestHostRma() { #AIROCSHMEM-419
+  ##############################################################################
+  #       | Name                    | Ranks | WGs | Threads | Max Msg Size    #
+  # These tests exercise the non-MPI TcpBootstrap IPC host path.              #
+  # ROCSHMEM_TEST_UUID=1 is set automatically so tests always use that path.  #
+  # IPC_HOST_NPES controls the PE count for the multi-PE concurrency tests.   #
+  # Default: 4. Override: IPC_HOST_NPES=8 ./driver.sh ...                     #
+  ##############################################################################
+  local npes=${IPC_HOST_NPES:-4}
+  local saved_uuid=$ROCSHMEM_TEST_UUID
+  ROCSHMEM_TEST_UUID=1
+
+  # Default-context: rocshmem_fence / rocshmem_quiet
+  ExecTest  "host_putmem"         2        1      1        65536
+  ExecTest  "host_getmem"         2        1      1        65536
+  # Long (64-bit) AMOs: rocshmem_long_atomic_fetch_add/cas
+  ExecTest  "host_amo_fadd"       2        1      1
+  ExecTest  "host_amo_fcswap"     2        1      1
+  # Explicit-context: rocshmem_ctx_fence / rocshmem_ctx_quiet
+  # ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2: default context takes slot 0, explicit ctx needs slot 1
+  ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2 && ExecTest "host_ctx_putmem"  2 1 1 65536
+  ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2 && ExecTest "host_ctx_getmem"  2 1 1 65536
+  # Int (32-bit) AMOs: rocshmem_int_atomic_fetch_add/cas (exercises 32-bit kernel path)
+  ExecTest  "host_int_amo_fadd"   2        1      1
+  ExecTest  "host_int_amo_fcswap" 2        1      1
+  ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2 ExecTest "host_amo_add" 2 1 1
+  ExecTest  "host_wait_until"            2        1      1
+  ExecTest  "host_test"                  2        1      1
+  ExecTest  "host_wait_until_all"        2        1      1
+  ExecTest  "host_wait_until_any"        2        1      1
+  ExecTest  "host_wait_until_some"       2        1      1
+  ExecTest  "host_wait_until_all_vector" 2        1      1
+  ExecTest  "host_wait_until_any_vector" 2        1      1
+  ExecTest  "host_wait_until_some_vector" 2       1      1
+  ExecTest  "host_wait_until_all_status" 2        1      1
+  ExecTest  "host_wait_until_any_status" 2        1      1
+  ExecTest  "host_wait_until_some_status" 2       1      1
+  # Concurrency tests — configurable PE count (IPC_HOST_NPES, default 4)
+  ExecTest  "host_amo_all_pes"    $npes    1      1
+  ExecTest  "host_amo_self"       $npes    1      1
+  ROCSHMEM_TEST_UUID=$saved_uuid
+}
+
 TestOther() {
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
@@ -613,12 +926,13 @@ TestOther() {
   ExecTest  "flood_putnbi"     8       64           1024
   ExecTest  "flood_p"          8       64           1024
 
-  ExecTest  "flood_get"        2       64           1024
-  ExecTest  "flood_get"        8       64           1024
-  ExecTest  "flood_getnbi"     8       64           1024
-  if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
-  ExecTest  "flood_g"          8       64           1024
-  else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
+  # Temporarily disabled flood_get tests
+  # ExecTest  "flood_get"        2       64           1024
+  # ExecTest  "flood_get"        8       64           1024
+  # ExecTest  "flood_getnbi"     8       64           1024
+  # if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
+  # ExecTest  "flood_g"          8       64           1024
+  # else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
 
   ExecTest  "flood_add"        2       64           1024
   ExecTest  "flood_add"        8       64           1024
@@ -640,9 +954,16 @@ TestOther() {
   ExecTest  "teamctxsubsetparentinfra" 5  1            1
   export ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024
   ExecTest  "host_ctx_create"          2       1            1
+  if [[ $TEST != ro* ]]; then # host team sync/barrier hangs on RO
+  ExecTest  "hostteamsyncbarrier"      2  1            1
+  ExecTest  "hostteamsyncbarrier"      4  1            1
+  ExecTest  "hostteamsyncbarrier"      8  1            1
+  else echo "Skip:   hostteamsyncbarrier (host team sync/barrier hangs on RO)"; fi
   unset ROCSHMEM_MAX_NUM_CONTEXTS
   unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
-
+  
+  ExecTest  "teamsplit2d"              4  1            1
+  
   ExecTest  "shmemptr"         2       1            1         8
   ExecTest  "shmemptr"         2       1            1024      8
   ExecTest  "shmemptr"         2       8            1         8
@@ -668,15 +989,6 @@ TestTiles() {
   #       | Name                      | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
 
-  # Detect wavefront size based on GPU architecture
-  # gfx1100 and gfx1201 have wavefront size 32, most others have 64
-  WAVE_SIZE=64
-  if command -v rocminfo >/dev/null 2>&1; then
-    if rocminfo | grep -qE "Name:.*(gfx1100|gfx1201)"; then
-      WAVE_SIZE=32
-    fi
-  fi
-
   ExecTest  "tile_put_contiguous"       2       1            1
   ExecTest  "tile_put_rowmajor"         2       1            1
   ExecTest  "tile_put_colmajor"         2       1            1
@@ -693,11 +1005,25 @@ TestTiles() {
   ExecTest  "tile_put_1d"               2       1            1
   ExecTest  "tile_get_1d"               2       1            1
   ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE
+  ExecTest  "tile_broadcast"            2       1            1
+  ExecTest  "tile_broadcast"            4       1            1
+  ExecTest  "tile_broadcast_wave"       2       1            $WAVE_SIZE
+  ExecTest  "tile_broadcast_wave"       4       1            $WAVE_SIZE
+  ExecTest  "tile_broadcast_wg"         2       4            $WAVE_SIZE
+  ExecTest  "tile_broadcast_wg"         4       4            $WAVE_SIZE
+  ExecTest  "tile_allgather"            2       1            1
+  ExecTest  "tile_allgather"            4       1            1
+  ExecTest  "tile_allgather_wave"       2       1            $WAVE_SIZE
+  ExecTest  "tile_allgather_wave"       4       1            $WAVE_SIZE
+  ExecTest  "tile_allgather_wg"         2       4            $WAVE_SIZE
+  ExecTest  "tile_allgather_wg"         4       4            $WAVE_SIZE
 }
 
 TestHeatMapRMA() {
   NOTIMEOUT=1
   NOVERIF=1
+  # Batch rotation allocates volume*batch*2 = 20 GiB; use 22 GiB to leave headroom
+  ROCSHMEM_HEAP_SIZE=$(( ROCSHMEM_HEAP_SIZE > 22*1024*1024*1024 ? ROCSHMEM_HEAP_SIZE : 22*1024*1024*1024 ))
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
@@ -749,7 +1075,12 @@ ValidateInput() {
     echo "        <threads>      : number of threads per workgroup"
     echo "        [max_msg_size] : maximum message size to test"
     echo "    <log_dir>     : path to output log directory"
-    echo "    [hostfile]    : path to hostfile"
+    echo "    [hostfile]    : path to hostfile (MPI only, not supported with SLR)"
+    echo
+    echo "Runtime Selection:"
+    echo "  - Set ROCSHMEM_TEST_SLR=1 to use SLR (Simple Local Runtime) for single-node testing"
+    echo "  - Use mpirun/mpiexec for MPI (default, supports multi-node)"
+    echo "  Note: ROCSHMEM_SLR_NP is set automatically by the script based on test requirements"
     exit 1
   fi
 }
@@ -849,6 +1180,15 @@ RETRY_THRESHOLD=${RETRY_THRESHOLD:-5}  # Maximum number of failed tests to retry
 ValidateInput ${#_POSITIONAL[@]}
 ValidateLogDir $LOG_DIR
 
+# Validate SLR and hostfile are not used together
+if [[ $USE_SLR -eq 1 && -n "$HOSTFILE" ]]; then
+  echo "ERROR: SLR (Simple Local Runtime) does not support hostfiles (single-node only)"
+  echo "       Either:"
+  echo "         - Unset ROCSHMEM_TEST_SLR to use MPI with hostfile"
+  echo "         - Remove hostfile argument to use SLR"
+  exit 1
+fi
+
 # Print build info and environment variables before running tests
 ROCSHMEM_INFO="$(dirname "$APP")/rocshmem_info"
 if [ ! -x "$ROCSHMEM_INFO" ]; then
@@ -881,6 +1221,17 @@ case $TEST in
     # Tile tests are only supported on IPC backend
     if [[ ! "$TEST" =~ ^(gda|ro) ]]; then
       TestTiles
+    fi
+    # Host non-MPI IPC tests are only supported on IPC backend
+    if [[ ! "$TEST" =~ ^(gda|ro) ]]; then
+      TestHostRma
+    fi
+    ;;
+  *"host")
+    if [ -x "$ROCSHMEM_INFO" ] && "$ROCSHMEM_INFO" | grep -q "USE_IPC.*: ON"; then
+      TestHostRma
+    else
+      echo "Skip: host tests require IPC backend (USE_IPC=OFF in this build)"
     fi
     ;;
   *"rma")

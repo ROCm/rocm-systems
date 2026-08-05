@@ -9,6 +9,7 @@
 #include <thread>
 #include <timemory/backends/threading.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <optional>
 #include <ostream>
@@ -91,6 +92,7 @@ struct thread_info
 
     static bool                              exists();
     static size_t                            get_peak_num_threads();
+    static size_t                            get_initialized_thread();
     static const std::optional<thread_info>& init(bool _offset = false);
     static const std::optional<thread_info>& get();
     static const std::optional<thread_info>& get(native_handle_t&);
@@ -103,6 +105,8 @@ struct thread_info
     const std::int64_t* causal_count = nullptr;
     index_data_t        index_data   = {};
     lifetime_data_t     lifetime     = { 0, 0 };
+
+    static std::atomic<size_t> initialized_threads;
 
     friend std::ostream& operator<<(std::ostream& _os, const thread_info& _v)
     {

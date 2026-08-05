@@ -2,6 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
+include_guard(GLOBAL)
+
 #-----------------------------------------------------------------------------
 # Option to use the clang-tidy tool
 #

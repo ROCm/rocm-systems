@@ -91,9 +91,6 @@
 	path = projects/rocprofiler-systems/external/pybind11
 	url = https://github.com/jrmadsen/pybind11.git
 	shallow = true
-[submodule "projects/rocprofiler-systems/external/sqlite"]
-	path = projects/rocprofiler-systems/external/sqlite
-	url = https://github.com/sqlite/sqlite.git
 [submodule "projects/rocprofiler-systems/external/googletest"]
 	path = projects/rocprofiler-systems/external/googletest
 	url = https://github.com/google/googletest.git
@@ -127,3 +124,6 @@
 [submodule "projects/rocprofiler-compute/src/lib/external/fmt"]
 	path = projects/rocprofiler-compute/src/lib/external/fmt
 	url = https://github.com/fmtlib/fmt.git
+[submodule "projects/rocprofiler-compute/src/lib/external/json"]
+	path = projects/rocprofiler-compute/src/lib/external/json
+	url = https://github.com/nlohmann/json.git

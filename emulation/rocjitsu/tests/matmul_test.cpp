@@ -2,14 +2,17 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "test_paths.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -29,7 +32,6 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #ifdef HAS_DEVICE_KERNELS
@@ -37,10 +39,9 @@ RJ_DIAGNOSTIC_POP
 namespace {
 
 using namespace rocjitsu;
+using test::kernel_path;
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
-
-std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
+const std::string CONFIG_PATH = test::config_path("gfx950_cdna4.json");
 
 constexpr uint32_t TOTAL_XCDS = 8;
 constexpr uint32_t CUS_PER_XCD = 32; // 4 SEs × 8 CUs
@@ -119,10 +120,10 @@ struct KernelExecFixture {
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
     loaded.wire_links(engine->topology());
-    if (num_threads > 1)
-      partition_by_xcd(num_threads);
-    else
-      engine->build();
+    if (num_threads > 1) {
+      ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads));
+    }
+    engine->create();
 
     Executable exec(kernel_path(kernel_name));
     ASSERT_TRUE(exec.is_valid());
@@ -134,28 +135,6 @@ struct KernelExecFixture {
     co->load_to_memory(mem(), KD_ADDR);
     kernel_object = KD_ADDR + co->kernel_descriptor_offset(kernel_name);
     ASSERT_NE(kernel_object, KD_ADDR) << "Kernel descriptor symbol not found";
-  }
-
-  /// Partition so that each XCD's components stay in the same partition.
-  /// Components not under any XCD (SoC, VM, IODs) go to partition 0.
-  void partition_by_xcd(uint32_t num_partitions) {
-    // Build a map from Xcd pointer to partition ID.
-    std::unordered_map<simdojo::Component *, simdojo::PartitionID> xcd_map;
-    for (uint32_t i = 0; i < soc->num_xcds(); ++i)
-      xcd_map[soc->xcd(i)] = i % num_partitions;
-
-    engine->topology().partition_manual(
-        num_partitions, [&](simdojo::Component *c) -> simdojo::PartitionID {
-          // Walk up the parent chain looking for an XCD ancestor.
-          for (auto *p = static_cast<simdojo::Component *>(c); p != nullptr;
-               p = static_cast<simdojo::Component *>(p->parent())) {
-            auto it = xcd_map.find(p);
-            if (it != xcd_map.end())
-              return it->second;
-          }
-          return 0; // Top-level components → partition 0.
-        });
-    engine->build();
   }
 
   amdgpu::GpuMemory *mem() { return gpu_mem; }
@@ -383,7 +362,7 @@ TEST(MatmulStressTest, MfmaAllCUs_MultiThreaded) {
 
 TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
-  constexpr uint32_t SOPP_S_ENDPGM = 0xBF810000;
+  constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
 
   auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
@@ -391,7 +370,7 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
-  engine->build();
+  engine->create();
 
   // Write a kernel descriptor + s_endpgm to GPU memory.
   using namespace rocr::llvm::amdhsa;
@@ -434,7 +413,7 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
 // Multi-threaded topology-only: 1 thread per XCD, dispatch s_endpgm to all CUs.
 TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
-  constexpr uint32_t SOPP_S_ENDPGM = 0xBF810000;
+  constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
 
   auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
@@ -444,21 +423,8 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
 
-  // Partition by XCD so each XCD's components stay on one thread.
-  std::unordered_map<simdojo::Component *, simdojo::PartitionID> xcd_map;
-  for (uint32_t i = 0; i < soc->num_xcds(); ++i)
-    xcd_map[soc->xcd(i)] = i;
-  engine->topology().partition_manual(
-      TOTAL_XCDS, [&](simdojo::Component *c) -> simdojo::PartitionID {
-        for (auto *p = static_cast<simdojo::Component *>(c); p != nullptr;
-             p = static_cast<simdojo::Component *>(p->parent())) {
-          auto it = xcd_map.find(p);
-          if (it != xcd_map.end())
-            return it->second;
-        }
-        return 0;
-      });
-  engine->build();
+  ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, TOTAL_XCDS));
+  engine->create();
 
   using namespace rocr::llvm::amdhsa;
   kernel_descriptor_t kd{};

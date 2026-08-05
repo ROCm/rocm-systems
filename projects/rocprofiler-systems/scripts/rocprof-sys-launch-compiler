@@ -105,10 +105,11 @@ fi
 # Known wrappers that may appear before the actual compiler
 KNOWN_WRAPPERS=(
     "resource_info.py"  # TheRock build profiling
-    "ccache"            # Compiler cache
+    "ccache"            # Compiler cache (ccache)
+    "sccache"           # Compiler cache (sccache)
 )
 
-CCACHE_PREFIX=""
+CACHE_PREFIX=""
 ACTUAL_COMPILER="${1}"
 CURRENT_BASENAME="$(basename "${1}")"
 
@@ -119,9 +120,9 @@ for wrapper in "${KNOWN_WRAPPERS[@]}"; do
             echo "but no underlying command was specified as the next argument." >&2
             exit 1
         fi
-        # Preserve ccache so we can re-apply it to the rocprofiler-systems compiler
-        if [[ "${wrapper}" == "ccache" ]]; then
-            CCACHE_PREFIX="${1}"
+        # Preserve cache wrapper so we can re-apply it to the rocprofiler-systems compiler
+        if [[ "${wrapper}" == "ccache" || "${wrapper}" == "sccache" ]]; then
+            CACHE_PREFIX="${1}"
         fi
         shift
         ACTUAL_COMPILER="${1}"
@@ -150,10 +151,10 @@ else
         export LIBRARY_PATH=${LLVM_LIB_DIR}:${LIBRARY_PATH}
     fi
 
-    # Use ccache with the rocprofiler-systems compiler if ccache was originally requested
-    if [ -n "${CCACHE_PREFIX}" ]; then
-        debug-message ${CCACHE_PREFIX} ${ROCPROFSYS_COMPILER} $@
-        ${CCACHE_PREFIX} ${ROCPROFSYS_COMPILER} $@
+    # Use cache wrapper with the rocprofiler-systems compiler if one was originally requested
+    if [ -n "${CACHE_PREFIX}" ]; then
+        debug-message ${CACHE_PREFIX} ${ROCPROFSYS_COMPILER} $@
+        ${CACHE_PREFIX} ${ROCPROFSYS_COMPILER} $@
     else
         debug-message ${ROCPROFSYS_COMPILER} $@
         ${ROCPROFSYS_COMPILER} $@

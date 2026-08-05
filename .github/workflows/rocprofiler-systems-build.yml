@@ -1,0 +1,425 @@
+name: rocprofiler-systems CI / Build and Test
+run-name: rocprofiler-systems build and test
+
+# Path exclusions are defined once here. The top-level workflow owns the visible
+# graph, while reusable workflows own execution details for each group.
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/rocprofiler-systems-build.yml'
+      - '.github/workflows/rocprofiler-systems-build-group.yml'
+      - '.github/workflows/rocprofiler-systems-code-coverage.yml'
+      - '.github/workflows/rocprofiler-systems-ubuntu-noble-sanitizers.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-systems-build.yml'
+      - '.github/workflows/rocprofiler-systems-build-group.yml'
+      - '.github/workflows/rocprofiler-systems-code-coverage.yml'
+      - '.github/workflows/rocprofiler-systems-ubuntu-noble-sanitizers.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matrix-setup:
+    name: Matrix setup
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      ubuntu_2204_primary_matrix: ${{ steps.ubuntu_2204.outputs.primary_matrix }}
+      ubuntu_2204_system_deps_matrix: ${{ steps.ubuntu_2204.outputs.system_deps_matrix }}
+      ubuntu_2204_has_primary: ${{ steps.ubuntu_2204.outputs.has_primary }}
+      ubuntu_2204_has_system_deps: ${{ steps.ubuntu_2204.outputs.has_system_deps }}
+      ubuntu_2404_primary_matrix: ${{ steps.ubuntu_2404.outputs.primary_matrix }}
+      ubuntu_2404_system_deps_matrix: ${{ steps.ubuntu_2404.outputs.system_deps_matrix }}
+      ubuntu_2404_has_primary: ${{ steps.ubuntu_2404.outputs.has_primary }}
+      ubuntu_2404_has_system_deps: ${{ steps.ubuntu_2404.outputs.has_system_deps }}
+      debian_primary_matrix: ${{ steps.debian.outputs.primary_matrix }}
+      debian_system_deps_matrix: ${{ steps.debian.outputs.system_deps_matrix }}
+      debian_has_primary: ${{ steps.debian.outputs.has_primary }}
+      debian_has_system_deps: ${{ steps.debian.outputs.has_system_deps }}
+      rhel_primary_matrix: ${{ steps.rhel.outputs.primary_matrix }}
+      rhel_system_deps_matrix: ${{ steps.rhel.outputs.system_deps_matrix }}
+      rhel_has_primary: ${{ steps.rhel.outputs.has_primary }}
+      rhel_has_system_deps: ${{ steps.rhel.outputs.has_system_deps }}
+    steps:
+      - name: Checkout matrix helper
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-systems/.github/ci-build-matrix.json
+            projects/rocprofiler-systems/scripts/generate-ci-build-matrix.py
+          sparse-checkout-cone-mode: false
+
+      - name: Generate Ubuntu 22.04 matrix
+        id: ubuntu_2204
+        shell: bash
+        run: |
+          python3 projects/rocprofiler-systems/scripts/generate-ci-build-matrix.py \
+            --group ubuntu-22.04 \
+            --matrix-file projects/rocprofiler-systems/.github/ci-build-matrix.json
+
+      - name: Generate Ubuntu 24.04 matrix
+        id: ubuntu_2404
+        shell: bash
+        run: |
+          python3 projects/rocprofiler-systems/scripts/generate-ci-build-matrix.py \
+            --group ubuntu-24.04 \
+            --matrix-file projects/rocprofiler-systems/.github/ci-build-matrix.json
+
+      - name: Generate Debian matrix
+        id: debian
+        shell: bash
+        run: |
+          python3 projects/rocprofiler-systems/scripts/generate-ci-build-matrix.py \
+            --group debian \
+            --matrix-file projects/rocprofiler-systems/.github/ci-build-matrix.json
+
+      - name: Generate RHEL matrix
+        id: rhel
+        shell: bash
+        run: |
+          python3 projects/rocprofiler-systems/scripts/generate-ci-build-matrix.py \
+            --group rhel \
+            --matrix-file projects/rocprofiler-systems/.github/ci-build-matrix.json
+
+  ubuntu-2204:
+    name: Ubuntu 22.04
+    needs: matrix-setup
+    uses: ./.github/workflows/rocprofiler-systems-build-group.yml
+    permissions:
+      contents: read
+    with:
+      group_key: ubuntu-22.04
+      group_name: Ubuntu 22.04
+      primary_matrix: ${{ needs.matrix-setup.outputs.ubuntu_2204_primary_matrix }}
+      system_deps_matrix: ${{ needs.matrix-setup.outputs.ubuntu_2204_system_deps_matrix }}
+      has_primary: ${{ needs.matrix-setup.outputs.ubuntu_2204_has_primary }}
+      has_system_deps: ${{ needs.matrix-setup.outputs.ubuntu_2204_has_system_deps }}
+
+  ubuntu-2404:
+    name: Ubuntu 24.04
+    needs: matrix-setup
+    uses: ./.github/workflows/rocprofiler-systems-build-group.yml
+    permissions:
+      contents: read
+    with:
+      group_key: ubuntu-24.04
+      group_name: Ubuntu 24.04
+      primary_matrix: ${{ needs.matrix-setup.outputs.ubuntu_2404_primary_matrix }}
+      system_deps_matrix: ${{ needs.matrix-setup.outputs.ubuntu_2404_system_deps_matrix }}
+      has_primary: ${{ needs.matrix-setup.outputs.ubuntu_2404_has_primary }}
+      has_system_deps: ${{ needs.matrix-setup.outputs.ubuntu_2404_has_system_deps }}
+
+  debian:
+    name: Debian
+    needs: matrix-setup
+    uses: ./.github/workflows/rocprofiler-systems-build-group.yml
+    permissions:
+      contents: read
+    with:
+      group_key: debian
+      group_name: Debian
+      primary_matrix: ${{ needs.matrix-setup.outputs.debian_primary_matrix }}
+      system_deps_matrix: ${{ needs.matrix-setup.outputs.debian_system_deps_matrix }}
+      has_primary: ${{ needs.matrix-setup.outputs.debian_has_primary }}
+      has_system_deps: ${{ needs.matrix-setup.outputs.debian_has_system_deps }}
+
+  rhel:
+    name: RHEL
+    needs: matrix-setup
+    uses: ./.github/workflows/rocprofiler-systems-build-group.yml
+    permissions:
+      contents: read
+    with:
+      group_key: rhel
+      group_name: RHEL
+      primary_matrix: ${{ needs.matrix-setup.outputs.rhel_primary_matrix }}
+      system_deps_matrix: ${{ needs.matrix-setup.outputs.rhel_system_deps_matrix }}
+      has_primary: ${{ needs.matrix-setup.outputs.rhel_has_primary }}
+      has_system_deps: ${{ needs.matrix-setup.outputs.rhel_has_system_deps }}
+
+  # RHEL-only compiler compatibility check. Defined here (not inside the
+  # shared build-group.yml) so it never appears as a phantom "skipped" job
+  # with an unresolved ${{ matrix.gcc-toolset }} name under the other three
+  # groups' call graphs — it simply isn't part of their workflow at all.
+  rhel-compiler-check:
+    name: RHEL compiler check / gcc-toolset-${{ matrix.gcc-toolset }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-rocm-${{ matrix.rocm-version }}-rhel-${{ matrix.os-release }}
+      options: --shm-size=512m
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os-release: ['8.10']
+        rocm-version: ['7.2']
+        gcc-toolset: ['13', '14', '15']
+        build-type: ['Release']
+
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-systems
+            .gitmodules
+          submodules: recursive
+
+      - name: Install GCC Toolset
+        shell: bash
+        run: |
+          dnf install -y \
+            gcc-toolset-${{ matrix.gcc-toolset }}-binutils \
+            gcc-toolset-${{ matrix.gcc-toolset }}-gcc \
+            gcc-toolset-${{ matrix.gcc-toolset }}-gcc-c++ \
+            gcc-toolset-${{ matrix.gcc-toolset }}-gcc-gfortran
+          TS=/opt/rh/gcc-toolset-${{ matrix.gcc-toolset }}/root/usr/bin
+          echo "CC=${TS}/gcc" >> "${GITHUB_ENV}"
+          echo "CXX=${TS}/g++" >> "${GITHUB_ENV}"
+          echo "${TS}" >> "${GITHUB_PATH}"
+          "${TS}/gcc" --version
+
+      - name: Configure environment
+        shell: bash
+        run: |
+          echo "/opt/rocm/bin" >> "${GITHUB_PATH}"
+          echo "ROCM_PATH=/opt/rocm" >> "${GITHUB_ENV}"
+          echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> "${GITHUB_ENV}"
+
+      - name: Restore ccache
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-gcc${{ matrix.gcc-toolset }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}
+          restore-keys: |
+            ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-gcc${{ matrix.gcc-toolset }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-
+            ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-gcc${{ matrix.gcc-toolset }}-${{ matrix.rocm-version }}-
+
+      - name: Configure ccache
+        shell: bash
+        run: |
+          mkdir -p "${CCACHE_DIR}"
+          ccache --max-size=1G
+          ccache --set-config=sloppiness=time_macros,include_file_mtime,include_file_ctime,pch_defines
+          ccache -z
+          ccache -p | head -20
+
+      - name: Configure
+        timeout-minutes: 30
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          git config --global --add safe.directory "${PWD}"
+          cmake --version
+          cmake -B build . \
+            -DCMAKE_C_COMPILER=${CC} \
+            -DCMAKE_CXX_COMPILER=${CXX} \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+            -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
+            -DROCPROFSYS_BUILD_TESTING=OFF \
+            -DROCPROFSYS_USE_PYTHON=ON \
+            -DROCPROFSYS_BUILD_DYNINST=ON \
+            -DROCPROFSYS_BUILD_TBB=ON \
+            -DROCPROFSYS_BUILD_ELFUTILS=ON \
+            -DROCPROFSYS_BUILD_LIBIBERTY=ON \
+            -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
+            "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13" \
+            -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
+
+      - name: Build
+        timeout-minutes: 60
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          cmake --build build --target all --parallel $(nproc)
+
+      - name: ccache stats
+        if: always()
+        shell: bash
+        run: |
+          echo "=== ccache stats ==="
+          ccache -s -v || true
+          echo "=== ccache dir size ==="
+          du -sh "${CCACHE_DIR}" || true
+
+  code-coverage:
+    name: Code coverage
+    needs: matrix-setup
+    uses: ./.github/workflows/rocprofiler-systems-code-coverage.yml
+    permissions:
+      contents: read
+      pull-requests: write
+
+  sanitizers:
+    name: Sanitizers
+    needs: matrix-setup
+    uses: ./.github/workflows/rocprofiler-systems-ubuntu-noble-sanitizers.yml
+    permissions:
+      contents: read
+
+  publish-test-results:
+    name: Summary report
+    needs:
+      - ubuntu-2204
+      - ubuntu-2404
+      - debian
+      - rhel
+      - code-coverage
+      - sanitizers
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout summary script
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-systems/scripts/summarize-junit-results.py
+          sparse-checkout-cone-mode: false
+
+      - name: Download build JUnit artifacts
+        uses: actions/download-artifact@v7
+        continue-on-error: true
+        with:
+          pattern: junit-build-*
+          path: junit-results
+          merge-multiple: false
+
+      - name: Download sanitizer JUnit artifacts
+        uses: actions/download-artifact@v7
+        continue-on-error: true
+        with:
+          pattern: junit-sanitizer-*
+          path: sanitizer-junit-results
+          merge-multiple: false
+
+      - name: Download sanitizer status artifacts
+        uses: actions/download-artifact@v7
+        continue-on-error: true
+        with:
+          pattern: sanitizer-summary-*
+          path: sanitizer-status
+          merge-multiple: false
+
+      - name: Generate test result summary
+        shell: bash
+        run: |
+          python3 projects/rocprofiler-systems/scripts/summarize-junit-results.py \
+            --mode build \
+            --junit-glob 'junit-results/**/*.xml' \
+            --output junit-summary.md \
+            --commit-sha '${{ github.sha }}' \
+            --commit-url '${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}'
+          cat junit-summary.md >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Generate sanitizer result summary
+        shell: bash
+        run: |
+          python3 projects/rocprofiler-systems/scripts/summarize-junit-results.py \
+            --mode sanitizer \
+            --junit-glob 'sanitizer-junit-results/**/*.xml' \
+            --status-glob 'sanitizer-status/**/*.json' \
+            --output sanitizer-summary.md
+          cat sanitizer-summary.md >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Update PR CI result summary
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- rocprofiler-systems-ci-summary -->';
+            const start = '<!-- rocprofiler-systems-build-summary:start -->';
+            const end = '<!-- rocprofiler-systems-build-summary:end -->';
+            const sanitizerStart = '<!-- rocprofiler-systems-sanitizer-summary:start -->';
+            const sanitizerEnd = '<!-- rocprofiler-systems-sanitizer-summary:end -->';
+            const buildSection = `${start}\n${fs.readFileSync('junit-summary.md', 'utf8').trim()}\n${end}`;
+            const sanitizerSection = `${sanitizerStart}\n${fs.readFileSync('sanitizer-summary.md', 'utf8').trim()}\n${sanitizerEnd}`;
+
+            function replaceSection(body, sectionStart, sectionEnd, replacement) {
+              const begin = body.indexOf(sectionStart);
+              const finish = body.indexOf(sectionEnd);
+              if (begin !== -1 && finish !== -1 && finish > begin) {
+                return `${body.slice(0, begin)}${replacement}${body.slice(finish + sectionEnd.length)}`;
+              }
+              return `${body.trim()}\n\n${replacement}`;
+            }
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const comment = comments.find((item) =>
+              item.user.type === 'Bot' && item.body && item.body.includes(marker)
+            );
+
+            if (comment) {
+              let body = replaceSection(comment.body, start, end, buildSection);
+              body = replaceSection(body, sanitizerStart, sanitizerEnd, sanitizerSection);
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: comment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body: `${marker}\n# rocprofiler-systems CI Summary\n\n${buildSection}\n\n${sanitizerSection}`,
+              });
+            }

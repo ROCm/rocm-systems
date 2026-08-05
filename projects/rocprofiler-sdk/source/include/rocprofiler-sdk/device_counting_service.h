@@ -46,7 +46,7 @@ ROCPROFILER_EXTERN_C_INIT
  * call outside of context startup.
  * @retval ::ROCPROFILER_STATUS_ERROR_AGENT_MISMATCH Agent of profile does not match agent of the
  * context.
- * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if succesfully configured
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if successfully configured
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 typedef rocprofiler_status_t (*rocprofiler_device_counting_agent_cb_t)(
@@ -91,7 +91,7 @@ typedef void (*rocprofiler_device_counting_service_cb_t)(
  * @retval ::ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND Returned if the buffer is not found.
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Returned if context already has agent
  *                                                     profiling configured for agent_id.
- * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if succesfully configured
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if successfully configured
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t

@@ -303,8 +303,9 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
       const amd::Image::Format imageFormat({channelOrder, channelType});
       const cl_mem_object_type imageType = hip::getCLMemObjectType(pResDesc->resType);
       const size_t imageSizeInBytes = pResDesc->res.linear.sizeInBytes;
-      amd::Memory* buffer =
-          getMemoryObjectWithOffset(pResDesc->res.linear.devPtr, imageSizeInBytes);
+      amd::Memory* buffer = getMemoryObjectWithOffset(hip::getCurrentDevice(),
+                                                       pResDesc->res.linear.devPtr,
+                                                       imageSizeInBytes);
       hipError_t status = hipSuccess;
       image = ihipImageCreate(channelOrder, channelType, imageType,
                               imageSizeInBytes / imageFormat.getElementSize(), /* imageWidth */
@@ -340,8 +341,9 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
       if (!ValidateDevicePointer(pResDesc->res.pitch2D.devPtr)) {
         return hipErrorInvalidValue;
       }
-      amd::Memory* buffer =
-          getMemoryObjectWithOffset(pResDesc->res.pitch2D.devPtr, imageSizeInBytes);
+      amd::Memory* buffer = getMemoryObjectWithOffset(hip::getCurrentDevice(),
+                                                       pResDesc->res.pitch2D.devPtr,
+                                                       imageSizeInBytes);
 
       hipError_t status = hipSuccess;
       image = ihipImageCreate(channelOrder, channelType, imageType,

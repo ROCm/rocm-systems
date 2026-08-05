@@ -307,6 +307,7 @@ global:
     hipDestroyExternalSemaphore;
     hipImportExternalMemory;
     hipExternalMemoryGetMappedBuffer;
+    hipExternalMemoryGetMappedMipmappedArray;
     hipDestroyExternalMemory;
     hipMemcpy2DToArrayAsync;
     hipDrvMemcpy2DUnaligned;
@@ -660,6 +661,10 @@ global:
     hipKernelSetAttribute;
     hipKernelGetFunction;
     hipMemPrefetchBatchAsync;
+    hipMemDiscardBatchAsync;
+    hipDrvMemDiscardBatchAsync;
+    hipMemDiscardAndPrefetchBatchAsync;
+    hipDrvMemDiscardAndPrefetchBatchAsync;
 local:
     *;
 } hip_7.1;
@@ -694,3 +699,10 @@ global:
 local:
     *;
 } hip_7.2;
+
+hip_7.15 {
+global:
+    hipMemGetDefaultMemPool;
+local:
+    *;
+} hip_7.14;

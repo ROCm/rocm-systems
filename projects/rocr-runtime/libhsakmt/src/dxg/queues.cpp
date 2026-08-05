@@ -244,3 +244,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId, uint64_t va
   queue_->RingDoorbell(value);
   return HSAKMT_STATUS_SUCCESS;
 }
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetSigbusDelay(HSAuint32 /*NodeId*/,
+                                             HSAuint32 /*DelayMs*/) {
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}

@@ -258,8 +258,9 @@ __device__ void QueuePair::mlx5_quiet_single() {
 }
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
-__device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, uintptr_t raddr,
-                                             uint8_t opcode, ActiveWFInfo &wf_info) {
+__device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t raddr,
+    uint32_t rkey, uintptr_t laddr, uint32_t lkey,
+    uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
   if (wf_info.is_pe_group_last) {
     // get SQ lock
     acquire_lock(&mlx5_sq.lock);
@@ -276,8 +277,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, ui
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, rkey, laddr,
-                   send_inline ? 0 : get_lkey(laddr),
+                   raddr, byteswap<uint32_t>(rkey), laddr, byteswap<uint32_t>(lkey),
                    static_cast<uint32_t>(length), send_inline};
 
   // copy to SQ
@@ -287,15 +287,21 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, ui
     // increment post counter
     mlx5_sq.post += wf_info.num_pe_group_lanes;
     // we are the last thread in the wavefront, so we have the last WQE posted
-    mlx5_ring_doorbell(mlx5_sq.post, wqe);
+    if (ring_db) {
+      mlx5_ring_doorbell(mlx5_sq.post, wqe);
+    }
     // release SQ lock
     release_lock(&mlx5_sq.lock);
   }
 }
 
 // precondition: called with all active lanes using different QPs
-__device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t laddr, uintptr_t raddr,
-                                                    uint8_t opcode, bool ring_db) {
+__device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t laddr,
+                                                    uint32_t lkey, uintptr_t raddr,
+                                                    uint32_t rkey, uint8_t opcode,
+                                                    bool ring_db) {
+  bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
+
   // get SQ lock
   acquire_lock(&mlx5_sq.lock);
   // poll until we have enough space for at least one WQE
@@ -305,12 +311,10 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t la
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, 0);
   uint16_t sq_idx = mlx5_sq_idx(mlx5_sq, wqe_idx);
 
-  // can we inline the data into the WQE?
-  bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
-
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, rkey, laddr, get_lkey(laddr), static_cast<uint32_t>(length), send_inline};
+                   raddr, byteswap<uint32_t>(rkey), laddr, byteswap<uint32_t>(lkey),
+                   static_cast<uint32_t>(length), send_inline};
 
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
@@ -330,10 +334,9 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t la
 /* can be called with all active lanes using any number of different QPs, don't assume anything
  * assumes that `fetching' is constant across all lanes using the same QP
  * TODO: make `fetching' a template parameter */
-__device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length,
-                                                 uintptr_t raddr, uint8_t opcode,
-                                                 int64_t atomic_data, int64_t atomic_cmp,
-                                                 bool fetching, ActiveWFInfo &wf_info) {
+__device__ uint64_t QueuePair::mlx5_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+    ActiveWFInfo &wf_info, bool fetching, bool fence) {
   if (wf_info.is_pe_group_last) {
     // get SQ lock
     acquire_lock(&mlx5_sq.lock);
@@ -353,11 +356,14 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, wf_info.pe_group_logical_lane_id);
   uint16_t sq_idx = mlx5_sq_idx(mlx5_sq, wqe_idx);
 
+  uint8_t fm_ce_se = MLX5_WQE_CTRL_CQ_UPDATE;
+  if (fence) fm_ce_se |= MLX5_WQE_CTRL_FENCE;
+
   // construct the WQE on the stack
-  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, rkey,
+  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, fm_ce_se,
+                   raddr, byteswap<uint32_t>(rkey),
                    static_cast<uint64_t>(atomic_data), static_cast<uint64_t>(atomic_cmp),
-                   reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
+                   reinterpret_cast<uintptr_t>(atomic_laddr), byteswap<uint32_t>(atomic_lkey)};
 
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
@@ -382,10 +388,10 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
 }
 
 // precondition: called with all active lanes using different QPs
-__device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int32_t length,
-                                                        uintptr_t raddr, uint8_t opcode,
+__device__ uint64_t QueuePair::mlx5_post_wqe_amo_single(uintptr_t raddr,
+                                                        uint32_t rkey, uint8_t opcode,
                                                         int64_t atomic_data, int64_t atomic_cmp,
-                                                        bool fetching) {
+                                                        bool fetching, bool fence) {
   // get SQ lock
   acquire_lock(&mlx5_sq.lock);
   // poll until we have enough space for at least one WQE
@@ -403,11 +409,14 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int32_t
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, 0);
   uint16_t sq_idx = mlx5_sq_idx(mlx5_sq, wqe_idx);
 
+  uint8_t fm_ce_se = MLX5_WQE_CTRL_CQ_UPDATE;
+  if (fence) fm_ce_se |= MLX5_WQE_CTRL_FENCE;
+
   // construct the WQE on the stack
-  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, rkey,
+  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, fm_ce_se,
+                   raddr, byteswap<uint32_t>(rkey),
                    static_cast<uint64_t>(atomic_data), static_cast<uint64_t>(atomic_cmp),
-                   reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
+                   reinterpret_cast<uintptr_t>(atomic_laddr), byteswap<uint32_t>(atomic_lkey)};
 
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;

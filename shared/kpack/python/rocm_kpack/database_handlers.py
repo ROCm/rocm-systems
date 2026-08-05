@@ -12,7 +12,6 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, List
 
-
 # Compile regex patterns once at module level
 # Matches architecture IDs like gfx908, gfx90a, gfx942-xnack+, gfx90a-xnack-
 # Note: Tensile filenames use hyphens (gfx90a-xnack+), not colons (gfx90a:xnack+)
@@ -178,19 +177,21 @@ class AotritonHandler(DatabaseHandler):
     AOTriton ships precompiled kernel images in per-architecture directories:
         lib/aotriton.images/amd-gfx942/flash/attn_fwd/kernel.aks2
         lib/aotriton.images/amd-gfx11xx/flash/bwd_kernel_dk_dv/kernel.aks2
+        lib/aotriton.images/amd-gfx110x/flash/bwd_kernel_dk_dv/kernel.aks2
 
-    Architecture directories use family names (gfx11xx, gfx120x) for ISA
-    families, and specific chip names (gfx942, gfx90a, gfx950) for others.
+    Architecture directories use family/sub-family names (gfx11xx, gfx110x,
+    gfx115x, gfx120x) for shared ISA assets, and specific chip names
+    (gfx942, gfx90a, gfx950) for others.
 
     Returns bundle keys from the rocm-bootstrap hierarchy:
-        gfx11xx → gfx11 (family), gfx120x → gfx12_0 (sub-family),
-        gfx942 → gfx942 (target), etc.
+        gfx11xx → gfx11 (family), gfx110x → gfx110x (sub-family),
+        gfx120x → gfx12_0 (sub-family), gfx942 → gfx942 (target), etc.
     """
 
     # Mapping from aotriton directory suffixes to rocm-bootstrap bundle keys.
-    # Entries are only needed for family/sub-family patterns that differ from
-    # the raw directory name. Target-level names (gfx942, gfx90a, etc.) pass
-    # through unchanged since they are already valid bundle keys.
+    # Entries are only needed for patterns that differ from the raw directory
+    # name. Already-valid keys (gfx110x, gfx942, gfx90a, etc.) pass through
+    # unchanged.
     _BUNDLE_MAP = {
         "gfx11xx": "gfx11",
         "gfx120x": "gfx12_0",
@@ -206,7 +207,7 @@ class AotritonHandler(DatabaseHandler):
         Pattern: */aotriton.images/amd-gfx*/...
 
         Returns:
-            Bundle key (e.g., 'gfx11', 'gfx12_0', 'gfx942') or None.
+            Bundle key (e.g., 'gfx11', 'gfx110x', 'gfx12_0', 'gfx942') or None.
         """
         path_str = self._relative_path(path, prefix_root)
         path_parts = Path(path_str).parts
@@ -279,6 +280,50 @@ class MIOpenHandler(DatabaseHandler):
         return None
 
 
+class HipKernelProviderRockeHandler(DatabaseHandler):
+    """Handler for hipKernelProvider per-architecture kernel content.
+
+    Engines install ISA-specific content under a generic ``arch_content``
+    container in the plugin engines dir, keyed by an arch directory:
+        .../hipdnn_plugins/engines/arch_content/rocke/gfx942/rocke_client_gfx942.kpack
+        .../hipdnn_plugins/engines/arch_content/rocke/gfx950/rocke_client_gfx950.kpack
+    The container is ``arch_content`` (not ``hip_kernel_provider/``, whose name
+    would collide with the plugin file and shadow it from hipDNN's loader), so
+    future engines drop under ``arch_content/<engine>/`` with no handler change.
+    """
+
+    def name(self) -> str:
+        return "hipkernelprovider"
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        """
+        Detect per-arch content by its arch directory.
+
+        Pattern: */engines/arch_content/[.../]<arch>/...  The ``engines`` parent
+        scopes the match to the plugin engines dir (matching TheRock's
+        ``**/engines/arch_content/**`` include).
+
+        Returns:
+            Bundle key (the gfx arch directory, e.g. 'gfx942') or None.
+        """
+        parts = Path(self._relative_path(path, prefix_root)).parts
+        root = next(
+            (
+                i
+                for i in range(1, len(parts))
+                if parts[i] == "arch_content" and parts[i - 1] == "engines"
+            ),
+            None,
+        )
+        if root is None:
+            return None
+        # First arch dir under arch_content with a file beneath it is the key.
+        for i in range(root + 1, len(parts) - 1):
+            if _GFX_ARCH_PATTERN.fullmatch(parts[i]):
+                return parts[i]
+        return None
+
+
 # Registry of available handlers
 AVAILABLE_HANDLERS = {
     "rocblas": RocBLASHandler,
@@ -286,6 +331,7 @@ AVAILABLE_HANDLERS = {
     "hipsparselt": HipSparseLtHandler,
     "aotriton": AotritonHandler,
     "miopen": MIOpenHandler,
+    "hipkernelprovider": HipKernelProviderRockeHandler,
 }
 
 

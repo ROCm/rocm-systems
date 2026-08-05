@@ -5,15 +5,14 @@
 
 #pragma once
 
-#include "hipfile-cpp20.h"
 #include "hipfile-warnings.h"
 #include "stats.h"
-#include "thread-pool.h"
 
 #include <stdexcept>
 #ifdef AIS_TESTING
 #include <mutex>
 #endif
+#include <concepts>
 
 #define HIPFILE_CONTEXT_DEFAULT_IMPL(T, Impl)                                                                \
     template <> struct ContextDefaultImpl<T> : ContextDefaultImplChecked<T, Impl> {}
@@ -23,14 +22,13 @@ namespace hipFile {
 template <typename T> struct ContextOverride;
 
 template <typename T, typename Impl>
-HIPFILE_REQUIRES(std::derived_from<Impl, T>)
+    requires(std::derived_from<Impl, T>)
 struct ContextDefaultImplChecked {
     using type = Impl;
 };
 
 template <typename T> struct ContextDefaultImpl : ContextDefaultImplChecked<T, T> {};
 HIPFILE_CONTEXT_DEFAULT_IMPL(IStatsServer, StatsServer);
-HIPFILE_CONTEXT_DEFAULT_IMPL(IThreadPool, ThreadPool);
 
 template <typename T> struct Context {
     using DefaultImpl = typename ContextDefaultImpl<T>::type;

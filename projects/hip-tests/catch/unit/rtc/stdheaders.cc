@@ -119,6 +119,8 @@ HIP_TEST_CASE(Unit_hiprtc_stdheaders) {
 
   HIP_CHECK(hipMemcpy(hResult.get(), dResult, sizeof(bool), hipMemcpyDeviceToHost));
 
+  HIP_CHECK(hipFree(dResult));
+
   HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   REQUIRE(*hResult == true);

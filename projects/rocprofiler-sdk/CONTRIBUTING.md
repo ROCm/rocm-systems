@@ -174,7 +174,7 @@ If rocprofv3 requires application replay, execute `set follow-fork-mode child` w
   * The first parameter to `TEST(<group>, <name>)` or `TEST_F(<group>, <name>)` should either be the name of the file, e.g. `TEST(agent, <name>)` in `agent.cpp`, or the name of test executable.
   * If the unit test is limit to a certain source file, e.g. `source/lib/common/utility.cpp`, then unit tests in the tests folder should be in a file by the same name, e.g. `source/lib/common/tests/utility.cpp`.
   * All of the source files in a unit test folder should be compiled into one executable and CTests should be added via `gtest_add_tests(...)`
-  * It is permitted to deactive clang-tidy for unit tests via `rocprofiler_deactivate_clang_tidy()`
+  * It is permitted to deactivate clang-tidy for unit tests via `rocprofiler_deactivate_clang_tidy()`
   * The `add_subdirectory(tests)` in parent directory's `CMakeLists.txt` should be guarded with `if(ROCPROFILER_BUILD_TESTS)`
 
 ## Code License ##

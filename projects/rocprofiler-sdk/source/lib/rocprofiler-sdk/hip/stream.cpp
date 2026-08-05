@@ -80,38 +80,73 @@ add_stream(hipStream_t stream, bool reindex_existing = true)
 {
     return get_stream_map()->wlock(
         [](stream_map_t& _data, hipStream_t _stream, const bool _reindex_existing) {
-            static uint64_t idx_offset = 0;
+            static uint64_t next_stream_idx = 1;
 
-            auto idx = _data.size() + idx_offset;
-            ROCP_INFO << fmt::format(
-                "hipStream_t={} :: id={}.handle={}{}", static_cast<void*>(_stream), '{', idx, '}');
+            auto make_stream_id = [&_stream]() {
+                return rocprofiler_stream_id_t{.handle =
+                                                   (_stream == nullptr) ? 0 : next_stream_idx++};
+            };
 
-            ROCP_CI_LOG_IF(WARNING, idx == 0 && _stream != nullptr)
-                << "null hip stream does not have index 0";
-
-            if(!_data.emplace(_stream, rocprofiler_stream_id_t{.handle = idx}).second)
+            auto itr = _data.find(_stream);
+            if(itr == _data.end())
             {
-                // Do not change the index if attachment mode is currently active
-                if(!_reindex_existing) return _data.at(_stream);
-                idx_offset += 1;
-                // Handle special hipStreamPerThread case where each thread has it's own implicit
-                // stream ID. No need to update map since hipStreamPerThread is defined as 0x02
-                if(_stream == hipStreamPerThread)
-                {
-                    return rocprofiler_stream_id_t{.handle = idx};
-                }
-                idx            = _data.size() + idx_offset;
-                auto _existing = _data.at(_stream);
-                ROCP_INFO << "existing hipStream_t ("
-                          << sdk::utility::as_hex(static_cast<void*>(_stream))
-                          << ") reallocated. rocprofiler_stream_id_t{.handle = " << _existing.handle
-                          << "} -> rocprofiler_stream_id_t{.handle = " << idx << "}";
-                _data.at(_stream) = rocprofiler_stream_id_t{.handle = idx};
+                auto stream_id = make_stream_id();
+                ROCP_INFO << fmt::format("hipStream_t={} :: id={{.handle={}}}",
+                                         static_cast<void*>(_stream),
+                                         stream_id.handle);
+
+                ROCP_CI_LOG_IF(WARNING, stream_id.handle == 0 && _stream != nullptr)
+                    << "null hip stream does not have index 0";
+
+                return _data.emplace(_stream, stream_id).first->second;
             }
-            return _data.at(_stream);
+
+            // Do not change the index if attachment mode is currently active. The null stream is
+            // also permanently reserved as stream ID 0.
+            if(!_reindex_existing || _stream == nullptr) return itr->second;
+
+            auto stream_id = make_stream_id();
+
+            // Handle special hipStreamPerThread case where each thread has its own implicit stream
+            // ID. No need to update map since hipStreamPerThread is defined as 0x02.
+            if(_stream == hipStreamPerThread) return stream_id;
+
+            auto _existing = itr->second;
+            ROCP_INFO << "existing hipStream_t ("
+                      << sdk::utility::as_hex(static_cast<void*>(_stream))
+                      << ") reallocated. rocprofiler_stream_id_t{.handle = " << _existing.handle
+                      << "} -> rocprofiler_stream_id_t{.handle = " << stream_id.handle << "}";
+            itr->second = stream_id;
+            return itr->second;
         },
         stream,
         reindex_existing);
+}
+
+void
+remove_stream(hipStream_t stream)
+{
+    get_stream_map()->wlock(
+        [](stream_map_t& _data, hipStream_t _stream) {
+            auto itr = _data.find(_stream);
+            if(itr != _data.end())
+            {
+                ROCP_INFO << fmt::format(
+                    "remove_stream :: hipStream_t ({}, rocprofiler_stream_id_t{{.handle = {}}})",
+                    sdk::utility::as_hex(static_cast<void*>(_stream)),
+                    itr->second.handle);
+                _data.erase(itr);
+            }
+            else
+            {
+                // Not an error: the stream may have been created during a window when HIP stream
+                // tracing was not active, so it was never added to the map.
+                ROCP_INFO << fmt::format(
+                    "remove_stream :: hipStream_t ({}) not found in map after destroy",
+                    sdk::utility::as_hex(static_cast<void*>(_stream)));
+            }
+        },
+        stream);
 }
 
 auto
@@ -147,8 +182,10 @@ get_stream_id(hipStream_t stream)
     // Stream ID already exists
     if(stream_id) return *stream_id;
 
-    ROCP_CI_LOG_IF(WARNING, !rocprofiler::registration::supports_attachment()) << fmt::format(
-        "Stream ID is not present in {} when attach feature is not being used", __FUNCTION__);
+    ROCP_INFO_IF(!rocprofiler::registration::supports_attachment())
+        << fmt::format("Stream ID is not present in {}, registering hipStream_t ({}) lazily",
+                       __FUNCTION__,
+                       sdk::utility::as_hex(static_cast<void*>(stream)));
     return add_stream(stream, false);
 }
 
@@ -316,6 +353,10 @@ FuncT create_destroy_functor(RetT (*func)(Args...))
                                                   ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
                                                   ROCPROFILER_HIP_STREAM_DESTROY,
                                                   tracer_data);
+
+            // Mirror add_stream in the create functor: only mutate the map while stream tracing
+            // is active so create/destroy bookkeeping stays symmetric.
+            remove_stream(stream);
         }
 
         if constexpr(!std::is_void<RetT>::value) return _ret;

@@ -39,7 +39,7 @@ if(NOT DEFINED ROCM_PATH)
     set(ROCM_PATH "/opt/rocm"  CACHE STRING "Default ROCM installation directory")
 endif()
 
-## Build is not supported on Windows plaform
+## Build is not supported on Windows platform
 if(WIN32)
   message(FATAL_ERROR "Windows build is not supported.")
 endif()

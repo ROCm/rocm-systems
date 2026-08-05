@@ -5,6 +5,7 @@
 
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
+#include "core/perfetto/engine.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/perfetto_processor.hpp"
@@ -12,6 +13,7 @@
 #include "core/trace_cache/sample_processor.hpp"
 #include "core/trace_cache/storage_parser_alias.hpp"
 #include "core/trace_cache/unified_memory_processor.hpp"
+#include "core/track_registry.hpp"
 #include "library/runtime.hpp"
 #include "logger/debug.hpp"
 
@@ -50,10 +52,12 @@ sum_storage_bytes(const std::vector<std::shared_ptr<data::processor_config_t>>& 
 }
 
 [[nodiscard]] data::processor_storage_t
-configure_processors(const std::shared_ptr<sample_processor_t>&       _coordinator,
-                     const std::shared_ptr<data::processor_config_t>& _config,
-                     const data::enabled_formats_t&                   _formats,
-                     output_file_registry&                            _registry)
+configure_processors(
+    const std::shared_ptr<sample_processor_t>&       _coordinator,
+    const std::shared_ptr<data::processor_config_t>& _config,
+    const data::enabled_formats_t& _formats, output_file_registry& _registry,
+    std::optional<std::reference_wrapper<core::cached_perfetto_engine>> _engine,
+    std::optional<std::reference_wrapper<rocprofsys::track_registry>>   _tracks)
 {
     data::processor_storage_t storage;
     if(_formats.is_rocpd_enabled())
@@ -63,11 +67,11 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _coordinat
             _config->_ppid, _registry);
         _coordinator->add_handler(*storage.rocpd_processor);
     }
-    if(_formats.is_perfetto_enabled())
+    if(_formats.is_perfetto_enabled() && _engine.has_value() && _tracks.has_value())
     {
         storage.perfetto_processor = std::make_shared<perfetto_processor_t>(
             _config->_metadata_registry, _config->_agent_manager, _config->_pid,
-            _config->_ppid, _registry);
+            _config->_ppid, _registry, _tracks->get());
         _coordinator->add_handler(*storage.perfetto_processor);
     }
 
@@ -83,11 +87,12 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _coordinat
 }
 
 void
-process_buffered_storage(const std::shared_ptr<data::processor_config_t>& _config,
-                         const std::string&             _storage_filename,
-                         const data::enabled_formats_t& _formats,
-                         output_file_registry&          _registry,
-                         progress::progress_callback    _progress_cb)
+process_buffered_storage(
+    const std::shared_ptr<data::processor_config_t>& _config,
+    const std::string& _storage_filename, const data::enabled_formats_t& _formats,
+    output_file_registry& _registry, progress::progress_callback _progress_cb,
+    std::optional<std::reference_wrapper<core::cached_perfetto_engine>> _engine,
+    std::optional<std::reference_wrapper<rocprofsys::track_registry>>   _tracks)
 {
     LOG_DEBUG("Processing buffered storage: {} for pid={}", _storage_filename,
               _config->_pid);
@@ -96,9 +101,23 @@ process_buffered_storage(const std::shared_ptr<data::processor_config_t>& _confi
     // RAII lifetime guard: configure_processors registers raw references to the
     // returned processors as handlers on _coordinator. Holding _storage in scope
     // keeps those processors alive until the parse + finalize is done.
-    [[maybe_unused]] auto _storage =
-        configure_processors(_coordinator, _config, _formats, _registry);
-    storage_parser_t _parser(_storage_filename);
+    [[maybe_unused]] auto _storage = configure_processors(_coordinator, _config, _formats,
+                                                          _registry, _engine, _tracks);
+    storage_parser_t      _parser(_storage_filename);
+
+    // perfetto_processor_t::prepare_for_processing primes two thread_local
+    // values on this parser thread (active track_registry + emitting pid).
+    // Today std::thread instances are not reused across configs, so the TLS
+    // dies with the thread. If a future thread-pool migration reuses worker
+    // threads, this guard ensures the TLS does not carry into the next task.
+    struct tls_reset_guard
+    {
+        ~tls_reset_guard()
+        {
+            ::rocprofsys::set_active_track_registry(nullptr);
+            ::rocprofsys::core::set_emitting_pid(-1);
+        }
+    } _tls_guard;
 
     _coordinator->prepare_for_processing();
     try
@@ -121,6 +140,14 @@ post_processor::post_processor(progress::tracker&    tracker,
 : m_tracker(tracker)
 , m_registry(registry)
 {}
+
+void
+post_processor::set_cached_perfetto_context(core::cached_perfetto_engine& engine,
+                                            rocprofsys::track_registry&   tracks) noexcept
+{
+    m_engine = engine;
+    m_tracks = tracks;
+}
 
 void
 post_processor::process(
@@ -147,7 +174,8 @@ post_processor::run_sequential(
         auto _progress_cb = m_tracker.begin(
             fmt::format("Generating trace-cache output for process [{}]", cfg->_pid),
             file_size_or_zero(_filename));
-        process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb);
+        process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb,
+                                 m_engine, m_tracks);
     }
     LOG_DEBUG("Sequential processing completed");
 }
@@ -160,26 +188,37 @@ post_processor::run_multithreaded(
     LOG_DEBUG("Starting multithreaded processing with {} configs", configs.size());
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
-    auto _progress_cb = m_tracker.begin("Generating ROCpd output database file",
-                                        sum_storage_bytes(configs));
+    auto _progress_cb = m_tracker.begin(
+        fmt::format("Generating {} output", formats.names()), sum_storage_bytes(configs));
 
-    std::vector<std::thread> processing_threads;
-    processing_threads.reserve(configs.size());
-    for(const auto& cfg : configs)
-    {
+    // Bound concurrency to hardware_concurrency so processing hundreds of
+    // pids does not oversubscribe the scheduler and degrade total
+    // throughput. Process in batches that fit the bound.
+    const auto hw         = std::thread::hardware_concurrency();
+    const auto max_active = (hw > 0) ? static_cast<std::size_t>(hw) : std::size_t{ 1 };
+
+    auto spawn_for_config = [this, &formats, &_progress_cb](
+                                const std::shared_ptr<data::processor_config_t>& cfg) {
         LOG_TRACE("Spawning processing thread for pid={}", cfg->_pid);
-        // Capture the callback by value: it holds a shared_ptr to the bar,
-        // and bar::on_advance is thread-safe, so concurrent calls are fine.
-        processing_threads.emplace_back([this, cfg, &formats, _progress_cb] {
+        return std::thread{ [this, cfg, &formats, _progress_cb] {
             const auto _filename =
                 utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid);
-            process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb);
-        });
-    }
+            process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb,
+                                     m_engine, m_tracks);
+        } };
+    };
 
-    LOG_TRACE("Waiting for {} processing threads to complete", processing_threads.size());
-    for(auto& thread : processing_threads)
-        thread.join();
+    for(std::size_t batch_start = 0; batch_start < configs.size();
+        batch_start += max_active)
+    {
+        const auto batch_end = std::min(batch_start + max_active, configs.size());
+        std::vector<std::thread> processing_threads;
+        processing_threads.reserve(batch_end - batch_start);
+        for(auto i = batch_start; i < batch_end; ++i)
+            processing_threads.emplace_back(spawn_for_config(configs[i]));
+        for(auto& thread : processing_threads)
+            thread.join();
+    }
     LOG_DEBUG("Multithreaded processing completed");
 }
 

@@ -56,6 +56,7 @@
 #include "suites/functional/memory_alignment.h"
 #include "suites/functional/memory_atomics.h"
 #include "suites/functional/memory_allocation.h"
+#include "suites/functional/memory_fill.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
 #include "suites/functional/svm_memory.h"
@@ -87,10 +88,12 @@
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
 #include "suites/functional/filter_devices.h"
+#include "suites/functional/fp_exception_shutdown.h"
 #include "suites/functional/gpu_coredump.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
+#include "suites/functional/queue_create.h"
 #include "suites/functional/cuid.h"
 #include "common/os.h"
 #include "common/platform_filter.h"
@@ -199,6 +202,13 @@ TEST(rocrtstFunc, MemoryAllocateContiguousTest) {
   if (!RunCustomTestProlog(&ma)) return;
   ma.MemoryAllocateContiguousTest();
   RunCustomTestEpilog(&ma);
+}
+
+TEST(rocrtstFunc, MemoryFillTest) {
+  MemoryFill mf;
+  if (!RunCustomTestProlog(&mf)) return;
+  mf.MemoryFillTest();
+  RunCustomTestEpilog(&mf);
 }
 
 TEST(rocrtstFunc, Concurrent_Init_Test) {
@@ -339,6 +349,13 @@ TEST(rocrtstFunc, Time_Stamp) {
   RunCustomTestEpilog(&ts);
 }
 
+TEST(rocrtstFunc, BarrierPkt_TimeStamp) {
+    TimeStamp ts;
+    RunCustomTestProlog(&ts);
+    ts.BarrierPacketTimestampValidationTest();
+    RunCustomTestEpilog(&ts);
+}
+
 TEST(rocrtstFunc, GpuCoreDump_DefaultPattern) {
     GpuCoreDumpTest gcd;
     if (!RunCustomTestProlog(&gcd)) return;
@@ -386,6 +403,13 @@ TEST(rocrtstFunc, GpuCoreDump_PipePattern) {
     if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestPipePattern();
     RunCustomTestEpilog(&gcd);
+}
+
+TEST(rocrtstFunc, FP_Exception_Shutdown) {
+    FpExceptionShutdownTest fpx;
+    if (!RunCustomTestProlog(&fpx)) return;
+    fpx.TestShutdownSurvivesStrictFpEnv();
+    RunCustomTestEpilog(&fpx);
 }
 
 
@@ -503,6 +527,13 @@ TEST(rocrtstFunc, SvmMemory_Negative_Test) {
     RunCustomTestEpilog(&smt);
 }
 
+TEST(rocrtstFunc, SvmMemory_AccessedBy_All_Devices_Test) {
+    SvmMemoryTestBasic smt;
+    if (!RunCustomTestProlog(&smt)) return;
+    smt.TestAccessedByAllDevices();
+    RunCustomTestEpilog(&smt);
+}
+
 TEST(rocrtstFunc, VirtMemory_Basic_Test) {
     VirtMemoryTestBasic vmt;
 
@@ -520,6 +551,7 @@ TEST(rocrtstFunc, VirtMemory_Access_Test) {
     vmt.CPUAccessToGPUMemoryTest();
     vmt.GPUAccessToCPUMemoryTest();
     vmt.GPUAccessToGPUMemoryTest();
+    vmt.ImportedShareableHandleSetAccessAfterFdClose();
     RunCustomTestEpilog(&vmt);
 }
 
@@ -539,10 +571,39 @@ TEST(rocrtstFunc, VirtMemory_Aliasing_Test) {
     RunCustomTestEpilog(&vmt);
 }
 
-TEST(rocrtstFunc, VirtMemory_Interprocess_Test) {
-    VirtMemoryTestInterProcess vmt;
+TEST(rocrtstFunc, VirtMemory_NonContiguousChunks_Test) {
+  VirtMemoryTestBasic vmt;
+
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.NonContiguousChunks();
+  RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_GPUtoHostAccess_Test) {
+  VirtMemoryTestBasic vmt;
+
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.TestGpuAccessToHostMemoryAllocation();
+  RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_Interprocess_DevicePool_Test) {
+    VirtMemoryTestInterProcess vmt(PoolType::kDevicePool);
     if (!RunCustomTestProlog(&vmt)) return;
     RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_Interprocess_HostPool_Test) {
+    VirtMemoryTestInterProcess vmt(PoolType::kCpuPool);
+    if (!RunCustomTestProlog(&vmt)) return;
+    RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_FabricExport_Readiness_Test) {
+  VirtMemoryTestBasic vmt;
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.TestFabricExportAcceleratorReadiness();
+  RunCustomTestEpilog(&vmt);
 }
 
 TEST(rocrtstFunc, Filter_Devices_Test) {
@@ -613,6 +674,41 @@ TEST(rocrtstFunc, Counted_Queue_Overflow_And_Wraparound_Test) {
   if (!RunCustomTestProlog(&cq)) return;
   cq.CountedQueuesOverflowWrapAroundTest();
   RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Queue_Create_SystemMem_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.SystemMemQueueTest();
+  RunCustomTestEpilog(&qt);
+}
+
+TEST(rocrtstFunc, Queue_Create_DeviceMem_RingBuf_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.DeviceMemRingBufQueueTest();
+  RunCustomTestEpilog(&qt);
+}
+
+TEST(rocrtstFunc, Queue_Create_Batch_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.BatchQueueCreateTest();
+  RunCustomTestEpilog(&qt);
+}
+
+TEST(rocrtstFunc, Queue_Create_SDMA_Create_Destroy_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.SdmaQueueCreateDestroyTest();
+  RunCustomTestEpilog(&qt);
+}
+
+TEST(rocrtstFunc, Queue_Create_Invalid_Args_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.InvalidArgsTest();
+  RunCustomTestEpilog(&qt);
 }
 
 #ifdef HSA_ENABLE_AMDCUID_SUPPORT
@@ -828,5 +924,13 @@ int main(int argc, char** argv) {
     }
     DumpMonitorInfo();
   }
-  return RUN_ALL_TESTS();
+
+  int result = RUN_ALL_TESTS();
+
+  // Print skipped test summary (grouped by reason)
+  rocrtst::SkippedTestTracker::getInstance().printSummary(
+      rocrtst::PlatformDetector::platformName(
+          rocrtst::TestFilterManager::getInstance().getPlatform()));
+
+  return result;
 }

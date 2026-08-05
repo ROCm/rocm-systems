@@ -38,10 +38,18 @@ def parse_args():
         default=None,
         help="Optional output path for the generated parameter header file.",
     )
+    parser.add_argument(
+        "--asan",
+        action="store_true",
+        help="Target is an Address Sanitizer (ASAN) build. Test cases that "
+        "list 'asan' in their 'disabled' field are skipped.",
+    )
     return parser.parse_args()
 
 
-def create_test_definition(group, case_name, case_config, platform, os_name, arch):
+def create_test_definition(
+    group, case_name, case_config, platform, os_name, arch, asan=False
+):
     level = case_config.get("level", 2)
     tags = case_config.get("tags", [])
     disabled = case_config.get("disabled", [])
@@ -53,9 +61,18 @@ def create_test_definition(group, case_name, case_config, platform, os_name, arc
     tags_str += f"[level_{level}]"
     tags_str += f"[{group}]"
 
-    if f"{platform}_{os_name}" in disabled or arch in disabled:
-        # skip case
-        tags_str = "[.]"
+    if (
+        f"{platform}_{os_name}" in disabled
+        or arch in disabled
+        or (asan and "asan" in disabled)
+    ):
+        # Disabled on this platform (e.g. amd_linux) or arch (e.g. gfx1260).
+        # Use the [disabled] tag (no leading dot) so it is visible in --list-tests
+        # and included in a bare ./exe run.
+        # CTest registers these as DISABLED TRUE (skipped by default).
+        tags_str += f"[disabled][{arch}]"
+    else:
+        tags_str += f"[{arch}]"
 
     return f'#define {case_name} "{case_name}", "{tags_str}"'
 
@@ -171,7 +188,7 @@ def main():
         for case_name, case_config in cases.items():
             test_macros.append(
                 create_test_definition(
-                    group, case_name, case_config, platform, os_name, arch
+                    group, case_name, case_config, platform, os_name, arch, args.asan
                 )
             )
 

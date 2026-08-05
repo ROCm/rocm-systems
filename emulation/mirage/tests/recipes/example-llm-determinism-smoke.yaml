@@ -1,0 +1,43 @@
+# Smoke test for the llm_determinism workload — single cell, tiny model.
+#
+# Goal: prove the deterministic-replay harness runs end-to-end and reports
+# pass/fail, NOT to stress comm/compute. One cell, one trial, one step.
+#
+# Single-rank (no torchrun) — export the rendezvous vars first:
+#   export RANK=0 WORLD_SIZE=1 LOCAL_RANK=0 MASTER_ADDR=127.0.0.1 MASTER_PORT=29500
+#   aorta triage run --recipe recipes/example-llm-determinism-smoke.yaml
+#
+# Multi-GPU (real comm coverage):
+#   torchrun --standalone --nproc_per_node=8 $(which aorta) triage run \
+#     --recipe recipes/example-llm-determinism-smoke.yaml
+#
+# `steps` is a first-class recipe field — putting it in workload_config is rejected.
+schema_version: 1
+
+ticket: LLM-DET-SMOKE
+workload: llm_determinism
+
+trials: 1
+steps: 1
+
+confound:
+  threshold: 1.15
+
+# Tiny model so the smoke is fast and fits a single small GPU.
+workload_config:
+  num_layers: 4
+  hidden_size: 1024
+  ffn_size: 2816
+  num_heads: 8
+  seq_len: 256
+  batch_size: 1
+  dtype: bf16
+  seed: 1234
+  checksum_mode: per_rank
+
+cells:
+  - name: smoke-bf16-4L
+    mitigations: [none]
+    environment: local
+    workload_config:
+      capture_dir: ./llm_det_capture/smoke-bf16-4L

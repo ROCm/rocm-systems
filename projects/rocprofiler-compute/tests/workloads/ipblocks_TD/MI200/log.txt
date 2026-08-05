@@ -1,159 +1,361 @@
-Omniperf version: 2.0.0-RC1
-Profiler choice: rocprofv1
-Path: /home1/josantos/omniperf/tests/workloads/ipblocks_TD/MI200
-Target: MI200
+alias: tatd, block id: 15
+Rocprofiler-Compute version: 3.7.0
+Profiler choice: rocprofiler-sdk
+Output directory: /home/xuchen/dev/rocm-systems/projects/rocprofiler-compute/tests/workloads/ipblocks_TD/MI200
+Target: MI210
 Command: ./tests/vcopy -n 1048576 -b 256 -i 3
 Kernel Selection: None
 Dispatch Selection: None
-IP Blocks: ['td']
+Filtered sections: ['tatd']
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Collecting Performance Counters
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-[profiling] Current input file: tests/workloads/ipblocks_TD/MI200/perfmon/pmc_perf_0.txt
-   |-> [rocprof] RPL: on '240321_164312' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
-   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
-   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_TD/MI200/perfmon/pmc_perf_0.txt'
-   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_164312_4170186'
-   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_164312_4170186/input0_results_240321_164312'
-   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_164312_4170186/input0.xml"
-   |-> [rocprof] gpu_index =
-   |-> [rocprof] kernel =
-   |-> [rocprof] range =
-   |-> [rocprof] 9 metrics
-   |-> [rocprof] SQ_CYCLES, SQ_BUSY_CYCLES, SQ_BUSY_CU_CYCLES, SQ_WAVES, SQ_WAVE_CYCLES, GRBM_COUNT, GRBM_GUI_ACTIVE, TD_TD_BUSY_sum, TD_TC_STALL_sum
-   |-> [rocprof] vcopy testing on GCD 0
-   |-> [rocprof] Finished allocating vectors on the CPU
-   |-> [rocprof] Finished allocating vectors on the GPU
-   |-> [rocprof] Finished copying vectors to the GPU
-   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
-   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
-   |-> [rocprof] Launching the  kernel on the GPU
-   |-> [rocprof] Finished executing kernel
-   |-> [rocprof] Finished executing kernel
-   |-> [rocprof] Finished executing kernel
-   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
-   |-> [rocprof] Releasing GPU memory
-   |-> [rocprof] Releasing CPU memory
-   |-> [rocprof]
-   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_164312_4170186/input0_results_240321_164312
-   |-> [rocprof] File 'tests/workloads/ipblocks_TD/MI200/pmc_perf_0.csv' is generating
-   |-> [rocprof]
-[profiling] Current input file: tests/workloads/ipblocks_TD/MI200/perfmon/pmc_perf_1.txt
-   |-> [rocprof] RPL: on '240321_164312' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
-   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
-   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_TD/MI200/perfmon/pmc_perf_1.txt'
-   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_164312_4170370'
-   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_164312_4170370/input0_results_240321_164312'
-   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_164312_4170370/input0.xml"
-   |-> [rocprof] gpu_index =
-   |-> [rocprof] kernel =
-   |-> [rocprof] range =
-   |-> [rocprof] 2 metrics
-   |-> [rocprof] TD_SPI_STALL_sum, TD_LOAD_WAVEFRONT_sum
-   |-> [rocprof] vcopy testing on GCD 0
-   |-> [rocprof] Finished allocating vectors on the CPU
-   |-> [rocprof] Finished allocating vectors on the GPU
-   |-> [rocprof] Finished copying vectors to the GPU
-   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
-   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
-   |-> [rocprof] Launching the  kernel on the GPU
-   |-> [rocprof] Finished executing kernel
-   |-> [rocprof] Finished executing kernel
-   |-> [rocprof] Finished executing kernel
-   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
-   |-> [rocprof] Releasing GPU memory
-   |-> [rocprof] Releasing CPU memory
-   |-> [rocprof]
-   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_164312_4170370/input0_results_240321_164312
-   |-> [rocprof] File 'tests/workloads/ipblocks_TD/MI200/pmc_perf_1.csv' is generating
-   |-> [rocprof]
-[profiling] Current input file: tests/workloads/ipblocks_TD/MI200/perfmon/pmc_perf_2.txt
-   |-> [rocprof] RPL: on '240321_164313' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
-   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
-   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_TD/MI200/perfmon/pmc_perf_2.txt'
-   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_164313_4170555'
-   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_164313_4170555/input0_results_240321_164313'
-   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_164313_4170555/input0.xml"
-   |-> [rocprof] gpu_index =
-   |-> [rocprof] kernel =
-   |-> [rocprof] range =
-   |-> [rocprof] 2 metrics
-   |-> [rocprof] TD_ATOMIC_WAVEFRONT_sum, TD_STORE_WAVEFRONT_sum
-   |-> [rocprof] vcopy testing on GCD 0
-   |-> [rocprof] Finished allocating vectors on the CPU
-   |-> [rocprof] Finished allocating vectors on the GPU
-   |-> [rocprof] Finished copying vectors to the GPU
-   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
-   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
-   |-> [rocprof] Launching the  kernel on the GPU
-   |-> [rocprof] Finished executing kernel
-   |-> [rocprof] Finished executing kernel
-   |-> [rocprof] Finished executing kernel
-   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
-   |-> [rocprof] Releasing GPU memory
-   |-> [rocprof] Releasing CPU memory
-   |-> [rocprof]
-   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_164313_4170555/input0_results_240321_164313
-   |-> [rocprof] File 'tests/workloads/ipblocks_TD/MI200/pmc_perf_2.csv' is generating
-   |-> [rocprof]
-[profiling] Current input file: tests/workloads/ipblocks_TD/MI200/perfmon/pmc_perf_3.txt
-   |-> [rocprof] RPL: on '240321_164313' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
-   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
-   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_TD/MI200/perfmon/pmc_perf_3.txt'
-   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_164313_4170744'
-   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_164313_4170744/input0_results_240321_164313'
-   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_164313_4170744/input0.xml"
-   |-> [rocprof] gpu_index =
-   |-> [rocprof] kernel =
-   |-> [rocprof] range =
-   |-> [rocprof] 1 metrics
-   |-> [rocprof] TD_COALESCABLE_WAVEFRONT_sum
-   |-> [rocprof] vcopy testing on GCD 0
-   |-> [rocprof] Finished allocating vectors on the CPU
-   |-> [rocprof] Finished allocating vectors on the GPU
-   |-> [rocprof] Finished copying vectors to the GPU
-   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
-   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
-   |-> [rocprof] Launching the  kernel on the GPU
-   |-> [rocprof] Finished executing kernel
-   |-> [rocprof] Finished executing kernel
-   |-> [rocprof] Finished executing kernel
-   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
-   |-> [rocprof] Releasing GPU memory
-   |-> [rocprof] Releasing CPU memory
-   |-> [rocprof]
-   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_164313_4170744/input0_results_240321_164313
-   |-> [rocprof] File 'tests/workloads/ipblocks_TD/MI200/pmc_perf_3.csv' is generating
-   |-> [rocprof]
-[profiling] Current input file: tests/workloads/ipblocks_TD/MI200/perfmon/timestamps.txt
-   |-> [rocprof] RPL: on '240321_164314' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
-   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
-   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_TD/MI200/perfmon/timestamps.txt'
-   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_164314_4170931'
-   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_164314_4170931/input0_results_240321_164314'
-   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_164314_4170931/input0.xml"
-   |-> [rocprof] gpu_index =
-   |-> [rocprof] kernel =
-   |-> [rocprof] range =
-   |-> [rocprof] 0 metrics
-   |-> [rocprof] vcopy testing on GCD 0
-   |-> [rocprof] Finished allocating vectors on the CPU
-   |-> [rocprof] Finished allocating vectors on the GPU
-   |-> [rocprof] Finished copying vectors to the GPU
-   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
-   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
-   |-> [rocprof] Launching the  kernel on the GPU
-   |-> [rocprof] Finished executing kernel
-   |-> [rocprof] Finished executing kernel
-   |-> [rocprof] Finished executing kernel
-   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
-   |-> [rocprof] Releasing GPU memory
-   |-> [rocprof] Releasing CPU memory
-   |-> [rocprof]
-   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_164314_4170931/input0_results_240321_164314
-   |-> [rocprof] File 'tests/workloads/ipblocks_TD/MI200/timestamps.csv' is generating
-   |-> [rocprof]
-[roofline] Checking for roofline.csv in tests/workloads/ipblocks_TD/MI200
-[roofline] No roofline data found. Generating...
+Generating native tool project using command: cmake -S /home/xuchen/dev/rocm-systems/projects/rocprofiler-compute/src/lib -B /home/xuchen/dev/rocm-systems/projects/rocprofiler-compute/src/lib/_build
+-- Checking for module 'libdw'
+--   Package 'libdw', required by 'virtual:world', not found
+-- Could NOT find libdw (missing: libdw_LIBRARY libdw_INCLUDE_DIR)
+-- {fmt} version: 12.1.0
+-- Build type:
+-- Configuring done (0.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/xuchen/dev/rocm-systems/projects/rocprofiler-compute/src/lib/_build
+Building native tool using command: cmake --build /home/xuchen/dev/rocm-systems/projects/rocprofiler-compute/src/lib/_build --parallel
+[  0%] Built target gsl_assert
+[ 33%] Built target fmt
+[100%] Built target rocprofiler-compute-tool
+Searching /home/xuchen/dev/rocm-systems/projects/rocprofiler-compute/src by lib/_build/lib/librocprofiler-compute-tool.so for native collector
+Using native collector: /home/xuchen/dev/rocm-systems/projects/rocprofiler-compute/src/lib/_build/lib/librocprofiler-compute-tool.so
+Using native counter collection tool: /home/xuchen/dev/rocm-systems/projects/rocprofiler-compute/src/lib/_build/lib/librocprofiler-compute-tool.so
+[profiling] Iteration multiplexing: Disabled
+[Run 1/8][Approximate profiling time left: pending first measurement...]
+[profiling] Current input file: tests/workloads/ipblocks_TD/MI200/perfmon/pmc_perf_0.yaml
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:10.386462 139967375417152 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.186810 sec
+   |-> [rocprofiler-sdk] [m[rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:10.387048 139967375417152 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.579630 139967375417152 tool.cpp:2423] HSA version 8.21.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] [mvcopy testing on GCD 0
+   |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
+   |-> [rocprofiler-sdk] Finished allocating vectors on the GPU
+   |-> [rocprofiler-sdk] Finished copying vectors to the GPU
+   |-> [rocprofiler-sdk] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprofiler-sdk] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprofiler-sdk] Launching the  kernel on the GPU
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprofiler-sdk] Releasing GPU memory
+   |-> [rocprofiler-sdk] Releasing CPU memory
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:10.675698 139967375417152 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.288650 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.697994 139967375417152 generateRocpd.cpp:583] writing SQL database for process 2525231 on node 2976770398
+   |-> [rocprofiler-sdk] [m[0;31mE20260526 19:04:10.698768 139967375417152 generateRocpd.cpp:606] Opened result file: tests/workloads/ipblocks_TD/MI200/out/pmc_1/smc4124-25-mi210-3c48/2525231_results.db (UUID=0001fa78-e4b4-74b4-8280-d4010a62346d)
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.777982 139967375417152 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.007718 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.779087 139967375417152 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.001089 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.780637 139967375417152 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.001536 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.790671 139967375417152 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_agent         ::     0.008087 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.853221 139967375417152 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc           ::     0.062534 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.855262 139967375417152 simple_timer.cpp:55] SQLite3 generation :: rocpd kernel info        ::     0.002026 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.855279 139967375417152 simple_timer.cpp:55] SQLite3 generation :: rocpd_region             ::     0.000004 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.863951 139967375417152 simple_timer.cpp:55] SQLite3 generation :: rocpd_kernel_dispatch    ::     0.008665 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.863966 139967375417152 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event          ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.863972 139967375417152 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_copy        ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.863978 139967375417152 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_allocate    ::     0.000001 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.864084 139967375417152 simple_timer.cpp:55] SQLite3 generation :: SQL indexing             ::     0.000098 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.864285 139967375417152 simple_timer.cpp:55] SQLite3 generation :: total                    ::     0.166291 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.867231 139967375417152 simple_timer.cpp:55] [rocprofv3] output generation ::     0.190065 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:10.867291 139967375417152 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.191553 sec
+   |-> [rocprofiler-sdk] [m[rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [write_counters] Counter collection data has been written to: tests/workloads/ipblocks_TD/MI200/out/pmc_1/2525231_native_counter_collection.csv
+Intermediate results_*.csv generation from rocpd databases is deprecated and will be replaced with automatic .db file retention in a future release.
+[Run 2/8][Approximate profiling time left: 11 seconds]...
+[profiling] Current input file: tests/workloads/ipblocks_TD/MI200/perfmon/pmc_perf_1.yaml
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:12.349531 124499989634880 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.182832 sec
+   |-> [rocprofiler-sdk] [m[rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:12.350158 124499989634880 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.544672 124499989634880 tool.cpp:2423] HSA version 8.21.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] [mvcopy testing on GCD 0
+   |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
+   |-> [rocprofiler-sdk] Finished allocating vectors on the GPU
+   |-> [rocprofiler-sdk] Finished copying vectors to the GPU
+   |-> [rocprofiler-sdk] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprofiler-sdk] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprofiler-sdk] Launching the  kernel on the GPU
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprofiler-sdk] Releasing GPU memory
+   |-> [rocprofiler-sdk] Releasing CPU memory
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:12.634333 124499989634880 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.284176 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.656659 124499989634880 generateRocpd.cpp:583] writing SQL database for process 2525242 on node 2976770398
+   |-> [rocprofiler-sdk] [m[0;31mE20260526 19:04:12.657447 124499989634880 generateRocpd.cpp:606] Opened result file: tests/workloads/ipblocks_TD/MI200/out/pmc_1/smc4124-25-mi210-3c48/2525242_results.db (UUID=0001fa78-ec63-7c63-ae5a-6b1c08d61237)
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.739666 124499989634880 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.007625 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.740863 124499989634880 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.001181 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.742460 124499989634880 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.001582 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.752682 124499989634880 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_agent         ::     0.008240 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.781984 124499989634880 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc           ::     0.029286 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.784312 124499989634880 simple_timer.cpp:55] SQLite3 generation :: rocpd kernel info        ::     0.002314 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.784330 124499989634880 simple_timer.cpp:55] SQLite3 generation :: rocpd_region             ::     0.000004 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.792980 124499989634880 simple_timer.cpp:55] SQLite3 generation :: rocpd_kernel_dispatch    ::     0.008643 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.792997 124499989634880 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event          ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.793003 124499989634880 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_copy        ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.793009 124499989634880 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_allocate    ::     0.000001 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.793120 124499989634880 simple_timer.cpp:55] SQLite3 generation :: SQL indexing             ::     0.000102 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.793341 124499989634880 simple_timer.cpp:55] SQLite3 generation :: total                    ::     0.136682 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.796207 124499989634880 simple_timer.cpp:55] [rocprofv3] output generation ::     0.160241 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:12.796252 124499989634880 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.161878 sec
+   |-> [rocprofiler-sdk] [m[rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [write_counters] Counter collection data has been written to: tests/workloads/ipblocks_TD/MI200/out/pmc_1/2525242_native_counter_collection.csv
+Intermediate results_*.csv generation from rocpd databases is deprecated and will be replaced with automatic .db file retention in a future release.
+[Run 3/8][Approximate profiling time left: 9 seconds]...
+[profiling] Current input file: tests/workloads/ipblocks_TD/MI200/perfmon/pmc_perf_2.yaml
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:14.280847 136225428488000 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.185991 sec
+   |-> [rocprofiler-sdk] [m[rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:14.281453 136225428488000 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.474125 136225428488000 tool.cpp:2423] HSA version 8.21.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] [mvcopy testing on GCD 0
+   |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
+   |-> [rocprofiler-sdk] Finished allocating vectors on the GPU
+   |-> [rocprofiler-sdk] Finished copying vectors to the GPU
+   |-> [rocprofiler-sdk] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprofiler-sdk] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprofiler-sdk] Launching the  kernel on the GPU
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprofiler-sdk] Releasing GPU memory
+   |-> [rocprofiler-sdk] Releasing CPU memory
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:14.561454 136225428488000 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.280001 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.583676 136225428488000 generateRocpd.cpp:583] writing SQL database for process 2525250 on node 2976770398
+   |-> [rocprofiler-sdk] [m[0;31mE20260526 19:04:14.584461 136225428488000 generateRocpd.cpp:606] Opened result file: tests/workloads/ipblocks_TD/MI200/out/pmc_1/smc4124-25-mi210-3c48/2525250_results.db (UUID=0001fa78-f3eb-73eb-ab2f-c8d2c337387f)
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.666637 136225428488000 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.007774 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.667831 136225428488000 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.001178 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.669458 136225428488000 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.001613 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.679710 136225428488000 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_agent         ::     0.008264 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.709085 136225428488000 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc           ::     0.029361 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.711448 136225428488000 simple_timer.cpp:55] SQLite3 generation :: rocpd kernel info        ::     0.002347 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.711465 136225428488000 simple_timer.cpp:55] SQLite3 generation :: rocpd_region             ::     0.000004 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.720071 136225428488000 simple_timer.cpp:55] SQLite3 generation :: rocpd_kernel_dispatch    ::     0.008598 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.720085 136225428488000 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event          ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.720092 136225428488000 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_copy        ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.720098 136225428488000 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_allocate    ::     0.000001 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.720202 136225428488000 simple_timer.cpp:55] SQLite3 generation :: SQL indexing             ::     0.000096 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.720419 136225428488000 simple_timer.cpp:55] SQLite3 generation :: total                    ::     0.136744 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.723302 136225428488000 simple_timer.cpp:55] [rocprofv3] output generation ::     0.160319 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:14.723350 136225428488000 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.161856 sec
+   |-> [rocprofiler-sdk] [m[rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [write_counters] Counter collection data has been written to: tests/workloads/ipblocks_TD/MI200/out/pmc_1/2525250_native_counter_collection.csv
+Intermediate results_*.csv generation from rocpd databases is deprecated and will be replaced with automatic .db file retention in a future release.
+[Run 4/8][Approximate profiling time left: 7 seconds]...
+[profiling] Current input file: tests/workloads/ipblocks_TD/MI200/perfmon/pmc_perf_3.yaml
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:16.205443 135315317419840 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.184566 sec
+   |-> [rocprofiler-sdk] [m[rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:16.206012 135315317419840 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.400138 135315317419840 tool.cpp:2423] HSA version 8.21.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] [mvcopy testing on GCD 0
+   |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
+   |-> [rocprofiler-sdk] Finished allocating vectors on the GPU
+   |-> [rocprofiler-sdk] Finished copying vectors to the GPU
+   |-> [rocprofiler-sdk] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprofiler-sdk] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprofiler-sdk] Launching the  kernel on the GPU
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprofiler-sdk] Releasing GPU memory
+   |-> [rocprofiler-sdk] Releasing CPU memory
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:16.493461 135315317419840 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.287449 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.515724 135315317419840 generateRocpd.cpp:583] writing SQL database for process 2525258 on node 2976770398
+   |-> [rocprofiler-sdk] [m[0;31mE20260526 19:04:16.516513 135315317419840 generateRocpd.cpp:606] Opened result file: tests/workloads/ipblocks_TD/MI200/out/pmc_1/smc4124-25-mi210-3c48/2525258_results.db (UUID=0001fa78-fb71-7b71-8a65-9462abe2b65e)
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.598355 135315317419840 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.007743 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.599549 135315317419840 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.001179 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.601214 135315317419840 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.001650 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.611708 135315317419840 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_agent         ::     0.008337 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.634039 135315317419840 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc           ::     0.022307 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.636214 135315317419840 simple_timer.cpp:55] SQLite3 generation :: rocpd kernel info        ::     0.002161 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.636231 135315317419840 simple_timer.cpp:55] SQLite3 generation :: rocpd_region             ::     0.000004 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.644813 135315317419840 simple_timer.cpp:55] SQLite3 generation :: rocpd_kernel_dispatch    ::     0.008575 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.644827 135315317419840 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event          ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.644833 135315317419840 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_copy        ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.644839 135315317419840 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_allocate    ::     0.000002 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.644942 135315317419840 simple_timer.cpp:55] SQLite3 generation :: SQL indexing             ::     0.000095 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.645151 135315317419840 simple_timer.cpp:55] SQLite3 generation :: total                    ::     0.129427 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.648185 135315317419840 simple_timer.cpp:55] [rocprofv3] output generation ::     0.153195 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:16.648233 135315317419840 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.154730 sec
+   |-> [rocprofiler-sdk] [m[rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [write_counters] Counter collection data has been written to: tests/workloads/ipblocks_TD/MI200/out/pmc_1/2525258_native_counter_collection.csv
+Intermediate results_*.csv generation from rocpd databases is deprecated and will be replaced with automatic .db file retention in a future release.
+[Run 5/8][Approximate profiling time left: 5 seconds]...
+[profiling] Current input file: tests/workloads/ipblocks_TD/MI200/perfmon/pmc_perf_4.yaml
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:18.130028 135787914551104 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.185855 sec
+   |-> [rocprofiler-sdk] [m[rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:18.130616 135787914551104 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.324461 135787914551104 tool.cpp:2423] HSA version 8.21.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] [mvcopy testing on GCD 0
+   |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
+   |-> [rocprofiler-sdk] Finished allocating vectors on the GPU
+   |-> [rocprofiler-sdk] Finished copying vectors to the GPU
+   |-> [rocprofiler-sdk] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprofiler-sdk] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprofiler-sdk] Launching the  kernel on the GPU
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprofiler-sdk] Releasing GPU memory
+   |-> [rocprofiler-sdk] Releasing CPU memory
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:18.419658 135787914551104 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.289043 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.443147 135787914551104 generateRocpd.cpp:583] writing SQL database for process 2525266 on node 2976770398
+   |-> [rocprofiler-sdk] [m[0;31mE20260526 19:04:18.443904 135787914551104 generateRocpd.cpp:606] Opened result file: tests/workloads/ipblocks_TD/MI200/out/pmc_1/smc4124-25-mi210-3c48/2525266_results.db (UUID=0001fa79-02f5-72f5-9304-2b77a03c07ba)
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.527897 135787914551104 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.007789 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.529134 135787914551104 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.001218 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.530707 135787914551104 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.001557 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.541586 135787914551104 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_agent         ::     0.008902 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.557632 135787914551104 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc           ::     0.016030 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.559773 135787914551104 simple_timer.cpp:55] SQLite3 generation :: rocpd kernel info        ::     0.002125 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.559790 135787914551104 simple_timer.cpp:55] SQLite3 generation :: rocpd_region             ::     0.000001 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.570042 135787914551104 simple_timer.cpp:55] SQLite3 generation :: rocpd_kernel_dispatch    ::     0.010243 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.570069 135787914551104 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event          ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.570075 135787914551104 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_copy        ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.570081 135787914551104 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_allocate    ::     0.000001 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.570218 135787914551104 simple_timer.cpp:55] SQLite3 generation :: SQL indexing             ::     0.000129 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.570642 135787914551104 simple_timer.cpp:55] SQLite3 generation :: total                    ::     0.127496 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.573637 135787914551104 simple_timer.cpp:55] [rocprofv3] output generation ::     0.152420 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:18.573732 135787914551104 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.153989 sec
+   |-> [rocprofiler-sdk] [m[rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [write_counters] Counter collection data has been written to: tests/workloads/ipblocks_TD/MI200/out/pmc_1/2525266_native_counter_collection.csv
+Intermediate results_*.csv generation from rocpd databases is deprecated and will be replaced with automatic .db file retention in a future release.
+[Run 6/8][Approximate profiling time left: 3 seconds]...
+[profiling] Current input file: tests/workloads/ipblocks_TD/MI200/perfmon/pmc_perf_5.yaml
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:20.074567 133681004298048 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.187015 sec
+   |-> [rocprofiler-sdk] [m[rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:20.075168 133681004298048 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.000001 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.268397 133681004298048 tool.cpp:2423] HSA version 8.21.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] [mvcopy testing on GCD 0
+   |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
+   |-> [rocprofiler-sdk] Finished allocating vectors on the GPU
+   |-> [rocprofiler-sdk] Finished copying vectors to the GPU
+   |-> [rocprofiler-sdk] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprofiler-sdk] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprofiler-sdk] Launching the  kernel on the GPU
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprofiler-sdk] Releasing GPU memory
+   |-> [rocprofiler-sdk] Releasing CPU memory
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:20.356514 133681004298048 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.281346 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.378852 133681004298048 generateRocpd.cpp:583] writing SQL database for process 2525281 on node 2976770398
+   |-> [rocprofiler-sdk] [m[0;31mE20260526 19:04:20.379645 133681004298048 generateRocpd.cpp:606] Opened result file: tests/workloads/ipblocks_TD/MI200/out/pmc_1/smc4124-25-mi210-3c48/2525281_results.db (UUID=0001fa79-0a8c-7a8c-9346-9eb7eed9832c)
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.461682 133681004298048 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.007660 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.462884 133681004298048 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.001185 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.464483 133681004298048 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.001585 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.474848 133681004298048 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_agent         ::     0.008415 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.490590 133681004298048 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc           ::     0.015727 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.492693 133681004298048 simple_timer.cpp:55] SQLite3 generation :: rocpd kernel info        ::     0.002089 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.492710 133681004298048 simple_timer.cpp:55] SQLite3 generation :: rocpd_region             ::     0.000004 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.502344 133681004298048 simple_timer.cpp:55] SQLite3 generation :: rocpd_kernel_dispatch    ::     0.009627 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.502358 133681004298048 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event          ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.502364 133681004298048 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_copy        ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.502371 133681004298048 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_allocate    ::     0.000001 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.502474 133681004298048 simple_timer.cpp:55] SQLite3 generation :: SQL indexing             ::     0.000096 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.502667 133681004298048 simple_timer.cpp:55] SQLite3 generation :: total                    ::     0.123815 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.505692 133681004298048 simple_timer.cpp:55] [rocprofv3] output generation ::     0.147634 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:20.505732 133681004298048 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.149177 sec
+   |-> [rocprofiler-sdk] [m[rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [write_counters] Counter collection data has been written to: tests/workloads/ipblocks_TD/MI200/out/pmc_1/2525281_native_counter_collection.csv
+Intermediate results_*.csv generation from rocpd databases is deprecated and will be replaced with automatic .db file retention in a future release.
+[Run 7/8][Approximate profiling time left: 1 second]...
+[profiling] Current input file: tests/workloads/ipblocks_TD/MI200/perfmon/pmc_perf_6.yaml
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:21.980344 123454993948480 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.183170 sec
+   |-> [rocprofiler-sdk] [m[rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:21.980931 123454993948480 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.000001 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.174401 123454993948480 tool.cpp:2423] HSA version 8.21.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] [mvcopy testing on GCD 0
+   |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
+   |-> [rocprofiler-sdk] Finished allocating vectors on the GPU
+   |-> [rocprofiler-sdk] Finished copying vectors to the GPU
+   |-> [rocprofiler-sdk] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprofiler-sdk] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprofiler-sdk] Launching the  kernel on the GPU
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprofiler-sdk] Releasing GPU memory
+   |-> [rocprofiler-sdk] Releasing CPU memory
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:22.264788 123454993948480 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.283858 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.286839 123454993948480 generateRocpd.cpp:583] writing SQL database for process 2525289 on node 2976770398
+   |-> [rocprofiler-sdk] [m[0;31mE20260526 19:04:22.287642 123454993948480 generateRocpd.cpp:606] Opened result file: tests/workloads/ipblocks_TD/MI200/out/pmc_1/smc4124-25-mi210-3c48/2525289_results.db (UUID=0001fa79-1202-7202-973c-1799b1de4726)
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.369381 123454993948480 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.007726 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.370570 123454993948480 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.001171 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.372175 123454993948480 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.001590 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.382418 123454993948480 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_agent         ::     0.008312 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.397845 123454993948480 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc           ::     0.015411 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.400010 123454993948480 simple_timer.cpp:55] SQLite3 generation :: rocpd kernel info        ::     0.002150 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.400027 123454993948480 simple_timer.cpp:55] SQLite3 generation :: rocpd_region             ::     0.000004 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.408859 123454993948480 simple_timer.cpp:55] SQLite3 generation :: rocpd_kernel_dispatch    ::     0.008817 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.408873 123454993948480 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event          ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.408879 123454993948480 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_copy        ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.408886 123454993948480 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_allocate    ::     0.000001 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.408991 123454993948480 simple_timer.cpp:55] SQLite3 generation :: SQL indexing             ::     0.000094 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.409172 123454993948480 simple_timer.cpp:55] SQLite3 generation :: total                    ::     0.122334 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.412004 123454993948480 simple_timer.cpp:55] [rocprofv3] output generation ::     0.145825 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:22.412069 123454993948480 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.147231 sec
+   |-> [rocprofiler-sdk] [m[rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [write_counters] Counter collection data has been written to: tests/workloads/ipblocks_TD/MI200/out/pmc_1/2525289_native_counter_collection.csv
+Intermediate results_*.csv generation from rocpd databases is deprecated and will be replaced with automatic .db file retention in a future release.
+[Run 8/8][Approximate profiling time left: 0 seconds]...
+[profiling] Current input file: tests/workloads/ipblocks_TD/MI200/perfmon/pmc_perf_7.yaml
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:23.899253 136732169822016 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.184975 sec
+   |-> [rocprofiler-sdk] [m[rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:23.899844 136732169822016 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.094369 136732169822016 tool.cpp:2423] HSA version 8.21.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] [mvcopy testing on GCD 0
+   |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
+   |-> [rocprofiler-sdk] Finished allocating vectors on the GPU
+   |-> [rocprofiler-sdk] Finished copying vectors to the GPU
+   |-> [rocprofiler-sdk] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprofiler-sdk] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprofiler-sdk] Launching the  kernel on the GPU
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprofiler-sdk] Releasing GPU memory
+   |-> [rocprofiler-sdk] Releasing CPU memory
+   |-> [rocprofiler-sdk] [0;33mW20260526 19:04:24.194471 136732169822016 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.294627 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.216897 136732169822016 generateRocpd.cpp:583] writing SQL database for process 2525297 on node 2976770398
+   |-> [rocprofiler-sdk] [m[0;31mE20260526 19:04:24.217694 136732169822016 generateRocpd.cpp:606] Opened result file: tests/workloads/ipblocks_TD/MI200/out/pmc_1/smc4124-25-mi210-3c48/2525297_results.db (UUID=0001fa79-197f-797f-861e-57ac5c20dff2)
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.297212 136732169822016 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.007661 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.298368 136732169822016 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.001139 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.299922 136732169822016 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.001539 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.310078 136732169822016 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_agent         ::     0.008251 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.325312 136732169822016 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc           ::     0.015219 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.327376 136732169822016 simple_timer.cpp:55] SQLite3 generation :: rocpd kernel info        ::     0.002048 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.327393 136732169822016 simple_timer.cpp:55] SQLite3 generation :: rocpd_region             ::     0.000004 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.336078 136732169822016 simple_timer.cpp:55] SQLite3 generation :: rocpd_kernel_dispatch    ::     0.008678 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.336092 136732169822016 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event          ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.336099 136732169822016 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_copy        ::     0.000000 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.336105 136732169822016 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_allocate    ::     0.000001 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.336207 136732169822016 simple_timer.cpp:55] SQLite3 generation :: SQL indexing             ::     0.000093 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.336396 136732169822016 simple_timer.cpp:55] SQLite3 generation :: total                    ::     0.119500 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.339285 136732169822016 simple_timer.cpp:55] [rocprofv3] output generation ::     0.143221 sec
+   |-> [rocprofiler-sdk] [m[0;33mW20260526 19:04:24.339334 136732169822016 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.144812 sec
+   |-> [rocprofiler-sdk] [m[rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [write_counters] Counter collection data has been written to: tests/workloads/ipblocks_TD/MI200/out/pmc_1/2525297_native_counter_collection.csv
+Intermediate results_*.csv generation from rocpd databases is deprecated and will be replaced with automatic .db file retention in a future release.
+PC sampling data collection skipped as block 21 is not specified.
+[roofline] Skipping roofline

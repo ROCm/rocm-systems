@@ -13,6 +13,8 @@
 /// arrays are inlined after the args. File descriptors (memfds for GPU
 /// memory) are passed via SCM_RIGHTS ancillary messages.
 
+#include "rocjitsu/vm/rj_vm.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -47,7 +49,17 @@ struct RpcHeader {
 };
 
 /// @brief RPC protocol version. Increment when making breaking changes.
-inline constexpr uint32_t kRpcProtocolVersion = 2;
+inline constexpr uint32_t kRpcProtocolVersion = 3;
+
+/// @brief Largest payload the daemon accepts after an RpcHeader.
+/// @details The daemon rejects — and disconnects — any client whose header
+/// declares more than this, so senders must size their payload against the
+/// same bound. Covers the RpcIoctlRequest, the ioctl args, and any inlined
+/// pointer array.
+inline constexpr uint32_t kMaxPayloadBytes = 16 * 1024 * 1024;
+
+/// @brief Fixed-size GPU metadata sent during daemon handshake.
+using RpcGpuInfo = ::rj_vm_gpu_info_t;
 
 /// @brief Handshake response payload (sent after RPC_HANDSHAKE).
 struct RpcHandshakeResponse {
@@ -55,6 +67,7 @@ struct RpcHandshakeResponse {
   uint32_t gpu_id;            ///< KFD gpu_id for the simulated device.
   uint32_t topology_path_len; ///< Length of the topology path string that follows.
   uint32_t drm_path_len;      ///< Length of the DRM sysfs path string that follows.
+  RpcGpuInfo gpu_info;        ///< Device metadata for client-side DRM/libdrm emulation.
 };
 
 /// @brief Ioctl request payload (when opcode == RPC_IOCTL).
@@ -86,7 +99,8 @@ struct RpcMunmapRequest {
 };
 
 static_assert(sizeof(RpcHeader) == 16);
-static_assert(sizeof(RpcHandshakeResponse) == 16);
+static_assert(sizeof(RpcGpuInfo) == 312);
+static_assert(sizeof(RpcHandshakeResponse) == 328);
 static_assert(sizeof(RpcIoctlRequest) == 8);
 static_assert(sizeof(RpcMmapRequest) == 32);
 static_assert(sizeof(RpcMmapResponse) == 8);
@@ -194,6 +208,12 @@ inline ssize_t rpc_recv_msg(int sock, void *data, size_t data_len, int *fds = nu
 /// @param total_bytes Number of bytes to read.
 /// @retval true All bytes were read successfully.
 /// @retval false Connection closed or recv(2) returned an error (errno is set).
+/// @note Deliberately reports no byte count, unlike rpc_send_exact(). A sender
+/// needs the zero-versus-partial distinction because a frame that never started
+/// leaves the stream aligned; a receiver does not, because by the time a reply
+/// is read the request is already on the wire, so any failure -- including one
+/// at zero bytes -- leaves the peer's answer, or the tail of it, unclaimed and
+/// the stream unparseable. Every failure here is terminal.
 inline bool rpc_recv_exact(int sock, void *buffer, size_t total_bytes) {
   auto *cursor = static_cast<uint8_t *>(buffer);
   size_t remaining = total_bytes;
@@ -213,31 +233,45 @@ inline bool rpc_recv_exact(int sock, void *buffer, size_t total_bytes) {
 /// @param sock Connected Unix domain socket fd.
 /// @param buffer Buffer to send from.
 /// @param total_bytes Number of bytes to send.
+/// @param[out] bytes_sent_out Optional; on return holds the number of bytes
+/// actually handed to the socket, which on failure is how much of the frame the
+/// peer will see. A caller that has to decide whether the stream is still
+/// parseable needs this: a failure at zero bytes puts nothing on the wire, any
+/// other failure leaves the peer parsing a truncated frame.
 /// @retval true All bytes were sent successfully.
 /// @retval false Connection closed or send(2) returned an error (errno is set).
-inline bool rpc_send_exact(int sock, const void *buffer, size_t total_bytes) {
+inline bool rpc_send_exact(int sock, const void *buffer, size_t total_bytes,
+                           size_t *bytes_sent_out = nullptr) {
   auto *cursor = static_cast<const uint8_t *>(buffer);
   size_t remaining = total_bytes;
+  auto report = [&](bool complete) {
+    if (bytes_sent_out)
+      *bytes_sent_out = total_bytes - remaining;
+    return complete;
+  };
   while (remaining > 0) {
     ssize_t bytes_sent = send(sock, cursor, remaining, MSG_NOSIGNAL);
     if (bytes_sent < 0 && errno == EINTR)
       continue;
     if (bytes_sent <= 0)
-      return false;
+      return report(false);
     cursor += bytes_sent;
     remaining -= static_cast<size_t>(bytes_sent);
   }
-  return true;
+  return report(true);
 }
 
 /// @brief Per-user runtime directory for rocjitsu state files.
 /// @details Checks $ROCJITSU_RUNTIME_DIR first (used by test infrastructure
 /// for per-process isolation), then $XDG_RUNTIME_DIR/rocjitsu, falling back
-/// to /tmp/rocjitsu-<uid>.
+/// to /tmp/rocjitsu-<uid>. An env var that is SET BUT EMPTY is treated as unset:
+/// returning "" would root every derived path (socket, config, per-PID dirs) at
+/// the filesystem root and make the reapers iterate/delete from "/" or CWD, so we
+/// never return an empty string.
 inline std::string rpc_default_runtime_dir() {
-  if (const char *rj = getenv("ROCJITSU_RUNTIME_DIR"))
+  if (const char *rj = getenv("ROCJITSU_RUNTIME_DIR"); rj && *rj)
     return rj;
-  if (const char *xdg = getenv("XDG_RUNTIME_DIR"))
+  if (const char *xdg = getenv("XDG_RUNTIME_DIR"); xdg && *xdg)
     return std::string(xdg) + "/rocjitsu";
   return "/tmp/rocjitsu-" + std::to_string(getuid());
 }
@@ -248,6 +282,34 @@ inline std::string rpc_default_socket_path() { return rpc_default_runtime_dir() 
 /// @brief Path to the config file written by the CLI for interposer discovery.
 inline std::string rpc_default_config_file_path() {
   return rpc_default_runtime_dir() + "/config_path";
+}
+
+/// @brief Environment variable carrying the resolved per-invocation runtime dir.
+/// @details The CLI exports this before execvp, so every descendant process
+/// (direct children and grandchildren spawned through wrappers like ctest)
+/// inherits the exact directory holding config_path/daemon.sock without
+/// re-deriving it from its own PID. Absent in attach mode, where the interposer
+/// falls back to its own PID-scoped runtime dir (which does not exist, so
+/// connect_to_daemon then uses the well-known socket).
+inline constexpr char kRpcInvocationDirEnv[] = "ROCJITSU_INVOCATION_DIR";
+
+/// @brief Per-invocation runtime directory scoped by PID.
+/// @details The CLI creates <runtime_dir>/<pid>/ before execvp and exports its
+/// path via $ROCJITSU_INVOCATION_DIR so the interposer locates the correct
+/// config/socket without depending on the process-tree shape. All descendants
+/// inherit the same directory through the environment.
+inline std::string rpc_invocation_runtime_dir(pid_t pid) {
+  return rpc_default_runtime_dir() + "/" + std::to_string(pid);
+}
+
+/// @brief Per-invocation daemon socket path scoped by PID.
+inline std::string rpc_invocation_socket_path(pid_t pid) {
+  return rpc_invocation_runtime_dir(pid) + "/daemon.sock";
+}
+
+/// @brief Per-invocation config-path handoff file scoped by PID.
+inline std::string rpc_invocation_config_file_path(pid_t pid) {
+  return rpc_invocation_runtime_dir(pid) + "/config_path";
 }
 
 } // namespace rocjitsu
