@@ -1914,6 +1914,220 @@ TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
   EXPECT_EQ(rodata_word, 0xA5A55A5Au);
 }
 
+// COMPUTE_PGM_RSRC3 is carried over verbatim only when source and target agree on its layout.
+// "GFX10 or later" is not a fine enough test: INST_PREF_SIZE is GFX11+, and IMAGE_OP is GFX11+,
+// so handing a GFX11 or GFX12 word to a GFX10 target would set bits GFX10 requires to be zero.
+// Equally, a GFX12 word must survive intact on a GFX12 target, including the GFX125-only
+// NAMED_BAR_CNT and an INST_PREF_SIZE above the 63 that GFX11's narrower field can hold.
+TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
+  using namespace rocr::llvm::amdhsa;
+
+  const auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
+  AmdGpuCodeObject probe(image.data(), image.size());
+  ASSERT_TRUE(probe.is_valid());
+  const Section *probe_rodata = find_section(probe, ".rodata");
+  ASSERT_NE(probe_rodata, nullptr);
+  ASSERT_GE(probe_rodata->size(), sizeof(kernel_descriptor_t));
+
+  // A GFX12-shaped source word: INST_PREF_SIZE beyond GFX11's 6-bit range, plus a GFX125-only
+  // named-barrier allocation.
+  uint32_t source_rsrc3 = 0;
+  AMDHSA_BITS_SET(source_rsrc3, COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE, 107u);
+  AMDHSA_BITS_SET(source_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT, 3u);
+
+  auto patched_rsrc3 = [&](rj_code_arch_t source_arch,
+                           rj_code_arch_t target_arch) -> std::optional<uint32_t> {
+    auto local_image = image;
+    AmdGpuCodeObject local_co(local_image.data(), local_image.size());
+    if (!local_co.is_valid())
+      return std::nullopt;
+    const Section *rodata = find_section(local_co, ".rodata");
+    if (rodata == nullptr)
+      return std::nullopt;
+
+    auto descriptor = read_kernel_descriptor_for_test(rodata->data());
+    descriptor.compute_pgm_rsrc3 = source_rsrc3;
+    write_kernel_descriptor_for_test(local_image.data() + rodata->sectionOffset(), descriptor);
+
+    AmdGpuCodeObject seeded(local_image.data(), local_image.size());
+    if (!seeded.is_valid())
+      return std::nullopt;
+
+    KdTranslation translation{};
+    translation.descriptor_file_offset = rodata->sectionOffset();
+    translation.target_wave_size = 32;
+    translation.source_arch = source_arch;
+
+    CodeObjectPatcher patcher(seeded);
+    if (!patcher.apply_kernel_descriptor_translation(translation, target_arch))
+      return std::nullopt;
+    const auto patched_image = patcher.emit();
+    return read_kernel_descriptor_for_test(patched_image.data() +
+                                           translation.descriptor_file_offset)
+        .compute_pgm_rsrc3;
+  };
+
+  // Matching layout: carried verbatim, both the wide INST_PREF_SIZE and NAMED_BAR_CNT.
+  const auto same_layout = patched_rsrc3(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(same_layout.has_value());
+  EXPECT_EQ(*same_layout, source_rsrc3);
+  EXPECT_EQ(AMDHSA_BITS_GET(*same_layout, COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE), 107u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*same_layout, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT), 3u);
+
+  // GFX10 targets have no INST_PREF_SIZE and no IMAGE_OP; the GFX12 word must not be inherited.
+  for (const rj_code_arch_t gfx10 : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    const auto rebuilt = patched_rsrc3(ROCJITSU_CODE_ARCH_GFX1250, gfx10);
+    ASSERT_TRUE(rebuilt.has_value());
+    EXPECT_NE(*rebuilt, source_rsrc3);
+    EXPECT_EQ(AMDHSA_BITS_GET(*rebuilt, COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE), 0u)
+        << "GFX10 reserves the INST_PREF_SIZE bits and requires them to be zero";
+  }
+
+  // A GFX9/CDNA source encodes ACCUM_OFFSET here, so it is rebuilt for a GFX12 target.
+  const auto from_cdna = patched_rsrc3(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(from_cdna.has_value());
+  EXPECT_NE(*from_cdna, source_rsrc3);
+  EXPECT_EQ(AMDHSA_BITS_GET(*from_cdna, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT), 0u);
+
+  // The narrow case: GFX11 -> GFX10. Both are "GFX10+" and both use SHARED_VGPR_COUNT, so a
+  // coarse family check treats them as interchangeable -- but GFX11's INST_PREF_SIZE at 9:4 and
+  // IMAGE_OP at 31 are reserved on GFX10 and must not be carried over.
+  uint32_t gfx11_rsrc3 = 0;
+  AMDHSA_BITS_SET(gfx11_rsrc3, COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE, 21u);
+  AMDHSA_BITS_SET(gfx11_rsrc3, COMPUTE_PGM_RSRC3_GFX10_PLUS_IMAGE_OP, 1u);
+  source_rsrc3 = gfx11_rsrc3;
+  for (const rj_code_arch_t gfx10 : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    const auto rebuilt = patched_rsrc3(ROCJITSU_CODE_ARCH_RDNA3, gfx10);
+    ASSERT_TRUE(rebuilt.has_value());
+    EXPECT_EQ(AMDHSA_BITS_GET(*rebuilt, COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE), 0u)
+        << "GFX10 reserves INST_PREF_SIZE; a GFX11 word must not be carried over";
+    EXPECT_EQ(AMDHSA_BITS_GET(*rebuilt, COMPUTE_PGM_RSRC3_GFX10_PLUS_IMAGE_OP), 0u)
+        << "IMAGE_OP is GFX11+; GFX10 reserves bit 31";
+  }
+
+  // GFX11 -> GFX11 still round-trips, so the split does not over-rebuild.
+  const auto gfx11_same = patched_rsrc3(ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_TRUE(gfx11_same.has_value());
+  EXPECT_EQ(*gfx11_same, gfx11_rsrc3);
+
+  // GFX125 -> GFX120. Both are GFX12, and both use the same 8-bit INST_PREF_SIZE, but LLVM
+  // reserves bits 21:14 on GFX120 while GFX125 fills them with NAMED_BAR_CNT,
+  // ENABLE_DYNAMIC_VGPR, TCP_SPLIT and ENABLE_DIDT_THROTTLE. A shared "GFX12+" bucket would
+  // carry those straight into target-reserved bits.
+  uint32_t gfx125_rsrc3 = 0;
+  AMDHSA_BITS_SET(gfx125_rsrc3, COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE, 107u);
+  AMDHSA_BITS_SET(gfx125_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT, 3u);
+  AMDHSA_BITS_SET(gfx125_rsrc3, COMPUTE_PGM_RSRC3_GFX125_TCP_SPLIT, 5u);
+  AMDHSA_BITS_SET(gfx125_rsrc3, COMPUTE_PGM_RSRC3_GFX125_ENABLE_DYNAMIC_VGPR, 1u);
+  source_rsrc3 = gfx125_rsrc3;
+  const auto to_gfx120 = patched_rsrc3(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(to_gfx120.has_value());
+  EXPECT_EQ(AMDHSA_BITS_GET(*to_gfx120, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT), 0u)
+      << "bits 21:14 are reserved on GFX120 and must not inherit GFX125 state";
+  EXPECT_EQ(AMDHSA_BITS_GET(*to_gfx120, COMPUTE_PGM_RSRC3_GFX125_TCP_SPLIT), 0u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*to_gfx120, COMPUTE_PGM_RSRC3_GFX125_ENABLE_DYNAMIC_VGPR), 0u);
+
+  // GFX125 -> GFX125 keeps all of it.
+  const auto gfx125_same = patched_rsrc3(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(gfx125_same.has_value());
+  EXPECT_EQ(*gfx125_same, gfx125_rsrc3);
+}
+
+// SHARED_VGPR_COUNT is the one carried field this patcher invalidates itself: it rewrites both
+// the wave size and the RSRC1 VGPR allocation the field is constrained against. LLVM requires
+// the count to be zero for wave32, and for wave64 requires
+// (compute_pgm_rsrc1.vgprs + 1) * 4 + shared_vgpr_count * 8 <= 256.
+//
+// The field counts registers the unchanged kernel body uses, so a descriptor that no longer
+// leaves room for them is refused rather than clamped: clamping would keep the body's demand
+// while shrinking what the descriptor reserves for it.
+TEST(CodeObjectPatcher, SharedVgprCountIsReconciledWithTheTargetAllocation) {
+  using namespace rocr::llvm::amdhsa;
+
+  const auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
+
+  struct PatchOutcome {
+    bool seeded = false;  ///< Fixture setup succeeded.
+    bool patched = false; ///< The patcher accepted the request.
+    uint32_t shared_count = 0;
+  };
+
+  auto patched = [&](uint32_t source_shared, uint32_t target_wave,
+                     uint32_t vgpr_granulated) -> PatchOutcome {
+    auto local_image = image;
+    AmdGpuCodeObject probe(local_image.data(), local_image.size());
+    if (!probe.is_valid())
+      return {};
+    const Section *rodata = find_section(probe, ".rodata");
+    if (rodata == nullptr)
+      return {};
+
+    auto descriptor = read_kernel_descriptor_for_test(rodata->data());
+    descriptor.compute_pgm_rsrc3 = 0;
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX10_PLUS_SHARED_VGPR_COUNT,
+                    source_shared);
+    write_kernel_descriptor_for_test(local_image.data() + rodata->sectionOffset(), descriptor);
+
+    AmdGpuCodeObject seeded(local_image.data(), local_image.size());
+    if (!seeded.is_valid())
+      return {};
+
+    KdTranslation translation{};
+    translation.descriptor_file_offset = rodata->sectionOffset();
+    translation.target_wave_size = target_wave;
+    translation.target_vgpr_granulated = vgpr_granulated;
+    translation.source_arch = ROCJITSU_CODE_ARCH_RDNA3;
+
+    PatchOutcome outcome;
+    outcome.seeded = true;
+    CodeObjectPatcher patcher(seeded);
+    outcome.patched =
+        patcher.apply_kernel_descriptor_translation(translation, ROCJITSU_CODE_ARCH_RDNA3);
+    if (!outcome.patched)
+      return outcome;
+    const auto out = patcher.emit();
+    outcome.shared_count = AMDHSA_BITS_GET(
+        read_kernel_descriptor_for_test(out.data() + translation.descriptor_file_offset)
+            .compute_pgm_rsrc3,
+        COMPUTE_PGM_RSRC3_GFX10_PLUS_SHARED_VGPR_COUNT);
+    return outcome;
+  };
+
+  // Wave64 with a small VGPR allocation: the source request still fits, so it survives.
+  const auto roomy = patched(/*source_shared=*/4, /*target_wave=*/64, /*vgpr_granulated=*/1);
+  ASSERT_TRUE(roomy.seeded);
+  ASSERT_TRUE(roomy.patched);
+  EXPECT_EQ(roomy.shared_count, 4u);
+
+  // Exactly at the limit: (33 + 1) * 4 = 136 arch VGPRs plus 15 * 8 = 120 shared reaches 256.
+  const auto exact = patched(/*source_shared=*/15, /*target_wave=*/64, /*vgpr_granulated=*/33);
+  ASSERT_TRUE(exact.seeded);
+  ASSERT_TRUE(exact.patched);
+  EXPECT_EQ(exact.shared_count, 15u);
+
+  // One block past the limit is refused rather than trimmed to fit.
+  const auto over = patched(/*source_shared=*/15, /*target_wave=*/64, /*vgpr_granulated=*/34);
+  ASSERT_TRUE(over.seeded);
+  EXPECT_FALSE(over.patched) << "an allocation that crowds out the shared blocks must be refused";
+
+  // Wave64 with a large allocation: (63 + 1) * 4 = 256 VGPRs leaves no room at all. Clamping to
+  // zero here used to report success while removing every block the body still uses.
+  const auto tight = patched(/*source_shared=*/9, /*target_wave=*/64, /*vgpr_granulated=*/63);
+  ASSERT_TRUE(tight.seeded);
+  EXPECT_FALSE(tight.patched) << "a 9-to-0 reduction is a resource change, not a translation";
+
+  // Wave32 has no shared VGPR blocks at all, so there is nowhere to put the source's request.
+  const auto wave32 = patched(/*source_shared=*/9, /*target_wave=*/32, /*vgpr_granulated=*/1);
+  ASSERT_TRUE(wave32.seeded);
+  EXPECT_FALSE(wave32.patched) << "wave32 cannot carry shared VGPR blocks";
+
+  // A source that asked for nothing is unaffected by any of the above.
+  const auto none = patched(/*source_shared=*/0, /*target_wave=*/32, /*vgpr_granulated=*/63);
+  ASSERT_TRUE(none.seeded);
+  ASSERT_TRUE(none.patched);
+  EXPECT_EQ(none.shared_count, 0u);
+}
+
 TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
   using namespace rocr::llvm::amdhsa;
 
@@ -13895,6 +14109,89 @@ TEST(BinaryTranslatorE2E, MatchedSemanticExpandRuleFailureIsDiagnostic) {
   EXPECT_FALSE(diagnostic->message.empty());
 }
 
+// Regression: the gfx1250 B0-to-A0 patcher used to zero COMPUTE_PGM_RSRC3 and then write the
+// small architectural default into INST_PREF_SIZE, discarding the value the producing compiler
+// chose to cover its own kernel body. Shrinking the instruction preload that way turned
+// TDM-pipelined MXFP GEMM kernels into intermittent MEMORY_APERTURE_VIOLATION aborts on real
+// gfx1250 parts, so a nonzero source request must survive translation untouched.
+TEST(BinaryTranslatorE2E, Gfx1250PreservesSourceInstPrefSize) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  // 107 exceeds the 6-bit GFX11 field: GFX12+ widened INST_PREF_SIZE to 8 bits, and reading it
+  // through the narrow definition truncates 107 to 43. 25% of the kernels in the gfx1250 Gluon
+  // suites request more than 63 units, so this width matters in practice.
+  constexpr uint32_t kSourceInstPrefSize = 107u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+
+  auto descriptor = rocjitsu::read_kernel_descriptor_for_test(rodata->data());
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE,
+                  kSourceInstPrefSize);
+  // NAMED_BAR_CNT is a GFX125-only control with no GFX10/GFX11 equivalent. Rebuilding RSRC3
+  // used to drop it, which silently removes a kernel's named-barrier allocation.
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT, 5);
+  rocjitsu::write_kernel_descriptor_for_test(image.data() + rodata->sectionOffset(), descriptor);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto *target_rodata = rocjitsu::find_section(translated, ".rodata");
+  ASSERT_NE(target_rodata, nullptr);
+  const auto target = rocjitsu::read_kernel_descriptor_for_test(target_rodata->data());
+  EXPECT_EQ(AMDHSA_BITS_GET(target.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE),
+            kSourceInstPrefSize);
+  EXPECT_EQ(AMDHSA_BITS_GET(target.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT), 5u);
+}
+
+// Zero is a legitimate request: INST_PREF_SIZE == 0 disables the instruction preload for the
+// wave. A same-architecture translation must carry that through rather than substitute the
+// architectural default, which would silently re-enable prefetch the producer turned off. The
+// default is reserved for sources whose RSRC3 is not in the GFX10+ layout at all (GFX90A-family,
+// where those bits are ACCUM_OFFSET) and therefore has to be rebuilt.
+TEST(BinaryTranslatorE2E, Gfx1250PreservesDisabledInstPrefSizeFromGfx10PlusSource) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+
+  auto descriptor = rocjitsu::read_kernel_descriptor_for_test(rodata->data());
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE, 0);
+  rocjitsu::write_kernel_descriptor_for_test(image.data() + rodata->sectionOffset(), descriptor);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto *target_rodata = rocjitsu::find_section(translated, ".rodata");
+  ASSERT_NE(target_rodata, nullptr);
+  const auto target = rocjitsu::read_kernel_descriptor_for_test(target_rodata->data());
+  EXPECT_EQ(AMDHSA_BITS_GET(target.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE),
+            0u);
+}
+
 TEST(KernelDescriptorTranslator, Gfx1250UsesWave32SixteenVgprGranularity) {
   using namespace rocr::llvm::amdhsa;
 
@@ -14041,6 +14338,47 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaVirtualizesOversizedStaticLdsDescript
   EXPECT_EQ(AMDHSA_BITS_GET(patched_kd.compute_pgm_rsrc2,
                             rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE),
             0u);
+}
+
+// SHARED_VGPR_COUNT is carried rather than recomputed, so the registers it reserves have to come
+// out of the target budget before the allocation is chosen. Planning that ignores them picks an
+// allocation the shared blocks no longer fit alongside, and the only way to encode that is to
+// take blocks away from a body that still uses them.
+TEST(KernelDescriptorTranslator, SharedVgprBlocksAreReservedFromTheTargetVgprBudget) {
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  const auto *text = rocjitsu::find_section(layout, ".text");
+  ASSERT_NE(text, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(rocjitsu::TestKernelDescriptor));
+
+  auto *source_kd =
+      reinterpret_cast<rocjitsu::TestKernelDescriptor *>(image.data() + rodata->sectionOffset());
+  // Wave64 is what gives shared VGPR blocks any meaning.
+  AMDHSA_BITS_SET(source_kd->kernel_code_properties,
+                  rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 0);
+  AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc3,
+                  rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX10_PLUS_SHARED_VGPR_COUNT, 9);
+
+  auto plan = [&](uint32_t minimum_vgprs) {
+    rocjitsu::KernelDescriptorTranslationOptions options;
+    options.minimum_vgprs = minimum_vgprs;
+    rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_RDNA3,
+                                                    ROCJITSU_CODE_ARCH_RDNA3);
+    return translator.translate_image(image, text->sectionOffset(), text->size(), options);
+  };
+
+  // Nine blocks reserve 72 of the 256 registers, leaving 184 for the translated allocation.
+  const auto fits = plan(/*minimum_vgprs=*/180);
+  ASSERT_EQ(fits.size(), 1u);
+  EXPECT_TRUE(fits[0].supported);
+
+  const auto overcommits = plan(/*minimum_vgprs=*/200);
+  ASSERT_EQ(overcommits.size(), 1u);
+  EXPECT_FALSE(overcommits[0].supported)
+      << "the body still needs the shared blocks its descriptor declared";
 }
 
 TEST(KernelDescriptorTranslator, VirtualLdsPreservesKernargPreloadRangeWhenSizeIsZero) {

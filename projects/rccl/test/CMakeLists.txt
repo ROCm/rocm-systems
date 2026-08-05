@@ -250,6 +250,7 @@ if(BUILD_TESTS)
     set(TEST_FIXTURE_SOURCE_FILES
       BitOpsTests.cpp
       IommuPassthrough_test.cpp
+      MatchSubnet_test.cpp
       MiscTests.cpp
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
@@ -360,10 +361,12 @@ if(BUILD_TESTS)
       EnqueueTests.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
+      TopoNicFusionTests.cpp
       NetSocketTests.cpp
       PluginCompatV11_test.cpp
       ProxyTests.cpp
       RcclWrapTests.cpp
+      SocketPollTests.cpp
       TransportTests.cpp
       TimeoutTests.cpp
       mem_manager/MemManagerTests.cpp
@@ -378,6 +381,15 @@ if(BUILD_TESTS)
 
     add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
 
+    # Hide the test executable's own symbols so it does NOT interpose
+    # librccl.so's weak alloc.h template/global symbols (e.g.
+    # ncclCudaHostCallocDebug<>, ncclDebugLevel) at load time. Without this,
+    # those interposed-but-mismatched definitions corrupt the heap during a
+    # full ncclCommInit* in this binary. The test still imports librccl's
+    # internal (Debug-visible) symbols normally.
+    target_compile_options(rccl-UnitTestsFixturesDebug PRIVATE
+      -fvisibility=hidden -fvisibility-inlines-hidden)
+    # NetDevsPolicyTests and NetDevsPolicyP2pNetTests load a topology XML fixture
     # SearchTests.cpp #includes the hipify-generated copy of src/graph/search.cc
     # directly (via #include SEARCH_CC_PATH) so it can exercise search.cc's
     # internal symbols in the same TU. Pass the absolute path as a source-scoped
@@ -527,6 +539,7 @@ if(BUILD_TESTS)
       WarpSpeedMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
+      NChannelsPerNetPeerMPITests.cpp
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
       mem_manager/SuspendResumeMPITests.cpp

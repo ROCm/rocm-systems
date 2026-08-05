@@ -705,6 +705,18 @@ endif()
 rj_configure_target(launch_preload_test TEST)
 rj_add_gtest_tests(launch_preload_test)
 
+# --- CLI ROCm visibility tests ---
+# rocm_visibility.cpp ships in the launch-preload library for build convenience,
+# but its tests get their own executable so they mirror the source structure.
+
+add_executable(rocm_visibility_test rocm_visibility_test.cpp)
+target_link_libraries(
+    rocm_visibility_test
+    PRIVATE rocjitsu_cli_launch_preload GTest::gtest_main
+)
+rj_configure_target(rocm_visibility_test TEST)
+rj_add_gtest_tests(rocm_visibility_test)
+
 # --- DBI probe fixture test ---
 # Loads a real amdclang++-compiled rj_nop_probe device ELF and exercises the
 # probe symbol resolver against it. Needs the compiled fixture (amdclang++ +
@@ -972,6 +984,54 @@ rj_add_test(
         "bin/guest_kfd_test"
         "--gtest_filter=GuestKfdFailureTest.SimulatorOversizedLdsFailsCleanly"
 )
+rj_add_test(
+    NAME "GuestKfdFailureTest.PathOnlyAutomaticDbtHandoffFailsClosed"
+    COMMAND
+        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdFailureTest.PathOnlyAutomaticDbtHandoffFailsClosed
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
+        "--"
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdFailureTest.PathOnlyAutomaticDbtHandoffFailsClosed"
+)
+rj_add_test(
+    NAME "GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes"
+    COMMAND
+        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    # The test skips when the runtime directory it is handed is already deeper than
+    # the >4095-byte path it needs to build. Without this the skip would be reported
+    # as a pass and the lost coverage would be invisible.
+    SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
+        "--"
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes"
+)
+# Pure harness logic: no guest device, so no launcher wrapper.
+rj_add_test(
+    NAME "GuestKfdConfigTest.LongPathHandoffSkipsWhenRuntimeDirIsTooDeep"
+    COMMAND
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdConfigTest.LongPathHandoffSkipsWhenRuntimeDirIsTooDeep
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdConfigTest.LongPathHandoffSkipsWhenRuntimeDirIsTooDeep"
+)
 if(RJ_HAS_GFX1201_GPU)
     add_test(
         NAME "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
@@ -1079,7 +1139,9 @@ target_include_directories(
 target_link_libraries(
     hsa_hooks_unit_test
     PRIVATE
-        rocjitsu_hooks
+        # Test-only hook variant: same objects as rocjitsu_hooks plus the
+        # exported rj_hsa_dbt_set_topology_nodes_root_for_test seam.
+        rocjitsu_hooks_testing
         ${RJ_OBJECT_LIBS}
         util
         flatbuffers
