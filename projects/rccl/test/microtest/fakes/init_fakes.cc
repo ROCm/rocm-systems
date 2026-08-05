@@ -10,6 +10,7 @@
 
 #include "init_fakes.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 #include <unordered_map>
@@ -112,6 +113,31 @@ bool validHsaScratchEnvSetting(const char* /*hsaScratchEnv*/, int /*hipRuntimeVe
 int getFirmwareVersion() { return g_firmwareVersion; }
 // Note: ncclCuMemEnable() is provided by nccl_fakes.cc (g_cuMemEnable seam);
 // getHostHash/getPidHash come from the real utils.cc oracle -- not faked here.
+
+// fillInfo downstream seams. gc-sections retains the whole fillInfo function
+// (so these must LINK even when a test returns early); defaults keep the happy
+// path benign: no fabric device, no cross-nic, no GDR.
+struct amdsmiFabricDeviceInfo;  // opaque; only a pointer is used here
+ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char*, uint32_t* deviceIndex) {
+  if (deviceIndex) *deviceIndex = static_cast<uint32_t>(-1);  // -1 -> skip fabric block
+  return ncclSuccess;
+}
+ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t, struct amdsmiFabricDeviceInfo*) {
+  return ncclSuccess;
+}
+ncclResult_t ncclTopoCheckCrossNicSupport(bool* supported) {
+  if (supported) *supported = false;
+  return ncclSuccess;
+}
+ncclResult_t ncclGpuGdrSupport(struct ncclComm*, int* gdrSupport) {
+  if (gdrSupport) *gdrSupport = 0;
+  return ncclSuccess;
+}
+ncclResult_t rocmLibraryInit(void) { return ncclSuccess; }
+uint64_t ncclOsGetPid() { return 4321; }
+// DMA-BUF export function pointer (dmaBufSupported gate): NULL -> unsupported.
+// Global-scope name is unmangled, so an untyped definition satisfies the ref.
+void* pfn_hsa_amd_portable_export_dmabuf = nullptr;
 
 // The NCCL_API dispatch symbol ncclCommGetAsyncError is emitted outside init.cc
 // (the api-trace layer, not linked here); ncclCommEnsureReady calls it. Route it
