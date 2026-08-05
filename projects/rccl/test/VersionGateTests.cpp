@@ -68,11 +68,11 @@ static_assert(!NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(0, ROCM_VER_7_12_60540),
               "a supported version must not override a failed probe");
 static_assert(!NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(0, ROCM_VER_7_12_0), "neither input holds");
 
-// The same two invariants asserted against the gate this build actually compiled
-// with, so the parameterized form above cannot drift away from the real macro.
-static_assert(!NCCL_CUMEM_DMABUF_EXPORT_GATE || NCCL_CUMEM_DMABUF_EXPORT_PROBE, "gate on without the probe");
-static_assert(!NCCL_CUMEM_DMABUF_EXPORT_GATE || NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION),
-              "gate on outside the version window");
+// The gate this build compiled with must still be the parameterized form instantiated
+// with this build's own inputs, or the combinations asserted above stop describing it.
+static_assert(NCCL_CUMEM_DMABUF_EXPORT_GATE ==
+                  NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(NCCL_CUMEM_DMABUF_EXPORT_PROBE, HIP_VERSION),
+              "the build's gate is no longer the parameterized gate for (probe, HIP_VERSION)");
 
 TEST(VersionGateTests, CeBatchAsyncWindow)
 {

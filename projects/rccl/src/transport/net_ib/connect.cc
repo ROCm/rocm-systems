@@ -1524,8 +1524,9 @@ ib_recv:
             if (wrap_ibv_reg_dmabuf_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, export_offset, sizeof(int),
                                        (uint64_t)rCommDev->gpuFlush.gpuFlushGpuMem, rCommDev->gpuFlush.dmabuf_fd,
                                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ) !=
-                ncclSuccess)
+                ncclSuccess) {
               goto peermem_flush;
+            }
             gpuFlushRegistered = true;
             goto flush_reg_done;
           peermem_flush:
