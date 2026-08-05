@@ -133,6 +133,13 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_SDMA_RR");
     enable_sdma_rr_ = (var == "1") ? true : false;
 
+    // When set, DmaCopy self-selection round-robins over an ordered pool of
+    // [preferred engines, then remaining (spill) engines]. Keeps one stream on
+    // the preferred/high-BW engine and spills additional concurrent streams onto
+    // the rest -- mirrors CLR's spill-when-busy for asymmetric engines. Default off.
+    var = os::GetEnvVar("HSA_ENABLE_SDMA_RR_SPILL");
+    enable_sdma_rr_spill_ = (var == "1") ? true : false;
+
     visible_gpus_ = os::GetEnvVar("ROCR_VISIBLE_DEVICES");
     filter_visible_gpus_ = os::IsEnvVarSet("ROCR_VISIBLE_DEVICES");
 
@@ -430,6 +437,8 @@ class Flag {
 
   bool enable_sdma_rr() const { return enable_sdma_rr_; }
 
+  bool enable_sdma_rr_spill() const { return enable_sdma_rr_spill_; }
+
   std::string visible_gpus() const { return visible_gpus_; }
 
   bool filter_visible_gpus() const { return filter_visible_gpus_; }
@@ -617,6 +626,8 @@ class Flag {
   SDMA_OVERRIDE enable_sdma_recommended_eng_;
 
   bool enable_sdma_rr_;
+
+  bool enable_sdma_rr_spill_;
 
   bool filter_visible_gpus_;
   std::string visible_gpus_;

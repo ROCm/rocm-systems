@@ -1180,19 +1180,40 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
   // Recommended SDMA engine copies only have gang factor 1
   uint32_t rec_mask = 0;
   DmaPreferredEngine(dst_agent, src_agent, &rec_mask);
-  // Default: pick the first preferred engine (k=0). When HSA_ENABLE_SDMA_RR is
-  // set, spread concurrent copies across the preferred engines via a free-running
-  // per-agent counter. NthSdmaEngine indexes set bits (k % popcount), so the
-  // rotation stays within rec_mask and is a no-op for a single-engine mask.
-  uint32_t rr_k = core::Runtime::runtime_singleton_->flag().enable_sdma_rr()
-                      ? NextSdmaUserQueueEngineId()
-                      : 0;
-  uint32_t rec_sdma_eng = NthSdmaEngine(rec_mask, rr_k);
-  LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-           "DmaCopy (ROCr self-select): preferred rec_mask=0x%x, rr=%d, rr_k=%u, "
-           "chosen rec_sdma_eng=%d, size=%zu",
-           rec_mask, core::Runtime::runtime_singleton_->flag().enable_sdma_rr() ? 1 : 0,
-           rr_k, rec_sdma_eng, size);
+
+  const bool rr       = core::Runtime::runtime_singleton_->flag().enable_sdma_rr();
+  const bool rr_spill = core::Runtime::runtime_singleton_->flag().enable_sdma_rr_spill();
+  uint32_t rec_sdma_eng = 0;
+
+  if (rr_spill) {
+    // Preferred+spill round-robin: reuse the arch/direction-aware preferred mask,
+    // then round-robin over an ordered pool [preferred engines, spill engines].
+    // 1 stream  -> first preferred engine (small-copy correctness);
+    // N streams -> fill preferred, then spill onto the remaining free engines
+    //              (mirrors CLR's spill-when-busy). Works for symmetric and
+    //              asymmetric engines alike.
+    const uint32_t all_mask   = (1u << (num_h2d_d2h_engines_ + num_p2p_engines_)) - 1;
+    const uint32_t spill_mask = all_mask & ~rec_mask;
+    const uint32_t pref_cnt   = rocr::os::Popcount(rec_mask);
+    const uint32_t pool_cnt   = pref_cnt + rocr::os::Popcount(spill_mask);
+    const uint32_t k          = pool_cnt ? (NextSdmaUserQueueEngineId() % pool_cnt) : 0;
+    rec_sdma_eng = (k < pref_cnt) ? NthSdmaEngine(rec_mask, k)
+                                  : NthSdmaEngine(spill_mask, k - pref_cnt);
+    LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+             "DmaCopy (ROCr self-select): pref_mask=0x%x, spill_mask=0x%x, k=%u, "
+             "chosen rec_sdma_eng=%d, size=%zu",
+             rec_mask, spill_mask, k, rec_sdma_eng, size);
+  } else {
+    // Default: pick the first preferred engine (k=0). When HSA_ENABLE_SDMA_RR is
+    // set, round-robin across the preferred engines only (no spill). NthSdmaEngine
+    // indexes set bits (k % popcount), so it is a no-op for a single-engine mask.
+    uint32_t rr_k = rr ? NextSdmaUserQueueEngineId() : 0;
+    rec_sdma_eng = NthSdmaEngine(rec_mask, rr_k);
+    LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+             "DmaCopy (ROCr self-select): preferred rec_mask=0x%x, rr=%d, rr_k=%u, "
+             "chosen rec_sdma_eng=%d, size=%zu",
+             rec_mask, rr ? 1 : 0, rr_k, rec_sdma_eng, size);
+  }
   if (rec_sdma_eng)
     return DmaCopyOnEngine(dst, dst_agent, src, src_agent, size,
                            dep_signals, out_signal, rec_sdma_eng, false);
