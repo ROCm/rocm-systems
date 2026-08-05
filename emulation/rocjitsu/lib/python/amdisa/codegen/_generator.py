@@ -2782,9 +2782,18 @@ class CodeGenerator:
     )
     # D16 load semantic classes. Stores share the d16_hi/d16_lo flags, so the
     # class gate is what restricts the partial-def treatment to loads.
-    # global/scratch loads use the 'flat_load' class.
+    # global/scratch loads use the 'flat_load' class. Byte/short buffer D16 loads
+    # (e.g. buffer_load_ubyte_d16) use 'buffer_load'/'tbuffer_load' and execute
+    # correctly; packed D16 FORMAT loads use the non-executable
+    # 'buffer_load_format_d16' class (metadata-only, see semantics._derive_buffer_data).
     _D16_LOAD_CLASSES = frozenset(
-        {'flat_load', 'buffer_load', 'tbuffer_load', 'ds_read'}
+        {
+            'flat_load',
+            'buffer_load',
+            'tbuffer_load',
+            'ds_read',
+            'buffer_load_format_d16',
+        }
     )
 
     def _dst_is_also_source(self, inst: Instruction) -> bool:
@@ -4582,6 +4591,16 @@ class CodeGenerator:
 
         if cls in ('buffer_store', 'tbuffer_store'):
             return self._gen_buffer_store(dst_ops, src_ops, sem, cls)
+
+        if cls in ('buffer_load_format_d16', 'buffer_store_format_d16'):
+            # Packed D16 FORMAT execution (two 16-bit components per VGPR) is not
+            # modeled by the memory pipeline; the class is metadata-only so the
+            # partial-def liveness of D16 FORMAT loads is still emitted.
+            return (
+                '  (void)wf;\n'
+                '  throw util::UnimplementedInst(mnemonic()); '
+                '// packed D16 FORMAT execution intentionally unimplemented'
+            )
 
         if cls in (
             'ds_read',
@@ -8165,20 +8184,28 @@ class CodeGenerator:
                         # multi-register FORMAT load only reads its last (partial)
                         # register, so expand just that one.
                         if d16_partial_reg_offset:
-                            d16_expand = (
-                                f'    uses.expand(RegisterRef{{r->cls, '
+                            d16_expand_stmt = (
+                                f'uses.expand(RegisterRef{{r->cls, '
                                 f'static_cast<uint16_t>(r->index + '
-                                f'{d16_partial_reg_offset}), 1}});\n'
+                                f'{d16_partial_reg_offset}), 1}});'
                             )
                         else:
-                            d16_expand = '    uses.expand(*r);\n'
+                            d16_expand_stmt = 'uses.expand(*r);'
+                        # Older MUBUF encodings redirect the load to LDS when
+                        # inst_.lds is set, leaving no VGPR destination; only guard
+                        # the preserved-destination read where such a field exists
+                        # (newer encodings have no lds field).
+                        d16_lds_guarded = 'lds' in inst_field_names
+                        d16_guard = '  if (!inst_.lds)\n' if d16_lds_guarded else ''
+                        d16_ind = '    ' if d16_lds_guarded else '  '
                         inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::implicit_uses'
                                 f'(RegisterSet &uses) const {{\n'
                                 f'  {inst.fmt_true_enc_name}::implicit_uses(uses);\n'
-                                f'  if (auto r = {d16_implicit_use_opnd}.to_register_ref())\n'
-                                f'{d16_expand}'
+                                f'{d16_guard}'
+                                f'{d16_ind}if (auto r = {d16_implicit_use_opnd}.to_register_ref())\n'
+                                f'{d16_ind}  {d16_expand_stmt}\n'
                                 f'}}'
                             )
                         )
@@ -8199,8 +8226,9 @@ class CodeGenerator:
                                     f'(std::vector<const ::rocjitsu::Operand *> &operands) '
                                     f'const {{\n'
                                     f'  {inst.fmt_true_enc_name}::implicit_use_operands(operands);\n'
-                                    f'  if ({d16_implicit_use_opnd}.to_register_ref())\n'
-                                    f'    operands.push_back(&{d16_implicit_use_opnd});\n'
+                                    f'{d16_guard}'
+                                    f'{d16_ind}if ({d16_implicit_use_opnd}.to_register_ref())\n'
+                                    f'{d16_ind}  operands.push_back(&{d16_implicit_use_opnd});\n'
                                     f'}}'
                                 )
                             )

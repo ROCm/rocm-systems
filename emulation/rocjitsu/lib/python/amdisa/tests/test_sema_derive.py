@@ -2879,6 +2879,12 @@ class TestDeriveBufferFormat:
 
     RDNA3+ renames these to a ``D16[_HI]_FORMAT_*`` ordering; the derivation
     normalizes it back to the legacy ``FORMAT_D16[_HI]_*`` ordering.
+
+    Non-D16 FORMAT (one dword per component) executes correctly and keeps the
+    executable ``buffer_load``/``tbuffer_load`` classes. Packed D16 FORMAT (two
+    16-bit components per VGPR) is not modeled by the memory pipeline, so it is
+    classified into the non-executable ``buffer_{load,store}_format_d16`` classes
+    that carry only the partial-def metadata for liveness.
     """
 
     def test_untyped_format_load_is_buffer_load(self):
@@ -2893,14 +2899,26 @@ class TestDeriveBufferFormat:
         assert sem.semantic_class == 'tbuffer_load'
         assert (sem.elem_size, sem.num_elems) == (4, 4)
 
-    def test_format_store_is_buffer_store(self):
+    def test_d16_format_load_is_non_executable_metadata_class(self):
+        sem = derive_semantics('BUFFER_LOAD_FORMAT_D16_X', 'ENC_MUBUF')
+        assert sem is not None
+        assert sem.semantic_class == 'buffer_load_format_d16'
+
+    def test_d16_format_store_is_non_executable_metadata_class(self):
         sem = derive_semantics('BUFFER_STORE_FORMAT_D16_X', 'ENC_MUBUF')
         assert sem is not None
+        assert sem.semantic_class == 'buffer_store_format_d16'
+
+    def test_non_d16_format_store_stays_executable(self):
+        sem = derive_semantics('BUFFER_STORE_FORMAT_XYZW', 'ENC_MUBUF')
+        assert sem is not None
         assert sem.semantic_class == 'buffer_store'
+        assert (sem.elem_size, sem.num_elems) == (4, 4)
 
     def test_single_component_d16_is_partial_def(self):
         sem = derive_semantics('BUFFER_LOAD_FORMAT_D16_X', 'ENC_MUBUF')
         assert sem.num_elems == 1
+        assert (sem.num_elems * sem.elem_size) % 4 != 0
         assert sem.d16_lo and not sem.d16_hi
 
     def test_d16_hi_component_sets_hi_flag(self):
@@ -2911,6 +2929,21 @@ class TestDeriveBufferFormat:
     def test_multi_component_d16_is_not_single_element(self):
         sem = derive_semantics('BUFFER_LOAD_FORMAT_D16_XYZW', 'ENC_MUBUF')
         assert sem.num_elems == 4
+
+    def test_rdna4_typed_d16_load_under_vbuffer_is_partial_def(self):
+        # RDNA4 folds typed buffers into ENC_VBUFFER (routed to _derive_mubuf),
+        # which previously only matched BUFFER_ and left TBUFFER_ as 'nop' with
+        # no preserved-destination use. It must now carry the partial-def metadata.
+        sem = derive_semantics('TBUFFER_LOAD_FORMAT_D16_X', 'ENC_VBUFFER')
+        assert sem is not None
+        assert sem.semantic_class == 'buffer_load_format_d16'
+        assert sem.num_elems == 1
+        assert sem.d16_lo and not sem.d16_hi
+
+    def test_typed_non_d16_load_under_vbuffer_stays_nop(self):
+        sem = derive_semantics('TBUFFER_LOAD_FORMAT_XYZW', 'ENC_VBUFFER')
+        assert sem is not None
+        assert sem.semantic_class == 'nop'
 
     @pytest.mark.parametrize(
         'legacy,rdna_ordered,enc',

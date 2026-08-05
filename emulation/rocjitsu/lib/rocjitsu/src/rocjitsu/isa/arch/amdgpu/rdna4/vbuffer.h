@@ -953,6 +953,7 @@ class TbufferLoadD16FormatXVbuffer : public Vbuffer {
 public:
   TbufferLoadD16FormatXVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -975,6 +976,7 @@ class TbufferLoadD16FormatXyzVbuffer : public Vbuffer {
 public:
   TbufferLoadD16FormatXyzVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;

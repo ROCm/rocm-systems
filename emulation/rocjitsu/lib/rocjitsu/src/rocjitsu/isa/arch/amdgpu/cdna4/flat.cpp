@@ -917,8 +917,9 @@ FlatLoadUbyteD16Flat::FlatLoadUbyteD16Flat(const MachineInst *inst)
 
 void FlatLoadUbyteD16Flat::implicit_uses(RegisterSet &uses) const {
   Flat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+  if (!inst_.lds)
+    if (auto r = vdst.to_register_ref())
+      uses.expand(*r);
 }
 
 void FlatLoadUbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -972,8 +973,9 @@ FlatLoadUbyteD16HiFlat::FlatLoadUbyteD16HiFlat(const MachineInst *inst)
 
 void FlatLoadUbyteD16HiFlat::implicit_uses(RegisterSet &uses) const {
   Flat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+  if (!inst_.lds)
+    if (auto r = vdst.to_register_ref())
+      uses.expand(*r);
 }
 
 void FlatLoadUbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1027,8 +1029,9 @@ FlatLoadSbyteD16Flat::FlatLoadSbyteD16Flat(const MachineInst *inst)
 
 void FlatLoadSbyteD16Flat::implicit_uses(RegisterSet &uses) const {
   Flat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+  if (!inst_.lds)
+    if (auto r = vdst.to_register_ref())
+      uses.expand(*r);
 }
 
 void FlatLoadSbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1083,8 +1086,9 @@ FlatLoadSbyteD16HiFlat::FlatLoadSbyteD16HiFlat(const MachineInst *inst)
 
 void FlatLoadSbyteD16HiFlat::implicit_uses(RegisterSet &uses) const {
   Flat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+  if (!inst_.lds)
+    if (auto r = vdst.to_register_ref())
+      uses.expand(*r);
 }
 
 void FlatLoadSbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1139,8 +1143,9 @@ FlatLoadShortD16Flat::FlatLoadShortD16Flat(const MachineInst *inst)
 
 void FlatLoadShortD16Flat::implicit_uses(RegisterSet &uses) const {
   Flat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+  if (!inst_.lds)
+    if (auto r = vdst.to_register_ref())
+      uses.expand(*r);
 }
 
 void FlatLoadShortD16Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1194,8 +1199,9 @@ FlatLoadShortD16HiFlat::FlatLoadShortD16HiFlat(const MachineInst *inst)
 
 void FlatLoadShortD16HiFlat::implicit_uses(RegisterSet &uses) const {
   Flat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+  if (!inst_.lds)
+    if (auto r = vdst.to_register_ref())
+      uses.expand(*r);
 }
 
 void FlatLoadShortD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {

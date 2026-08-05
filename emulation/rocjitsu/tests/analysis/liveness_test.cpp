@@ -4272,5 +4272,44 @@ TEST(GeneratedInstDefUse, D16StoreDoesNotDefineData) {
   EXPECT_FALSE(idu.defs.contains({RegClass::VGPR, 5, 1}));
 }
 
+// RDNA4 folds typed buffers into ENC_VBUFFER, routed through the untyped
+// derivation. That path now recognizes TBUFFER_* as well, so a typed D16
+// FORMAT_X load (op 136) reports its preserved destination like its untyped and
+// pre-RDNA4 MTBUF counterparts. Before the fix it decoded as an unclassified nop
+// with no implicit_uses override. VDATA is word1[0:7] (=5).
+TEST(GeneratedInstDefUse, D16TypedFormatLoadUnderVbufferReadsDestination) {
+  auto inst =
+      decode_rdna4({0xC4220000U, 0x00000005U}); // tbuffer_load_d16_format_x, vdata=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "tbuffer_load_d16_format_x");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+// On older MUBUF encodings the LDS bit (word0 bit 16) redirects the loaded data
+// to LDS, leaving no VGPR destination -- so the preserved-destination read must
+// be suppressed there, or liveness invents a false live range. Same opcode
+// (buffer_load_short_d16, MUBUF op 36 on CDNA3), toggling only LDS. VDATA is
+// word1[8:15] (=5).
+TEST(GeneratedInstDefUse, D16BufferLoadLdsBitSuppressesDestinationRead) {
+  auto normal =
+      decode_cdna3({0xE0900000U, 0x00000500U}); // buffer_load_short_d16, vdata=5, lds=0
+  ASSERT_NE(normal, nullptr);
+  ASSERT_EQ(std::string_view(normal->mnemonic()), "buffer_load_short_d16");
+  InstDefUse normal_idu(*normal);
+  EXPECT_TRUE(normal_idu.uses.contains({RegClass::VGPR, 5, 1}))
+      << "LDS clear: the preserved half of vdata is a read";
+
+  auto lds =
+      decode_cdna3({0xE0910000U, 0x00000500U}); // ...same, lds=1 (bit 16 set)
+  ASSERT_NE(lds, nullptr);
+  ASSERT_EQ(std::string_view(lds->mnemonic()), "buffer_load_short_d16");
+  InstDefUse lds_idu(*lds);
+  EXPECT_FALSE(lds_idu.uses.contains({RegClass::VGPR, 5, 1}))
+      << "LDS set: data goes to LDS, so vdata is not a preserved read";
+}
+
 } // namespace
 } // namespace rocjitsu

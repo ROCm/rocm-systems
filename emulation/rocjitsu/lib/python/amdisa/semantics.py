@@ -2050,6 +2050,58 @@ def _normalize_buffer_format_suffix(suffix: str) -> str:
     return suffix
 
 
+def _derive_buffer_data(
+    name: str,
+    suffix: str,
+    is_store: bool,
+    typed: bool,
+    typed_format_executable: bool = True,
+) -> InstructionSemantics | None:
+    """Classify a buffer/typed-buffer LOAD/STORE data suffix.
+
+    Untyped (MUBUF) and typed (MTBUF) buffers -- and both under the unified RDNA4
+    ``ENC_VBUFFER`` -- share identical data-layout logic; only the executable
+    class prefix differs (``buffer_*`` vs ``tbuffer_*``).
+
+    D16 FORMAT loads/stores pack two 16-bit components per VGPR. That packed
+    layout is not modeled by the memory pipeline, so they are given dedicated
+    non-executable classes (``buffer_{load,store}_format_d16``) that carry the
+    partial-def metadata (num_elems/elem_size/d16 flags) for liveness without
+    activating incorrect execution. Non-D16 FORMAT (one dword per component) and
+    byte/short/dword data execute correctly and keep their normal classes.
+
+    ``typed_format_executable`` gates the executable ``tbuffer_*`` class for
+    non-D16 typed FORMAT ops. Real MTBUF encodings supply mtbuf-style addressing
+    and keep it enabled; RDNA4 folds typed buffers into VBUFFER (mubuf-style
+    addressing, no ``mtbuf_calculate_addresses``), so it is disabled there,
+    leaving non-D16 typed ops unclassified (``nop``) as before -- only the D16
+    typed loads need the partial-def metadata.
+    """
+    normalized = _normalize_buffer_format_suffix(suffix)
+    flat_info = _FLAT_DATA_MAP.get(normalized)
+    fmt_info = None if flat_info else _BUFFER_FORMAT_MAP.get(normalized)
+    info = flat_info or fmt_info
+    if not info:
+        return None
+    esz, ne, se = info
+    if fmt_info is not None and esz == 2:  # D16 FORMAT: packed, metadata-only
+        cls = 'buffer_store_format_d16' if is_store else 'buffer_load_format_d16'
+    elif typed and not typed_format_executable:
+        return None  # non-D16 typed FORMAT under VBUFFER: leave as nop
+    else:
+        base = 'tbuffer' if typed else 'buffer'
+        cls = f'{base}_store' if is_store else f'{base}_load'
+    return InstructionSemantics(
+        name,
+        cls,
+        elem_size=esz,
+        num_elems=ne,
+        sign_extend=se,
+        d16_hi='D16_HI' in normalized,
+        d16_lo='D16' in normalized and 'D16_HI' not in normalized,
+    )
+
+
 def _derive_mubuf(name: str) -> InstructionSemantics | None:
     """Derive semantics for a MUBUF (Untyped Buffer memory) instruction."""
     upper = name.upper()
@@ -2084,22 +2136,19 @@ def _derive_mubuf(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'buffer_atomic')
 
     is_store = '_STORE_' in upper
-    for prefix in ('BUFFER_LOAD_', 'BUFFER_STORE_'):
+    # RDNA4 folds typed buffers into ENC_VBUFFER, which routes here, so accept
+    # TBUFFER_* as well; harmless for pre-RDNA4 MUBUF, which has no such names.
+    for prefix in ('BUFFER_LOAD_', 'BUFFER_STORE_', 'TBUFFER_LOAD_', 'TBUFFER_STORE_'):
         if upper.startswith(prefix):
-            suffix = _normalize_buffer_format_suffix(upper[len(prefix) :])
-            info = _FLAT_DATA_MAP.get(suffix) or _BUFFER_FORMAT_MAP.get(suffix)
-            if info:
-                esz, ne, se = info
-                cls = 'buffer_store' if is_store else 'buffer_load'
-                return InstructionSemantics(
-                    name,
-                    cls,
-                    elem_size=esz,
-                    num_elems=ne,
-                    sign_extend=se,
-                    d16_hi='D16_HI' in suffix,
-                    d16_lo='D16' in suffix and 'D16_HI' not in suffix,
-                )
+            sem = _derive_buffer_data(
+                name,
+                upper[len(prefix) :],
+                is_store,
+                typed=prefix.startswith('TBUFFER'),
+                typed_format_executable=False,
+            )
+            if sem:
+                return sem
     return InstructionSemantics(name, 'nop')
 
 
@@ -2109,20 +2158,9 @@ def _derive_mtbuf(name: str) -> InstructionSemantics | None:
     is_store = '_STORE_' in upper
     for prefix in ('TBUFFER_LOAD_', 'TBUFFER_STORE_'):
         if upper.startswith(prefix):
-            suffix = _normalize_buffer_format_suffix(upper[len(prefix) :])
-            info = _FLAT_DATA_MAP.get(suffix) or _BUFFER_FORMAT_MAP.get(suffix)
-            if info:
-                esz, ne, se = info
-                cls = 'tbuffer_store' if is_store else 'tbuffer_load'
-                return InstructionSemantics(
-                    name,
-                    cls,
-                    elem_size=esz,
-                    num_elems=ne,
-                    sign_extend=se,
-                    d16_hi='D16_HI' in suffix,
-                    d16_lo='D16' in suffix and 'D16_HI' not in suffix,
-                )
+            sem = _derive_buffer_data(name, upper[len(prefix) :], is_store, typed=True)
+            if sem:
+                return sem
     return InstructionSemantics(name, 'nop')
 
 
