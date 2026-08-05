@@ -1525,26 +1525,35 @@ ExpandResult expand_gfx1250_cvt_pk_fp8_f32_e5m3(const Instruction &inst, uint32_
                                            .sdst = static_cast<uint8_t>(fp16_ovfl)}));
 
   uint16_t effective_src0 = source.src0;
+  // The bank travels with the operand, not with the instruction. Once a literal
+  // has been materialized into out0 the effective operand is that scratch VGPR,
+  // which is allocated in the low bank -- forwarding the guest operand's bank
+  // would make the helper address a different physical register under a nonzero
+  // VGPR-MSB mode.
+  uint8_t effective_src0_bank = *src0_bank;
   if (source.src0 == 255u) {
     append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
     append_words(words, gfx1250::build_vop3(gfx1250::kVMovB32Vop3,
                                             {.vdst = static_cast<uint8_t>(out0), .src0 = 255}));
     words.push_back(literal);
     effective_src0 = gfx1250_vgpr_src(out0);
+    effective_src0_bank = 0;
   }
-  append_gfx1250_f32_to_e5m3(words, effective_src0, *src0_bank, out0, temp, top_byte, masks->base,
-                             static_cast<uint16_t>(masks->base + 1u),
+  append_gfx1250_f32_to_e5m3(words, effective_src0, effective_src0_bank, out0, temp, top_byte,
+                             masks->base, static_cast<uint16_t>(masks->base + 1u),
                              static_cast<uint16_t>(masks->base + 2u), fp16_ovfl, current_mode);
   uint16_t effective_src1 = source.src1;
+  uint8_t effective_src1_bank = *src1_bank;
   if (source.src1 == 255u) {
     append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
     append_words(words, gfx1250::build_vop3(gfx1250::kVMovB32Vop3,
                                             {.vdst = static_cast<uint8_t>(out1), .src0 = 255}));
     words.push_back(literal);
     effective_src1 = gfx1250_vgpr_src(out1);
+    effective_src1_bank = 0;
   }
-  append_gfx1250_f32_to_e5m3(words, effective_src1, *src1_bank, out1, temp, top_byte, masks->base,
-                             static_cast<uint16_t>(masks->base + 1u),
+  append_gfx1250_f32_to_e5m3(words, effective_src1, effective_src1_bank, out1, temp, top_byte,
+                             masks->base, static_cast<uint16_t>(masks->base + 1u),
                              static_cast<uint16_t>(masks->base + 2u), fp16_ovfl, current_mode);
   append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
   append_words(words,
