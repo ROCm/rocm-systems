@@ -13172,6 +13172,9 @@ VSExpF32Vop3::VSExpF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_EXP_F32 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -13193,52 +13196,27 @@ VSExpF16Vop3::VSExpF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_EXP_F16 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
-        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
-                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
-                              0xFFFFu),
-        true);
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_EXP_F16 does not support DPP", "");
 }
 
 void VSExpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  if (exec != 0) {
-    amdgpu::RegisterAccess(wf).write_scalar(
-        vdst,
-        util::f32_to_f16_mode(
-            [&]() {
-              float v = [&]() {
-                float v = amdgpu::transcendental::exp_f32([&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ((opsel & 0x1u) != 0 ? (amdgpu::RegisterAccess(wf).read_scalar(src0) >> 16)
-                                           : amdgpu::RegisterAccess(wf).read_scalar(src0))));
-                  if (inst_.abs & (1u << 0))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 0))
-                    sv = -sv;
-                  return sv;
-                }());
-                if (inst_.omod == 1)
-                  v *= 2.0f;
-                else if (inst_.omod == 2)
-                  v *= 4.0f;
-                else if (inst_.omod == 3)
-                  v *= 0.5f;
-                return v;
-              }();
-              if (inst_.clamp)
-                v = std::clamp(v, 0.0f, 1.0f);
-              return v;
-            }(),
-            wf.fp16_ovfl()));
-  }
+  amdgpu::RegisterAccess(wf).write_scalar(
+      vdst,
+      amdgpu::pseudo_scalar::execute_f16(
+          amdgpu::pseudo_scalar::Operation::EXP2,
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(src0))),
+          (inst_.abs & 1u) != 0, (inst_.neg & 1u) != 0, wf.fp_round_mode_f16_f64(),
+          wf.fp_denorm_mode_f16_f64(), inst_.omod, inst_.clamp, wf.fp16_ovfl()));
 }
 
 VSLogF32Vop3::VSLogF32Vop3(const MachineInst *inst)
@@ -13249,6 +13227,9 @@ VSLogF32Vop3::VSLogF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_LOG_F32 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -13270,52 +13251,27 @@ VSLogF16Vop3::VSLogF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_LOG_F16 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
-        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
-                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
-                              0xFFFFu),
-        true);
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_LOG_F16 does not support DPP", "");
 }
 
 void VSLogF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  if (exec != 0) {
-    amdgpu::RegisterAccess(wf).write_scalar(
-        vdst,
-        util::f32_to_f16_mode(
-            [&]() {
-              float v = [&]() {
-                float v = amdgpu::transcendental::log_f32([&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ((opsel & 0x1u) != 0 ? (amdgpu::RegisterAccess(wf).read_scalar(src0) >> 16)
-                                           : amdgpu::RegisterAccess(wf).read_scalar(src0))));
-                  if (inst_.abs & (1u << 0))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 0))
-                    sv = -sv;
-                  return sv;
-                }());
-                if (inst_.omod == 1)
-                  v *= 2.0f;
-                else if (inst_.omod == 2)
-                  v *= 4.0f;
-                else if (inst_.omod == 3)
-                  v *= 0.5f;
-                return v;
-              }();
-              if (inst_.clamp)
-                v = std::clamp(v, 0.0f, 1.0f);
-              return v;
-            }(),
-            wf.fp16_ovfl()));
-  }
+  amdgpu::RegisterAccess(wf).write_scalar(
+      vdst,
+      amdgpu::pseudo_scalar::execute_f16(
+          amdgpu::pseudo_scalar::Operation::LOG2,
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(src0))),
+          (inst_.abs & 1u) != 0, (inst_.neg & 1u) != 0, wf.fp_round_mode_f16_f64(),
+          wf.fp_denorm_mode_f16_f64(), inst_.omod, inst_.clamp, wf.fp16_ovfl()));
 }
 
 VSRcpF32Vop3::VSRcpF32Vop3(const MachineInst *inst)
@@ -13326,6 +13282,9 @@ VSRcpF32Vop3::VSRcpF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_RCP_F32 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -13347,52 +13306,27 @@ VSRcpF16Vop3::VSRcpF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_RCP_F16 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
-        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
-                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
-                              0xFFFFu),
-        true);
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_RCP_F16 does not support DPP", "");
 }
 
 void VSRcpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  if (exec != 0) {
-    amdgpu::RegisterAccess(wf).write_scalar(
-        vdst,
-        util::f32_to_f16_mode(
-            [&]() {
-              float v = [&]() {
-                float v = amdgpu::transcendental::rcp_f32([&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ((opsel & 0x1u) != 0 ? (amdgpu::RegisterAccess(wf).read_scalar(src0) >> 16)
-                                           : amdgpu::RegisterAccess(wf).read_scalar(src0))));
-                  if (inst_.abs & (1u << 0))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 0))
-                    sv = -sv;
-                  return sv;
-                }());
-                if (inst_.omod == 1)
-                  v *= 2.0f;
-                else if (inst_.omod == 2)
-                  v *= 4.0f;
-                else if (inst_.omod == 3)
-                  v *= 0.5f;
-                return v;
-              }();
-              if (inst_.clamp)
-                v = std::clamp(v, 0.0f, 1.0f);
-              return v;
-            }(),
-            wf.fp16_ovfl()));
-  }
+  amdgpu::RegisterAccess(wf).write_scalar(
+      vdst,
+      amdgpu::pseudo_scalar::execute_f16(
+          amdgpu::pseudo_scalar::Operation::RCP,
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(src0))),
+          (inst_.abs & 1u) != 0, (inst_.neg & 1u) != 0, wf.fp_round_mode_f16_f64(),
+          wf.fp_denorm_mode_f16_f64(), inst_.omod, inst_.clamp, wf.fp16_ovfl()));
 }
 
 VSRsqF32Vop3::VSRsqF32Vop3(const MachineInst *inst)
@@ -13403,6 +13337,9 @@ VSRsqF32Vop3::VSRsqF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_RSQ_F32 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -13424,52 +13361,27 @@ VSRsqF16Vop3::VSRsqF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_RSQ_F16 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
-        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
-                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
-                              0xFFFFu),
-        true);
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_RSQ_F16 does not support DPP", "");
 }
 
 void VSRsqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  if (exec != 0) {
-    amdgpu::RegisterAccess(wf).write_scalar(
-        vdst,
-        util::f32_to_f16_mode(
-            [&]() {
-              float v = [&]() {
-                float v = amdgpu::transcendental::rsq_f32([&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ((opsel & 0x1u) != 0 ? (amdgpu::RegisterAccess(wf).read_scalar(src0) >> 16)
-                                           : amdgpu::RegisterAccess(wf).read_scalar(src0))));
-                  if (inst_.abs & (1u << 0))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 0))
-                    sv = -sv;
-                  return sv;
-                }());
-                if (inst_.omod == 1)
-                  v *= 2.0f;
-                else if (inst_.omod == 2)
-                  v *= 4.0f;
-                else if (inst_.omod == 3)
-                  v *= 0.5f;
-                return v;
-              }();
-              if (inst_.clamp)
-                v = std::clamp(v, 0.0f, 1.0f);
-              return v;
-            }(),
-            wf.fp16_ovfl()));
-  }
+  amdgpu::RegisterAccess(wf).write_scalar(
+      vdst,
+      amdgpu::pseudo_scalar::execute_f16(
+          amdgpu::pseudo_scalar::Operation::RSQ,
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(src0))),
+          (inst_.abs & 1u) != 0, (inst_.neg & 1u) != 0, wf.fp_round_mode_f16_f64(),
+          wf.fp_denorm_mode_f16_f64(), inst_.omod, inst_.clamp, wf.fp16_ovfl()));
 }
 
 VSSqrtF32Vop3::VSSqrtF32Vop3(const MachineInst *inst)
@@ -13481,6 +13393,9 @@ VSSqrtF32Vop3::VSSqrtF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_SQRT_F32 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -13503,52 +13418,27 @@ VSSqrtF16Vop3::VSSqrtF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_SQRT_F16 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
-        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
-                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
-                              0xFFFFu),
-        true);
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_SQRT_F16 does not support DPP", "");
 }
 
 void VSSqrtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  if (exec != 0) {
-    amdgpu::RegisterAccess(wf).write_scalar(
-        vdst,
-        util::f32_to_f16_mode(
-            [&]() {
-              float v = [&]() {
-                float v = amdgpu::transcendental::sqrt_f32([&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ((opsel & 0x1u) != 0 ? (amdgpu::RegisterAccess(wf).read_scalar(src0) >> 16)
-                                           : amdgpu::RegisterAccess(wf).read_scalar(src0))));
-                  if (inst_.abs & (1u << 0))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 0))
-                    sv = -sv;
-                  return sv;
-                }());
-                if (inst_.omod == 1)
-                  v *= 2.0f;
-                else if (inst_.omod == 2)
-                  v *= 4.0f;
-                else if (inst_.omod == 3)
-                  v *= 0.5f;
-                return v;
-              }();
-              if (inst_.clamp)
-                v = std::clamp(v, 0.0f, 1.0f);
-              return v;
-            }(),
-            wf.fp16_ovfl()));
-  }
+  amdgpu::RegisterAccess(wf).write_scalar(
+      vdst,
+      amdgpu::pseudo_scalar::execute_f16(
+          amdgpu::pseudo_scalar::Operation::SQRT,
+          util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(src0))),
+          (inst_.abs & 1u) != 0, (inst_.neg & 1u) != 0, wf.fp_round_mode_f16_f64(),
+          wf.fp_denorm_mode_f16_f64(), inst_.omod, inst_.clamp, wf.fp16_ovfl()));
 }
 
 VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
