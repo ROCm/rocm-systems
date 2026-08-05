@@ -356,6 +356,20 @@ protected:
     saved_environment_.clear();
   }
 
+  // Loads @p source through a fresh reader, the way a caller that re-registers
+  // the same object does -- a new handle every time, so nothing but the content
+  // itself can connect one load to the next.
+  hsa_status_t load_through_new_reader(const std::vector<uint8_t> &source,
+                                       hsa_executable_t executable = kExecutable) {
+    hsa_code_object_reader_t reader{};
+    const hsa_status_t create_status = api.core.hsa_code_object_reader_create_from_memory_fn(
+        source.data(), source.size(), &reader);
+    if (create_status != HSA_STATUS_SUCCESS)
+      return create_status;
+    return api.core.hsa_executable_load_agent_code_object_fn(executable, kA0Agent, reader, nullptr,
+                                                             nullptr);
+  }
+
   // Every case runs with these cleared and gets whatever the process had back,
   // so one case cannot decide what a later one observes.
   static constexpr std::array<const char *, 3> kIsolatedEnvironment = {
@@ -693,6 +707,62 @@ TEST_F(HsaHotswapHookTest, AnOutOfResourcesFailureCapturesNothing) {
       << log_text;
 }
 
+TEST_F(HsaHotswapHookTest, EnablingCaptureAfterAHintStillProducesTheArtifact) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
+
+  // The hint names the variable that turns capture on. Acting on it inside the
+  // same process must work: a hint that consumed the source's one capture slot
+  // would tell the operator to do something that then cannot succeed. Both
+  // attempts force a status the memo refuses to remember, so the second load
+  // really translates again instead of replaying the first verdict.
+  rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  const std::string hint_text = testing::internal::GetCapturedStderr();
+  ASSERT_NE(hint_text.find("set HSA_HOTSWAP_DUMP_SOURCE=1 to save the source code object"),
+            std::string::npos)
+      << hint_text;
+  ASSERT_EQ(rj_test_dump_path_count(), 0u);
+
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  const std::string capture_text = testing::internal::GetCapturedStderr();
+
+  EXPECT_EQ(rj_test_dump_path_count(), 1u);
+  expect_failure_dump(capture_text, source);
+}
+
+TEST_F(HsaHotswapHookTest, CorrectingTheCaptureDirectoryRetriesTheArtifact) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", "/nonexistent-rocjitsu-hotswap-dump", 1), 0);
+
+  // Forced so the memo does not remember it: the retry below has to translate.
+  rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  const std::string failed_text = testing::internal::GetCapturedStderr();
+  ASSERT_NE(failed_text.find("could not be saved"), std::string::npos) << failed_text;
+  ASSERT_EQ(rj_test_dump_path_count(), 0u);
+
+  // A capture that could not be written must not spend the source's slot: the
+  // operator fixes the destination and the next failure produces the artifact.
+  ScopedTempDirectory directory;
+  ASSERT_FALSE(directory.path().empty());
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", directory.path().c_str(), 1), 0);
+  rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  const std::string capture_text = testing::internal::GetCapturedStderr();
+
+  EXPECT_EQ(rj_test_dump_path_count(), 1u);
+  expect_failure_dump(capture_text, source);
+}
+
 TEST_F(HsaHotswapHookTest, RetainedStorageSurvivesUnloadAndReinstall) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   ASSERT_EQ(rj_test_retained_executable_buffer_count(), 0u);
@@ -973,9 +1043,6 @@ TEST_F(HsaHotswapHookTest, CallbackApiSnapshotIsSafeDuringUnload) {
 // distinguishes reuse from repetition.
 class HsaHotswapMemoTest : public HsaHotswapHookTest {
 protected:
-  // Loads @p source through a fresh reader, the way a caller that re-registers the
-  // same object does -- a new handle every time, so nothing but the content itself
-  // can connect one load to the next.
   // Spin until @p expected threads are asleep on an in-flight translation, or a
   // generous deadline passes. Returns what was actually observed so the caller can
   // release the gate before asserting on it.
@@ -1050,17 +1117,6 @@ protected:
       return patched;
     }
     return {};
-  }
-
-  hsa_status_t load_through_new_reader(const std::vector<uint8_t> &source,
-                                       hsa_executable_t executable = kExecutable) {
-    hsa_code_object_reader_t reader{};
-    const hsa_status_t create_status = api.core.hsa_code_object_reader_create_from_memory_fn(
-        source.data(), source.size(), &reader);
-    if (create_status != HSA_STATUS_SUCCESS)
-      return create_status;
-    return api.core.hsa_executable_load_agent_code_object_fn(executable, kA0Agent, reader, nullptr,
-                                                             nullptr);
   }
 };
 

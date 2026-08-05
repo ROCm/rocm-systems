@@ -101,32 +101,63 @@ const char *source_capture_directory() {
   return "/tmp";
 }
 
-std::mutex g_captured_sources_mutex;
-std::unordered_set<uint64_t> g_captured_sources;
+// A distinct failing object is rare, but nothing about a process guarantees it:
+// cap what the registries below can grow to, and stop capturing once a run has
+// produced enough material to diagnose whatever is wrong.
+constexpr size_t kMaxCapturedSources = 32;
 
-/// @brief Take the single capture slot for @p source_id.
-///
-/// @returns False when this source was already reported, so a failure repeating
-/// on every load of the same bytes leaves one artifact, not one per attempt.
-bool claim_source_capture(uint64_t source_id) noexcept {
+std::mutex g_captured_sources_mutex;
+/// Source identity -> whether its artifact was completely written. An entry that
+/// is present but false is a capture in flight on another thread.
+std::unordered_map<uint64_t, bool> g_captured_sources;
+/// Sources the disabled-capture hint has already named. Kept apart from the
+/// capture registry so the hint does not consume the artifact's one slot: an
+/// operator who reads it, exports the variable and retries must get the file.
+std::unordered_set<uint64_t> g_hinted_sources;
+
+/// @returns True when @p seen did not already hold @p source_id and has room.
+bool claim_once(std::unordered_set<uint64_t> &seen, uint64_t source_id) noexcept {
   try {
     std::lock_guard lock(g_captured_sources_mutex);
-    return g_captured_sources.insert(source_id).second;
+    if (seen.size() >= kMaxCapturedSources)
+      return false;
+    return seen.insert(source_id).second;
   } catch (...) {
     return false;
   }
 }
 
-void dump_failed_source(uint64_t source_id, std::span<const uint8_t> bytes) noexcept {
-  if (!claim_source_capture(source_id))
-    return;
-  if (!source_capture_enabled()) {
-    log_error("translation failed; set HSA_HOTSWAP_DUMP_SOURCE=1 to save the source code object "
-              "source_id=fnv1a64:%016" PRIx64 " input_bytes=%zu; please file a bug report",
-              source_id, bytes.size());
-    return;
+/// @brief Begin the one capture allowed for @p source_id.
+///
+/// @returns False when another thread is already writing this source, when it
+/// has been captured, or when the registry is full. A claim taken here is
+/// released by finish_source_capture(), so a capture that could not be written
+/// -- an unwritable directory, a full filesystem -- can be retried once the
+/// operator fixes it rather than being refused for the life of the process.
+bool begin_source_capture(uint64_t source_id) noexcept {
+  try {
+    std::lock_guard lock(g_captured_sources_mutex);
+    if (g_captured_sources.size() >= kMaxCapturedSources && !g_captured_sources.contains(source_id))
+      return false;
+    return g_captured_sources.emplace(source_id, false).second;
+  } catch (...) {
+    return false;
   }
+}
 
+/// @brief Settle a claim taken by begin_source_capture().
+void finish_source_capture(uint64_t source_id, bool written) noexcept {
+  std::lock_guard lock(g_captured_sources_mutex);
+  if (written)
+    g_captured_sources[source_id] = true;
+  else
+    g_captured_sources.erase(source_id);
+}
+
+/// @brief Write @p bytes to a fresh file in the configured directory.
+///
+/// @returns True only once the artifact is completely written and closed.
+bool write_captured_source(uint64_t source_id, std::span<const uint8_t> bytes) noexcept {
   char path[PATH_MAX];
   const int length =
       std::snprintf(path, sizeof(path), "%s/rocjitsu-gfx1250-b0-to-a0-%016" PRIx64 "-XXXXXX.elf",
@@ -135,7 +166,7 @@ void dump_failed_source(uint64_t source_id, std::span<const uint8_t> bytes) noex
     log_error("translation failed and its source code object could not be saved: path is too long "
               "source_id=fnv1a64:%016" PRIx64 "; please file a bug report",
               source_id);
-    return;
+    return false;
   }
 
   const int descriptor = mkstemps(path, 4);
@@ -143,7 +174,7 @@ void dump_failed_source(uint64_t source_id, std::span<const uint8_t> bytes) noex
     log_error("translation failed and its source code object could not be saved "
               "source_id=fnv1a64:%016" PRIx64 " errno=%d; please file a bug report",
               source_id, errno);
-    return;
+    return false;
   }
   FILE *output = fdopen(descriptor, "wb");
   if (output == nullptr) {
@@ -153,7 +184,7 @@ void dump_failed_source(uint64_t source_id, std::span<const uint8_t> bytes) noex
     log_error("translation failed and its source code object could not be saved "
               "source_id=fnv1a64:%016" PRIx64 " path=%s errno=%d; please file a bug report",
               source_id, path, saved_errno);
-    return;
+    return false;
   }
   const size_t written = std::fwrite(bytes.data(), 1, bytes.size(), output);
   const int close_status = std::fclose(output);
@@ -164,12 +195,27 @@ void dump_failed_source(uint64_t source_id, std::span<const uint8_t> bytes) noex
               "source_id=fnv1a64:%016" PRIx64
               " path=%s written=%zu expected=%zu errno=%d; please file a bug report",
               source_id, path, written, bytes.size(), saved_errno);
-    return;
+    return false;
   }
   log_error("translation failed; source code object saved source_id=fnv1a64:%016" PRIx64
             " input_bytes=%zu path=%s; please file a bug report and attach this code object",
             source_id, bytes.size(), path);
   remember_test_dump(path);
+  return true;
+}
+
+void dump_failed_source(uint64_t source_id, std::span<const uint8_t> bytes) noexcept {
+  if (!source_capture_enabled()) {
+    if (claim_once(g_hinted_sources, source_id)) {
+      log_error("translation failed; set HSA_HOTSWAP_DUMP_SOURCE=1 to save the source code object "
+                "source_id=fnv1a64:%016" PRIx64 " input_bytes=%zu; please file a bug report",
+                source_id, bytes.size());
+    }
+    return;
+  }
+  if (!begin_source_capture(source_id))
+    return;
+  finish_source_capture(source_id, write_captured_source(source_id, bytes));
 }
 
 void write_log(bool enabled, const char *level, const char *format, va_list args) noexcept {
@@ -1543,6 +1589,7 @@ extern "C" RJ_HOOK_EXPORT void rj_test_clear_retained_storage() {
   {
     std::lock_guard lock(g_captured_sources_mutex);
     g_captured_sources.clear();
+    g_hinted_sources.clear();
   }
   {
     std::lock_guard lock(g_state.storage_mutex);
