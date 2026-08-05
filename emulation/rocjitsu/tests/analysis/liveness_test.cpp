@@ -1867,10 +1867,12 @@ TEST(CfgAnalysis, Gfx1250RecoversSignedDeltaTemplateWithPrefetch) {
   ASSERT_EQ(sub_consumer->static_indirect_call_fixups().size(), 1u);
   EXPECT_EQ(sub_consumer->static_indirect_call_fixups()[0].source_target_offset, 76u);
   EXPECT_TRUE(has_successor_start(*sub_consumer, target->start_offset()));
+  EXPECT_FALSE(sub_consumer->static_indirect_call_fixups()[0].source_requires_xcnt_drain);
 
   ASSERT_EQ(add_consumer->static_indirect_call_fixups().size(), 1u);
   EXPECT_EQ(add_consumer->static_indirect_call_fixups()[0].source_target_offset, 76u);
   EXPECT_TRUE(has_successor_start(*add_consumer, target->start_offset()));
+  EXPECT_FALSE(add_consumer->static_indirect_call_fixups()[0].source_requires_xcnt_drain);
 }
 
 TEST(CfgAnalysis, Gfx1250RecoversSignedDeltaTemplateWithXcntWaitAndPrefetch) {
@@ -1945,6 +1947,11 @@ TEST(CfgAnalysis, Gfx1250RecoversSignedDeltaTemplateWithXcntWaitAndPrefetch) {
   ASSERT_EQ(add_consumer->static_indirect_call_fixups().size(), 1u);
   EXPECT_EQ(add_consumer->static_indirect_call_fixups()[0].source_target_offset, 76u);
   EXPECT_TRUE(has_successor_start(*add_consumer, target->start_offset()));
+
+  // The subtract half's drain is inside the range relocation overwrites, so
+  // both consumers of that shared range must ask the rewrite to reproduce it.
+  EXPECT_TRUE(sub_consumer->static_indirect_call_fixups()[0].source_requires_xcnt_drain);
+  EXPECT_TRUE(add_consumer->static_indirect_call_fixups()[0].source_requires_xcnt_drain);
 }
 
 TEST(CfgAnalysis, Gfx1250SignedDeltaRejectsMoveClobberingTemporary) {

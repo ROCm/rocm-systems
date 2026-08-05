@@ -86,6 +86,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "support/elf_test_support.h"
+#include "util/data_types.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -9877,6 +9878,168 @@ TEST(BinaryTranslatorE2E, Gfx1250EmulatesCvtSrFp8F32ClampSetForA0) {
             1);
 }
 
+/// @brief Run one translated gfx1250 E5M3 replacement on the emulated CU.
+///
+/// @details The B0 conversion is translated on its own and every instruction of
+/// the A0 replacement then executes in order on a single-lane wavefront. That
+/// makes the emitted sequence comparable against the execution model's own
+/// conversion helpers, which mnemonic-counting tests cannot check.
+std::optional<uint32_t> run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t opsel,
+                                                     uint32_t src0_value, uint32_t src1_value,
+                                                     uint32_t vdst_initial, bool fp16_ovfl,
+                                                     uint8_t vgpr_msb_mode = 0) {
+  constexpr uint16_t kSrc0Vgpr = 22;
+  constexpr uint16_t kSrc1Vgpr = 2;
+  constexpr uint16_t kDstVgpr = 30;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+
+  std::vector<uint32_t> source_words;
+  if (vgpr_msb_mode != 0)
+    source_words.push_back(gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0})[0]);
+  const auto conversion = gfx1250::build_vop3(opcode, {.vdst = kDstVgpr,
+                                                       .opsel = opsel,
+                                                       .clamp = 1,
+                                                       .src0 = 256 + kSrc0Vgpr,
+                                                       .src1 = 256 + kSrc1Vgpr});
+  source_words.push_back(conversion[0]);
+  source_words.push_back(conversion[1]);
+  source_words.push_back(kGfx1250SEndpgm);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(source_words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  if (!result.ok()) {
+    ADD_FAILURE() << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
+    return std::nullopt;
+  }
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  if (translated.text_sections().empty()) {
+    ADD_FAILURE() << "translated code object has no .text";
+    return std::nullopt;
+  }
+  const auto *text = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+
+  rocjitsu::amdgpu::GpuMemory gpu_mem("gfx1250_e5m3_mem");
+  rocjitsu::amdgpu::L2Cache l2("gfx1250_e5m3_l2");
+  rocjitsu::amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = rocjitsu::amdgpu::ComputeUnitCore::create("gfx1250_e5m3", cfg, &gpu_mem, &l2);
+  if (cu == nullptr) {
+    ADD_FAILURE() << "could not create a gfx1250 compute unit";
+    return std::nullopt;
+  }
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  if (wf == nullptr) {
+    ADD_FAILURE() << "could not dispatch a wavefront";
+    return std::nullopt;
+  }
+  wf->set_exec(0x1u);
+  wf->set_mode_raw(fp16_ovfl ? rocjitsu::amdgpu::Wavefront::FP16_OVFL_BIT : 0u);
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + kSrc0Vgpr, 0, src0_value);
+  cu->write_vgpr(vb + kSrc1Vgpr, 0, src1_value);
+  cu->write_vgpr(vb + kDstVgpr, 0, vdst_initial);
+
+  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  if (!decoder) {
+    ADD_FAILURE() << "no gfx1250 decoder";
+    return std::nullopt;
+  }
+  const std::string_view source_mnemonic =
+      opcode == gfx1250::kVCvtPkFp8F32Vop3 ? "v_cvt_pk_fp8_f32" : "v_cvt_sr_fp8_f32";
+  for (size_t index = 0; index < word_count;) {
+    std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(text + index));
+    if (inst == nullptr) {
+      ADD_FAILURE() << "undecodable replacement word at " << index;
+      return std::nullopt;
+    }
+    if (std::string_view(inst->mnemonic()) == "s_endpgm")
+      break;
+    // Executing the untranslated conversion would compare the model against
+    // itself and pass no matter what the expansion emits.
+    if (std::string_view(inst->mnemonic()) == source_mnemonic) {
+      ADD_FAILURE() << "the source conversion survived translation";
+      return std::nullopt;
+    }
+    cu->execute_instruction(inst.get(), *wf);
+    index += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
+  }
+  return cu->read_vgpr(vb + kDstVgpr, 0);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250E5m3PackReplacementMatchesReferenceConversion) {
+  // Deliberately spans the encoding's discontinuities: signed zeros, the tiny
+  // and subnormal quanta, the normal boundary, a rounding tie, max finite, the
+  // rounded and exponent overflow cases, infinity and NaN.
+  static constexpr std::array<uint32_t, 19> kValues = {
+      0x00000000u, 0x80000000u, 0x00000001u, 0x36800000u, 0x37000000u, 0x37800000u, 0x38800000u,
+      0x3F800000u, 0x3FC00000u, 0x3F900000u, 0x47C00000u, 0x47D00000u, 0x47E00000u, 0x47E80000u,
+      0x47F00000u, 0x47F80000u, 0x7F000000u, 0x7F800000u, 0x7FC00000u};
+  constexpr uint32_t kDstInitial = 0xa5a5a5a5u;
+
+  for (const bool fp16_ovfl : {false, true}) {
+    for (const bool write_high : {false, true}) {
+      for (size_t index = 0; index < kValues.size(); ++index) {
+        const uint32_t src0 = kValues[index];
+        const uint32_t src1 = kValues[(index + 5) % kValues.size()];
+        const auto produced = run_gfx1250_e5m3_replacement(gfx1250::kVCvtPkFp8F32Vop3,
+                                                           static_cast<uint8_t>(write_high ? 8 : 0),
+                                                           src0, src1, kDstInitial, fp16_ovfl);
+        ASSERT_TRUE(produced.has_value());
+        const uint32_t packed =
+            util::f32_to_fp8_e5m3_rne_mode(std::bit_cast<float>(src0), fp16_ovfl) |
+            (static_cast<uint32_t>(
+                 util::f32_to_fp8_e5m3_rne_mode(std::bit_cast<float>(src1), fp16_ovfl))
+             << 8);
+        const uint32_t expected = write_high ? ((kDstInitial & 0x0000ffffu) | (packed << 16))
+                                             : ((kDstInitial & 0xffff0000u) | packed);
+        EXPECT_EQ(*produced, expected)
+            << "src0=" << std::hex << src0 << " src1=" << src1 << " fp16_ovfl=" << std::dec
+            << fp16_ovfl << " write_high=" << write_high;
+      }
+    }
+  }
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250E5m3StochasticReplacementMatchesReferenceConversion) {
+  static constexpr std::array<uint32_t, 14> kValues = {
+      0x00000000u, 0x80000000u, 0x00000001u, 0x36800000u, 0x37000000u, 0x38800000u, 0x3F800000u,
+      0x3FC00000u, 0x47D00000u, 0x47E00000u, 0x47F00000u, 0x47F80000u, 0x7F800000u, 0x7FC00000u};
+  // Both seed extremes plus one interior value: stochastic rounding must round
+  // down at seed 0 and up at UINT32_MAX for every representable magnitude.
+  static constexpr std::array<uint32_t, 3> kSeeds = {0u, 0x0f0f0f0fu, 0xffffffffu};
+  constexpr uint32_t kDstInitial = 0xa5a5a5a5u;
+
+  for (const bool fp16_ovfl : {false, true}) {
+    for (uint8_t dst_byte = 0; dst_byte < 4; ++dst_byte) {
+      for (const uint32_t seed : kSeeds) {
+        for (const uint32_t value : kValues) {
+          const auto produced = run_gfx1250_e5m3_replacement(gfx1250::kVCvtSrFp8F32Vop3,
+                                                             static_cast<uint8_t>(dst_byte << 2),
+                                                             value, seed, kDstInitial, fp16_ovfl);
+          ASSERT_TRUE(produced.has_value());
+          const uint32_t byte =
+              util::f32_to_fp8_e5m3_sr_mode(std::bit_cast<float>(value), seed, fp16_ovfl);
+          const uint32_t shift = static_cast<uint32_t>(dst_byte) * 8u;
+          const uint32_t expected = (kDstInitial & ~(0xffu << shift)) | (byte << shift);
+          EXPECT_EQ(*produced, expected)
+              << "value=" << std::hex << value << " seed=" << seed << std::dec
+              << " fp16_ovfl=" << fp16_ovfl << " dst_byte=" << static_cast<unsigned>(dst_byte);
+        }
+      }
+    }
+  }
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250E5m3PackRejectsDpp) {
   constexpr uint32_t kEndpgm = 0xBFB00000u;
   for (const uint16_t opcode : {gfx1250::kVCvtPkFp8F32Vop3, gfx1250::kVCvtSrFp8F32Vop3}) {
@@ -14115,6 +14278,7 @@ TEST(BinaryTranslatorE2E, Gfx1250RecoveredBuilderRewriteKeepsTheXcntDrain) {
   // of it instead of being NOP-filled away with the rest of the range.
   constexpr uint64_t kWord = sizeof(uint32_t);
   constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kLiteralOperand = 255;
   std::vector<uint8_t> text(8 * kWord, 0);
   rocjitsu::KernelTextLayout layout;
   layout.body_end = text.size();
@@ -14138,9 +14302,9 @@ TEST(BinaryTranslatorE2E, Gfx1250RecoveredBuilderRewriteKeepsTheXcntDrain) {
   std::array<uint32_t, 3> replacement{};
   std::memcpy(replacement.data(), text.data() + kWord, replacement.size() * sizeof(uint32_t));
   EXPECT_EQ(replacement[0], rocjitsu::build_s_wait_xcnt(ROCJITSU_CODE_ARCH_GFX1250).value());
-  const auto builder = rocjitsu::decode_one(replacement[1], ROCJITSU_CODE_ARCH_GFX1250);
-  ASSERT_NE(builder, nullptr);
-  EXPECT_EQ(builder->mnemonic(), "s_add_nc_u64");
+  EXPECT_EQ(replacement[1],
+            rocjitsu::build_sop2_encoding(ROCJITSU_CODE_ARCH_GFX1250, gfx1250::kSAddNcU64Sop2,
+                                          kPcSreg, kPcSreg, kLiteralOperand));
   // s_get_pc_i64 leaves the address of the next instruction, and the target is
   // the block at 4 * kWord.
   EXPECT_EQ(replacement[2], 3 * kWord);
@@ -14149,6 +14313,7 @@ TEST(BinaryTranslatorE2E, Gfx1250RecoveredBuilderRewriteKeepsTheXcntDrain) {
 TEST(BinaryTranslatorE2E, Gfx1250RecoveredBuilderRewriteOmitsAnUnneededXcntDrain) {
   constexpr uint64_t kWord = sizeof(uint32_t);
   constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kLiteralOperand = 255;
   std::vector<uint8_t> text(8 * kWord, 0);
   rocjitsu::KernelTextLayout layout;
   layout.body_end = text.size();
@@ -14170,9 +14335,42 @@ TEST(BinaryTranslatorE2E, Gfx1250RecoveredBuilderRewriteOmitsAnUnneededXcntDrain
 
   uint32_t first = 0;
   std::memcpy(&first, text.data() + kWord, sizeof(first));
-  const auto builder = rocjitsu::decode_one(first, ROCJITSU_CODE_ARCH_GFX1250);
-  ASSERT_NE(builder, nullptr);
-  EXPECT_EQ(builder->mnemonic(), "s_add_nc_u64");
+  EXPECT_EQ(first,
+            rocjitsu::build_sop2_encoding(ROCJITSU_CODE_ARCH_GFX1250, gfx1250::kSAddNcU64Sop2,
+                                          kPcSreg, kPcSreg, kLiteralOperand));
+}
+
+TEST(BinaryTranslatorE2E, RecoveredBuilderReuseRejectsDisagreeingXcntDrain) {
+  // Only the first consumer of a shared range writes the replacement, so a
+  // second consumer that wants different words must not be silently dropped.
+  constexpr uint64_t kWord = sizeof(uint32_t);
+  constexpr uint16_t kPcSreg = 8;
+  std::vector<uint8_t> text(8 * kWord, 0);
+  rocjitsu::KernelTextLayout layout;
+  layout.body_end = text.size();
+  layout.blocks.push_back(
+      {.source_start = 0, .source_end = 4 * kWord, .target_start = 0, .target_end = 4 * kWord});
+  layout.blocks.push_back({.source_start = 4 * kWord,
+                           .source_end = 8 * kWord,
+                           .target_start = 4 * kWord,
+                           .target_end = 8 * kWord});
+  layout.recovered_builder_fixups.push_back({.source_target_offset = 4 * kWord,
+                                             .source_call_sreg = kPcSreg,
+                                             .target_getpc_offset = 0,
+                                             .target_recovery_begin_offset = kWord,
+                                             .target_recovery_end_offset = 4 * kWord});
+  layout.recovered_builder_fixups.push_back({.source_target_offset = 4 * kWord,
+                                             .source_call_sreg = kPcSreg,
+                                             .source_requires_xcnt_drain = true,
+                                             .target_getpc_offset = 0,
+                                             .target_recovery_begin_offset = kWord,
+                                             .target_recovery_end_offset = 4 * kWord});
+
+  const auto patched =
+      rocjitsu::patch_recovered_builder_fixups(text, layout, ROCJITSU_CODE_ARCH_GFX1250);
+  EXPECT_FALSE(patched.ok);
+  EXPECT_NE(patched.message.find("incompatible replacements"), std::string::npos)
+      << patched.message;
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250IgnoresUndecodablePaddingAfterTerminator) {
