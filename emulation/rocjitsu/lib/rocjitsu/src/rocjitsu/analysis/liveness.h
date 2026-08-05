@@ -142,10 +142,13 @@ public:
   /// object. The pointed-to BasicBlocks and their Instructions must outlive this
   /// analysis because deferred CFG queries retain and later dereference them.
   /// @param blocks Blocks in one kernel CFG scope.
-  /// @param exec Program-point EXEC-state analysis over the same @p blocks scope;
-  /// lets EXEC-masked vector defs count as kills where EXEC is provably full.
-  /// Taken by value and moved into the analysis; `std::move` it in.
-  LivenessAnalysis(KernelBlockScope blocks, ExecMaskAnalysis exec,
+  /// @param exec Optional program-point EXEC-state analysis over the same
+  /// @p blocks scope; lets EXEC-masked vector defs count as kills where EXEC is
+  /// provably full. Ownership is moved into the analysis. Defaults to null: with
+  /// no EXEC analysis every EXEC-masked vector def is treated as `Unknown`, so
+  /// the conservative behavior (never promote such a def to a kill) is preserved.
+  LivenessAnalysis(KernelBlockScope blocks,
+                   std::unique_ptr<ExecMaskAnalysis> exec = nullptr,
                    LivenessAnalysisOptions options = {},
                    std::span<const ScopedCfgEdge> extra_edges = {});
   ~LivenessAnalysis();

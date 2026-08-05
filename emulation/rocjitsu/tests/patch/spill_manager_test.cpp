@@ -554,7 +554,7 @@ TEST(SpillManager, IntegrationFromLiveBefore) {
   for (const auto &b : blocks)
     scope.push_back(b.get());
   const ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/64};
-  LivenessAnalysis liveness{KernelBlockScope(scope), exec};
+  LivenessAnalysis liveness{KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec)};
   const RegisterSet &live = liveness.live_before(*probe);
   ASSERT_FALSE(live.none()) << "expected at least one live register at probe site";
 

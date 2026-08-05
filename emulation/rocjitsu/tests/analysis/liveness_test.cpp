@@ -337,7 +337,7 @@ std::span<const uint8_t> text_span(const CodeObject &co) {
 LivenessAnalysis analyze_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   auto scope = block_scope(blocks);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  return LivenessAnalysis(KernelBlockScope(scope), exec);
+  return LivenessAnalysis(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec));
 }
 
 // Wire the same scoped call/return edges into BOTH analyses, as BinaryTranslator
@@ -346,7 +346,7 @@ LivenessAnalysis analyze_scope_with_edges(const std::vector<std::unique_ptr<Basi
                                           std::span<const ScopedCfgEdge> extra_edges) {
   auto scope = block_scope(blocks);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64, extra_edges);
-  return LivenessAnalysis(KernelBlockScope(scope), exec, /*options=*/{}, extra_edges);
+  return LivenessAnalysis(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), /*options=*/{}, extra_edges);
 }
 
 // CFG/liveness tests care about decoded register effects, not the physical
@@ -2885,7 +2885,7 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbResolvesPhysicalRegisterBank) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -2922,7 +2922,7 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDestinationBank) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -2956,7 +2956,7 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDespiteExplicitBank0Alias) 
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -2988,7 +2988,7 @@ TEST(LivenessAnalysis, Gfx1250SwapImplicitReadsResolvePerRole) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -3040,7 +3040,7 @@ TEST(LivenessAnalysis, Gfx1250DppPreserveReadResolvesToDstBank) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -3073,7 +3073,7 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseUnknownBankReadsEveryCandidate) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -3106,7 +3106,7 @@ TEST(LivenessAnalysis, Gfx1250UnknownBankDefMakesEveryCandidateGloballyUsed) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -3144,7 +3144,7 @@ TEST(LivenessAnalysis, Gfx1250RelativeVgprAccessDisablesGlobalUnusedQuery) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   const Instruction &instruction = *blocks.front()->instructions().begin();
   EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&instruction, 1, 1, 1, 2), std::nullopt);
@@ -3166,7 +3166,7 @@ TEST(LivenessAnalysis, Gfx1250SwaprelDisablesGlobalUnusedQuery) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   const Instruction &instruction = *blocks.front()->instructions().begin();
   EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&instruction, 1, 1, 1, 2), std::nullopt);
@@ -3193,7 +3193,7 @@ TEST(LivenessAnalysis, Gfx1250GprIndexModeWriteDisablesGlobalUnusedQuery) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -3223,7 +3223,7 @@ TEST(LivenessAnalysis, Gfx1250ImmediateGprIndexModeWriteUsesLiteralValue) {
     options.entry_block = scope.front();
     options.text = text_span(co);
     const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-    LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+    LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
     auto instruction = blocks.front()->instructions().begin();
     ++instruction;
@@ -3254,7 +3254,7 @@ TEST(LivenessAnalysis, Cdna4DynamicGprIndexModeWriteDisablesGlobalUnusedQuery) {
   options.arch = ROCJITSU_CODE_ARCH_CDNA4;
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -3283,7 +3283,7 @@ TEST(LivenessAnalysis, Cdna4ImmediateGprIndexModeWriteUsesLiteralValue) {
     options.arch = ROCJITSU_CODE_ARCH_CDNA4;
     options.text = text_span(co);
     const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-    LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+    LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
     auto instruction = blocks.front()->instructions().begin();
     ++instruction;
@@ -3315,7 +3315,7 @@ TEST(LivenessAnalysis, Gfx1250DynamicModeWriteConservativelyUsesEveryBank) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -3349,7 +3349,7 @@ TEST(LivenessAnalysis, Gfx1250FullLiteralModeWriteRecoversKnownBank) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   auto instruction = blocks.front()->instructions().begin();
   std::advance(instruction, 2);
@@ -3391,7 +3391,7 @@ TEST(LivenessAnalysis, Gfx1250TruncatedLiteralModeWriteMarksBanksAmbiguous) {
   const auto full = text_span(co);
   options.text = full.subspan(0, 8);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   auto instruction = blocks.front()->instructions().begin();
   std::advance(instruction, 2);
@@ -3421,7 +3421,7 @@ TEST(LivenessAnalysis, Gfx1250PartialLiteralModeWriteUsesUnmaskedVgprFields) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   auto instruction = blocks.front()->instructions().begin();
   std::advance(instruction, 2);
@@ -3454,7 +3454,7 @@ TEST(LivenessAnalysis, Gfx1250ImmediateModeWriteRecoversBanksOutsideRequestedSli
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   auto instruction = blocks.front()->instructions().begin();
   std::advance(instruction, 2);
@@ -3482,7 +3482,7 @@ TEST(LivenessAnalysis, Gfx1250LiteralModeWriteTracksEveryRole) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -3511,7 +3511,7 @@ TEST(LivenessAnalysis, Gfx1250ImmediateNonModeWriteDoesNotChangeBanks) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -3543,7 +3543,7 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinRequiresPredecessorsToAgree) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   const Instruction &joined_move = *join->instructions().begin();
   EXPECT_EQ(liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0), std::nullopt);
@@ -3572,7 +3572,7 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinPreservesAgreeingBank) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   const Instruction &joined_move = *join->instructions().begin();
   EXPECT_EQ(liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0), 2);
@@ -3610,7 +3610,7 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbJoinExcludesUnreachablePredecessor) {
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   const Instruction *joined_move = nullptr;
   for (const auto &block : blocks) {
@@ -3897,7 +3897,7 @@ TEST(ExecMaskAnalysis, Wave32ExecHiZeroWritePreservesFull) {
   EXPECT_EQ(exec.before(*insts[2]), ExecState::Full); // exec_hi=0 preserved Full
 
   const ExecMaskAnalysis exec_for_liveness{KernelBlockScope(scope), /*wave_size=*/32};
-  const LivenessAnalysis liveness{KernelBlockScope(scope), exec_for_liveness};
+  const LivenessAnalysis liveness{KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec_for_liveness)};
   EXPECT_FALSE(liveness.is_live_before(*insts[2], {RegClass::VGPR, 0, 1}));
 }
 
@@ -4101,7 +4101,7 @@ TEST(LivenessAnalysis, MinFreeVgprForcesScratchAllocationAboveFloor) {
   options.min_free_vgpr = 4;
 
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   const Instruction &use = *blocks[0]->instructions().begin();
   EXPECT_FALSE(liveness.is_live_before(use, {RegClass::VGPR, 0, 4}));
@@ -4116,7 +4116,7 @@ TEST(LivenessAnalysis, GloballyUnusedRunHonorsMinFreeVgprFloor) {
   LivenessAnalysisOptions options;
   options.min_free_vgpr = 4;
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   const Instruction &use = *blocks[0]->instructions().begin();
   EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&use, 1, 0, 1, 8), 4);
@@ -4128,7 +4128,7 @@ TEST(LivenessAnalysis, FindsGloballyUnusedRunBeforeSiteDeadFallback) {
   auto blocks = build_test_blocks({TestOpcode::UseVgpr0, TestOpcode::Nop, TestOpcode::End});
   auto scope = block_scope(blocks);
   const ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/64};
-  const LivenessAnalysis liveness{KernelBlockScope(scope), exec};
+  const LivenessAnalysis liveness{KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec)};
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -4156,13 +4156,13 @@ TEST(LivenessAnalysis, FreeVgprAllocationHonorsDestinationLimit) {
 
   LivenessAnalysisOptions limited_options;
   limited_options.min_free_vgpr = 256;
-  LivenessAnalysis limited(KernelBlockScope(scope), exec, limited_options);
+  LivenessAnalysis limited(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), limited_options);
   EXPECT_EQ(limited.find_free_run(&use, 1), std::nullopt);
 
   LivenessAnalysisOptions gfx1250_options;
   gfx1250_options.min_free_vgpr = 256;
   gfx1250_options.max_free_vgpr = 1024;
-  LivenessAnalysis gfx1250(KernelBlockScope(scope), exec, gfx1250_options);
+  LivenessAnalysis gfx1250(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), gfx1250_options);
   EXPECT_EQ(gfx1250.find_free_run(&use, 1), 256);
 }
 
@@ -4174,7 +4174,7 @@ TEST(LivenessAnalysis, FindFreeRunHonorsBaseAlignment) {
   options.min_free_vgpr = 93;
 
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec), options);
 
   const Instruction &use = *blocks[0]->instructions().begin();
   EXPECT_EQ(liveness.find_free_run(&use, 4, 0, 2), 94);
@@ -4288,7 +4288,7 @@ TEST(LivenessAnalysis, ExplicitBlockSubsetIgnoresOutsideSuccessors) {
 
   std::vector<BasicBlock *> kernel_blocks{kernel0};
   const ExecMaskAnalysis kernel_exec(KernelBlockScope(kernel_blocks), /*wave_size=*/64);
-  LivenessAnalysis kernel_liveness{KernelBlockScope(kernel_blocks), kernel_exec};
+  LivenessAnalysis kernel_liveness{KernelBlockScope(kernel_blocks), std::make_unique<ExecMaskAnalysis>(kernel_exec)};
   EXPECT_FALSE(kernel_liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
 }
 

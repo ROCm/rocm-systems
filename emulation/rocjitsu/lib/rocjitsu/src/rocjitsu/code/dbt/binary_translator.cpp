@@ -2147,26 +2147,16 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     std::vector<ScopedCfgEdge> scope_analysis_edges;
     if (scope_requires_liveness) {
       scope_analysis_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
-      // Seed every hardware entry: the descriptor entry plus, when present, the
-      // kernarg-preload firmware entry (+256), which hardware enters with unknown
-      // EXEC and so must be pinned Unknown even if an ordinary path reaches it.
-      // (The firmware entry is seeded here for EXEC state, but deliberately
-      // excluded from the relocation-root gate above, which reasons about PC
-      // provenance rather than EXEC.)
-      std::vector<const BasicBlock *> entry_blocks{scope.entry};
-      if (scope.translation->has_kernarg_preload_firmware_skip) {
-        const uint64_t firmware_offset =
-            scope.translation->kernarg_preload_firmware_entry_text_offset;
-        for (const BasicBlock *block : scope.blocks) {
-          if (block != nullptr && block->start_offset() == firmware_offset) {
-            entry_blocks.push_back(block);
-            break;
-          }
-        }
-      }
-      ExecMaskAnalysis exec(KernelBlockScope(scope.blocks), scope.translation->guest_wavefront_size,
-                            scope_analysis_edges, entry_blocks);
-      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), std::move(exec), liveness_options,
+      // DBT runs liveness without EXEC-state analysis: with a null ExecMaskAnalysis
+      // every EXEC-masked vector def is treated as `Unknown` and so is never
+      // promoted to a kill, keeping scratch allocation conservative.
+      //
+      // TODO: Once ExecMaskAnalysis is performance-optimized, build one here (seeded
+      // with the descriptor entry plus, when present, the kernarg-preload firmware
+      // entry at +256, which hardware enters with unknown EXEC) and pass it to
+      // LivenessAnalysis so EXEC-masked vector defs can be promoted to kills where
+      // EXEC is provably full, freeing more scratch registers.
+      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), /*exec=*/nullptr, liveness_options,
                                   scope_analysis_edges);
     }
 
