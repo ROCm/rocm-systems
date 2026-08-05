@@ -1466,6 +1466,11 @@ ExpandResult expand_gfx1250_cvt_pk_fp8_f32_e5m3(const Instruction &inst, uint32_
     return ExpandResult::not_handled();
   if (source.src0 == 233u || source.src0 == 234u || source.src0 == 250u)
     return ExpandResult::failed("gfx1250 E5M3 pack does not support DPP");
+  // SRC_LITERAL64 carries a two-word payload, and the expansion has no free
+  // literal slot to re-encode it: the generated helpers already spend selector
+  // 255 on their own mask literals.
+  if (source.src0 == 254u || source.src1 == 254u)
+    return ExpandResult::failed("gfx1250 E5M3 pack does not support SRC_LITERAL64");
   const bool has_literal = source.src0 == 255u || source.src1 == 255u;
   if (has_literal && inst.size() < 3 * static_cast<int>(sizeof(uint32_t)))
     return ExpandResult::failed("gfx1250 E5M3 pack literal word is missing");
@@ -1606,6 +1611,8 @@ ExpandResult expand_gfx1250_cvt_sr_fp8_f32_e5m3(const Instruction &inst, uint32_
     return ExpandResult::not_handled();
   if (source.src0 == 233u || source.src0 == 234u || source.src0 == 250u)
     return ExpandResult::failed("gfx1250 stochastic E5M3 does not support DPP");
+  if (source.src0 == 254u || source.src1 == 254u)
+    return ExpandResult::failed("gfx1250 stochastic E5M3 does not support SRC_LITERAL64");
   const bool has_literal = source.src0 == 255u || source.src1 == 255u;
   if (has_literal && inst.size() < 3 * static_cast<int>(sizeof(uint32_t)))
     return ExpandResult::failed("gfx1250 stochastic E5M3 literal word is missing");

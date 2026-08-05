@@ -9805,6 +9805,47 @@ TEST(BinaryTranslatorE2E, Gfx1250EmulatesLiteralCvtPkFp8F32ClampSetForA0) {
             0);
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250MaterializedE5m3LiteralIgnoresTheGuestSourceBank) {
+  // Src0 is a literal and its guest bank is 1; src1, src2 and the destination
+  // stay in bank 0. The literal is materialized into a low-bank scratch VGPR,
+  // so no helper may run under a src-bank-1 mode (0x04) -- doing so would read
+  // a different physical register than the one the v_mov just wrote.
+  constexpr auto set_vgpr_msb = gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x01});
+  constexpr auto source_cvt = gfx1250::build_vop3(
+      gfx1250::kVCvtPkFp8F32Vop3, {.vdst = 30, .clamp = 1, .src0 = 255, .src1 = 256 + 2});
+  constexpr uint32_t kLiteral = 0x3F800000u;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {set_vgpr_msb[0], source_cvt[0], source_cvt[1], kLiteral, kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  EXPECT_EQ(std::ranges::count_if(
+                decoded, [](const auto &inst) { return inst->mnemonic() == "v_cvt_pk_fp8_f32"; }),
+            0);
+  std::vector<uint8_t> modes;
+  for (const auto &inst : decoded) {
+    if (inst->mnemonic() == "s_set_vgpr_msb") {
+      ASSERT_NE(inst->raw_encoding(), nullptr);
+      modes.push_back(static_cast<uint8_t>(inst->raw_encoding()[0] & 0xffu));
+    }
+  }
+  ASSERT_FALSE(modes.empty());
+  EXPECT_EQ(std::ranges::find(modes, 0x04u), modes.end())
+      << "materialized literal must be read from the low bank";
+  EXPECT_EQ(modes.back(), 0x01u) << "expansion must restore the incoming VGPR-MSB mode";
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250EmulatesCvtSrFp8F32ClampSetForA0) {
   constexpr auto source_cvt =
       gfx1250::build_vop3(gfx1250::kVCvtSrFp8F32Vop3,
@@ -9863,6 +9904,37 @@ TEST(BinaryTranslatorE2E, Gfx1250E5m3PackRejectsDpp) {
     ASSERT_FALSE(result.ok());
     ASSERT_FALSE(result.diagnostics.empty());
     EXPECT_NE(result.diagnostics.front().message.find("does not support DPP"), std::string::npos);
+  }
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250E5m3PackRejectsLiteral64) {
+  constexpr uint32_t kEndpgm = 0xBFB00000u;
+  constexpr uint32_t kLiteralLow = 0x3F800000u;
+  // The gfx1250 VOP3 decoder reports only the first literal word, so the second
+  // one is decoded on its own. Keep it an s_nop rather than undecodable bytes,
+  // which would fail the kernel before the expansion rule is consulted.
+  constexpr uint32_t kLiteralHigh = 0xBF800000u;
+  for (const uint16_t opcode : {gfx1250::kVCvtPkFp8F32Vop3, gfx1250::kVCvtSrFp8F32Vop3}) {
+    for (const bool literal_in_src0 : {true, false}) {
+      const auto conversion = gfx1250::build_vop3(
+          opcode, {.vdst = 30,
+                   .clamp = 1,
+                   .src0 = static_cast<uint16_t>(literal_in_src0 ? 254 : 256 + 22),
+                   .src1 = static_cast<uint16_t>(literal_in_src0 ? 256 + 2 : 254)});
+      auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+          {conversion[0], conversion[1], kLiteralLow, kLiteralHigh, kEndpgm});
+      rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+      rocjitsu::BinaryTranslator translator(
+          ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+          gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                   rocjitsu::ProcessorRevision::Gfx1250A0));
+      const auto result = translator.translate(source);
+      ASSERT_FALSE(result.ok());
+      ASSERT_FALSE(result.diagnostics.empty());
+      EXPECT_NE(result.diagnostics.front().message.find("does not support SRC_LITERAL64"),
+                std::string::npos)
+          << result.diagnostics.front().message;
+    }
   }
 }
 
@@ -14034,6 +14106,73 @@ TEST(BinaryTranslatorE2E, Gfx1250RecoversAddNcU64PcBuilder) {
 
   EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
                                                           : result.diagnostics.front().message);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250RecoveredBuilderRewriteKeepsTheXcntDrain) {
+  // A recovered gfx1250 signed-delta range holds the s_wait_xcnt the compiler
+  // put ahead of the pair writes. The canonical builder overwrites the whole
+  // range and writes that same pair, so the drain has to be re-emitted in front
+  // of it instead of being NOP-filled away with the rest of the range.
+  constexpr uint64_t kWord = sizeof(uint32_t);
+  constexpr uint16_t kPcSreg = 8;
+  std::vector<uint8_t> text(8 * kWord, 0);
+  rocjitsu::KernelTextLayout layout;
+  layout.body_end = text.size();
+  layout.blocks.push_back(
+      {.source_start = 0, .source_end = 4 * kWord, .target_start = 0, .target_end = 4 * kWord});
+  layout.blocks.push_back({.source_start = 4 * kWord,
+                           .source_end = 8 * kWord,
+                           .target_start = 4 * kWord,
+                           .target_end = 8 * kWord});
+  layout.recovered_builder_fixups.push_back({.source_target_offset = 4 * kWord,
+                                             .source_call_sreg = kPcSreg,
+                                             .source_requires_xcnt_drain = true,
+                                             .target_getpc_offset = 0,
+                                             .target_recovery_begin_offset = kWord,
+                                             .target_recovery_end_offset = 4 * kWord});
+
+  const auto patched =
+      rocjitsu::patch_recovered_builder_fixups(text, layout, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(patched.ok) << patched.message;
+
+  std::array<uint32_t, 3> replacement{};
+  std::memcpy(replacement.data(), text.data() + kWord, replacement.size() * sizeof(uint32_t));
+  EXPECT_EQ(replacement[0], rocjitsu::build_s_wait_xcnt(ROCJITSU_CODE_ARCH_GFX1250).value());
+  const auto builder = rocjitsu::decode_one(replacement[1], ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(builder, nullptr);
+  EXPECT_EQ(builder->mnemonic(), "s_add_nc_u64");
+  // s_get_pc_i64 leaves the address of the next instruction, and the target is
+  // the block at 4 * kWord.
+  EXPECT_EQ(replacement[2], 3 * kWord);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250RecoveredBuilderRewriteOmitsAnUnneededXcntDrain) {
+  constexpr uint64_t kWord = sizeof(uint32_t);
+  constexpr uint16_t kPcSreg = 8;
+  std::vector<uint8_t> text(8 * kWord, 0);
+  rocjitsu::KernelTextLayout layout;
+  layout.body_end = text.size();
+  layout.blocks.push_back(
+      {.source_start = 0, .source_end = 4 * kWord, .target_start = 0, .target_end = 4 * kWord});
+  layout.blocks.push_back({.source_start = 4 * kWord,
+                           .source_end = 8 * kWord,
+                           .target_start = 4 * kWord,
+                           .target_end = 8 * kWord});
+  layout.recovered_builder_fixups.push_back({.source_target_offset = 4 * kWord,
+                                             .source_call_sreg = kPcSreg,
+                                             .target_getpc_offset = 0,
+                                             .target_recovery_begin_offset = kWord,
+                                             .target_recovery_end_offset = 4 * kWord});
+
+  const auto patched =
+      rocjitsu::patch_recovered_builder_fixups(text, layout, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(patched.ok) << patched.message;
+
+  uint32_t first = 0;
+  std::memcpy(&first, text.data() + kWord, sizeof(first));
+  const auto builder = rocjitsu::decode_one(first, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(builder, nullptr);
+  EXPECT_EQ(builder->mnemonic(), "s_add_nc_u64");
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250IgnoresUndecodablePaddingAfterTerminator) {

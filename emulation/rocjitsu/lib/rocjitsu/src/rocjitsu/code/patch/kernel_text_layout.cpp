@@ -997,6 +997,19 @@ TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
     const int64_t base = static_cast<int64_t>(fixup.target_getpc_offset + sizeof(uint32_t));
     const int64_t delta = static_cast<int64_t>(*target_target) - base;
     std::vector<uint32_t> replacement_words;
+    if (fixup.source_requires_xcnt_drain) {
+      // The drain the source range held ordered the writes to this same SGPR
+      // pair, so it has to come before the builder rather than be NOP-filled
+      // away with the rest of the range.
+      const auto drain = build_s_wait_xcnt(arch);
+      if (!drain) {
+        return relocation_error(
+            fixup.source_call_offset,
+            "target ISA cannot encode the XCNT drain the recovered builder requires",
+            TextLayoutFailureCategory::ResourceLimit);
+      }
+      replacement_words.push_back(*drain);
+    }
     if (!append_pc_delta_builder(replacement_words, arch, fixup.source_call_sreg, delta)) {
       return relocation_error(
           fixup.source_call_offset,

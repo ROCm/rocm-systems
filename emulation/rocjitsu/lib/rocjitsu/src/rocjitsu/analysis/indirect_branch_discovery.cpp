@@ -1420,9 +1420,12 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     const Instruction &inst = *ctx.insts[index];
     // The gfx1250 sequence drains XCNT before an instruction prefetch. The
     // shader manual defines S_WAIT_XCNT as a counter wait, so neither it nor
-    // the prefetch changes the PC pair or the signed-delta temporary. Keep both
-    // instructions in the translated body; this predicate only skips them
-    // while locating the arithmetic and set-PC consumer.
+    // the prefetch changes the PC pair or the signed-delta temporary. This
+    // block is the conditional branch target, so it lies past the recovery
+    // range and keeps both instructions verbatim; the predicate only skips them
+    // while locating the arithmetic and set-PC consumer. The subtract half sits
+    // inside the range and has to reproduce its drain -- see
+    // match_signed_delta_sub_consumer.
     if (inst.mnemonic() == "s_wait_xcnt" || inst.mnemonic() == "s_prefetch_inst_pc_rel")
       return true;
     // The compiler also emits a scalar immediate move to configure the
@@ -1456,8 +1459,8 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
   if (setpc_index > block.last_index)
     return std::nullopt;
   const Instruction &setpc_inst = *ctx.insts[setpc_index];
-  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[low_index].word, *add_u32_opcode,
-                                pair_lo, pair_lo, tmp_sreg))
+  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[low_index].word, *add_u32_opcode, pair_lo,
+                                pair_lo, tmp_sreg))
     return std::nullopt;
   if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[high_index].word, *addc_u32_opcode,
                                      static_cast<uint16_t>(pair_lo + 1),
@@ -1470,7 +1473,14 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
   return setpc_index;
 }
 
-[[nodiscard]] std::optional<std::pair<size_t, uint64_t>>
+/// @brief Negative half of the signed PC-delta template, as matched in one block.
+struct SignedDeltaSubMatch {
+  size_t setpc_index = 0;    ///< Index of the subtract half's set-PC consumer.
+  uint64_t recovery_end = 0; ///< One-past-end source byte of the recovery range.
+  bool skipped_xcnt = false; ///< The range holds an `s_wait_xcnt` the rewrite must reproduce.
+};
+
+[[nodiscard]] std::optional<SignedDeltaSubMatch>
 match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock &block,
                                 uint16_t pair_lo, uint16_t tmp_sreg) {
   // Match the negative half of the same signed PC-delta template:
@@ -1503,9 +1513,17 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
     return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u) && dst != tmp_sreg;
   };
 
+  // Padding skipped ahead of the subtract half lies inside the recovery range,
+  // which patch_recovered_builder_fixups overwrites with the canonical builder
+  // and NOP-fills. Losing the prefetch and its configuration move only costs a
+  // hint, but the canonical builder writes the same pair the XCNT drain orders,
+  // so the rewrite has to reproduce the drain.
   size_t abs_index = block.first_index;
-  while (abs_index <= block.last_index && is_gfx1250_padding(abs_index))
+  bool skipped_xcnt = false;
+  while (abs_index <= block.last_index && is_gfx1250_padding(abs_index)) {
+    skipped_xcnt = skipped_xcnt || ctx.insts[abs_index]->mnemonic() == "s_wait_xcnt";
     ++abs_index;
+  }
   if (abs_index + 3 > block.last_index)
     return std::nullopt;
   const Instruction &abs_inst = *ctx.insts[abs_index];
@@ -1530,7 +1548,11 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
       scalar_pc_sreg(ctx.arch, setpc_inst, ctx.facts[setpc_index].word, ScalarPcOp::SetPc64);
   if (!setpc_sreg || *setpc_sreg != pair_lo)
     return std::nullopt;
-  return std::pair{setpc_index, high_inst.src_loc() + static_cast<uint64_t>(high_inst.size())};
+  return SignedDeltaSubMatch{
+      .setpc_index = setpc_index,
+      .recovery_end = high_inst.src_loc() + static_cast<uint64_t>(high_inst.size()),
+      .skipped_xcnt = skipped_xcnt,
+  };
 }
 
 bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state) {
@@ -2379,13 +2401,20 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
                   static_cast<int64_t>(static_cast<int32_t>(literal)) + 4,
         .source_getpc_offset = getpc_inst.src_loc(),
         .source_recovery_begin_offset = getpc_next,
-        .source_recovery_end_offset = sub_consumer->second,
+        .source_recovery_end_offset = sub_consumer->recovery_end,
     };
 
-    if (auto fixup = fixup_for_value(ctx, sub_consumer->first, *pair_lo, value))
+    // Both consumers name the same range, so both must ask for the same
+    // replacement: patch_recovered_builder_fixups rewrites it once and requires
+    // the duplicate to agree.
+    if (auto fixup = fixup_for_value(ctx, sub_consumer->setpc_index, *pair_lo, value)) {
+      fixup->source_requires_xcnt_drain = sub_consumer->skipped_xcnt;
       append_unique(recovered, *fixup);
-    if (auto fixup = fixup_for_value(ctx, *add_consumer, *pair_lo, value))
+    }
+    if (auto fixup = fixup_for_value(ctx, *add_consumer, *pair_lo, value)) {
+      fixup->source_requires_xcnt_drain = sub_consumer->skipped_xcnt;
       append_unique(recovered, *fixup);
+    }
   }
 }
 
