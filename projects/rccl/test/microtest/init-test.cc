@@ -21,6 +21,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
+#include <memory>
+#include <vector>
 
 #include "fakes/init_fakes.h"
 
@@ -68,12 +71,51 @@ class InitMicrotest : public ::testing::Test {
   void TearDown() override { ResetInitFakes(); }
 };
 
-// Bring-up smoke test: proves the TU compiles/links (init.cc pulled in, all
-// external symbols satisfied) and that a pure host-logic helper is callable.
-// uniformRanksPerHost is a static in init.cc, visible here via the include.
-TEST_F(InitMicrotest, TranslationUnitLinksAndPureHelperReturnsFalseForEmpty) {
-  // Single host, zero ranks -> loop body never runs -> ranksPerHost stays -1,
-  // total stays 0, so the uniform check is trivially satisfied (returns true).
-  // (Full behavioral coverage of this helper lands with the matrix rows.)
-  SUCCEED();
+namespace {
+// Minimal comm builder for uniformRanksPerHost, which reads ONLY
+// peerInfo[i].hostHash. Each initializer value is a host id; ranks sharing an
+// id are "on the same host". Nothing else on ncclComm is touched.
+class HostPattern {
+ public:
+  explicit HostPattern(std::initializer_list<uint64_t> hosts)
+      : peers_(hosts.size()), comm_(new ncclComm{}) {
+    int i = 0;
+    for (uint64_t h : hosts) peers_[i++].hostHash = h;
+    comm_->peerInfo = peers_.data();
+  }
+  const ncclComm* comm() const { return comm_.get(); }
+  int nranks() const { return static_cast<int>(peers_.size()); }
+ private:
+  std::vector<ncclPeerInfo> peers_;
+  std::unique_ptr<ncclComm> comm_;
+};
+}  // namespace
+
+// --- Tier A: uniformRanksPerHost (init.cc:1249) -- pure host logic, no seams ---
+// Returns true iff every host has the same (>0) number of ranks and they cover
+// all nranks.
+
+TEST_F(InitMicrotest, UniformRanksPerHost_TwoHostsTwoRanksEach_ReturnsTrue) {
+  HostPattern p{1, 1, 2, 2};
+  EXPECT_TRUE(uniformRanksPerHost(p.comm(), p.nranks()));
+}
+
+TEST_F(InitMicrotest, UniformRanksPerHost_UnevenRanksPerHost_ReturnsFalse) {
+  HostPattern p{1, 1, 2};  // host 1 has 2 ranks, host 2 has 1 -> non-uniform
+  EXPECT_FALSE(uniformRanksPerHost(p.comm(), p.nranks()));
+}
+
+TEST_F(InitMicrotest, UniformRanksPerHost_AllRanksOneHost_ReturnsTrue) {
+  HostPattern p{7, 7, 7, 7};
+  EXPECT_TRUE(uniformRanksPerHost(p.comm(), p.nranks()));
+}
+
+TEST_F(InitMicrotest, UniformRanksPerHost_SingleRank_ReturnsTrue) {
+  HostPattern p{42};
+  EXPECT_TRUE(uniformRanksPerHost(p.comm(), p.nranks()));
+}
+
+TEST_F(InitMicrotest, UniformRanksPerHost_ZeroRanks_ReturnsFalse) {
+  HostPattern p{};  // ranksPerHost stays -1 -> ranksPerHost>0 fails
+  EXPECT_FALSE(uniformRanksPerHost(p.comm(), 0));
 }
