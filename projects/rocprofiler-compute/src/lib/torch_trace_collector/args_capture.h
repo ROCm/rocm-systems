@@ -33,16 +33,17 @@ struct ArgsCaptureConfig
 
 inline ArgsCaptureConfig g_args_capture;
 
-// Truncate an args blob longer than kMaxArgsLen characters and append an
-// ellipsis.
+// Truncate an over-length args blob to kMaxArgsLen characters and append an
+// ellipsis, keeping the closing ')' when the blob is parenthesized.
 inline std::string cap_args_blob(std::string blob)
 {
     if (blob.size() <= kMaxArgsLen)
     {
         return blob;
     }
+    const bool balanced = !blob.empty() && blob.front() == '(' && blob.back() == ')';
     blob.resize(kMaxArgsLen);
-    blob += "...";
+    blob += balanced ? "...)" : "...";
     return blob;
 }
 

@@ -2626,6 +2626,11 @@ def test_torch_trace_profile(
         "No aggregated stats found in output"
     )
 
+    # 11b. Operator args appear inline in the call-tree display
+    assert re.search(r"args=\([^)]", list_output), (
+        "Operator args not shown in --list-torch-operators call-tree output"
+    )
+
     # 12. Kernel IDs
     kernel_ids = re.findall(r"\(id (\d+)\)", list_output)
     assert kernel_ids, "No kernel IDs found in output"
@@ -2877,6 +2882,11 @@ def test_triton_trace_profile(
         "No operator arguments captured in consolidated.csv Args column"
     )
 
+    # Operator args appear inline in the call-tree display.
+    assert re.search(r"args=\([^)]", list_output), (
+        "Operator args not shown in --list-triton-operators call-tree output"
+    )
+
     # ---- analyze --triton-operator ----
 
     capsys.readouterr()
@@ -2912,13 +2922,13 @@ def test_triton_trace_profile(
 
 
 @pytest.mark.triton_trace
-def test_ml_api_trace_torch_compile_triton(
+def test_ml_api_trace_triton_ffn(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
     capsys,
 ):
     """
-    Validate the ML API trace flow for a torch.compile Triton workload.
+    Validate the ML API trace flow for a Triton workload.
 
     Profiles the workload with --ml-api-trace and runs analyze with
     --list-triton-operators, --triton-operator, and --torch-operator. Verifies
@@ -2939,12 +2949,12 @@ def test_ml_api_trace_torch_compile_triton(
         workload_dir,
         options,
         check_success=True,
-        app_name="torch_compile_test_app",
+        app_name="triton_test_app",
     )
 
     # ---- Profiling output ----
 
-    assert returncode == 0, "Profiling the torch.compile/Triton workload failed"
+    assert returncode == 0, "Profiling the Triton workload failed"
 
     marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
     counter_collection_files = list(
@@ -2968,7 +2978,8 @@ def test_ml_api_trace_torch_compile_triton(
         "--list-triton-operators",
     ])
     assert returncode_list == 0, "Analyze with --list-triton-operators failed"
-    capsys.readouterr()
+
+    list_output = capsys.readouterr().out
 
     consolidated_csv = Path(workload_dir) / "ml_api_trace" / "consolidated.csv"
     assert consolidated_csv.exists(), "consolidated.csv not found in ml_api_trace"
@@ -2977,16 +2988,16 @@ def test_ml_api_trace_torch_compile_triton(
     for column in ("Operator_Name", "Backend", "Kernel_Name"):
         assert column in df.columns, f"{column} column missing in consolidated.csv"
 
-    # A Triton kernel is attributed to an operator marker from the torch or
-    # triton backend.
+    # A Triton kernel is attributed to an operator marker from the triton
+    # backend.
     attributed_triton = df[
-        df["Kernel_Name"].astype(str).str.contains("triton_", case=False, na=False)
-        & df["Operator_Name"].notna()
-        & df["Backend"].isin(["torch", "triton"])
+        df["Backend"].eq("triton")
+        & df["Operator_Name"].astype(str).str.contains("triton", case=False, na=False)
+        & df["Kernel_Name"].notna()
     ]
     assert not attributed_triton.empty, (
-        "No torch.compile Triton kernel (triton_*) was attributed to an "
-        "operator marker in consolidated.csv"
+        "No Triton kernel was attributed to a Triton operator marker in "
+        "consolidated.csv"
     )
 
     # Operator-argument capture populates the Args column.
@@ -2994,6 +3005,11 @@ def test_ml_api_trace_torch_compile_triton(
     captured_args = df["Args"].fillna("").astype(str).str.strip()
     assert captured_args.str.startswith("(").any(), (
         "No operator arguments captured in consolidated.csv Args column"
+    )
+
+    # Operator args appear inline in the call-tree display.
+    assert re.search(r"args=\([^)]", list_output), (
+        "Operator args not shown in --list-triton-operators call-tree output"
     )
 
     # ---- analyze --triton-operator ----

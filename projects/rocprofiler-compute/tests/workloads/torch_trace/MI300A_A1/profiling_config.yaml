@@ -19,25 +19,28 @@ list_available_metrics: false
 list_blocks: null
 list_metrics: null
 list_sets: false
-loglevel: 10
+loglevel: 20
 membw_analysis: false
+ml_api_trace: false
+ml_trace_with_params: shapes
 mode: profile
 name: torch_trace
 no_native_tool: false
 no_roof: false
-output_directory: /app/projects/rocprofiler-compute/workloads/torch_trace/MI300X_A1
+output_directory: /app/projects/rocprofiler-compute/workloads/torch_trace/MI300A_A1
+overwrite: false
 pc_sampling: false
 pc_sampling_interval: null
 pc_sampling_method: stochastic
 quiet: false
-remaining: python /app/projects/rocprofiler-compute/src/utils/inject_roctx/launch.py
-  --frameworks torch -- sample/simple_net.py
+remaining: python3 /app/projects/rocprofiler-compute/src/utils/inject_roctx/launch.py
+  --frameworks torch --capture-args 1 --capture-arg-values 0 -- /app/projects/rocprofiler-compute/sample/simple_net.py
 retain_rocpd_output: false
-rocprofiler_sdk_tool_path: /rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so
+rocprofiler_sdk_tool_path: /rocm-venv/lib/python3.12/site-packages/_rocm_sdk_core/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so
 roof_only: false
 set_selected: compute_thruput_util
-spatial_multiplexing: null
 specs: false
 target: null
 torch_trace: true
-verbose: 1
+triton_trace: false
+verbose: 0

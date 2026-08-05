@@ -702,6 +702,15 @@ def test_cap_args_truncates_long_blobs():
     assert marker_format.cap_args("short") == "short"
 
 
+def test_cap_args_keeps_closing_paren_when_parenthesized():
+    from utils.inject_roctx import marker_format
+
+    long_blob = "(" + "x" * (marker_format.MAX_ARGS_LEN + 50) + ")"
+    capped = marker_format.cap_args(long_blob)
+    assert capped.endswith("...)")
+    assert len(capped) == marker_format.MAX_ARGS_LEN + len("...)")
+
+
 def test_triton_build_args_tensor_and_scalar():
     from utils.inject_roctx import core
     from utils.inject_roctx.backends import triton as triton_backend
