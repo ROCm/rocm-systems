@@ -807,6 +807,16 @@ inline bool ncclDevFuncIsLL128RegVariant(int coll, int proto) {
          (coll == ncclFuncAllReduce || coll == ncclFuncAllGather || coll == ncclFuncBroadcast);
 }
 
+// Map user-buffer registration status to the LL128 reg-variant UserRegMode:
+//   1 = registered     (Direct path, system-scope cache-bypassing load/store)
+//   2 = non-registered (plain / non-temporal path)
+// A buffer counts as registered if either the IPC/NVLS (regUsed) or the network
+// (netRegUsed) registration is active. Keep in sync with the UserRegMode kernel
+// dimension in src/device/generate.py and the selection in src/enqueue.cc.
+inline int ncclDevFuncLL128RegMode(bool regUsed, bool netRegUsed) {
+  return (regUsed || netRegUsed) ? 1 : 2;
+}
+
 // Which unroll-factor tables were generated in this build, indexed by the
 // NCCL_UNROLL_* enum. Generated in host_table.cpp by generate.py.
 extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
@@ -814,7 +824,8 @@ extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py
 // `reg` is the user-buffer registration mode (0=n/a, 1=registered, 2=non-registered)
 // and is only used to distinguish the LL128 reg-variant collectives.
-inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, int acc = 0, int pipeline = 0, int reg = 0) {
+inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, int acc = 0, int pipeline = 0,
+                         int reg = 0) {
   int row = -1;
   uint64_t key;
   // Pack 4-bit fields from right (LSB) to left in order:

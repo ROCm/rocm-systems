@@ -82,6 +82,42 @@ TEST_F(LL128RegVariantKernelTests, TwoDistinctLL128KernelsPerRegVariantCollectiv
     }
 }
 
+// Pins the registration -> UserRegMode selection performed at launch in
+// enqueue.cc (ncclTasksRegAndEnqueue): a registered user buffer must resolve to
+// the reg=1 kernel and a non-registered one to the reg=2 kernel. Because the
+// generated ids are only asserted to be *distinct* elsewhere, inverting the
+// `1 : 2` mapping there would still pass those tests -- this one catches it.
+TEST_F(LL128RegVariantKernelTests, RegModeSelectionResolvesToMatchingKernel)
+{
+    const int coll  = ncclFuncAllReduce;
+    const int redop = ncclDevSum;
+    const int type  = ncclFloat32;
+    const int algo  = NCCL_ALGO_RING;
+
+    const int idRegistered    = FuncId(coll, redop, type, algo, NCCL_PROTO_LL128, kRegistered);
+    const int idNonRegistered = FuncId(coll, redop, type, algo, NCCL_PROTO_LL128, kNonRegistered);
+    ASSERT_GE(idRegistered, 0)    << "registered (reg=1) LL128 kernel not generated";
+    ASSERT_GE(idNonRegistered, 0) << "non-registered (reg=2) LL128 kernel not generated";
+    ASSERT_NE(idRegistered, idNonRegistered);
+
+    // The mapping enqueue.cc applies: a registered IPC/NVLS buffer (regUsed), a
+    // registered network buffer (netRegUsed), or both -> reg=1; nothing -> reg=2.
+    EXPECT_EQ(ncclDevFuncLL128RegMode(/*regUsed=*/true, /*netRegUsed=*/false), kRegistered);
+    EXPECT_EQ(ncclDevFuncLL128RegMode(/*regUsed=*/false, /*netRegUsed=*/true), kRegistered);
+    EXPECT_EQ(ncclDevFuncLL128RegMode(/*regUsed=*/true, /*netRegUsed=*/true), kRegistered);
+    EXPECT_EQ(ncclDevFuncLL128RegMode(/*regUsed=*/false, /*netRegUsed=*/false), kNonRegistered);
+
+    // End-to-end: the selected mode must resolve to the matching kernel id, so an
+    // inverted 1:2 mapping would land on the wrong (registered<->non-registered) id.
+    auto resolve = [&](bool regUsed, bool netRegUsed) {
+        return FuncId(coll, redop, type, algo, NCCL_PROTO_LL128,
+                      ncclDevFuncLL128RegMode(regUsed, netRegUsed));
+    };
+    EXPECT_EQ(resolve(true, false), idRegistered)     << "registered buffer must select the reg=1 kernel";
+    EXPECT_EQ(resolve(false, true), idRegistered)     << "net-registered buffer must select the reg=1 kernel";
+    EXPECT_EQ(resolve(false, false), idNonRegistered) << "non-registered buffer must select the reg=2 kernel";
+}
+
 // The classifier that gates the split must agree with the generated set.
 TEST_F(LL128RegVariantKernelTests, ClassificationMatchesRegVariantSet)
 {
@@ -107,6 +143,13 @@ TEST_F(LL128RegVariantKernelTests, NonRegVariantEmitsSingleKernel)
     int rsLL128 = FuncId(ncclFuncReduceScatter, ncclDevSum, ncclFloat32,
                          NCCL_ALGO_RING, NCCL_PROTO_LL128, kRegMode0);
     EXPECT_GE(rsLL128, 0) << "ReduceScatter RING LL128 kernel not generated";
+    // ...and its reg-variant kernels must NOT exist -- this is what confirms the split is scoped.
+    EXPECT_LT(FuncId(ncclFuncReduceScatter, ncclDevSum, ncclFloat32,
+                     NCCL_ALGO_RING, NCCL_PROTO_LL128, kRegistered), 0)
+        << "ReduceScatter must not have a registered (reg=1) LL128 kernel";
+    EXPECT_LT(FuncId(ncclFuncReduceScatter, ncclDevSum, ncclFloat32,
+                     NCCL_ALGO_RING, NCCL_PROTO_LL128, kNonRegistered), 0)
+        << "ReduceScatter must not have a non-registered (reg=2) LL128 kernel";
 
     // Reg-variant collective at SIMPLE: also a single kernel keyed with reg=0.
     int arSimple = FuncId(ncclFuncAllReduce, ncclDevSum, ncclFloat32,

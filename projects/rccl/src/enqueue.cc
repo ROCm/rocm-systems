@@ -478,10 +478,19 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
     // known, select the matching device function index.
     if (ncclDevFuncIsLL128RegVariant(task->func, task->protocol)) {
       int accFlag = (task->func == ncclFuncAllReduce && task->acc != nullptr) ? 1 : 0;
-      int regMode = (devWork.regUsed || devWork.netRegUsed) ? 1 : 2;
+      int regMode = ncclDevFuncLL128RegMode(devWork.regUsed, devWork.netRegUsed);
       int id = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol, accFlag,
                              task->pipeline, regMode);
-      if (id >= 0) task->devFuncId = id;
+      // reg=1/reg=2 are always generated as a pair, so id<0 is unreachable today.
+      // Fail loudly anyway (mirroring the ncclPrepareTasks path) rather than
+      // silently keeping the reg=2 placeholder, which would run a registered
+      // buffer through the non-registered kernel and lose cache-bypass.
+      if (id < 0) {
+        WARN("%s: no LL128 %s user-buffer kernel for %s. Please ensure it has been enabled in build.", __func__,
+             regMode == 1 ? "registered" : "non-registered", ncclFuncToString(task->func));
+        return ncclInvalidUsage;
+      }
+      task->devFuncId = id;
     }
 
     if (task->regBufType & NCCL_NVLS_REG_BUFFER) {

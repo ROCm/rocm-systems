@@ -105,10 +105,20 @@ class DeviceTableGenerationTest(unittest.TestCase):
             undeclared,
             "pure-RDC dispatch calls symbols that were never declared: %s" % sorted(undeclared),
         )
-        # Sanity: the reg-variant AllReduce LL128 kernels keep their reg suffix,
-        # and no kernel ever gets a bogus "_0" reg suffix.
-        self.assertTrue(any(s.endswith(("_1", "_2")) for s in called))
+        # Sanity: no kernel ever gets a bogus "_0" reg suffix.
         self.assertFalse(any(re.search(r"_LL128_.*_0$", s) for s in called))
+        # Sanity: AllReduce LL128 must appear as a reg-variant PAIR -- a reg=1 and
+        # a reg=2 symbol. Match the reg field specifically: a bare endswith("_1"/"_2")
+        # is not enough because reg=0 kernels omit the reg field and end in the unroll
+        # value (which is also 1/2), so that check passes even if the split were removed.
+        self.assertTrue(
+            any(re.search(r"_AllReduce_RING_LL128_Sum_f32_\d+_\d+_\d+_1$", s) for s in called),
+            "registered (reg=1) AllReduce LL128 symbol missing",
+        )
+        self.assertTrue(
+            any(re.search(r"_AllReduce_RING_LL128_Sum_f32_\d+_\d+_\d+_2$", s) for s in called),
+            "non-registered (reg=2) AllReduce LL128 symbol missing",
+        )
 
     def test_guarded_out_leaf_traps_not_noop(self):
         # Arch-guarded-out slots must fail fast (matching the old nullptr table
