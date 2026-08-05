@@ -1144,6 +1144,27 @@ bool Buffer::create(bool alloc_local) {
   return (success = (deviceMemory_ != nullptr));
 }
 
+// Recompute the owning agent from a live pointer_info query. Used once the virtual
+// address is actually backed (post hsa_amd_vmem_map), which is the only point where the
+// true owner of VMM-mapped / imported memory can be resolved.
+void Memory::refreshOwningAgentFromPointerInfo() {
+  if (deviceMemory_ == nullptr) {
+    return;
+  }
+
+  hsa_amd_pointer_info_t info = {};
+  info.size = sizeof(info);
+  hsa_status_t err = hsa_amd_pointer_info(reinterpret_cast<address>(deviceMemory_), &info, nullptr,
+                                          nullptr, nullptr);
+
+  // info.agentOwner is the agent that actually owns the backing pages (a peer device for
+  // imported memory). Fall back to this device's backend if the query can't resolve it.
+  hsa_agent_t agent =
+      (err == HSA_STATUS_SUCCESS && info.agentOwner.handle != 0) ? info.agentOwner
+                                                                 : dev().getBackendDevice();
+  setOwningAgent(agent);
+}
+
 // Helper function to compute and cache the owning agent
 void Buffer::computeAndSetOwningAgent() {
   hsa_agent_t agent;
@@ -1168,12 +1189,11 @@ void Buffer::computeAndSetOwningAgent() {
     hsa_status_t err = hsa_amd_pointer_info(
         reinterpret_cast<address>(deviceMemory_), &info, nullptr, nullptr, nullptr);
 
-    if (err == HSA_STATUS_SUCCESS && info.type == HSA_EXT_POINTER_TYPE_IPC) {
-      agent = info.agentOwner;
-    } else {
-      // Fallback to backend device
-      agent = dev().getBackendDevice();
-    }
+    // info.agentOwner is the agent that actually owns the backing pages (a peer device for
+    // IPC/imported memory). Note ROCr does not always tag IPC-opened memory with
+    // HSA_EXT_POINTER_TYPE_IPC, so key off a valid agentOwner rather than the pointer type.
+    agent = (err == HSA_STATUS_SUCCESS && info.agentOwner.handle != 0) ? info.agentOwner
+                                                                       : dev().getBackendDevice();
   } else if (kind_ == MEMORY_KIND_ARENA || kind_ == MEMORY_KIND_HOST) {
     // Arena and host memory use CPU agent
     agent = dev().getCpuAgent();

@@ -63,8 +63,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(void *MemoryAddress,
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 	}
 
-	transfer_size = MIN(transfer_size, size_offset);
-
 	args.in.handle = handle;
 	args.in.fd = fd;
 	args.in.file_offset = file_offset;

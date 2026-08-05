@@ -78,12 +78,6 @@ on:
     # job `if`); the subset that runs is defined by SMOKE_SUITES below.
     types: [labeled, synchronize]
 
-# Serialise on the shared AINIC nodes: only one run at a time, and never cancel
-# an in-progress allocation (it must finish cleanly to release the nodes).
-concurrency:
-  group: ainic-test-runner-pinned-nodes
-  cancel-in-progress: false
-
 permissions:
   contents: read
 
@@ -120,6 +114,14 @@ jobs:
       github.event_name != 'pull_request' ||
       (github.event.pull_request.head.repo.full_name == github.repository &&
        contains(github.event.pull_request.labels.*.name, 'ainic-test'))
+    # Serialise on the shared AINIC nodes: only one run at a time, and never
+    # cancel an in-progress allocation (it must finish cleanly to release the
+    # nodes). Job-level (not workflow-level) so skipped PR runs -- every PR
+    # synchronize in the monorepo triggers this workflow -- don't join the queue
+    # and cancel a pending labeled run that is still waiting for the runner.
+    concurrency:
+      group: ainic-test-runner-pinned-nodes
+      cancel-in-progress: false
     runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
     timeout-minutes: 540
 

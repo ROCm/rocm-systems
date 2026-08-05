@@ -107,6 +107,29 @@ std::string GetLibraryName(LibHandle lib) {
   return std::string{};
 }
 
+std::string GetAdjacentLibraryPath(const void* address, const std::string& filename) {
+  HMODULE module = nullptr;
+  if (!GetModuleHandleExA(
+          GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+          reinterpret_cast<LPCSTR>(address), &module)) {
+    return {};
+  }
+
+  std::string path(MAX_PATH, '\0');
+  for (;;) {
+    DWORD length = GetModuleFileNameA(module, path.data(), static_cast<DWORD>(path.size()));
+    if (length == 0) return {};
+    if (length < path.size()) {
+      path.resize(length);
+      const auto slash = path.find_last_of("\\/");
+      return slash == std::string::npos ? std::string{}
+                                        : path.substr(0, slash + 1) + filename;
+    }
+    if (path.size() >= 32768) return {};
+    path.resize(path.size() * 2);
+  }
+}
+
 Semaphore CreateSemaphore() {
   auto sem = static_cast<void*>(CreateSemaphoreA(nullptr, 0, LONG_MAX, nullptr));
   assert(sem != nullptr && "CreateSemaphore failed");

@@ -35,15 +35,18 @@ std::optional<Packed16VgprSource> packed_16bit_vgpr_source(bool packed_16bit_sou
                                                            OperandType opr_type, int ev) {
   if (!packed_16bit_source || size_bits != 16)
     return std::nullopt;
-  if (opr_type == OperandType::OPR_VGPR) {
-    if (ev >= 0 && ev <= 127)
-      return Packed16VgprSource{static_cast<uint32_t>(ev), 0};
-    if (ev >= 128 && ev <= 255)
-      return Packed16VgprSource{static_cast<uint32_t>(ev - 128), 16};
+  int selector_base;
+  if (opr_type == OperandType::OPR_VGPR)
+    selector_base = 0;
+  else if (opr_type == OperandType::OPR_SRC)
+    selector_base = 256;
+  else
     return std::nullopt;
-  }
-  if (ev >= 384 && ev <= 511)
-    return Packed16VgprSource{static_cast<uint32_t>(ev - 384), 16};
+  int selector = ev - selector_base;
+  if (selector >= 0 && selector <= 127)
+    return Packed16VgprSource{static_cast<uint32_t>(selector), 0};
+  if (selector >= 128 && selector <= 255)
+    return Packed16VgprSource{static_cast<uint32_t>(selector - 128), 16};
   return std::nullopt;
 }
 
@@ -1078,7 +1081,10 @@ uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
   if (auto packed = packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, ev)) {
     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, false) : off;
-    uint32_t raw = amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane);
+    uint8_t byte_mask = packed->shift ? rocjitsu::ExecutionPlugin::kHighHalfByteMask
+                                      : rocjitsu::ExecutionPlugin::kLowHalfByteMask;
+    uint32_t raw =
+        amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane, byte_mask);
     return (raw >> packed->shift) & 0xffffu;
   }
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
@@ -1114,10 +1120,10 @@ void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) con
     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, true) : off;
     uint32_t idx = wf.vgpr_alloc().base + voff;
-    uint32_t old = amdgpu::RegisterAccess(wf.cu()).read_vgpr(idx, lane);
-    uint32_t keep_mask = packed->shift ? 0x0000ffffu : 0xffff0000u;
-    uint32_t merged = (old & keep_mask) | ((val & 0xffffu) << packed->shift);
-    amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, merged);
+    uint8_t write_byte_mask = packed->shift ? rocjitsu::ExecutionPlugin::kHighHalfByteMask
+                                            : rocjitsu::ExecutionPlugin::kLowHalfByteMask;
+    uint32_t placed = (val & 0xffffu) << packed->shift;
+    amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, placed, write_byte_mask);
     return;
   }
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, encoding_value_)) {

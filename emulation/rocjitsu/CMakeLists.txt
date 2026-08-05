@@ -360,24 +360,14 @@ target_link_libraries(
         rocjitsu_code
         rocjitsu_isa
         rocjitsu_isa_registry
-        rocjitsu_isa_cdna1
-        rocjitsu_isa_cdna2
-        rocjitsu_isa_cdna3
-        rocjitsu_isa_cdna4
-        rocjitsu_isa_rdna1
-        rocjitsu_isa_rdna2
-        rocjitsu_isa_rdna3
-        rocjitsu_isa_rdna3_5
-        rocjitsu_isa_rdna4
-        rocjitsu_isa_gfx1250
-        # \NPI new ISA family: link its rocjitsu_isa_<isa> object library here.
-        rocjitsu_isa_risc_v
         simdojo
         rocjitsu_kmd
         rocjitsu_vm
         rocjitsu_vm_amdgpu
-        rocjitsu_plugin_logging
-        rocjitsu_plugin_race_detector
+        # Host-side plugin loader. The logging/race plugins are no longer
+        # linked in statically; they are separate librocjitsu_plugin_<name>.so
+        # modules discovered and dlopen()ed at runtime.
+        rocjitsu_plugin_loader
         rocjitsu_vm_risc_v
         rocjitsu_config
         rocjitsu_dbt_config
@@ -436,12 +426,14 @@ install(
     TARGETS rocjitsu_shared rocjitsu_hooks
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
-
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     install(
-        TARGETS rocjitsu_gfx1250_b0_to_a0
+        TARGETS hsa_hotswap_rocjitsu
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 

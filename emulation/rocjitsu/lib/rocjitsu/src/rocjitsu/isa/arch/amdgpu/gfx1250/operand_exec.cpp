@@ -28,15 +28,18 @@ std::optional<Packed16VgprSource> packed_16bit_vgpr_source(bool packed_16bit_sou
                                                            OperandType opr_type, int ev) {
   if (!packed_16bit_source || size_bits != 16)
     return std::nullopt;
-  if (opr_type == OperandType::OPR_VGPR) {
-    if (ev >= 0 && ev <= 127)
-      return Packed16VgprSource{static_cast<uint32_t>(ev), 0};
-    if (ev >= 128 && ev <= 255)
-      return Packed16VgprSource{static_cast<uint32_t>(ev - 128), 16};
+  int selector_base;
+  if (opr_type == OperandType::OPR_VGPR)
+    selector_base = 0;
+  else if (opr_type == OperandType::OPR_SRC)
+    selector_base = 256;
+  else
     return std::nullopt;
-  }
-  if (ev >= 384 && ev <= 511)
-    return Packed16VgprSource{static_cast<uint32_t>(ev - 384), 16};
+  int selector = ev - selector_base;
+  if (selector >= 0 && selector <= 127)
+    return Packed16VgprSource{static_cast<uint32_t>(selector), 0};
+  if (selector >= 128 && selector <= 255)
+    return Packed16VgprSource{static_cast<uint32_t>(selector - 128), 16};
   return std::nullopt;
 }
 
@@ -436,7 +439,10 @@ uint32_t Operand::read_lane_exec(const amdgpu::Wavefront &wf, uint32_t lane) con
   if (auto packed = packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, ev)) {
     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, false) : off;
-    uint32_t raw = amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane);
+    uint8_t byte_mask = packed->shift ? rocjitsu::ExecutionPlugin::kHighHalfByteMask
+                                      : rocjitsu::ExecutionPlugin::kLowHalfByteMask;
+    uint32_t raw =
+        amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane, byte_mask);
     return (raw >> packed->shift) & 0xffffu;
   }
   if (auto off = Isa::resolved_vgpr_offset(wf, opr_type_, ev, vgpr_msb_role())) {
@@ -472,10 +478,10 @@ void Operand::write_lane_exec(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val
     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, off, true) : off;
     uint32_t idx = wf.vgpr_alloc().base + voff;
-    uint32_t old = amdgpu::RegisterAccess(wf.cu()).read_vgpr(idx, lane);
-    uint32_t keep_mask = packed->shift ? 0x0000ffffu : 0xffff0000u;
-    uint32_t merged = (old & keep_mask) | ((val & 0xffffu) << packed->shift);
-    amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, merged);
+    uint8_t write_byte_mask = packed->shift ? rocjitsu::ExecutionPlugin::kHighHalfByteMask
+                                            : rocjitsu::ExecutionPlugin::kLowHalfByteMask;
+    uint32_t placed = (val & 0xffffu) << packed->shift;
+    amdgpu::RegisterAccess(wf.cu()).write_vgpr(idx, lane, placed, write_byte_mask);
     return;
   }
   if (auto off = Isa::resolved_vgpr_offset(wf, opr_type_, encoding_value_, vgpr_msb_role())) {
@@ -627,21 +633,68 @@ void Operand::simd_notify_read64_mut_exec(amdgpu::Wavefront &wf, uint64_t lane_m
   }
 }
 
-const bool Operand::execution_backend_registered_ = [] {
-  execution_backend() = ExecutionBackend{
-      &Operand::simd_capable_exec,        &Operand::read_lane_chunk_exec,
-      &Operand::write_lane_chunk_exec,    &Operand::read_scalar_exec,
-      &Operand::read_lane_exec,           &Operand::write_scalar_exec,
-      &Operand::write_lane_exec,          &Operand::read_lane64_exec,
-      &Operand::write_lane64_exec,        &Operand::read_scalar64_exec,
-      &Operand::write_scalar64_exec,      &Operand::simd_vgpr_base_exec,
-      &Operand::simd_vgpr_storage_exec,   &Operand::simd_vgpr_storage_mut_exec,
-      &Operand::simd_vgpr_storage64_exec, &Operand::simd_vgpr_storage64_mut_exec,
-      &Operand::simd_notify_read_exec,    &Operand::simd_notify_read_mut_exec,
-      &Operand::simd_notify_read64_exec,  &Operand::simd_notify_read64_mut_exec,
+void Operand::simd_notify_write_mut_exec(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                         uint8_t byte_mask) const {
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    wf.cu().raw_cu().notify_vgpr_write(&wf, wf.vgpr_alloc().base + voff, lane_mask, byte_mask);
+  }
+}
+
+void Operand::simd_notify_write64_mut_exec(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                           uint8_t byte_mask) const {
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    uint32_t reg = wf.vgpr_alloc().base + voff;
+    wf.cu().raw_cu().notify_vgpr_write(&wf, reg, lane_mask, byte_mask);
+    wf.cu().raw_cu().notify_vgpr_write(&wf, reg + 1, lane_mask, byte_mask);
+  }
+}
+
+const void *Operand::full_execution_backend() {
+  static const ExecutionBackend backend{
+      &Operand::simd_capable_exec,
+      &Operand::read_lane_chunk_exec,
+      &Operand::write_lane_chunk_exec,
+      &Operand::read_scalar_exec,
+      &Operand::read_lane_exec,
+      &Operand::write_scalar_exec,
+      &Operand::write_lane_exec,
+      &Operand::read_lane64_exec,
+      &Operand::write_lane64_exec,
+      &Operand::read_scalar64_exec,
+      &Operand::write_scalar64_exec,
+      &Operand::simd_vgpr_base_exec,
+      &Operand::simd_vgpr_storage_exec,
+      &Operand::simd_vgpr_storage_mut_exec,
+      &Operand::simd_vgpr_storage64_exec,
+      &Operand::simd_vgpr_storage64_mut_exec,
+      &Operand::simd_notify_read_exec,
+      &Operand::simd_notify_read_mut_exec,
+      &Operand::simd_notify_read64_exec,
+      &Operand::simd_notify_read64_mut_exec,
+      &Operand::simd_notify_write_mut_exec,
+      &Operand::simd_notify_write64_mut_exec,
   };
-  return true;
-}();
+  return &backend;
+}
+
+bool Operand::full_execution_backend_complete() {
+  const auto is_complete = [](const ExecutionBackend &backend) {
+    return backend.simd_capable != nullptr && backend.read_lane_chunk != nullptr &&
+           backend.write_lane_chunk != nullptr && backend.read_scalar != nullptr &&
+           backend.read_lane != nullptr && backend.write_scalar != nullptr &&
+           backend.write_lane != nullptr && backend.read_lane64 != nullptr &&
+           backend.write_lane64 != nullptr && backend.read_scalar64 != nullptr &&
+           backend.write_scalar64 != nullptr && backend.simd_vgpr_base != nullptr &&
+           backend.simd_vgpr_storage != nullptr && backend.simd_vgpr_storage_mut != nullptr &&
+           backend.simd_vgpr_storage64 != nullptr && backend.simd_vgpr_storage64_mut != nullptr &&
+           backend.simd_notify_read != nullptr && backend.simd_notify_read_mut != nullptr &&
+           backend.simd_notify_read64 != nullptr && backend.simd_notify_read64_mut != nullptr &&
+           backend.simd_notify_write_mut != nullptr && backend.simd_notify_write64_mut != nullptr;
+  };
+  return is_complete(*static_cast<const ExecutionBackend *>(full_execution_backend()));
+}
 
 } // namespace gfx1250
 } // namespace rocjitsu

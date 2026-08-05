@@ -277,10 +277,10 @@ class TestGpuPartition(unittest.TestCase):
         )
         return
 
-    def test_get_gpu_compute_partition_mem_alloc_mode(self):
+    def test_get_gpu_accelerator_partition_mem_alloc_mode(self):
         self.common.print_func_name("")
         self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_compute_partition_mem_alloc_mode=amdsmi.amdsmi_get_gpu_compute_partition_mem_alloc_mode
+            amdsmi_get_gpu_accelerator_partition_mem_alloc_mode=amdsmi.amdsmi_get_gpu_accelerator_partition_mem_alloc_mode
         )
         return
 
@@ -324,14 +324,75 @@ class TestGpuPartition(unittest.TestCase):
     # Uses clk_type_name instead of clk_type
     # Uses clk_limit_type_name instead of clk_limit_type
 
-    def test_set_gpu_memory_partition(self):
+    def test_set_gpu_memory_partition_return_codes(self):
+        """Verify that set accepts supported modes and rejects unsupported ones."""
         self.common.print_func_name("")
 
         self.common.Test_Per_GPU_With_One_Enum(
-            amdsmi_set_gpu_memory_partition=amdsmi.amdsmi_set_gpu_memory_partition,
+            amdsmi_set_gpu_memory_partition_mode=amdsmi.amdsmi_set_gpu_memory_partition_mode,
             memory_partition_type=common.MEMORY_PARTITION_TYPES,
         )
         return
+
+    def test_set_gpu_memory_partition_idempotent(self):
+        """Setting the current partition mode must succeed and leave the read-back unchanged."""
+        self.common.print_func_name("")
+
+        NPS_NAME_TO_TYPE = {
+            "NPS1": amdsmi.AmdSmiMemoryPartitionType.NPS1,
+            "NPS2": amdsmi.AmdSmiMemoryPartitionType.NPS2,
+            "NPS4": amdsmi.AmdSmiMemoryPartitionType.NPS4,
+            "NPS8": amdsmi.AmdSmiMemoryPartitionType.NPS8,
+        }
+
+        raise_exception = None
+        for i, gpu in enumerate(self.common.processors):
+            self.common.print_device_header(i)
+
+            # Read current partition.
+            current_partition = None
+            msg = f"\t### amdsmi_get_gpu_memory_partition(gpu={i}):"
+            try:
+                current_partition = amdsmi.amdsmi_get_gpu_memory_partition(gpu)
+                self.common.print(msg, current_partition)
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                if self.common.check_ret(msg, e, self.common.PASS):
+                    raise_exception = e
+                continue
+
+            if current_partition not in NPS_NAME_TO_TYPE:
+                self.common.print(f"\t   [skip] Unknown partition mode: {current_partition}", "")
+                continue
+
+            # Set the same mode again — must succeed.
+            msg = f"\t### amdsmi_set_gpu_memory_partition idempotent(gpu={i}, mode={current_partition}):"
+            try:
+                amdsmi.amdsmi_set_gpu_memory_partition(gpu, NPS_NAME_TO_TYPE[current_partition])
+                self.common.print(msg, "SUCCESS")
+                self.common.check_ret("", "", self.common.PASS)
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                if self.common.check_ret(msg, e, self.common.PASS):
+                    raise_exception = e
+                continue
+
+            # Read back — value must be unchanged (no reload occurred).
+            msg = f"\t### amdsmi_get_gpu_memory_partition post-idempotent-set(gpu={i}):"
+            try:
+                post_partition = amdsmi.amdsmi_get_gpu_memory_partition(gpu)
+                self.common.print(msg, post_partition)
+                if post_partition != current_partition:
+                    self.common.print(
+                        f"\t   TEST FAILURE: partition changed from {current_partition} "
+                        f"to {post_partition} without a driver reload",
+                        "",
+                    )
+                    raise_exception = amdsmi.AmdSmiLibraryException(0)
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                if self.common.check_ret(msg, e, self.common.PASS):
+                    raise_exception = e
+
+        if raise_exception:
+            raise raise_exception
 
     def test_set_gpu_memory_partition_mode(self):
         self.common.print_func_name("")
@@ -347,12 +408,12 @@ class TestGpuPartition(unittest.TestCase):
         )
         return
 
-    def test_set_gpu_compute_partition_mem_alloc_mode(self):
+    def test_set_gpu_accelerator_partition_mem_alloc_mode(self):
         self.common.print_func_name("")
 
         self.common.Test_Per_GPU_With_One_Enum(
-            amdsmi_set_gpu_compute_partition_mem_alloc_mode=amdsmi.amdsmi_set_gpu_compute_partition_mem_alloc_mode,
-            compute_partition_mem_alloc_mode=common.COMPUTE_PARTITION_MEM_ALLOC_MODE_TYPES,
+            amdsmi_set_gpu_accelerator_partition_mem_alloc_mode=amdsmi.amdsmi_set_gpu_accelerator_partition_mem_alloc_mode,
+            accelerator_partition_mem_alloc_mode=common.ACCELERATOR_PARTITION_MEM_ALLOC_MODE_TYPES,
         )
         return
 

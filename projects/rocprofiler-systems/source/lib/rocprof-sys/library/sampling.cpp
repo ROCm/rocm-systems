@@ -11,7 +11,6 @@
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/perf.hpp"
-#include "core/rocpd/data_processor.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/utility.hpp"
@@ -68,10 +67,12 @@
 #include <initializer_list>
 #include <mutex>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 
 #include <pthread.h>
 #include <signal.h>

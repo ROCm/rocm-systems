@@ -8,6 +8,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
@@ -15,6 +16,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -28,16 +30,24 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
+#include <atomic>
+#include <barrier>
 #include <bit>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
+#include <new>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <sys/mman.h>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 namespace {
@@ -128,7 +138,8 @@ struct VmFixture {
   uint64_t write_kernel(uint64_t addr, const void *code, size_t code_size, uint32_t sgprs = 104,
                         uint32_t vgprs = 256, uint32_t user_sgprs = 2,
                         uint32_t group_segment_fixed_size = 0, bool wgp_mode = false,
-                        uint32_t enable_vgpr_workitem_id = 0) {
+                        uint32_t enable_vgpr_workitem_id = 0,
+                        uint32_t extra_compute_pgm_rsrc1 = 0) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
@@ -141,6 +152,7 @@ struct VmFixture {
     kd.group_segment_fixed_size = group_segment_fixed_size;
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
                     enable_vgpr_workitem_id);
+    kd.compute_pgm_rsrc1 |= extra_compute_pgm_rsrc1;
 
     mem()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     mem()->load_image(static_cast<const uint8_t *>(code), code_size,
@@ -337,6 +349,63 @@ TEST(RdnaDispatchTest, WgpModeCombinesSiblingCuLdsCapacity) {
   }
 }
 
+TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
+  using namespace rocr::llvm::amdhsa;
+
+  uint32_t rsrc1 = 0;
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_32, FLOAT_ROUND_MODE_ZERO);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_16_64, FLOAT_ROUND_MODE_PLUS_INFINITY);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_32, FLOAT_DENORM_MODE_FLUSH_SRC);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_16_64, FLOAT_DENORM_MODE_FLUSH_NONE);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 1);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 1);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_DEBUG_MODE, 1);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FP16_OVFL, 1);
+
+  const uint32_t common_mode =
+      (FLOAT_ROUND_MODE_ZERO << 0) | (FLOAT_ROUND_MODE_PLUS_INFINITY << 2) |
+      (FLOAT_DENORM_MODE_FLUSH_SRC << 4) | (FLOAT_DENORM_MODE_FLUSH_NONE << 6) |
+      amdgpu::Wavefront::FP16_OVFL_BIT;
+
+  struct ModeInitCase {
+    const char *arch;
+    uint32_t endpgm;
+    uint32_t expected_mode;
+  };
+
+  constexpr uint32_t kGfx9Endpgm = SOPP_S_ENDPGM;
+  constexpr uint32_t kGfx11Endpgm = 0xBFB00000u;
+  const ModeInitCase cases[] = {
+      {"cdna1", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"cdna2", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"cdna3", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"cdna4", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"rdna1", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"rdna2", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"rdna3", kGfx11Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"rdna3_5", kGfx11Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"rdna4", kGfx11Endpgm, common_mode},
+      {"gfx1250", kGfx11Endpgm, common_mode},
+  };
+
+  for (const ModeInitCase &mode_case : cases) {
+    SCOPED_TRACE(mode_case.arch);
+    const uint32_t code[] = {mode_case.endpgm};
+    VmFixture f(mode_case.arch, 1, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+    auto *snap = f.capture_halts();
+    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0,
+                                 /*wgp_mode=*/false, /*enable_vgpr_workitem_id=*/0,
+                                 /*extra_compute_pgm_rsrc1=*/rsrc1);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(ko, 64, 64);
+
+    EXPECT_NO_THROW(f.engine->run());
+    ASSERT_GE(snap->snapshots().size(), 1u);
+    for (const auto &wf : snap->snapshots())
+      EXPECT_EQ(wf.mode_raw, mode_case.expected_mode);
+  }
+}
+
 TEST(RdnaDispatchTest, Gfx1250DoesNotEnableWgpMode) {
   const uint32_t code[] = {SOPP_S_ENDPGM};
   VmFixture f("gfx1250", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
@@ -437,6 +506,335 @@ TEST(GpuMemoryTest, VmidMappedKernelSymbolUsesTranslatedHostPointer) {
             "vmid_kernel");
 
   mem.unregister_process(process.process_id());
+}
+
+TEST(GpuMemoryTest, UnregisterInvalidatesThreadLocalTranslationCaches) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kOffset = 0x123;
+  constexpr uint64_t kAddr = kBaseVa + kOffset;
+
+  KfdProcess process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> page{};
+  page[kOffset] = 0x5a;
+  process.map_pages(kBaseVa, page.data(), page.size(), amdgpu::Mtype::UC);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  EXPECT_EQ(memory.resolve_host_ptr(kAddr, kPid), page.data());
+  EXPECT_EQ(memory.read8(kAddr, kPid), page[kOffset]);
+  EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::UC);
+
+  memory.unregister_process(kPid);
+
+  EXPECT_EQ(memory.resolve_host_ptr(kAddr, kPid), nullptr);
+  EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::RW);
+}
+
+TEST(GpuMemoryTest, ReregisterProcessInvalidatesThreadLocalTranslationCaches) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kOffset = 0x123;
+  constexpr uint64_t kAddr = kBaseVa + kOffset;
+
+  KfdProcess first_process(kPid);
+  KfdProcess second_process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> first_page{};
+  std::array<uint8_t, KfdProcess::kPageSize> second_page{};
+  first_page[kOffset] = 0x11;
+  second_page[kOffset] = 0x22;
+  first_process.map_pages(kBaseVa, first_page.data(), first_page.size(), amdgpu::Mtype::UC);
+  second_process.map_pages(kBaseVa, second_page.data(), second_page.size(), amdgpu::Mtype::CC);
+
+  memory.register_process(kPid, &first_process.page_table_, &first_process.page_table_mutex_,
+                          first_process.page_table_generation());
+  ASSERT_EQ(memory.resolve_host_ptr(kAddr, kPid), first_page.data());
+  ASSERT_EQ(memory.read8(kAddr, kPid), first_page[kOffset]);
+  ASSERT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::UC);
+
+  memory.register_process(kPid, &second_process.page_table_, &second_process.page_table_mutex_,
+                          second_process.page_table_generation());
+  EXPECT_EQ(memory.resolve_host_ptr(kAddr, kPid), second_page.data());
+  EXPECT_EQ(memory.read8(kAddr, kPid), second_page[kOffset]);
+  EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::CC);
+}
+
+TEST(GpuMemoryTest, PageTableEntryMutationsInvalidateCachedPtes) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kOffset = 0x123;
+  constexpr uint64_t kAddr = kBaseVa + kOffset;
+
+  KfdProcess process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> old_page{};
+  std::array<uint8_t, KfdProcess::kPageSize> new_page{};
+  old_page[kOffset] = 0x11;
+  new_page[kOffset] = 0x22;
+  process.map_pages(kBaseVa, old_page.data(), old_page.size(), amdgpu::Mtype::UC);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  ASSERT_EQ(memory.read8(kAddr, kPid), old_page[kOffset]);
+  ASSERT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::UC);
+
+  process.remap_page_host_ptrs(kBaseVa, old_page.data(), new_page.data(), new_page.size());
+  EXPECT_EQ(memory.read8(kAddr, kPid), new_page[kOffset]);
+
+  process.set_page_mtype(kBaseVa, new_page.size(), amdgpu::Mtype::CC);
+  EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::CC);
+}
+
+TEST(GpuMemoryTest, ReusedMemoryInstanceInvalidatesThreadLocalTranslationCaches) {
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kOffset = 0x123;
+  constexpr uint64_t kAddr = kBaseVa + kOffset;
+  alignas(amdgpu::GpuMemory) unsigned char storage[sizeof(amdgpu::GpuMemory)];
+
+  KfdProcess first_process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> first_page{};
+  first_page[kOffset] = 0x11;
+  first_process.map_pages(kBaseVa, first_page.data(), first_page.size(), amdgpu::Mtype::UC);
+
+  auto *first_memory = new (storage) amdgpu::GpuMemory("memory");
+  first_memory->register_process(kPid, &first_process.page_table_, &first_process.page_table_mutex_,
+                                 first_process.page_table_generation());
+  EXPECT_EQ(first_memory->read8(kAddr, kPid), first_page[kOffset]);
+  EXPECT_EQ(first_memory->pte_mtype(kAddr, kPid), amdgpu::Mtype::UC);
+  first_memory->~GpuMemory();
+
+  KfdProcess second_process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> second_page{};
+  second_page[kOffset] = 0x22;
+  second_process.map_pages(kBaseVa, second_page.data(), second_page.size(), amdgpu::Mtype::CC);
+
+  auto *second_memory = new (storage) amdgpu::GpuMemory("memory");
+  second_memory->register_process(kPid, &second_process.page_table_,
+                                  &second_process.page_table_mutex_,
+                                  second_process.page_table_generation());
+  EXPECT_EQ(second_memory->read8(kAddr, kPid), second_page[kOffset]);
+  EXPECT_EQ(second_memory->pte_mtype(kAddr, kPid), amdgpu::Mtype::CC);
+  second_memory->~GpuMemory();
+}
+
+TEST(GpuMemoryThreadingTest, AtomicRmwKeepsStorageIdentityAcrossConcurrentMap) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kVmid = 17;
+
+  void *raw_mapping = mmap(nullptr, KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw_mapping, MAP_FAILED);
+  struct Mapping {
+    uint8_t *data;
+    ~Mapping() { munmap(data, KfdProcess::kPageSize); }
+  } mapping{static_cast<uint8_t *>(raw_mapping)};
+
+  KfdProcess process(kVmid);
+  memory.register_process(kVmid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  memory.set_process_client_pid(kVmid, getpid());
+
+  auto *target = reinterpret_cast<uint32_t *>(mapping.data + 64);
+  *target = 0;
+
+  std::barrier first_atomic_has_read(2);
+  std::barrier allow_first_atomic_to_write(2);
+  std::thread first_atomic([&] {
+    memory.atomic_rmw(
+        reinterpret_cast<uint64_t>(target), sizeof(*target),
+        [&](uint8_t *storage) {
+          uint32_t value = 0;
+          std::memcpy(&value, storage, sizeof(value));
+          ++value;
+          std::memcpy(storage, &value, sizeof(value));
+          first_atomic_has_read.arrive_and_wait();
+          allow_first_atomic_to_write.arrive_and_wait();
+        },
+        kVmid);
+  });
+
+  first_atomic_has_read.arrive_and_wait();
+
+  const bool acquired_page_table_exclusively = process.page_table_mutex_.try_lock();
+  if (acquired_page_table_exclusively)
+    process.page_table_mutex_.unlock();
+  EXPECT_FALSE(acquired_page_table_exclusively)
+      << "fallback atomic must retain the page-table shared lock during its callback";
+
+  allow_first_atomic_to_write.arrive_and_wait();
+  first_atomic.join();
+
+  process.map_pages(reinterpret_cast<uint64_t>(mapping.data), mapping.data, KfdProcess::kPageSize);
+  memory.atomic_rmw(
+      reinterpret_cast<uint64_t>(target), sizeof(*target),
+      [](uint8_t *storage) {
+        uint32_t value = 0;
+        std::memcpy(&value, storage, sizeof(value));
+        ++value;
+        std::memcpy(storage, &value, sizeof(value));
+      },
+      kVmid);
+
+  EXPECT_EQ(*target, 2u);
+}
+
+TEST(GpuMemoryThreadingTest, ReadersRemainSafeWhilePagesAreRemapped) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kAddr = 0x40000000;
+  constexpr uint32_t kValuePrefix = 0xa5a50000;
+  constexpr uint32_t kReaders = 4;
+  constexpr uint32_t kRemaps = 2000;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  auto initial_page = std::make_unique<uint32_t>(kValuePrefix);
+  process.map_pages(kAddr, initial_page.get(), sizeof(*initial_page));
+  std::barrier start(kReaders + 1);
+  std::barrier initial_read(kReaders + 1);
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> mapped_reads{0};
+  std::atomic<uint64_t> invalid_reads{0};
+  std::vector<std::thread> readers;
+  readers.reserve(kReaders);
+  for (uint32_t i = 0; i < kReaders; ++i) {
+    readers.emplace_back([&] {
+      start.arrive_and_wait();
+      const uint32_t initial_value = memory.read32(kAddr, kPid);
+      if ((initial_value & 0xffff0000) == kValuePrefix)
+        mapped_reads.fetch_add(1, std::memory_order_relaxed);
+      else
+        invalid_reads.fetch_add(1, std::memory_order_relaxed);
+      initial_read.arrive_and_wait();
+      while (!stop.load(std::memory_order_acquire)) {
+        const uint32_t value = memory.read32(kAddr, kPid);
+        if (value == 0)
+          continue;
+        if ((value & 0xffff0000) == kValuePrefix)
+          mapped_reads.fetch_add(1, std::memory_order_relaxed);
+        else
+          invalid_reads.fetch_add(1, std::memory_order_relaxed);
+      }
+    });
+  }
+
+  start.arrive_and_wait();
+  initial_read.arrive_and_wait();
+  process.unmap_pages(kAddr, sizeof(*initial_page));
+  initial_page.reset();
+  for (uint32_t i = 0; i < kRemaps; ++i) {
+    auto page = std::make_unique<uint32_t>(kValuePrefix | (i & 0xffff));
+    process.map_pages(kAddr, page.get(), sizeof(*page));
+    std::this_thread::yield();
+    process.unmap_pages(kAddr, sizeof(*page));
+    page.reset();
+  }
+  stop.store(true, std::memory_order_release);
+
+  for (auto &reader : readers)
+    reader.join();
+
+  EXPECT_GT(mapped_reads.load(std::memory_order_relaxed), 0u);
+  EXPECT_EQ(invalid_reads.load(std::memory_order_relaxed), 0u);
+}
+
+TEST(GpuMemoryTest, RegisteredVmidPassthroughMissRespectsUserSpaceLimit) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + 0x123, kPid), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + KfdProcess::kPageSize + 0x123, kPid),
+            nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(0x4000, kPid), reinterpret_cast<uint8_t *>(0x4000));
+}
+
+TEST(GpuMemoryTest, UnregisteredVmidPassthroughRespectsUserSpaceLimit) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
+
+  EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + 0x123), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(0x4000), reinterpret_cast<uint8_t *>(0x4000));
+}
+
+TEST(GpuMemoryTest, ZeroPassthroughAddressUsesFallbackStorage) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+
+  constexpr uint32_t kValue = 0xc001d00d;
+  memory.write32(0, kValue);
+
+  EXPECT_EQ(memory.read32(0), kValue);
+}
+
+TEST(GpuMemoryTest, NullBackedPteDoesNotInvokeMappedCallback) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kAddr = 0x4000;
+  constexpr uint32_t kValue = 0x12345678;
+
+  KfdProcess process(kPid);
+  process.page_table_[kAddr >> KfdProcess::kPageShift] = {};
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  ASSERT_EQ(memory.resolve_host_ptr(kAddr, kPid), nullptr);
+  memory.write32(kAddr, kValue, kPid);
+  EXPECT_EQ(memory.read32(kAddr, kPid), kValue);
+}
+
+TEST(GpuMemoryTest, RegisteredVmidBlockMissUsesClientMemory) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr size_t kMappingSize = KfdProcess::kPageSize * 2;
+
+  void *raw_mapping =
+      mmap(nullptr, kMappingSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw_mapping, MAP_FAILED);
+  struct Mapping {
+    uint8_t *data = nullptr;
+    size_t size = 0;
+    ~Mapping() {
+      if (data)
+        munmap(data, size);
+    }
+  } mapping{static_cast<uint8_t *>(raw_mapping), kMappingSize};
+
+  for (size_t i = 0; i < kMappingSize; ++i)
+    mapping.data[i] = static_cast<uint8_t>((i * 17 + 3) & 0xff);
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  memory.set_process_client_pid(kPid, getpid());
+
+  constexpr size_t kAccessOffset = KfdProcess::kPageSize - 8;
+  constexpr size_t kAccessSize = 32;
+  const uint64_t addr = reinterpret_cast<uint64_t>(mapping.data + kAccessOffset);
+
+  std::array<uint8_t, kAccessSize> actual{};
+  memory.read_block(addr, std::span<uint8_t>(actual), kPid);
+  EXPECT_TRUE(std::equal(actual.begin(), actual.end(), mapping.data + kAccessOffset));
+
+  std::array<uint8_t, kAccessSize> replacement{};
+  for (size_t i = 0; i < replacement.size(); ++i)
+    replacement[i] = static_cast<uint8_t>(0xa0 + i);
+
+  memory.write_block(addr, std::span<const uint8_t>(replacement), kPid);
+  EXPECT_TRUE(std::equal(replacement.begin(), replacement.end(), mapping.data + kAccessOffset));
 }
 
 TEST(VmLifecycleTest, CreateAndDestroy) {
@@ -1318,6 +1716,12 @@ constexpr uint32_t vop1(uint32_t op, uint32_t vdst, uint32_t src0) {
 }
 constexpr uint32_t v_mov_b32(uint32_t vdst, uint32_t src0) { return vop1(1, vdst, src0); }
 
+constexpr std::array<uint32_t, 2> vop3_cdna(uint32_t op, uint32_t vdst, uint32_t src0,
+                                            uint32_t src1, uint32_t src2 = 0, uint32_t opsel = 0) {
+  return {vdst | ((opsel & 0xFu) << 11) | ((op & 0x3FFu) << 16) | (0x34u << 26),
+          (src0 & 0x1FFu) | ((src1 & 0x1FFu) << 9) | ((src2 & 0x1FFu) << 18)};
+}
+
 // VOP2: encoding[31]=0, op[30:25], vdst[24:17], vsrc1[16:9], src0[8:0]
 constexpr uint32_t vop2(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t vsrc1) {
   return (op << 25) | (vdst << 17) | (vsrc1 << 9) | src0;
@@ -1367,6 +1771,43 @@ constexpr uint32_t S_WAITCNT_0 = sopp(12, 0);
 constexpr uint32_t S_ENDPGM = sopp(1, 0);
 
 } // namespace enc
+
+TEST(AqlDispatchTest, Fp16OvflDescriptorControlsFp8ConversionResult) {
+  using namespace rocr::llvm::amdhsa;
+  using namespace enc;
+
+  auto run_case = [](bool fp16_ovfl, uint32_t expected_v2) {
+    uint32_t rsrc1 = 0;
+    const uint32_t fp16_ovfl_bit = fp16_ovfl ? 1u : 0u;
+    AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FP16_OVFL, fp16_ovfl_bit);
+
+    const auto cvt_pk_fp8 = vop3_cdna(cdna4::kVCvtPkFp8F32Vop3, 2, VGPR_SRC(5), VGPR_SRC(6));
+    const uint32_t code[] = {
+        s_mov_b32(SGPR(5), 255), std::bit_cast<uint32_t>(500.0f),
+        s_mov_b32(SGPR(6), 255), std::bit_cast<uint32_t>(500.0f),
+        v_mov_b32(5, SGPR(5)),   v_mov_b32(6, SGPR(6)),
+        cvt_pk_fp8[0], // v_cvt_pk_fp8_f32 v2.l, v5, v6
+        cvt_pk_fp8[1],           S_ENDPGM,
+    };
+
+    VmFixture f("cdna4");
+    auto *snap = f.capture_halts();
+    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0,
+                                 /*wgp_mode=*/false, /*enable_vgpr_workitem_id=*/0,
+                                 /*extra_compute_pgm_rsrc1=*/rsrc1);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(ko, 64, 64);
+
+    ASSERT_NO_THROW(f.engine->run());
+    ASSERT_EQ(snap->snapshots().size(), 1u);
+    EXPECT_EQ((snap->snapshots().front().mode_raw & amdgpu::Wavefront::FP16_OVFL_BIT) != 0,
+              fp16_ovfl);
+    EXPECT_EQ(snap->snapshots().front().vgpr(2, 0), expected_v2);
+  };
+
+  run_case(false, 0x00007F7Fu);
+  run_case(true, 0x00007E7Eu);
+}
 
 TEST(RdnaDispatchTest, WgpModeRoutesDsWritesThroughSiblingLdsPool) {
   constexpr uint32_t kPerCuLdsBytes = 64 * 1024;
@@ -2225,15 +2666,10 @@ TEST(DsTransposeTest, ReadB64TrB16_AccBit) {
                           << " should contain LDS data, not the VGPR sentinel";
 }
 
-// L1ScalarCache::writeback_all() must write each dirty K$ line back under its
-// own owning vmid (from the line tag), not the caller-supplied vmid. A CU can
-// retain dirty K$ lines from process A and then be flushed while processing
-// process B (e.g. from an acquire fence or SDMA path). If the bulk writeback
-// used the caller vmid, A's dirty line would be published through B's page
-// table and corrupt B's address space. Two page tables map the same GPU VA to
-// different host pages; a store under VMID 7 followed by writeback_all(8) must
-// land in VMID 7's backing, not VMID 8's.
-TEST(L1ScalarCacheVmidTest, WritebackAllUsesLineOwnerVmidNotCaller) {
+// Write-through scalar stores must use the store's VMID. Two page tables map
+// the same GPU VA to different host pages; a store under VMID 7 followed by the
+// no-op writeback_all(8) must land only in VMID 7's backing.
+TEST(L1ScalarCacheVmidTest, WriteThroughStoreUsesStoreVmid) {
   constexpr uint32_t kVmidA = 7;
   constexpr uint32_t kVmidB = 8;
   constexpr uint64_t kSharedVa = 0x40000; // page-aligned, aliased across procs.
@@ -2248,8 +2684,10 @@ TEST(L1ScalarCacheVmidTest, WritebackAllUsesLineOwnerVmidNotCaller) {
   alignas(4096) std::array<uint8_t, 4096> backing_b{};
   proc_a.map_pages(kSharedVa, backing_a.data(), backing_a.size());
   proc_b.map_pages(kSharedVa, backing_b.data(), backing_b.size());
-  mem.register_process(kVmidA, &proc_a.page_table_, &proc_a.page_table_mutex_);
-  mem.register_process(kVmidB, &proc_b.page_table_, &proc_b.page_table_mutex_);
+  mem.register_process(kVmidA, &proc_a.page_table_, &proc_a.page_table_mutex_,
+                       proc_a.page_table_generation());
+  mem.register_process(kVmidB, &proc_b.page_table_, &proc_b.page_table_mutex_,
+                       proc_b.page_table_generation());
 
   amdgpu::L2Cache l2("test.l2");
   l2.set_backing_memory(&mem);
@@ -2257,18 +2695,21 @@ TEST(L1ScalarCacheVmidTest, WritebackAllUsesLineOwnerVmidNotCaller) {
   amdgpu::L1ScalarCache k_cache(&l2);
   k_cache.set_memory(&mem);
 
-  // Store a dword under VMID A, leaving a dirty K$ line owned by VMID A.
+  // Store a dword under VMID A. Write-through must publish it immediately
+  // through VMID A's page table.
   k_cache.store(kSharedVa, /*num_dwords=*/1, &kStoreWord, kVmidA);
+  EXPECT_EQ(mem.read32(kSharedVa, kVmidA), kStoreWord);
+  EXPECT_NE(mem.read32(kSharedVa, kVmidB), kStoreWord);
 
-  // Flush the K$ as if servicing VMID B, then flush L2 to backing. The line
-  // must be published through VMID A's page table (its owner), not B's.
+  // A writeback request from another process is harmless because K$ has no
+  // dirty data to publish.
   k_cache.writeback_all(kVmidB);
   l2.flush_all();
 
   EXPECT_EQ(mem.read32(kSharedVa, kVmidA), kStoreWord)
-      << "dirty K$ line must be written back under its owner VMID A";
+      << "write-through store must remain in VMID A";
   EXPECT_NE(mem.read32(kSharedVa, kVmidB), kStoreWord)
-      << "line must NOT leak into VMID B's address space";
+      << "store must NOT leak into VMID B's address space";
 
   mem.unregister_process(kVmidA);
   mem.unregister_process(kVmidB);

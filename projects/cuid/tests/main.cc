@@ -23,7 +23,9 @@
 #include "test_common.h"
 
 // Unit tests (no root or device required)
+#include "unit/cuid_gpu_test.h"
 #include "unit/file_lock_test.h"
+#include "unit/gim_util_test.h"
 #include "unit/id_string_test.h"
 #include "unit/status_string_test.h"
 #include "unit/utilities_test.h"
@@ -38,6 +40,7 @@
 #include "functional/device_refresh_test.h"
 #include "functional/hmac_test.h"
 #include "functional/reverse_lookup_test.h"
+#include "src/gim_util.h"
 
 // =============================================================================
 // cuidtstUnprivileged — tests that run without root
@@ -123,6 +126,26 @@ TEST(cuidtstUnprivileged, DeviceRefresh) {
   RunGenericTest(&tst);
 }
 
+TEST(cuidtstUnprivileged, GimClientAvailability) {
+  TestGimClientAvailability tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, GimParseAsicSerial) {
+  TestGimParseAsicSerial tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, GimFormatBdf) {
+  TestGimFormatBdf tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, CuidGpuRenderNode) {
+  TestCuidGpuRenderNode tst;
+  RunGenericTest(&tst);
+}
+
 // =============================================================================
 // cuidtstPrivileged — tests that require root
 // =============================================================================
@@ -180,6 +203,17 @@ TEST(cuidtstPrivileged, ReverseDeviceType) {
     GTEST_SKIP() << "Requires root; run with sudo to enable.";
   }
   TestReverseDeviceType tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstPrivileged, GimDeviceEnumeration) {
+  if (geteuid() != 0) {
+    GTEST_SKIP() << "Requires root; run with sudo to enable.";
+  }
+  if (!cuid::gim::GimClient::is_available()) {
+    GTEST_SKIP() << "GIM device node not present; skipping.";
+  }
+  TestGimDeviceEnumeration tst;
   RunGenericTest(&tst);
 }
 

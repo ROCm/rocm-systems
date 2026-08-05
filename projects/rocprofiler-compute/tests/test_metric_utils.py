@@ -867,6 +867,17 @@ class TestMetricEvaluator:
             f"Expected 'N/A', got: {evaluator.eval_expression(eval_str)}"
         )
 
+    def test_eval_expression_returns_na_for_nullified_incomplete_kernel(self):
+        """Both numerator and denominator all-NaN yields NaN, mapped to 'N/A'."""
+        evaluator = self._make_evaluator({
+            "NUMERATOR": [np.nan, np.nan, np.nan],
+            "DENOMINATOR": [np.nan, np.nan, np.nan],
+        })
+        eval_str = self._to_eval_str("SUM(NUMERATOR) / SUM(DENOMINATOR)")
+        assert evaluator.eval_expression(eval_str) == "N/A", (
+            f"Expected 'N/A', got: {evaluator.eval_expression(eval_str)}"
+        )
+
     def test_eval_expression_handles_mixed_nan_and_valid_values(self):
         """SUM skips NaN values, producing a finite result for mixed data."""
         evaluator = self._make_evaluator({
