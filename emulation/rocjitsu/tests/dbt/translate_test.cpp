@@ -9753,7 +9753,7 @@ TEST(BinaryTranslatorE2E, Gfx1250CopiesCvtPkFp8F32WhenClampIsClear) {
   EXPECT_EQ(target_words[2], kGfx1250SEndpgm);
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250CvtPkFp8F32ClampSetStillFailsClosed) {
+TEST(BinaryTranslatorE2E, Gfx1250EmulatesCvtPkFp8F32ClampSetForA0) {
   constexpr auto source_cvt = gfx1250::build_vop3(
       gfx1250::kVCvtPkFp8F32Vop3, {.vdst = 30, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
@@ -9767,16 +9767,22 @@ TEST(BinaryTranslatorE2E, Gfx1250CvtPkFp8F32ClampSetStillFailsClosed) {
                                rocjitsu::ProcessorRevision::Gfx1250A0));
   auto result = translator.translate(source);
 
-  EXPECT_FALSE(result.ok());
-  const auto diagnostic = std::ranges::find_if(result.diagnostics, [](const auto &item) {
-    return item.severity == rocjitsu::DiagnosticSeverity::Error &&
-           item.kind == rocjitsu::DiagnosticKind::ExpandMissing;
-  });
-  ASSERT_NE(diagnostic, result.diagnostics.end());
-  EXPECT_EQ(diagnostic->mnemonic, "v_cvt_pk_fp8_f32");
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  EXPECT_EQ(std::ranges::count_if(decoded, [](const auto &item) {
+              return item->mnemonic() == "v_cvt_pk_fp8_f32";
+            }),
+            0);
+  EXPECT_GE(std::ranges::count_if(decoded, [](const auto &item) {
+              return item->mnemonic() == "v_cndmask_b32";
+            }),
+            6);
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250LiteralCvtPkFp8F32ClampSetFailsClosed) {
+TEST(BinaryTranslatorE2E, Gfx1250EmulatesLiteralCvtPkFp8F32ClampSetForA0) {
   constexpr auto source_cvt = gfx1250::build_vop3(
       gfx1250::kVCvtPkFp8F32Vop3, {.vdst = 30, .clamp = 1, .src0 = 255, .src1 = 256 + 2});
   constexpr uint32_t kLiteral = 0x3F800000u;
@@ -9791,13 +9797,45 @@ TEST(BinaryTranslatorE2E, Gfx1250LiteralCvtPkFp8F32ClampSetFailsClosed) {
                                rocjitsu::ProcessorRevision::Gfx1250A0));
   auto result = translator.translate(source);
 
-  EXPECT_FALSE(result.ok());
-  const auto diagnostic = std::ranges::find_if(result.diagnostics, [](const auto &item) {
-    return item.severity == rocjitsu::DiagnosticSeverity::Error &&
-           item.kind == rocjitsu::DiagnosticKind::ExpandMissing;
-  });
-  ASSERT_NE(diagnostic, result.diagnostics.end());
-  EXPECT_EQ(diagnostic->mnemonic, "v_cvt_pk_fp8_f32");
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  EXPECT_EQ(std::ranges::count_if(decoded, [](const auto &item) {
+              return item->mnemonic() == "v_cvt_pk_fp8_f32";
+            }),
+            0);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250EmulatesCvtSrFp8F32ClampSetForA0) {
+  constexpr auto source_cvt = gfx1250::build_vop3(
+      gfx1250::kVCvtSrFp8F32Vop3,
+      {.vdst = 30, .opsel = 12, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_cvt[0], source_cvt[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  EXPECT_EQ(std::ranges::count_if(decoded, [](const auto &item) {
+              return item->mnemonic() == "v_cvt_sr_fp8_f32";
+            }),
+            0);
+  EXPECT_EQ(std::ranges::count_if(decoded, [](const auto &item) {
+              return item->mnemonic() == "v_cvt_floor_i32_f32";
+            }),
+            1);
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250CopiesLiteralCvtF32Fp8E32WithoutClampEmulation) {
@@ -10405,7 +10443,7 @@ TEST(BinaryTranslatorE2E, Gfx1250UsesNeutralScaledK128Fp8Bf8Wmma) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   constexpr auto completion_wait = kGfx1250WmmaCompletionWait;
 
-  EXPECT_EQ(rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0().size(), 39u);
+  EXPECT_EQ(rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0().size(), 41u);
   for (const WmmaCase &test_case : cases) {
     SCOPED_TRACE(test_case.name);
     auto source_wmma = gfx1250::build_vop3p(test_case.source_opcode, fields);

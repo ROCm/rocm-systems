@@ -1409,20 +1409,21 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
   // this block. We deliberately do not add that temporary to the general
   // lattice; this helper is only for the complete signed-delta template where
   // the sibling subtract block proves both paths are the same static target.
-  if (block.first_index + 2 > block.last_index)
-    return std::nullopt;
-
   const auto add_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddU32);
   const auto addc_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddcU32);
   if (!add_u32_opcode || !addc_u32_opcode)
     return std::nullopt;
 
-  const Instruction &low_inst = *ctx.insts[block.first_index];
   const auto is_gfx1250_padding = [&](size_t index) {
     if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
       return false;
     const Instruction &inst = *ctx.insts[index];
-    if (inst.mnemonic() == "s_prefetch_inst_pc_rel")
+    // The gfx1250 sequence drains XCNT before an instruction prefetch. The
+    // shader manual defines S_WAIT_XCNT as a counter wait, so neither it nor
+    // the prefetch changes the PC pair or the signed-delta temporary. Keep both
+    // instructions in the translated body; this predicate only skips them
+    // while locating the arithmetic and set-PC consumer.
+    if (inst.mnemonic() == "s_wait_xcnt" || inst.mnemonic() == "s_prefetch_inst_pc_rel")
       return true;
     // The compiler also emits a scalar immediate move to configure the
     // prefetch. It is safe to skip only when its destination is outside the
@@ -1435,7 +1436,14 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u) && dst != tmp_sreg;
   };
 
-  size_t high_index = block.first_index + 1;
+  size_t low_index = block.first_index;
+  while (low_index <= block.last_index && is_gfx1250_padding(low_index))
+    ++low_index;
+  if (low_index > block.last_index)
+    return std::nullopt;
+  const Instruction &low_inst = *ctx.insts[low_index];
+
+  size_t high_index = low_index + 1;
   while (high_index <= block.last_index && is_gfx1250_padding(high_index))
     ++high_index;
   if (high_index > block.last_index)
@@ -1448,7 +1456,7 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
   if (setpc_index > block.last_index)
     return std::nullopt;
   const Instruction &setpc_inst = *ctx.insts[setpc_index];
-  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[block.first_index].word, *add_u32_opcode,
+  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[low_index].word, *add_u32_opcode,
                                 pair_lo, pair_lo, tmp_sreg))
     return std::nullopt;
   if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[high_index].word, *addc_u32_opcode,
@@ -1485,7 +1493,7 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
     if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
       return false;
     const Instruction &inst = *ctx.insts[index];
-    if (inst.mnemonic() == "s_prefetch_inst_pc_rel")
+    if (inst.mnemonic() == "s_wait_xcnt" || inst.mnemonic() == "s_prefetch_inst_pc_rel")
       return true;
     // Skip a prefetch-config move only when it clobbers neither the getpc pair
     // nor tmp_sreg (whose value s_abs_i32/s_sub_u32 below consume).
