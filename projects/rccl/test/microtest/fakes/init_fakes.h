@@ -32,6 +32,10 @@ const char* micro_getenv(const char* name);
 void SetMicroEnv(const char* name, const char* value);  // scripts one var
 void ClearMicroEnv();                                    // back to real getenv
 
+// Controllable GIN error state: ncclGinQueryLastError() reports this. Tests set
+// it to drive the ncclRemoteError precedence branch in ncclCommGetAsyncError.
+extern bool g_ginHasError;
+
 // Reset every init-layer fake to defaults. Cascades to ResetHipFakes() and
 // ResetNcclFakes(). Called from the fixture TearDown().
 void ResetInitFakes();

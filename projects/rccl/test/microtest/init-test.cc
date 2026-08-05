@@ -325,3 +325,56 @@ TEST_F(InitMicrotest, EnvConfigOverride_CgaClusterSizeInRange_Applied) {
 // TODO(AICOMRCCL-1685): a MIN_CTAS override test does not apply the value even
 // though COMM_BLOCKING/CGA_CLUSTER_SIZE (same g_loadParam path) do -- investigate
 // whether ncclParamMinCTAs resolves outside the redirected NCCL_PARAM. Deferred.
+
+// --- Tier B: computeBuffSizes (init.cc:1180) -- buff/chunk selection. Params
+// return -2 (default) so buffSizes come from rcclSetDefaultBuffSizes; single
+// node + owner==comm sets the shared tpP2pChunkSize. ---------------------------
+TEST_F(InitMicrotest, ComputeBuffSizes_SingleNodeOwner_UsesDefaultsAndSetsShared) {
+  auto comm = std::make_unique<ncclComm>();
+  auto sr = std::make_unique<ncclSharedResources>();
+  comm->sharedRes = sr.get();
+  sr->owner = comm.get();      // owner==comm -> sets sharedRes->tpP2pChunkSize
+  comm->nNodes = 1;
+  comm->isAllNvlink = false;   // -> p2pChunkSize from P2P_PCI_CHUNKSIZE default
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(comm.get()));
+  EXPECT_EQ(1 << 22, comm->buffSizes[NCCL_PROTO_SIMPLE]);   // default from fake
+  EXPECT_EQ(1 << 17, comm->p2pChunkSize);                   // P2P_PCI default
+  EXPECT_EQ(comm->p2pChunkSize, sr->tpP2pChunkSize);
+}
+
+// --- Tier B: ncclCommGetAsyncError precedence (init.cc:4260) ------------------
+TEST_F(InitMicrotest, GetAsyncError_CommErrorWins_OverProxyGin) {
+  ReadyComm rc;
+  rc.get()->asyncResult = ncclSystemError;  // set before proxy/gin checks
+  ncclResult_t e = ncclSuccess;
+  EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
+  EXPECT_EQ(ncclSystemError, e);
+}
+TEST_F(InitMicrotest, GetAsyncError_ProxyError_Propagates) {
+  ReadyComm rc;
+  auto ps = std::make_unique<ncclProxyState>();
+  ps->asyncResult = ncclSystemError;
+  rc.get()->proxyState = ps.get();
+  ncclResult_t e = ncclSuccess;
+  EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
+  EXPECT_EQ(ncclSystemError, e);
+}
+TEST_F(InitMicrotest, GetAsyncError_GinError_ReturnsRemoteError) {
+  ReadyComm rc;
+  auto sr = std::make_unique<ncclSharedResources>();
+  sr->ginState.connected = true;
+  rc.get()->sharedRes = sr.get();
+  g_ginHasError = true;  // ncclGinQueryLastError -> hasError
+  ncclResult_t e = ncclSuccess;
+  EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
+  EXPECT_EQ(ncclRemoteError, e);
+}
+TEST_F(InitMicrotest, GetAsyncError_GroupJobCompletes_AndClears) {
+  ReadyComm rc;
+  auto gj = std::make_unique<ncclGroupJob>();
+  rc.get()->groupJob = gj.get();
+  ncclResult_t e = ncclInProgress;
+  EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
+  EXPECT_EQ(ncclSuccess, e);
+  EXPECT_EQ(nullptr, rc.get()->groupJob);  // completed -> cleared
+}

@@ -85,10 +85,22 @@ void Recorder::record(const char*) {}
 // -------------------------------------------------------------------------
 ncclResult_t ncclGroupJobAbort(struct ncclGroupJob*) { return ncclSuccess; }
 ncclResult_t ncclGroupJobComplete(struct ncclGroupJob*) { return ncclSuccess; }
+
+bool g_ginHasError = false;
 ncclResult_t ncclGinQueryLastError(struct ncclGinState*, bool* hasError) {
-  if (hasError) *hasError = false;
+  if (hasError) *hasError = g_ginHasError;
   return ncclSuccess;
 }
+
+// computeBuffSizes seams: rcclSetDefaultBuffSizes fills the per-protocol default
+// buffer sizes; rcclSetP2pNetChunkSize fills the multi-node net chunk size.
+// Deterministic values let tests assert the assignment paths.
+void rcclSetDefaultBuffSizes(struct ncclComm*, int* defaults) {
+  defaults[0] = 1 << 18;  // LL
+  defaults[1] = 1 << 18;  // LL128
+  defaults[2] = 1 << 22;  // SIMPLE
+}
+void rcclSetP2pNetChunkSize(struct ncclComm*, int& sz) { sz = 1 << 17; }
 
 // The NCCL_API dispatch symbol ncclCommGetAsyncError is emitted outside init.cc
 // (the api-trace layer, not linked here); ncclCommEnsureReady calls it. Route it
@@ -103,4 +115,5 @@ void ResetInitFakes() {
   ResetHipFakes();
   ResetNcclFakes();
   ClearMicroEnv();
+  g_ginHasError = false;
 }
