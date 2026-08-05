@@ -6,17 +6,21 @@ Thread limit tests.
 """
 
 from __future__ import annotations
+from dataclasses import dataclass
+from typing import Callable
 import pytest
 from conftest import RocprofsysTest, get_rocprof_config
 
 pytestmark = [pytest.mark.thread_limit]
 
-# rocprof-sys may initialize internal/offset threads (sampling, ROCm, etc.)
-# that consume thread slots without appearing as workload thread rows. Expect the
-# highest profiled thread index to be at most thread_limit - INTERNAL_THREAD_OFFSET.
-# The half-thread case is far below the limit, so use the exact highest launched index.
+# rocprof-sys' own threads (sampling, ROCm) consume slots without producing
+# workload rows, so back off by this much when at or over the limit.
 INTERNAL_THREAD_OFFSET = 20
-OVERFLOW_THREAD_LOAD_MULTIPLIER = 8
+
+# Workload args shared by every case. Threads are created in batches of
+# WORKLOAD_CONCURRENCY, so slots are consumed cumulatively without many being live.
+WORKLOAD_FIB = 35
+WORKLOAD_CONCURRENCY = 2
 
 # ============================================================================
 # Thread Limit Fixtures
@@ -36,33 +40,55 @@ def thread_limit_env() -> dict[str, str]:
 
 
 # ============================================================================
-# Helper Function
+# Thread Limit Case Matrix
+# ============================================================================
+
+
+@dataclass(frozen=True)
+class ThreadLimitCase:
+    """A thread-limit scenario expressed as functions of the runtime thread limit."""
+
+    thread_count: Callable[[int], int]
+    pass_value: Callable[[int, int], int]
+    fail_value: Callable[[int, int], int]
+    expect_exhausted_warning: bool
+
+
+# Below the limit ("half") every launched thread is profiled, so the highest index
+# is the exact top launched index and the absent index is one past it. At or over
+# the limit, internal/offset threads consume slots, so back off by
+# INTERNAL_THREAD_OFFSET and expect one past the limit to be absent. Only the
+# over-limit row is required to emit the thread-limit warning.
+THREAD_LIMIT_CASES: dict[str, ThreadLimitCase] = {
+    "half": ThreadLimitCase(
+        thread_count=lambda limit: limit // 2,
+        pass_value=lambda thread_count, limit: thread_count - 1,
+        fail_value=lambda thread_count, limit: thread_count + 1,
+        expect_exhausted_warning=False,
+    ),
+    "at_limit": ThreadLimitCase(
+        thread_count=lambda limit: limit,
+        pass_value=lambda thread_count, limit: (limit - 1) - INTERNAL_THREAD_OFFSET,
+        fail_value=lambda thread_count, limit: limit + 1,
+        expect_exhausted_warning=False,
+    ),
+    "exhausted": ThreadLimitCase(
+        thread_count=lambda limit: limit * 2,
+        pass_value=lambda thread_count, limit: (limit - 1) - INTERNAL_THREAD_OFFSET,
+        fail_value=lambda thread_count, limit: limit + 1,
+        expect_exhausted_warning=True,
+    ),
+}
+
+
+# ============================================================================
+# Helper Functions
 # ============================================================================
 
 
 def get_thread_limit() -> int:
     """Get the thread limit for the test"""
     return get_rocprof_config().capabilities.max_threads
-
-
-def get_overflow_thread_load_count() -> int:
-    """Thread count for load test — scales with the configured thread limit."""
-    return get_thread_limit() * OVERFLOW_THREAD_LOAD_MULTIPLIER
-
-
-def get_expected_pass_value(thread_count: int, thread_limit: int) -> int:
-    """Highest profiled thread index expected after internal/offset overhead."""
-    max_profiled = min(thread_count - 1, thread_limit - 1)
-    if thread_count == thread_limit // 2:
-        return max_profiled
-    return max_profiled - INTERNAL_THREAD_OFFSET
-
-
-def get_expected_fail_value(thread_count: int, thread_limit: int) -> int:
-    """Thread index that must not appear in profile output."""
-    if thread_count >= thread_limit:
-        return thread_limit + 1
-    return thread_count + 1
 
 
 def get_thread_limit_warning_regex(thread_limit: int) -> str:
@@ -83,59 +109,35 @@ def get_thread_limit_warning_regex(thread_limit: int) -> str:
 @pytest.mark.parametrize(
     "mode", ["sampling", "binary_rewrite", "runtime_instrument", "sys_run"]
 )
-@pytest.mark.parametrize("thread_ratio", ["half", "at", "double"])
+@pytest.mark.parametrize("thread_ratio", list(THREAD_LIMIT_CASES))
 @pytest.mark.class_name("thread-limit")
 class TestThreadLimit(RocprofsysTest):
     BINARY_REWRITE_ARGS = ["-e", "-v", "2", "-i", "1024", "--label", "return", "args"]
-    RUNTIME_INSTRUMENT_ARGS = ["-e", "-v", "1", "-i", "1024", "--label", "return", "args"]
+    RUNTIME_INSTRUMENT_ARGS = ["-e", "-v", "2", "-i", "1024", "--label", "return", "args"]
 
     def test(self, mode, thread_ratio, thread_limit_env):
         thread_limit = get_thread_limit()
-        if thread_ratio == "half":
-            thread_count = thread_limit // 2
-        elif thread_ratio == "at":
-            thread_count = thread_limit
-        else:  # "double"
-            thread_count = thread_limit * 2
+        case = THREAD_LIMIT_CASES[thread_ratio]
+        thread_count = case.thread_count(thread_limit)
         result = self.run_test(
             mode,
             "thread-limit",
             env=thread_limit_env,
-            run_args=["35", "2", str(thread_count)],
+            run_args=[
+                str(WORKLOAD_FIB),
+                str(WORKLOAD_CONCURRENCY),
+                str(thread_count),
+            ],
             binary_rewrite_args=self.BINARY_REWRITE_ARGS,
             runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
         )
-        pass_value = get_expected_pass_value(thread_count, thread_limit)
-        fail_value = get_expected_fail_value(thread_count, thread_limit)
+        pass_regex = [f"\\|{case.pass_value(thread_count, thread_limit)}>>>"]
+        if case.expect_exhausted_warning:
+            pass_regex.append(get_thread_limit_warning_regex(thread_limit))
 
         self.assert_regex(
             result,
             mode,
-            pass_regex=[f"\\|{pass_value}>>>"],
-            fail_regex=[f"\\|{fail_value}>>>"],
-        )
-
-
-@pytest.mark.parametrize("mode", ["sampling", "sys_run"])
-@pytest.mark.timeout(600)
-@pytest.mark.class_name("thread-limit-load-test")
-class TestThreadLimitLoadTest(RocprofsysTest):
-    def test(self, mode, thread_limit_env, rocprof_config):
-        concurrency = min(rocprof_config.capabilities.num_procs, 16)
-        thread_count = get_overflow_thread_load_count()
-        result = self.run_test(
-            mode,
-            "thread-limit",
-            env=thread_limit_env,
-            run_args=["30", str(concurrency), str(thread_count)],
-        )
-        thread_limit = get_thread_limit()
-        pass_value = get_expected_pass_value(thread_count, thread_limit)
-        fail_value = get_expected_fail_value(thread_count, thread_limit)
-        warning_re = get_thread_limit_warning_regex(thread_limit)
-        self.assert_regex(
-            result,
-            mode,
-            pass_regex=[f"\\|{pass_value}>>>", warning_re],
-            fail_regex=[f"\\|{fail_value}>>>"],
+            pass_regex=pass_regex,
+            fail_regex=[f"\\|{case.fail_value(thread_count, thread_limit)}>>>"],
         )

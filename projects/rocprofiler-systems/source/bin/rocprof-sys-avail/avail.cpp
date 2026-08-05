@@ -242,9 +242,11 @@ main(int argc, char** argv)
                       "thread exits")
         .count(0)
         .action([](parser_t&) {
-            // NOTE: test_thread_limit.py depends on the wording here to capture
-            // the compile-time value. Any wording change must be reflected in that file.
-            std::cout << "Compile-time limit on the total number of threads: "
+            // NOTE: capabilities.py max_threads method depends on the wording here to
+            // capture the compile-time value. Any wording change must be reflected in
+            // that file.
+            std::cout << "Compile-time limit on the total number of threads "
+                         "(ROCPROFSYS_MAX_THREADS): "
                       << ROCPROFSYS_MAX_THREADS << "\n";
         });
 

@@ -392,7 +392,11 @@ class SystemCapabilities:
 
     @persistent_cached_property
     def max_threads(self) -> int:
-        """Compile-time maximum number of threads that can be profiled at once.
+        """Compile-time limit on the total number of threads profiled per process.
+
+        The limit is cumulative over the lifetime of the process rather than a
+        cap on concurrency: every thread that is created consumes a slot, and
+        that slot is not reused when the thread exits.
 
         This is the ``ROCPROFSYS_MAX_THREADS`` CMake constant baked into the
         binaries at build time. It is queried from
@@ -409,7 +413,9 @@ class SystemCapabilities:
         )
         # Must stay in sync with the exact line printed by rocprof-sys-avail's
         # `--max-threads` action (source/bin/rocprof-sys-avail/avail.cpp).
-        match = re.search(r"total number of threads:\s*(\d+)", result.stdout)
+        match = re.search(
+            r"total number of threads \(ROCPROFSYS_MAX_THREADS\):\s*(\d+)", result.stdout
+        )
         if not match:
             raise RuntimeError(
                 "Could not parse the thread limit from "
