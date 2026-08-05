@@ -2,8 +2,6 @@
 
 All notable changes to the hipFile Python bindings will be documented in this file.
 
-## [Unreleased]
-
 ## [0.4.0.dev0]
 
 ### Added
