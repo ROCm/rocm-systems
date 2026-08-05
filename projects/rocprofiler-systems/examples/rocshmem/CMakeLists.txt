@@ -27,13 +27,15 @@ endif()
 # A NUMA-enabled rocSHMEM's installed cmake config calls find_dependency(NUMA)
 # to resolve the numa::numa target its link interface references. TheRock ships
 # that resolver as numa-config.cmake under the nested rocm_sysdeps prefix
-# (<rocm>/lib/rocm_sysdeps/lib/cmake/NUMA), which is not on the default search
-# path. Add it so find_package(rocshmem) can satisfy find_dependency(NUMA).
-foreach(_rocm_root ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm)
-    if(EXISTS "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA")
-        list(PREPEND CMAKE_PREFIX_PATH "${_rocm_root}/lib/rocm_sysdeps")
-    endif()
-endforeach()
+# (<rocm>/lib/rocm_sysdeps/lib/cmake/NUMA).
+if(NOT NUMA_DIR)
+    foreach(_rocm_root ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm)
+        if(EXISTS "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA/numa-config.cmake")
+            set(NUMA_DIR "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA")
+            break()
+        endif()
+    endforeach()
+endif()
 
 # rocSHMEM provides the roc::rocshmem imported target. When built as part of
 # the rocm-systems monorepo the target is already defined; for standalone
