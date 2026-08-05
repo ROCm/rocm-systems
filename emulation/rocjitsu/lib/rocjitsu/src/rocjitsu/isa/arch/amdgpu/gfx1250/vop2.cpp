@@ -69,6 +69,7 @@ VAddF64Vop2::VAddF64Vop2(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
@@ -235,6 +236,7 @@ VMulF64Vop2::VMulF64Vop2(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
@@ -533,6 +535,7 @@ VMinNumF64Vop2::VMinNumF64Vop2(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
@@ -570,6 +573,7 @@ VMaxNumF64Vop2::VMaxNumF64Vop2(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
@@ -866,6 +870,7 @@ VFmacF64Vop2::VFmacF64Vop2(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
@@ -1393,6 +1398,7 @@ VFmamkF64Vop2::VFmamkF64Vop2(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
@@ -1428,6 +1434,7 @@ VFmaakF64Vop2::VFmaakF64Vop2(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
@@ -1591,6 +1598,7 @@ VAddNcU64Vop2::VAddNcU64Vop2(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
@@ -1628,6 +1636,7 @@ VSubNcU64Vop2::VSubNcU64Vop2(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
@@ -1665,6 +1674,7 @@ VMulU64Vop2::VMulU64Vop2(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {

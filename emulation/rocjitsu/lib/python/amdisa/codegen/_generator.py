@@ -860,7 +860,7 @@ class CodeGenerator:
         if widening is not None:
             return (
                 f'{opnd.name} = Operand::make_literal32('
-                f'static_cast<uint32_t>({literal_expr}), '
+                f'{operand_size}, static_cast<uint32_t>({literal_expr}), '
                 f'Operand::Literal32Widening::{widening.value});'
             )
         return (
@@ -10099,7 +10099,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
                 '          uint16_t literal16_display_value, bool has_literal16_display);\n'
                 '  Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);\n'
-                '  static Operand make_literal32(uint32_t literal_value, Literal32Widening widening);\n'
+                '  static Operand make_literal32(int size_bits, uint32_t literal_value, Literal32Widening widening);\n'
                 '  std::string name() const override;\n'
                 f'{literal64_decl}'
                 '  std::optional<RegisterRef> to_register_ref() const override;\n'
@@ -10193,8 +10193,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     '}'
                 ),
                 cgen.Line(
-                    'Operand Operand::make_literal32(uint32_t literal_value, Literal32Widening widening) {\n'
-                    '  Operand operand(64, OperandType::OPR_SIMM32, static_cast<int>(literal_value));\n'
+                    'Operand Operand::make_literal32(int size_bits, uint32_t literal_value, Literal32Widening widening) {\n'
+                    '  Operand operand(size_bits, OperandType::OPR_SIMM32, static_cast<int>(literal_value));\n'
                     '  operand.literal32_widening_ = widening;\n'
                     '  return operand;\n'
                     '}'

@@ -47,8 +47,8 @@ Operand::Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, 
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
 
-Operand Operand::make_literal32(uint32_t literal_value, Literal32Widening widening) {
-  Operand operand(64, OperandType::OPR_SIMM32, static_cast<int>(literal_value));
+Operand Operand::make_literal32(int size_bits, uint32_t literal_value, Literal32Widening widening) {
+  Operand operand(size_bits, OperandType::OPR_SIMM32, static_cast<int>(literal_value));
   operand.literal32_widening_ = widening;
   return operand;
 }

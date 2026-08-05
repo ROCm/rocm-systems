@@ -2267,6 +2267,7 @@ VCmpFF64Vopc::VCmpFF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2294,6 +2295,7 @@ VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2321,6 +2323,7 @@ VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2348,6 +2351,7 @@ VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2375,6 +2379,7 @@ VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2402,6 +2407,7 @@ VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2429,6 +2435,7 @@ VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2456,6 +2463,7 @@ VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2483,6 +2491,7 @@ VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2510,6 +2519,7 @@ VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2537,6 +2547,7 @@ VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2564,6 +2575,7 @@ VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2591,6 +2603,7 @@ VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2618,6 +2631,7 @@ VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2645,6 +2659,7 @@ VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2672,6 +2687,7 @@ VCmpTruF64Vopc::VCmpTruF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2701,6 +2717,7 @@ VCmpxFF64Vopc::VCmpxFF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2739,6 +2756,7 @@ VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2780,6 +2798,7 @@ VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2821,6 +2840,7 @@ VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2862,6 +2882,7 @@ VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2903,6 +2924,7 @@ VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2944,6 +2966,7 @@ VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2985,6 +3008,7 @@ VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -3026,6 +3050,7 @@ VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -3067,6 +3092,7 @@ VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -3108,6 +3134,7 @@ VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -3149,6 +3176,7 @@ VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -3190,6 +3218,7 @@ VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -3231,6 +3260,7 @@ VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -3272,6 +3302,7 @@ VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -3313,6 +3344,7 @@ VCmpxTruF64Vopc::VCmpxTruF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -5649,6 +5681,7 @@ VCmpFI64Vopc::VCmpFI64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -5676,6 +5709,7 @@ VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -5703,6 +5737,7 @@ VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -5730,6 +5765,7 @@ VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -5757,6 +5793,7 @@ VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -5784,6 +5821,7 @@ VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -5811,6 +5849,7 @@ VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -5838,6 +5877,7 @@ VCmpTI64Vopc::VCmpTI64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -5865,6 +5905,7 @@ VCmpClassF64Vopc::VCmpClassF64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -6278,6 +6319,7 @@ VCmpxFI64Vopc::VCmpxFI64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -6316,6 +6358,7 @@ VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -6357,6 +6400,7 @@ VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -6398,6 +6442,7 @@ VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -6439,6 +6484,7 @@ VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -6480,6 +6526,7 @@ VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -6521,6 +6568,7 @@ VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -6562,6 +6610,7 @@ VCmpxTI64Vopc::VCmpxTI64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -6600,6 +6649,7 @@ VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -9393,6 +9443,7 @@ VCmpFU64Vopc::VCmpFU64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -9420,6 +9471,7 @@ VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -9447,6 +9499,7 @@ VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -9474,6 +9527,7 @@ VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -9501,6 +9555,7 @@ VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -9528,6 +9583,7 @@ VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -9555,6 +9611,7 @@ VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -9582,6 +9639,7 @@ VCmpTU64Vopc::VCmpTU64Vopc(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -10123,6 +10181,7 @@ VCmpxFU64Vopc::VCmpxFU64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -10161,6 +10220,7 @@ VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -10202,6 +10262,7 @@ VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -10243,6 +10304,7 @@ VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -10284,6 +10346,7 @@ VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -10325,6 +10388,7 @@ VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -10366,6 +10430,7 @@ VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -10407,6 +10472,7 @@ VCmpxTU64Vopc::VCmpxTU64Vopc(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||

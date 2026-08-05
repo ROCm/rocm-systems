@@ -143,6 +143,7 @@ VMovB64Vop3::VMovB64Vop3(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
@@ -318,6 +319,7 @@ VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand::make_literal32(
+        32,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
@@ -657,6 +659,7 @@ VPermPk16B4U4Vop3::VPermPk16B4U4Vop3(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
@@ -700,6 +703,7 @@ VPermPk16B6U4Vop3::VPermPk16B6U4Vop3(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
@@ -711,6 +715,7 @@ VPermPk16B6U4Vop3::VPermPk16B6U4Vop3(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
@@ -743,6 +748,7 @@ VPermPk16B8U4Vop3::VPermPk16B8U4Vop3(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
@@ -754,6 +760,7 @@ VPermPk16B8U4Vop3::VPermPk16B8U4Vop3(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 254) {
@@ -765,6 +772,7 @@ VPermPk16B8U4Vop3::VPermPk16B8U4Vop3(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {
@@ -999,6 +1007,7 @@ VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
     src2 = Operand::make_literal32(
+        32,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 254) {

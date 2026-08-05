@@ -199,7 +199,7 @@ def test_f64_simm32_literal_operand_uses_extension_word_as_double_high_bits():
     )
 
     assert (
-        'src0 = Operand::make_literal32(static_cast<uint32_t>('
+        'src0 = Operand::make_literal32(64, static_cast<uint32_t>('
         'reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32), '
         'Operand::Literal32Widening::F64HighBits);'
     ) == stmt
@@ -246,7 +246,7 @@ def test_mixed_width_literal_operands_classify_per_operand_signature():
     )
 
     assert (
-        'src0 = Operand::make_literal32(static_cast<uint32_t>('
+        'src0 = Operand::make_literal32(64, static_cast<uint32_t>('
         'reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32), '
         'Operand::Literal32Widening::F64HighBits);'
     ) == src0_stmt
@@ -264,7 +264,7 @@ def test_u64_simm32_literal_operand_keeps_low_32_bit_value():
     )
 
     assert (
-        'ssrc0 = Operand::make_literal32(static_cast<uint32_t>('
+        'ssrc0 = Operand::make_literal32(64, static_cast<uint32_t>('
         'reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32), '
         'Operand::Literal32Widening::ZeroExtend);'
     ) == stmt
@@ -283,7 +283,7 @@ def test_pk_f32_simm32_literal_operand_replicates_extension_word():
     )
 
     assert (
-        'src0 = Operand::make_literal32(static_cast<uint32_t>('
+        'src0 = Operand::make_literal32(64, static_cast<uint32_t>('
         'reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32), '
         'Operand::Literal32Widening::Replicate32);'
     ) == stmt
@@ -302,7 +302,7 @@ def test_i64_simm32_literal_operand_sign_extends_from_data_format():
     )
 
     assert (
-        'src0 = Operand::make_literal32('
+        'src0 = Operand::make_literal32(64, '
         'static_cast<uint32_t>(reinterpret_cast<const '
         'Vop3InstLiteralMachineInst *>(inst)->simm32), '
         'Operand::Literal32Widening::SignExtend);'
@@ -377,7 +377,7 @@ def test_generated_operand_tracks_literal32_widening_without_literal64_provenanc
     assert 'uint64_t widened_literal32_value() const;' in operand_h
     assert 'std::optional<Literal32Widening> literal32_widening_' in operand_h
     assert 'literal32_display' not in operand_h
-    assert 'Operand operand(64, OperandType::OPR_SIMM32' in operand_cpp
+    assert 'Operand operand(size_bits, OperandType::OPR_SIMM32' in operand_cpp
     assert 'operand.literal32_widening_ = widening;' in operand_cpp
     assert operand_cpp.count('if (literal32_widening_)') == 2
     assert operand_cpp.count('return widened_literal32_value();') == 2
@@ -399,7 +399,7 @@ def test_b64_simm32_literal_operand_keeps_low_32_bit_value():
     )
 
     assert (
-        'ssrc0 = Operand::make_literal32(static_cast<uint32_t>('
+        'ssrc0 = Operand::make_literal32(64, static_cast<uint32_t>('
         'reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32), '
         'Operand::Literal32Widening::ZeroExtend);'
     ) == stmt
@@ -413,7 +413,22 @@ def test_m64_simm32_literal_operand_keeps_low_32_bit_mask():
     )
 
     assert (
-        'src2 = Operand::make_literal32(static_cast<uint32_t>('
+        'src2 = Operand::make_literal32(64, static_cast<uint32_t>('
+        'reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32), '
+        'Operand::Literal32Widening::ZeroExtend);'
+    ) == stmt
+
+
+def test_64bit_simm32_literal_preserves_effective_operand_size():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('src2', 'OPR_SREG', size=64, data_format_name='FMT_NUM_M64'),
+        'Vop3InstLiteralMachineInst',
+        size_expr='32',
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'src2 = Operand::make_literal32(32, static_cast<uint32_t>('
         'reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32), '
         'Operand::Literal32Widening::ZeroExtend);'
     ) == stmt

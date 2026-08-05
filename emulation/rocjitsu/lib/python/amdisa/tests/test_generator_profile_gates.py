@@ -1972,6 +1972,8 @@ def test_generated_literal32_widening_shapes_cover_gfx1250_and_cdna_vopc(
     _run_multi(args)
 
     gfx_operand_exec = (gfx1250_generated_root / 'operand_exec.cpp').read_text()
+    gfx_vop3_alu = (gfx1250_generated_root / 'vop3_alu.cpp').read_text()
+    gfx_vop3_data = (gfx1250_generated_root / 'vop3_data.cpp').read_text()
     gfx_vop3_ternary = (gfx1250_generated_root / 'vop3_ternary.cpp').read_text()
     gfx_vop3p = (gfx1250_generated_root / 'vop3p.cpp').read_text()
     cdna_vopc = (tmp_path / 'cdna4' / 'vopc.cpp').read_text()
@@ -1991,6 +1993,16 @@ def test_generated_literal32_widening_shapes_cover_gfx1250_and_cdna_vopc(
     cdna_vopc_ctor = _generated_constructor_body(cdna_vopc, 'VCmpLtI64Vopc')
     assert 'src0 = Operand::make_literal32' in cdna_vopc_ctor
     assert 'Operand::Literal32Widening::SignExtend' in cdna_vopc_ctor
+
+    effective_32bit_ctors = (
+        _generated_constructor_body(gfx_vop3_data, 'VCndmaskB32Vop3'),
+        _generated_constructor_body(gfx_vop3_data, 'VCndmaskB16Vop3'),
+        _generated_constructor_body(gfx_vop3_alu, 'VAddCoCiU32Vop3SdstEnc'),
+        _generated_constructor_body(gfx_vop3_alu, 'VSubCoCiU32Vop3SdstEnc'),
+        _generated_constructor_body(gfx_vop3_alu, 'VSubrevCoCiU32Vop3SdstEnc'),
+    )
+    for constructor in effective_32bit_ctors:
+        assert re.search(r'src2\s*=\s*Operand::make_literal32\(\s*32\s*,', constructor)
 
 
 def test_generated_rdna4_local_vop3_pack_paths_use_selected_halves(

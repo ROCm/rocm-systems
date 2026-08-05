@@ -42,6 +42,7 @@ SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -93,6 +94,7 @@ SCmovB64Sop1::SCmovB64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -137,6 +139,7 @@ SBrevB64Sop1::SBrevB64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -188,6 +191,7 @@ SCtzI32B64Sop1::SCtzI32B64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -230,6 +234,7 @@ SClzI32U64Sop1::SClzI32U64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -272,6 +277,7 @@ SClsI32I64Sop1::SClsI32I64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -496,6 +502,7 @@ SBcnt0I32B64Sop1::SBcnt0I32B64Sop1(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -544,6 +551,7 @@ SBcnt1I32B64Sop1::SBcnt1I32B64Sop1(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -592,6 +600,7 @@ SQuadmaskB64Sop1::SQuadmaskB64Sop1(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -640,6 +649,7 @@ SWqmB64Sop1::SWqmB64Sop1(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -688,6 +698,7 @@ SNotB64Sop1::SNotB64Sop1(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -747,6 +758,7 @@ SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -810,6 +822,7 @@ SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -873,6 +886,7 @@ SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -935,6 +949,7 @@ SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -997,6 +1012,7 @@ SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -1059,6 +1075,7 @@ SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -1123,6 +1140,7 @@ SAndNot0SaveexecB64Sop1::SAndNot0SaveexecB64Sop1(const MachineInst *inst)
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -1187,6 +1205,7 @@ SOrNot0SaveexecB64Sop1::SOrNot0SaveexecB64Sop1(const MachineInst *inst)
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -1251,6 +1270,7 @@ SAndNot1SaveexecB64Sop1::SAndNot1SaveexecB64Sop1(const MachineInst *inst)
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -1315,6 +1335,7 @@ SOrNot1SaveexecB64Sop1::SOrNot1SaveexecB64Sop1(const MachineInst *inst)
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -1379,6 +1400,7 @@ SAndNot0WrexecB64Sop1::SAndNot0WrexecB64Sop1(const MachineInst *inst)
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -1443,6 +1465,7 @@ SAndNot1WrexecB64Sop1::SAndNot1WrexecB64Sop1(const MachineInst *inst)
   num_dst_ = 3;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -1494,6 +1517,7 @@ SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -1542,6 +1566,7 @@ SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -1599,6 +1624,7 @@ SSetPcI64Sop1::SSetPcI64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -1625,6 +1651,7 @@ SSwapPcI64Sop1::SSwapPcI64Sop1(const MachineInst *inst)
   num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -1649,6 +1676,7 @@ SRfeI64Sop1::SRfeI64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
@@ -1671,6 +1699,7 @@ SAddPcI64Sop1::SAddPcI64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
+        64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254) {
