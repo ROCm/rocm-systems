@@ -1556,15 +1556,16 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
     return false;
   }
 
-  if (!clBinary()->setElfIn()) {
-    LogError("Setting input OCL binary failed");
+  // Do not rely on amd::Elf to do validations here since it makes copies
+  // and depending on the binary size, that might be costly.
+  auto [binary, binSize] = clBinary()->data();
+  if (binSize < sizeof(amd::Elf64_Ehdr)) {
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, "Invalid size to validate \n");
     return false;
   }
-  uint16_t type;
-  if (!clBinary()->elfIn()->getType(type)) {
-    LogError("Bad OCL Binary: error loading ELF type!");
-    return false;
-  }
+  const amd::Elf64_Ehdr* ehdr = reinterpret_cast<const amd::Elf64_Ehdr*>(binary);
+  uint16_t type = ehdr->e_type;
+
   switch (type) {
     case ET_NONE: {
       setType(TYPE_NONE);
@@ -1579,9 +1580,7 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
       break;
     }
     case ET_DYN: {
-      char* sect = nullptr;
-      size_t sz = 0;
-      if (clBinary()->elfIn()->isHsaCo()) {
+      if (ehdr->e_machine == EM_AMDGPU) {
         setType(TYPE_EXECUTABLE);
       } else {
         setType(TYPE_LIBRARY);
@@ -1605,7 +1604,6 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
     linkOptions_.clear();
   }
 
-  clBinary()->resetElfIn();
   return true;
 }
 
