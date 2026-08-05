@@ -292,14 +292,19 @@ on c01-3. The broader context:
   **`DOORBELL=0` still failed 1/20** — the sfence alone does NOT fix the bug.
   The fence ordering is NOT the root cause (or not the only cause).
 
-### Doorbell fence test results (e21-14, 62 prereqs, DEBUG_CLR_AQL_DEV_QUEUE=1)
+### Doorbell fence test results (e21-14, 62 prereqs, DEBUG_CLR_AQL_DEV_QUEUE=1) — COMPLETE
 
-| Condition | Pass/20 | Fail/20 | Conclusion |
+| Condition | Pass/20 | Fail/20 | Failure rate |
 |---|---|---|---|
-| `DOORBELL=0` (ROCr sfence) | 19 | **1** | Sfence alone insufficient |
-| `DOORBELL=1` (direct+skip_fence) | 15+ | 0 (so far, incomplete) | Inconclusive |
+| `DOORBELL=0` (ROCr sfence always) | 19 | **1** | 5% |
+| `DOORBELL=1` (direct+skip_fence) | 16 | **4** | 20% |
 
-DOORBELL=1 run was still at iter 15/20 when investigation paused.
+**Key finding: two distinct contributions to the bug**
+
+1. The `skip_fence` optimization makes it **4× worse** (20% vs 5%) — confirming fence ordering
+   is a real factor. Restoring the sfence in the direct doorbell path is part of the fix.
+2. But sfence alone still leaves **5% failures** — there is a second issue independent of
+   the doorbell ordering, likely in the VRAM ring buffer state after queue recycling.
 
 ### Current hypothesis (unconfirmed)
 
