@@ -35,6 +35,7 @@
 #include <chrono>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -127,28 +128,28 @@ note_signal_less(signal_less_counter which, uint64_t n)
     g_counters[static_cast<size_t>(which)].fetch_add(n, std::memory_order_relaxed);
 }
 
-signal_less_counters
+signal_less_counter_array
 signal_less_stats()
 {
-    auto _at = [](signal_less_counter c) {
-        return g_counters[static_cast<size_t>(c)].load(std::memory_order_relaxed);
-    };
-    auto _s                     = signal_less_counters{};
-    _s.batch_eligible           = _at(signal_less_counter::batch_eligible);
-    _s.entry_registered         = _at(signal_less_counter::entry_registered);
-    _s.register_refused         = _at(signal_less_counter::register_refused);
-    _s.eop_proven               = _at(signal_less_counter::eop_proven);
-    _s.eop_unmatched            = _at(signal_less_counter::eop_unmatched);
-    _s.handoff_submitted        = _at(signal_less_counter::handoff_submitted);
-    _s.handoff_retried          = _at(signal_less_counter::handoff_retried);
-    _s.finalizer_emitted        = _at(signal_less_counter::finalizer_emitted);
-    _s.finalizer_no_timing      = _at(signal_less_counter::finalizer_no_timing);
-    _s.no_timing_start_unknown  = _at(signal_less_counter::no_timing_start_unknown);
-    _s.no_timing_convert_failed = _at(signal_less_counter::no_timing_convert_failed);
-    _s.no_timing_bad_interval   = _at(signal_less_counter::no_timing_bad_interval);
-    _s.no_timing_before_enqueue = _at(signal_less_counter::no_timing_before_enqueue);
-    _s.no_timing_after_now      = _at(signal_less_counter::no_timing_after_now);
+    auto _s = signal_less_counter_array{};
+    for(size_t i = 0; i < _s.size(); ++i)
+        _s[i] = g_counters[i].load(std::memory_order_relaxed);
     return _s;
+}
+
+const char*
+signal_less_counter_name(signal_less_counter which)
+{
+    switch(which)
+    {
+        case signal_less_counter::entry_registered: return "registered";
+        case signal_less_counter::eop_proven: return "eop-proven";
+        case signal_less_counter::eop_unmatched: return "eop-unmatched";
+        case signal_less_counter::finalizer_emitted: return "emitted";
+        case signal_less_counter::finalizer_no_timing: return "no-timing";
+        case signal_less_counter::kCount: break;
+    }
+    return "?";
 }
 
 bool
@@ -181,12 +182,7 @@ hand_off_proven(signal_less_hub_t::proven&& p)
 {
     if(g_child_stale.load(std::memory_order_acquire)) return;
 
-    if(submit_no_signal_finalize(p))
-    {
-        note_signal_less(signal_less_counter::handoff_submitted);
-        return;
-    }
-    note_signal_less(signal_less_counter::handoff_retried);
+    if(submit_no_signal_finalize(p)) return;
 
     // Deliberately NOT finalized here: this is the processor thread, which must
     // never run a client callback.
@@ -442,26 +438,18 @@ signal_less_teardown()
 
     join_signal_less_tasks();
 
-    const auto _c = signal_less_stats();
+    // The only signal-less summary: the reader does not print one too.
+    const auto _c       = signal_less_stats();
+    auto       _chain   = std::string{};
+    for(size_t i = 0; i < _c.size(); ++i)
+        _chain += fmt::format("{}{}={}",
+                              i == 0 ? "" : " ",
+                              signal_less_counter_name(static_cast<signal_less_counter>(i)),
+                              _c[i]);
+
     ROCP_WARNING << fmt::format(
-        "KFD dispatch-log signal-less summary: {} eligible batch(es), {} entry(ies) registered ({} "
-        "refused), {} EOP proven / {} unmatched, {} handed off ({} retried), {} record(s) emitted, "
-        "{} completed without timing (start-unknown {} / convert-fail {} / bad-interval {} / "
-        "before-enqueue {} / after-now {}); teardown finalized {} retry-owned and stranded {}",
-        _c.batch_eligible,
-        _c.entry_registered,
-        _c.register_refused,
-        _c.eop_proven,
-        _c.eop_unmatched,
-        _c.handoff_submitted,
-        _c.handoff_retried,
-        _c.finalizer_emitted,
-        _c.finalizer_no_timing,
-        _c.no_timing_start_unknown,
-        _c.no_timing_convert_failed,
-        _c.no_timing_bad_interval,
-        _c.no_timing_before_enqueue,
-        _c.no_timing_after_now,
+        "KFD dispatch-log signal-less summary: {}; teardown finalized {} deferred and stranded {}",
+        _chain,
         _flushed,
         _leaked);
 }

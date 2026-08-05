@@ -61,7 +61,6 @@ struct pending_payload
     rocprofiler_thread_id_t  tid             = 0;
     rocprofiler_agent_id_t   agent_id        = {};
     uint64_t                 enqueue_ts      = 0;
-    uint64_t                 submit_index    = 0;
 };
 
 using signal_less_hub_t = DispatchHub<pending_payload>;

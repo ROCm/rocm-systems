@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <string_view>
@@ -74,48 +75,26 @@ signal_less_quiesce();
 // rebuild. Skipped entirely unless signal-less is active.
 enum class signal_less_counter
 {
-    batch_eligible = 0,   // a batch qualified and published its packets untouched
-    entry_registered,     // pending entries the hub accepted
-    register_refused,     // the hub refused a batch eligibility had accepted
-    eop_proven,           // firmware EOP claimed a pending entry
-    eop_unmatched,        // firmware EOP found no pending entry (key mismatch?)
-    handoff_submitted,    // proven completion accepted by the task group
-    handoff_retried,      // rejected; parked in the retry owner
-    finalizer_emitted,    // RESULT_READY: record emitted with KFD timestamps
-    finalizer_no_timing,  // COMPLETED_NO_TIMING: retired, no record
-    // These sum to finalizer_no_timing: a lost START and a rejected sanity
-    // clause are different bugs needing opposite fixes.
-    no_timing_start_unknown,
-    no_timing_convert_failed,
-    no_timing_bad_interval,
-    no_timing_before_enqueue,
-    no_timing_after_now,
+    entry_registered = 0,  // pending entries the hub accepted
+    eop_proven,            // firmware EOP claimed a pending entry
+    eop_unmatched,         // firmware EOP found no pending entry (key mismatch?)
+    finalizer_emitted,     // RESULT_READY: record emitted with KFD timestamps
+    finalizer_no_timing,   // COMPLETED_NO_TIMING: retired, no record
     kCount
-};
-
-struct signal_less_counters
-{
-    uint64_t batch_eligible           = 0;
-    uint64_t entry_registered         = 0;
-    uint64_t register_refused         = 0;
-    uint64_t eop_proven               = 0;
-    uint64_t eop_unmatched            = 0;
-    uint64_t handoff_submitted        = 0;
-    uint64_t handoff_retried          = 0;
-    uint64_t finalizer_emitted        = 0;
-    uint64_t finalizer_no_timing      = 0;
-    uint64_t no_timing_start_unknown  = 0;
-    uint64_t no_timing_convert_failed = 0;
-    uint64_t no_timing_bad_interval   = 0;
-    uint64_t no_timing_before_enqueue = 0;
-    uint64_t no_timing_after_now      = 0;
 };
 
 void
 note_signal_less(signal_less_counter which, uint64_t n = 1);
 
-signal_less_counters
+// Snapshot indexed by signal_less_counter, so a new counter needs no mirror
+// struct and no copy loop -- add an enumerator and a name and it prints.
+using signal_less_counter_array = std::array<uint64_t, static_cast<size_t>(signal_less_counter::kCount)>;
+
+signal_less_counter_array
 signal_less_stats();
+
+const char*
+signal_less_counter_name(signal_less_counter which);
 
 // pthread_atfork CHILD handler. RESTRICTED CONTEXT: only the forking thread
 // survives, so this does atomic scalar stores ONLY -- no mutex, allocation, map

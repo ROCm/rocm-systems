@@ -576,70 +576,19 @@ no_signal_finalize(kfd::signal_less_hub_t::proven&& proven)
     }
 
     kfd::note_signal_less(kfd::signal_less_counter::finalizer_no_timing);
-    switch(_detail.reason)
-    {
-        case kfd::finalize_reason::start_unknown:
-            kfd::note_signal_less(kfd::signal_less_counter::no_timing_start_unknown);
-            break;
-        case kfd::finalize_reason::convert_failed:
-            kfd::note_signal_less(kfd::signal_less_counter::no_timing_convert_failed);
-            break;
-        case kfd::finalize_reason::bad_interval:
-            kfd::note_signal_less(kfd::signal_less_counter::no_timing_bad_interval);
-            break;
-        case kfd::finalize_reason::before_enqueue:
-            kfd::note_signal_less(kfd::signal_less_counter::no_timing_before_enqueue);
-            break;
-        case kfd::finalize_reason::after_now:
-            kfd::note_signal_less(kfd::signal_less_counter::no_timing_after_now);
-            break;
-        case kfd::finalize_reason::ready: break;
-    }
 
-    // Capped on REJECTIONS, not finalizations: the first few rejections are the
-    // diagnostic, and a steady stream of them must not flood the log.
+    // Rate-limited: the first few are the diagnostic, a steady stream must not
+    // flood the log.
+    static auto _warned = std::atomic<int>{0};
+    if(_warned.fetch_add(1, std::memory_order_relaxed) < 10)
     {
-        static const bool _trace  = common::get_env("ROCPROFILER_KFD_DISPATCH_LOG_TRACE", false);
-        static auto       _traced = std::atomic<int>{0};
-        if(_trace && _traced.fetch_add(1, std::memory_order_relaxed) < 10)
-        {
-            const auto _reason_name = [](kfd::finalize_reason r) -> const char* {
-                switch(r)
-                {
-                    case kfd::finalize_reason::start_unknown: return "start_unknown(shape-ii)";
-                    case kfd::finalize_reason::convert_failed: return "convert_failed";
-                    case kfd::finalize_reason::bad_interval: return "bad_interval";
-                    case kfd::finalize_reason::before_enqueue: return "before_enqueue";
-                    case kfd::finalize_reason::after_now: return "after_now";
-                    case kfd::finalize_reason::ready: break;
-                }
-                return "ready";
-            };
-
-            ROCP_WARNING << fmt::format(
-                "KFD signal-less REJECT[{}]: key(slot={} idx={} gen={}) submit_index={} "
-                "sdk_seq_id={} start_ticks={} end_ticks={} converted={} start_ns={} end_ns={} "
-                "enqueue_ts={} now={} delta_start_minus_enqueue={} delta_now_minus_end={} "
-                "clause(start<end={} start>=enqueue={} end<=now+slack={})",
-                _reason_name(_detail.reason),
-                proven.key.doorbell_off,
-                proven.key.dispatch_idx_low32,
-                proven.key.generation,
-                _payload.submit_index,
-                _payload.callback_record.dispatch_info.dispatch_id,
-                proven.start_ticks ? static_cast<int64_t>(*proven.start_ticks) : int64_t{-1},
-                proven.end_ticks,
-                _detail.converted,
-                _detail.start_ns,
-                _detail.end_ns,
-                _payload.enqueue_ts,
-                _now,
-                static_cast<int64_t>(_detail.start_ns) - static_cast<int64_t>(_payload.enqueue_ts),
-                static_cast<int64_t>(_now) - static_cast<int64_t>(_detail.end_ns),
-                _detail.start_ns < _detail.end_ns,
-                _detail.start_ns >= _payload.enqueue_ts,
-                _detail.end_ns <= _now + kfd::kKfdFutureSlackNs);
-        }
+        ROCP_WARNING << fmt::format(
+            "KFD dispatch-log: no timing for dispatch (reason={}, gpu={} slot={} idx={} gen={})",
+            kfd::finalize_reason_name(_detail.reason),
+            proven.key.gpu_id,
+            proven.key.doorbell_off,
+            proven.key.dispatch_idx_low32,
+            proven.key.generation);
     }
 }
 
@@ -728,7 +677,6 @@ signal_less_batch_eligible(Queue*                                            que
 
     if(_eligible)
     {
-        kfd::note_signal_less(kfd::signal_less_counter::batch_eligible);
         return true;
     }
     keys_out->clear();
@@ -1099,7 +1047,6 @@ write_interceptor(Queue*                                queue,
                 _pl.tid            = thr_id;
                 _pl.agent_id       = queue->get_agent().get_rocp_agent()->id;
                 _pl.enqueue_ts     = _info_session.enqueue_ts;
-                _pl.submit_index   = _base_pkt_index + i;
 
                 _signal_less_regs.emplace_back(std::move(_reg));
             }
@@ -1143,7 +1090,6 @@ write_interceptor(Queue*                                queue,
         {
             // Reachable only if another queue's collision quarantined this slot between
             // eligibility and here. The packets have already skipped their signals.
-            kfd::note_signal_less(kfd::signal_less_counter::register_refused);
             ROCP_WARNING << "KFD dispatch-log: signal-less batch registration refused; these "
                             "dispatches will not complete";
         }

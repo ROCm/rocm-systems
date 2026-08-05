@@ -68,6 +68,21 @@ struct finalize_detail
     bool            converted = false;
 };
 
+inline const char*
+finalize_reason_name(finalize_reason r)
+{
+    switch(r)
+    {
+        case finalize_reason::start_unknown: return "start-unknown";
+        case finalize_reason::convert_failed: return "convert-failed";
+        case finalize_reason::bad_interval: return "bad-interval";
+        case finalize_reason::before_enqueue: return "before-enqueue";
+        case finalize_reason::after_now: return "after-now";
+        case finalize_reason::ready: break;
+    }
+    return "ready";
+}
+
 // Decide the outcome and produce system-domain timestamps.
 template <typename ConvertFn>
 finalize_outcome

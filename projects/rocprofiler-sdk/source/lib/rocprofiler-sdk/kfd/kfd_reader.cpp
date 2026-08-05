@@ -494,40 +494,9 @@ copy_records(reader_state& st)
 // STAGE 2, processor thread: pairs start/eop, resolves the generation, drives
 // the hub. All the lock-taking work lives here, off the ring-reading path. It
 // runs no client callback itself; hand_off_proven() submits to the task group.
-// The raw dump below is off unless ROCPROFILER_KFD_DISPATCH_LOG_TRACE=1 and is
-// the decisive check for an orphaned EOP: it shows whether a START with the
-// same (doorbell, dispatch_id) appears in the stream at all.
-void
-trace_raw_records(const record_batch& batch)
-{
-    static const bool _trace  = common::get_env("ROCPROFILER_KFD_DISPATCH_LOG_TRACE", false);
-    static auto       _logged = std::atomic<int>{0};
-    if(!_trace) return;
-
-    for(const auto& _r : batch.records)
-    {
-        if(_logged.fetch_add(1, std::memory_order_relaxed) >= 40) return;
-        const char* _type = _r.rec.record_type == kRecStart ? "START"
-                            : _r.rec.record_type == kRecEop ? "EOP  "
-                                                            : "PAD  ";
-        ROCP_WARNING << fmt::format(
-            "KFD raw record: {} region={} doorbell_off={} (page_slot={}) dispatch_id={} ts={} "
-            "loss_free={}",
-            _type,
-            _r.region,
-            _r.rec.doorbell_off,
-            doorbell_off_to_page_slot(_r.rec.doorbell_off),
-            _r.rec.dispatch_id,
-            (static_cast<uint64_t>(_r.rec.ts_hi) << 32) | _r.rec.ts_lo,
-            _r.loss_free);
-    }
-}
-
 uint64_t
 process_batch(processor_state& proc, const record_batch& batch)
 {
-    trace_raw_records(batch);
-
     const uint32_t _gpu     = batch.gpu_id;
     auto&          _pairing = proc.for_gpu(_gpu);
 
@@ -536,26 +505,7 @@ process_batch(processor_state& proc, const record_batch& batch)
         batch.records.size(),
         _pairing,
         batch.now_ns,
-        [&_pairing, _gpu](const drained_record& rec) {
-            // An orphaned EOP: report whether STARTs were retained for the same slot.
-            if(!rec.start_known)
-            {
-                static const bool _trace =
-                    common::get_env("ROCPROFILER_KFD_DISPATCH_LOG_TRACE", false);
-                static auto _logged = std::atomic<int>{0};
-                if(_trace && _logged.fetch_add(1, std::memory_order_relaxed) < 10)
-                {
-                    auto _near = _pairing.starts_with_doorbell(rec.doorbell_off);
-                    ROCP_WARNING << fmt::format(
-                        "KFD orphaned EOP: doorbell_off={} dispatch_id={} -- {} retained START(s) "
-                        "on this doorbell (example id={}), {} retained overall",
-                        rec.doorbell_off,
-                        rec.dispatch_id,
-                        _near.first,
-                        _near.second,
-                        _pairing.pending_starts.size());
-                }
-            }
+        [_gpu](const drained_record& rec) {
             uint32_t slot = doorbell_off_to_page_slot(rec.doorbell_off);
             uint32_t gen  = doorbell_map().get_generation(_gpu, slot);
             // gpu_id stamped from the ring this record came from: a record can
@@ -779,21 +729,6 @@ processor_loop()
             _p.unmatched_eops,
             _p.starts_overwritten,
             _p.pending_starts.size());
-
-        // The pairing key is (doorbell_off, dispatch_idx), so a START and EOP
-        // disagreeing on doorbell_off can never pair.
-        for(const auto& itr : _p.per_doorbell)
-        {
-            ROCP_WARNING << fmt::format(
-                "KFD dispatch-log per-doorbell (gpu_id={}): doorbell_off={} (page_slot={}) "
-                "starts={} eops={} unmatched_eops={}",
-                _gpu_itr.first,
-                itr.first,
-                doorbell_off_to_page_slot(itr.first),
-                itr.second.starts,
-                itr.second.eops,
-                itr.second.unmatched);
-        }
     }
 }
 
@@ -883,33 +818,13 @@ reader_loop()
         _ring_lost += st.sessions[i].cursors.lost_records;
     }
 
-    const auto _sl = signal_less_stats();
-    ROCP_WARNING_IF(_sl.batch_eligible > 0 || _sl.eop_unmatched > 0) << fmt::format(
+    // The signal-less chain itself is summarised once, by teardown.
+    ROCP_WARNING_IF(_ring_overruns > 0 || _ring_lost > 0) << fmt::format(
         "KFD dispatch-log ring: {} lap(s), {} record(s) lost to laps, {} batch(es) dropped -- a "
         "lost record is a lost START, which shows up as a start-unknown no-timing",
         _ring_overruns,
         _ring_lost,
         st.batches_dropped.load(std::memory_order_relaxed));
-
-    ROCP_WARNING_IF(_sl.batch_eligible > 0 || _sl.eop_unmatched > 0) << fmt::format(
-        "KFD dispatch-log signal-less chain: {} eligible batch(es) -> {} registered ({} refused) "
-        "-> {} EOP proven / {} unmatched -> {} handed off ({} retried) -> {} emitted / {} "
-        "no-timing (start-unknown {} / convert-fail {} / bad-interval {} / before-enqueue {} / "
-        "after-now {})",
-        _sl.batch_eligible,
-        _sl.entry_registered,
-        _sl.register_refused,
-        _sl.eop_proven,
-        _sl.eop_unmatched,
-        _sl.handoff_submitted,
-        _sl.handoff_retried,
-        _sl.finalizer_emitted,
-        _sl.finalizer_no_timing,
-        _sl.no_timing_start_unknown,
-        _sl.no_timing_convert_failed,
-        _sl.no_timing_bad_interval,
-        _sl.no_timing_before_enqueue,
-        _sl.no_timing_after_now);
 }
 }  // namespace
 

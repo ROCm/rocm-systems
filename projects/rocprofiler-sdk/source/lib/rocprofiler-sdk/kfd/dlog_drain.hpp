@@ -32,7 +32,6 @@
 
 #include <cstdint>
 #include <cstring>
-#include <map>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -173,16 +172,6 @@ struct pair_state
     uint64_t eops_seen          = 0;
     uint64_t starts_overwritten = 0;  // a START replaced a retained START on the same key
 
-    // The pairing key is (doorbell_off, dispatch_id), so a START and EOP that
-    // disagree on doorbell_off can never pair.
-    struct doorbell_tally
-    {
-        uint64_t starts    = 0;
-        uint64_t eops      = 0;
-        uint64_t unmatched = 0;
-    };
-    std::map<uint32_t, doorbell_tally> per_doorbell = {};
-
     // Drop retained starts belonging to a page-relative doorbell slot whose queue
     // was destroyed, so a stale start cannot pair with a record from whatever
     // reuses the slot. Reader-thread only, like the rest of this state.
@@ -203,20 +192,6 @@ struct pair_state
             }
         }
         return removed;
-    }
-
-    // Retained starts sharing a doorbell, with one example dispatch id.
-    std::pair<size_t, uint32_t> starts_with_doorbell(uint32_t doorbell_off) const
-    {
-        size_t   count   = 0;
-        uint32_t example = 0;
-        for(const auto& itr : pending_starts)
-        {
-            if(static_cast<uint32_t>(itr.first >> 32) != doorbell_off) continue;
-            if(count == 0) example = static_cast<uint32_t>(itr.first & 0xFFFFFFFFu);
-            ++count;
-        }
-        return {count, example};
     }
 
     // Age out unmatched starts (queue died mid-dispatch, ring overwrite) so the
@@ -329,7 +304,6 @@ pair_records(const copied_record* records,
         if(rec.record_type == kRecStart)
         {
             ++state.starts_seen;
-            ++state.per_doorbell[rec.doorbell_off].starts;
             // dispatch_id is only low-32, so a key can recur.
             if(state.pending_starts.count(key) != 0) ++state.starts_overwritten;
             state.pending_starts[key] = pair_state::pending_start{ts, now_ns};
@@ -337,7 +311,6 @@ pair_records(const copied_record* records,
         }
         if(rec.record_type != kRecEop) continue;
         ++state.eops_seen;
-        ++state.per_doorbell[rec.doorbell_off].eops;
 
         auto out         = drained_record{};
         out.doorbell_off = rec.doorbell_off;
@@ -358,7 +331,6 @@ pair_records(const copied_record* records,
             // The START was lost (shape ii): the EOP still proves the kernel
             // finished, it just carries no interval.
             ++state.unmatched_eops;
-            ++state.per_doorbell[rec.doorbell_off].unmatched;
         }
         on_record(out);
     }
