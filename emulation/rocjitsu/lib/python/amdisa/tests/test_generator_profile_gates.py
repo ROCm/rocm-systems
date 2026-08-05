@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import xml.etree.ElementTree as elem_tree
+import os
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -56,7 +57,8 @@ def _repo_root() -> Path:
 
 
 def _mrisa_dir() -> Path:
-    return _repo_root() / 'shared' / 'machine-readable-isa' / 'isa'
+    default = _repo_root() / 'shared' / 'machine-readable-isa' / 'isa'
+    return Path(os.environ.get('MRISA_PATH', default))
 
 
 @pytest.fixture
@@ -1900,7 +1902,7 @@ def test_generated_vector_f16_arithmetic_consumes_fp16_ovfl(
     assert 'wf.fp16_ovfl()' in vop3
 
 
-def test_local_true16_vop3_probe_is_guarded_before_dpp_cleanup(tmp_path):
+def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
     args = SimpleNamespace(
         multi=[f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}'],
         gen_isas=True,
@@ -1914,23 +1916,14 @@ def test_local_true16_vop3_probe_is_guarded_before_dpp_cleanup(tmp_path):
     rdna4_vop3 = (tmp_path / 'rdna4' / 'vop3.cpp').read_text()
     ceil_body = _generated_method_body(rdna4_vop3, 'VCeilF16Vop3', 'VTruncF16Vop3')
 
-    guard = (
-        'if (inst_.src0 != amdgpu::SRC_DPP && ' '!amdgpu::dpp::is_src_dpp8(inst_.src0))'
-    )
-    assert guard in ceil_body
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' in ceil_body
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in ceil_body
     assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in ceil_body
-    assert 'src0.clear_delegate();' in ceil_body
-    assert ceil_body.index(guard) < ceil_body.index(
-        'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16'
-    )
+    assert 'ScopedOperandDelegate dpp_src0_binding_' in ceil_body
+    assert 'inst_.src0 != amdgpu::SRC_DPP' not in ceil_body
     assert ceil_body.index(
         'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16'
     ) < ceil_body.index('read_vop3_true16_src(src0, wf, lane, opsel, 0)')
-    assert ceil_body.index(
-        'write_vop3_true16_dst(vdst, wf, lane, opsel,'
-    ) < ceil_body.index('src0.clear_delegate();')
 
 
 def test_generated_rdna4_local_vop3_pack_paths_use_selected_halves(
@@ -2016,9 +2009,71 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     body = _generated_method_body(vop3_exec_alu, 'VAddF16Vop3', 'VAddNcU16Vop3')
     assert 'dpp_bound_ctrl_, dpp_fi_' in body
     assert 'apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_' in body
-    assert 'if (dpp_src0_)' in body
-    assert 'src0.set_delegate(dpp_src0_.get());' in body
-    assert 'src0.clear_delegate();' in body
+    assert 'ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());' in body
+    assert 'src0.set_delegate(' not in body
+    assert 'src0.clear_delegate();' not in body
+
+
+def test_generated_sdwa_uses_shared_source_staging(
+    amdgpu_generated_root: Path,
+) -> None:
+    checked_sdwa_files = 0
+    for arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2'):
+        for filename in ('vop1.cpp', 'vop2.cpp', 'vopc.cpp'):
+            path = amdgpu_generated_root / arch / filename
+            assert path.exists(), f'missing generated file: {path}'
+            generated = path.read_text()
+            if 'amdgpu::SRC_SDWA' not in generated:
+                continue
+            checked_sdwa_files += 1
+            assert 'amdgpu::sdwa::stage_source(' in generated
+            assert 'sdwa_src_select(' not in generated
+            assert 'std::make_unique<DppOperand>' not in generated
+    assert checked_sdwa_files > 0
+
+
+def test_generated_sdwa_uses_source_specific_modifier_formats(
+    cdna4_generated_root: Path,
+) -> None:
+    vop1 = (cdna4_generated_root / 'vop1.cpp').read_text()
+    vop2 = (cdna4_generated_root / 'vop2.cpp').read_text()
+    vopc = (cdna4_generated_root / 'vopc.cpp').read_text()
+
+    cvt_f32_f16 = _generated_method_body(vop1, 'VCvtF32F16Vop1', 'VCvtRpiI32F32Vop1')
+    assert 'SourceModifierFormat::F16' in cvt_f32_f16
+
+    cvt_i32_f32 = _generated_method_body(vop1, 'VCvtI32F32Vop1', 'VCvtF16F32Vop1')
+    assert 'SourceModifierFormat::F32' in cvt_i32_f32
+
+    cvt_f32_bf16 = vop1[vop1.index('void VCvtF32Bf16Vop1::execute_impl') :]
+    assert 'SourceModifierFormat::BF16' in cvt_f32_bf16
+
+    add_f32 = _generated_method_body(vop2, 'VAddF32Vop2', 'VSubF32Vop2')
+    assert add_f32.count('SourceModifierFormat::F32') == 2
+
+    add_f16 = _generated_method_body(vop2, 'VAddF16Vop2', 'VSubF16Vop2')
+    assert add_f16.count('SourceModifierFormat::F16') == 2
+
+    ldexp_f16 = _generated_method_body(vop2, 'VLdexpF16Vop2', 'VAddU32Vop2')
+    assert 'SourceModifierFormat::F16' in ldexp_f16
+    assert 'SourceModifierFormat::NONE' in ldexp_f16
+
+    cmp_class_f16 = _generated_method_body(
+        vopc, 'VCmpClassF16Vopc', 'VCmpxClassF16Vopc'
+    )
+    assert 'SourceModifierFormat::F16' in cmp_class_f16
+    assert 'SourceModifierFormat::NONE' in cmp_class_f16
+
+
+def test_generated_operandless_vop_does_not_stage_missing_source(
+    cdna4_generated_root: Path,
+) -> None:
+    vop1 = (cdna4_generated_root / 'vop1.cpp').read_text()
+    nop = _generated_method_body(vop1, 'VNopVop1', 'VMovB32Vop1')
+    assert 'apply_dpp(' not in nop
+    assert 'apply_dpp8(' not in nop
+    assert 'stage_source(' not in nop
+    assert 'src_operands_[0]' not in nop
 
 
 @pytest.mark.parametrize(
