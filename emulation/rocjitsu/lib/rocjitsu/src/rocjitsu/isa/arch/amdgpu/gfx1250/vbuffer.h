@@ -22,7 +22,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferLoadI8Vbuffer : public Vbuffer {
@@ -33,7 +33,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferLoadU16Vbuffer : public Vbuffer {
@@ -44,7 +44,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferLoadI16Vbuffer : public Vbuffer {
@@ -55,7 +55,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferLoadB32Vbuffer : public Vbuffer {
@@ -66,7 +66,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferLoadB64Vbuffer : public Vbuffer {
@@ -77,7 +77,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferLoadB96Vbuffer : public Vbuffer {
@@ -88,7 +88,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferLoadB128Vbuffer : public Vbuffer {
@@ -99,7 +99,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferStoreB8Vbuffer : public Vbuffer {
@@ -110,7 +110,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferStoreB16Vbuffer : public Vbuffer {
@@ -121,7 +121,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferStoreB32Vbuffer : public Vbuffer {
@@ -132,7 +132,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferStoreB64Vbuffer : public Vbuffer {
@@ -143,7 +143,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferStoreB96Vbuffer : public Vbuffer {
@@ -154,7 +154,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferStoreB128Vbuffer : public Vbuffer {
@@ -165,7 +165,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferLoadD16U8Vbuffer : public Vbuffer {
@@ -176,7 +176,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferLoadD16I8Vbuffer : public Vbuffer {
@@ -187,7 +187,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferLoadD16B16Vbuffer : public Vbuffer {
@@ -198,7 +198,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferLoadD16HiU8Vbuffer : public Vbuffer {
@@ -209,7 +209,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferLoadD16HiI8Vbuffer : public Vbuffer {
@@ -220,7 +220,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferLoadD16HiB16Vbuffer : public Vbuffer {
@@ -231,7 +231,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferStoreD16HiB8Vbuffer : public Vbuffer {
@@ -242,7 +242,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferStoreD16HiB16Vbuffer : public Vbuffer {
@@ -253,7 +253,7 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
 };
 
 class BufferAtomicSwapB32Vbuffer : public Vbuffer {
@@ -264,7 +264,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicCmpswapB32Vbuffer : public Vbuffer {
@@ -276,7 +277,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAddU32Vbuffer : public Vbuffer {
@@ -287,7 +289,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicSubU32Vbuffer : public Vbuffer {
@@ -298,7 +301,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicSubClampU32Vbuffer : public Vbuffer {
@@ -309,7 +313,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMinI32Vbuffer : public Vbuffer {
@@ -320,7 +325,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMinU32Vbuffer : public Vbuffer {
@@ -331,7 +337,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMaxI32Vbuffer : public Vbuffer {
@@ -342,7 +349,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMaxU32Vbuffer : public Vbuffer {
@@ -353,7 +361,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAndB32Vbuffer : public Vbuffer {
@@ -364,7 +373,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicOrB32Vbuffer : public Vbuffer {
@@ -375,7 +385,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicXorB32Vbuffer : public Vbuffer {
@@ -386,7 +397,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicIncU32Vbuffer : public Vbuffer {
@@ -397,7 +409,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicDecU32Vbuffer : public Vbuffer {
@@ -408,7 +421,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicSwapB64Vbuffer : public Vbuffer {
@@ -419,7 +433,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicCmpswapB64Vbuffer : public Vbuffer {
@@ -431,7 +446,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAddU64Vbuffer : public Vbuffer {
@@ -442,7 +458,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicSubU64Vbuffer : public Vbuffer {
@@ -453,7 +470,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMinI64Vbuffer : public Vbuffer {
@@ -464,7 +482,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMinU64Vbuffer : public Vbuffer {
@@ -475,7 +494,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMaxI64Vbuffer : public Vbuffer {
@@ -486,7 +506,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMaxU64Vbuffer : public Vbuffer {
@@ -497,7 +518,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAndB64Vbuffer : public Vbuffer {
@@ -508,7 +530,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicOrB64Vbuffer : public Vbuffer {
@@ -519,7 +542,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicXorB64Vbuffer : public Vbuffer {
@@ -530,7 +554,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicIncU64Vbuffer : public Vbuffer {
@@ -541,7 +566,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicDecU64Vbuffer : public Vbuffer {
@@ -552,7 +578,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicCondSubU32Vbuffer : public Vbuffer {
@@ -563,7 +590,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMinNumF32Vbuffer : public Vbuffer {
@@ -574,7 +602,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMaxNumF32Vbuffer : public Vbuffer {
@@ -585,7 +614,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAddF64Vbuffer : public Vbuffer {
@@ -596,7 +626,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAddF32Vbuffer : public Vbuffer {
@@ -607,7 +638,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicPkAddF16Vbuffer : public Vbuffer {
@@ -618,7 +650,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicPkAddBf16Vbuffer : public Vbuffer {
@@ -629,7 +662,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMinNumF64Vbuffer : public Vbuffer {
@@ -640,7 +674,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMaxNumF64Vbuffer : public Vbuffer {
@@ -651,7 +686,8 @@ public:
   Operand vaddr;
   Operand rsrc;
   Operand soffset;
-  static const bool execute_registered_;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 } // namespace gfx1250

@@ -39,14 +39,14 @@ extern "C" {
 
 //! Major version should be changed for every header change that breaks ABI
 //! Such as adding/deleting APIs, changing names, fields of structures, etc.
-#define AMDCUID_LIB_VERSION_MAJOR 0
+#define AMDCUID_LIB_VERSION_MAJOR 1
 
 //! Minor version should be updated for each API change, but without changing
 //! headers
-#define AMDCUID_LIB_VERSION_MINOR 4
+#define AMDCUID_LIB_VERSION_MINOR 0
 
 //! Patch version should be updated for each bug fix or non-API change
-#define AMDCUID_LIB_VERSION_PATCH 2
+#define AMDCUID_LIB_VERSION_PATCH 0
 
 /**
  * @brief Retrieve the version of the CUID library.
@@ -68,7 +68,7 @@ void amdcuid_get_library_version(uint32_t* major, uint32_t* minor, uint32_t* pat
  * @return A constant character pointer to the version string. The format is
  * "MAJOR.MINOR.PATCH".
  */
-const char* amdcuid_library_version_to_string();
+const char* amdcuid_library_version_to_string(void);
 
 /**
  * @brief Status codes returned by CUID API functions.

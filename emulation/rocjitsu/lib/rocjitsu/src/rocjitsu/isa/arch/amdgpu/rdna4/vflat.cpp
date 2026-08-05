@@ -35,11 +35,14 @@ FlatLoadU8Vflat::FlatLoadU8Vflat(const MachineInst *inst)
             make_exec_fn<FlatLoadU8Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &vaddr;
-  num_src_ = 1;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -61,11 +64,14 @@ FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
             make_exec_fn<FlatLoadI8Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &vaddr;
-  num_src_ = 1;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -88,11 +94,14 @@ FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
             make_exec_fn<FlatLoadU16Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &vaddr;
-  num_src_ = 1;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -114,11 +123,14 @@ FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
             make_exec_fn<FlatLoadI16Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &vaddr;
-  num_src_ = 1;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -141,11 +153,14 @@ FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
             make_exec_fn<FlatLoadB32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &vaddr;
-  num_src_ = 1;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -167,11 +182,14 @@ FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
             make_exec_fn<FlatLoadB64Vflat>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &vaddr;
-  num_src_ = 1;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -193,11 +211,14 @@ FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
             make_exec_fn<FlatLoadB96Vflat>()),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &vaddr;
-  num_src_ = 1;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -219,11 +240,14 @@ FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
             make_exec_fn<FlatLoadB128Vflat>()),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &vaddr;
-  num_src_ = 1;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -245,11 +269,14 @@ FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
             make_exec_fn<FlatStoreB8Vflat>()),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -280,11 +307,14 @@ FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
             make_exec_fn<FlatStoreB16Vflat>()),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -315,11 +345,14 @@ FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
             make_exec_fn<FlatStoreB32Vflat>()),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -350,11 +383,14 @@ FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
             make_exec_fn<FlatStoreB64Vflat>()),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -387,11 +423,14 @@ FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
             make_exec_fn<FlatStoreB96Vflat>()),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -426,11 +465,14 @@ FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
             make_exec_fn<FlatStoreB128Vflat>()),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -467,11 +509,14 @@ FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
             make_exec_fn<FlatLoadD16U8Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &vaddr;
-  num_src_ = 1;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -494,11 +539,14 @@ FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
             make_exec_fn<FlatLoadD16I8Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &vaddr;
-  num_src_ = 1;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -522,11 +570,14 @@ FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
             make_exec_fn<FlatLoadD16B16Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &vaddr;
-  num_src_ = 1;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -549,11 +600,14 @@ FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
             make_exec_fn<FlatLoadD16HiU8Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &vaddr;
-  num_src_ = 1;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -576,11 +630,14 @@ FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
             make_exec_fn<FlatLoadD16HiI8Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &vaddr;
-  num_src_ = 1;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -604,11 +661,14 @@ FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
             make_exec_fn<FlatLoadD16HiB16Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &vaddr;
-  num_src_ = 1;
+  src_operands_[1] = &gpumem;
+  num_src_ = 2;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -631,11 +691,14 @@ FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
             make_exec_fn<FlatStoreD16HiB8Vflat>()),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -667,11 +730,14 @@ FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
             make_exec_fn<FlatStoreD16HiB16Vflat>()),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
+  dst_operands_[0] = &gpumem;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -704,13 +770,18 @@ FlatAtomicSwapB32Vflat::FlatAtomicSwapB32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -744,13 +815,18 @@ FlatAtomicCmpswapB32Vflat::FlatAtomicCmpswapB32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -786,13 +862,18 @@ FlatAtomicAddU32Vflat::FlatAtomicAddU32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -826,13 +907,18 @@ FlatAtomicSubU32Vflat::FlatAtomicSubU32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -866,13 +952,18 @@ FlatAtomicSubClampU32Vflat::FlatAtomicSubClampU32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -906,13 +997,18 @@ FlatAtomicMinI32Vflat::FlatAtomicMinI32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -946,13 +1042,18 @@ FlatAtomicMinU32Vflat::FlatAtomicMinU32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -986,13 +1087,18 @@ FlatAtomicMaxI32Vflat::FlatAtomicMaxI32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1026,13 +1132,18 @@ FlatAtomicMaxU32Vflat::FlatAtomicMaxU32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1066,13 +1177,18 @@ FlatAtomicAndB32Vflat::FlatAtomicAndB32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1106,13 +1222,18 @@ FlatAtomicOrB32Vflat::FlatAtomicOrB32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1146,13 +1267,18 @@ FlatAtomicXorB32Vflat::FlatAtomicXorB32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1186,13 +1312,18 @@ FlatAtomicIncU32Vflat::FlatAtomicIncU32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1226,13 +1357,18 @@ FlatAtomicDecU32Vflat::FlatAtomicDecU32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1266,13 +1402,18 @@ FlatAtomicSwapB64Vflat::FlatAtomicSwapB64Vflat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1308,13 +1449,18 @@ FlatAtomicCmpswapB64Vflat::FlatAtomicCmpswapB64Vflat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1354,13 +1500,18 @@ FlatAtomicAddU64Vflat::FlatAtomicAddU64Vflat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1396,13 +1547,18 @@ FlatAtomicSubU64Vflat::FlatAtomicSubU64Vflat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1438,13 +1594,18 @@ FlatAtomicMinI64Vflat::FlatAtomicMinI64Vflat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1480,13 +1641,18 @@ FlatAtomicMinU64Vflat::FlatAtomicMinU64Vflat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1522,13 +1688,18 @@ FlatAtomicMaxI64Vflat::FlatAtomicMaxI64Vflat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1564,13 +1735,18 @@ FlatAtomicMaxU64Vflat::FlatAtomicMaxU64Vflat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1606,13 +1782,18 @@ FlatAtomicAndB64Vflat::FlatAtomicAndB64Vflat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1648,13 +1829,18 @@ FlatAtomicOrB64Vflat::FlatAtomicOrB64Vflat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1690,13 +1876,18 @@ FlatAtomicXorB64Vflat::FlatAtomicXorB64Vflat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1732,13 +1923,18 @@ FlatAtomicIncU64Vflat::FlatAtomicIncU64Vflat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1774,13 +1970,18 @@ FlatAtomicDecU64Vflat::FlatAtomicDecU64Vflat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1816,13 +2017,18 @@ FlatAtomicCondSubU32Vflat::FlatAtomicCondSubU32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1856,13 +2062,18 @@ FlatAtomicMinNumF32Vflat::FlatAtomicMinNumF32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1896,13 +2107,18 @@ FlatAtomicMaxNumF32Vflat::FlatAtomicMaxNumF32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1936,13 +2152,18 @@ FlatAtomicAddF32Vflat::FlatAtomicAddF32Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -1976,13 +2197,18 @@ FlatAtomicPkAddF16Vflat::FlatAtomicPkAddF16Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -2016,13 +2242,18 @@ FlatAtomicPkAddBf16Vflat::FlatAtomicPkAddBf16Vflat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
+      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &vsrc;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
   if (amdgpu::gfx12_atomic_returns(inst_.th))
     dst_operands_[num_dst_++] = &vdst;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 

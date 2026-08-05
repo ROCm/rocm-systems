@@ -534,7 +534,7 @@ struct __hip_fp6_e2m3 {
     union {
       __hip_bfloat16_raw bf16_raw;
       __amd_bf16_storage_t bf16;
-    } u;
+    } u{};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     __amd_fp6x32_storage_t in{};
     __amd_bf16x32_storage_t out{};

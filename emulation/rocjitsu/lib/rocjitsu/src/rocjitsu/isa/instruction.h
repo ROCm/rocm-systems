@@ -18,6 +18,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -178,6 +179,22 @@ public:
   /// @returns Encoding size in bytes.
   int size() const { return size_; }
 
+  /// @brief Previous decoded instruction in the same basic block.
+  /// @returns The preceding instruction, or nullptr at the block boundary.
+  [[nodiscard]] const Instruction *previous_instruction() const {
+    if (parent_ == nullptr || prev_ == nullptr || prev_->parent_ != parent_)
+      return nullptr;
+    return static_cast<const Instruction *>(prev_);
+  }
+
+  /// @brief Next decoded instruction in the same basic block.
+  /// @returns The following instruction, or nullptr at the block boundary.
+  [[nodiscard]] const Instruction *next_instruction() const {
+    if (parent_ == nullptr || next_ == nullptr || next_->parent_ != parent_)
+      return nullptr;
+    return static_cast<const Instruction *>(next_);
+  }
+
   /// @brief Source byte offset of this instruction in the decoded text section.
   ///
   /// @details Most decoder users only care about the instruction encoding and
@@ -219,6 +236,19 @@ public:
   /// the printed operand list, such as FLAT/GLOBAL `saddr` addressing fields.
   virtual void implicit_uses(RegisterSet & /*uses*/) const {}
 
+  /// @brief Report operands that are implicitly read, preserving their identity.
+  ///
+  /// @details Complements implicit_uses(): where that flattens hidden reads into
+  /// a RegisterSet (losing operand role and width), this appends the source
+  /// Operand pointers so a caller can resolve each with its own VGPR-MSB role and
+  /// width — needed on gfx1250, where a partial-write/RMW op preserve-reads its
+  /// destination and a swap preserve-reads both operands, each in its own bank.
+  /// Only register-bearing implicit reads that originate from a decoded operand
+  /// are reported here; encoded-field reads with no Operand (e.g. FLAT `saddr`)
+  /// remain exclusive to implicit_uses(). The pointed-to Operands share this
+  /// instruction's lifetime.
+  virtual void implicit_use_operands(std::vector<const Operand *> & /*operands*/) const {}
+
   /// @brief Add registers implicitly written by this instruction.
   virtual void implicit_defs(RegisterSet & /*defs*/) const {}
 
@@ -241,13 +271,16 @@ public:
     if (disassembly_.empty()) {
       disassembly_ = mnemonic_;
       bool first = true;
+      // TODO: Include explicit fieldless operands (and/or implicit ones too).
       for (uint8_t i = 0; i < num_dst_; ++i) {
+        if (dst_operands_[i]->is_fieldless())
+          continue;
         disassembly_ += (first ? " " : ", ");
         disassembly_ += dst_operands_[i]->name();
         first = false;
       }
       for (uint8_t i = 0; i < num_src_; ++i) {
-        if (src_operands_[i]->size_bits() == 0)
+        if (src_operands_[i]->size_bits() == 0 || src_operands_[i]->is_fieldless())
           continue;
         disassembly_ += (first ? " " : ", ");
         disassembly_ += src_operands_[i]->name();
@@ -263,11 +296,14 @@ protected:
 
   /// @brief Size of the instruction's encoding in bytes.
   int size_ = 0;
-  /// @brief Instruction's source operands (max 6).
+  /// @brief Instruction's source operands (max 6). KEEP IN SYNC with
+  /// CodeGenerator._SRC_OPERANDS_CAPACITY (the generator's overflow tripwire
+  /// mirrors this size); resize both together.
   std::array<Operand *, 6> src_operands_{};
   uint8_t num_src_ = 0;
-  /// @brief Instruction's destination operands (max 2).
-  std::array<Operand *, 2> dst_operands_{};
+  /// @brief Instruction's destination operands (max 3). KEEP IN SYNC with
+  /// CodeGenerator._DST_OPERANDS_CAPACITY; resize both together.
+  std::array<Operand *, 3> dst_operands_{};
   uint8_t num_dst_ = 0;
   /// @brief Append modifier flags to the disassembly string (e.g. " sc0 sc1").
   /// Overridden by memory encoding bases that have flag bits to display.
@@ -290,6 +326,9 @@ protected:
 protected:
   std::string_view mnemonic_;
 };
+
+/// @brief Return a callback from the per-ISA backend active during decoding.
+Instruction::ExecuteFn current_instruction_execute(size_t instruction_id) noexcept;
 
 /// @brief Abstract class that holds static ISA state for a specific instruction instance.
 ///
@@ -320,37 +359,9 @@ public:
     };
   }
 
-  /// @brief Return the execution callback installed by an optional execution
-  /// translation unit.
-  ///
-  /// @details Model and execution objects must be co-linked into the same
-  /// image. The slot is image-local C++ state, not a registration ABI between
-  /// independently loaded shared libraries. Execution translation units
-  /// register their callbacks during static initialization, before any
-  /// instruction is decoded. Model-only images omit those translation units
-  /// and intentionally observe a null callback.
-  /// @tparam Derived Concrete generated instruction type.
-  /// @returns The registered execution trampoline, or null in a model-only
-  /// image.
-  template <typename Derived> static ExecuteFn registered_exec_fn() {
-    return exec_fn_slot<Derived>();
-  }
-
-  /// @brief Install a concrete instruction's execution trampoline.
-  /// @tparam Derived Concrete generated instruction type.
-  /// @returns True so the helper can initialize a namespace-scope registrar.
-  template <typename Derived> static bool register_exec_fn() {
-    exec_fn_slot<Derived>() = make_exec_fn<Derived>();
-    return true;
-  }
-
-private:
-  /// @brief Return the image-local dispatch slot for one instruction type.
-  /// @tparam Derived Concrete generated instruction type.
-  /// @returns Mutable slot populated during execution-TU static initialization.
-  template <typename Derived> static ExecuteFn &exec_fn_slot() {
-    static ExecuteFn fn = nullptr;
-    return fn;
+  /// @brief Select a callback from the active immutable per-ISA table.
+  static ExecuteFn selected_exec_fn(size_t instruction_id) {
+    return current_instruction_execute(instruction_id);
   }
 };
 

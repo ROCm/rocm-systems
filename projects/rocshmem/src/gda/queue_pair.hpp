@@ -236,30 +236,28 @@ class QueuePair {
   __device__ void quiet_scope(ActiveWFInfo &wf_info);
 
   /**
-   * @brief Create and enqueue an atomic fetch work queue entry (wqe).
+   * @brief Create and enqueue an atomic fetch-and-add work queue entry (wqe).
    *
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
-   * @param[in] cond Used in atomic comparisons.
    * @param[in] wf_info Wavefront information.
    *
-   * @return An atomic value
+   * @return The previous value at dest.
    */
-  __device__ int64_t atomic_fetch(void *dest, int64_t value, int64_t cond,
+  __device__ int64_t atomic_fetch_add(void *dest, int64_t value,
       ActiveWFInfo &wf_info);
 
   /**
-   * @brief Create and enqueue an atomic fetch work queue entry (wqe).
+   * @brief Create and enqueue a non-fetching atomic add work queue entry (wqe).
    *
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
-   * @param[in] cond Used in atomic comparisons.
    * @param[in] wf_info Wavefront information.
    */
-  __device__ void atomic_nofetch(void *dest, int64_t value, int64_t cond,
+  __device__ void atomic_add(void *dest, int64_t value,
       ActiveWFInfo &wf_info);
 
-  __device__ void atomic_nofetch_single(void *dest, int64_t value);
+  __device__ void atomic_add_single(void *dest, int64_t value);
 
   /**
    * @brief Create and enqueue an atomic cas work queue entry (wqe).
@@ -292,11 +290,14 @@ class QueuePair {
    * remote key differs from the QP's default heap key. Mirror the default-key
    * versions above but forward the caller-supplied @p rkey.
    */
-  __device__ int64_t atomic_fetch(void *dest, uint32_t rkey, int64_t value,
-      int64_t cond, ActiveWFInfo &wf_info);
+  __device__ int64_t atomic_fetch_add(void *dest, uint32_t rkey, int64_t value,
+      ActiveWFInfo &wf_info);
 
-  __device__ void atomic_nofetch(void *dest, uint32_t rkey, int64_t value,
-      int64_t cond, ActiveWFInfo &wf_info);
+  __device__ void atomic_add(void *raddr, uint32_t rkey, int64_t value,
+      ActiveWFInfo &wf_info, bool fence = false);
+
+  __device__ void atomic_add_single(void *raddr, uint32_t rkey,
+      int64_t value, bool fence = false);
 
   __device__ int64_t atomic_cas(void *dest, uint32_t rkey, int64_t atomic_data,
       int64_t atomic_cmp, ActiveWFInfo &wf_info);

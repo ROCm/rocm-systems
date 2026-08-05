@@ -272,19 +272,17 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi) {
     kernelArgImpl = KernelArgImpl::DeviceKernelArgsReadback;
   }
 
-  // Enable device kernel args and device-memory AQL queue ring buffers by
-  // default on gfx94x/gfx125x.
+  // Enable device kernel args by default on gfx94x/gfx125x. Device-memory AQL
+  // ring buffers are controlled separately via DEBUG_CLR_AQL_DEV_QUEUE below.
   if (isGfx94x || isGfx125x) {
     kernel_arg_impl_ = kernelArgImpl;
     kernel_arg_opt_ = true;
-    aql_device_ring_buf_ = true;
   }
 
   if (!flagIsDefault(HIP_FORCE_DEV_KERNARG)) {
     kernel_arg_impl_ = kernelArgImpl & (HIP_FORCE_DEV_KERNARG ? 0xF : 0x0);
   }
-  if (!flagIsDefault(DEBUG_CLR_AQL_DEV_QUEUE)) {
-    aql_device_ring_buf_ = (DEBUG_CLR_AQL_DEV_QUEUE > 0);
-  }
+
+  aql_device_ring_buf_ = (DEBUG_CLR_AQL_DEV_QUEUE > 0);
 }
 }  // namespace amd::roc

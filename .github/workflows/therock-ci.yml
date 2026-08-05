@@ -81,7 +81,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 22004a6bc8a28393f8b772b7f6e2a3040f11cd8d # 2026-07-20
+          ref: 2e7c190b99caa226a8644eda6eca720b3db102d5 # 2026-07-22
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -205,7 +205,8 @@ jobs:
     with:
       projects_to_test: "hip-tests, rocrtst"
       amdgpu_families: gfx125X-dcgpu
-      test_runs_on: linux-mi455-gpu-rocm
+      # MI455 machine is down - disabled until back online (was: linux-mi455-gpu-rocm)
+      test_runs_on: ""
       platform: linux
       artifact_run_id: ${{ github.run_id }}
 

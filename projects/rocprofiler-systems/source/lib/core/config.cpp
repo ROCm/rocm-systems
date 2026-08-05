@@ -664,9 +664,13 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_UCX, "Enable support for UCX functions",
                               false, "ucx", "backend", "parallelism");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_SHMEM,
+    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_OPENSHMEM,
                               "Enable support for OpenSHMEM functions", false, "shmem",
                               "backend", "parallelism");
+
+    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_SHMEM,
+                              "[DEPRECATED] Renamed to ROCPROFSYS_USE_OPENSHMEM", false,
+                              "shmem", "backend", "parallelism", "deprecated");
 
     ROCPROFSYS_CONFIG_SETTING(
         bool, env_vars::USE_RCCLP,
@@ -1491,6 +1495,8 @@ configure_settings(bool _init)
                               std::string{ env_vars::LOG_LEVEL });
     handle_deprecated_setting(std::string{ env_vars::TRACE_LEGACY },
                               std::string{ env_vars::TRACE });
+    handle_deprecated_setting(std::string{ env_vars::USE_SHMEM },
+                              std::string{ env_vars::USE_OPENSHMEM });
 
     scope::get_fields()[scope::flat::value]     = _config->get_flat_profile();
     scope::get_fields()[scope::timeline::value] = _config->get_timeline_profile();
@@ -2345,7 +2351,7 @@ get_use_ucx()
 bool&
 get_use_shmem()
 {
-    static auto _v = get_config()->find(std::string{ env_vars::USE_SHMEM });
+    static auto _v = get_config()->find(std::string{ env_vars::USE_OPENSHMEM });
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
@@ -3021,7 +3027,7 @@ std::string
 get_ump_absolute_path()
 {
     auto ensure_dir = [](std::string path) {
-        if(!path.empty() && !tim::filepath::direxists(path))
+        if(!path.empty() && !path::is_directory(path))
         {
             tim::filepath::makedir(path);
         }
@@ -3503,9 +3509,7 @@ get_tmp_file(std::string _basename, std::string _ext)
     // subdirectory="rocprofsys-output/%ppid%" (not
     // "/home/user/rocprofsys-output/%ppid%"), so files go under
     // get_tmpdir()/rocprofsys-output/.
-    auto _output_path = settings::output_path();
-    auto _pos         = _output_path.rfind('/');
-    if(_pos != std::string::npos) _output_path = _output_path.substr(_pos + 1);
+    auto _output_path = path::filename(settings::output_path());
     if(_output_path.empty()) _output_path = "rocprofsys";
     _cfg.subdirectory = fmt::format("{}/{}/", _output_path, "%ppid%");
     auto _fname =

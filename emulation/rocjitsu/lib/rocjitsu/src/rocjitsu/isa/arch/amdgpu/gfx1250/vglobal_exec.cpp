@@ -23,8 +23,6 @@
 namespace rocjitsu {
 namespace gfx1250 {
 
-const bool GlobalLoadU8Vglobal::execute_registered_ = register_exec_fn<GlobalLoadU8Vglobal>();
-
 void GlobalLoadU8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -39,8 +37,6 @@ void GlobalLoadU8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool GlobalLoadI8Vglobal::execute_registered_ = register_exec_fn<GlobalLoadI8Vglobal>();
 
 void GlobalLoadI8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -58,8 +54,6 @@ void GlobalLoadI8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalLoadU16Vglobal::execute_registered_ = register_exec_fn<GlobalLoadU16Vglobal>();
-
 void GlobalLoadU16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -74,8 +68,6 @@ void GlobalLoadU16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool GlobalLoadI16Vglobal::execute_registered_ = register_exec_fn<GlobalLoadI16Vglobal>();
 
 void GlobalLoadI16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -93,8 +85,6 @@ void GlobalLoadI16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalLoadB32Vglobal::execute_registered_ = register_exec_fn<GlobalLoadB32Vglobal>();
-
 void GlobalLoadB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -109,8 +99,6 @@ void GlobalLoadB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool GlobalLoadB64Vglobal::execute_registered_ = register_exec_fn<GlobalLoadB64Vglobal>();
 
 void GlobalLoadB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -127,8 +115,6 @@ void GlobalLoadB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalLoadB96Vglobal::execute_registered_ = register_exec_fn<GlobalLoadB96Vglobal>();
-
 void GlobalLoadB96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -144,8 +130,6 @@ void GlobalLoadB96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalLoadB128Vglobal::execute_registered_ = register_exec_fn<GlobalLoadB128Vglobal>();
-
 void GlobalLoadB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -160,8 +144,6 @@ void GlobalLoadB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool GlobalStoreB8Vglobal::execute_registered_ = register_exec_fn<GlobalStoreB8Vglobal>();
 
 void GlobalStoreB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -187,8 +169,6 @@ void GlobalStoreB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalStoreB16Vglobal::execute_registered_ = register_exec_fn<GlobalStoreB16Vglobal>();
-
 void GlobalStoreB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 2;
@@ -213,8 +193,6 @@ void GlobalStoreB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalStoreB32Vglobal::execute_registered_ = register_exec_fn<GlobalStoreB32Vglobal>();
-
 void GlobalStoreB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
@@ -238,8 +216,6 @@ void GlobalStoreB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalStoreB64Vglobal::execute_registered_ = register_exec_fn<GlobalStoreB64Vglobal>();
 
 void GlobalStoreB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -266,8 +242,6 @@ void GlobalStoreB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalStoreB96Vglobal::execute_registered_ = register_exec_fn<GlobalStoreB96Vglobal>();
 
 void GlobalStoreB96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -296,8 +270,6 @@ void GlobalStoreB96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalStoreB128Vglobal::execute_registered_ = register_exec_fn<GlobalStoreB128Vglobal>();
 
 void GlobalStoreB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -329,8 +301,6 @@ void GlobalStoreB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalLoadD16U8Vglobal::execute_registered_ = register_exec_fn<GlobalLoadD16U8Vglobal>();
-
 void GlobalLoadD16U8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -346,8 +316,6 @@ void GlobalLoadD16U8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool GlobalLoadD16I8Vglobal::execute_registered_ = register_exec_fn<GlobalLoadD16I8Vglobal>();
 
 void GlobalLoadD16I8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -366,9 +334,6 @@ void GlobalLoadD16I8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalLoadD16B16Vglobal::execute_registered_ =
-    register_exec_fn<GlobalLoadD16B16Vglobal>();
-
 void GlobalLoadD16B16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -385,9 +350,6 @@ void GlobalLoadD16B16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalLoadD16HiU8Vglobal::execute_registered_ =
-    register_exec_fn<GlobalLoadD16HiU8Vglobal>();
-
 void GlobalLoadD16HiU8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -403,9 +365,6 @@ void GlobalLoadD16HiU8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool GlobalLoadD16HiI8Vglobal::execute_registered_ =
-    register_exec_fn<GlobalLoadD16HiI8Vglobal>();
 
 void GlobalLoadD16HiI8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -424,9 +383,6 @@ void GlobalLoadD16HiI8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalLoadD16HiB16Vglobal::execute_registered_ =
-    register_exec_fn<GlobalLoadD16HiB16Vglobal>();
-
 void GlobalLoadD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -442,9 +398,6 @@ void GlobalLoadD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool GlobalStoreD16HiB8Vglobal::execute_registered_ =
-    register_exec_fn<GlobalStoreD16HiB8Vglobal>();
 
 void GlobalStoreD16HiB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -471,9 +424,6 @@ void GlobalStoreD16HiB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalStoreD16HiB16Vglobal::execute_registered_ =
-    register_exec_fn<GlobalStoreD16HiB16Vglobal>();
-
 void GlobalStoreD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 2;
@@ -498,9 +448,6 @@ void GlobalStoreD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalLoadAddtidB32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalLoadAddtidB32Vglobal>();
 
 void GlobalLoadAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -532,9 +479,6 @@ void GlobalLoadAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalStoreAddtidB32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalStoreAddtidB32Vglobal>();
 
 void GlobalStoreAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -576,20 +520,13 @@ void GlobalStoreAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalInvVglobal::execute_registered_ = register_exec_fn<GlobalInvVglobal>();
-
 void GlobalInvVglobal::execute_impl(amdgpu::Wavefront &wf) {
   wf.cu().l1_vector().invalidate_all();
   if (auto *l2 = wf.cu().l2())
     l2->flush_all(wf.process_id());
 }
 
-const bool GlobalWbVglobal::execute_registered_ = register_exec_fn<GlobalWbVglobal>();
-
 void GlobalWbVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
-const bool GlobalAtomicSwapB32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicSwapB32Vglobal>();
 
 void GlobalAtomicSwapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -618,9 +555,6 @@ void GlobalAtomicSwapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalAtomicCmpswapB32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicCmpswapB32Vglobal>();
 
 void GlobalAtomicCmpswapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -652,9 +586,6 @@ void GlobalAtomicCmpswapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicAddU32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicAddU32Vglobal>();
-
 void GlobalAtomicAddU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -682,9 +613,6 @@ void GlobalAtomicAddU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalAtomicSubU32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicSubU32Vglobal>();
 
 void GlobalAtomicSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -714,9 +642,6 @@ void GlobalAtomicSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicSubClampU32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicSubClampU32Vglobal>();
-
 void GlobalAtomicSubClampU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -744,9 +669,6 @@ void GlobalAtomicSubClampU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalAtomicMinI32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicMinI32Vglobal>();
 
 void GlobalAtomicMinI32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -776,9 +698,6 @@ void GlobalAtomicMinI32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicMinU32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicMinU32Vglobal>();
-
 void GlobalAtomicMinU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -806,9 +725,6 @@ void GlobalAtomicMinU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalAtomicMaxI32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicMaxI32Vglobal>();
 
 void GlobalAtomicMaxI32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -838,9 +754,6 @@ void GlobalAtomicMaxI32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicMaxU32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicMaxU32Vglobal>();
-
 void GlobalAtomicMaxU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -868,9 +781,6 @@ void GlobalAtomicMaxU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalAtomicAndB32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicAndB32Vglobal>();
 
 void GlobalAtomicAndB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -900,9 +810,6 @@ void GlobalAtomicAndB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicOrB32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicOrB32Vglobal>();
-
 void GlobalAtomicOrB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -930,9 +837,6 @@ void GlobalAtomicOrB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalAtomicXorB32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicXorB32Vglobal>();
 
 void GlobalAtomicXorB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -962,9 +866,6 @@ void GlobalAtomicXorB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicIncU32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicIncU32Vglobal>();
-
 void GlobalAtomicIncU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -993,9 +894,6 @@ void GlobalAtomicIncU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicDecU32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicDecU32Vglobal>();
-
 void GlobalAtomicDecU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -1023,9 +921,6 @@ void GlobalAtomicDecU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalAtomicSwapB64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicSwapB64Vglobal>();
 
 void GlobalAtomicSwapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1056,9 +951,6 @@ void GlobalAtomicSwapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalAtomicCmpswapB64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicCmpswapB64Vglobal>();
 
 void GlobalAtomicCmpswapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1094,9 +986,6 @@ void GlobalAtomicCmpswapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicAddU64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicAddU64Vglobal>();
-
 void GlobalAtomicAddU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -1126,9 +1015,6 @@ void GlobalAtomicAddU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalAtomicSubU64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicSubU64Vglobal>();
 
 void GlobalAtomicSubU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1160,9 +1046,6 @@ void GlobalAtomicSubU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicMinI64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicMinI64Vglobal>();
-
 void GlobalAtomicMinI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -1192,9 +1075,6 @@ void GlobalAtomicMinI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalAtomicMinU64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicMinU64Vglobal>();
 
 void GlobalAtomicMinU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1226,9 +1106,6 @@ void GlobalAtomicMinU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicMaxI64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicMaxI64Vglobal>();
-
 void GlobalAtomicMaxI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -1258,9 +1135,6 @@ void GlobalAtomicMaxI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalAtomicMaxU64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicMaxU64Vglobal>();
 
 void GlobalAtomicMaxU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1292,9 +1166,6 @@ void GlobalAtomicMaxU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicAndB64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicAndB64Vglobal>();
-
 void GlobalAtomicAndB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -1324,9 +1195,6 @@ void GlobalAtomicAndB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalAtomicOrB64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicOrB64Vglobal>();
 
 void GlobalAtomicOrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1358,9 +1226,6 @@ void GlobalAtomicOrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicXorB64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicXorB64Vglobal>();
-
 void GlobalAtomicXorB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -1390,9 +1255,6 @@ void GlobalAtomicXorB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalAtomicIncU64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicIncU64Vglobal>();
 
 void GlobalAtomicIncU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1424,9 +1286,6 @@ void GlobalAtomicIncU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicDecU64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicDecU64Vglobal>();
-
 void GlobalAtomicDecU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -1457,12 +1316,7 @@ void GlobalAtomicDecU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalWbinvVglobal::execute_registered_ = register_exec_fn<GlobalWbinvVglobal>();
-
 void GlobalWbinvVglobal::execute_impl(amdgpu::Wavefront &wf) { wf.cu().l1_vector().flush_all(); }
-
-const bool GlobalAtomicCondSubU32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicCondSubU32Vglobal>();
 
 void GlobalAtomicCondSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1492,9 +1346,6 @@ void GlobalAtomicCondSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicMinNumF32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicMinNumF32Vglobal>();
-
 void GlobalAtomicMinNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -1522,9 +1373,6 @@ void GlobalAtomicMinNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalAtomicMaxNumF32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicMaxNumF32Vglobal>();
 
 void GlobalAtomicMaxNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1554,8 +1402,6 @@ void GlobalAtomicMaxNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalLoadBlockVglobal::execute_registered_ = register_exec_fn<GlobalLoadBlockVglobal>();
-
 void GlobalLoadBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -1570,9 +1416,6 @@ void GlobalLoadBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool GlobalStoreBlockVglobal::execute_registered_ =
-    register_exec_fn<GlobalStoreBlockVglobal>();
 
 void GlobalStoreBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1660,9 +1503,6 @@ void GlobalStoreBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicAddF64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicAddF64Vglobal>();
-
 void GlobalAtomicAddF64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -1693,9 +1533,6 @@ void GlobalAtomicAddF64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicAddF32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicAddF32Vglobal>();
-
 void GlobalAtomicAddF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -1724,9 +1561,6 @@ void GlobalAtomicAddF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalLoadTr16B128Vglobal::execute_registered_ =
-    register_exec_fn<GlobalLoadTr16B128Vglobal>();
-
 void GlobalLoadTr16B128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -1743,9 +1577,6 @@ void GlobalLoadTr16B128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalLoadTr8B64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalLoadTr8B64Vglobal>();
-
 void GlobalLoadTr8B64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -1761,9 +1592,6 @@ void GlobalLoadTr8B64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool GlobalAtomicPkAddF16Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicPkAddF16Vglobal>();
 
 void GlobalAtomicPkAddF16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1793,9 +1621,6 @@ void GlobalAtomicPkAddF16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicPkAddBf16Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicPkAddBf16Vglobal>();
-
 void GlobalAtomicPkAddBf16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -1823,9 +1648,6 @@ void GlobalAtomicPkAddBf16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalAtomicMinNumF64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicMinNumF64Vglobal>();
 
 void GlobalAtomicMinNumF64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1857,9 +1679,6 @@ void GlobalAtomicMinNumF64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalAtomicMaxNumF64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalAtomicMaxNumF64Vglobal>();
-
 void GlobalAtomicMaxNumF64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -1890,13 +1709,7 @@ void GlobalAtomicMaxNumF64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalPrefetchB8Vglobal::execute_registered_ =
-    register_exec_fn<GlobalPrefetchB8Vglobal>();
-
 void GlobalPrefetchB8Vglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
-const bool GlobalLoadAsyncToLdsB8Vglobal::execute_registered_ =
-    register_exec_fn<GlobalLoadAsyncToLdsB8Vglobal>();
 
 void GlobalLoadAsyncToLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1925,9 +1738,6 @@ void GlobalLoadAsyncToLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalLoadAsyncToLdsB32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalLoadAsyncToLdsB32Vglobal>();
-
 void GlobalLoadAsyncToLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
@@ -1954,9 +1764,6 @@ void GlobalLoadAsyncToLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalLoadAsyncToLdsB64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalLoadAsyncToLdsB64Vglobal>();
 
 void GlobalLoadAsyncToLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -1985,9 +1792,6 @@ void GlobalLoadAsyncToLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalLoadAsyncToLdsB128Vglobal::execute_registered_ =
-    register_exec_fn<GlobalLoadAsyncToLdsB128Vglobal>();
-
 void GlobalLoadAsyncToLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
@@ -2015,9 +1819,6 @@ void GlobalLoadAsyncToLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalStoreAsyncFromLdsB8Vglobal::execute_registered_ =
-    register_exec_fn<GlobalStoreAsyncFromLdsB8Vglobal>();
-
 void GlobalStoreAsyncFromLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 1;
@@ -2043,9 +1844,6 @@ void GlobalStoreAsyncFromLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalStoreAsyncFromLdsB32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalStoreAsyncFromLdsB32Vglobal>();
 
 void GlobalStoreAsyncFromLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2073,9 +1871,6 @@ void GlobalStoreAsyncFromLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalStoreAsyncFromLdsB64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalStoreAsyncFromLdsB64Vglobal>();
-
 void GlobalStoreAsyncFromLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
@@ -2101,9 +1896,6 @@ void GlobalStoreAsyncFromLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool GlobalStoreAsyncFromLdsB128Vglobal::execute_registered_ =
-    register_exec_fn<GlobalStoreAsyncFromLdsB128Vglobal>();
 
 void GlobalStoreAsyncFromLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2131,8 +1923,6 @@ void GlobalStoreAsyncFromLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool ClusterLoadB32Vglobal::execute_registered_ = register_exec_fn<ClusterLoadB32Vglobal>();
-
 void ClusterLoadB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -2148,8 +1938,6 @@ void ClusterLoadB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool ClusterLoadB64Vglobal::execute_registered_ = register_exec_fn<ClusterLoadB64Vglobal>();
 
 void ClusterLoadB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2167,8 +1955,6 @@ void ClusterLoadB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool ClusterLoadB128Vglobal::execute_registered_ = register_exec_fn<ClusterLoadB128Vglobal>();
-
 void ClusterLoadB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -2184,9 +1970,6 @@ void ClusterLoadB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool ClusterLoadAsyncToLdsB8Vglobal::execute_registered_ =
-    register_exec_fn<ClusterLoadAsyncToLdsB8Vglobal>();
 
 void ClusterLoadAsyncToLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2218,9 +2001,6 @@ void ClusterLoadAsyncToLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool ClusterLoadAsyncToLdsB32Vglobal::execute_registered_ =
-    register_exec_fn<ClusterLoadAsyncToLdsB32Vglobal>();
-
 void ClusterLoadAsyncToLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
@@ -2250,9 +2030,6 @@ void ClusterLoadAsyncToLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   }
   set_data(std::move(d));
 }
-
-const bool ClusterLoadAsyncToLdsB64Vglobal::execute_registered_ =
-    register_exec_fn<ClusterLoadAsyncToLdsB64Vglobal>();
 
 void ClusterLoadAsyncToLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2284,9 +2061,6 @@ void ClusterLoadAsyncToLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool ClusterLoadAsyncToLdsB128Vglobal::execute_registered_ =
-    register_exec_fn<ClusterLoadAsyncToLdsB128Vglobal>();
-
 void ClusterLoadAsyncToLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
@@ -2317,9 +2091,6 @@ void ClusterLoadAsyncToLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalLoadMonitorB32Vglobal::execute_registered_ =
-    register_exec_fn<GlobalLoadMonitorB32Vglobal>();
-
 void GlobalLoadMonitorB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -2334,9 +2105,6 @@ void GlobalLoadMonitorB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool GlobalLoadMonitorB64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalLoadMonitorB64Vglobal>();
 
 void GlobalLoadMonitorB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2353,9 +2121,6 @@ void GlobalLoadMonitorB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-const bool GlobalLoadMonitorB128Vglobal::execute_registered_ =
-    register_exec_fn<GlobalLoadMonitorB128Vglobal>();
-
 void GlobalLoadMonitorB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
@@ -2370,9 +2135,6 @@ void GlobalLoadMonitorB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool GlobalLoadTr4B64Vglobal::execute_registered_ =
-    register_exec_fn<GlobalLoadTr4B64Vglobal>();
 
 void GlobalLoadTr4B64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2389,9 +2151,6 @@ void GlobalLoadTr4B64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
-
-const bool GlobalLoadTr6B96Vglobal::execute_registered_ =
-    register_exec_fn<GlobalLoadTr6B96Vglobal>();
 
 void GlobalLoadTr6B96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
