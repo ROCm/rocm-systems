@@ -14,8 +14,9 @@ declared API, not that the behavior is correct. That matches the documented
 coverage methodology in ``projects/hip-tests/CONTRACT_COVERAGE.md``.
 
 Exit status (with --check): non-zero if there is any declared API that is neither
-covered by a contract test nor listed in the allowlist, or if the allowlist has
-stale entries. Without --check the script only reports and always exits 0.
+covered by a contract test nor listed in the allowlist, if the allowlist has stale
+entries, or if ``CONTRACT_COVERAGE.md``'s snapshot block has drifted. Without
+--check the script only reports and always exits 0.
 
 Runs anywhere with Python 3.6+ and the standard library only; no ROCm, GPU, or
 build is required (pure static analysis), so it is safe as a fast PR gate.
@@ -40,6 +41,7 @@ REPO_ROOT = _PROJECTS_DIR.parent                                # <repo>
 
 HEADER_PATH = REPO_ROOT / "projects" / "hip" / "include" / "hip" / "hip_runtime_api.h"
 ALLOWLIST_PATH = CONTRACT_DIR / "uncovered_apis.txt"
+COVERAGE_DOC_PATH = _HIP_TESTS_DIR / "CONTRACT_COVERAGE.md"
 
 # Names that are parsed as prototypes but are not public contract targets. These
 # are excluded from the denominator entirely (they never count as covered or as
@@ -63,6 +65,18 @@ _DECL_RE = re.compile(
 
 # Any hipXxx( token in a contract source counts as exercising that API.
 _CALL_RE = re.compile(r"\b(hip[A-Za-z0-9_]+)\s*\(")
+_SNAPSHOT_RE = re.compile(
+    r"<!--\s*contract-coverage-snapshot\s*(.*?)\s*-->",
+    re.DOTALL,
+)
+_SNAPSHOT_FIELDS = (
+    "contract_tests",
+    "contract_domains",
+    "declared_apis",
+    "covered_apis",
+    "uncovered_allowlisted",
+    "coverage_pct",
+)
 
 
 def _strip_comments(text):
@@ -117,6 +131,83 @@ def load_allowlist(allowlist_path=ALLOWLIST_PATH):
     return entries
 
 
+def contract_test_counts(contract_dir=CONTRACT_DIR):
+    """Return (test_count, domain_count) for contract source files."""
+    domains = set()
+    tests = 0
+    for path in Path(contract_dir).rglob("test_hip_*_contract.cc"):
+        domains.add(path.parent.name)
+        tests += path.read_text(encoding="utf-8", errors="replace").count("HIP_TEST_CASE(")
+    return tests, len(domains)
+
+
+def load_coverage_snapshot(doc_path=COVERAGE_DOC_PATH):
+    """Return the machine-readable CONTRACT_COVERAGE.md snapshot, or an error."""
+    path = Path(doc_path)
+    if not path.exists():
+        return {}, ["coverage doc not found: {}".format(path)]
+    text = path.read_text(encoding="utf-8", errors="replace")
+    match = _SNAPSHOT_RE.search(text)
+    if not match:
+        return {}, ["coverage doc is missing the contract-coverage-snapshot block"]
+
+    snapshot = {}
+    errors = []
+    for raw in match.group(1).splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if ":" not in line:
+            errors.append("malformed snapshot line: {}".format(line))
+            continue
+        name, value = line.split(":", 1)
+        name, value = name.strip(), value.strip()
+        if name not in _SNAPSHOT_FIELDS:
+            errors.append("unknown snapshot field: {}".format(name))
+            continue
+        snapshot[name] = value
+
+    missing = [name for name in _SNAPSHOT_FIELDS if name not in snapshot]
+    if missing:
+        errors.append("snapshot is missing field(s): {}".format(", ".join(missing)))
+    return snapshot, errors
+
+
+def _snapshot_value(name, value):
+    if name == "coverage_pct":
+        return float(value)
+    return int(value)
+
+
+def snapshot_drift(report, contract_dir=CONTRACT_DIR, doc_path=COVERAGE_DOC_PATH):
+    """Return human-readable CONTRACT_COVERAGE.md snapshot drift messages."""
+    snapshot, errors = load_coverage_snapshot(doc_path)
+    if errors:
+        return errors
+
+    contract_tests, contract_domains = contract_test_counts(contract_dir)
+    expected = {
+        "contract_tests": contract_tests,
+        "contract_domains": contract_domains,
+        "declared_apis": report["declared_count"],
+        "covered_apis": report["covered_count"],
+        "uncovered_allowlisted": report["uncovered_count"] - len(report["violations"]),
+        "coverage_pct": report["coverage_pct"],
+    }
+
+    drift = []
+    for name in _SNAPSHOT_FIELDS:
+        try:
+            actual = _snapshot_value(name, snapshot[name])
+        except ValueError:
+            drift.append("{} has non-numeric snapshot value: {}".format(name, snapshot[name]))
+            continue
+        if actual != expected[name]:
+            drift.append("{} is stale: doc has {}, computed {}".format(
+                name, actual, expected[name]))
+    return drift
+
+
 def compute(header_path=HEADER_PATH, contract_dir=CONTRACT_DIR,
             allowlist_path=ALLOWLIST_PATH):
     """Compute the coverage report as a dict of sorted lists / counts."""
@@ -143,7 +234,7 @@ def compute(header_path=HEADER_PATH, contract_dir=CONTRACT_DIR,
     }
 
 
-def _print_summary(report):
+def _print_summary(report, doc_drift):
     print("HIP contract-test coverage")
     print("  declared public APIs : {}".format(report["declared_count"]))
     print("  covered by a test    : {}".format(report["covered_count"]))
@@ -171,6 +262,11 @@ def _print_summary(report):
         for name in report["allowlisted_redundant"]:
             print("  {}".format(name))
         print("")
+    if doc_drift:
+        print("CONTRACT_COVERAGE.md snapshot drift:")
+        for item in doc_drift:
+            print("  {}".format(item))
+        print("")
     if report["violations"]:
         print("RESULT: FAIL - {} API(s) need a contract test or an "
               "allowlist entry.".format(len(report["violations"])))
@@ -180,6 +276,8 @@ def _print_summary(report):
               "with a reason if it genuinely cannot be covered.")
     elif report["allowlisted_stale"] or report["allowlisted_redundant"]:
         print("RESULT: FAIL - allowlist is out of date (see above).")
+    elif doc_drift:
+        print("RESULT: FAIL - CONTRACT_COVERAGE.md snapshot is out of date (see above).")
     else:
         print("RESULT: OK - every declared API is covered or justifiably allowlisted.")
 
@@ -199,12 +297,15 @@ def main(argv=None):
                         help="path to catch/contract (default: repo-relative)")
     parser.add_argument("--allowlist", default=ALLOWLIST_PATH,
                         help="path to uncovered_apis.txt (default: repo-relative)")
+    parser.add_argument("--coverage-doc", default=COVERAGE_DOC_PATH,
+                        help="path to CONTRACT_COVERAGE.md (default: repo-relative)")
     args = parser.parse_args(argv)
 
     if not Path(args.header).exists():
         parser.error("header not found: {}".format(args.header))
 
     report = compute(args.header, args.contract_dir, args.allowlist)
+    doc_drift = snapshot_drift(report, args.contract_dir, args.coverage_doc)
 
     if args.list_uncovered:
         for name in report["uncovered"]:
@@ -212,12 +313,13 @@ def main(argv=None):
     elif args.json:
         printable = {k: v for k, v in report.items() if k != "allowlist"}
         printable["allowlist"] = report["allowlist"]
+        printable["coverage_doc_drift"] = doc_drift
         print(json.dumps(printable, indent=2, sort_keys=True))
     else:
-        _print_summary(report)
+        _print_summary(report, doc_drift)
 
     failed = bool(report["violations"] or report["allowlisted_stale"]
-                  or report["allowlisted_redundant"])
+                  or report["allowlisted_redundant"] or doc_drift)
     if args.check and failed:
         return 1
     return 0

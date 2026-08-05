@@ -12,6 +12,15 @@ contract tier intentionally pins only small, portable semantic guarantees.
 
 ## Snapshot
 
+<!-- contract-coverage-snapshot
+contract_tests: 604
+contract_domains: 118
+declared_apis: 495
+covered_apis: 484
+uncovered_allowlisted: 11
+coverage_pct: 97.8
+-->
+
 - Snapshot date: 2026-08-04
 - Snapshot commit: `0d90b30fb6`
 - Contract tests: 604
@@ -38,7 +47,8 @@ contract tier intentionally pins only small, portable semantic guarantees.
   contract harness.
 - [`catch/contract/tools/check_contract_coverage.py`](catch/contract/tools/check_contract_coverage.py)
   is the static drift checker. It recomputes the declared, covered, uncovered, and
-  stale-allowlist sets and is run by the HIP contract-test coverage workflow.
+  stale-allowlist sets, verifies the numeric snapshot block above, and is run by the
+  HIP contract-test coverage workflow.
 
 Keep this file short and human-readable. Do not duplicate the complete generated test
 plan or the full covered-API listing here.
