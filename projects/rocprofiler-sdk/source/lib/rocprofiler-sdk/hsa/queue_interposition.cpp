@@ -1152,11 +1152,11 @@ write_interceptor(Queue*                                queue,
         if(_signal_less_batch &&
            !kfd::signal_less_hub().register_batch(std::move(_signal_less_regs)))
         {
+            // Reachable only if another queue's collision quarantined this slot between
+            // eligibility and here. The packets have already skipped their signals.
             kfd::note_signal_less(kfd::signal_less_counter::register_refused);
-            // Unreachable by the argument above; the packets have already skipped their
-            // signals, so there is no way back to the signal path.
-            ROCP_WARNING << "KFD dispatch-log: signal-less batch registration was refused after "
-                            "eligibility accepted it; these dispatches will not complete";
+            ROCP_WARNING << "KFD dispatch-log: signal-less batch registration refused; these "
+                            "dispatches will not complete";
         }
         else if(_signal_less_batch)
         {

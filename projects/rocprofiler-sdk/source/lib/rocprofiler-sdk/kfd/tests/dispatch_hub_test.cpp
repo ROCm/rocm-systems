@@ -353,7 +353,8 @@ TEST(DispatchHub, poison_blocks_further_registration_and_completion)
     ASSERT_TRUE(register_one(hub, key));
     hub.poison(session_mode::loss_poisoned);
 
-    EXPECT_FALSE(register_one(hub, key_of(4, 31)));
+    // Eligibility refuses; registration is unconditional by design.
+    EXPECT_FALSE(hub.can_register_batch({key_of(4, 31)}));
     EXPECT_FALSE(hub.prove_eop(key_of(4, 31), 1, true).has_value());
     EXPECT_FALSE(hub.note_start(key_of(4, 31), 1));
 }
@@ -446,8 +447,13 @@ TEST(DispatchHub, teardown_leaks_still_pending_entries)
     EXPECT_EQ(hub.mode(), session_mode::stopping);
     // Their correlation id is on the ledger, so finalize must not force-retire it.
     EXPECT_TRUE(hub.is_ledgered(11));
-    // And nothing new can be admitted once teardown has begun.
-    EXPECT_FALSE(register_one(hub, key_of(4, 3)));
+    // Eligibility refuses once teardown has begun, but registration itself does
+    // NOT: a batch that already skipped its signals must still be admitted, and
+    // a later drain leaks it.
+    EXPECT_FALSE(hub.can_register_batch({key_of(4, 3)}));
+    EXPECT_TRUE(register_one(hub, key_of(4, 3), /*corr_id=*/12));
+    EXPECT_EQ(hub.drain_for_teardown().second.dispatches, 1u);
+    EXPECT_TRUE(hub.is_ledgered(12));
 }
 
 // U19: fork
@@ -695,10 +701,9 @@ TEST(DispatchHub, overrun_strands_everything_and_reports_both_counts)
     EXPECT_EQ(loss.second.correlation_ids, 2u);  // sharing two correlation ids
     EXPECT_EQ(loss.first.size(), 5u);            // payloads handed back for release
 
-    // Signal-less is off for the rest of the process: no later batch is admissible.
+    // Signal-less is off for the rest of the process: no later batch is eligible.
     EXPECT_EQ(hub.mode(), session_mode::loss_poisoned);
     EXPECT_FALSE(hub.can_register_batch({key_of(6, 0)}));
-    EXPECT_FALSE(register_one(hub, key_of(6, 0)));
 
     // A late record for a stranded dispatch completes nothing.
     EXPECT_FALSE(hub.prove_eop(key_of(4, 0), 1, true).has_value());

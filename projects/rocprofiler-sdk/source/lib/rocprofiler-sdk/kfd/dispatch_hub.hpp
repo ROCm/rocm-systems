@@ -141,12 +141,15 @@ public:
     // Whole-batch atomic: validates every entry first and inserts all or none.
     // No overwrite semantics anywhere. The caller must fall back to the signal
     // path for the WHOLE batch on false.
+    // NO session-mode gate: eligibility already committed this batch to the
+    // signal-less path, so refusing it here would leave dispatches that have
+    // skipped their completion signals with nothing to complete them. Teardown
+    // step 5 leaks anything that registers late, which retires nothing.
     bool register_batch(std::vector<registration>&& batch)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
 
         auto lk = std::lock_guard<std::mutex>{m_mu};
-        if(m_mode != session_mode::running) return false;
 
         for(size_t i = 0; i < batch.size(); ++i)
         {
@@ -175,6 +178,7 @@ public:
         if(m_abandoned.load(std::memory_order_acquire)) return false;
 
         auto lk = std::lock_guard<std::mutex>{m_mu};
+        if(m_mode != session_mode::running) return false;
         for(size_t i = 0; i < keys.size(); ++i)
         {
             if(!key_admissible_locked(keys[i])) return false;
@@ -424,12 +428,12 @@ private:
 
     using map_t = std::unordered_map<correlation_key, entry, correlation_key_hash>;
 
-    // Caller holds m_mu. A key may be registered only into a running session, only
-    // once, never onto a tombstone (U11), and never onto a quarantined slot.
+    // Caller holds m_mu. A key may be registered only once, never onto a
+    // tombstone, and never onto a quarantined slot. Session mode is deliberately
+    // NOT part of this: it gates eligibility, not registration.
     bool key_admissible_locked(const correlation_key& key) const
     {
-        return m_mode == session_mode::running && m_entries.count(key) == 0 &&
-               m_tombstones.count(key) == 0 &&
+        return m_entries.count(key) == 0 && m_tombstones.count(key) == 0 &&
                m_quarantined.count({key.gpu_id, key.doorbell_off}) == 0;
     }
 
