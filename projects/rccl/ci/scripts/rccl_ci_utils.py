@@ -16,6 +16,15 @@ log = logging.getLogger(__name__)
 SMTP_SERVERS = ["smtp.amd.com", "aussmtp.amd.com", "mail.amd.com", "localhost"]
 
 
+def find_pip_sdk_lib_dirs() -> list[Path]:
+    """Return library directories from pip-installed ROCm SDK packages."""
+    site = Path(sys.prefix) / "lib"
+    dirs = sorted(d for d in site.rglob("_rocm_sdk_*/lib") if d.is_dir())
+    if not dirs:
+        dirs = sorted(d for d in Path(sys.prefix).rglob("_rocm_sdk_*/lib") if d.is_dir())
+    return dirs
+
+
 def override_bundled_rccl(rccl_lib_dir: Path) -> None:
     """Replace the pip-bundled librccl.so with the CI-built version.
 
@@ -30,13 +39,15 @@ def override_bundled_rccl(rccl_lib_dir: Path) -> None:
 
     ci_rccl = rccl_lib_dir.resolve() / "librccl.so"
     if not ci_rccl.exists():
-        log.error("CI-built librccl.so not found at %s", ci_rccl)
-        sys.exit(1)
+        raise FileNotFoundError(
+            f"CI-built librccl.so not found at {ci_rccl} — check artifact fetch"
+        )
     ci_size = ci_rccl.stat().st_size
     log.info("CI-built RCCL: %s (%d bytes)", ci_rccl, ci_size)
 
-    site_packages = Path(sys.prefix) / "lib"
-    bundled = list(site_packages.rglob("_rocm_sdk_libraries/lib/librccl.so*"))
+    bundled = []
+    for d in find_pip_sdk_lib_dirs():
+        bundled.extend(d.glob("librccl.so*"))
     if not bundled:
         bundled = list(Path(sys.prefix).rglob("librccl.so*"))
 
@@ -44,8 +55,12 @@ def override_bundled_rccl(rccl_lib_dir: Path) -> None:
     for target in bundled:
         if target.is_symlink():
             continue
-        orig_size = target.stat().st_size
         backup = target.with_suffix(target.suffix + ".pip-original")
+        if backup.exists():
+            log.info("Skipping %s (already replaced in prior run)", target)
+            replaced += 1
+            continue
+        orig_size = target.stat().st_size
         shutil.copy2(str(target), str(backup))
         shutil.copy2(str(ci_rccl), str(target))
         new_size = target.stat().st_size

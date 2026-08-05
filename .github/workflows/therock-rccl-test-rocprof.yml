@@ -17,6 +17,9 @@ on:
       notify_webhook:
         type: string
         default: ""
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK:
+        required: false
   workflow_dispatch:
     inputs:
       amdgpu_families:

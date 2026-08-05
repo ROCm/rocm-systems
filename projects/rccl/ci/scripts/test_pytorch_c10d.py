@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from rccl_ci_utils import (
+    find_pip_sdk_lib_dirs,
     find_rccl_library,
     override_bundled_rccl,
     parse_junit_xml,
@@ -429,8 +430,8 @@ def main() -> None:
     # Step 2: Create symlinks for soname version mismatches between
     # CI-built libraries and pip-installed packages (must run before
     # quarantine so pip dirs get compatibility symlinks)
-    pip_lib_dirs = list(Path(sys.prefix, "lib").rglob("_rocm_sdk_*/lib"))
-    reconcile_soname_versions([rccl_lib_dir] + [d for d in pip_lib_dirs if d.is_dir()])
+    pip_lib_dirs = find_pip_sdk_lib_dirs()
+    reconcile_soname_versions([rccl_lib_dir] + pip_lib_dirs)
 
     # Step 3: Quarantine TheRock-bundled libamd_smi and rocm_sysdeps to
     # prevent the nl_genl destructor crash (SIGSEGV in containers).

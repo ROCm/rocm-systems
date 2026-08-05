@@ -20,6 +20,9 @@ on:
       notify_webhook:
         type: string
         default: ''
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK:
+        required: false
   workflow_dispatch:
     inputs:
       amdgpu_families:
@@ -123,9 +126,9 @@ jobs:
           # The dynamic linker caches LD_LIBRARY_PATH at process startup.
           # PyTorch's import chain (rocm_sdk.preload_libraries -> ctypes.CDLL)
           # needs _rocm_sdk_core/lib on the path before Python starts.
-          SITE_PKGS=$(python -c "import site; print(site.getsitepackages()[0])")
-          for d in "$SITE_PKGS"/_rocm_sdk_*/lib; do
-            [ -d "$d" ] && export LD_LIBRARY_PATH="${d}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export PYTHONPATH="rocm-systems/projects/rccl/ci/scripts:${PYTHONPATH:-}"
+          for d in $(python -c "from rccl_ci_utils import find_pip_sdk_lib_dirs; print('\n'.join(str(d) for d in find_pip_sdk_lib_dirs()))"); do
+            export LD_LIBRARY_PATH="${d}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           done
 
           NOTIFY_ARGS=()
