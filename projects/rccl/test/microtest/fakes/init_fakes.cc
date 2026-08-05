@@ -43,6 +43,24 @@ void SetMicroEnv(const char* name, const char* value) {
 
 void ClearMicroEnv() { microEnvMap().clear(); }
 
+// -------------------------------------------------------------------------
+// Environment read: init.cc calls ncclGetEnv() for NCCL_* lookups. Route it
+// through the same controllable map as micro_getenv (SetMicroEnv controls both).
+// -------------------------------------------------------------------------
+const char* ncclGetEnv(const char* name) { return micro_getenv(name); }
+
+// -------------------------------------------------------------------------
+// External ncclParam* referenced by init.cc but NOT defined via NCCL_PARAM in
+// the UUT (the redirected NCCL_PARAM only covers params declared inside init.cc).
+// Route through g_loadParam so tests can flip them per-case; distinct env keys.
+// Defaults mirror the production NCCL_PARAM defaults.
+// -------------------------------------------------------------------------
+int64_t ncclParamLaunchOrderImplicit() { return g_loadParam("LAUNCH_ORDER_IMPLICIT", 0); }
+int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }
+int64_t ncclParamNvtxDisable() { return g_loadParam("NVTX_DISABLE", 0); }
+int64_t ncclParamPatEnable() { return g_loadParam("PAT_ENABLE", 2); }
+int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_REG_ENABLE", 1); }
+
 void ResetInitFakes() {
   ResetHipFakes();
   ResetNcclFakes();

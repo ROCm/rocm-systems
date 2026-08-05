@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <vector>
@@ -118,4 +119,65 @@ TEST_F(InitMicrotest, UniformRanksPerHost_SingleRank_ReturnsTrue) {
 TEST_F(InitMicrotest, UniformRanksPerHost_ZeroRanks_ReturnsFalse) {
   HostPattern p{};  // ranksPerHost stays -1 -> ranksPerHost>0 fails
   EXPECT_FALSE(uniformRanksPerHost(p.comm(), 0));
+}
+
+// --- Tier B: ctaPolicyIsValid (init.cc:132) -- pure; valid range is
+// [0, DEFAULT|EFFICIENCY|ZERO]. -----------------------------------------------
+TEST_F(InitMicrotest, CtaPolicyIsValid_Default_True) {
+  EXPECT_TRUE(ctaPolicyIsValid(NCCL_CTA_POLICY_DEFAULT));
+}
+TEST_F(InitMicrotest, CtaPolicyIsValid_CombinedFlags_True) {
+  EXPECT_TRUE(ctaPolicyIsValid(NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO));
+}
+TEST_F(InitMicrotest, CtaPolicyIsValid_Negative_False) {
+  EXPECT_FALSE(ctaPolicyIsValid(-1));
+}
+TEST_F(InitMicrotest, CtaPolicyIsValid_AboveMax_False) {
+  const int maxPolicy =
+      NCCL_CTA_POLICY_DEFAULT | NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO;
+  EXPECT_FALSE(ctaPolicyIsValid(maxPolicy + 1));
+}
+
+// --- Tier B: parseCommConfig (init.cc:3041) -- one validation arm per test.
+// A fresh NCCL_CONFIG_INITIALIZER (current version) passes every arm; each test
+// perturbs exactly one field and expects ncclInvalidArgument. ---------------
+namespace {
+ncclResult_t ParseWith(const std::function<void(ncclConfig_t&)>& tweak) {
+  auto comm = std::make_unique<ncclComm>();
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  tweak(cfg);
+  return parseCommConfig(comm.get(), &cfg);
+}
+}  // namespace
+
+TEST_F(InitMicrotest, ParseCommConfig_BadMagic_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclInvalidArgument, ParseWith([](ncclConfig_t& c) { c.magic = 0; }));
+}
+TEST_F(InitMicrotest, ParseCommConfig_BadBlocking_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclInvalidArgument, ParseWith([](ncclConfig_t& c) { c.blocking = 2; }));
+}
+TEST_F(InitMicrotest, ParseCommConfig_NegativeCgaClusterSize_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclInvalidArgument, ParseWith([](ncclConfig_t& c) { c.cgaClusterSize = -5; }));
+}
+TEST_F(InitMicrotest, ParseCommConfig_MinGreaterThanMaxCTAs_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclInvalidArgument, ParseWith([](ncclConfig_t& c) { c.minCTAs = 8; c.maxCTAs = 4; }));
+}
+TEST_F(InitMicrotest, ParseCommConfig_BadCollnetEnable_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclInvalidArgument, ParseWith([](ncclConfig_t& c) { c.collnetEnable = 2; }));
+}
+TEST_F(InitMicrotest, ParseCommConfig_InvalidCTAPolicy_ReturnsInvalidArgument) {
+  const int maxPolicy =
+      NCCL_CTA_POLICY_DEFAULT | NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO;
+  EXPECT_EQ(ncclInvalidArgument,
+            ParseWith([&](ncclConfig_t& c) { c.CTAPolicy = maxPolicy + 1; }));
+}
+TEST_F(InitMicrotest, ParseCommConfig_BadMaxP2pPeers_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclInvalidArgument, ParseWith([](ncclConfig_t& c) { c.maxP2pPeers = 0; }));
+}
+TEST_F(InitMicrotest, ParseCommConfig_ValidDefault_ReturnsSuccessAndAssigns) {
+  auto comm = std::make_unique<ncclComm>();
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  EXPECT_EQ(ncclSuccess, parseCommConfig(comm.get(), &cfg));
+  EXPECT_EQ(1, comm->config.blocking);                       // undef -> default 1
+  EXPECT_EQ(NCCL_CTA_POLICY_DEFAULT, comm->config.CTAPolicy);  // undef -> default
 }
