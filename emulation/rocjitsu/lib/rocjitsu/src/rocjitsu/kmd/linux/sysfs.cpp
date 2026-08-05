@@ -116,98 +116,10 @@ void reap_stale_sysfs_dirs() {
   }
 }
 
-/// @brief Debug-related topology bits derived from a GPU's GFXIP version.
-///
-/// @details Mirrors the per-node values the amdkfd driver programs in
-/// kfd_topology_set_capabilities() (drivers/gpu/drm/amd/amdkfd/kfd_topology.c):
-/// the trap-debugger capability flags, the capability2 flags, and the
-/// debug_prop address-watch-mask range that libhsakmt and rocdbgapi read back.
-struct DebugTopology {
-  uint32_t capability = 0;
-  uint32_t capability2 = 0;
-  uint64_t debug_prop = 0;
-};
-
-/// @brief Reproduces kfd_topology_set_capabilities() for the simulated GPU
-/// identified by @p gfx_target_version.
-///
-/// @details The driver keys every decision on the GC hardware IP version, which
-/// is not the same number as gfx_target_version for CDNA parts (see
-/// kmd::gc_ip_version_for_gfx_target_version), so we translate first and then
-/// apply the driver's exact IP_VERSION thresholds.
-///
-/// \NPI sync this with the KFD driver code in drivers/gpu/drm/amd/amdkfd/kfd_topology.c
-DebugTopology debug_topology_for(uint32_t gfx_target_version) {
-  using kmd::make_gc_ip_version;
-  const uint32_t gc = kmd::gc_ip_version_for_gfx_target_version(gfx_target_version);
-
-  DebugTopology topo;
-
-  // Trap-based debugging is advertised for every debug-capable GPU.
-  topo.capability = HSA_CAP_TRAP_DEBUG_SUPPORT |
-                    HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_TRAP_OVERRIDE_SUPPORTED |
-                    HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_MODE_SUPPORTED;
-
-  // kfd_dbg_has_ttmps_always_setup(): dispatch info (ttmps) is always valid
-  // except on gfx9.4.2 (Aldebaran) below gfx11, and on gfx11 only with modern
-  // MES firmware (sched_version >= 70), which the simulator always models.
-  const bool ttmps_always_setup =
-      (gc < make_gc_ip_version(11, 0, 0) && gc != make_gc_ip_version(9, 4, 2)) ||
-      gc >= make_gc_ip_version(11, 0, 0);
-  if (ttmps_always_setup)
-    topo.debug_prop |= HSA_DBG_DISPATCH_INFO_ALWAYS_VALID;
-
-  if (gc < make_gc_ip_version(10, 0, 0)) {
-    // gfx9 (CDNA). The watch-address-mask range widens by one bit on the
-    // gfx9.4.3/gfx9.4.4 parts (LO 6->7, HI 29->30).
-    if (gc == make_gc_ip_version(9, 4, 3) || gc == make_gc_ip_version(9, 4, 4))
-      topo.debug_prop |= kmd::kWatchAddrMaskLoBitGfx943 | kmd::kWatchAddrMaskHiBitGfx943;
-    else
-      topo.debug_prop |= kmd::kWatchAddrMaskLoBitGfx9 | kmd::kWatchAddrMaskHiBit;
-
-    if (gc >= make_gc_ip_version(9, 4, 2))
-      topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED;
-
-    // Per-queue reset is withheld only from SR-IOV virtual functions, which the
-    // simulator never models.
-    topo.capability |= HSA_CAP_PER_QUEUE_RESET_SUPPORTED;
-  } else {
-    // gfx10+ (RDNA).
-    topo.debug_prop |= kmd::kWatchAddrMaskLoBitGfx10 | kmd::kWatchAddrMaskHiBit;
-
-    if (gc >= make_gc_ip_version(12, 0, 0))
-      topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_ALU_OPERATIONS_SUPPORTED;
-
-    if (gc >= make_gc_ip_version(12, 1, 0)) {
-      topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED |
-                         HSA_CAP_PER_QUEUE_RESET_SUPPORTED;
-      topo.capability2 |= HSA_CAP2_TRAP_DEBUG_LDS_OUT_OF_ADDR_RANGE_SUPPORTED;
-    }
-  }
-
-  // Firmware-backed trap debugging (kfd_topology_set_dbg_firmware_support()).
-  // The simulator always provides compatible "firmware", so advertise it.
-  topo.capability |= HSA_CAP_TRAP_DEBUG_FIRMWARE_SUPPORTED;
-
-  return topo;
-}
-
-/// @brief Non-debug capability bits advertised for the data-center compute GPUs
-/// the simulator models.
-///
-/// @details On real hardware these originate from the ASIC's CRAT tables rather
-/// than kfd_topology_set_capabilities(); reproducing per-ASIC CRAT variation is
-/// out of scope, so the simulator advertises the common data-center feature set
-/// (ECC/RAS, ATS, SVM, coherent host access). The version-specific debug bits
-/// are contributed separately by debug_topology_for().
-uint32_t default_non_debug_capability() {
-  return HSA_CAP_ATS_PRESENT | HSA_CAP_QUEUE_IDLE_EVENT | HSA_CAP_WATCH_POINTS_SUPPORTED |
-         ((4u << HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT) & HSA_CAP_WATCH_POINTS_TOTALBITS_MASK) |
-         ((HSA_CAP_DOORBELL_TYPE_2_0 << HSA_CAP_DOORBELL_TYPE_TOTALBITS_SHIFT) &
-          HSA_CAP_DOORBELL_TYPE_TOTALBITS_MASK) |
-         HSA_CAP_AQL_QUEUE_DOUBLE_MAP | HSA_CAP_MEM_EDCSUPPORTED | HSA_CAP_RASEVENTNOTIFY |
-         HSA_CAP_SRAM_EDCSUPPORTED | HSA_CAP_SVMAPI_SUPPORTED | HSA_CAP_FLAGS_COHERENTHOSTACCESS;
-}
+// The debug-topology derivation (trap-debug capability/capability2/debug_prop
+// per GFXIP) lives in kfd_topology.h so the DBG_TRAP GET_DEVICE_SNAPSHOT path
+// and this sysfs topology generator share one source of truth.
+using kmd::DebugTopology;
 
 } // namespace
 
@@ -372,24 +284,20 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   write_file(node_dir + "/gpu_id", gpu_id.str());
   write_file(node_dir + "/name", gpu.marketing_name + "\n");
 
-  const DebugTopology dbg = debug_topology_for(gpu.gfx_target_version);
-
-  uint32_t cap = gpu.capability;
-  if (cap == 0)
-    cap = default_non_debug_capability() | dbg.capability;
-  const uint32_t asic_revision = gpu.revision_id;
-  cap = (cap & ~HSA_CAP_ASIC_REVISION_MASK) |
-        ((asic_revision << HSA_CAP_ASIC_REVISION_SHIFT) & HSA_CAP_ASIC_REVISION_MASK);
-
-  uint32_t cap2 = gpu.capability2;
-  if (cap2 == 0)
-    cap2 = dbg.capability2;
-
-  uint64_t debug_prop = gpu.debug_prop;
-  if (debug_prop == 0)
-    debug_prop = dbg.debug_prop;
+  const DebugTopology topology = kmd::effective_topology_for(
+      gpu.gfx_target_version, gpu.capability, gpu.capability2, gpu.debug_prop, gpu.revision_id);
 
   uint32_t p2p_links = total_gpus > 1 ? total_gpus - 1 : 0;
+
+  // array_count is the one geometry property KFD reports per node rather than
+  // per XCC: node_show() emits node_props.array_count * NUM_XCC, while
+  // simd_arrays_per_engine and cu_per_simd_array stay per-XCC. The DBG_TRAP
+  // device snapshot passes the unscaled value through instead (kfd_debug.c),
+  // which is why the two paths report different numbers for the same property.
+  // Normalize once (GpuInfo::effective_num_xcc) so array_count and the num_xcc
+  // property cannot disagree.
+  const uint32_t num_xcc = gpu.effective_num_xcc();
+  const uint32_t node_array_count = gpu.array_count_per_xcc() * num_xcc;
 
   std::ostringstream props;
   props << "cpu_cores_count 0\n"
@@ -405,8 +313,8 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "gds_size_in_kb 0\n"
         << "num_gws 64\n"
         << "wave_front_size " << gpu.wave_front_size << "\n"
-        << "array_count " << gpu.num_shader_engines << "\n"
-        << "simd_arrays_per_engine " << gpu.num_shader_arrays_per_engine << "\n"
+        << "array_count " << node_array_count << "\n"
+        << "simd_arrays_per_engine " << gpu.effective_arrays_per_engine() << "\n"
         << "cu_per_simd_array " << gpu.num_cu_per_sh << "\n"
         << "simd_per_cu " << gpu.simd_per_cu << "\n"
         << "max_slots_scratch_cu " << gpu.max_slots_scratch_cu << "\n"
@@ -425,12 +333,12 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "max_engine_clk_ccompute 0\n"
         << "local_mem_size " << gpu.local_mem_size << "\n"
         << "fw_version " << gpu.fw_version << "\n"
-        << "capability " << cap << "\n"
-        << "capability2 " << cap2 << "\n"
-        << "debug_prop " << debug_prop << "\n"
+        << "capability " << topology.capability << "\n"
+        << "capability2 " << topology.capability2 << "\n"
+        << "debug_prop " << topology.debug_prop << "\n"
         << "sdma_fw_version " << gpu.sdma_fw_version << "\n"
         << "unique_id " << gpu.unique_id << "\n"
-        << "num_xcc " << gpu.num_xcc << "\n"
+        << "num_xcc " << num_xcc << "\n"
         << "vram_public 1\n"
         << "vram_size " << gpu.local_mem_size << "\n";
 
@@ -636,6 +544,9 @@ Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t
   gpu.location_id = dev.location_id;
   gpu.domain = dev.domain;
   gpu.hive_id = dev.hive_id;
+  gpu.capability = dev.capability;
+  gpu.capability2 = dev.capability2;
+  gpu.debug_prop = dev.debug_prop;
   gpu.drm_render_minor = dev.drm_render_minor;
   gpu.marketing_name = dev.marketing_name;
   gpu.revision_id = dev.revision_id;
