@@ -15,13 +15,21 @@
 #include <assert.h>
 #include <poll.h>
 #include <sched.h>
+#include <sys/mman.h>
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
+#include "os.h"
 #include "profiler.h"
 #include "proxy.h"
 #include "timer.h"
@@ -524,6 +532,165 @@ TEST(ProxyTests, ProxyConnectionPoolBoundsCheck)
     EXPECT_EQ(ncclProxyGetConnection(&emptyPool, 0, &out), ncclInvalidArgument);
 
     TEST_INFO("[ProxyTests] ProxyConnectionPoolBoundsCheck PASSED");
+}
+
+// std::mutex / std::condition_variable modernization coverage.
+//
+// ncclProxyOpsPool synchronizes the main thread (producer, ncclProxyPost) and the
+// progress thread (consumer, ncclProxyGetPostedOps) through a std::mutex + a
+// std::condition_variable that were ported from pthread_mutex_t / pthread_cond_t.
+// Because the pool lives in cross-process shared memory, RCCL re-arms those
+// std::-typed primitives as PTHREAD_PROCESS_SHARED via ncclOsSetMutexCondShared()
+// using their native_handle(). The following two tests exercise that machinery
+// directly: the round-trip test validates the intra-process RAII lock + wait/notify
+// protocol, and the process-shared test validates the same std::mutex / condvar work
+// across a fork() the way the real proxy uses them.
+
+static constexpr int kNoOps = -1;
+static constexpr int kPostedOpIndex = 7;
+static constexpr auto kWaitTimeout = std::chrono::seconds(10);
+
+// Single-process: drive the producer/consumer handshake on the pool's std::mutex and
+// std::condition_variable exactly as ncclProxyPost() and ncclProxyGetPostedOps() do,
+// after arming them process-shared. Covers ncclOsSetMutexCondShared, std::lock_guard,
+// std::unique_lock, cond.wait(predicate) and cond.notify_one() with correct RAII scope.
+TEST(ProxyTests, ProxyOpsPoolMutexCondRoundTrip)
+{
+    TEST_INFO("[ProxyTests] ProxyOpsPoolMutexCondRoundTrip start");
+
+    struct ncclProxyOpsPool* pool = new ncclProxyOpsPool();
+    pool->nextOps    = kNoOps;
+    pool->nextOpsEnd = kNoOps;
+
+    ncclOsSetMutexCondShared(pool->mutex, pool->cond);
+
+    int  observedOps  = kNoOps;
+    bool waitSucceeded = false;
+    bool stop          = false;
+
+    // Consumer mirrors ncclProxyGetPostedOps: block on the condvar until an op is
+    // posted (or a stop is requested), under a std::unique_lock.
+    std::thread consumer([&]() {
+        std::unique_lock<std::mutex> lock(pool->mutex);
+        waitSucceeded = pool->cond.wait_for(
+            lock, kWaitTimeout, [&]() { return pool->nextOps != kNoOps || stop; });
+        observedOps    = pool->nextOps;
+        pool->nextOps  = kNoOps;
+    });
+
+    // Give the consumer time to actually reach cond.wait_for()
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Producer mirrors ncclProxyPost: publish an op under a std::lock_guard and wake
+    // exactly one waiter. The lock_guard must release before the consumer can proceed.
+    {
+        std::lock_guard<std::mutex> lock(pool->mutex);
+        pool->nextOps = kPostedOpIndex;
+        pool->cond.notify_one();
+    }
+
+    consumer.join();
+
+    EXPECT_TRUE(waitSucceeded) << "consumer timed out waiting on the pool condvar";
+    EXPECT_EQ(observedOps, kPostedOpIndex);
+
+    // Second leg: the shutdown wake path (ncclProxyProgressDestroy sets stop then
+    // notifies). The consumer must wake and exit even though no op is posted.
+    observedOps   = kPostedOpIndex;
+    waitSucceeded = false;
+    pool->nextOps = kNoOps;
+
+    std::thread stopper([&]() {
+        std::unique_lock<std::mutex> lock(pool->mutex);
+        waitSucceeded = pool->cond.wait_for(
+            lock, kWaitTimeout, [&]() { return pool->nextOps != kNoOps || stop; });
+        observedOps = pool->nextOps;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    {
+        std::lock_guard<std::mutex> lock(pool->mutex);
+        stop = true;
+        pool->cond.notify_one();
+    }
+
+    stopper.join();
+
+    EXPECT_TRUE(waitSucceeded) << "consumer did not wake on stop request";
+    EXPECT_EQ(observedOps, kNoOps) << "stop wake must not fabricate a posted op";
+
+    delete pool;
+    TEST_INFO("[ProxyTests] ProxyOpsPoolMutexCondRoundTrip PASSED");
+}
+
+struct ProxyOpsPoolShmRegion
+{
+    struct ncclProxyOpsPool pool;
+    volatile int            childObserved; // op index the child read, or sentinel
+};
+
+// Process-shared: Arm the pool's mutex/condvar PTHREAD_PROCESS_SHARED, fork, have the child block in
+// cond.wait() and the parent publish an op + notify. Proves a std::mutex / std::condition_variable 
+// synchronizes correctly across processes through their pthread native handles.
+TEST(ProxyTests, ProxyOpsPoolMutexCondProcessShared)
+{
+    RUN_ISOLATED_TEST(
+        "ProxyOpsPoolMutexCondProcessShared",
+        []() {
+            TEST_INFO("[ProxyTests] ProxyOpsPoolMutexCondProcessShared start");
+
+            // Anonymous shared memory: MAP_SHARED makes writes visible across fork()
+            void* map = mmap(
+                nullptr,
+                sizeof(ProxyOpsPoolShmRegion),
+                PROT_READ | PROT_WRITE,
+                MAP_SHARED | MAP_ANONYMOUS,
+                -1,
+                0);
+            ASSERT_NE(map, MAP_FAILED);
+
+            auto* region        = static_cast<ProxyOpsPoolShmRegion*>(map);
+            auto& pool          = region->pool;
+            pool.nextOps        = kNoOps;
+            pool.nextOpsEnd     = kNoOps;
+            region->childObserved = kNoOps - 1;
+
+            ncclOsSetMutexCondShared(pool.mutex, pool.cond);
+
+            pid_t pid = fork();
+            ASSERT_NE(pid, -1);
+
+            if(pid == 0)
+            {
+                // Child = consumer. Watchdog so a broken pshared cond can never hang CI.
+                alarm(30);
+                std::unique_lock<std::mutex> lock(pool.mutex);
+                bool woke = pool.cond.wait_for(
+                    lock, kWaitTimeout, [&]() { return pool.nextOps != kNoOps; });
+                region->childObserved = woke ? pool.nextOps : (kNoOps - 2);
+                lock.unlock();
+                _exit(woke ? 0 : 1);
+            }
+
+            // Parent = producer. Let the child block in cond.wait_for first.
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            {
+                std::lock_guard<std::mutex> lock(pool.mutex);
+                pool.nextOps = kPostedOpIndex;
+                pool.cond.notify_one();
+            }
+
+            int status = 0;
+            ASSERT_EQ(waitpid(pid, &status, 0), pid);
+            EXPECT_TRUE(WIFEXITED(status)) << "child did not exit normally";
+            EXPECT_EQ(WEXITSTATUS(status), 0) << "child timed out on the shared condvar";
+            EXPECT_EQ(region->childObserved, kPostedOpIndex)
+                << "child did not observe the cross-process posted op";
+
+            ASSERT_EQ(munmap(map, sizeof(ProxyOpsPoolShmRegion)), 0);
+            TEST_INFO("[ProxyTests] ProxyOpsPoolMutexCondProcessShared PASSED");
+        });
 }
 
 } // namespace RcclUnitTesting
