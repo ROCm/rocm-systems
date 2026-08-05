@@ -3620,11 +3620,13 @@ class CodeGenerator:
             for opnd in dst_operands
         )
         uses_true16_vop3 = bool(getattr(profile, 'uses_true16_vop3_opsel', False))
+        ignores_true16_opsel = cls == 'pseudo_scalar_unary' and dtype == 'f16'
         enabled = (
             uses_true16_vop3
             and bool(is_vop3)
             and bool(dst_operands)
             and (has_src or has_dst)
+            and not ignores_true16_opsel
         )
         # A few VOP3 f16 special bodies must still use true16 OP_SEL selection
         # even though their semantic operand model is not a plain 16-bit
@@ -3704,6 +3706,7 @@ class CodeGenerator:
                 'scalar_wrexec',
                 'scalar_addk',
                 'scalar_bfe',
+                'pseudo_scalar_unary',
                 'vector_swap',
                 'vector_mov',
                 'vector_binop',
@@ -3728,7 +3731,12 @@ class CodeGenerator:
                     and dtype in ('b16', 'u16')
                 )
                 is_float_op = dtype in ('f16', 'f32', 'f64', 'bf16')
-                if is_vop3 and is_float_op and not is_true16_mov:
+                if (
+                    is_vop3
+                    and is_float_op
+                    and not is_true16_mov
+                    and cls != 'pseudo_scalar_unary'
+                ):
                     from amdisa.sema_enrich import enrich_block
 
                     ef = {'neg'}
@@ -7068,6 +7076,24 @@ class CodeGenerator:
                     ctor_body_parts.extend(conditional_src_body)
                     ctor_body_parts.extend(conditional_dst_body)
 
+                    # Pseudo-scalar V_S_* instructions encode their SGPR
+                    # destination through VDST, but the ISA reserves the VCC
+                    # selectors for this instruction family. Keep this check
+                    # local to pseudo_scalar_unary: OPR_SREG legitimately
+                    # permits VCC destinations for other instructions.
+                    if (
+                        inst_sem is not None
+                        and inst_sem.semantic_class == 'pseudo_scalar_unary'
+                    ):
+                        ctor_body_parts.append(
+                            'if (reinterpret_cast<const OpEncoding*>(inst)->vdst == '
+                            'OpSelSreg::OPR_SREG_VCC_LO || '
+                            'reinterpret_cast<const OpEncoding*>(inst)->vdst == '
+                            'OpSelSreg::OPR_SREG_VCC_HI) '
+                            f'throw util::InvalidInst("{inst.name} may not use VCC as '
+                            'a destination", "");'
+                        )
+
                     # Flat segment-aware operands: adjust addr width and add
                     # saddr for SCRATCH (seg==1) and GLOBAL (seg==2) segments.
                     if rule.use_flat_mnemonic:
@@ -7141,6 +7167,15 @@ class CodeGenerator:
                                 opnd.name in _lit_fields
                                 and opnd.name in enc_field_names
                             ):
+                                # F16 pseudo-scalar V_S_* instructions always
+                                # consume literal bits [15:0]. Unlike generic
+                                # true16 VOP3 operands, OPSEL does not select a
+                                # literal half for this instruction family.
+                                pseudo_scalar_f16 = (
+                                    inst_sem is not None
+                                    and inst_sem.semantic_class == 'pseudo_scalar_unary'
+                                    and inst_sem.data_type == 'f16'
+                                )
                                 fixup = self._literal_operand_fixup_stmt(
                                     opnd,
                                     _lit32_struct,
@@ -7154,6 +7189,7 @@ class CodeGenerator:
                                         and self.isa_spec.profile.has_src_modifiers(
                                             enc.enc_name
                                         )
+                                        and not pseudo_scalar_f16
                                         else None
                                     ),
                                 )
@@ -9013,6 +9049,7 @@ class CodeGenerator:
             '#include "rocjitsu/vm/amdgpu/register_access.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"',
             *simd_extra_includes(),
             '#include "util/data_types.h"',
             '#include "util/except.h"',
