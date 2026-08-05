@@ -53,15 +53,17 @@
 // Neutralize the NVTX3 range macros: pull in nvtx.h now (guarded, so init.cc's
 // re-include is a no-op), then redefine the range macros to no-ops so init.cc
 // references no roctx_scoped_range_in symbols (NVTX is pure instrumentation).
+// Expand to nothing: init.cc uses these without a trailing ';' (the real macros
+// self-terminate), so an empty expansion is the safe no-op.
 #include "nvtx.h"
 #undef NCCL_NVTX3_FUNC_RANGE
-#define NCCL_NVTX3_FUNC_RANGE ((void)0)
+#define NCCL_NVTX3_FUNC_RANGE
 #undef NVTX3_RANGE
-#define NVTX3_RANGE(...) ((void)0)
+#define NVTX3_RANGE(...)
 #undef NVTX3_RANGE_ADD_PAYLOAD
-#define NVTX3_RANGE_ADD_PAYLOAD(...) ((void)0)
+#define NVTX3_RANGE_ADD_PAYLOAD(...)
 #undef NVTX3_FUNC_WITH_PARAMS
-#define NVTX3_FUNC_WITH_PARAMS(...) ((void)0)
+#define NVTX3_FUNC_WITH_PARAMS(...)
 
 // getenv seam (plan F2): active ONLY around the UUT include. init.cc's direct
 // getenv("HSA_NO_SCRATCH_RECLAIM")/("HSA_FORCE_FINE_GRAIN_PCIE") reads route
