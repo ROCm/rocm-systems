@@ -3,17 +3,7 @@
 #
 cmake_minimum_required(VERSION 3.16.0)
 
-if(NOT DEFINED VERSION_MAJOR)
-    set(VERSION_MAJOR 0)
-endif()
-
-if(NOT DEFINED VERSION_MINOR)
-    set(VERSION_MINOR 3)
-endif()
-
-if(NOT DEFINED VERSION_PATCH)
-    set(VERSION_PATCH 0)
-endif()
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.cmake)
 
 set(VERSION_PATCH ${VERSION_PATCH})
 
@@ -63,12 +53,6 @@ set(BUILD_PYTHON
 set_property(CACHE BUILD_PYTHON PROPERTY STRINGS AUTO ON OFF)
 option(BUILD_MARKERS "Enable Building SQTT marker instrumentation plugin" OFF)
 option(DISABLE_COMGR "Disable dependency on amd_comgr disassembly" OFF)
-
-# Directory scope: sanitized targets recompile these sources instead of reusing the object library.
-add_compile_definitions(
-    ROCPROF_TRACE_DECODER_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
-    ROCPROF_TRACE_DECODER_VERSION_MINOR=${PROJECT_VERSION_MINOR}
-    ROCPROF_TRACE_DECODER_VERSION_PATCH=${PROJECT_VERSION_PATCH})
 
 if(BUILD_MARKERS)
     add_subdirectory(markers)
