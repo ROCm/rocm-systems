@@ -47,7 +47,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rocm-release: ['6.2', '6.3', '6.4', 'latest']
+        rocm-release: ['6.2', '6.3', '6.4', '7.0.2', '7.0.1', '7.0.1-complete', '7.0.2-complete', 'latest']
         os: ['ubuntu-22.04']
         build-type: ['Release']
         aqlprofile: ['internal', 'external']
