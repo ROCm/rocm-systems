@@ -7,6 +7,7 @@
 #include "backend.h"
 #include "buffer.h"
 #include "backend/asyncop-fallback.h"
+#include "backend/bounce-buffer.h"
 #include "backend/memcpy-kernel.h"
 #include "configuration.h"
 #include "context.h"
@@ -27,7 +28,6 @@
 #include <hip/driver_types.h>
 #include <memory>
 #include <stdexcept>
-#include <sys/mman.h>
 #include <syslog.h>
 #include <system_error>
 #include <variant>
@@ -37,9 +37,15 @@ using namespace hipFile;
 
 using std::min;
 using std::shared_ptr;
-using std::unique_ptr;
 
 static const size_t DefaultChunkSize = 16 * 1024 * 1024;
+
+/// @brief Round size up to a whole number of pages
+static size_t
+roundUpToPageSize(size_t size)
+{
+    return (size + hipFile::getPageSize() - 1) & hipFile::getPageMask();
+}
 
 int
 Fallback::score(const std::shared_ptr<IFile> &file, const std::shared_ptr<IBuffer> &buffer, size_t size,
@@ -84,10 +90,17 @@ Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
         throw std::invalid_argument("The selected file or buffer region is invalid");
     }
 
-    auto ptr     = Context<Sys>::get()->mmap(nullptr, chunk_size, PROT_READ | PROT_WRITE,
-                                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    auto deleter = [&](void *addr) { Context<Sys>::get()->munmap(addr, chunk_size); };
-    unique_ptr<void, decltype(deleter)> bounce_buffer{ptr, deleter};
+    // Never stage through more memory than the request can use. The buffer is
+    // cached for the lifetime of the thread, so this caps what a thread that
+    // only ever issues small IOs keeps pinned.
+    chunk_size = min(chunk_size, roundUpToPageSize(std::max(size, size_t{1})));
+
+    auto *bounce_buffer = getThreadBounceBuffer(chunk_size);
+    auto  unbufferedFd  = -1;
+    if (file->unbufferedFd())
+        unbufferedFd = *file->unbufferedFd();
+    else
+        throw std::invalid_argument("Testing direct vs hiphostmalloc fallback.");
 
     ssize_t total_io_bytes = 0;
     do {
@@ -100,19 +113,17 @@ Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
         try {
             switch (type) {
                 case IoType::Read:
-                    io_bytes =
-                        Context<Sys>::get()->pread(file->bufferedFd(), bounce_buffer.get(), count, offset);
+                    io_bytes = Context<Sys>::get()->pread(unbufferedFd, bounce_buffer, count, offset);
                     if (io_bytes > 0) {
-                        Context<Hip>::get()->hipMemcpy(device_buffer_position, bounce_buffer.get(),
+                        Context<Hip>::get()->hipMemcpy(device_buffer_position, bounce_buffer,
                                                        static_cast<size_t>(io_bytes), hipMemcpyHostToDevice);
                     }
                     break;
                 case IoType::Write:
-                    Context<Hip>::get()->hipMemcpy(bounce_buffer.get(), device_buffer_position, count,
+                    Context<Hip>::get()->hipMemcpy(bounce_buffer, device_buffer_position, count,
                                                    hipMemcpyDeviceToHost);
                     Context<Hip>::get()->hipStreamSynchronize(nullptr);
-                    io_bytes =
-                        Context<Sys>::get()->pwrite(file->bufferedFd(), bounce_buffer.get(), count, offset);
+                    io_bytes = Context<Sys>::get()->pwrite(unbufferedFd, bounce_buffer, count, offset);
                     Context<Sys>::get()->fdatasync(file->bufferedFd());
                     break;
                 default:

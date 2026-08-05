@@ -11,6 +11,7 @@ set(HIPFILE_SOURCES
     async.cpp
     backend.cpp
     backend/asyncop-fallback.cpp
+    backend/bounce-buffer.cpp
     backend/memcpy-kernel.hip
     backend/fallback.cpp
     backend/fastpath.cpp
