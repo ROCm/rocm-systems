@@ -297,7 +297,30 @@ std::string shared_translation_root(const void *address) {
   const size_t prefix_at = library_dir.rfind('/');
   if (prefix_at == std::string_view::npos)
     return {};
-  return std::string(library_dir.substr(0, prefix_at)) + "/share/rocjitsu/translations";
+
+  // Only an install layout gets a root. Stripping two components unconditionally
+  // means a module loaded from anywhere at all names a sibling `share` -- a copy
+  // under /tmp would derive /tmp/share/rocjitsu/translations, inventing a cache
+  // location in a world-writable directory purely because that is where the
+  // library happened to sit. Requiring the containing directory to be a library
+  // directory keeps the derivation to the case it was designed for; anything
+  // else reports no root, and the caller treats that as "not pre-translated".
+  const std::string_view library_dir_name = library_dir.substr(prefix_at + 1);
+  const bool is_library_dir = library_dir_name == "lib" || library_dir_name == "lib64" ||
+                              // Debian/Ubuntu multiarch, e.g. lib/x86_64-linux-gnu, whose prefix is
+                              // one level further up than the two-component strip above assumes.
+                              library_dir_name.find('-') != std::string_view::npos;
+  if (!is_library_dir)
+    return {};
+  std::string_view prefix = library_dir.substr(0, prefix_at);
+  if (library_dir_name.find('-') != std::string_view::npos) {
+    const size_t multiarch_prefix_at = prefix.rfind('/');
+    if (multiarch_prefix_at == std::string_view::npos ||
+        prefix.substr(multiarch_prefix_at + 1) != "lib")
+      return {};
+    prefix = prefix.substr(0, multiarch_prefix_at);
+  }
+  return std::string(prefix) + "/share/rocjitsu/translations";
 }
 
 namespace {
@@ -326,69 +349,127 @@ namespace {
 /// correcting one would quietly repair the very thing the directory checks below
 /// exist to notice, and repairing it is precisely what someone who planted it
 /// would want.
-[[nodiscard]] bool make_directory_path(const std::string &path, mode_t mode) {
-  std::string partial;
-  partial.reserve(path.size());
-  for (size_t i = 1; i <= path.size(); ++i) {
-    if (i != path.size() && path[i] != '/')
-      continue;
-    partial.assign(path, 0, i);
-    if (mkdir(partial.c_str(), mode) == 0) {
-      (void)chmod(partial.c_str(), mode);
-    } else if (errno != EEXIST) {
-      return false;
+[[nodiscard]] std::vector<std::string> path_components(std::string_view path) {
+  std::vector<std::string> components;
+  size_t at = 0;
+  while (at < path.size()) {
+    const size_t next = path.find('/', at);
+    const std::string_view component =
+        path.substr(at, next == std::string_view::npos ? std::string_view::npos : next - at);
+    if (!component.empty())
+      components.emplace_back(component);
+    if (next == std::string_view::npos)
+      break;
+    at = next + 1;
+  }
+  return components;
+}
+
+/// @brief Which owners a directory the store relies on may have.
+enum class DirectoryTrust {
+  /// Sole ownership by the caller. The session tier is writable by the process
+  /// that checks it, and exclusivity is what makes its own writes safe to trust.
+  kOwnedByCaller,
+  /// Owner root or the caller -- the standard trusted-system-directory test. The
+  /// shared tier is read at run time and written only by an installer, so the
+  /// question is not exclusivity but whether anyone outside the trust boundary
+  /// could have placed an entry.
+  kOwnedByRootOrCaller,
+};
+
+/// @brief Whether @p info names a directory an acceptable user owns.
+///
+/// @details Asked of the directories the store is handed rather than the ones it
+/// creates. The fallback root lives in a world-writable directory, so another
+/// user can pre-create it, and ownership is what rules that out. Their MODE is
+/// not the store's business: $XDG_RUNTIME_DIR/rocjitsu is made by the daemon and
+/// is group-writable, and demanding otherwise would disable the session tier
+/// wherever the daemon has run.
+[[nodiscard]] bool directory_owner_is_trusted(const struct stat &info, DirectoryTrust trust) {
+  if (!S_ISDIR(info.st_mode))
+    return false;
+  if (trust == DirectoryTrust::kOwnedByCaller)
+    return info.st_uid == geteuid();
+  return info.st_uid == 0 || info.st_uid == geteuid();
+}
+
+/// @brief Whether @p info names a directory only its owner can write.
+///
+/// @details Asked of the directories holding entries, which the store creates
+/// itself and whose contents it is about to believe. Group or other write there
+/// means someone outside the trust boundary could have placed an entry.
+[[nodiscard]] bool directory_is_trusted(const struct stat &info, DirectoryTrust trust) {
+  return directory_owner_is_trusted(info, trust) && (info.st_mode & (S_IWGRP | S_IWOTH)) == 0;
+}
+
+/// @brief Walk to @p path one component at a time, following no symlink.
+///
+/// @details Opening the assembled path in one call and checking only what it
+/// lands on proves nothing about how it got there: any component along the way
+/// can be a symlink, and the check then describes the target rather than the
+/// place the caller named. A domain pre-created as a symlink was enough to send
+/// the writer outside the root it was given and have the reader find the entry
+/// there, with every check passing.
+///
+/// So each component is opened relative to its already-verified parent with
+/// O_NOFOLLOW, and the checks apply to that descriptor. A symlink anywhere is
+/// refused instead of followed. The final descriptor is then held for the
+/// process lifetime, so nothing that happens to the path afterwards changes
+/// which directory is used.
+///
+/// @param create_mode Non-zero creates missing components with that mode. mkdir
+///        applies the umask, so a component this call creates has its mode set
+///        again through its own descriptor. A component that already existed is
+///        left exactly as found: correcting one would quietly repair the very
+///        thing these checks exist to notice.
+/// @param trusted_from Index of the first component the trust policy applies to.
+///        The directories above a store root are the system's -- /tmp is
+///        world-writable by design and would fail any ownership test -- so they
+///        are walked without following symlinks but are not otherwise judged.
+[[nodiscard]] int open_descended_directory(const std::string &path, mode_t create_mode,
+                                           DirectoryTrust trust, size_t owner_checked_from,
+                                           size_t trusted_from) {
+  const std::vector<std::string> components = path_components(path);
+  if (components.empty())
+    return -1;
+
+  int parent = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (parent < 0)
+    return -1;
+
+  for (size_t index = 0; index < components.size(); ++index) {
+    const std::string &component = components[index];
+    // "." and ".." would step outside the chain of descriptors this walk has
+    // verified, which is the whole point of walking it.
+    if (component == "." || component == "..") {
+      close(parent);
+      return -1;
     }
+    const bool created = create_mode != 0 && mkdirat(parent, component.c_str(), create_mode) == 0;
+    if (!created && create_mode != 0 && errno != EEXIST) {
+      close(parent);
+      return -1;
+    }
+    const int child =
+        openat(parent, component.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    close(parent);
+    if (child < 0)
+      return -1;
+    if (created)
+      (void)fchmod(child, create_mode);
+    if (index >= owner_checked_from) {
+      struct stat info {};
+      const bool ok = fstat(child, &info) == 0 &&
+                      (index >= trusted_from ? directory_is_trusted(info, trust)
+                                             : directory_owner_is_trusted(info, trust));
+      if (!ok) {
+        close(child);
+        return -1;
+      }
+    }
+    parent = child;
   }
-  return true;
-}
-
-/// @brief Open @p path and confirm it is a private directory we own.
-///
-/// @details The preferred location is created private by the session manager,
-/// but the fallback sits in a world-writable directory where another user can
-/// pre-create the path. A directory that fails these checks is refused outright
-/// rather than repaired: the wrong mode is a signal, and fixing it is precisely
-/// what someone planting a directory would want.
-[[nodiscard]] int open_verified_directory(const std::string &path) {
-  const int fd = open(path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-  if (fd < 0)
-    return -1;
-  struct stat info {};
-  if (fstat(fd, &info) != 0 || !S_ISDIR(info.st_mode) || info.st_uid != geteuid() ||
-      (info.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
-    close(fd);
-    return -1;
-  }
-  return fd;
-}
-
-/// @brief Open @p path and confirm it is a trusted system directory.
-///
-/// @details A separate policy from the session tier's, not a relaxation of it.
-/// The session tier requires sole ownership because it is writable by the
-/// process that checks it, and exclusivity is what makes its own writes safe to
-/// trust. The shared tier is read at run time and written only by an installer,
-/// so the question is different: could anyone outside the trust boundary have
-/// placed an entry here? Owner root or the caller, with neither group nor other
-/// able to write, is the answer -- the standard test for a system directory. The
-/// verified descriptor is then held, so nothing that happens to the path
-/// afterwards changes which directory is read.
-///
-/// Symlinks are permitted on the final component, unlike the session tier, since
-/// nothing here is rooted in a world-writable directory and packagers do
-/// legitimately link install trees around. The ownership test is applied to
-/// whatever the link resolves to.
-[[nodiscard]] int open_trusted_directory(const std::string &path) {
-  const int fd = open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-  if (fd < 0)
-    return -1;
-  struct stat info {};
-  if (fstat(fd, &info) != 0 || !S_ISDIR(info.st_mode) ||
-      (info.st_uid != 0 && info.st_uid != geteuid()) || (info.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
-    close(fd);
-    return -1;
-  }
-  return fd;
+  return parent;
 }
 
 struct Entry {
@@ -508,13 +589,28 @@ struct TranslationStore::Impl {
       }
     }
     const std::string path = base + "/" + domain_ + "/" + std::string(kSchemaDir);
+    // The trust policy starts at the store's own root. Everything above it
+    // belongs to the system -- /tmp is world-writable by design, and judging it
+    // by the store's rules would refuse every fallback location -- so those are
+    // walked without following symlinks but are not otherwise judged. From the
+    // root down, every component must pass, because those are the directories
+    // whose contents this store is about to believe.
+    // Ownership is checked from the store root down, because a root someone else
+    // owns is a root someone else controls -- that is what protects the /tmp
+    // fallback. The stricter no-group-or-other-write rule starts one level
+    // lower, at the directories this store creates and reads entries from: the
+    // root itself may be the daemon's, and it is group-writable.
+    const size_t owner_checked_from = path_components(base).size() - 1;
+    const size_t trusted_from = path_components(base).size();
     // A read-only store never creates its tree. An absent shared tier means
     // nobody pre-translated, which is a miss and not something to repair -- and
     // a directory this process created could not be trusted by the next one
     // anyway, since it would fail its own ownership test under a different user.
-    if (writable() && !make_directory_path(path, shared() ? 0755 : 0700))
-      return;
-    dir_fd_ = shared() ? open_trusted_directory(path) : open_verified_directory(path);
+    const mode_t create_mode = writable() ? (shared() ? 0755 : 0700) : 0;
+    dir_fd_ = open_descended_directory(path, create_mode,
+                                       shared() ? DirectoryTrust::kOwnedByRootOrCaller
+                                                : DirectoryTrust::kOwnedByCaller,
+                                       owner_checked_from, trusted_from);
     if (writable()) {
       // Once per process, and the only moment at which a temporary left by a
       // process that died mid-write is unambiguously abandoned.

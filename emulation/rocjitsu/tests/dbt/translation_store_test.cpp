@@ -36,6 +36,11 @@ constexpr TranslationIdentity kIdentity{
     .target_isa = "gfx-example",
 };
 
+constexpr auto kSafeDirPerms =
+    std::filesystem::perms::owner_all | std::filesystem::perms::group_read |
+    std::filesystem::perms::group_exec | std::filesystem::perms::others_read |
+    std::filesystem::perms::others_exec;
+
 const std::vector<uint8_t> kSource{'s', 'r', 'c'};
 const std::vector<uint8_t> kObject{'o', 'u', 't', 'p', 'u', 't'};
 
@@ -273,6 +278,101 @@ TEST_F(TranslationStoreTest, ARebuiltTranslatorDoesNotReadTheOldEntries) {
   EXPECT_EQ(get(*first), kObject);
 }
 #endif // RJ_TRANSLATOR_PROBE_a && RJ_TRANSLATOR_PROBE_b
+
+TEST_F(TranslationStoreTest, AGroupWritableStoreRootIsStillUsable) {
+  // $XDG_RUNTIME_DIR/rocjitsu is created by the daemon and is group-writable, so
+  // applying the store's own no-group-or-other-write rule to the root it is
+  // handed disables the session tier wherever the daemon has run -- silently,
+  // because an unusable store is indistinguishable from a cold one. Ownership is
+  // what matters for a root the store did not create; the stricter rule belongs
+  // to the directories it creates and reads entries from.
+  const std::filesystem::path root = std::filesystem::path(root_) / "daemon-made";
+  std::filesystem::create_directories(root);
+  std::filesystem::permissions(root, kSafeDirPerms | std::filesystem::perms::group_write);
+
+  auto store = open_shared("pair-a", TranslationStore::Access::kReadWrite, root.string().c_str());
+  ASSERT_TRUE(store->available()) << "a group-writable root must not disable the store";
+  put(*store, kObject);
+  EXPECT_EQ(get(*store), kObject);
+
+  // The directories holding entries are still strict, whatever the root allows.
+  for (const auto &item : std::filesystem::recursive_directory_iterator(root)) {
+    if (!std::filesystem::is_directory(item))
+      continue;
+    EXPECT_EQ(std::filesystem::status(item).permissions() &
+                  (std::filesystem::perms::group_write | std::filesystem::perms::others_write),
+              std::filesystem::perms::none)
+        << item.path();
+  }
+}
+
+TEST_F(TranslationStoreTest, ASymlinkedDomainIsRefusedRatherThanFollowed) {
+  // Checking only where an assembled path lands proves nothing about how it got
+  // there. With the domain pre-created as a symlink, a writer walks out of the
+  // root it was given and a reader finds the entry at the target, with every
+  // check passing -- so a symlink at any component has to be refused rather than
+  // followed and then described.
+  //
+  // The ordinary domain below is the control, and it is the whole reason this
+  // test means anything: without it, a store refusing BOTH cases -- for any
+  // unrelated reason -- would read as a pass, and the assertion would be
+  // measuring nothing. Both halves run under identical ownership and modes, so
+  // the only difference between them is the symlink.
+  auto ordinary = open_shared("pair-ok", TranslationStore::Access::kReadWrite);
+  ASSERT_TRUE(ordinary->available()) << "control: a plain domain must be usable here";
+  put(*ordinary, kObject);
+  ASSERT_EQ(get(*ordinary), kObject) << "control: a plain domain must round-trip here";
+
+  const std::filesystem::path elsewhere = std::filesystem::path(root_) / "elsewhere";
+  std::filesystem::create_directories(elsewhere);
+  // Explicit, because the ambient umask decides otherwise: a group-writable
+  // directory is refused on its own merits, which would make the symlink
+  // assertion below pass without testing the symlink at all.
+  std::filesystem::permissions(elsewhere, kSafeDirPerms);
+  std::filesystem::create_directory_symlink(elsewhere, std::filesystem::path(root_) / "pair-a");
+
+  for (auto access : {TranslationStore::Access::kReadWrite, TranslationStore::Access::kReadOnly}) {
+    auto shared_store = open_shared("pair-a", access);
+    EXPECT_FALSE(shared_store->available()) << "a symlinked domain must not be followed";
+    put(*shared_store, kObject);
+    EXPECT_TRUE(get(*shared_store).empty());
+  }
+
+  auto session = open("pair-a");
+  EXPECT_FALSE(session->available());
+  put(*session, kObject);
+  EXPECT_TRUE(get(*session).empty());
+
+  // And nothing was written through the link into the directory it targets.
+  EXPECT_TRUE(std::filesystem::is_empty(elsewhere));
+}
+
+TEST_F(TranslationStoreTest, ASymlinkAboveTheDomainIsRefusedToo) {
+  // The parent of the domain is just as load-bearing: redirecting it relocates
+  // the whole tree, including entries a later reader would trust. Same structure
+  // as above -- a real directory first, so refusing everything cannot pass.
+  const std::filesystem::path real_root = std::filesystem::path(root_) / "real";
+  std::filesystem::create_directories(real_root);
+  std::filesystem::permissions(real_root, kSafeDirPerms);
+  auto ordinary =
+      open_shared("pair-a", TranslationStore::Access::kReadWrite, real_root.string().c_str());
+  ASSERT_TRUE(ordinary->available()) << "control: a plain root must be usable here";
+  put(*ordinary, kObject);
+  ASSERT_EQ(get(*ordinary), kObject);
+
+  const std::filesystem::path elsewhere = std::filesystem::path(root_) / "elsewhere";
+  std::filesystem::create_directories(elsewhere);
+  std::filesystem::permissions(elsewhere, kSafeDirPerms);
+  const std::filesystem::path linked_root = std::filesystem::path(root_) / "link";
+  std::filesystem::create_directory_symlink(elsewhere, linked_root);
+
+  auto tool =
+      open_shared("pair-a", TranslationStore::Access::kReadWrite, linked_root.string().c_str());
+  EXPECT_FALSE(tool->available()) << "a symlinked root must not be followed";
+  put(*tool, kObject);
+  EXPECT_TRUE(get(*tool).empty());
+  EXPECT_TRUE(std::filesystem::is_empty(elsewhere));
+}
 
 TEST_F(TranslationStoreTest, TheSharedTierHoldsWhatTheSessionTierRefuses) {
   // The reason the shared tier exists. The session tier is rooted in the
