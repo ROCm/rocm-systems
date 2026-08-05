@@ -12,7 +12,10 @@
 [![pylint](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-pylint.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-pylint.yml)
 [![shellcheck](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-shellcheck.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-shellcheck.yml)
 
-AMD Infinity Storage library that supports IO directly to the GPU.
+hipFile is AMD's Infinity Storage library that provides direct-to-GPU I/O for the ROCm platform. The library provides C and Python APIs for synchronous, asynchronous, and batch I/O operations. hipFile automatically falls back to POSIX I/O when operations are unable to use the direct-to-GPU path.
+
+> [!NOTE]
+> The published documentation is available at [hipFile](https://rocm.docs.amd.com/projects/hipFile/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in `projects/hipfile/docs` in this repository. As with all ROCm projects, the documentation is open source.
 
 ## Installing and Using hipFile
 

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/env_vars.hpp"
 #include "core/config.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
@@ -88,7 +89,8 @@ struct settings_policy
     static gpu::enabled_metrics get_enabled_metrics() noexcept
     {
         static auto _enabled_metrics = []() {
-            auto setting   = get_setting_value<std::string>("ROCPROFSYS_AMD_SMI_METRICS");
+            auto setting =
+                get_setting_value<std::string>(std::string{ env_vars::AMD_SMI_METRICS });
             auto value_str = setting.has_value() ? setting.value() : "all";
             auto result    = parse_enabled_metrics(value_str);
             return result;
@@ -106,7 +108,8 @@ struct settings_policy
      */
     static nic::nic_device_filter get_nic_device_filter() noexcept
     {
-        auto filter = get_setting_value<std::string>("ROCPROFSYS_SAMPLING_AINICS");
+        auto filter =
+            get_setting_value<std::string>(std::string{ env_vars::SAMPLING_AINICS });
         if(!filter.has_value())
         {
             // NIC sampling disabled by default
@@ -140,7 +143,7 @@ struct settings_policy
     /**
      * @brief Get NIC enabled metrics.
      *
-     * For NIC, all 6 RDMA metrics are enabled when NIC sampling is active.
+     * For NIC, all RDMA metrics are enabled when NIC sampling is active.
      */
     static nic::enabled_metrics get_nic_enabled_metrics() noexcept
     {
@@ -158,7 +161,8 @@ struct settings_policy
     static cpu::enabled_metrics get_cpu_enabled_metrics()
     {
         static auto _result = []() {
-            auto       setting = get_setting_value<std::string>("ROCPROFSYS_CPU_METRICS");
+            auto setting =
+                get_setting_value<std::string>(std::string{ env_vars::CPU_METRICS });
             const auto value_str = setting.has_value() ? setting.value() : "all";
             return parse_cpu_enabled_metrics(value_str);
         }();

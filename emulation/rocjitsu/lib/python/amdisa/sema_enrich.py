@@ -45,6 +45,15 @@ _DS_ATOMIC_PREFIXES = (
     'DS_SUB_CLAMP_',
 )
 
+_NO_DST_MODIFIER_INSTRUCTIONS = frozenset(
+    {
+        'V_CVT_F16_BF8',
+        'V_CVT_F16_FP8',
+        'V_CVT_NORM_I16_F16',
+        'V_CVT_NORM_U16_F16',
+    }
+)
+
 
 def _is_ds_atomic(name: str) -> bool:
     return any(name.startswith(p) for p in _DS_ATOMIC_PREFIXES)
@@ -83,6 +92,8 @@ def enrich_block(
     body = _fix_non_rtn_atomics(name, body)
 
     if enc_field_names:
+        if name in _NO_DST_MODIFIER_INSTRUCTIONS:
+            enc_field_names = enc_field_names - frozenset({'clamp', 'omod'})
         body = _add_vop3_modifiers(body, enc_field_names, block.pragma)
 
     result = SemaBlock(

@@ -21,7 +21,7 @@ jobs:
           script: |
             const pr = context.payload.pull_request;
             let prNumber, headSha, baseBranch, headBranch;
-            
+
             // Handle different event types
             if (context.eventName === 'pull_request') {
               prNumber = pr.number;
@@ -32,26 +32,26 @@ jobs:
               // Find the associated PR for workflow_run events
               const workflowRun = context.payload.workflow_run;
               console.log(`Workflow run completed: ${workflowRun.name} with conclusion: ${workflowRun.conclusion}`);
-              
+
               if (workflowRun.event !== 'pull_request') {
                 console.log('Workflow run was not triggered by a pull request, skipping');
                 return;
               }
-              
+
               const prs = await github.rest.pulls.list({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 state: 'open',
                 head: `${context.repo.owner}:${workflowRun.head_branch}`
               });
-              
+
               const associatedPr = prs.data.find(p => p.head.sha === workflowRun.head_sha);
-              
+
               if (!associatedPr) {
                 console.log('No associated PR found for this workflow run');
                 return;
               }
-              
+
               prNumber = associatedPr.number;
               headSha = associatedPr.head.sha;
               baseBranch = associatedPr.base.ref;
@@ -127,40 +127,40 @@ jobs:
             if (context.eventName === 'workflow_run') {
               // Handle workflow_run events (existing logic)
               const workflowRun = context.payload.workflow_run;
-              
+
               if (workflowRun.name === 'ABI Compliance Check') {
                 shouldCheckABI = true;
                 console.log(`ABI Compliance Check completed with conclusion: ${workflowRun.conclusion}`);
-                
+
                 try {
                   const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
                     run_id: workflowRun.id
                   });
-                  
+
                   // Check job conclusions for ABI breakage
                   for (const job of jobs.jobs) {
                     console.log(`Job: ${job.name}, Conclusion: ${job.conclusion}`);
-                    
+
                     if (job.name.includes('Major ABI') && job.conclusion === 'failure') {
                       hasMajorAbiBreakage = true;
                       console.log('Major ABI breakage detected from job failure');
                     }
-                    
+
                     if (job.name.includes('Minor ABI') && job.conclusion === 'failure') {
                       hasMinorAbiBreakage = true;
                       console.log('Minor ABI breakage detected from job failure');
                     }
                   }
-                  
+
                   // If workflow succeeded, no ABI breakage
                   if (workflowRun.conclusion === 'success') {
                     console.log('ABI Compliance Check succeeded - no ABI breakage');
                     hasMajorAbiBreakage = false;
                     hasMinorAbiBreakage = false;
                   }
-                  
+
                 } catch (error) {
                   console.log(`Could not fetch job details: ${error.message}`);
                   return;
@@ -169,11 +169,11 @@ jobs:
             } else if (context.eventName === 'pull_request') {
               // NEW: Check if amdsmi.h has been reverted on PR events
               const hasAbiLabels = existingLabels.includes('MAJOR ABI BREAKAGE') || existingLabels.includes('MINOR ABI BREAKAGE');
-              
+
               if (hasAbiLabels) {
                 console.log('PR has ABI labels, checking if amdsmi.h changes were reverted...');
                 shouldCheckABI = true;
-                
+
                 try {
                   // Get the diff for amdsmi.h between base and head
                   const { data: comparison } = await github.rest.repos.compareCommits({
@@ -182,10 +182,10 @@ jobs:
                     base: currentPr.base.sha,
                     head: currentPr.head.sha
                   });
-                  
+
                   // Check if amdsmi.h has any changes
                   const amdsmiFile = comparison.files?.find(file => file.filename === 'include/amd_smi/amdsmi.h');
-                  
+
                   if (!amdsmiFile) {
                     console.log('No changes to amdsmi.h found in this PR - removing ABI labels');
                     hasMajorAbiBreakage = false;
@@ -200,7 +200,7 @@ jobs:
                     hasMajorAbiBreakage = existingLabels.includes('MAJOR ABI BREAKAGE');
                     hasMinorAbiBreakage = existingLabels.includes('MINOR ABI BREAKAGE');
                   }
-                  
+
                 } catch (error) {
                   console.log(`Error checking file changes: ${error.message}`);
                   // If we can't check, preserve existing labels
@@ -222,7 +222,7 @@ jobs:
 
               for (const [labelName, shouldHaveLabel] of Object.entries(abiLabels)) {
                 const hasLabel = existingLabels.includes(labelName);
-                
+
                 if (shouldHaveLabel && !hasLabel) {
                   // Add label
                   try {
@@ -265,7 +265,7 @@ jobs:
                     body: '⚠️ **MAJOR ABI BREAKAGE detected** in the latest ABI compliance check. Please review the ABI compliance report and fix any breaking changes.'
                   });
                 }
-                
+
                 if (hasMinorAbiBreakage && !wasMinorAbiBreakage) {
                   await github.rest.issues.createComment({
                     owner: context.repo.owner,
@@ -274,7 +274,7 @@ jobs:
                     body: '⚠️ **MINOR ABI BREAKAGE detected** in the latest ABI compliance check. Please review the ABI compliance report for details.'
                   });
                 }
-                
+
                 if (!hasMajorAbiBreakage && wasMajorAbiBreakage) {
                   await github.rest.issues.createComment({
                     owner: context.repo.owner,
@@ -283,7 +283,7 @@ jobs:
                     body: '✅ **MAJOR ABI BREAKAGE resolved** - ABI compliance check is now passing!'
                   });
                 }
-                
+
                 if (!hasMinorAbiBreakage && wasMinorAbiBreakage) {
                   await github.rest.issues.createComment({
                     owner: context.repo.owner,
@@ -302,7 +302,7 @@ jobs:
                     body: '✅ **MAJOR ABI BREAKAGE resolved** - `amdsmi.h` changes have been reverted.'
                   });
                 }
-                
+
                 if (!hasMinorAbiBreakage && wasMinorAbiBreakage) {
                   await github.rest.issues.createComment({
                     owner: context.repo.owner,

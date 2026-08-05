@@ -42,7 +42,7 @@ namespace amd::dbgapi
 {
 
 class agent_t;
-class compute_queue_t;
+class queue_t;
 class dispatch_t;
 class event_t;
 class displaced_stepping_t;
@@ -131,6 +131,8 @@ public:
 
   bool is_halted () const;
   void set_halted (bool halted);
+
+  size_t lds_size () const { return m_cwsr_record->lds_size (); }
 
   /* Return the last wave stop event, or nullptr if the event is already
      processed and destroyed.  */
@@ -242,7 +244,7 @@ public:
 
   workgroup_t &workgroup () const { return m_workgroup; }
   const dispatch_t &dispatch () const;
-  compute_queue_t &queue () const;
+  queue_t &queue () const;
   const agent_t &agent () const;
   process_t &process () const;
   const architecture_t &architecture () const;

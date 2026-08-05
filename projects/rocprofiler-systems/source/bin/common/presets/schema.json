@@ -447,6 +447,10 @@
                 "time_output": {
                     "$ref": "#/$defs/enabledField",
                     "description": "Include timestamps in output filenames"
+                },
+                "unified_memory_output_path": {
+                    "$ref": "#/$defs/stringValueField",
+                    "description": "Output directory path for unified memory profiling reports"
                 }
             },
             "type": "object"

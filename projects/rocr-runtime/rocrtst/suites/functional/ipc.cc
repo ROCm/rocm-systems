@@ -189,6 +189,14 @@ static void ClearShared(Shared *s) {
 void IPCTest::SetUp(void) {
   if (!checkPlatformFiltering()) return;
 
+#ifdef ROCRTST_ASAN
+  // IPC test uses fork() which is unsupported under ASAN as ASAN's shadow
+  // memory state becomes inconsistent after fork, causing failure on free
+  std::cout << "Skipping IPC test under ASAN (fork unsupported)." << std::endl;
+  test_skipped_ = true;
+  return;
+#endif
+
   hsa_status_t err;
 
   // Allow user to trigger a failure

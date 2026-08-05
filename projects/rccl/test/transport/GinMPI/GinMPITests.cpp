@@ -10,9 +10,15 @@
 
 #include "GinMPITestBase.hpp"
 
+#include "comm.h"
+#include "gin.h"
+
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
+
+extern bool rcclUseAinic();
 
 namespace RCCLGinTests
 {
@@ -720,11 +726,12 @@ TEST_F(GinMPIStressTest, IPutSignalStress10k)
 namespace
 {
 
-// Pretty per-instance suffix: e.g. "Ctx2_64KiB"
-inline std::string CtxSizeName(const ::testing::TestParamInfo<std::tuple<int, size_t>>& info)
+// Pretty per-instance suffix: e.g. "Ctx2_64KiB_DmaBuf"
+inline std::string CtxSizeName(const ::testing::TestParamInfo<std::tuple<int, size_t, bool>>& info)
 {
-    const int    nCtx = std::get<0>(info.param);
-    const size_t sz   = std::get<1>(info.param);
+    const int    nCtx    = std::get<0>(info.param);
+    const size_t sz      = std::get<1>(info.param);
+    const bool   dmaBuf  = std::get<2>(info.param);
     std::string  sizeStr;
     if(sz % (1024 * 1024) == 0)
     {
@@ -738,12 +745,16 @@ inline std::string CtxSizeName(const ::testing::TestParamInfo<std::tuple<int, si
     {
         sizeStr = std::to_string(sz) + "B";
     }
-    return "Ctx" + std::to_string(nCtx) + "_" + sizeStr;
+    return "Ctx" + std::to_string(nCtx) + "_" + sizeStr
+           + (dmaBuf ? "_DmaBuf" : "_RegMr");
 }
 
-inline std::string CtxOnlyName(const ::testing::TestParamInfo<int>& info)
+inline std::string CtxOnlyName(const ::testing::TestParamInfo<std::tuple<int, bool>>& info)
 {
-    return "Ctx" + std::to_string(info.param);
+    const int  nCtx   = std::get<0>(info.param);
+    const bool dmaBuf = std::get<1>(info.param);
+    return "Ctx" + std::to_string(nCtx)
+           + (dmaBuf ? "_DmaBuf" : "_RegMr");
 }
 
 } // namespace
@@ -755,14 +766,78 @@ INSTANTIATE_TEST_SUITE_P(
         ::testing::Values(1, 2),
         ::testing::Values(static_cast<size_t>(4 * 1024),
                           static_cast<size_t>(64 * 1024),
-                          static_cast<size_t>(1 * 1024 * 1024))),
+                          static_cast<size_t>(1 * 1024 * 1024)),
+        ::testing::Bool()),
     CtxSizeName);
 
 INSTANTIATE_TEST_SUITE_P(
     CtxOnly,
     GinMPIFixedSizeTest,
-    ::testing::Values(1, 2),
+    ::testing::Combine(
+        ::testing::Values(1, 2),
+        ::testing::Bool()),
     CtxOnlyName);
+
+// ---------------------------------------------------------------------------
+// Communicator-init fixture — validates GIN backend gating and selection at
+// ncclCommInitRank() time. Unlike the fixtures above it does not stand up any
+// GIN data-path context; it only inspects the backend the communicator bound.
+// ---------------------------------------------------------------------------
+class GinInitMPITest : public MPITestBase
+{
+protected:
+    ncclGin_t* AssignedGin()
+    {
+        auto* comm = reinterpret_cast<struct ncclComm*>(getActiveCommunicator());
+        return comm->sharedRes->ginState.ncclGin;
+    }
+};
+
+TEST_F(GinInitMPITest, GinEnableZeroSkipsInit)
+{
+    const char* e = std::getenv("NCCL_GIN_ENABLE");
+    if (e == nullptr || std::strcmp(e, "0") != 0)
+        GTEST_SKIP() << "Requires NCCL_GIN_ENABLE=0";
+
+    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, kNoProcessLimit,
+                                          kNoPowerOfTwoRequired, 1, kNoNodeLimit))
+        << "Test requirements not met";
+
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+    EXPECT_EQ(AssignedGin(), nullptr) << "GIN must be skipped when NCCL_GIN_ENABLE=0";
+}
+
+TEST_F(GinInitMPITest, AinicSelectsCastBackend)
+{
+    if (!rcclUseAinic())
+        GTEST_SKIP() << "Requires AINIC hardware";
+
+    const char* e = std::getenv("NCCL_GIN_ENABLE");
+    if (e != nullptr && std::strcmp(e, "0") == 0)
+        GTEST_SKIP() << "GIN disabled by NCCL_GIN_ENABLE=0";
+
+    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, kNoProcessLimit,
+                                          kNoPowerOfTwoRequired, 1, kNoNodeLimit))
+        << "Test requirements not met";
+
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclGin_t* gin = AssignedGin();
+    if (gin == nullptr)
+        GTEST_SKIP() << "No GIN-capable devices enabled on this host";
+
+    // The generic net_ib proxy (ncclGinIbProxy) and the ionic net_ib_cast
+    // backends all report the name "GIN_IB_PROXY", so the backend identity must
+    // be checked through its function table rather than its name. The ionic
+    // cast entry point (IbCastGinIb) morphs into IbCastGinIbProxy or
+    // IbCastGinIbGdaki during init(); both cast variants share
+    // IbCastGinIbFinalize, which differs from the generic backend's finalize.
+    TEST_INFO("Assigned GIN backend: %s (finalize=%p)", gin->name, (void*)gin->finalize);
+    EXPECT_NE(gin->finalize, ncclGinIbProxy.finalize)
+        << "AINIC must not use the generic IB GIN backend";
+    EXPECT_EQ(gin->finalize, IbCastGinIbProxy.finalize)
+        << "AINIC must use the ionic ib-cast GIN backend";
+}
 
 } // namespace RCCLGinTests
 

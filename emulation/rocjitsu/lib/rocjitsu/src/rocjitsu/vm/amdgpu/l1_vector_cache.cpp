@@ -3,51 +3,141 @@
 
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 
+#include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "util/log.h"
 
+#include <algorithm>
 #include <bit>
 #include <cassert>
+#include <cstring>
+#include <format>
 
 namespace rocjitsu {
 namespace amdgpu {
+namespace {
 
-void L1VectorCache::ensure_line(uint64_t addr) {
-  if (cache_.lookup(addr))
+template <typename F>
+uint32_t for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint32_t wf_size,
+                                     uint32_t stride, F &&fn) {
+  uint32_t run_count = 0;
+  uint64_t remaining = lane_mask;
+  while (remaining) {
+    const uint32_t first_lane = std::countr_zero(remaining);
+    remaining &= ~(uint64_t{1} << first_lane);
+
+    uint32_t last_lane = first_lane;
+    while (last_lane + 1 < wf_size) {
+      const uint32_t next_lane = last_lane + 1;
+      const uint64_t next_bit = uint64_t{1} << next_lane;
+      if (!(remaining & next_bit) || addrs[next_lane] != addrs[last_lane] + stride)
+        break;
+      remaining &= ~next_bit;
+      last_lane = next_lane;
+    }
+
+    fn(first_lane, last_lane - first_lane + 1);
+    ++run_count;
+  }
+  return run_count;
+}
+
+} // namespace
+
+L1VectorCache::L1VectorCache(L2Cache *l2)
+    : l2_(l2), coherence_epoch_(DeviceCacheCoherence::instance().current_epoch()) {}
+
+L1VectorCache::~L1VectorCache() = default;
+
+void L1VectorCache::set_l2(L2Cache *l2) {
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  synchronize_epoch_locked();
+  l2_ = l2;
+}
+
+void L1VectorCache::set_memory(GpuMemory *mem) {
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  synchronize_epoch_locked();
+  memory_ = mem;
+}
+
+void L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid) {
+  if (cache_.lookup(addr, nullptr, vmid))
     return;
 
   uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
   uint8_t evicted_data[LINE_SIZE];
-  cache_.allocate(addr, &evicted, evicted_data);
+  cache_.allocate(addr, vmid, &evicted, evicted_data);
 
   assert(!evicted.dirty && "L1 V$ is write-through; lines should never be dirty");
 
   uint8_t line_buf[LINE_SIZE];
-  l2_->fetch_line(line_addr, line_buf);
-  cache_.fill_line(addr, line_buf);
+  l2_->fetch_line(line_addr, line_buf, vmid);
+  cache_.fill_line(addr, line_buf, vmid);
 }
 
+// Per-line CC invalidation is sufficient: the CP serializes dispatch N's cache
+// management before dispatch N+1 begins execution, so no blanket invalidation
+// at dispatch boundaries is needed.
 void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype,
-                               bool non_temporal) {
-  if (mtype == Mtype::UC || non_temporal) {
-    l2_->read(addr, dst, size, mtype);
-    return;
-  }
+                               bool non_temporal, bool request_l1_bypass, uint32_t vmid) {
+  Mtype inst_mtype = mtype;
+  Mtype effective = mtype;
+  if (memory_)
+    effective = effective_mtype(mtype, memory_->pte_mtype(addr, vmid));
 
-  if (mtype == Mtype::CC) {
-    // SC0/GLC: invalidate stale L1 line to force refetch from L2.
-    // On real hardware, coherently-cacheable loads re-validate against L2
-    // even on L1 hit, ensuring inter-CU stores are visible.
-    cache_.invalidate(addr);
-  }
+  util::Logger::cp([&](auto &os) {
+    static thread_local uint64_t mtype_counts[5] = {};
+    static thread_local uint64_t total = 0;
+    ++mtype_counts[static_cast<int>(effective)];
+    ++total;
+    if ((total & (total - 1)) == 0 && total >= 1024) {
+      os << std::format("L1V_READ_MTYPE_STATS total={} UC={} CC={} RW={} WB={} NT={} "
+                        "last: addr={:#x} inst={} eff={} vmid={}",
+                        total, mtype_counts[0], mtype_counts[1], mtype_counts[2], mtype_counts[3],
+                        mtype_counts[4], addr, static_cast<int>(inst_mtype),
+                        static_cast<int>(effective), vmid);
+    }
+  });
 
-  ensure_line(addr);
-  cache_.read_line(addr, dst, CacheStore::line_offset(addr), size);
+  uint32_t copied = 0;
+  while (copied < size) {
+    const uint64_t ea = addr + copied;
+    const uint32_t line_offset = CacheStore::line_offset(ea);
+    const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
+    Mtype chunk_mtype = inst_mtype;
+    if (memory_)
+      chunk_mtype = effective_mtype(inst_mtype, memory_->pte_mtype(ea, vmid));
+
+    if (chunk_mtype == Mtype::UC || non_temporal || request_l1_bypass) {
+      cache_.invalidate(ea, vmid);
+      l2_->read(ea, dst + copied, chunk, chunk_mtype, vmid);
+      copied += chunk;
+      continue;
+    }
+
+    if (chunk_mtype == Mtype::CC) {
+      cache_.invalidate(ea, vmid);
+      l2_->read(ea, dst + copied, chunk, chunk_mtype, vmid);
+      copied += chunk;
+      continue;
+    }
+
+    ensure_line(ea, vmid);
+    cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
+    copied += chunk;
+  }
 }
 
 void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype,
-                                bool non_temporal) {
+                                bool non_temporal, uint32_t vmid) {
+  Mtype inst_mtype = mtype;
+  Mtype effective = mtype;
+  if (memory_)
+    effective = effective_mtype(mtype, memory_->pte_mtype(addr, vmid));
+
   util::Logger::vm([&](auto &os) {
     if (addr >= 0x4d00c00000ULL && addr < 0x4d00c00100ULL) {
       uint32_t val = 0;
@@ -60,74 +150,103 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
       static thread_local uint32_t tw = 0;
       if (++tw <= 20)
         os << std::format("L1_WRITE @{:#x} size={} val={:#x} mtype={}", addr, size, val,
-                          static_cast<int>(mtype));
+                          static_cast<int>(effective));
     }
   });
-  if (mtype == Mtype::UC || non_temporal) {
-    l2_->write(addr, src, size, mtype);
-    return;
+
+  uint32_t copied = 0;
+  while (copied < size) {
+    const uint64_t ea = addr + copied;
+    const uint32_t line_offset = CacheStore::line_offset(ea);
+    const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
+    Mtype chunk_mtype = inst_mtype;
+    if (memory_)
+      chunk_mtype = effective_mtype(inst_mtype, memory_->pte_mtype(ea, vmid));
+
+    if (chunk_mtype == Mtype::UC || non_temporal) {
+      cache_.invalidate(ea, vmid);
+      l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
+      copied += chunk;
+      continue;
+    }
+
+    ensure_line(ea, vmid);
+    cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
+
+    // Write through to L2 for all cacheable stores. This ensures partial writes
+    // from different CUs sharing the same L2 are properly merged at byte
+    // granularity via L2::write(), rather than full-line replacement via
+    // writeback_line() during L1 eviction/flush.
+    l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
+
+    simdojo::CacheTag *tag = nullptr;
+    cache_.lookup(ea, &tag, vmid);
+    assert(tag != nullptr && "ensure_line must guarantee hit");
+
+    // L1 line stays clean since L2 has the authoritative copy.
+    tag->coherence = (chunk_mtype == Mtype::CC) ? simdojo::CoherenceState::SHARED
+                                                : simdojo::CoherenceState::EXCLUSIVE;
+    tag->dirty = false;
+    copied += chunk;
   }
-
-  ensure_line(addr);
-  cache_.write_line(addr, src, CacheStore::line_offset(addr), size);
-
-  // Write through to L2 for all cacheable stores. This ensures partial writes
-  // from different CUs sharing the same L2 are properly merged at byte
-  // granularity via L2::write(), rather than full-line replacement via
-  // writeback_line() during L1 eviction/flush.
-  l2_->write(addr, src, size, mtype);
-
-  simdojo::CacheTag *tag = nullptr;
-  cache_.lookup(addr, &tag);
-  assert(tag != nullptr && "ensure_line must guarantee hit");
-
-  // L1 line stays clean since L2 has the authoritative copy.
-  tag->coherence =
-      (mtype == Mtype::CC) ? simdojo::CoherenceState::SHARED : simdojo::CoherenceState::EXCLUSIVE;
-  tag->dirty = false;
 }
 
 void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
-                         uint32_t num_elems, uint8_t *dst, Mtype mtype, bool non_temporal) {
+                         uint32_t num_elems, uint8_t *dst, Mtype mtype, bool non_temporal,
+                         bool request_l1_bypass, uint32_t wf_size, uint32_t vmid) {
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  synchronize_epoch_locked();
   uint32_t stride = num_elems * elem_size;
-  // Iterate only over lanes that are active according to lane_mask.
-  uint64_t remaining = lane_mask;
-  while (remaining) {
-    uint32_t lane = std::countr_zero(remaining);
-    remaining &= remaining - 1; // clear lowest set bit
-    uint64_t base = addrs[lane];
-    for (uint32_t e = 0; e < num_elems; ++e) {
-      uint64_t ea = base + e * elem_size;
-      read_bytes(ea, dst + lane * stride + e * elem_size, elem_size, mtype, non_temporal);
-    }
-  }
+  for_each_coalesced_lane_run(
+      addrs, lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
+        read_bytes(addrs[first_lane], dst + first_lane * stride, run_lanes * stride, mtype,
+                   non_temporal, request_l1_bypass, vmid);
+      });
 }
 
 void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
-                          uint32_t num_elems, const uint8_t *src, Mtype mtype, bool non_temporal) {
+                          uint32_t num_elems, const uint8_t *src, Mtype mtype, bool non_temporal,
+                          uint32_t wf_size, uint32_t vmid) {
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  synchronize_epoch_locked();
   uint32_t stride = num_elems * elem_size;
-  uint32_t active_lanes = std::popcount(lane_mask);
+  const uint32_t active_lanes = std::popcount(lane_mask);
   ++store_count_;
   if (active_lanes > 0)
     ++store_active_count_;
-  store_l2_writes_ += active_lanes * num_elems;
-  // Iterate only over lanes that are active according to lane_mask.
-  uint64_t remaining = lane_mask;
-  while (remaining) {
-    uint32_t lane = std::countr_zero(remaining);
-    remaining &= remaining - 1; // clear lowest set bit
-    uint64_t base = addrs[lane];
-    for (uint32_t e = 0; e < num_elems; ++e) {
-      uint64_t ea = base + e * elem_size;
-      write_bytes(ea, src + lane * stride + e * elem_size, elem_size, mtype, non_temporal);
-    }
-  }
+  store_l2_writes_ += for_each_coalesced_lane_run(
+      addrs, lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
+        write_bytes(addrs[first_lane], src + first_lane * stride, run_lanes * stride, mtype,
+                    non_temporal, vmid);
+      });
+}
+
+void L1VectorCache::invalidate(uint64_t addr, uint32_t vmid) {
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  synchronize_epoch_locked();
+  cache_.invalidate(addr, vmid);
+}
+
+void L1VectorCache::invalidate_all() {
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  synchronize_epoch_locked();
+  invalidate_all_locked();
 }
 
 void L1VectorCache::flush_all() {
-  // All stores are written through to L2 during execution, so no dirty lines
-  // to write back. Just invalidate.
-  cache_.invalidate_all();
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  synchronize_epoch_locked();
+  invalidate_all_locked();
+}
+
+void L1VectorCache::invalidate_all_locked() { cache_.invalidate_all(); }
+
+void L1VectorCache::synchronize_epoch_locked() {
+  const uint64_t current_epoch = DeviceCacheCoherence::instance().current_epoch();
+  if (coherence_epoch_ == current_epoch)
+    return;
+  invalidate_all_locked();
+  coherence_epoch_ = current_epoch;
 }
 
 } // namespace amdgpu

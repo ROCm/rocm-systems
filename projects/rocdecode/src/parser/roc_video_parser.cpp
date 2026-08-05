@@ -55,7 +55,7 @@ RocVideoParser::~RocVideoParser() {
  * @return rocDecStatus : ROCDEC_SUCCESS on success
  */
 rocDecStatus RocVideoParser::Initialize(RocdecParserParams *pParams) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(pParams));
     if(pParams == nullptr) {
         CriticalLog(g_rocdec_logger, ROCDEC_STR("Parser parameters are not set for the parser"));
         FunctionExitLog(g_rocdec_logger);
@@ -98,7 +98,7 @@ void RocVideoParser::CheckAndAdjustDecBufPoolSize(int dpb_size) {
 }
 
 ParserResult RocVideoParser::OutputDecodedPictures(bool no_delay) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(no_delay));
     RocdecParserDispInfo disp_info = {0};
     disp_info.progressive_frame = 1; // not used
     disp_info.top_field_first = 1; // not used

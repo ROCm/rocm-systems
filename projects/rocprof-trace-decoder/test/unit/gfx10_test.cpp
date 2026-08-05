@@ -22,10 +22,12 @@
 
 #include <gtest/gtest.h>
 #include <cstdint>
+#include <string>
 #include <vector>
 #include "gfx10/gfx10parser.h"
 #include "gfx10/gfx10token.h"
 #include "gfx10/gfx10wave.h"
+#include "gfx11/gfx11token.h"
 #include "segment.hpp"
 
 // Tests for get_sa_wgp helper function
@@ -113,17 +115,131 @@ TEST(Gfx10TokenTest, ConstructorSetsFields)
     EXPECT_EQ(token.type, RdnaType::WAVE_START);
 }
 
-// Tests for gfx10::CSRegisterHandler
-TEST(CSRegisterHandlerGFX10Test, IsPgmLoHi)
+TEST(Gfx10TokenDiagnosticsTest, PrintAndTypeStringsExposeDecodedFields)
 {
-    gfx10::CSRegisterHandler handler;
+    auto has = [](const std::string& text, const char* part) { EXPECT_NE(text.find(part), std::string::npos); };
 
-    EXPECT_TRUE(handler.IsPgmLo(0xC));
-    EXPECT_FALSE(handler.IsPgmLo(0xD));
-    EXPECT_TRUE(handler.IsPgmHi(0xD));
-    EXPECT_FALSE(handler.IsPgmHi(0xC));
+    wstart_type_common start{};
+    start.sa = 1;
+    start.simd = 2;
+    start.wgp = 4;
+    start.wid = 7;
+    start.me = 1;
+    start.pipe = 3;
+    EXPECT_STREQ(start.typestr(), "WAVE_START");
+    auto text = start.print().str();
+    has(text, "wgp:4");
+    has(text, "simd:2");
+    has(text, "wid:7");
+    has(text, "me:1");
+    has(text, "pipe:3");
+
+    wend_type_common end{};
+    end.sa = 1;
+    end.simd = 3;
+    end.wgp = 5;
+    end.wid = 8;
+    EXPECT_STREQ(end.typestr(), "WAVE_END");
+    has(end.print().str(), "wid:8");
+
+    header_type header{};
+    header.version = 2;
+    header.NWGP = 6;
+    header.DWGP = 3;
+    header.DSIMD = 2;
+    header.DSA = 1;
+    header.UCF = 1;
+    header.DPRate = 7;
+    header.WSM = 2;
+    EXPECT_STREQ(header.typestr(), "HEADER");
+    text = header.print().str();
+    has(text, "TT Version:2");
+    has(text, "NWGP:6");
+    has(text, "DPRate:7");
+
+    inst_type_common inst{};
+    inst.wid = 9;
+    inst.inst = 55;
+    inst.w64h = 1;
+    EXPECT_STREQ(inst.typestr(), "INST");
+    has(inst.print().str(), "inst:55");
+
+    valu_inst_type valu{};
+    valu.wid = 10;
+    EXPECT_STREQ(valu.typestr(), "VALU");
+    has(valu.print().str(), "wid:10");
+
+    immed_one_type immed_one{};
+    immed_one.wid = 11;
+    EXPECT_STREQ(immed_one.typestr(), "IMMEDONE");
+    has(immed_one.print().str(), "wid:11");
+
+    immediate_type immediate{};
+    immediate.waves = 0x1234;
+    EXPECT_STREQ(immediate.typestr(), "IMMED");
+    has(immediate.print().str(), "mask:0x1234");
+
+    wave_ready_type ready{};
+    ready.waves = 0x4321;
+    EXPECT_STREQ(ready.typestr(), "WAVERDY");
+    has(ready.print().str(), "mask:0x4321");
+
+    gfx10::misc_type misc{};
+    misc.tm = 17;
+    misc.fields = 0x5A;
+    EXPECT_STREQ(misc.typestr(), "MISC");
+    has(misc.print().str(), "fields:0x5a");
+
+    gfx10::new_pc_type pc{};
+    pc.wave = 4;
+    pc.pc = 0x123;
+    EXPECT_STREQ(pc.typestr(), "NEW_PC");
+    has(pc.print().str(), "0x123");
+
+    gfx10::reg_write_type reg{};
+    reg.pipe = 2;
+    reg.regaddr = 0xC340;
+    reg.regdata = 0xABCD;
+    EXPECT_STREQ(reg.typestr(), "REG_WRITE");
+    text = reg.print().str();
+    has(text, "pipe:2");
+    has(text, "addr:0xc340");
+
+    gfx10::reg_init_type init{};
+    init.pipe = 1;
+    init.type = 2;
+    init.data = 0x77;
+    EXPECT_STREQ(init.typestr(), "REG_INIT");
+    has(init.print().str(), "type:2");
+
+    gfx10::event_type event{};
+    event.me = 1;
+    event.pipe = 2;
+    event.evtype = 3;
+    event.id = 7;
+    EXPECT_STREQ(event.typestr(), "EVENT");
+    has(event.print().str(), "id:7");
+
+    gfx11::shader_data_type shader{};
+    shader.sa = 1;
+    shader.simd = 2;
+    shader.wgp = 3;
+    shader.wave = 4;
+    shader_data_common_type common{shader};
+    common.data = 0xCAFE;
+    EXPECT_STREQ(common.typestr(), "SHADER_DATA");
+    has(common.print().str(), "data:0xcafe");
+
+    gfx11::shader_data_short_type shader_short{};
+    shader_short.simd = 1;
+    shader_short.wgp = 2;
+    shader_short.wave = 3;
+    shader_data_common_type short_common{shader_short};
+    EXPECT_EQ(short_common.simd, 1u);
+    EXPECT_EQ(short_common.wave, 3u);
 }
 
+// Tests for gfx10::CSRegisterHandler
 TEST(CSRegisterHandlerGFX10Test, IsUserdata)
 {
     gfx10::CSRegisterHandler handler;
@@ -368,7 +484,7 @@ TEST(Gfx10WaveTest, NewPcPushesEntry)
     gfx10::wave_t wave(0, 0, 0, pcinfo_t{100, 1}, start_tok, false);
     wave.trap_status = WaveTrapStatus::TRAP_RESTORED;
 
-    CodeobjTableTranslator table;
+    CachedTable table;
     size_t before = wave.pc_infos.size();
     wave.new_pc(200, 0x1000, table);
     EXPECT_GT(wave.pc_infos.size(), before);

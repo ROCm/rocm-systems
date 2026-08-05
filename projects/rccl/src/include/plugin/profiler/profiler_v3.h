@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef PROFILER_V3_H_
 #define PROFILER_V3_H_
@@ -39,7 +40,7 @@ typedef struct {
     } p2p;
 
     struct {
-      pid_t pid;                // pid of the originating process
+      ncclPid_t pid;            // pid of the originating process
       uint8_t channelId;        // channel id for this proxy operation
       int peer;                 // remote rank for send/recv
       int nSteps;               // number of steps for this proxy operation
@@ -101,7 +102,8 @@ typedef struct {
   //  - eHandle   : handle to event object created through startEvent
   //  - eStateArgs: optional argument used to capture event attribute updates associated with the state transition
   //  - eState    : event state transition
-  ncclResult_t (*recordEventState)(void* eHandle, ncclProfilerEventState_v3_t eState, ncclProfilerEventStateArgs_v3_t* eStateArgs);
+  ncclResult_t (*recordEventState)(void* eHandle, ncclProfilerEventState_v3_t eState,
+                                   ncclProfilerEventStateArgs_v3_t* eStateArgs);
 
   // finalize - finalize the profiler plugin
   // Input

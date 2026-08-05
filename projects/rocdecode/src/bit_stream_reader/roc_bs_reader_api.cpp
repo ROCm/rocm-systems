@@ -26,7 +26,7 @@ THE SOFTWARE.
 namespace rocdecode {
 
 rocDecStatus ROCDECAPI rocDecCreateBitstreamReader(RocdecBitstreamReader *bs_reader_handle, const char *input_file_path) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(bs_reader_handle) + ", " + RocDecFmtPtr(input_file_path));
     if (bs_reader_handle == nullptr || input_file_path == nullptr) {
         CriticalLog(g_rocdec_logger, "Null pointer");
         FunctionExitLog(g_rocdec_logger);
@@ -47,7 +47,7 @@ rocDecStatus ROCDECAPI rocDecCreateBitstreamReader(RocdecBitstreamReader *bs_rea
 }
 
 rocDecStatus ROCDECAPI rocDecGetBitstreamCodecType(RocdecBitstreamReader bs_reader_handle, rocDecVideoCodec *codec_type) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(bs_reader_handle) + ", " + RocDecFmtPtr(codec_type));
     if (bs_reader_handle == nullptr || codec_type == nullptr) {
         CriticalLog(g_rocdec_logger, "Null pointer");
         FunctionExitLog(g_rocdec_logger);
@@ -69,7 +69,7 @@ rocDecStatus ROCDECAPI rocDecGetBitstreamCodecType(RocdecBitstreamReader bs_read
 }
 
 rocDecStatus ROCDECAPI rocDecGetBitstreamBitDepth(RocdecBitstreamReader bs_reader_handle, int *bit_depth) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(bs_reader_handle) + ", " + RocDecFmtPtr(bit_depth));
     if (bs_reader_handle == nullptr || bit_depth == nullptr) {
         CriticalLog(g_rocdec_logger, "Null pointer");
         FunctionExitLog(g_rocdec_logger);
@@ -91,7 +91,7 @@ rocDecStatus ROCDECAPI rocDecGetBitstreamBitDepth(RocdecBitstreamReader bs_reade
 }
 
 rocDecStatus ROCDECAPI rocDecGetBitstreamPicData(RocdecBitstreamReader bs_reader_handle, uint8_t **pic_data, int *pic_size, int64_t *pts) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(bs_reader_handle) + ", " + RocDecFmtPtr(pic_data) + ", " + RocDecFmtPtr(pic_size) + ", " + RocDecFmtPtr(pts));
     if (bs_reader_handle == nullptr || pic_data == nullptr || pic_size == nullptr || pts == nullptr) {
         CriticalLog(g_rocdec_logger, "Null pointer");
         FunctionExitLog(g_rocdec_logger);
@@ -113,7 +113,7 @@ rocDecStatus ROCDECAPI rocDecGetBitstreamPicData(RocdecBitstreamReader bs_reader
 }
 
 rocDecStatus ROCDECAPI rocDecDestroyBitstreamReader(RocdecBitstreamReader bs_reader_handle) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(bs_reader_handle));
     if (bs_reader_handle == nullptr) {
         CriticalLog(g_rocdec_logger, "Null pointer");
         FunctionExitLog(g_rocdec_logger);

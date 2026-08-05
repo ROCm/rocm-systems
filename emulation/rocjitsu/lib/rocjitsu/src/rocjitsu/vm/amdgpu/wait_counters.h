@@ -18,15 +18,19 @@ namespace amdgpu {
 /// GFX11 (RDNA3/3.5) and GFX12 (RDNA4) use fine-grained counters:
 ///   LOADCNT (≡ VMCNT for loads), STORECNT (≡ VSCNT), DSCNT (DS subset
 ///   of LGKMCNT), KMCNT (scalar/constant subset of LGKMCNT), EXPCNT.
+/// GFX12.5 also adds TENSORCNT for tensor data mover operations and ASYNCCNT
+/// for async global/cluster transfers to or from LDS.
 enum class WaitCounterType : uint8_t {
-  VMCNT,    ///< Vector memory count (global loads; GFX9/10 stores too).
-  LGKMCNT,  ///< LDS/GDS/K(Constant)/Message count.
-  EXPCNT,   ///< Export count.
-  VSCNT,    ///< Vector store count (GFX10 only — S_WAITCNT_VSCNT).
-  LOADCNT,  ///< Vector load count (GFX11+; alias of VMCNT for loads).
-  STORECNT, ///< Vector store count (GFX11+; alias of VSCNT).
-  DSCNT,    ///< DS (LDS/GDS) count (GFX11+; subset of LGKMCNT).
-  KMCNT,    ///< Scalar/constant memory count (GFX11+; subset of LGKMCNT).
+  VMCNT,     ///< Vector memory count (global loads; GFX9/10 stores too).
+  LGKMCNT,   ///< LDS/GDS/K(Constant)/Message count.
+  EXPCNT,    ///< Export count.
+  VSCNT,     ///< Vector store count (GFX10 only — S_WAITCNT_VSCNT).
+  LOADCNT,   ///< Vector load count (GFX11+; alias of VMCNT for loads).
+  STORECNT,  ///< Vector store count (GFX11+; alias of VSCNT).
+  DSCNT,     ///< DS (LDS/GDS) count (GFX11+; subset of LGKMCNT).
+  KMCNT,     ///< Scalar/constant memory count (GFX11+; subset of LGKMCNT).
+  TENSORCNT, ///< Tensor data mover count (GFX12.5).
+  ASYNCCNT,  ///< Async global/cluster LDS transfer count (GFX12.5).
 };
 
 /// @brief Outstanding memory operation counters for a wavefront.
@@ -48,12 +52,15 @@ struct WaitCounters {
   uint8_t vscnt = 0;   ///< Vector store count (GFX10) / storecnt alias (GFX11+).
 
   // GFX11+ fine-grained counters
-  uint8_t dscnt = 0; ///< DS (LDS/GDS) count (GFX11+).
-  uint8_t kmcnt = 0; ///< Scalar/constant memory count (GFX11+).
+  uint8_t dscnt = 0;     ///< DS (LDS/GDS) count (GFX11+).
+  uint8_t kmcnt = 0;     ///< Scalar/constant memory count (GFX11+).
+  uint8_t tensorcnt = 0; ///< Tensor data mover count (GFX12.5).
+  uint8_t asynccnt = 0;  ///< Async global/cluster LDS transfer count (GFX12.5).
 
   /// @brief Check whether all counters are zero (no outstanding memory ops).
   bool empty() const {
-    return vmcnt == 0 && lgkmcnt == 0 && expcnt == 0 && vscnt == 0 && dscnt == 0 && kmcnt == 0;
+    return vmcnt == 0 && lgkmcnt == 0 && expcnt == 0 && vscnt == 0 && dscnt == 0 && kmcnt == 0 &&
+           tensorcnt == 0 && asynccnt == 0;
   }
 
   /// Hardware saturation limits for each counter type.
@@ -63,6 +70,8 @@ struct WaitCounters {
   static constexpr uint8_t VSCNT_MAX = 63;
   static constexpr uint8_t DSCNT_MAX = 63;
   static constexpr uint8_t KMCNT_MAX = 31;
+  static constexpr uint8_t TENSORCNT_MAX = 63;
+  static constexpr uint8_t ASYNCCNT_MAX = 63;
 
   void increment(WaitCounterType type) {
     switch (type) {
@@ -87,6 +96,12 @@ struct WaitCounters {
     case WaitCounterType::KMCNT:
       kmcnt = std::min<uint8_t>(kmcnt + 1, KMCNT_MAX);
       lgkmcnt = std::min<uint8_t>(lgkmcnt + 1, LGKMCNT_MAX);
+      break;
+    case WaitCounterType::TENSORCNT:
+      tensorcnt = std::min<uint8_t>(tensorcnt + 1, TENSORCNT_MAX);
+      break;
+    case WaitCounterType::ASYNCCNT:
+      asynccnt = std::min<uint8_t>(asynccnt + 1, ASYNCCNT_MAX);
       break;
     }
   }
@@ -123,6 +138,14 @@ struct WaitCounters {
       assert(lgkmcnt > 0 && "LGKMCNT underflow from KMCNT");
       --lgkmcnt;
       break;
+    case WaitCounterType::TENSORCNT:
+      assert(tensorcnt > 0 && "TENSORCNT underflow");
+      --tensorcnt;
+      break;
+    case WaitCounterType::ASYNCCNT:
+      assert(asynccnt > 0 && "ASYNCCNT underflow");
+      --asynccnt;
+      break;
     }
   }
 };
@@ -138,11 +161,14 @@ struct WaitTarget {
   uint8_t vscnt = WaitCounters::VSCNT_MAX;
   uint8_t dscnt = WaitCounters::DSCNT_MAX;
   uint8_t kmcnt = WaitCounters::KMCNT_MAX;
+  uint8_t tensorcnt = WaitCounters::TENSORCNT_MAX;
+  uint8_t asynccnt = WaitCounters::ASYNCCNT_MAX;
 
   /// @brief Check whether the given counters satisfy all thresholds.
   bool satisfied(const WaitCounters &c) const {
     return c.vmcnt <= vmcnt && c.lgkmcnt <= lgkmcnt && c.expcnt <= expcnt && c.vscnt <= vscnt &&
-           c.dscnt <= dscnt && c.kmcnt <= kmcnt;
+           c.dscnt <= dscnt && c.kmcnt <= kmcnt && c.tensorcnt <= tensorcnt &&
+           c.asynccnt <= asynccnt;
   }
 };
 

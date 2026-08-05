@@ -66,7 +66,7 @@ if [ "$2" = "-n" ] ; then
   check_trace_flag=0
 fi
 
-# test check routin
+# test check routine
 test_status=0
 test_runnum=0
 test_number=0
@@ -128,7 +128,7 @@ eval_test "MatrixTranspose dry run" ./test/MatrixTranspose MatrixTranspose_dryru
 eval_test "copy dry run" ./test/copy copy_dryrun_trace
 
 # Standalone test
-# ROCtracer is used explicitely by test
+# ROCtracer is used explicitly by test
 eval_test "standalone C test" "./test/MatrixTranspose_ctest" MatrixTranspose_ctest_trace
 eval_test "standalone HIP test" "./test/MatrixTranspose_test" MatrixTranspose_test_trace
 eval_test "standalone HIP hipaact test" "./test/MatrixTranspose_hipaact_test" MatrixTranspose_hipaact_test_trace

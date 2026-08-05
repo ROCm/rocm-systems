@@ -23,16 +23,27 @@ virtualMemoryManagement:
   Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl: *level_2
   Unit_hipMemImportFromShareableHandle_Capture: *level_2
   Unit_hipMemGetHandleForAddressRange_Negative: *level_2
-  Unit_hipMemGetHandleForAddressRange_DeviceMemory: *level_2
+  Unit_hipMemGetHandleForAddressRange_DeviceMemory:
+    <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
   Unit_hipMemGetHandleForAddressRange_VM: *level_2
   Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: [multigpu]
   Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice:
     <<: *level_2
     tags: [multigpu]
-  Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem: *level_2
-  Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM: *level_2
+  Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem:
+    <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
+  Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM:
+    <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
   Unit_hipMemGetHandleForAddressRange_MultipleThreads: *level_2
   Unit_hipMemGetHandleForAddressRange_DifferentOffsets: *level_2
   Unit_hipMemExportToShareableHandle_Positive_Basic: *level_2
@@ -86,6 +97,33 @@ virtualMemoryManagement:
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
   Unit_hipMemCreate_Capture: *level_2
+  Unit_hipMemCreate_HostNuma_Granularity:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemCreate_HostNuma_BasicAllocDealloc:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemCreate_HostNuma_ChkDev2HstMemcpy:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemCreate_HostNuma_ChkWithKerLaunch:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  # (amd_linux) These two are the only host-NUMA tests that directly dereference
+  # the mapped VA from the CPU. On the current CI kernel/driver stack that CPU
+  # access faults with SIGBUS even though hsa_amd_vmem_set_access() reports
+  # success; the allocation + GPU/DMA-access tests above are unaffected and stay
+  # enabled. Same code works on bare-metal gfx942/gfx950; ROCr is investigating.
+  # Re-enable on amd_linux once the runtime fix lands.
+  Unit_hipMemCreate_HostNuma_HostAndDeviceAccess:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl, amd_linux]
+  Unit_hipMemCreate_HostNuma_NumaTypedAccess:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl, amd_linux]
+  Unit_hipMemCreate_HostNuma_Negative:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
   Unit_hipMemSetAccess_SetGet:
     <<: *level_2
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
@@ -167,10 +205,10 @@ virtualMemoryManagement:
   Unit_hipMemSetAccessHostDevice_hostalloc:
     <<: *level_2
     # SWDEV-555665
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipMemSetAccessHost_devicealloc:
     <<: *level_2
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipMemGetAllocationPropertiesFromHandle_functional:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
@@ -192,6 +230,11 @@ virtualMemoryManagement:
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
   Unit_hipMemMap_PhysicalMemory_Map2MultVMMs:
+    <<: *level_2
+    # (amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemMap_UnmapOneAliasOfMultiAliasedHandle:
     <<: *level_2
     # (amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
@@ -222,6 +265,11 @@ virtualMemoryManagement:
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
   Unit_hipMemMap_Capture: *level_2
+  Unit_hipMemMap_Retrieve_AllocationHandle: *level_2
+  Unit_hipMemMap_Retrieve_MultiAllocationHandle: *level_2
+  Unit_hipMemMap_CheckAddMemObj: *level_2
+  Unit_hipMemMap_RoundTrip: *level_2
+  Unit_hipMemMap_ConcurrentDisjointMapsNoDeadlock: *level_2
   Unit_hipMemRelease_negative:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
@@ -232,9 +280,14 @@ virtualMemoryManagement:
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
   Unit_hipMemUnmap_Capture: *level_2
+  Unit_hipMemUnmap_CrossLinksTornDown: *level_2
+  Unit_hipMemUnmap_RemapCrossLinks: *level_2
+  Unit_hipMemUnmap_DirectPath_BasicRoundTrip: *level_2
+  Unit_hipMemUnmap_DirectPath_InFlightKernelDrained: *level_2
   Unit_hipMemMapArrayAsync_Positive_Basic:
     <<: *level_2
     tags: [image]
     # Below tests are failing PSDB
     disabled: [nvidia_linux, nvidia_windows]
   Unit_hipMemSetAccess_SegmentsAccess: *level_2
+  Unit_hipMemExportFabricHandleToStdout_Positive_Basic: *level_2

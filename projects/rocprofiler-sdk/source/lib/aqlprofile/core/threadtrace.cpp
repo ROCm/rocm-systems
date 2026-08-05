@@ -439,6 +439,8 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
         out->read_size    = manager->config.capacity_per_se;
         out->num_swaps    = manager->buffer_swaps.fetch_add(1);
         out->data = buffer_data.at((out->num_swaps + buffer_data.size() - 1) % buffer_data.size());
+
+        out->read_offset = sizeof(uint16_t) * (control.wptr_doublebuffer >> 30);
     }
 
     return HSA_STATUS_SUCCESS;

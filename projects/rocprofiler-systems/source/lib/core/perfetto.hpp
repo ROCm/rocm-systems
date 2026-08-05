@@ -12,8 +12,7 @@
 #if defined(TIMEMORY_USE_PERFETTO)
 #    include <timemory/components/perfetto/backends.hpp>
 #else
-#    include <perfetto.h>
-PERFETTO_DEFINE_CATEGORIES(ROCPROFSYS_PERFETTO_CATEGORIES);
+#    include "core/perfetto/category_registry.hpp"
 #endif
 
 #include <timemory/process/process.hpp>
@@ -133,7 +132,7 @@ perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
                 _css << " " << std::hex << std::setw(12) << std::left << eitr;
             throw std::runtime_error(fmt::format(
                 "perfetto_counter_track emplace method for '{}' ({:p}) "
-                "invalidated C-string '{}' ({p}).\nprevious: {}\ncurrent: {}\n",
+                "invalidated C-string '{}' ({:p}).\nprevious: {}\ncurrent: {}\n",
                 _v, (void*) _name->c_str(), std::get<0>(itr),
                 (void*) std::get<0>(itr).c_str(), _pss.str(), _css.str()));
         }

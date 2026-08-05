@@ -23,7 +23,7 @@ endif()
 add_executable(fork-example fork.cpp)
 target_link_libraries(
     fork-example
-    PRIVATE Threads::Threads rocprofiler-systems::rocprofiler-systems-user-library
+    PRIVATE Threads::Threads pthread rocprofiler-systems::rocprofiler-systems-user-library
 )
 target_compile_options(fork-example PRIVATE ${_FLAGS})
 

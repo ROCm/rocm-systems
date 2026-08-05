@@ -1,9 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-check_rocprofsys_disable_examples("jacobi-fortran-usm" _JACOBI_FORTAN_USM_DISABLED)
+check_rocprofsys_disable_examples("jacobi-fortran-usm" _JACOBI_FORTRAN_USM_DISABLED)
 check_rocprofsys_disable_examples("openmp" _OPENMP_DISABLED)
-if(_JACOBI_FORTAN_USM_DISABLED OR _OPENMP_DISABLED)
+if(_JACOBI_FORTRAN_USM_DISABLED OR _OPENMP_DISABLED)
     return()
 endif()
 

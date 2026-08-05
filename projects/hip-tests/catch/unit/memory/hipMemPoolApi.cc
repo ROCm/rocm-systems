@@ -111,7 +111,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicAlloc) {
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&C), numElements * sizeof(float),
                                    mem_pool, stream));
 
-  int blocks = 1024;
+  int blocks = isQuickLevel() ? 2 : 1024;
   hipMemPoolAttr attr;
   notifiedKernel<<<blocks, 32, 0, stream>>>(B, notified);
 

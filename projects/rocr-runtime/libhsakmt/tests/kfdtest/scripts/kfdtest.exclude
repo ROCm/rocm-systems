@@ -200,7 +200,8 @@ FILTER[vega12]=\
 FILTER[vega20]=\
 "$BLACKLIST_ALL_ASICS:"\
 "$SDMA_BLACKLIST:"\
-"KFDQMTest.GPUDoorbellWrite"
+"KFDQMTest.GPUDoorbellWrite:"\
+"KFDEvictTest.*"
 
 FILTER[raven_dgpuFallback]=\
 "$BLACKLIST_ALL_ASICS:"\
@@ -356,7 +357,17 @@ FILTER[gfx1201]=\
 
 FILTER[gfx1250]=\
 "$BLACKLIST_ALL_ASICS:"\
-"$BLACKLIST_GFX12"
+"$BLACKLIST_GFX12:"\
+"KFDEventTest.SignalInvalidEvent:"\
+"KFDQMTest.ExtendedCuMasking:"\
+"KFDQMTest.MultipleCpQueuesStressDispatch:"\
+"KFDCWSRTest.InternalRegTest:"\
+"KFDEvictTest.QueueTest:"\
+"KFDRASTest.*:"\
+"KFDExceptionTest.AddressFault:"\
+"KFDQMTest.GpuMemCopyTest:"\
+"KFDDBGTest.HitTrapOnWaveStartEndEvent:"\
+"KFDNegativeTest.*"
 
 FILTER[RHEL9]=\
 "$BLACKLIST_ALL_ASICS:"\

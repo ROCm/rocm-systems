@@ -1,5 +1,0 @@
-pmc:  TCC_READ_sum TCC_WRITE_sum TCC_ATOMIC_sum TCC_WRITEBACK_sum
-
-gpu:
-range:
-kernel:

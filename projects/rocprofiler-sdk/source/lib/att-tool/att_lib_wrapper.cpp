@@ -66,7 +66,7 @@ ATTFileMgr::~ATTFileMgr()
         ROCP_ERROR_IF(status != ROCPROFILER_STATUS_SUCCESS) << "unable to delete codeobj " << id;
     }
 
-    OccupancyFile::OccupancyFile(dir, table, occupancy);
+    OccupancyFile::OccupancyFile(dir, table, occupancy, events, dispatches);
 }
 
 void
@@ -103,6 +103,8 @@ ATTFileMgr::parseShader(int se_id, std::vector<char>& data)
     ToolData   tooldata(data, config, decoder);
 
     if(!config.occupancy.empty()) occupancy.emplace(se_id, std::move(config.occupancy));
+    if(!config.events.empty()) events.emplace(se_id, std::move(config.events));
+    if(!config.dispatches.empty()) dispatches.emplace(se_id, std::move(config.dispatches));
 
     for(auto& [pc, kernel] : config.kernel_names)
         codefile->kernel_names.emplace(pc, std::move(kernel));

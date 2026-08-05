@@ -1,0 +1,154 @@
+{
+  "archs": {
+    "gfx115x": {
+      "files": {
+        "0000_top_stats.yaml": "9d2d844dd3e3cbd6743c5a7f4ada6dcc",
+        "0100_system_info.yaml": "09a09ab73c94db93d40eba5068ae06ca",
+        "0200_system_speed_of_light.yaml": "74b65005b11dbb75c17e9b761246aa95",
+        "0300_memory_chart.yaml": "6ace5eb3f5a5a21f1aca7167fb8cfeb1",
+        "0400_roofline.yaml": "14243a4aa61185e7ac1bea933a4262cb",
+        "0500_command_processor_cpc.yaml": "2b853d2df2c9c7afe11f41bf92ab1b5b",
+        "0600_workgroup_manager_spi.yaml": "cee979ca8ead219d99a08b1c512d8c3d",
+        "0700_workgroup_processor.yaml": "984b23d6c4db0936de5d144262ae9636",
+        "0900_l0_cache.yaml": "ac293628bb3c4bf6ecb40055122308ae",
+        "1100_l1_cache.yaml": "cabb87c7129da3873a5a0f149212b3fa",
+        "1300_l2_cache.yaml": "68baf54c91195686719fb6b170fc0083",
+        "1400_graphics_core_efficiency_arbiter.yaml": "a7a56f137be2a224aae8139c3c5f8b94",
+        "1700_graphics_register_bus_manager.yaml": "5e61a4f7c346f2d4373b4f8ff995501c"
+      }
+    },
+    "gfx908": {
+      "files": {
+        "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
+        "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
+        "0200_system_speed_of_light.yaml": "136cabf31c36d826574330e36df284a7",
+        "0300_memory_chart.yaml": "1ab5b46e7648b5eb292b452cb350a8b6",
+        "0400_roofline.yaml": "9fe933acbd9084678ed48c88b691143e",
+        "0500_command_processor_cpc_cpf.yaml": "8d76d2a8f16aaf8f684b7ce2cef048f0",
+        "0600_workgroup_manager_spi.yaml": "a298d8e3b5616418a2031ce007868c18",
+        "0700_wavefront.yaml": "8237f388a28474bf56527b0effb5847b",
+        "1000_compute_units_instruction_mix.yaml": "b7eb5e2701fc0e5c566b9177335beed1",
+        "1100_compute_units_compute_pipeline.yaml": "bf33a213345567e0b8f39657ef9308e5",
+        "1200_local_data_share_lds.yaml": "b62e7ceb2226f67c87cc41a9a8984888",
+        "1300_instruction_cache.yaml": "4b08fd6bae8a930462faa580a53809d9",
+        "1400_scalar_l1_data_cache.yaml": "642d2083b9b677128ac7f7895f6d3f2b",
+        "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "351893abac99742209bceb12d7d76484",
+        "1600_vector_l1_data_cache.yaml": "42e90d5f3dd1cabc365c807ee110c6fc",
+        "1700_l2_cache.yaml": "8d98c1933a53493cec6decb0c0caab1e",
+        "1800_l2_cache_per_channel.yaml": "f2d6a1151e56b6d09ba6cd0ab5b20204",
+        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
+      }
+    },
+    "gfx90a": {
+      "files": {
+        "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
+        "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
+        "0200_system_speed_of_light.yaml": "44644536cd97d95d54ac773f2486fb5f",
+        "0300_memory_chart.yaml": "5910bf47d1b363d3d62504218b79a713",
+        "0400_roofline.yaml": "13be0e988b462362962b1053c099349f",
+        "0500_command_processor_cpc_cpf.yaml": "8d76d2a8f16aaf8f684b7ce2cef048f0",
+        "0600_workgroup_manager_spi.yaml": "a298d8e3b5616418a2031ce007868c18",
+        "0700_wavefront.yaml": "8237f388a28474bf56527b0effb5847b",
+        "1000_compute_units_instruction_mix.yaml": "35408847067464df2baac6472a979644",
+        "1100_compute_units_compute_pipeline.yaml": "f23cad5ebcb38ecd5dec8051a416770d",
+        "1200_local_data_share_lds.yaml": "b62e7ceb2226f67c87cc41a9a8984888",
+        "1300_instruction_cache.yaml": "4b08fd6bae8a930462faa580a53809d9",
+        "1400_scalar_l1_data_cache.yaml": "642d2083b9b677128ac7f7895f6d3f2b",
+        "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "ffd35eb8edecdb23c58b308c8fbb49fe",
+        "1600_vector_l1_data_cache.yaml": "42e90d5f3dd1cabc365c807ee110c6fc",
+        "1700_l2_cache.yaml": "8b00ecb89ac2bad083a7dd7f3170218f",
+        "1800_l2_cache_per_channel.yaml": "5e04128ee35a40ce5c7c49bd8edba847",
+        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
+      }
+    },
+    "gfx940": {
+      "files": {
+        "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
+        "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
+        "0200_system_speed_of_light.yaml": "42e5f1e6ef3d5e6985f1064167f028c2",
+        "0300_memory_chart.yaml": "02664b07261413f7b483979d664a4806",
+        "0400_roofline.yaml": "e7407ceedf984094a7f2bd04bfc0e188",
+        "0500_command_processor_cpc_cpf.yaml": "8d76d2a8f16aaf8f684b7ce2cef048f0",
+        "0600_workgroup_manager_spi.yaml": "a298d8e3b5616418a2031ce007868c18",
+        "0700_wavefront.yaml": "8237f388a28474bf56527b0effb5847b",
+        "1000_compute_units_instruction_mix.yaml": "f750affa61e433dbba158ec114b0c480",
+        "1100_compute_units_compute_pipeline.yaml": "51fd364335776bed6c995e4a00175cd2",
+        "1200_local_data_share_lds.yaml": "b62e7ceb2226f67c87cc41a9a8984888",
+        "1300_instruction_cache.yaml": "4b08fd6bae8a930462faa580a53809d9",
+        "1400_scalar_l1_data_cache.yaml": "642d2083b9b677128ac7f7895f6d3f2b",
+        "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "133886f74e87a6ac11995bc25335b374",
+        "1600_vector_l1_data_cache.yaml": "40d1c43fb97cd4082f09e2d9c6b4ce15",
+        "1700_l2_cache.yaml": "c0d8f6b27b50077dacaea5b6ef8a8c41",
+        "1800_l2_cache_per_channel.yaml": "2fa15a760d3b597376f8f1189d4cb1ad",
+        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
+      }
+    },
+    "gfx941": {
+      "files": {
+        "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
+        "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
+        "0200_system_speed_of_light.yaml": "3bfe23d7bd49237ee3fcc9071747d7d9",
+        "0300_memory_chart.yaml": "02664b07261413f7b483979d664a4806",
+        "0400_roofline.yaml": "e06c2acf3a37e63d0cb664a08900d88d",
+        "0500_command_processor_cpc_cpf.yaml": "8d76d2a8f16aaf8f684b7ce2cef048f0",
+        "0600_workgroup_manager_spi.yaml": "a298d8e3b5616418a2031ce007868c18",
+        "0700_wavefront.yaml": "8237f388a28474bf56527b0effb5847b",
+        "1000_compute_units_instruction_mix.yaml": "f750affa61e433dbba158ec114b0c480",
+        "1100_compute_units_compute_pipeline.yaml": "51fd364335776bed6c995e4a00175cd2",
+        "1200_local_data_share_lds.yaml": "b62e7ceb2226f67c87cc41a9a8984888",
+        "1300_instruction_cache.yaml": "4b08fd6bae8a930462faa580a53809d9",
+        "1400_scalar_l1_data_cache.yaml": "642d2083b9b677128ac7f7895f6d3f2b",
+        "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "133886f74e87a6ac11995bc25335b374",
+        "1600_vector_l1_data_cache.yaml": "40d1c43fb97cd4082f09e2d9c6b4ce15",
+        "1700_l2_cache.yaml": "c0d8f6b27b50077dacaea5b6ef8a8c41",
+        "1800_l2_cache_per_channel.yaml": "2fa15a760d3b597376f8f1189d4cb1ad",
+        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
+      }
+    },
+    "gfx942": {
+      "files": {
+        "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
+        "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
+        "0200_system_speed_of_light.yaml": "42e5f1e6ef3d5e6985f1064167f028c2",
+        "0300_memory_chart.yaml": "7fd4d74c21df754f6f8af4e5d5c19ba6",
+        "0400_roofline.yaml": "73cba2af93c9f1a5e5130df9dd3a3f1b",
+        "0500_command_processor_cpc_cpf.yaml": "8d76d2a8f16aaf8f684b7ce2cef048f0",
+        "0600_workgroup_manager_spi.yaml": "a298d8e3b5616418a2031ce007868c18",
+        "0700_wavefront.yaml": "8237f388a28474bf56527b0effb5847b",
+        "1000_compute_units_instruction_mix.yaml": "f750affa61e433dbba158ec114b0c480",
+        "1100_compute_units_compute_pipeline.yaml": "9d568d2e67c05fc328f8ca72a9d90688",
+        "1200_local_data_share_lds.yaml": "b62e7ceb2226f67c87cc41a9a8984888",
+        "1300_instruction_cache.yaml": "4b08fd6bae8a930462faa580a53809d9",
+        "1400_scalar_l1_data_cache.yaml": "642d2083b9b677128ac7f7895f6d3f2b",
+        "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "30d5165412c86a7fda6e60415857f602",
+        "1600_vector_l1_data_cache.yaml": "fd1defe228ba06e8e84a64aae7d1804e",
+        "1700_l2_cache.yaml": "06db33cd33f2f00a5b2f105c6d9f2ea6",
+        "1800_l2_cache_per_channel.yaml": "2fa15a760d3b597376f8f1189d4cb1ad",
+        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
+      }
+    },
+    "gfx950": {
+      "files": {
+        "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
+        "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
+        "0200_system_speed_of_light.yaml": "683e3116257df32dac95bd33867b6f29",
+        "0300_memory_chart.yaml": "b07f21ec87d734e2f475b4238a8ffae4",
+        "0400_roofline.yaml": "fa14331c5e57f000c63f2da2543b4ce7",
+        "0500_command_processor_cpc_cpf.yaml": "9692ade2811b3693357296edbdf31dce",
+        "0600_workgroup_manager_spi.yaml": "95d7f66c50777976248eaefe778366cf",
+        "0700_wavefront.yaml": "e1cf000b51857587f90086a1e8975a5b",
+        "1000_compute_units_instruction_mix.yaml": "4aa28bd3e0ad9a5b4b176f837b015f22",
+        "1100_compute_units_compute_pipeline.yaml": "c986ef30c465577506a2dba24abfa572",
+        "1200_local_data_share_lds.yaml": "03f7fedf5fa6b7dcbbc37d4023526e5a",
+        "1300_instruction_cache.yaml": "4b08fd6bae8a930462faa580a53809d9",
+        "1400_scalar_l1_data_cache.yaml": "e4ca1304b98181c73e5dec0a8a27f797",
+        "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "5b4d7dbe52db2c3cbde60c6a769e16f7",
+        "1600_vector_l1_data_cache.yaml": "623c2230982b1b4231b16f6d5162953b",
+        "1700_l2_cache.yaml": "5e4e51138c2b081f371cf2cb1f1b9642",
+        "1800_l2_cache_per_channel.yaml": "20fda1f38e9ad03df0bce18ce4d27858",
+        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b",
+        "3000_mem_bw.yaml": "ffded5b303d4fa9c1ca1849d3934c6c1"
+      }
+    }
+  }
+}

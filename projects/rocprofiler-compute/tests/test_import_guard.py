@@ -8,12 +8,11 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import ProfileModeImportGuard
 
 
 def test_import_guard_allows_stdlib_and_project():
     """Verify ProfileModeImportGuard allows stdlib and project imports."""
-    from conftest import ProfileModeImportGuard
-
     with ProfileModeImportGuard():
         # 1. Stdlib imports (must succeed - these are always available)
         import argparse
@@ -34,8 +33,6 @@ def test_import_guard_allows_stdlib_and_project():
 
 def test_import_guard_allows_rocm_modules():
     """Verify ProfileModeImportGuard allows ROCm system libraries."""
-    from conftest import ProfileModeImportGuard
-
     # Add amdsmi to sys.path (same as profile code does)
     amdsmi_path = Path(os.getenv("ROCM_PATH", "/opt/rocm")) / "share/amd_smi"
     if not amdsmi_path.exists():
@@ -62,31 +59,25 @@ def test_import_guard_allows_rocm_modules():
 
 def test_import_guard_blocks_non_stdlib():
     """Verify ProfileModeImportGuard blocks non-stdlib imports."""
-    from conftest import ProfileModeImportGuard
-
-    if sys.version_info < (3, 10):
-        pytest.skip(
-            "ProfileModeImportGuard requires Python 3.10+ (sys.stdlib_module_names)"
-        )
-
-    # Test blocking non-stdlib imports
-    # Note: Must clear from sys.modules first since import hooks only
-    # run for uncached modules
     test_packages = ["pandas", "yaml", "numpy"]
 
     for package in test_packages:
-        # Clear from cache if present
-        if package in sys.modules:
-            del sys.modules[package]
-
         # Should block the import
         with pytest.raises(ImportError, match="PROFILE MODE DEPENDENCY VIOLATION"):
             with ProfileModeImportGuard():
                 __import__(package)
 
         # Verify error message mentions the forbidden package
-        if package in sys.modules:
-            del sys.modules[package]
         with pytest.raises(ImportError, match=package):
             with ProfileModeImportGuard():
                 __import__(package)
+
+
+def test_import_guard_catches_already_cached_package():
+    """Guard must flag a forbidden import even when it is already cached."""
+    # pandas is cached session-wide (conftest imports it via common.py); a
+    # meta_path finder alone never sees a cached import.
+    assert "pandas" in sys.modules
+    with pytest.raises(ImportError, match="PROFILE MODE DEPENDENCY VIOLATION"):
+        with ProfileModeImportGuard():
+            __import__("pandas")

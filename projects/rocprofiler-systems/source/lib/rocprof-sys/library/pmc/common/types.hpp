@@ -13,7 +13,7 @@ namespace pmc
 {
 
 /**
- * @brief Version information for device providers and drivers.
+ * @brief Version information for device providers and backends.
  */
 struct version
 {

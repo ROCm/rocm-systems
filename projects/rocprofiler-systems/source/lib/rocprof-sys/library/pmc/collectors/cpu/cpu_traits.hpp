@@ -29,17 +29,17 @@ using ::rocprofsys::pmc::device_selection_mode;
  * selects socket IDs (not individual cores). All cores on a selected socket
  * are always monitored.
  *
- * @tparam DriverProvider The provider type (wraps procfs driver).
+ * @tparam BackendProvider The provider type (wraps procfs backend).
  */
-template <typename DriverProvider>
+template <typename BackendProvider>
 struct cpu_traits
 {
     using metrics_t         = cpu::metrics;
     using enabled_metrics_t = cpu::enabled_metrics;
-    using device_t          = device<typename DriverProvider::driver_t>;
+    using device_t          = device<typename BackendProvider::backend_t>;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;
-    using driver_t          = typename DriverProvider::driver_t;
+    using backend_t         = typename BackendProvider::backend_t;
 
     static constexpr const char* device_name = "CPU";
 

@@ -1,5 +1,0 @@
-pmc:  CPC_CPC_TCIU_BUSY CPC_CPC_TCIU_IDLE
-
-gpu:
-range:
-kernel:

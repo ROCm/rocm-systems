@@ -171,18 +171,18 @@ main(int argc, char *argv[])
             goto destroy_stream;
         }
 
-        if (bytes_read != (ssize_t)alloc_size) {
+        if (bytes_read != static_cast<ssize_t>(alloc_size)) {
             fprintf(stderr, "Async read short: %zd of %zu\n", bytes_read, alloc_size);
             goto destroy_stream;
         }
-        if (bytes_written != (ssize_t)alloc_size) {
+        if (bytes_written != static_cast<ssize_t>(alloc_size)) {
             fprintf(stderr, "Async write short: %zd of %zu\n", bytes_written, alloc_size);
             goto destroy_stream;
         }
     }
 
     /* 8. Trim WRITE_FILE down to the true payload size (we wrote padded). */
-    if (-1 == ftruncate(wfd, (off_t)payload_size)) {
+    if (-1 == ftruncate(wfd, static_cast<off_t>(payload_size))) {
         fprintf(stderr, "Could not truncate %s (%s)\n", write_path, strerror(errno));
         goto destroy_stream;
     }

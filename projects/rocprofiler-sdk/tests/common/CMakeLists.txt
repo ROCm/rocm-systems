@@ -12,28 +12,7 @@ set(ROCPROFILER_DEFAULT_FAIL_REGEX
     "threw an exception|Permission denied|Could not create logging file|failed with error code|Subprocess aborted"
     CACHE INTERNAL "Default FAIL_REGULAR_EXPRESSION for tests")
 
-set(DEFAULT_GPU_TARGETS
-    "gfx900"
-    "gfx906"
-    "gfx908"
-    "gfx90a"
-    "gfx942"
-    "gfx950"
-    "gfx1030"
-    "gfx1010"
-    "gfx1100"
-    "gfx1101"
-    "gfx1102")
-
-set(GPU_TARGETS
-    "${DEFAULT_GPU_TARGETS}"
-    CACHE STRING "GPU targets to compile for")
-
-set(AMDGPU_TARGETS
-    "${GPU_TARGETS}"
-    CACHE STRING
-          "GPU targets to compile for AMDGPUs (update GPU_TARGETS, not this variable)"
-          FORCE)
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/rocprofiler_test_gpu_targets.cmake")
 
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
     cmake_policy(SET CMP0135 NEW)
@@ -393,7 +372,7 @@ function(rocprofiler_add_integration_validate_test NAME)
         "INCLUDE_FILE_PATH"
         "BUNDLE_TESTS")
     set(_SINGLE_OPTS "TARGET_DEPENDS" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "LABELS"
-                     "DISABLED" "DISABLED_MEMCHECKS")
+                     "DISABLED" "DISABLED_MEMCHECKS" "PYTHON_EXECUTABLE")
     set(_MULTI_OPTS
         "TEST_PATHS"
         "CONFIG"
@@ -474,6 +453,13 @@ function(rocprofiler_add_integration_validate_test NAME)
         list(APPEND arg_LABELS "validation")
     endif()
 
+    if(NOT arg_PYTHON_EXECUTABLE)
+        if(NOT Python3_EXECUTABLE)
+            find_package(Python3 REQUIRED COMPONENTS Interpreter)
+        endif()
+        set(arg_PYTHON_EXECUTABLE ${Python3_EXECUTABLE})
+    endif()
+
     set(arg_PYTHON_PATH "${ROCPROFILER_SDK_TESTS_BINARY_DIR}/pytest-packages"
                         ${arg_PYTHON_PATH})
 
@@ -515,35 +501,18 @@ function(rocprofiler_add_integration_validate_test NAME)
     _append_prop(FIXTURES_REQUIRED arg_FIXTURES_REQUIRED)
 
     rocprofiler_sdk_pytest_discover_tests(
-        ${arg_NAME}
-        ${_STRIP_PARAM_BRACKETS}
-        ${_INCLUDE_FILE_PATH}
-        ${_BUNDLE_TESTS}
-        TEST_PATHS
-        ${arg_TEST_PATHS}
-        WORKING_DIRECTORY
-        ${arg_WORKING_DIRECTORY}
-        TRIM_FROM_NAME
-        "${arg_TRIM_FROM_NAME}"
-        TRIM_FROM_FULL_NAME
-        "${arg_TRIM_FROM_FULL_NAME}"
-        LIBRARY_PATH_PREPEND
-        ${arg_LIBRARY_PATH}
-        PYTHON_PATH_PREPEND
-        ${arg_PYTHON_PATH}
-        ENVIRONMENT
-        "${arg_ENVIRONMENT}"
-        DEPENDS
-        "${arg_DEPENDS}"
-        EXTRA_ARGS
-        ${arg_ARGS}
-        --durations=20
-        -rA
-        -s
-        -vv
-        DISCOVERY_EXTRA_ARGS
-        ${arg_DISCOVERY_ARGS}
-        PROPERTIES
-        ${_props})
+        ${arg_NAME} ${_STRIP_PARAM_BRACKETS} ${_INCLUDE_FILE_PATH} ${_BUNDLE_TESTS}
+        TEST_PATHS ${arg_TEST_PATHS}
+        WORKING_DIRECTORY ${arg_WORKING_DIRECTORY}
+        PYTHON_EXECUTABLE ${arg_PYTHON_EXECUTABLE}
+        TRIM_FROM_NAME "${arg_TRIM_FROM_NAME}"
+        TRIM_FROM_FULL_NAME "${arg_TRIM_FROM_FULL_NAME}"
+        LIBRARY_PATH_PREPEND ${arg_LIBRARY_PATH}
+        PYTHON_PATH_PREPEND ${arg_PYTHON_PATH}
+        ENVIRONMENT "${arg_ENVIRONMENT}"
+        DEPENDS "${arg_DEPENDS}"
+        EXTRA_ARGS ${arg_ARGS} --durations=20 -rA -s -vv
+        DISCOVERY_EXTRA_ARGS ${arg_DISCOVERY_ARGS}
+        PROPERTIES ${_props})
 
 endfunction()

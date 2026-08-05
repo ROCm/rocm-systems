@@ -34,3 +34,5 @@ external_projects_current_project = "rccl"
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]

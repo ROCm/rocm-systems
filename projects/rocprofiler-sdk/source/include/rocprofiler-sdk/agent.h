@@ -135,7 +135,7 @@ typedef struct rocprofiler_agent_v0_t
     rocprofiler_agent_type_t type;  ///< Enumeration for identifying the agent type (CPU, GPU, etc.)
     uint32_t cpu_cores_count;  ///< # of latency (= CPU) cores present on this HSA node. This value
                                ///< is 0 for a HSA node with no such cores, e.g a "discrete HSA GPU"
-    uint32_t simd_count;  ///< # of HSA throughtput (= GPU) FCompute cores ("SIMD") present in a
+    uint32_t simd_count;       ///< # of HSA throughput (= GPU) FCompute cores ("SIMD") present in a
                           ///< node. This value is 0 if no FCompute cores are present (e.g. pure
                           ///< "CPU node").
     uint32_t mem_banks_count;  ///< # of discoverable memory bank affinity properties on this
@@ -238,7 +238,7 @@ typedef struct rocprofiler_agent_v0_t
     /// value). This field is intended to help with environment variable indexing used to mask GPUs
     /// at runtime (i.e. HIP_VISIBLE_DEVICES and ROCR_VISIBLE_DEVICES) which start at zero and only
     /// apply to GPUs, e.g., logical_node_type_id value for first GPU will be 0, second GPU will
-    /// have value of 1, etc., regardless of however many agents of a different type preceeded (and
+    /// have value of 1, etc., regardless of however many agents of a different type preceded (and
     /// thus increased the ::rocprofiler_agent_v0_t.node_id or
     /// ::rocprofiler_agent_v0_t.logical_node_id).
     ///

@@ -36,16 +36,28 @@ from . import libpyrocpd
 
 class RocpdSchema:
 
-    def __init__(self, uuid="", guid=""):
+    def __init__(self, uuid="", guid="", version="0.0.0"):
 
         variables = libpyrocpd.schema_jinja_variables()
         variables.uuid = f"{uuid}"
         variables.guid = f"{guid}"
 
+        self.supported_schema_versions = libpyrocpd.query_supported_schema_versions(
+            libpyrocpd.sql_engine.sqlite3
+        )
+
+        # version=0.0.0 means use the default schema version
+        schema_version = (
+            version
+            if isinstance(version, libpyrocpd.schema_version)
+            else libpyrocpd.schema_version(str(version))
+        )
+
         self.tables = RocpdSchema.load_schema(
             libpyrocpd.sql_engine.sqlite3,
             libpyrocpd.sql_schema.rocpd_tables,
             libpyrocpd.sql_option.sqlite3_pragma_foreign_keys,
+            schema_version,
             variables,
         )
 
@@ -53,16 +65,26 @@ class RocpdSchema:
             libpyrocpd.sql_engine.sqlite3,
             libpyrocpd.sql_schema.rocpd_indexes,
             libpyrocpd.sql_option.none,
+            schema_version,
+            variables,
+        )
+
+        self.metadata = RocpdSchema.load_schema(
+            libpyrocpd.sql_engine.sqlite3,
+            libpyrocpd.sql_schema.rocpd_metadata,
+            libpyrocpd.sql_option.none,
+            schema_version,
             variables,
         )
 
         _views = []
-        for itr in ["rocpd", "data", "summary", "marker"]:
+        for itr in ["rocpd", "data", "summary"]:
             _views += [
                 RocpdSchema.load_schema(
                     libpyrocpd.sql_engine.sqlite3,
                     getattr(libpyrocpd.sql_schema, f"{itr}_views"),
                     libpyrocpd.sql_option.none,
+                    schema_version,
                     variables,
                 )
             ]
@@ -70,11 +92,12 @@ class RocpdSchema:
 
     def write_schema(self, connection):
         connection.executescript(self.tables)
+        connection.executescript(self.metadata)
         connection.executescript(self.indexes)
         connection.executescript(self.views)
 
     @staticmethod
-    def load_schema(engine, kind, options, variables=None, **kwargs):
+    def load_schema(engine, kind, options, version="0.0.0", variables=None, **kwargs):
 
         if variables is None:
             variables = libpyrocpd.schema_jinja_variables()
@@ -84,7 +107,11 @@ class RocpdSchema:
             if _variable is not None:
                 setattr(variables, itr, f"{_variable}")
 
-        return libpyrocpd.load_schema(engine, kind, options, variables)
+        return libpyrocpd.load_schema(engine, kind, options, version, variables)
+
+
+def query_supported_schema_versions(engine=libpyrocpd.sql_engine.sqlite3):
+    return libpyrocpd.query_supported_schema_versions(engine)
 
 
 def main(create=None):

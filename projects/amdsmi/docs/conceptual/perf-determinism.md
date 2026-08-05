@@ -23,7 +23,7 @@ automatic behavior with a specific policy.
 
 The request flows through the stack as:
 
-1. **AMD SMI** (user space) calls `amdsmi_set_gpu_perf_level()`.
+1. **AMD SMI** (user space) calls {c:func}`amdsmi_set_gpu_perf_level`.
 2. The **amdgpu kernel driver** writes the level to the
    `power_dpm_force_performance_level` sysfs file.
 3. The driver sends a **PMFW** (Power Management Firmware) message to the SMU
@@ -88,7 +88,7 @@ GFXCLK frequency.
 ### How it works
 
 When you enable performance determinism via
-`amdsmi_set_gpu_perf_determinism_mode()` or `amd-smi set --perf-determinism
+{c:func}`amdsmi_set_gpu_perf_determinism_mode` or `amd-smi set --perf-determinism
 <SCLKMAX>`:
 
 1. The GPU performance level is set to `DETERMINISM`.
@@ -145,12 +145,12 @@ returns an error.
 :::::{tab-set}
 ::::{tab-item} C/C++
 
-- `amdsmi_get_gpu_perf_level()` -- Query the current DPM performance level.
-- `amdsmi_set_gpu_perf_level()` -- Set the PowerPlay performance level.
-- `amdsmi_set_gpu_perf_determinism_mode()` -- Enable performance determinism
+- {c:func}`amdsmi_get_gpu_perf_level` -- Query the current DPM performance level.
+- {c:func}`amdsmi_set_gpu_perf_level` -- Set the PowerPlay performance level.
+- {c:func}`amdsmi_set_gpu_perf_determinism_mode` -- Enable performance determinism
   with a GFXCLK SoftMax (in MHz).
 
-See [Clock, Power, and Performance Control](/doxygen/docBin/html/group__tagClkPowerPerfControl)
+See {ref}`Clock, Power, and Performance Control <tagClkPowerPerfControl>`
 for the full API reference.
 ::::
 

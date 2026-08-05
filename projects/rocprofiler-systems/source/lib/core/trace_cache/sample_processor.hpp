@@ -124,13 +124,11 @@ struct processor_view_t
     };
 
     template <typename T>
+        requires std::is_base_of_v<processor_t<T>, T>
     explicit processor_view_t(T& t) noexcept
     : m_object{ std::addressof(t) }
     , m_vtable{ std::addressof(get_vtable_for_type<T>()) }
-    {
-        static_assert(std::is_base_of<processor_t<T>, T>::value,
-                      "Type must be derived from processor_t<T>");
-    }
+    {}
 
     processor_view_t(const processor_view_t&) noexcept            = default;
     processor_view_t(processor_view_t&&) noexcept                 = default;

@@ -30,43 +30,6 @@ class StitchUtilsTest : public ::testing::Test
 protected:
 };
 
-// Tests for split2
-TEST_F(StitchUtilsTest, Split2BasicSplit)
-{
-    auto [first, second] = split2("hello::world", "::");
-    EXPECT_EQ(first, "hello");
-    EXPECT_EQ(second, "world");
-}
-
-TEST_F(StitchUtilsTest, Split2NoDelimiter)
-{
-    auto [first, second] = split2("helloworld", "::");
-    EXPECT_EQ(first, "helloworld");
-    EXPECT_TRUE(second.empty());
-}
-
-TEST_F(StitchUtilsTest, Split2DelimiterAtEnd)
-{
-    auto [first, second] = split2("hello::", "::");
-    EXPECT_EQ(first, "hello::");
-    EXPECT_TRUE(second.empty());
-}
-
-TEST_F(StitchUtilsTest, Split2MultipleSplitPoints)
-{
-    // Only splits at first occurrence
-    auto [first, second] = split2("a::b::c", "::");
-    EXPECT_EQ(first, "a");
-    EXPECT_EQ(second, "b::c");
-}
-
-TEST_F(StitchUtilsTest, Split2EmptyInput)
-{
-    auto [first, second] = split2("", "::");
-    EXPECT_TRUE(first.empty());
-    EXPECT_TRUE(second.empty());
-}
-
 // Tests for strip
 TEST_F(StitchUtilsTest, StripLeadingWhitespace)
 {
@@ -184,21 +147,6 @@ TEST(BValidTest, LargeValues)
     EXPECT_TRUE(bValid(large_addr));
     EXPECT_TRUE(bValid(large_id));
     EXPECT_TRUE(bValid(both_large));
-}
-
-// Edge case: split2 with delimiter at start
-TEST(StitchUtilsEdgeCaseTest, Split2DelimiterAtStart)
-{
-    auto [first, second] = split2("::hello", "::");
-    EXPECT_TRUE(first.empty() || first == "::hello");
-}
-
-// Edge case: split2 with only delimiter
-TEST(StitchUtilsEdgeCaseTest, Split2OnlyDelimiter)
-{
-    auto [first, second] = split2("::", "::");
-    // Behavior depends on implementation - just verify no crash
-    EXPECT_TRUE(first.empty() || first == "::");
 }
 
 // Edge case: splitv with tabs

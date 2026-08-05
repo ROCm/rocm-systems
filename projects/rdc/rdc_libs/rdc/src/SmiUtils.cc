@@ -24,10 +24,12 @@ THE SOFTWARE.
 
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "rdc/rdc.h"
+#include "rdc_lib/RdcLogger.h"
 
 namespace amd {
 namespace rdc {
@@ -77,8 +79,30 @@ rdc_status_t Smi2RdcError(amdsmi_status_t rsmi) {
   }
 }
 
+// Dual index semantics for gpu_id:
+//   Physical/instance-0: device_index is a flat index into s_flat_gpu_table.
+//   Partition-instance:  device_index is a socket index, instance_index the per-socket proc.
+// These coincide in SPX but diverge in CPX (multiple procs per socket), so don't pass a
+// flat index where a socket index is expected.
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle) {
+  if (processor_handle == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  const auto& table = get_flat_gpu_table();
+  rdc_entity_info_t info = rdc_get_info_from_entity_index(gpu_id);
+
+  if (info.instance_index == 0 && info.entity_role == RDC_DEVICE_ROLE_PHYSICAL) {
+    uint32_t flat_idx = info.device_index;
+    if (flat_idx >= table.size()) {
+      return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+    }
+    *processor_handle = table[flat_idx].handle;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  // Entity-encoded index (partition instances): use socket/proc mapping
   uint32_t socket_count = 0;
   amdsmi_status_t ret = amdsmi_get_socket_handles(&socket_count, nullptr);
   if (ret != AMDSMI_STATUS_SUCCESS) {
@@ -91,39 +115,30 @@ amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
     return ret;
   }
 
-  std::vector<std::vector<amdsmi_processor_handle>> procs_by_socket;
-  procs_by_socket.resize(socket_count);
-
-  for (size_t s = 0; s < sockets.size(); s++) {
-    uint32_t proc_count = 0;
-    ret = amdsmi_get_processor_handles(sockets[s], &proc_count, nullptr);
-    if (ret != AMDSMI_STATUS_SUCCESS) {
-      return ret;
-    }
-
-    std::vector<amdsmi_processor_handle> procs(proc_count);
-    ret = amdsmi_get_processor_handles(sockets[s], &proc_count, procs.data());
-    if (ret != AMDSMI_STATUS_SUCCESS) {
-      return ret;
-    }
-
-    procs_by_socket[s] = procs;
-  }
-
-  rdc_entity_info_t info = rdc_get_info_from_entity_index(gpu_id);
   uint32_t socket_index = info.device_index;
   uint32_t instance_index = info.instance_index;
 
-  if (socket_index >= procs_by_socket.size()) {
+  if (socket_index >= socket_count) {
     return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
   }
 
-  const auto& handles = procs_by_socket[socket_index];
-  if (instance_index >= handles.size()) {
+  uint32_t proc_count = 0;
+  ret = amdsmi_get_processor_handles(sockets[socket_index], &proc_count, nullptr);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  if (instance_index >= proc_count) {
     return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
   }
 
-  *processor_handle = handles[instance_index];
+  std::vector<amdsmi_processor_handle> procs(proc_count);
+  ret = amdsmi_get_processor_handles(sockets[socket_index], &proc_count, procs.data());
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  *processor_handle = procs[instance_index];
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -224,22 +239,54 @@ amdsmi_status_t get_metrics_info(amdsmi_processor_handle proc, amdsmi_gpu_metric
 }
 
 amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
-  // Get the processor handle for the physical device.
-  amdsmi_processor_handle proc_handle = nullptr;
-  amdsmi_status_t ret = get_processor_handle_from_id(index, &proc_handle);
-  if (ret != AMDSMI_STATUS_SUCCESS) {
-    return ret;
-  }
-
   if (num_partition == nullptr) {
     return AMDSMI_STATUS_INVAL;
+  }
+
+  // Decode the entity index so both bare flat indices and partition-instance entity
+  // indices resolve to the right socket (they diverge in CPX). See the dual-index note
+  // on get_processor_handle_from_id().
+  const auto& table = get_flat_gpu_table();
+  rdc_entity_info_t info = rdc_get_info_from_entity_index(index);
+
+  uint32_t target_socket = 0;
+  if (info.entity_role == RDC_DEVICE_ROLE_PHYSICAL && info.instance_index == 0) {
+    // Physical/instance-0: device_index is a flat index into the GPU table.
+    uint32_t flat_idx = info.device_index;
+    if (flat_idx >= table.size()) {
+      return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+    }
+    target_socket = table[flat_idx].socket_index;
+  } else {
+    // Partition-instance: device_index is the socket index.
+    target_socket = info.device_index;
+  }
+
+  // Find the first processor in the same socket to query the physical GPU profile.
+  amdsmi_processor_handle phys_handle = nullptr;
+  for (const auto& entry : table) {
+    if (entry.socket_index == target_socket) {
+      phys_handle = entry.handle;
+      break;
+    }
+  }
+
+  if (phys_handle == nullptr) {
+    return AMDSMI_STATUS_NOT_FOUND;
   }
 
   amdsmi_accelerator_partition_profile_t profile;
   memset(&profile, 0, sizeof(profile));
   uint32_t partition_id{};
 
-  ret = amdsmi_get_gpu_accelerator_partition_profile(proc_handle, &profile, &partition_id);
+  amdsmi_status_t ret =
+      amdsmi_get_gpu_accelerator_partition_profile(phys_handle, &profile, &partition_id);
+  // Non-partitionable GPUs report this as unsupported; treat them as a single
+  // partition. All consumers handle a count of 1 correctly.
+  if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+    *num_partition = 1;
+    return AMDSMI_STATUS_SUCCESS;
+  }
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -248,9 +295,104 @@ amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
     return AMDSMI_STATUS_UNEXPECTED_DATA;
   }
 
+  // Some driver/amdsmi versions return the current profile with num_partitions set to an
+  // invalid sentinel (e.g. UINT32_MAX) even though the call succeeds. Fall back to the flat
+  // table, which enumerates exactly one entry per partition in a socket, so the count stays
+  // consistent with the rest of RDC's GPU view.
+  if (profile.num_partitions == 0 || profile.num_partitions > RDC_MAX_NUM_PARTITIONS) {
+    uint16_t socket_entries = 0;
+    for (const auto& entry : table) {
+      if (entry.socket_index == target_socket) {
+        socket_entries++;
+      }
+    }
+    *num_partition = socket_entries;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
   *num_partition = profile.num_partitions;
 
   return ret;
+}
+
+// Flat (0-based) index -> AMD GPU handle, built lazily and cached for the process lifetime.
+// Goes stale if the partition mode changes at runtime; a daemon restart is the supported fix.
+static std::mutex s_flat_gpu_table_mutex;
+static std::vector<GpuHandleEntry> s_flat_gpu_table;
+static bool s_flat_gpu_table_initialized = false;
+
+// Caller must hold s_flat_gpu_table_mutex.
+static void build_flat_gpu_table_locked() {
+  s_flat_gpu_table.clear();
+
+  uint32_t socket_count = 0;
+  if (amdsmi_get_socket_handles(&socket_count, nullptr) != AMDSMI_STATUS_SUCCESS) {
+    return;
+  }
+  std::vector<amdsmi_socket_handle> sockets(socket_count);
+  if (amdsmi_get_socket_handles(&socket_count, sockets.data()) != AMDSMI_STATUS_SUCCESS) {
+    return;
+  }
+
+  for (uint32_t s = 0; s < socket_count; s++) {
+    uint32_t proc_count = 0;
+    if (amdsmi_get_processor_handles(sockets[s], &proc_count, nullptr) != AMDSMI_STATUS_SUCCESS) {
+      continue;
+    }
+    std::vector<amdsmi_processor_handle> procs(proc_count);
+    if (amdsmi_get_processor_handles(sockets[s], &proc_count, procs.data()) !=
+        AMDSMI_STATUS_SUCCESS) {
+      continue;
+    }
+    for (uint32_t p = 0; p < proc_count; p++) {
+      processor_type_t proc_type = AMDSMI_PROCESSOR_TYPE_UNKNOWN;
+      if (amdsmi_get_processor_type(procs[p], &proc_type) != AMDSMI_STATUS_SUCCESS) {
+        continue;
+      }
+      if (proc_type == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
+        GpuHandleEntry entry;
+        entry.handle = procs[p];
+        entry.socket_index = s;
+        entry.proc_index = p;
+        s_flat_gpu_table.push_back(entry);
+      }
+    }
+  }
+
+  // A query failure above leaves the table empty or short; warn once so a
+  // misbehaving driver/topology is diagnosable rather than silently swallowed.
+  if (s_flat_gpu_table.empty()) {
+    RDC_LOG(RDC_ERROR, "build_flat_gpu_table: no AMD GPUs found; GPU table is empty");
+  }
+  s_flat_gpu_table_initialized = true;
+}
+
+const std::vector<GpuHandleEntry>& get_flat_gpu_table() {
+  std::lock_guard<std::mutex> lock(s_flat_gpu_table_mutex);
+  if (!s_flat_gpu_table_initialized) {
+    build_flat_gpu_table_locked();
+  }
+  return s_flat_gpu_table;
+}
+
+// Invalidates the cache; previously returned references are dangling afterward.
+void reset_flat_gpu_table() {
+  std::lock_guard<std::mutex> lock(s_flat_gpu_table_mutex);
+  s_flat_gpu_table.clear();
+  s_flat_gpu_table_initialized = false;
+}
+
+uint64_t count_pending_bad_pages(const amdsmi_retired_page_record_t* records, uint32_t count) {
+  if (records == nullptr) {
+    return 0;
+  }
+  uint64_t pending = 0;
+  for (uint32_t i = 0; i < count; ++i) {
+    if (AMDSMI_MEM_PAGE_STATUS_PENDING == records[i].status) {
+      ++pending;
+    }
+  }
+  return pending;
 }
 
 }  // namespace rdc

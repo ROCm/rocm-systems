@@ -62,6 +62,18 @@ set(${AMD_SMI_LIBS_TARGET}_VERSION_STRING
     "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}+${${AMD_SMI_LIBS_TARGET}_VERSION_HASH}"
 )
 
+# PyPI rejects a PEP 440 local version (the +hash suffix), so a published wheel
+# needs a clean MAJOR.MINOR.PATCH. Per-commit CI wheels keep +hash for unique
+# filenames; the commit is always recoverable via amdsmi.__commit__.
+option(AMDSMI_WHEEL_RELEASE "Use a clean PEP 440 version (no +hash) for the wheel" OFF)
+if(AMDSMI_WHEEL_RELEASE)
+    set(${AMD_SMI_LIBS_TARGET}_WHEEL_VERSION
+        "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}"
+    )
+else()
+    set(${AMD_SMI_LIBS_TARGET}_WHEEL_VERSION "${${AMD_SMI_LIBS_TARGET}_VERSION_STRING}")
+endif()
+
 set(DEFAULT_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 update_version_in_file("include/amd_smi/amdsmi.h" ${DEFAULT_VERSION} "#define AMDSMI_LIB_VERSION_" " *" " ")
 update_version_in_file("rust-interface/src/amdsmi_wrapper.rs" ${DEFAULT_VERSION} "AMDSMI_LIB_VERSION_" " *: *u32 *= *"
@@ -111,8 +123,25 @@ include(GNUInstallDirs)
 
 option(BUILD_TESTS "Build test suite" OFF)
 option(ENABLE_ASAN_PACKAGING "" OFF)
-option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+    option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
+else()
+    option(ENABLE_ESMI_LIB "Build ESMI Library" OFF)
+endif()
+
 option(BUILD_EXAMPLES "Build examples" OFF)
+option(
+    BUILD_PYTHON_WHEEL
+    "Build the standalone Python wheel and the isolated libamd_smi_python.so it bundles. OFF means only the system-package layout is built (no .whl artifact)."
+    OFF
+)
+if(BUILD_PYTHON_WHEEL AND NOT BUILD_SHARED_LIBS)
+    message(
+        FATAL_ERROR
+        "BUILD_PYTHON_WHEEL=ON requires BUILD_SHARED_LIBS=ON: the wheel ships a .so (libamd_smi_python.so) and the py-interface subdirectory only enters when BUILD_SHARED_LIBS=ON."
+    )
+endif()
 
 # If amdsmi is built as a static library, it should support being embedded in other programs. The setting below essentially enables the -fPIC flag.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "Enable position independent code for all targets")
@@ -175,8 +204,28 @@ generic_package()
 
 # Dependencies
 find_package(Threads REQUIRED)
+
 pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
 pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
+
+# Netlink libraries for network interface functionality (required)
+# TheRock RUNTIME_DEPS automatically configure PKG_CONFIG_PATH for bundled sysdeps
+find_package(PkgConfig REQUIRED)
+
+# Try to use CMake config files first (bundled sysdeps provide these)
+find_package(libnl CONFIG QUIET)
+find_package(libmnl CONFIG QUIET)
+
+if(libnl_FOUND AND libmnl_FOUND)
+    message(STATUS "Using bundled netlink libraries via CMake config")
+    set(USING_BUNDLED_NETLINK TRUE)
+else()
+    message(STATUS "Using system netlink libraries via pkg-config")
+    pkg_check_modules(LIBNL3 REQUIRED IMPORTED_TARGET libnl-3.0)
+    pkg_check_modules(LIBNLGENL3 REQUIRED IMPORTED_TARGET libnl-genl-3.0)
+    pkg_check_modules(LIBMNL REQUIRED IMPORTED_TARGET libmnl)
+    set(USING_BUNDLED_NETLINK FALSE)
+endif()
 
 # Configuration
 function(get_imported_target_info target out_soname out_include_dirs)
@@ -233,65 +282,50 @@ set(ROCM_SRC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/src")
 set(ROCM_INC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi")
 set(SHR_MUTEX_DIR "${PROJECT_SOURCE_DIR}/third_party/shared_mutex")
 if(ENABLE_ESMI_LIB)
-    # Supported esmi library version tag
-    set(current_esmi_tag "esmi_pkg_ver-5.1.1")
+    # Pin to an immutable commit hash so the sources can't be swapped by a moved tag.
+    set(ESMI_GIT_HASH "d494a3194ceb4cc4dbb2debf9fcbe8773c6d3bef")
+    set(ESMI_SOURCE_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library")
 
-    if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/src)
-        # TODO: use ExternalProject_Add instead or a submodule
-        message(STATUS "Adding esmi_ib_library...")
+    # Drop an existing checkout pinned to a different commit so a hash bump
+    # re-fetches instead of silently building stale sources.
+    if(EXISTS "${ESMI_SOURCE_DIR}/.git")
         execute_process(
-            COMMAND
-                git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git
-                ${PROJECT_SOURCE_DIR}/esmi_ib_library
-        )
-    else()
-        message(STATUS "esmi_ib_library already installed, checking version...")
-
-        # Grab latest commit and get the tag
-        execute_process(
-            COMMAND git rev-list --tags --max-count=1
-            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/esmi_ib_library
-            OUTPUT_VARIABLE latest_commit
+            COMMAND git rev-parse HEAD
+            WORKING_DIRECTORY "${ESMI_SOURCE_DIR}"
+            OUTPUT_VARIABLE esmi_current_hash
             OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
         )
-        execute_process(
-            COMMAND git describe --tags ${latest_commit} --match "*pkg*"
-            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/esmi_ib_library
-            OUTPUT_VARIABLE latest_esmi_tag
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-        )
-
-        # Update to latest tags if not matched
-        if(NOT latest_esmi_tag STREQUAL current_esmi_tag)
-            message(STATUS "Updating esmi_ib_library...")
-            execute_process(
-                COMMAND
-                    git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git
-                    ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp
-                RESULT_VARIABLE clone_result
-            )
-            if(clone_result EQUAL 0)
-                file(REMOVE_RECURSE ${PROJECT_SOURCE_DIR}/esmi_ib_library)
-                file(RENAME ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp ${PROJECT_SOURCE_DIR}/esmi_ib_library)
-                message(STATUS "Successfully cloned updated esmi_ib_library")
-            else()
-                file(REMOVE_RECURSE ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp)
-                message(FATAL_ERROR "Failed to clone updated esmi_ib_library")
-            endif()
-        else()
-            message(STATUS "esmi_ib_library is the latest version: ${current_esmi_tag}...")
+        if(NOT esmi_current_hash STREQUAL ESMI_GIT_HASH)
+            message(STATUS "esmi_ib_library pin changed, re-fetching...")
+            file(REMOVE_RECURSE "${ESMI_SOURCE_DIR}")
         endif()
     endif()
 
+    # Reuse existing sources when present (offline-safe); only fetch when absent.
+    if(NOT EXISTS "${ESMI_SOURCE_DIR}/src/e_smi.c")
+        include(FetchContent)
+        FetchContent_Declare(
+            esmi_ib_library
+            GIT_REPOSITORY https://github.com/amd/esmi_ib_library.git
+            GIT_TAG ${ESMI_GIT_HASH}
+            # No GIT_SHALLOW: a shallow clone can't check out an arbitrary commit.
+            SOURCE_DIR
+            ${ESMI_SOURCE_DIR}
+            # Download only: point SOURCE_SUBDIR at a dir with no CMakeLists.txt
+            # so the sources are compiled into amd_smi, not add_subdirectory'd.
+            SOURCE_SUBDIR
+            __download_only__
+        )
+        FetchContent_MakeAvailable(esmi_ib_library)
+    endif()
+
     # Make sure to update the amd_hsmp.h file with the corresponding esmi version
-    file(
-        COPY "${PROJECT_SOURCE_DIR}/include/amd_smi/impl/amd_hsmp.h"
-        DESTINATION "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm"
-    )
+    file(COPY "${PROJECT_SOURCE_DIR}/include/amd_smi/impl/amd_hsmp.h" DESTINATION "${ESMI_SOURCE_DIR}/include/asm")
 
     add_definitions("-DENABLE_ESMI_LIB=1")
-    set(ESMI_INC_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library/include")
-    set(ESMI_SRC_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library/src")
+    set(ESMI_INC_DIR "${ESMI_SOURCE_DIR}/include")
+    set(ESMI_SRC_DIR "${ESMI_SOURCE_DIR}/src")
     # esmi has a lot of write-strings warnings - silence them
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-write-strings")
 endif()
@@ -359,9 +393,8 @@ add_subdirectory("src")
 
 if(BUILD_TESTS)
     set(TESTS_COMPONENT "tests")
-    #add_subdirectory("tests/rocm_smi_test")
     add_subdirectory("tests/amd_smi_test")
-    add_subdirectory("tests/python_unittest")
+    add_subdirectory("tests/python")
 endif()
 
 # python interface, CLI, and py-test depend on shared libraries
@@ -457,11 +490,14 @@ add_subdirectory(goamdsmi_shim)
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-amdgpu-dev")
 set(CPACK_DEBIAN_ASAN_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
-set(CPACK_DEBIAN_PACKAGE_DEPENDS
-    "libdrm-dev, sudo, libc6, python3 (>= 3.6.8), python3-pip, python3-setuptools, python3-wheel"
-)
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libdrm-dev, sudo, libc6, python3 (>= 3.6.8)")
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
+# The tests package ships amdsmitst, which dynamically links libamd_smi.so from
+# the main package. Keep amd-smi-lib (set by generic_package()) as the first
+# dependency and append the runtime deps, so the tests package is never
+# installable without the library it links against.
+set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS "${CPACK_PACKAGE_NAME}, ${CPACK_DEBIAN_PACKAGE_DEPENDS}")
 
 # $CURRENT_YEAR is used by copyright.in
 string(TIMESTAMP CURRENT_YEAR "%Y")
@@ -507,8 +543,25 @@ install(
 )
 
 # RPM package specific variables
+# The Python module installs under an absolute system site-packages path
+# (e.g. /usr/lib64/python3.9/site-packages) that the OS python package already
+# owns. Left alone, CPack's RPM generator declares %dir ownership of that
+# directory and its parents -- co-owning system directories, with the default
+# group-writable (0775) mode. Exclude the sitelib and its ancestors from the
+# auto filelist so the RPM owns only its own <sitelib>/amdsmi subtree, not the
+# shared /usr python directories.
+set(_amdsmi_sitelib_excludes "")
+if(AMDSMI_SYSTEM_PYTHON_SITELIB)
+    set(_amdsmi_walk "${AMDSMI_SYSTEM_PYTHON_SITELIB}")
+    while(_amdsmi_walk AND NOT _amdsmi_walk STREQUAL "/" AND NOT _amdsmi_walk STREQUAL "/usr")
+        list(APPEND _amdsmi_sitelib_excludes "${_amdsmi_walk}")
+        get_filename_component(_amdsmi_walk "${_amdsmi_walk}" DIRECTORY)
+    endwhile()
+endif()
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
-    "${CPACK_PACKAGING_INSTALL_PREFIX} ${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}"
+    "${CPACK_PACKAGING_INSTALL_PREFIX}"
+    "${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}"
+    ${_amdsmi_sitelib_excludes}
 )
 #Set rpm distro
 if(CPACK_RPM_PACKAGE_RELEASE)
@@ -519,11 +572,60 @@ endif()
 set(CPACK_RPM_PACKAGE_SUGGESTS "python3-argcomplete, libdrm-amdgpu-devel")
 set(CPACK_RPM_DEV_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 set(CPACK_RPM_ASAN_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
-# python version gated by rhel8 :(
 # note that RPM based systems have "devel" suffix instead of "dev" in debian based systems
-set(CPACK_RPM_PACKAGE_REQUIRES "libdrm-devel, sudo, python3 >= 3.6.8, python3-pip, python3-wheel, python3-setuptools")
+#
+# The amdsmi Python module installs into a version-specific site-packages path
+# on RPM distros (e.g. /usr/lib64/python3.9/site-packages). py-interface/
+# CMakeLists.txt detects that path from the system's DEFAULT python3
+# (platform-python on RHEL), so the module lands where a plain `import amdsmi`
+# and the `amd-smi` CLI (#!/usr/bin/python3) actually look. This dependency
+# pins the RPM to that same default interpreter's ABI as defense-in-depth: it
+# makes the interpreter dependency explicit and keeps the RPM from installing
+# onto a host missing that interpreter.
+#
+# On RPM distros there is NO version-independent site-packages location --
+# /usr/lib/python3/site-packages (Debian's version-agnostic dir) is not on any
+# RHEL interpreter's sys.path -- so the install path is intrinsically tied to a
+# python minor and the dependency must be too. The canonical RPM expression is
+# `python(abi) = X.Y` (per the Fedora Python Packaging Guidelines): normally
+# rpmbuild's dependency generator emits this automatically for files under
+# %{python3_sitelib}. That auto-generator does NOT fire here -- CPack installs
+# the module as raw .py files (no .dist-info metadata) and the RHEL8 build image
+# lacks the path-based python.attr generator -- so we set the same requirement
+# by hand. The token that expresses "this python minor" differs by distro
+# family, so pick it from /etc/os-release:
+#   * RHEL/CentOS/Fedora/AlmaLinux/AzureLinux: `python(abi) = X.Y`, provided by
+#     the pythonX.Y packages (dnf pulls the matching interpreter in on install).
+#   * SLES/openSUSE: no python(abi) provide; the versioned package is `pythonXY`
+#     (no dot), e.g. python311 (zypper pulls it in on install).
+# Fall back to the loose `python3 >= 3.6.8` when the ABI could not be derived
+# (version-agnostic Debian path) or the distro family is unrecognized.
+set(_amdsmi_py_req "python3 >= 3.6.8")
+if(AMDSMI_SYSTEM_PYTHON_ABI)
+    set(_amdsmi_os_id "")
+    if(EXISTS "/etc/os-release")
+        file(READ "/etc/os-release" _amdsmi_os_release)
+        # ID_LIKE covers derivatives (e.g. almalinux -> "rhel centos fedora").
+        string(REGEX MATCH "ID_LIKE=[\"']?([^\"'\n]+)" _ "${_amdsmi_os_release}")
+        set(_amdsmi_os_id "${CMAKE_MATCH_1}")
+        string(REGEX MATCH "\nID=[\"']?([^\"'\n]+)" _ "\n${_amdsmi_os_release}")
+        string(APPEND _amdsmi_os_id " ${CMAKE_MATCH_1}")
+    endif()
+    if(_amdsmi_os_id MATCHES "rhel|centos|fedora|almalinux|rocky|mariner|azurelinux")
+        set(_amdsmi_py_req "python(abi) = ${AMDSMI_SYSTEM_PYTHON_ABI}")
+    elseif(_amdsmi_os_id MATCHES "suse|sles")
+        string(REPLACE "." "" _amdsmi_abi_nodot "${AMDSMI_SYSTEM_PYTHON_ABI}")
+        set(_amdsmi_py_req "python${_amdsmi_abi_nodot}")
+    endif()
+endif()
+message(STATUS "amdsmi RPM python interpreter dependency: ${_amdsmi_py_req}")
+set(CPACK_RPM_PACKAGE_REQUIRES "libdrm-devel, sudo, ${_amdsmi_py_req}")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 set(CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
+# amdsmitst dynamically links libamd_smi.so; keep amd-smi-lib (set by
+# generic_package()) first and append the runtime requires so the tests RPM
+# cannot install without the library it links against.
+set(CPACK_RPM_TESTS_PACKAGE_REQUIRES "${CPACK_PACKAGE_NAME}, ${CPACK_RPM_PACKAGE_REQUIRES}")
 
 # don't terminate if bytecompile of python files fails
 set(CPACK_RPM_SPEC_MORE_DEFINE "%define _python_bytecompile_errors_terminate_build 0")

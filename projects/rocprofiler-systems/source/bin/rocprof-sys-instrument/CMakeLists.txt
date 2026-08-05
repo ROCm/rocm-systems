@@ -37,6 +37,7 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-compile-options
         rocprofiler-systems::rocprofiler-systems-compile-definitions
         rocprofiler-systems::rocprofiler-systems-sanitizer
+        rocprofiler-systems::rocprofiler-systems-common-library
         timemory::timemory-headers
         timemory::timemory-extensions
         timemory::timemory-core

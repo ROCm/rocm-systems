@@ -4,6 +4,7 @@
 #include "function_signature.hpp"
 #include <cstdint>
 
+#include "common/path.hpp"
 #include "core/demangler.hpp"
 
 function_signature::function_signature(std::string_view _ret, std::string_view _name,
@@ -17,11 +18,8 @@ function_signature::function_signature(std::string_view _ret, std::string_view _
 , m_col(std::move(_col))
 , m_return(_ret)
 , m_name(rocprofsys::utility::demangle(_name.data()))
-, m_file(_file)
-{
-    if(m_file.find('/') != std::string_view::npos)
-        m_file = m_file.substr(m_file.find_last_of('/') + 1);
-}
+, m_file(rocprofsys::path::filename(_file))
+{}
 
 function_signature::function_signature(std::string_view _ret, std::string_view _name,
                                        std::string_view                _file,
@@ -30,11 +28,15 @@ function_signature::function_signature(std::string_view _ret, std::string_view _
                                        bool _info_beg, bool _info_end)
 : function_signature(_ret, _name, _file, _row, _col, _loop, _info_beg, _info_end)
 {
-    m_params = "(";
+    m_params.clear();
+    m_params.push_back('(');
     for(const auto& itr : _params)
-        m_params.append(itr + ", ");
-    if(!_params.empty()) m_params = m_params.substr(0, m_params.length() - 2);
-    m_params += ")";
+    {
+        m_params.append(itr);
+        m_params.append(", ");
+    }
+    if(!_params.empty()) m_params.resize(m_params.length() - 2);
+    m_params.push_back(')');
 }
 
 std::string

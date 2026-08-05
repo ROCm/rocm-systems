@@ -20,6 +20,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
+  Operand gpumem;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatLoadSbyteFlat : public Flat {
@@ -28,6 +32,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
+  Operand gpumem;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatLoadUshortFlat : public Flat {
@@ -36,6 +44,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
+  Operand gpumem;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatLoadSshortFlat : public Flat {
@@ -44,6 +56,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
+  Operand gpumem;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatLoadDwordFlat : public Flat {
@@ -52,6 +68,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
+  Operand gpumem;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatLoadDwordx2Flat : public Flat {
@@ -60,6 +80,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
+  Operand gpumem;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatLoadDwordx3Flat : public Flat {
@@ -68,6 +92,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
+  Operand gpumem;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatLoadDwordx4Flat : public Flat {
@@ -76,6 +104,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
+  Operand gpumem;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatStoreByteFlat : public Flat {
@@ -84,6 +116,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatStoreByteD16HiFlat : public Flat {
@@ -92,6 +128,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatStoreShortFlat : public Flat {
@@ -100,6 +140,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatStoreShortD16HiFlat : public Flat {
@@ -108,6 +152,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatStoreDwordFlat : public Flat {
@@ -116,6 +164,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatStoreDwordx2Flat : public Flat {
@@ -124,6 +176,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatStoreDwordx3Flat : public Flat {
@@ -132,6 +188,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatStoreDwordx4Flat : public Flat {
@@ -140,6 +200,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatLoadUbyteD16Flat : public Flat {
@@ -148,6 +212,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
+  Operand gpumem;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatLoadUbyteD16HiFlat : public Flat {
@@ -156,6 +224,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
+  Operand gpumem;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatLoadSbyteD16Flat : public Flat {
@@ -164,6 +236,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
+  Operand gpumem;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatLoadSbyteD16HiFlat : public Flat {
@@ -172,6 +248,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
+  Operand gpumem;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatLoadShortD16Flat : public Flat {
@@ -180,6 +260,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
+  Operand gpumem;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatLoadShortD16HiFlat : public Flat {
@@ -188,6 +272,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand flat_scratch;
+  Operand gpumem;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicSwapFlat : public Flat {
@@ -197,6 +285,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicCmpswapFlat : public Flat {
@@ -206,6 +299,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicAddFlat : public Flat {
@@ -215,6 +313,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicSubFlat : public Flat {
@@ -224,6 +327,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicSminFlat : public Flat {
@@ -233,6 +341,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicUminFlat : public Flat {
@@ -242,6 +355,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicSmaxFlat : public Flat {
@@ -251,6 +369,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicUmaxFlat : public Flat {
@@ -260,6 +383,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicAndFlat : public Flat {
@@ -269,6 +397,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicOrFlat : public Flat {
@@ -278,6 +411,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicXorFlat : public Flat {
@@ -287,6 +425,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicIncFlat : public Flat {
@@ -296,6 +439,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicDecFlat : public Flat {
@@ -305,6 +453,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicAddF32Flat : public Flat {
@@ -314,6 +467,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicPkAddF16Flat : public Flat {
@@ -323,6 +481,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicAddF64Flat : public Flat {
@@ -332,6 +495,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicMinF64Flat : public Flat {
@@ -341,6 +509,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicMaxF64Flat : public Flat {
@@ -350,6 +523,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicPkAddBf16Flat : public Flat {
@@ -359,6 +537,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicSwapX2Flat : public Flat {
@@ -368,6 +551,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicCmpswapX2Flat : public Flat {
@@ -377,6 +565,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicAddX2Flat : public Flat {
@@ -386,6 +579,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicSubX2Flat : public Flat {
@@ -395,6 +593,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicSminX2Flat : public Flat {
@@ -404,6 +607,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicUminX2Flat : public Flat {
@@ -413,6 +621,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicSmaxX2Flat : public Flat {
@@ -422,6 +635,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicUmaxX2Flat : public Flat {
@@ -431,6 +649,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicAndX2Flat : public Flat {
@@ -440,6 +663,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicOrX2Flat : public Flat {
@@ -449,6 +677,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicXorX2Flat : public Flat {
@@ -458,6 +691,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicIncX2Flat : public Flat {
@@ -467,6 +705,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 class FlatAtomicDecX2Flat : public Flat {
@@ -476,6 +719,11 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand gpumem;
+  Operand flat_scratch;
+  Operand gpumem_in;
+  Operand m0;
+  Operand saddr;
 };
 
 } // namespace cdna4

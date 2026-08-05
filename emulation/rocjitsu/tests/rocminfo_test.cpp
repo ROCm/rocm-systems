@@ -3,25 +3,68 @@
 
 /// @file rocminfo_test.cpp
 /// @brief Verifies that rocminfo runs successfully against the simulated GPU
-///        via the LD_PRELOAD KMD interposer and reports expected topology.
-///
-/// Requires LD_PRELOAD=librocjitsu_kmd.so, RJ_CONFIG/RJ_SCHEMA env vars,
-/// and the rocminfo binary installed (typically at /opt/rocm/bin/rocminfo).
+///        via the rocjitsu CLI launcher and reports expected topology.
 
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
+#include <system_error>
 
 namespace {
 
-/// Run a command and capture its combined stdout+stderr and exit code.
 struct ProcessResult {
   std::string output;
   int exit_code;
 };
+
+struct TestPaths {
+  std::string rocjitsu_bin = ROCJITSU_BIN;
+  std::string config_path = RJ_CONFIG_PATH;
+};
+
+std::filesystem::path resolve_relative_to_exe(const std::filesystem::path &exe_dir,
+                                              const char *path) {
+  std::filesystem::path candidate(path);
+  if (!candidate.is_absolute())
+    candidate = exe_dir / candidate;
+  return candidate.lexically_normal();
+}
+
+std::filesystem::path current_exe_dir() {
+  std::error_code ec;
+  std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+  if (ec)
+    return {};
+  return exe.parent_path();
+}
+
+bool installed_paths_exist(const TestPaths &paths) {
+  return std::filesystem::exists(paths.rocjitsu_bin) && std::filesystem::exists(paths.config_path);
+}
+
+TestPaths installed_paths(const std::filesystem::path &exe_dir) {
+  return {
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_ROCJITSU_BIN).string(),
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_CONFIG_PATH).string(),
+  };
+}
+
+const TestPaths &test_paths() {
+  static TestPaths paths = [] {
+    std::filesystem::path exe_dir = current_exe_dir();
+    if (!exe_dir.empty()) {
+      TestPaths installed = installed_paths(exe_dir);
+      if (installed_paths_exist(installed))
+        return installed;
+    }
+    return TestPaths{};
+  }();
+  return paths;
+}
 
 ProcessResult run_command(const std::string &cmd) {
   ProcessResult result;
@@ -42,16 +85,14 @@ ProcessResult run_command(const std::string &cmd) {
   return result;
 }
 
-/// Path to rocminfo, injected via CMake compile definition ROCMINFO_PATH.
-const char *rocminfo_path() { return ROCMINFO_PATH; }
-
-/// Lazily-initialised singleton so rocminfo is only invoked once.
 const ProcessResult &rocminfo_output() {
-  static const ProcessResult result = run_command(rocminfo_path());
+  const TestPaths &paths = test_paths();
+  const char *rocminfo_path = std::getenv("ROCMINFO_PATH");
+  static const ProcessResult result =
+      run_command(paths.rocjitsu_bin + " --config " + paths.config_path + " -- " +
+                  (rocminfo_path ? rocminfo_path : ROCMINFO_PATH));
   return result;
 }
-
-// ---------------------------------------------------------------------------
 
 TEST(RocminfoTest, ExitsSuccessfully) {
   EXPECT_EQ(rocminfo_output().exit_code, 0)
@@ -60,11 +101,8 @@ TEST(RocminfoTest, ExitsSuccessfully) {
 }
 
 TEST(RocminfoTest, InterposerActive) {
-  // The interposer is active if rocminfo sees a GPU agent. The simulated
-  // GPU reports as gfx950, which only appears when the interposer is
-  // providing the KFD topology.
   EXPECT_NE(rocminfo_output().output.find("gfx950"), std::string::npos)
-      << "LD_PRELOAD interposer does not appear to be active (no gfx950 agent).\nOutput:\n"
+      << "Interposer does not appear to be active (no gfx950 agent).\nOutput:\n"
       << rocminfo_output().output;
 }
 

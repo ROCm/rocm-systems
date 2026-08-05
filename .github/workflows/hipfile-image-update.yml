@@ -41,6 +41,12 @@ jobs:
     if: ${{ github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch' }}
     runs-on: [ubuntu-24.04]
     container: docker:28.5
+    # NOTE: nightly is intentionally absent here. This job refreshes the static
+    # latest-rocm<ver> images post-merge, but the nightly target moves daily, so
+    # nightly images are refreshed by hipfile-image-update-nightly.yml (daily and
+    # on Dockerfile-change merge) instead. Keep this matrix in sync with
+    # hipfile-ci-toplevel.yml's SUPPORTED_PLATFORMS/ROCM_VERSIONS/MATRIX_EXCLUDE
+    # (and MATRIX_INCLUDE if used) for the non-nightly rows.
     strategy:
       matrix:
         supported_platforms:
@@ -55,15 +61,14 @@ jobs:
             rocm_versions: 7.13.0
     steps:
       - name: Fetching code repository...
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          fetch-depth: 0
           sparse-checkout: |
             projects/hipfile
             .github/workflows
 
       - name: Authenticating to GitHub Container Registry.
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -97,7 +102,7 @@ jobs:
           }}" >> "${GITHUB_OUTPUT}"
 
       - name: Setup Docker Builder
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
         with:
           name: ais-builder
           driver: docker-container

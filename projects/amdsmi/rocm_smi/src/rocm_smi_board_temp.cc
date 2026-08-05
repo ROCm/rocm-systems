@@ -28,8 +28,10 @@
 #include <iomanip>
 #include <map>
 #include <sstream>
+#include <vector>
 
 #include "rocm_smi/rocm_smi_common.h"
+#include "rocm_smi/rocm_smi_dyn_gpu_metrics.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
@@ -85,6 +87,301 @@ static const std::map<int, rsmi_temperature_type_t> system_temp_map = {
     {AMDGPU_OAM_4_5_6_7_3V3_VR_TEMP, RSMI_TEMP_TYPE_BASEBOARD_OAM_4_5_6_7_3V3_VR},
     {AMDGPU_IBC_HSC_TEMP, RSMI_TEMP_TYPE_BASEBOARD_IBC_HSC},
     {AMDGPU_IBC_TEMP, RSMI_TEMP_TYPE_BASEBOARD_IBC}};
+
+struct DynamicBoardTempMetrics {
+  metrics_table_header_t common_header{};
+  std::uint32_t attr_count{};
+  std::map<details::AMDGpuMetricAttributeId_t, int64_t> metric_values{};
+};
+
+static const std::map<details::AMDGpuMetricAttributeId_t, rsmi_temperature_type_t>
+    dynamic_gpuboard_temp_map = {
+        {details::AMDGpuMetricAttributeId_t::NODE_TEMP_RETIMER,
+         RSMI_TEMP_TYPE_GPUBOARD_NODE_RETIMER_X},
+        {details::AMDGpuMetricAttributeId_t::NODE_TEMP_IBC, RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_IBC},
+        {details::AMDGpuMetricAttributeId_t::NODE_TEMP_IBC_2,
+         RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_IBC_2},
+        {details::AMDGpuMetricAttributeId_t::NODE_TEMP_VDD18_VR,
+         RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_VDD18_VR},
+        {details::AMDGpuMetricAttributeId_t::NODE_TEMP_04_HBM_B_VR,
+         RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_B_VR},
+        {details::AMDGpuMetricAttributeId_t::NODE_TEMP_04_HBM_D_VR,
+         RSMI_TEMP_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_D_VR},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDCR_SOCIO_A,
+         RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOCIO_A},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDCR_SOCIO_C,
+         RSMI_TEMP_TYPE_GPUBOARD_VDDCR_SOCIO_C},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDCR_X0, RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD0},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDCR_X1, RSMI_TEMP_TYPE_GPUBOARD_VDDCR_VDD1},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDCR_HBM_B,
+         RSMI_TEMP_TYPE_GPUBOARD_VDDCR_11_HBM_B},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDCR_HBM_D,
+         RSMI_TEMP_TYPE_GPUBOARD_VDDCR_11_HBM_D},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDIO_04_HBM_B,
+         RSMI_TEMP_TYPE_GPUBOARD_VDDIO_04_HBM_B},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDIO_04_HBM_D,
+         RSMI_TEMP_TYPE_GPUBOARD_VDDIO_04_HBM_D},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDCR_075_HBM_B,
+         RSMI_TEMP_TYPE_GPUBOARD_VDDCR_075_HBM_B},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDCR_075_HBM_D,
+         RSMI_TEMP_TYPE_GPUBOARD_VDDCR_075_HBM_D},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDIO_11_GTA_A,
+         RSMI_TEMP_TYPE_GPUBOARD_VDDIO_11_GTA_A},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDIO_11_GTA_C,
+         RSMI_TEMP_TYPE_GPUBOARD_VDDIO_11_GTA_C},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDAN_075_GTA_A,
+         RSMI_TEMP_TYPE_GPUBOARD_VDDAN_075_GTA_A},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDAN_075_GTA_C,
+         RSMI_TEMP_TYPE_GPUBOARD_VDDAN_075_GTA_C},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDCR_075_UCIE,
+         RSMI_TEMP_TYPE_GPUBOARD_VDDCR_075_UCIE},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDIO_065_UCIEAA,
+         RSMI_TEMP_TYPE_GPUBOARD_VDDIO_065_UCIEAA},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDIO_065_UCIEAM_A,
+         RSMI_TEMP_TYPE_GPUBOARD_VDDIO_065_UCIEAM_A},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDIO_065_UCIEAM_C,
+         RSMI_TEMP_TYPE_GPUBOARD_VDDIO_065_UCIEAM_C},
+        {details::AMDGpuMetricAttributeId_t::VR_TEMP_VDDAN_075, RSMI_TEMP_TYPE_GPUBOARD_VDDAN_075},
+};
+
+static const std::map<details::AMDGpuMetricAttributeId_t, rsmi_temperature_type_t>
+    dynamic_baseboard_temp_map = {
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_UBB_FPGA,
+         RSMI_TEMP_TYPE_BASEBOARD_UBB_FPGA},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_UBB_FRONT,
+         RSMI_TEMP_TYPE_BASEBOARD_UBB_FRONT},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_UBB_BACK,
+         RSMI_TEMP_TYPE_BASEBOARD_UBB_BACK},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_UBB_OAM7,
+         RSMI_TEMP_TYPE_BASEBOARD_UBB_OAM7},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_UBB_IBC, RSMI_TEMP_TYPE_BASEBOARD_UBB_IBC},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_UBB_UFPGA,
+         RSMI_TEMP_TYPE_BASEBOARD_UBB_UFPGA},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_UBB_OAM1,
+         RSMI_TEMP_TYPE_BASEBOARD_UBB_OAM1},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_OAM_0_1_HSC,
+         RSMI_TEMP_TYPE_BASEBOARD_OAM_0_1_HSC},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_OAM_2_3_HSC,
+         RSMI_TEMP_TYPE_BASEBOARD_OAM_2_3_HSC},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_OAM_4_5_HSC,
+         RSMI_TEMP_TYPE_BASEBOARD_OAM_4_5_HSC},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_OAM_6_7_HSC,
+         RSMI_TEMP_TYPE_BASEBOARD_OAM_6_7_HSC},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_UBB_FPGA_0V72_VR,
+         RSMI_TEMP_TYPE_BASEBOARD_UBB_FPGA_0V72_VR},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_UBB_FPGA_3V3_VR,
+         RSMI_TEMP_TYPE_BASEBOARD_UBB_FPGA_3V3_VR},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_RETIMER_0_1_2_3_1V2_VR,
+         RSMI_TEMP_TYPE_BASEBOARD_RETIMER_0_1_2_3_1V2_VR},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_RETIMER_4_5_6_7_1V2_VR,
+         RSMI_TEMP_TYPE_BASEBOARD_RETIMER_4_5_6_7_1V2_VR},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_RETIMER_0_1_0V9_VR,
+         RSMI_TEMP_TYPE_BASEBOARD_RETIMER_0_1_0V9_VR},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_RETIMER_4_5_0V9_VR,
+         RSMI_TEMP_TYPE_BASEBOARD_RETIMER_4_5_0V9_VR},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_RETIMER_2_3_0V9_VR,
+         RSMI_TEMP_TYPE_BASEBOARD_RETIMER_2_3_0V9_VR},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_RETIMER_6_7_0V9_VR,
+         RSMI_TEMP_TYPE_BASEBOARD_RETIMER_6_7_0V9_VR},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_OAM_0_1_2_3_3V3_VR,
+         RSMI_TEMP_TYPE_BASEBOARD_OAM_0_1_2_3_3V3_VR},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_OAM_4_5_6_7_3V3_VR,
+         RSMI_TEMP_TYPE_BASEBOARD_OAM_4_5_6_7_3V3_VR},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_IBC_HSC, RSMI_TEMP_TYPE_BASEBOARD_IBC_HSC},
+        {details::AMDGpuMetricAttributeId_t::SYSTEM_TEMP_IBC, RSMI_TEMP_TYPE_BASEBOARD_IBC},
+};
+
+static bool read_dynamic_scalar_value(const std::byte* data,
+                                      details::AMDGpuMetricAttributeType_t attr_type,
+                                      int64_t* value) {
+  if (!data || !value) {
+    return false;
+  }
+
+  switch (attr_type) {
+    case details::AMDGpuMetricAttributeType_t::TYPE_UINT8: {
+      auto v = std::uint8_t(0);
+      std::memcpy(&v, data, sizeof(v));
+      if (v == std::numeric_limits<uint8_t>::max()) return false;
+      *value = static_cast<int64_t>(v);
+      return true;
+    }
+    case details::AMDGpuMetricAttributeType_t::TYPE_INT8: {
+      auto v = std::int8_t(0);
+      std::memcpy(&v, data, sizeof(v));
+      *value = static_cast<int64_t>(v);
+      return true;
+    }
+    case details::AMDGpuMetricAttributeType_t::TYPE_UINT16: {
+      auto v = std::uint16_t(0);
+      std::memcpy(&v, data, sizeof(v));
+      if (v == std::numeric_limits<uint16_t>::max()) return false;
+      *value = static_cast<int64_t>(v);
+      return true;
+    }
+    case details::AMDGpuMetricAttributeType_t::TYPE_INT16: {
+      auto v = std::int16_t(0);
+      std::memcpy(&v, data, sizeof(v));
+      *value = static_cast<int64_t>(v);
+      return true;
+    }
+    case details::AMDGpuMetricAttributeType_t::TYPE_UINT32: {
+      auto v = std::uint32_t(0);
+      std::memcpy(&v, data, sizeof(v));
+      if (v == std::numeric_limits<uint32_t>::max()) return false;
+      *value = static_cast<int64_t>(v);
+      return true;
+    }
+    case details::AMDGpuMetricAttributeType_t::TYPE_INT32: {
+      auto v = std::int32_t(0);
+      std::memcpy(&v, data, sizeof(v));
+      *value = static_cast<int64_t>(v);
+      return true;
+    }
+    case details::AMDGpuMetricAttributeType_t::TYPE_UINT64: {
+      auto v = std::uint64_t(0);
+      std::memcpy(&v, data, sizeof(v));
+      if (v == std::numeric_limits<uint64_t>::max()) return false;
+      *value = static_cast<int64_t>(v);
+      return true;
+    }
+    case details::AMDGpuMetricAttributeType_t::TYPE_INT64: {
+      auto v = std::int64_t(0);
+      std::memcpy(&v, data, sizeof(v));
+      *value = v;
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+static int32_t decode_temperature_value(uint32_t encoded, uint8_t* sensor_id);
+
+static int64_t dynamic_temp_to_millicelsius(int64_t raw_value,
+                                            details::AMDGpuMetricAttributeType_t attr_type) {
+  if (attr_type == details::AMDGpuMetricAttributeType_t::TYPE_UINT32) {
+    const uint64_t uvalue = static_cast<uint64_t>(raw_value);
+    if (uvalue > 0xFFFFFFULL && uvalue <= std::numeric_limits<uint32_t>::max()) {
+      return static_cast<int64_t>(decode_temperature_value(static_cast<uint32_t>(uvalue), nullptr));
+    }
+  }
+
+  return raw_value * 1000;
+}
+
+static rsmi_status_t read_board_temp_header(const char* filename, metrics_table_header_t& header) {
+  std::ifstream file(filename, std::ios::binary);
+  if (!file.is_open()) {
+    return ErrnoToRsmiStatus(errno);
+  }
+  file.read(reinterpret_cast<char*>(&header), sizeof(header));
+  if (file.gcount() < static_cast<std::streamsize>(sizeof(header))) {
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  return RSMI_STATUS_SUCCESS;
+}
+
+static rsmi_status_t read_dynamic_board_temp_metrics(const char* filename,
+                                                     DynamicBoardTempMetrics& metrics) {
+  if (!filename) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  metrics_table_header_t header{};
+  if (const rsmi_status_t hdr_status = read_board_temp_header(filename, header);
+      hdr_status != RSMI_STATUS_SUCCESS) {
+    return hdr_status;
+  }
+  constexpr auto kMaxBoardTempBlobSize = std::size_t(1 << 20);  // 1 MB
+
+  auto reserve_size =
+      (static_cast<std::size_t>(header.structure_size) >= sizeof(metrics_table_header_t))
+          ? static_cast<std::size_t>(header.structure_size)
+          : sizeof(amdgpu_gpuboard_temp_metrics_v1_1);
+  if (reserve_size > kMaxBoardTempBlobSize) {
+    return RSMI_STATUS_UNEXPECTED_SIZE;
+  }
+
+  std::ifstream file(filename, std::ios::binary);
+  if (!file.is_open()) {
+    return ErrnoToRsmiStatus(errno);
+  }
+
+  auto blob = std::vector<std::byte>(reserve_size);
+  file.read(reinterpret_cast<char*>(blob.data()), static_cast<std::streamsize>(reserve_size));
+  if (file.bad()) {
+    return ErrnoToRsmiStatus(errno);
+  }
+  blob.resize(static_cast<size_t>(file.gcount()));
+  if (blob.size() < sizeof(metrics_table_header_t) + sizeof(uint32_t)) {
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+
+  auto offset = std::size_t(0);
+  std::memcpy(&metrics.common_header, blob.data(), sizeof(metrics_table_header_t));
+  offset += sizeof(metrics_table_header_t);
+
+  if (metrics.common_header.content_revision < 1) {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+
+  auto attr_count = std::uint32_t(0);
+  std::memcpy(&attr_count, blob.data() + offset, sizeof(attr_count));
+  offset += sizeof(attr_count);
+
+  if (attr_count == 0) {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+
+  metrics.attr_count = attr_count;
+  metrics.metric_values.clear();
+
+  for (uint32_t idx = 0; idx < attr_count; ++idx) {
+    if (sizeof(uint64_t) > (blob.size() - offset)) {
+      return RSMI_STATUS_UNEXPECTED_SIZE;
+    }
+
+    auto encoded_attr = std::uint64_t(0);
+    std::memcpy(&encoded_attr, blob.data() + offset, sizeof(encoded_attr));
+    offset += sizeof(encoded_attr);
+
+    const auto decoded = details::amdgpu_metrics_decode_attr(encoded_attr);
+    const auto attr_type = static_cast<details::AMDGpuMetricAttributeType_t>(decoded.m_attr_type);
+    const auto attr_id = static_cast<details::AMDGpuMetricAttributeId_t>(decoded.m_attr_id);
+    const auto attr_instance = decoded.m_attr_instance;
+
+    const auto attr_type_size = details::get_metric_bytes(attr_type);
+    if (attr_type_size == 0 || attr_instance == 0) {
+      return RSMI_STATUS_UNEXPECTED_DATA;
+    }
+
+    const auto total_attr_size = (attr_instance * attr_type_size);
+    if (total_attr_size > (blob.size() - offset)) {
+      return RSMI_STATUS_UNEXPECTED_SIZE;
+    }
+
+    auto value = std::int64_t(0);
+    if (read_dynamic_scalar_value(blob.data() + offset, attr_type, &value)) {
+      // attr_id is the primary key (not a composed key).
+      // duplicate attr_ids across attributes will overwrite each other.
+      metrics.metric_values[attr_id] = dynamic_temp_to_millicelsius(value, attr_type);
+    } else {
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | read_dynamic_scalar_value failed"
+         << " | idx=" << idx << " | offset=0x" << std::hex << offset
+         << " | attr_id=" << static_cast<uint32_t>(attr_id)
+         << " | attr_type=" << static_cast<uint32_t>(attr_type) << " | attr_instance=" << std::dec
+         << attr_instance << " | next_offset=0x" << std::hex
+         << (offset + static_cast<std::size_t>(total_attr_size));
+      LOG_DEBUG(ss);
+    }
+
+    offset += static_cast<size_t>(total_attr_size);
+  }
+
+  return RSMI_STATUS_SUCCESS;
+}
 
 // Helper function to create hex dump string
 static std::string createHexDump(const void* data, size_t size, const std::string& description) {
@@ -154,7 +451,6 @@ rsmi_status_t read_gpuboard_temp_metrics(const char* filename,
 
   // Read the entire structure
   file.read(reinterpret_cast<char*>(&metrics), sizeof(metrics));
-
   if (file.bad()) {
     std::ostringstream ess;
     ess << __PRETTY_FUNCTION__ << " | ======= end ======= "
@@ -163,7 +459,6 @@ rsmi_status_t read_gpuboard_temp_metrics(const char* filename,
     LOG_INFO(ess);
     return ErrnoToRsmiStatus(errno);
   }
-
   // Always create hex dump for debugging, using the number of bytes actually read
   std::string hexDump = createHexDump(&metrics, file.gcount(), "GPU Board Temperature Metrics");
   LOG_DEBUG(hexDump);
@@ -177,6 +472,15 @@ rsmi_status_t read_gpuboard_temp_metrics(const char* filename,
         << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
     LOG_INFO(ess);
     return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  if (metrics.common_header.content_revision != 0) {
+    std::ostringstream ess;
+    ess << __PRETTY_FUNCTION__ << " | ======= end ======= "
+        << " | Fail | Unexpected content revision for v1.0 parser: "
+        << static_cast<unsigned>(metrics.common_header.content_revision)
+        << " | Returning = " << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    LOG_INFO(ess);
+    return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
   std::ostringstream oss;
@@ -223,7 +527,6 @@ rsmi_status_t read_baseboard_temp_metrics(const char* filename,
 
   // Read the entire structure
   file.read(reinterpret_cast<char*>(&metrics), sizeof(metrics));
-
   if (file.bad()) {
     std::ostringstream ess;
     ess << __PRETTY_FUNCTION__ << " | ======= end ======= "
@@ -232,7 +535,6 @@ rsmi_status_t read_baseboard_temp_metrics(const char* filename,
     LOG_INFO(ess);
     return ErrnoToRsmiStatus(errno);
   }
-
   // Always create hex dump for debugging, using the number of bytes actually read
   std::string hexDump = createHexDump(&metrics, file.gcount(), "Baseboard Temperature Metrics");
   LOG_DEBUG(hexDump);
@@ -246,6 +548,15 @@ rsmi_status_t read_baseboard_temp_metrics(const char* filename,
         << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
     LOG_INFO(ess);
     return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  if (metrics.common_header.content_revision != 0) {
+    std::ostringstream ess;
+    ess << __PRETTY_FUNCTION__ << " | ======= end ======= "
+        << " | Fail | Unexpected content revision for v1.0 parser: "
+        << static_cast<unsigned>(metrics.common_header.content_revision)
+        << " | Returning = " << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    LOG_INFO(ess);
+    return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
   std::ostringstream oss;
@@ -298,7 +609,6 @@ rsmi_status_t get_gpuboard_temp_value(const amdgpu_gpuboard_temp_metrics_v1_0& m
       auto it = vr_temp_map.find(i);
       if (it != vr_temp_map.end() && it->second == temperature_type) {
         *value = decode_temperature_value(metrics.vr_temp[i]);
-
         std::ostringstream oss;
         oss << __PRETTY_FUNCTION__ << " | ======= end ======= "
             << " | Success | VR temp found at index: " << i << " | Raw value: " << *value
@@ -357,7 +667,6 @@ rsmi_status_t get_baseboard_temp_value(const amdgpu_baseboard_temp_metrics_v1_0&
       auto it = system_temp_map.find(i);
       if (it != system_temp_map.end() && it->second == temperature_type) {
         *value = decode_temperature_value(metrics.system_temp[i]);
-
         std::ostringstream oss;
         oss << __PRETTY_FUNCTION__ << " | ======= end ======= "
             << " | Success | System temp found at index: " << i << " | Raw value: " << *value
@@ -375,6 +684,62 @@ rsmi_status_t get_baseboard_temp_value(const amdgpu_baseboard_temp_metrics_v1_0&
       << " | Temperature type: " << static_cast<int>(temperature_type)
       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
   LOG_ERROR(ess);
+  return RSMI_STATUS_NOT_SUPPORTED;
+}
+
+rsmi_status_t get_gpuboard_temp_value_dynamic(const char* filename,
+                                              rsmi_temperature_type_t temperature_type,
+                                              int64_t* value) {
+  if (!value) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  DynamicBoardTempMetrics metrics{};
+  rsmi_status_t status = read_dynamic_board_temp_metrics(filename, metrics);
+  if (status != RSMI_STATUS_SUCCESS) {
+    return status;
+  }
+
+  for (const auto& [attr_id, rsmi_type] : dynamic_gpuboard_temp_map) {
+    if (rsmi_type != temperature_type) {
+      continue;
+    }
+
+    auto metric_it = metrics.metric_values.find(attr_id);
+    if (metric_it != metrics.metric_values.end()) {
+      *value = metric_it->second;
+      return RSMI_STATUS_SUCCESS;
+    }
+  }
+
+  return RSMI_STATUS_NOT_SUPPORTED;
+}
+
+rsmi_status_t get_baseboard_temp_value_dynamic(const char* filename,
+                                               rsmi_temperature_type_t temperature_type,
+                                               int64_t* value) {
+  if (!value) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  DynamicBoardTempMetrics metrics{};
+  rsmi_status_t status = read_dynamic_board_temp_metrics(filename, metrics);
+  if (status != RSMI_STATUS_SUCCESS) {
+    return status;
+  }
+
+  for (const auto& [attr_id, rsmi_type] : dynamic_baseboard_temp_map) {
+    if (rsmi_type != temperature_type) {
+      continue;
+    }
+
+    auto metric_it = metrics.metric_values.find(attr_id);
+    if (metric_it != metrics.metric_values.end()) {
+      *value = metric_it->second;
+      return RSMI_STATUS_SUCCESS;
+    }
+  }
+
   return RSMI_STATUS_NOT_SUPPORTED;
 }
 

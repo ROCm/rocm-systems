@@ -23,12 +23,19 @@ namespace RcclUnitTesting
  * @brief Generic thread-safe process isolated test runner
  *
  * This class provides a framework for running tests in isolated processes
- * with clean environment settings and sequential execution.
+ * using fork()+execv(), with per-test environment control and optional
+ * parallel execution with GPU-aware slot scheduling.
  *
  */
 class ProcessIsolatedTestRunner
 {
 public:
+    /// Env var set before execv(); its presence in a re-exec'd child selects the test to run.
+    static constexpr const char* kReexecMarkerEnvVar = "RCCL_PIT_REEXEC_TEST";
+
+    /// Special value for captureProcessOutput timeout: no deadline, wait indefinitely.
+    static constexpr int kNoTimeoutSeconds = 0;
+
     /**
      * @brief Test execution result structure
      */
@@ -54,6 +61,9 @@ public:
      */
     struct TestConfig
     {
+        /// Special value for numGpus: CPU-only test, no GPU slot acquired.
+        static constexpr size_t kCpuOnly = 0;
+
         std::string           name;      ///< Test name
         std::function<void()> testLogic; ///< Test function to execute
         std::unordered_map<std::string, std::string>
@@ -61,6 +71,7 @@ public:
         std::chrono::seconds     timeout;              ///< Test timeout
         bool                     inheritParentEnv;     ///< Whether to inherit parent environment
         std::vector<std::string> clearEnvVars; ///< Environment variables to explicitly clear
+        size_t                   numGpus; ///< GPU slots needed; see withNumGpus(). Default: kCpuOnly.
 
         /**
          * @brief Constructor
@@ -69,41 +80,36 @@ public:
          */
         TestConfig(const std::string& testName, std::function<void()> logic);
 
-        /**
-         * @brief Set environment variables for this test
-         * @param env Map of environment variable name-value pairs
-         * @return Reference to this TestConfig for method chaining
-         */
+        /// Set environment variables for this test.
         TestConfig& withEnvironment(const std::unordered_map<std::string, std::string>& env);
 
-        /**
-         * @brief Set timeout for this test
-         * @param timeoutSeconds Timeout in seconds
-         * @return Reference to this TestConfig for method chaining
-         */
+        /// Set the wall-clock timeout for this test.
         TestConfig& withTimeout(std::chrono::seconds timeoutSeconds);
 
         /**
-         * @brief Configure environment inheritance
-         * @param inherit Whether to inherit parent environment variables
-         * @return Reference to this TestConfig for method chaining
+         * @brief Configure environment inheritance.
+         * @param cleanEnv true (default) = start with a clean environment;
+         *                 false = inherit all parent environment variables.
          */
-        TestConfig& withCleanEnvironment(bool inherit = false);
+        TestConfig& withCleanEnvironment(bool cleanEnv = true);
 
-        /**
-         * @brief Clear a specific environment variable
-         * @param varName Name of the variable to clear
-         * @return Reference to this TestConfig for method chaining
-         */
+        /// Clear a specific environment variable before the test runs.
         TestConfig& clearVariable(const std::string& varName);
 
-        /**
-         * @brief Set a specific environment variable
-         * @param name Variable name
-         * @param value Variable value
-         * @return Reference to this TestConfig for method chaining
-         */
+        /// Set a specific environment variable for this test.
         TestConfig& setVariable(const std::string& name, const std::string& value);
+
+        /**
+         * @brief Declare how many GPU slots this test requires during parallel execution.
+         *
+         * The runner partitions the GPU pool into non-overlapping subsets and injects
+         * HIP_VISIBLE_DEVICES so concurrent tests never share a physical device.
+         *
+         * @param n kCpuOnly (0) = no slot acquired, runs freely in parallel (default).
+         *          1           = one dedicated GPU from the pool.
+         *          N           = exactly N GPUs from the pool.
+         */
+        TestConfig& withNumGpus(size_t n);
     };
 
     /**
@@ -111,8 +117,27 @@ public:
      */
     struct ExecutionOptions
     {
-        bool stopOnFirstFailure; ///< Stop execution on first test failure
-        bool verboseLogging;     ///< Enable verbose logging
+        /// Special value for maxParallelJobs: use GPU pool size as the degree of
+        /// parallelism, falling back to std::thread::hardware_concurrency() when
+        /// no GPU pool is available.
+        static constexpr size_t kAutoParallelism = 0;
+
+        bool   stopOnFirstFailure; ///< Stop execution on first test failure
+        bool   verboseLogging;     ///< Enable verbose logging
+        size_t maxParallelJobs;    ///< Maximum number of concurrent child processes.
+                                   ///< 1 = sequential (default).
+                                   ///< kAutoParallelism (0) = GPU pool size, or hardware_concurrency() if no pool.
+                                   ///< N > 1 = up to N tests run simultaneously.
+                                   ///< Results are always reported in registration order.
+
+        /// Physical GPU device indices available for distribution across parallel
+        /// test processes.  Each concurrent child is assigned a non-overlapping
+        /// subset and sees only its assigned GPUs via HIP_VISIBLE_DEVICES so
+        /// tests never contend on the same device.
+        ///
+        /// Empty (default): auto-detect via HIP_VISIBLE_DEVICES, then KFD sysfs.
+        /// Only used when maxParallelJobs > 1.
+        std::vector<int> gpuPool;
 
         /**
          * @brief Default constructor with sensible defaults
@@ -129,7 +154,6 @@ private:
         std::string stdoutContent; ///< Captured stdout content
         std::string stderrContent; ///< Captured stderr content
     };
-
     // Thread-safe static members for test management
     static std::mutex              testConfigsMutex_;
     static std::vector<TestConfig> testConfigs_;
@@ -170,10 +194,18 @@ private:
      * @param stderrPipe Stderr pipe file descriptors [read, write]
      * @param pid Child process ID to monitor
      * @param status Pointer to status variable for waitpid
+     * @param timeout Wall-clock limit; 0 = unlimited.  On expiry the child is
+     *                SIGTERM'd (then SIGKILL'd) and *status is set to indicate
+     *                RCCL_TEST_TIMEOUT.
      * @return Captured output from stdout and stderr
      */
-    static CapturedOutput
-        captureProcessOutput(int stdoutPipe[2], int stderrPipe[2], pid_t pid, int* status);
+    static CapturedOutput captureProcessOutput(
+        int                  stdoutPipe[2],
+        int                  stderrPipe[2],
+        pid_t                pid,
+        int*                 status,
+        std::chrono::seconds timeout = std::chrono::seconds(kNoTimeoutSeconds)
+    );
 
     /**
      * @brief Display captured output with formatted delimiters
@@ -181,6 +213,56 @@ private:
      * @param testName Name of the test for context
      */
     static void displayCapturedOutput(const CapturedOutput& output, const std::string& testName);
+
+    /**
+     * @brief Handle re-exec child entrypoint
+     *
+     * If kReexecMarkerEnvVar is set, this process is a re-exec child:
+     * run the matching test lambda, flush coverage, and _exit().
+     * Returns normally only when called from the original parent process.
+     *
+     * @param tests Test configurations to search for the target
+     */
+    static void handleReexecEntrypoint(const std::vector<TestConfig>& tests);
+
+    /// Return type for a single spawned test: result + captured output.
+    struct SpawnOutcome
+    {
+        TestResult     result;
+        CapturedOutput output;
+    };
+
+    /// Callable type for spawning one isolated test.
+    using SpawnFn = std::function<SpawnOutcome(const TestConfig&, const std::vector<int>&)>;
+
+    /**
+     * @brief Run tests one at a time (no GPU slot management).
+     */
+    static void runSequential(
+        const std::vector<TestConfig>& tests,
+        const ExecutionOptions&        opts,
+        const SpawnFn&                 spawnFn);
+
+    /**
+     * @brief Run tests with a bounded sliding window and GPU slot management.
+     * @param parallelism Maximum simultaneous child processes.
+     * @param gpuPool     Physical GPU indices available for slot assignment.
+     */
+    static void runParallel(
+        const std::vector<TestConfig>& tests,
+        const ExecutionOptions&        opts,
+        size_t                         parallelism,
+        const std::vector<int>&        gpuPool,
+        const SpawnFn&                 spawnFn);
+
+    /**
+     * @brief Generate and display test report
+     * @param options          Execution options used for the test run
+     * @param totalRegistered  Total number of tests registered (may differ from
+     *                         the number run when stopOnFirstFailure is active)
+     * @return True if no tests failed
+     */
+    static bool generateReport(const ExecutionOptions& options, size_t totalRegistered);
 
 public:
     /**
@@ -215,20 +297,13 @@ public:
     static void recordTestResult(const TestResult& result);
 
     /**
-     * @brief Execute all registered tests sequentially
-     * @param options Execution options (defaults to continue on failure)
-     * @return True if all tests passed, false otherwise
+     * @brief Execute all registered tests (sequentially or in parallel)
+     * @param options Execution options (defaults to sequential, continue on failure)
+     * @return True if all tests passed, false if any failed or the GPU pool could not be detected
      * @note This method automatically clears all test registrations and results
      *       after execution, ensuring a clean state for the next test suite.
      */
     static bool executeAllTests(const ExecutionOptions& options = ExecutionOptions());
-
-    /**
-     * @brief Generate and display test report
-     * @param options Execution options used for the test run
-     * @return True if all tests passed, false otherwise
-     */
-    static bool generateReport(const ExecutionOptions& options);
 
     /**
      * @brief Get detailed test results (thread-safe)

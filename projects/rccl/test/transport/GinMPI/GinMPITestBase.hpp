@@ -13,6 +13,10 @@
 #include <hip/hip_runtime.h>
 #include <mpi.h>
 
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
+#include <unistd.h>
+
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -33,6 +37,7 @@
 #include "nccl_gin.h"
 
 extern ncclGin_t IbCastGinIbProxy;
+extern ncclGin_t ncclGinIbProxy;
 
 namespace RCCLGinTests
 {
@@ -48,7 +53,7 @@ inline ncclGin_t* GetGinPlugin()
     if (envNet == nullptr) return nullptr;
 
     if (strcasecmp(envNet, "IB-CAST") == 0) return &IbCastGinIbProxy;
-    // if (strcasecmp(envNet, "IB") == 0) return &ncclGinIbProxy;
+    if (strcasecmp(envNet, "IB") == 0) return &ncclGinIbProxy;
 
     return nullptr;
 }
@@ -85,7 +90,8 @@ protected:
     // Device buffers allocated through AllocBuf released via hipFree in TearDown
     std::vector<void*> allocatedDeviceBuffers_;
 
-    virtual int GetNumContexts() const { return 1; }
+    virtual int  GetNumContexts() const { return 1; }
+    virtual bool UseDmaBuf()     const { return false; }
 
     void SetUp() override
     {
@@ -176,12 +182,7 @@ protected:
         int nGpus = 0;
         if(hipGetDeviceCount(&nGpus) != hipSuccess || nGpus <= 0)
         {
-            // GTEST_SKIP() expands to `return <void>`, which we cannot do
-            // from this bool-returning helper. Execute it inside a void
-            // lambda so the return is consumed there, then bail to the
-            // caller normally — the skip status is still registered on
-            // the active test.
-            [&]() { GTEST_SKIP() << "No HIP devices visible; GIN tests require GPU"; }();
+            ADD_FAILURE() << "No HIP devices visible; GIN tests require GPU";
             return false;
         }
 
@@ -262,17 +263,61 @@ protected:
             return false;
         }
 
-        TEST_INFO("GinMPI fixture ready: rank=%d/%d nDevices=%d nContexts=%d",
-                  worldRank_, worldSize_, nDevices_, GetNumContexts());
+        TEST_INFO("GinMPI fixture ready: rank=%d/%d nDevices=%d nContexts=%d regMethod=%s",
+                  worldRank_, worldSize_, nDevices_, GetNumContexts(),
+                  UseDmaBuf() ? "DmaBuf" : "RegMr");
         return true;
     }
 
     ncclResult_t RegMr(void* data, size_t size,
                        void** mhandle, void** ginHandle)
     {
+        if(UseDmaBuf())
+        {
+            return RegMrDmaBuf(data, size, mhandle, ginHandle);
+        }
         ncclResult_t r = gin_->regMrSym(collComm_, data, size,
                                         NCCL_PTR_CUDA, /*mrFlags=*/0,
                                         mhandle, ginHandle);
+        if(r == ncclSuccess && mhandle != nullptr && *mhandle != nullptr)
+        {
+            registeredMhandles_.push_back(*mhandle);
+        }
+        return r;
+    }
+
+    ncclResult_t RegMrDmaBuf(void* data, size_t size,
+                             void** mhandle, void** ginHandle)
+    {
+        if(gin_->regMrSymDmaBuf == nullptr)
+        {
+            ADD_FAILURE() << "regMrSymDmaBuf is NULL (SetUpFixture should have skipped)";
+            return ncclInternalError;
+        }
+
+        const size_t pageSize = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+        uintptr_t aligned = reinterpret_cast<uintptr_t>(data) & ~(pageSize - 1);
+        size_t    offset  = reinterpret_cast<uintptr_t>(data) - aligned;
+        size_t    alignedSize = (size + offset + pageSize - 1) & ~(pageSize - 1);
+
+        int       fd = -1;
+        uint64_t  exportOffset = 0;
+        hsa_status_t hrc = hsa_amd_portable_export_dmabuf(
+            reinterpret_cast<const void*>(aligned), alignedSize,
+            &fd, &exportOffset);
+        if(hrc != HSA_STATUS_SUCCESS || fd < 0)
+        {
+            ADD_FAILURE() << "hsa_amd_portable_export_dmabuf failed: hsa_status=" << hrc;
+            return ncclSystemError;
+        }
+
+        ncclResult_t r = gin_->regMrSymDmaBuf(collComm_, data, size,
+                                               NCCL_PTR_CUDA,
+                                               exportOffset + offset, fd,
+                                               /*mrFlags=*/0,
+                                               mhandle, ginHandle);
+        (void)close(fd);
+
         if(r == ncclSuccess && mhandle != nullptr && *mhandle != nullptr)
         {
             registeredMhandles_.push_back(*mhandle);
@@ -409,12 +454,14 @@ protected:
 // don't produce redundant size variants.
 // ---------------------------------------------------------------------------
 class GinMPITest : public GinMPITestBase,
-                   public ::testing::WithParamInterface<std::tuple<int, size_t>>
+                   public ::testing::WithParamInterface<std::tuple<int, size_t, bool>>
 {
 protected:
     int    NumContexts() const { return std::get<0>(GetParam()); }
     size_t MessageSize() const { return std::get<1>(GetParam()); }
+    bool   IsDmaBuf()    const { return std::get<2>(GetParam()); }
     int    GetNumContexts() const override { return NumContexts(); }
+    bool   UseDmaBuf()      const override { return IsDmaBuf(); }
 };
 
 // ---------------------------------------------------------------------------
@@ -424,11 +471,13 @@ protected:
 // IPutSignalInvalidSignalOp (size is irrelevant to the assertion).
 // ---------------------------------------------------------------------------
 class GinMPIFixedSizeTest : public GinMPITestBase,
-                            public ::testing::WithParamInterface<int>
+                            public ::testing::WithParamInterface<std::tuple<int, bool>>
 {
 protected:
-    int NumContexts() const { return GetParam(); }
-    int GetNumContexts() const override { return NumContexts(); }
+    int  NumContexts() const { return std::get<0>(GetParam()); }
+    bool IsDmaBuf()    const { return std::get<1>(GetParam()); }
+    int  GetNumContexts() const override { return NumContexts(); }
+    bool UseDmaBuf()      const override { return IsDmaBuf(); }
 };
 
 // ---------------------------------------------------------------------------

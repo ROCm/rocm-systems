@@ -90,13 +90,15 @@ public:
 
     Fspath dir{};
 
-    std::shared_ptr<class CodeFile>            codefile{nullptr};
-    std::shared_ptr<class FilenameMgr>         filenames{nullptr};
-    std::shared_ptr<class RealtimeTS>          realtime{nullptr};
-    std::shared_ptr<AddressTable>              table{nullptr};
-    std::map<size_t, std::vector<occupancy_t>> occupancy{};
-    std::vector<uint64_t>                      codeobjs_to_delete{};
-    rocprofiler_thread_trace_decoder_id_t      decoder{};
+    std::shared_ptr<class CodeFile>              codefile{nullptr};
+    std::shared_ptr<class FilenameMgr>           filenames{nullptr};
+    std::shared_ptr<class RealtimeTS>            realtime{nullptr};
+    std::shared_ptr<AddressTable>                table{nullptr};
+    std::map<size_t, std::vector<occupancy_t>>   occupancy{};
+    std::map<size_t, std::vector<trace_event_t>> events{};
+    std::map<size_t, std::vector<dispatch_t>>    dispatches{};
+    std::vector<uint64_t>                        codeobjs_to_delete{};
+    rocprofiler_thread_trace_decoder_id_t        decoder{};
 
     std::array<std::shared_ptr<class WstatesFile>, ROCPROFILER_THREAD_TRACE_DECODER_WSTATE_LAST>
         wstates;

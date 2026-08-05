@@ -27,7 +27,6 @@
 #include <cstring>
 #include <future>
 #include <map>
-#include "numa_wrapper.hpp"
 #include <random>
 #include <set>
 #include <sstream>

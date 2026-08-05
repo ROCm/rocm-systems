@@ -205,6 +205,39 @@ Profile types:
 
 .. tip:: Start with a flat profile to identify high-impact functions, then use a hierarchical profile to analyze critical paths.
 
+Selecting output formats
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``--output-format`` flag (available in ``rocprof-sys-run`` and ``rocprof-sys-sample``) selects which output format(s) to produce in a single, intuitive option. The selection is authoritative: only the formats you name are produced. Use either ``--output-format`` or the legacy individual flags, not both.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 35 50
+
+   * - Token
+     - Output
+     - Equivalent environment variable(s)
+   * - ``proto``
+     - Perfetto trace
+     - ``ROCPROFSYS_TRACE=true``
+   * - ``rocpd``
+     - RocPD SQLite database
+     - ``ROCPROFSYS_USE_ROCPD=true``
+   * - ``json``
+     - Timemory profile, JSON serialization
+     - ``ROCPROFSYS_PROFILE=true`` and ``ROCPROFSYS_JSON_OUTPUT=true``
+   * - ``text`` (alias ``txt``)
+     - Timemory profile, text serialization
+     - ``ROCPROFSYS_PROFILE=true`` and ``ROCPROFSYS_TEXT_OUTPUT=true``
+
+Tokens are space- or comma-separated and can be combined, for example:
+
+.. code-block:: shell
+
+   rocprof-sys-run --output-format proto rocpd -- ./myapp
+
+The ``--trace``, ``--profile``, ``--flat-profile``, and ``--profile-format`` flags and their environment variables remain available, but cannot be combined with ``--output-format`` on the same command line: because ``--output-format`` is authoritative over the same settings, mixing it with those flags is rejected to avoid an ambiguous result. Use either ``--output-format`` or the individual flags, not both.
+
 Sampling mode
 ^^^^^^^^^^^^^^^^^^^^^^^^
 

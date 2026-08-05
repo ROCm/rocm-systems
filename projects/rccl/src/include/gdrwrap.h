@@ -13,17 +13,14 @@
 #include <stdint.h> // for standard [u]intX_t types
 #include <stdio.h>
 #include <stdlib.h>
+#include <mutex>
 #include "archinfo.h"
 
 // These can be used if the GDR library isn't thread safe
-#include <pthread.h>
-extern pthread_mutex_t gdrLock;
-#define GDRLOCK() pthread_mutex_lock(&gdrLock)
-#define GDRUNLOCK() pthread_mutex_unlock(&gdrLock)
+std::mutex& getGdrMutex();
 #define GDRLOCKCALL(cmd, ret) do {                      \
-    GDRLOCK();                                          \
+    std::lock_guard<std::mutex> lock(getGdrMutex());   \
     ret = cmd;                                          \
-    GDRUNLOCK();                                        \
 } while(false)
 
 #define GDRCHECK(cmd) do {                              \
@@ -39,8 +36,8 @@ extern pthread_mutex_t gdrLock;
 // This is required as the GDR memory is mapped WC
 #if !defined(__NVCC__)
 #if defined(__PPC__)
-static inline void wc_store_fence(void) { asm volatile("sync") ; }
-#elif defined(__x86_64__)
+static inline void wc_store_fence(void) { asm volatile("sync" : : : "memory"); }
+#elif defined(__x86_64__) || (defined(_MSC_VER) && (defined(_M_X64) || defined(_M_AMD64)))
 #include <immintrin.h>
 static inline void wc_store_fence(void) { _mm_sfence(); }
 #elif defined(__aarch64__) || defined(__riscv)
@@ -65,6 +62,22 @@ static gdr_t wrap_gdr_open(void) { gdr_t g = gdr_open(); return g; }
 static ncclResult_t wrap_gdr_close(gdr_t g) { GDRCHECK(gdr_close(g)); return ncclSuccess; }
 static ncclResult_t wrap_gdr_pin_buffer(gdr_t g, unsigned long addr, size_t size, uint64_t p2p_token, uint32_t va_space, gdr_mh_t *handle) {
   GDRCHECK(gdr_pin_buffer(g, addr, size, p2p_token, va_space, handle));
+  return ncclSuccess;
+}
+
+static bool ncclGdrPinV2Available(void) {
+#if defined(GDR_API_MAJOR_VERSION) && defined(GDR_API_MINOR_VERSION)
+  return (GDR_API_MAJOR_VERSION > 2) || (GDR_API_MAJOR_VERSION == 2 && GDR_API_MINOR_VERSION >= 5);
+#else
+  return false;
+#endif
+}
+static ncclResult_t wrap_gdr_pin_buffer_v2(gdr_t g, unsigned long addr, size_t size, uint32_t flags, gdr_mh_t* handle) {
+  if (!ncclGdrPinV2Available()) {
+    WARN("gdr_pin_buffer_v2 not available; GDRCopy >= 2.5 required");
+    return ncclInternalError;
+  }
+  GDRCHECK(gdr_pin_buffer_v2(g, addr, size, flags, handle));
   return ncclSuccess;
 }
 static ncclResult_t wrap_gdr_unpin_buffer(gdr_t g, gdr_mh_t handle) {
@@ -104,6 +117,12 @@ static ncclResult_t wrap_gdr_copy_from_mapping(gdr_mh_t handle, void *h_ptr, con
 // Dynamically handle dependency the GDR API library
 
 /* Extracted from gdrapi.h (v2.1 Nov 2020) */
+/* Exception: gdr_pin_flags / GDR_PIN_FLAG_FORCE_PCIE extracted from gdrapi.h (v2.5) */
+
+typedef enum gdr_pin_flags {
+  GDR_PIN_FLAG_DEFAULT     = 0,
+  GDR_PIN_FLAG_FORCE_PCIE  = 1
+} gdr_pin_flags_t;
 
 #define GPU_PAGE_SHIFT   16
 #define GPU_PAGE_SIZE    (1UL << GPU_PAGE_SHIFT)
@@ -135,6 +154,10 @@ ncclResult_t wrap_gdr_symbols(void);
 gdr_t wrap_gdr_open(void);
 ncclResult_t wrap_gdr_close(gdr_t g);
 ncclResult_t wrap_gdr_pin_buffer(gdr_t g, unsigned long addr, size_t size, uint64_t p2p_token, uint32_t va_space, gdr_mh_t *handle);
+// gdrwrap.cc (which defines the runtime-detecting version) is not compiled in this
+// configuration, so GDRCopy v2 pinning is unavailable; report false inline.
+static inline bool ncclGdrPinV2Available(void) { return false; }
+ncclResult_t wrap_gdr_pin_buffer_v2(gdr_t g, unsigned long addr, size_t size, uint32_t flags, gdr_mh_t *handle);
 ncclResult_t wrap_gdr_unpin_buffer(gdr_t g, gdr_mh_t handle);
 ncclResult_t wrap_gdr_get_info(gdr_t g, gdr_mh_t handle, gdr_info_t *info);
 ncclResult_t wrap_gdr_map(gdr_t g, gdr_mh_t handle, void **va, size_t size);
@@ -146,7 +169,7 @@ ncclResult_t wrap_gdr_copy_from_mapping(gdr_mh_t handle, void *h_ptr, const void
 
 #endif // GDR_DIRECT
 
-// Global GDR driver handle
+// Global GDR driver handle; set once during NCCL init.
 extern gdr_t ncclGdrCopy;
 
 #include "alloc.h"
@@ -180,7 +203,11 @@ static gdr_t ncclGdrInit() {
 }
 
 template <typename T>
-static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** gdrHandle) {
+static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** gdrHandle,
+                                      struct ncclMemManager* manager,
+                                      uint32_t pinFlags = 0,
+                                      ncclMemType_t memType = ncclMemPersist) {
+  (void)pinFlags;  // GDR FORCE_PCIE pin flag has no effect on AMD's fine-grained GDR path
   // gdr_info_t info; // unused variable - compiler warning
   size_t mapSize;
   // gdr_mh_t mh;     // unused variable - compiler warning
@@ -193,9 +220,9 @@ static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** 
   ALIGN_SIZE(mapSize, GPU_PAGE_SIZE);
   // GDRCOPY Pinned buffer has to be GPU_PAGE_SIZE aligned too
 #if defined(HIP_UNCACHED_MEMORY)
-  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1, hipDeviceMallocUncached));
+  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1, manager, memType, hipDeviceMallocUncached));
 #else
-  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1, hipDeviceMallocFinegrained));
+  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1, manager, memType, hipDeviceMallocFinegrained));
 #endif
   gdr_mem_desc_t* md;
   NCCLCHECK(ncclCalloc(&md, 1));
@@ -222,13 +249,14 @@ static ncclResult_t ncclGdrCudaCopy(void *gdrHandle, T* dst, T* src, size_t nele
   return ncclSuccess;
 }
 
-static ncclResult_t ncclGdrCudaFree(void* gdrHandle) {
+static ncclResult_t ncclGdrCudaFree(void* gdrHandle, struct ncclMemManager* manager) {
   gdr_mem_desc_t *md = (gdr_mem_desc_t*)gdrHandle;
-  CUDACHECK(cudaFree(md->gdrDevMem));
+  NCCLCHECK(ncclCudaFree(md->gdrDevMem, manager));
   free(md);
 
   return ncclSuccess;
 }
+
 #else
 static gdr_t ncclGdrInit() {
   int libMajor, libMinor, drvMajor, drvMinor;
@@ -261,7 +289,10 @@ error:
 }
 
 template <typename T>
-static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** gdrHandle) {
+static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** gdrHandle,
+                                      struct ncclMemManager* manager,
+                                      uint32_t pinFlags = 0,
+                                      ncclMemType_t memType = ncclMemPersist) {
   gdr_info_t info;
   size_t mapSize;
   gdr_mh_t mh;
@@ -273,12 +304,17 @@ static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** 
   // GDRCOPY Pinned buffer has to be a minimum of a GPU_PAGE_SIZE
   ALIGN_SIZE(mapSize, GPU_PAGE_SIZE);
   // GDRCOPY Pinned buffer has to be GPU_PAGE_SIZE aligned too
-  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1));
+  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1, manager, memType));
   uint64_t alignedAddr = (((uint64_t) devMem) + GPU_PAGE_OFFSET) & GPU_PAGE_MASK;
   size_t align = alignedAddr - (uint64_t)devMem;
 
-  //TRACE(NCCL_INIT, "GDRCOPY: Pin buffer 0x%lx (%p) align %zu size %zu", alignedAddr, devMem, align, mapSize);
-  NCCLCHECK(wrap_gdr_pin_buffer(ncclGdrCopy, alignedAddr, mapSize, 0, 0, &mh));
+  if (ncclGdrPinV2Available() || pinFlags == GDR_PIN_FLAG_FORCE_PCIE) {
+    // If pingFlags is set to FORCE_PCIE, we will error out if we can't honnor it.
+    NCCLCHECK(wrap_gdr_pin_buffer_v2(ncclGdrCopy, alignedAddr, mapSize, pinFlags, &mh));
+  } else {
+    // TRACE(NCCL_INIT, "GDRCOPY: Pin buffer 0x%lx (%p) align %zu size %zu", alignedAddr, devMem, align, mapSize);
+    NCCLCHECK(wrap_gdr_pin_buffer(ncclGdrCopy, alignedAddr, mapSize, 0, 0, &mh));
+  }
 
   NCCLCHECK(wrap_gdr_map(ncclGdrCopy, mh, &gdrMap, mapSize));
   //TRACE(NCCL_INIT, "GDRCOPY : mapped %p (0x%lx) at %p", devMem, alignedAddr, gdrMap);
@@ -313,15 +349,49 @@ static ncclResult_t ncclGdrCudaCopy(void *gdrHandle, T* dst, T* src, size_t nele
   return ncclSuccess;
 }
 
-static ncclResult_t ncclGdrCudaFree(void* gdrHandle) {
+static ncclResult_t ncclGdrCudaFree(void* gdrHandle, struct ncclMemManager* manager) {
   gdr_mem_desc_t *md = (gdr_mem_desc_t*)gdrHandle;
   NCCLCHECK(wrap_gdr_unmap(ncclGdrCopy, md->gdrMh, md->gdrMap, md->gdrMapSize));
   NCCLCHECK(wrap_gdr_unpin_buffer(ncclGdrCopy, md->gdrMh));
-  NCCLCHECK(ncclCudaFree(md->gdrDevMem));
+  NCCLCHECK(ncclCudaFree(md->gdrDevMem, manager));
   free(md);
 
   return ncclSuccess;
 }
 #endif
+
+// Helper: Allocate memory accessible from CPU (either GDR or host memory)
+template <typename T>
+static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int host_flags,
+                                          void **gdrHandle, struct ncclMemManager* manager, bool forceHost = false) {
+  if (ncclGdrCopy && !forceHost) {
+    NCCLCHECK(ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle, manager));
+  } else {
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
+    NCCLCHECK(ncclCuMemHostAlloc((void **)ptr, NULL, nelem * sizeof(T)));
+#else
+    CUDACHECK(hipHostMalloc((void **)ptr, nelem * sizeof(T)));
+#endif
+    memset((void *)*ptr, 0, nelem * sizeof(T));
+    *devPtr = *ptr;
+    if (gdrHandle) *gdrHandle = NULL;  // Mark as host allocated by nulling GDR handle
+  }
+  return ncclSuccess;
+}
+
+// Helper: Free memory allocated by allocMemCPUAccessible
+template <typename T>
+static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle, struct ncclMemManager* manager) {
+  if (gdrHandle != NULL) {  // If a GDR handle exists, it was GDR memory
+    NCCLCHECK(ncclGdrCudaFree(gdrHandle, manager));
+  } else {  // Otherwise, it was host memory (or GDR was off)
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
+    NCCLCHECK(ncclCuMemHostFree(ptr));
+#else
+    CUDACHECK(hipHostFree(ptr));
+#endif
+  }
+  return ncclSuccess;
+}
 
 #endif // End include guard

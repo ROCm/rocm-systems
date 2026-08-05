@@ -184,7 +184,7 @@ AcquireAgentInfoEntry(hsa_agent_t agent, agent_info_t* agent_i)
         agent, (hsa_agent_info_t) HSA_AMD_AGENT_INFO_DRIVER_NODE_ID, &agent_i->internal_node_id);
     RET_IF_HSA_ERR(err);
 
-    // Max number of watch points on mem. addr. ranges to generate exeception
+    // Max number of watch points on mem. addr. ranges to generate exception
     // events
     err = hsa_agent_get_info(agent,
                              (hsa_agent_info_t) HSA_AMD_AGENT_INFO_MAX_ADDRESS_WATCH_POINTS,
@@ -454,8 +454,8 @@ CheckInitError()
 
 // Print out all static information known to HSA about the target system.
 // Throughout this program, the Acquire-type functions make HSA calls to
-// interate through HSA objects and then perform HSA get_info calls to
-// acccumulate information about those objects. Corresponding to each
+// iterate through HSA objects and then perform HSA get_info calls to
+// accumulate information about those objects. Corresponding to each
 // Acquire-type function is a Display* function which display the
 // accumulated data in a formatted way.
 int

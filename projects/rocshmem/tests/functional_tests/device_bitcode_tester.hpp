@@ -37,10 +37,10 @@ class DeviceBitcodeTester : public Tester {
   void execute() override;
 
  protected:
-  void resetBuffers(size_t size) override;
+  void resetBuffers(uint64_t size) override;
   void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                    size_t size) override;
-  void verifyResults(size_t size) override;
+                    uint64_t size) override;
+  void verifyResults(uint64_t size) override;
 
  private:
   std::string resolve_hsaco_path();

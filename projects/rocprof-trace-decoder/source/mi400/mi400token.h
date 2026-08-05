@@ -25,9 +25,9 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
-#include "common.hpp"
 #include "gfx12/gfx12parser.h"
 #include "gfx12/gfx12token.h"
+#include "rocprof_trace_decoder/cxx/common.hpp"
 
 namespace mi400
 {
@@ -84,7 +84,6 @@ union immed_one_type
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -92,7 +91,6 @@ union immed_one_type
         return ss;
     }
     const char* typestr() const { return "IMMEDONE"; };
-#endif
 };
 
 union lds_config_type
@@ -113,22 +111,15 @@ union misc_type
 {
     struct
     {
-        uint64_t header           : 7;
-        uint64_t tm               : 3;
-        uint64_t spm              : 1;
-        uint64_t gc_rinse         : 1;
-        uint64_t save_context     : 1;
-        uint64_t tt_stall_start   : 1;
-        uint64_t tt_stall_end     : 1;
-        uint64_t DIDT_stall_start : 1;
-        uint64_t DIDT_stall_end   : 1;
-        uint64_t CLF              : 1;
-        uint64_t CLL              : 1;
-        uint64_t CLID             : 4;
+        uint64_t header : 7;
+        uint64_t tm     : 3;
+        uint64_t fields : 7;
+        uint64_t CLF    : 1;
+        uint64_t CLL    : 1;
+        uint64_t CLID   : 4;
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -136,7 +127,6 @@ union misc_type
         return ss;
     }
     const char* typestr() const { return "MISC"; };
-#endif
 };
 
 union header_type
@@ -178,15 +168,14 @@ union header_type
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
-        return std::stringstream{} << "TT Version:" << version << "DWGP:" << DWGP << " DSIMD:" << DSIMD
-                                   << " DSA:" << DSA << " NSA:" << NSA << " UCF:" << UCF << "DPRate:" << DPRate
-                                   << " WSM:" << WSM;
+        std::stringstream ss;
+        ss << "TT Version:" << version << "DWGP:" << DWGP << " DSIMD:" << DSIMD << " DSA:" << DSA << " NSA:" << NSA
+           << " UCF:" << UCF << "DPRate:" << DPRate << " WSM:" << WSM;
+        return ss;
     }
     const char* typestr() const { return "HEADER"; };
-#endif
 };
 
 class Token : public gfx12::Token

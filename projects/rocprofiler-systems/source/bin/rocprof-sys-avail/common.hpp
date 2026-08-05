@@ -10,7 +10,6 @@
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/argparse.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/type_list.hpp>
 
 #include <array>

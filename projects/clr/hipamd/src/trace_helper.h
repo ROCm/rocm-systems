@@ -164,6 +164,12 @@ inline hipError_t ConvertCLErrorIntoHIPError(cl_int cl_error) {
     case CL_INVALID_MEM_OBJECT:
       hip_error = hipErrorIllegalAddress;
       break;
+    case CL_OUT_OF_HOST_MEMORY:
+      hip_error = hipErrorOutOfMemory;
+      break;
+    case CL_INVALID_VALUE:
+      hip_error = hipErrorInvalidValue;
+      break;
     case CL_DEVICE_NOT_AVAILABLE:
     default:
       hip_error = hipErrorUnknown;

@@ -164,6 +164,7 @@ ROCm Compute Profiler uses [Ruff](https://docs.astral.sh/ruff/) for linting and 
 |-------|-----------------|
 | Function design, naming, code organization | [Python Coding Style Guidelines](PYTHON_CODING_STYLE.md) |
 | Ruff configuration (enforced rules, ignores, formatting) | [`pyproject.toml`](pyproject.toml) |
+| YAML metric equation formatting | [YAML Metric Equation Formatting](#yaml-metric-equation-formatting) |
 
 ### Running Ruff Manually
 
@@ -177,17 +178,61 @@ ruff check --fix .
 ruff format .
 ```
 
+### YAML Metric Equation Formatting
+
+Metric equations in YAML config files follow a canonical format. The canonical
+implementation is [`tools/format_yaml.py`](tools/format_yaml.py).
+
+**Scope.** Equation formatting applies to YAML files under:
+
+- `src/rocprof_compute_soc/analysis_configs/gfx*/*.yaml`
+- `src/rocprof_compute_tui/utils/gfx*/*.yaml`
+
+Template files (`*_template.yaml`) and build artifacts are excluded. Only values
+under these keys are treated as equations: `value`, `avg`, `min`, `max`, `peak`.
+
+**Rules.**
+
+- **Operator spacing** — all binary operators (`+`, `-`, `*`, `/`) have exactly
+  one space on each side: `SUM(x) / SUM(y)`.
+- **Constant factoring** — when an aggregation (`SUM`, `AVG`, `MIN`, `MAX`)
+  multiplies by a numeric constant, factor it out:
+  `128 * SUM(x)`, not `SUM(x * 128)`. Addition inside aggregations is left as-is.
+- **Minimal parentheses** — remove parentheses made redundant by operator
+  precedence (`a + b + c`, not `(a + b) + c`), but preserve those required for
+  correct evaluation (`a - (b - c)`, `(a + b) * c`).
+- **Unary negation** — negation of a compound expression keeps its parentheses:
+  `-(a + b)`, not `-a + b`.
+- **Literal values** — `N/A`, `None`, `null`, `true`, `false`, and
+  `Peak (Empirical)` are never parsed as equations and must be written exactly
+  as shown (the space before `(` in `Peak (Empirical)` is required).
+
+Equations with unsupported syntax (unknown characters, unmatched parentheses) are
+left unchanged; the formatter never corrupts an equation it cannot fully parse.
+
+**Enforcement.** The `yaml-format-fix` pre-commit hook runs
+`tools/format_yaml.py --fix` on staged config files and auto-corrects equations
+in place. Re-stage the modified files and commit again.
+
+```bash
+# Show proposed changes
+python tools/format_yaml.py --diff src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
+
+# Auto-fix in place
+python tools/format_yaml.py --fix src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
+```
+
 ## Documentation Changes
 
 For instructions on building and testing changes to files under the `docs/` folder, see the [ROCm documentation contributing guide](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
 ## Metrics Management
 
-If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof_compute_soc/analysis_configs/gfx<arch>/*.yaml`, config deltas, or metric descriptions in `docs/data/metrics_description.yaml` — follow the metric management workflow:
+If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof_compute_soc/analysis_configs/gfx<arch>/*.yaml` or metric descriptions in `docs/data/metrics_description.yaml` — follow the metric management workflow:
 
 1. Edit the relevant panel YAMLs.
-2. Where appropriate, generate and apply a config delta using the [workflow script](tools/config_management/master_config_workflow_script.py).
-3. Verify that hashes are updated and CI tests pass.
+2. Validate them with `python tools/config_management/master_config_workflow_script.py --validate-only`.
+3. Refresh the hash DB with `python tools/config_management/hash_manager.py --compute-all src/rocprof_compute_soc/analysis_configs` and confirm CI tests pass.
 
 For full details, see the [metric config management README](./tools/config_management/README.md).
 
