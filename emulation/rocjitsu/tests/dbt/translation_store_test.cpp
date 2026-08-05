@@ -279,6 +279,44 @@ TEST_F(TranslationStoreTest, ARebuiltTranslatorDoesNotReadTheOldEntries) {
 }
 #endif // RJ_TRANSLATOR_PROBE_a && RJ_TRANSLATOR_PROBE_b
 
+TEST_F(TranslationStoreTest, ADomainContainingNulDoesNotAliasAnother) {
+  // The C path APIs stop at a NUL, so these two distinct views name one
+  // directory. Without rejecting them the second domain reads back what the
+  // first wrote, which is precisely the isolation a domain is supposed to give.
+  const std::string_view first("pair\0a", 6);
+  const std::string_view second("pair\0b", 6);
+
+  auto writer = open(first);
+  EXPECT_FALSE(writer->key_for(kSource, kIdentity).valid);
+  put(*writer, kObject);
+
+  auto reader = open(second);
+  EXPECT_TRUE(get(*reader).empty()) << "a truncated domain must not alias another";
+  EXPECT_TRUE(get(*writer).empty());
+}
+
+TEST_F(TranslationStoreTest, ALineBreakingIdentityIsRefusedRatherThanStored) {
+  // The manifest is line oriented. A newline in the ISA forges an earlier size=
+  // or sha= field, so the object is written but every later lookup rejects it --
+  // a write-only entry that is retried for as long as the workload runs.
+  constexpr TranslationIdentity injected{
+      .profile_id = 7,
+      .input_revision = 2,
+      .output_revision = 1,
+      .target_isa = "gfx-example\nsize=0\nsha=0",
+  };
+
+  auto store = open("pair-a");
+  EXPECT_FALSE(store->key_for(kSource, injected).valid);
+  store->store(store->key_for(kSource, injected), kObject, injected);
+  EXPECT_TRUE(store->lookup(store->key_for(kSource, injected), injected).empty());
+  EXPECT_EQ(store->size_for_test(), 0u) << "nothing may be written for a refused identity";
+
+  // The ordinary identity still works, so this is refusal and not a dead store.
+  put(*store, kObject);
+  EXPECT_EQ(get(*store), kObject);
+}
+
 TEST_F(TranslationStoreTest, AGroupWritableStoreRootIsStillUsable) {
   // $XDG_RUNTIME_DIR/rocjitsu is created by the daemon and is group-writable, so
   // applying the store's own no-group-or-other-write rule to the root it is

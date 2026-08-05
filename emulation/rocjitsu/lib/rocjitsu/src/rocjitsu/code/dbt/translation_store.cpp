@@ -485,8 +485,12 @@ struct Entry {
 /// a compile-time constant at every call site today, which is why rejecting it
 /// outright is preferable to sanitising it.
 [[nodiscard]] bool is_single_path_component(std::string_view domain) {
+  // A NUL is as much a separator problem as a slash: the C path APIs stop at it,
+  // so "pair\0a" and "pair\0b" are distinct string_views that name one directory
+  // and silently share entries, which is exactly the isolation the domain exists
+  // to provide.
   return !domain.empty() && domain != "." && domain != ".." &&
-         domain.find('/') == std::string_view::npos;
+         domain.find('/') == std::string_view::npos && domain.find('\0') == std::string_view::npos;
 }
 
 } // namespace
@@ -961,13 +965,27 @@ bool TranslationStore::available() { return impl_->available(); }
 
 TranslationStore::~TranslationStore() = default;
 
+// Every public operation is contained here rather than at each internal step.
+// The documented contract is best effort -- a caller translates instead -- but
+// these paths allocate strings, vectors and file buffers, and this component is
+// reached from an HSA load callback. A std::bad_alloc escaping key_for() fails
+// that load outright, turning a cache that could not answer into a program that
+// cannot run. Returning an invalid key, a miss, or a no-op keeps the promise.
 CacheKey TranslationStore::key_for(std::span<const uint8_t> source,
-                                   const TranslationIdentity &identity) {
+                                   const TranslationIdentity &identity) try {
   CacheKey key;
   if (source.empty())
     return key;
   const std::string build_id = impl_->build_id();
   if (build_id.empty() || !impl_->available())
+    return key;
+
+  // The manifest is line oriented, so a newline here forges an earlier size= or
+  // sha= field. The object still gets written, every later lookup rejects it,
+  // and the entry is retried forever: a write-only cache slot. The one identity
+  // this hook presents is safe, but the type accepts any string_view.
+  if (identity.target_isa.find('\n') != std::string_view::npos ||
+      identity.target_isa.find('\r') != std::string_view::npos)
     return key;
 
   Sha256 hash;
@@ -983,20 +1001,26 @@ CacheKey TranslationStore::key_for(std::span<const uint8_t> source,
   key.digest = hash.finish();
   key.valid = true;
   return key;
+} catch (...) {
+  return CacheKey{};
 }
 
 std::vector<uint8_t> TranslationStore::lookup(const CacheKey &key,
-                                              const TranslationIdentity &identity) {
+                                              const TranslationIdentity &identity) try {
   if (!key.valid)
     return {};
   return impl_->lookup(to_hex(key.digest), identity);
+} catch (...) {
+  return {};
 }
 
 void TranslationStore::store(const CacheKey &key, std::span<const uint8_t> translated,
-                             const TranslationIdentity &identity) {
+                             const TranslationIdentity &identity) noexcept try {
   if (!key.valid || translated.empty())
     return;
   impl_->store(to_hex(key.digest), translated, identity);
+} catch (...) {
+  // Declared never to throw, and now actually is.
 }
 
 #if defined(RJ_TRANSLATION_STORE_TEST_HOOKS)

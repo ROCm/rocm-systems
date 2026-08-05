@@ -169,7 +169,7 @@ public:
   /// @details Does nothing on a read-only store, and nothing on any store whose
   /// tier refuses an object this large.
   void store(const CacheKey &key, std::span<const uint8_t> translated,
-             const TranslationIdentity &identity);
+             const TranslationIdentity &identity) noexcept;
 
 #if defined(RJ_TRANSLATION_STORE_TEST_HOOKS)
   /// @brief Test-only: point the store at @p root and re-run its checks.
