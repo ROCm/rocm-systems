@@ -1086,6 +1086,11 @@ class GpuAgent : public GpuAgentInt {
   // structure for stochastic sampling
   pcs_data_t pcs_stochastic_data_;
 
+  // Serializes PM4 submit-and-wait on queues_[QueuePCSampling]: ExecutePM4 reuses a single
+  // per-queue indirect buffer, so only one submission may be in flight at a time.
+  // Lock order: host_buffer_mutex -> pcs_pm4_mutex_.
+  std::mutex pcs_pm4_mutex_;
+
   /// @brief XGMI CPU<->GPU
   bool xgmi_cpu_gpu_;
   /// @brief Is PCIe large BAR enabled.

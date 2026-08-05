@@ -3712,8 +3712,10 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
   // Initialize per-XCC structures
   pcs_data->num_xcc = properties_.NumXcc;
 
-  // Detect if we need PM4 fallback (non-large-BAR systems cannot use CPU atomics on VRAM)
-  pcs_data->use_pm4_fallback = !LargeBarEnabled();
+  // Always drain with PM4, never a CPU memcpy: the buf_written_val handshake does not order
+  // the trap handler's GL2 payload writes across the large-BAR aperture, so the CPU can read a
+  // torn record. The CPU path can return once the handler publishes the payload before the count.
+  pcs_data->use_pm4_fallback = true;
 
   // Allocate cache-line aligned per-XCC data array
   // Each per_xcc_pcs_data_t is 64-byte aligned to prevent false sharing between XCCs
@@ -4049,6 +4051,20 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
 
   // Allocate contiguous device memory for all XCCs, each XCC gets deviceAllocSize bytes
   size_t deviceAllocSize = AlignUp(sizeof(pcs_sampling_data_t) + (2 * trap_buffer_size), 256);
+
+  // TMA2 holds one per-XCC stride shared by the hosttrap and stochastic buffer arrays, so an
+  // active session of the other method with a different stride would index past its allocation.
+  const pcs_data_t& other_pcs_data = (sampling_method == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1)
+      ? pcs_stochastic_data_
+      : pcs_hosttrap_data_;
+  if (other_pcs_data.session && other_pcs_data.per_xcc_device_stride != deviceAllocSize) {
+    debug_print(
+        "PC Sampling: cannot start session, active session uses per-XCC stride %zu but this "
+        "session needs %zu\n",
+        other_pcs_data.per_xcc_device_stride, deviceAllocSize);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
   size_t totalDeviceAllocSize = deviceAllocSize * pcs_data->num_xcc;
   pcs_data->per_xcc_device_stride = deviceAllocSize;  // Cache for trap handler update in Destroy
 
@@ -4250,12 +4266,14 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
   // Reset per-XCC state for a fresh session. PcSamplingStop uses -1 on the
   // done signals as an exit sentinel to wake worker threads, so restore the
   // expected initial values before creating new monitoring threads.
+  //
+  // which_buffer is deliberately not reset: it shadows bit 63 of buf_write_val, which survives
+  // stop/start, so forcing it to 0 would desync the drain and hang the PM4 WAIT_REG_MEM poll.
   for (uint32_t xcc_id = 0; xcc_id < pcs_data->num_xcc; xcc_id++) {
     pcs_data->xcc_data[xcc_id].host_write_offset = 0;
     pcs_data->xcc_data[xcc_id].host_read_offset = 0;
     HSA::hsa_signal_store_screlease(pcs_data->xcc_data[xcc_id].done_sig0, 1);
     HSA::hsa_signal_store_screlease(pcs_data->xcc_data[xcc_id].done_sig1, 1);
-    pcs_data->xcc_data[xcc_id].which_buffer = 0;
   }
   pcs_data->consumer_exit.store(false, std::memory_order_relaxed);
   pcs_data->pending_flush_count = 0;
@@ -4587,6 +4605,10 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   if (!pcs_data->xcc_data[xcc_id].device_data) {
     return HSA_STATUS_SUCCESS;
   }
+
+  // ExecutePM4 returns once the doorbell rings but reuses one indirect buffer per queue, so
+  // hold the lock across both PM4 pairs or a concurrent submission overwrites unfetched commands.
+  std::lock_guard<std::mutex> pm4_lock(pcs_pm4_mutex_);
 
   uint32_t next_buffer;
   uint64_t reset_write_val;
