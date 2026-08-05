@@ -56,35 +56,6 @@ parse_signal_less_env(std::string_view v)
     return v == "1" || v == "on" || v == "ON" || v == "true" || v == "TRUE" || v == "yes";
 }
 
-// Whether the machinery is COMPLETE in this build -- not the on switch.
-// Activation still needs the env opt-in above. Kept separate so a build that
-// ships the machinery incomplete can force it off in one place.
-constexpr bool
-signal_less_fully_wired()
-{
-    return true;
-}
-
-// Per-batch: if ANY packet fails, the WHOLE batch keeps the signal path -- there
-// are no mixed-mode batches. App-signal presence is deliberately not an input.
-struct eligibility_inputs
-{
-    bool feature_enabled       = false;  // env flag
-    bool fully_wired           = false;  // signal_less_fully_wired()
-    bool session_live_for_gpu  = false;  // a dlog session exists for THIS gpu
-    bool reader_alive          = false;  // not poisoned / reader-dead
-    bool doorbells_injective   = false;  // every packet's slot has one live owner
-    bool hub_accepts_batch     = false;  // no live/tombstoned key, no quarantined slot
-    bool payload_constructible = false;  // owned payload can be built for every packet
-};
-
-inline bool
-batch_is_signal_less_eligible(const eligibility_inputs& in)
-{
-    return in.feature_enabled && in.fully_wired && in.session_live_for_gpu && in.reader_alive &&
-           in.doorbells_injective && in.hub_accepts_batch && in.payload_constructible;
-}
-
 // Steps 1-6 of the teardown order, called BEFORE the existing
 // queue_controller_fini / kfd::finalize / correlation_id_finalize sequence.
 // No-op unless signal-less is active.

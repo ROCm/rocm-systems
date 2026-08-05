@@ -690,7 +690,7 @@ signal_less_batch_eligible(Queue*                                            que
 
     // Cheapest gate first: with the feature off this is one relaxed load.
     if(kfd::signal_less_child_stale()) return false;
-    if(!kfd::signal_less_feature_enabled() || !kfd::signal_less_fully_wired()) return false;
+    if(!kfd::signal_less_feature_enabled()) return false;
 
     const auto _gpu_id = queue->get_agent().get_rocp_agent()->gpu_id;
     if(!kfd::ensure_reader_session(static_cast<uint32_t>(_gpu_id))) return false;
@@ -718,23 +718,15 @@ signal_less_batch_eligible(Queue*                                            que
         return false;
     }
 
-    auto _inputs                 = kfd::eligibility_inputs{};
-    _inputs.feature_enabled      = true;
-    _inputs.fully_wired          = kfd::signal_less_fully_wired();
-    _inputs.session_live_for_gpu = true;
-    _inputs.reader_alive         = kfd::signal_less_hub().mode() == kfd::session_mode::running;
-    _inputs.doorbells_injective =
-        kfd::owner_registry().is_injective(static_cast<uint32_t>(_gpu_id), _db->doorbell_off);
-    // is_closing() is an eligibility-only gate: a batch already past this point
-    // may still register, which is what the destroy path fences before it strands.
-    _inputs.hub_accepts_batch =
+    // can_register_batch() carries the session-mode gate. is_closing() is
+    // eligibility-only: a batch already past this point may still register, which
+    // is what the destroy path fences before it strands.
+    const bool _eligible =
+        kfd::owner_registry().is_injective(static_cast<uint32_t>(_gpu_id), _db->doorbell_off) &&
         kfd::signal_less_hub().can_register_batch(_flat) &&
         !kfd::signal_less_hub().is_closing(static_cast<uint32_t>(_gpu_id), _db->doorbell_off);
-    // The payload is value-only (see kfd::pending_payload), so construction cannot
-    // fail once the key resolved.
-    _inputs.payload_constructible = true;
 
-    if(kfd::batch_is_signal_less_eligible(_inputs))
+    if(_eligible)
     {
         kfd::note_signal_less(kfd::signal_less_counter::batch_eligible);
         return true;

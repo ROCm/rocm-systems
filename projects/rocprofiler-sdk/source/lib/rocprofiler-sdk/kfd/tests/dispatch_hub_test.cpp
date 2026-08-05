@@ -452,78 +452,6 @@ TEST(signal_less_flag, only_explicit_enable_turns_it_on)
     EXPECT_FALSE(parse_signal_less_env("1 "));
 }
 
-// The machinery is complete, so the master switch is true -- but activation is
-// still an explicit operator opt-in. With the env variable unset (the default)
-// the feature is off and every dispatch keeps the signal path.
-TEST(signal_less_flag, machinery_is_present_but_activation_is_opt_in)
-{
-    static_assert(signal_less_fully_wired(), "the signal-less machinery is complete in this build");
-
-    // Default: env unset -> not enabled -> no batch can be eligible.
-    auto in                  = eligibility_inputs{};
-    in.fully_wired           = signal_less_fully_wired();
-    in.session_live_for_gpu  = true;
-    in.reader_alive          = true;
-    in.doorbells_injective   = true;
-    in.hub_accepts_batch     = true;
-    in.payload_constructible = true;
-    in.feature_enabled       = false;  // ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS unset
-    EXPECT_FALSE(batch_is_signal_less_eligible(in));
-
-    // Opted in: the path becomes reachable.
-    in.feature_enabled = true;
-    EXPECT_TRUE(batch_is_signal_less_eligible(in));
-}
-
-// The owner-injectivity input now comes from the live-owner registry, and a slot
-// with no known owner is not injective -- so it alone holds a batch on the signal
-// path even with everything else satisfied.
-TEST(signal_less_flag, unknown_slot_is_not_injective)
-{
-    auto reg = OwnerRegistry{};
-
-    auto in                  = eligibility_inputs{};
-    in.feature_enabled       = true;
-    in.fully_wired           = true;
-    in.session_live_for_gpu  = true;
-    in.reader_alive          = true;
-    in.hub_accepts_batch     = true;
-    in.payload_constructible = true;
-    in.doorbells_injective   = reg.is_injective(/*gpu_id=*/0, /*slot=*/4100);
-
-    EXPECT_FALSE(batch_is_signal_less_eligible(in));
-}
-
-// Every input is necessary: dropping any one of them keeps the whole batch on the
-// signal path (no mixed-mode batches, no "minimal/where-known" gating).
-TEST(signal_less_flag, eligibility_requires_every_condition)
-{
-    auto all_true                  = eligibility_inputs{};
-    all_true.feature_enabled       = true;
-    all_true.fully_wired           = true;
-    all_true.session_live_for_gpu  = true;
-    all_true.reader_alive          = true;
-    all_true.doorbells_injective   = true;
-    all_true.hub_accepts_batch     = true;
-    all_true.payload_constructible = true;
-    ASSERT_TRUE(batch_is_signal_less_eligible(all_true));
-
-    bool eligibility_inputs::*fields[] = {&eligibility_inputs::feature_enabled,
-                                          &eligibility_inputs::fully_wired,
-                                          &eligibility_inputs::session_live_for_gpu,
-                                          &eligibility_inputs::reader_alive,
-                                          &eligibility_inputs::doorbells_injective,
-                                          &eligibility_inputs::hub_accepts_batch,
-                                          &eligibility_inputs::payload_constructible};
-
-    for(auto field : fields)
-    {
-        auto one_false   = all_true;
-        one_false.*field = false;
-        EXPECT_FALSE(batch_is_signal_less_eligible(one_false));
-    }
-}
-
 // Unit 3: EOP shape (ii), overrun leak-and-shout, and the finalize skip
 
 // Shape (ii): an EOP whose START was lost still proves completion for the unique
@@ -590,6 +518,14 @@ TEST(DispatchHub, loss_ledger_selects_exactly_the_leaked_ids)
 
 // One live queue on a slot is the sole owner, so records for it are unambiguous
 // and a batch on that queue can be eligible.
+// A slot with no known owner is NOT injective: an unresolved doorbell must never
+// be treated as uniquely owned, or a firmware record could be attributed to it.
+TEST(OwnerRegistry, unknown_slot_is_not_injective)
+{
+    auto reg = OwnerRegistry{};
+    EXPECT_FALSE(reg.is_injective(/*gpu_id=*/0, /*slot=*/4100));
+}
+
 TEST(OwnerRegistry, sole_owner_is_injective)
 {
     auto reg = OwnerRegistry{};
@@ -600,16 +536,7 @@ TEST(OwnerRegistry, sole_owner_is_injective)
     EXPECT_EQ(reg.owners_of(0, 40), 1u);
     EXPECT_EQ(reg.live_queues(), 1u);
 
-    // With injectivity satisfied and everything else true, a batch is eligible.
-    auto in                  = eligibility_inputs{};
-    in.feature_enabled       = true;
-    in.fully_wired           = true;  // forced: the real switch is still off
-    in.session_live_for_gpu  = true;
-    in.reader_alive          = true;
-    in.hub_accepts_batch     = true;
-    in.payload_constructible = true;
-    in.doorbells_injective   = reg.is_injective(0, 40);
-    EXPECT_TRUE(batch_is_signal_less_eligible(in));
+    EXPECT_TRUE(reg.is_injective(0, 40));
 }
 
 // A second live owner is a collision: the registry says so, the slot stops being

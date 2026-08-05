@@ -128,7 +128,7 @@ note_signal_less(signal_less_counter which, uint64_t n)
 {
     // Nothing is counted unless the feature is actually active, so the default
     // path never touches these atomics.
-    if(!signal_less_feature_enabled() || !signal_less_fully_wired()) return;
+    if(!signal_less_feature_enabled()) return;
     g_counters[static_cast<size_t>(which)].fetch_add(n, std::memory_order_relaxed);
 }
 
@@ -304,7 +304,7 @@ drain_close_signal_less_queue(uint64_t                             queue_token,
                               const std::function<bool(uint64_t)>& wait_hw_drained)
 {
     if(g_child_stale.load(std::memory_order_acquire)) return 0;
-    if(!signal_less_feature_enabled() || !signal_less_fully_wired()) return 0;
+    if(!signal_less_feature_enabled()) return 0;
 
     auto _slot = owner_registry().slot_of(queue_token);
     auto _gpu  = owner_registry().gpu_of(queue_token);
@@ -403,7 +403,7 @@ bool
 signal_less_lazy_profiling()
 {
     if(g_child_stale.load(std::memory_order_acquire)) return false;
-    return signal_less_feature_enabled() && signal_less_fully_wired();
+    return signal_less_feature_enabled();
 }
 
 void
@@ -430,7 +430,7 @@ signal_less_teardown()
     // With the feature off there is no hub work, no retry-owner work and no
     // reader->task handoff, so the ordering constraint does not apply and the
     // existing finalize path is left byte-for-byte as it was.
-    if(!signal_less_feature_enabled() || !signal_less_fully_wired()) return;
+    if(!signal_less_feature_enabled()) return;
 
     // Strict order (design requirement 7). Each step is what makes the next final:
     //   1. stopping  -> eligibility fails, so no new PENDING is reserved
@@ -490,7 +490,7 @@ void
 signal_less_quiesce()
 {
     if(g_child_stale.load(std::memory_order_acquire)) return;
-    if(!signal_less_feature_enabled() || !signal_less_fully_wired()) return;
+    if(!signal_less_feature_enabled()) return;
     if(!ops_ready().load(std::memory_order_acquire)) return;
     auto& _ops = ops_storage();
 
