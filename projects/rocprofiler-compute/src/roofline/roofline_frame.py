@@ -5,11 +5,9 @@
 ceilings, bandwidths) into the log-log axes it opens on.
 """
 
-from __future__ import annotations
-
 import math
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List, Optional, Tuple
 
 FRAME_PAD = 1.6
 FRAME_MIN_DECADES = 2.5
@@ -22,15 +20,15 @@ class FrameAnchors:
     """What a frame has to hold. Compute ceilings are throughputs rather than
     points because those lines run off the right edge, bounding y alone."""
 
-    points: list[tuple[float, float]] = field(default_factory=list)
-    throughputs: list[float] = field(default_factory=list)
-    bandwidths: list[float] = field(default_factory=list)
+    points: List[Tuple[float, float]] = field(default_factory=list)
+    throughputs: List[float] = field(default_factory=list)
+    bandwidths: List[float] = field(default_factory=list)
 
 
 def frame_bounds(
     anchors: FrameAnchors,
     aspect: float = FRAME_NOMINAL_ASPECT,
-) -> Optional[tuple[float, float, float, float]]:
+) -> Optional[Tuple[float, float, float, float]]:
     """Frame these anchors as (x_lo, x_hi, y_lo, y_hi), or None when they leave
     nothing to frame. aspect is the plot area's width over its height."""
     points = [(ai, perf) for ai, perf in anchors.points if ai > 0 and perf > 0]
@@ -56,13 +54,13 @@ def frame_bounds(
     return (10 ** x_range[0], 10 ** x_range[1], 10 ** y_range[0], 10 ** y_range[1])
 
 
-def _padded_log_span(lo: float, hi: float) -> tuple[float, float]:
+def _padded_log_span(lo: float, hi: float) -> Tuple[float, float]:
     """A positive [lo, hi] in log10, with FRAME_PAD of blank on each side."""
     pad = math.log10(FRAME_PAD)
     return (math.log10(lo) - pad, math.log10(hi) + pad)
 
 
-def _widened_to(span: tuple[float, float], decades: float) -> tuple[float, float]:
+def _widened_to(span: Tuple[float, float], decades: float) -> Tuple[float, float]:
     """Widen a log10 span about its midpoint to cover decades. Widens only, so
     nothing already framed falls back out."""
     lo, hi = span
@@ -73,11 +71,11 @@ def _widened_to(span: tuple[float, float], decades: float) -> tuple[float, float
 
 
 def _pinned_to_slopes(
-    x_range: tuple[float, float],
-    y_range: tuple[float, float],
-    slopes: list[float],
+    x_range: Tuple[float, float],
+    y_range: Tuple[float, float],
+    slopes: List[float],
     aspect: float,
-) -> tuple[tuple[float, float], tuple[float, float]]:
+) -> Tuple[Tuple[float, float], Tuple[float, float]]:
     """Hold the left edge out until every roof crosses the bottom edge inside the
     frame: x_lo + log10(bandwidth) <= y_lo. The top edge pays for that width,
     since lowering the floor is what pushes slopes off the left edge."""
@@ -93,10 +91,10 @@ def _pinned_to_slopes(
 
 
 def _shaped_to_aspect(
-    x_range: tuple[float, float],
-    y_range: tuple[float, float],
+    x_range: Tuple[float, float],
+    y_range: Tuple[float, float],
     aspect: float,
-) -> tuple[tuple[float, float], tuple[float, float]]:
+) -> Tuple[Tuple[float, float], Tuple[float, float]]:
     """Widen whichever axis is cramped until a roof reads within
     FRAME_SLOPE_SKEW of 45 degrees, which turns on the decades per pixel each
     axis shows and so on the window's shape."""

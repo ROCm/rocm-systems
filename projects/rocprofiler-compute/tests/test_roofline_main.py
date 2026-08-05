@@ -435,11 +435,12 @@ def test_the_controller_looks_up_controls_the_page_renders() -> None:
     renders. Nothing would report the two drifting apart: the control would
     simply stop working."""
     controller = (_ASSETS / "roofline_plot.js").read_text(encoding="utf-8")
+    page_template = roofline_html._read_asset("roofline_plot.html")
 
     looked_up = set(re.findall(r'getElementById\("([^"]+)"\)', controller))
     assert looked_up, "expected the controller to find its controls by id"
     for element_id in sorted(looked_up):
-        assert f'id="{element_id}"' in roofline_html._PAGE_TEMPLATE, (
+        assert f'id="{element_id}"' in page_template, (
             f"the controller looks up #{element_id}, which the page never renders"
         )
 
@@ -449,9 +450,10 @@ def test_the_dark_theme_is_named_the_same_in_every_asset() -> None:
     and the toggle flips it. One name in three files, or a reader's theme silently
     stops following either of them."""
     dark_class = "roofline-theme-dark"
+    page_template = roofline_html._read_asset("roofline_plot.html")
     css = (_ASSETS / "roofline_plot.css").read_text(encoding="utf-8")
     controller = (_ASSETS / "roofline_plot.js").read_text(encoding="utf-8")
 
-    assert f'classList.add("{dark_class}")' in roofline_html._PAGE_TEMPLATE
+    assert f'classList.add("{dark_class}")' in page_template
     assert f":root.{dark_class}" in css
     assert f'"{dark_class}"' in controller
