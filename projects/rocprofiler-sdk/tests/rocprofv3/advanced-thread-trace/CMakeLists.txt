@@ -227,8 +227,15 @@ rocprofiler_add_integration_execute_test(
 
 # ATT plus PC sampling
 
-# Disabled for now. This previously rode on ROCPROFILER_DISABLE_UNSTABLE_CTESTS, which is
-# slated to default to OFF and would bring the test back with it.
+rocprofiler_sdk_pc_sampling_stochastic_disabled(IS_PC_SAMPLING_STOCHASTIC_DISABLED)
+
+set(ATT_PLUS_PCS_DISABLE ${IS_DISABLED})
+if(${IS_PC_SAMPLING_STOCHASTIC_DISABLED})
+    set(ATT_PLUS_PCS_DISABLE ON)
+endif()
+if(${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+    set(ATT_PLUS_PCS_DISABLE ON)
+endif()
 set(PCS_ARGS --pc-sampling-beta-enabled 1 --pc-sampling-unit cycles
              --pc-sampling-interval 16384 --pc-sampling-method stochastic)
 
@@ -239,7 +246,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 90
     LABELS "integration-tests;thread-trace;pc-sampling"
-    DISABLED ON)
+    DISABLED ${ATT_PLUS_PCS_DISABLE})
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-gpu-index-two-gpus

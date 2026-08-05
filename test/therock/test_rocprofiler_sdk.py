@@ -3,6 +3,7 @@
 
 import logging
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -27,8 +28,52 @@ THEROCK_CLANG_PLUS_PATH = THEROCK_LLVM_BIN_PATH / "amdclang++"
 ROCPROFILER_SDK_PATH = THEROCK_PATH / "share" / "rocprofiler-sdk"
 ROCPROFILER_SDK_TESTS_PATH = ROCPROFILER_SDK_PATH / "tests"
 
+# Architectures that support PC sampling. Mirrors rocprofiler_sdk_pc_sampling_disabled()
+# in the SDK's cmake utilities.
+PC_SAMPLING_ARCHITECTURES = re.compile(
+    r"^(gfx90a|gfx94[0-9]|gfx95[0-9]|gfx12[0-9][0-9])$"
+)
+
 logging.basicConfig(level=logging.INFO)
 environ_vars = os.environ.copy()
+
+
+def gpu_architecture():
+    """Returns the gfx architecture of the first GPU agent, or "unknown" if it cannot be
+    determined."""
+    rocminfo = THEROCK_BIN_PATH / "rocminfo"
+    if not rocminfo.exists():
+        logging.warning(f"{rocminfo} not found")
+        return "unknown"
+
+    result = subprocess.run(
+        [str(rocminfo)], capture_output=True, text=True, env=environ_vars
+    )
+    if result.returncode != 0:
+        logging.warning(f"{rocminfo} returned {result.returncode}:\n{result.stderr}")
+        return "unknown"
+
+    # The CPU agents listed ahead of the GPUs carry no gfx name, so the first match is the
+    # architecture of the first GPU agent.
+    architecture = re.search(r"gfx[0-9a-fA-F]+", result.stdout)
+    return architecture.group() if architecture else "unknown"
+
+
+def setup_pc_sampling_env():
+    """PC sampling is a beta feature that has to be opted into, and the suites using it
+    report as skipped without the opt-in. The variable grants every rocprofiler-sdk process
+    access to the feature, so only opt in on architectures that support PC sampling, and
+    leave a setting made by the caller alone."""
+    if "ROCPROFILER_PC_SAMPLING_BETA_ENABLED" in environ_vars:
+        return
+
+    architecture = gpu_architecture()
+    if not PC_SAMPLING_ARCHITECTURES.match(architecture):
+        logging.info(f"PC sampling beta feature not opted into for {architecture}")
+        return
+
+    logging.info(f"PC sampling beta feature opted into for {architecture}")
+    environ_vars["ROCPROFILER_PC_SAMPLING_BETA_ENABLED"] = "1"
 
 
 def setup_env():
@@ -36,12 +81,14 @@ def setup_env():
     environ_vars["HIP_PATH"] = str(THEROCK_PATH)
     environ_vars["ROCPROFILER_METRICS_PATH"] = str(ROCPROFILER_SDK_PATH)
     environ_vars["HIP_PLATFORM"] = "amd"
-    environ_vars["ROCPROFILER_PC_SAMPLING_BETA_ENABLED"] = "1"
 
     old_ld_lib_path = os.getenv("LD_LIBRARY_PATH", "").split(":")
     environ_vars["LD_LIBRARY_PATH"] = ":".join(
         [f"{THEROCK_LIB_PATH}", f"{THEROCK_SYSDEPS_LIB_PATH}"] + old_ld_lib_path
     )
+
+    # rocminfo needs the library path above, so this has to come last.
+    setup_pc_sampling_env()
 
 
 def cmake_config():
