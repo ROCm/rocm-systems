@@ -28,11 +28,12 @@ const char* ncclGetEnv(const char* name) { return std::getenv(name); }
 
 namespace RcclUnitTesting
 {
-  // Whitebox coverage for the NCCL_IBVERBS_LIB override in
-  // src/misc/ibvsymbols.cc. Covers: default load (env unset), override to a
-  // uniquely-located copy, and override to a nonexistent path (fallback).
-  // The all-paths-fail branch needs a host with no rdma-core and is left as
-  // a documented ceiling.
+  // Whitebox coverage for the NCCL_IBVERBS_LIB override (and its
+  // NCCL_LIBIBVERBS_SO alias) in src/misc/ibvsymbols.cc. Covers: default load
+  // (env unset), override to a uniquely-located copy, override to a
+  // nonexistent path (fallback), the alias by itself, and precedence when
+  // both are set. The all-paths-fail branch needs a host with no rdma-core
+  // and is left as a documented ceiling.
   //
   // Note: buildIbvSymbols()'s loader handle is a function-local static that
   // is never dlclose()'d, so repeated calls in this process accumulate
@@ -40,26 +41,28 @@ namespace RcclUnitTesting
 
   namespace
   {
-    constexpr const char* kEnvVar = "NCCL_IBVERBS_LIB";
+    constexpr const char* kEnvVar      = "NCCL_IBVERBS_LIB";
+    constexpr const char* kAliasEnvVar = "NCCL_LIBIBVERBS_SO";
 
-    // Restores NCCL_IBVERBS_LIB to its pre-test value on scope exit so cases
-    // do not contaminate one another (tests share a process).
+    // Restores `name`'s pre-test value on scope exit so cases do not
+    // contaminate one another (tests share a process).
     class ScopedEnv
     {
     public:
-      ScopedEnv() : had_(false)
+      explicit ScopedEnv(const char* name) : name_(name), had_(false)
       {
-        const char* v = std::getenv(kEnvVar);
+        const char* v = std::getenv(name_);
         if (v) { had_ = true; saved_ = v; }
       }
-      void set(const char* value) { setenv(kEnvVar, value, 1); }
-      void unset() { unsetenv(kEnvVar); }
+      void set(const char* value) { setenv(name_, value, 1); }
+      void unset() { unsetenv(name_); }
       ~ScopedEnv()
       {
-        if (had_) setenv(kEnvVar, saved_.c_str(), 1);
-        else      unsetenv(kEnvVar);
+        if (had_) setenv(name_, saved_.c_str(), 1);
+        else      unsetenv(name_);
       }
     private:
+      const char* name_;
       bool        had_;
       std::string saved_;
     };
@@ -136,7 +139,7 @@ namespace RcclUnitTesting
     if (!LibibverbsAvailable())
       GTEST_SKIP() << "libibverbs not installed on this host";
 
-    ScopedEnv env;
+    ScopedEnv env(kEnvVar);
     env.unset();
 
     ncclIbvSymbols symbols = {};
@@ -158,7 +161,7 @@ namespace RcclUnitTesting
     if (copyPath.empty())
       GTEST_SKIP() << "could not create a temp copy of libibverbs";
 
-    ScopedEnv env;
+    ScopedEnv env(kEnvVar);
     env.set(copyPath.c_str());
 
     ncclIbvSymbols symbols = {};
@@ -178,11 +181,73 @@ namespace RcclUnitTesting
     if (!LibibverbsAvailable())
       GTEST_SKIP() << "libibverbs not installed on this host";
 
-    ScopedEnv env;
+    ScopedEnv env(kEnvVar);
     env.set("/nonexistent/path/libibverbs.so");
 
     ncclIbvSymbols symbols = {};
     ASSERT_EQ(buildIbvSymbols(&symbols), ncclSuccess);
     ExpectSymbolsLoaded(symbols);
+  }
+
+  // NCCL_IBVERBS_LIB unset, alias set to a uniquely-named copy: the alias is
+  // honored the same way, proven with the same dlopen check as above.
+  TEST(IbvSymbolsEnv, AliasOverrideValidSoname)
+  {
+    std::string libPath = LibibverbsPath();
+    if (libPath.empty())
+      GTEST_SKIP() << "libibverbs not installed on this host";
+
+    std::string copyPath = MakeUniqueLibCopy(libPath);
+    if (copyPath.empty())
+      GTEST_SKIP() << "could not create a temp copy of libibverbs";
+
+    ScopedEnv primary(kEnvVar);
+    primary.unset();
+    ScopedEnv alias(kAliasEnvVar);
+    alias.set(copyPath.c_str());
+
+    ncclIbvSymbols symbols = {};
+    ncclResult_t result = buildIbvSymbols(&symbols);
+    unlink(copyPath.c_str());
+
+    ASSERT_EQ(result, ncclSuccess);
+    ExpectSymbolsLoaded(symbols);
+    EXPECT_TRUE(IsLoadedInProcess(copyPath))
+        << "NCCL_LIBIBVERBS_SO alias was not actually dlopen'd";
+  }
+
+  // Both set to distinct unique copies: NCCL_IBVERBS_LIB must win over the
+  // NCCL_LIBIBVERBS_SO alias.
+  TEST(IbvSymbolsEnv, PrimaryTakesPrecedenceOverAlias)
+  {
+    std::string libPath = LibibverbsPath();
+    if (libPath.empty())
+      GTEST_SKIP() << "libibverbs not installed on this host";
+
+    std::string primaryCopy = MakeUniqueLibCopy(libPath);
+    std::string aliasCopy   = MakeUniqueLibCopy(libPath);
+    if (primaryCopy.empty() || aliasCopy.empty())
+    {
+      if (!primaryCopy.empty()) unlink(primaryCopy.c_str());
+      if (!aliasCopy.empty())   unlink(aliasCopy.c_str());
+      GTEST_SKIP() << "could not create temp copies of libibverbs";
+    }
+
+    ScopedEnv primary(kEnvVar);
+    primary.set(primaryCopy.c_str());
+    ScopedEnv alias(kAliasEnvVar);
+    alias.set(aliasCopy.c_str());
+
+    ncclIbvSymbols symbols = {};
+    ncclResult_t result = buildIbvSymbols(&symbols);
+    unlink(primaryCopy.c_str());
+    unlink(aliasCopy.c_str());
+
+    ASSERT_EQ(result, ncclSuccess);
+    ExpectSymbolsLoaded(symbols);
+    EXPECT_TRUE(IsLoadedInProcess(primaryCopy))
+        << "NCCL_IBVERBS_LIB was not honored";
+    EXPECT_FALSE(IsLoadedInProcess(aliasCopy))
+        << "alias should not be used when NCCL_IBVERBS_LIB is set";
   }
 }  // namespace RcclUnitTesting
