@@ -10,6 +10,7 @@
 // gen_stubs.sh. Real fakes replace individual entries as deeper tests need them.
 #include <cstdlib>
 #include <cstdint>
+#include <functional>
 #include <sched.h>
 #include <cstddef>
 #include "nccl.h"
@@ -134,4 +135,18 @@ char ncclLastError[1024] = {};
 thread_local int ncclGroupDepth = 0;
 thread_local ncclResult_t ncclGroupError = ncclSuccess;
 const char* rcclGitHash = "microtest";
-int getROCmVersion() { return 60443484; }
+
+// Missed by the generator (init*/extern-C names, ref-to-array, std::function).
+struct ncclTopoRanks;
+void initEnv() { ::abort(); }
+void initNvtxRegisteredEnums() { ::abort(); }
+ncclResult_t ncclTopoPreset(struct ncclComm*, struct ncclTopoGraph* (&)[7], struct ncclTopoRanks*) { ::abort(); }
+ncclResult_t rcclCheckRomeTopoModelIdxConsensus(int, std::function<int(int)>,
+                                                std::function<const char*(int)>,
+                                                std::function<unsigned long(int)>) { ::abort(); }
+extern "C" {
+ncclResult_t ncclMemManagerInit(struct ncclComm*) { ::abort(); }
+ncclResult_t ncclMemManagerDestroy(struct ncclComm*) { ::abort(); }
+// librocm-core: return non-VerSuccess (benign "version unknown") if ever reached.
+int getROCmVersion(int*, int*, int*) { return 1; }
+}
