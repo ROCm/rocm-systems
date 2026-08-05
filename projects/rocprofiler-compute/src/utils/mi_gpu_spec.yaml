@@ -558,5 +558,5 @@ mi_gpu_spec:
               memory_levels: ["LDS", "L0", "L1", "L2", "HBM"]
             chip_ids:
               physical: 30145
-              virtual: 30144
+              virtual: 30161
   #########################################################

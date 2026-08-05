@@ -5,7 +5,6 @@
 # benchmark_gfx1250.py
 #
 # Benchmarking class for all gfx1250 products
-# gfx1250
 #
 # -----------------------------------------------------------------------------
 
@@ -28,6 +27,7 @@ class Bench_gfx1250(benchmark_gfx12_base.Bench_gfx12):
             "F8": 32768,
             "F16": 16384,
             "F32": 2048,
+            "F64": 0,  # Unsupported
             "BF16": 16384,
             "I8": 32768,
         }
