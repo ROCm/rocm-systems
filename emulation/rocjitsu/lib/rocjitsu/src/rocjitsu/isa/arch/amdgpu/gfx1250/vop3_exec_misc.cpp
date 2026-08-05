@@ -44,10 +44,8 @@ void VPrngB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  if (dpp_src0_)
-    src0.set_delegate(dpp_src0_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
   (void)wf;
-  src0.clear_delegate();
 }
 
 void VSatPkU8I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
