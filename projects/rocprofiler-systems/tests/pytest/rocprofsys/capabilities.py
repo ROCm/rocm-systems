@@ -402,27 +402,26 @@ class SystemCapabilities:
         binaries at build time. It is queried from
         ``rocprof-sys-avail --max-threads``
 
-        Throws an error if the value cannot be parsed from the output.
+        Returns 0 when the value cannot be determined, so callers degrade
+        gracefully instead of aborting the whole configuration step.
         """
-        result = subprocess.run(
-            [str(self.rocprofsys_avail), "--max-threads"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=True,
-        )
+        try:
+            result = subprocess.run(
+                [str(self.rocprofsys_avail), "--max-threads"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                return 0
+        except (subprocess.SubprocessError, OSError):
+            return 0
         # Must stay in sync with the exact line printed by rocprof-sys-avail's
         # `--max-threads` action (source/bin/rocprof-sys-avail/avail.cpp).
         match = re.search(
             r"total number of threads \(ROCPROFSYS_MAX_THREADS\):\s*(\d+)", result.stdout
         )
-        if not match:
-            raise RuntimeError(
-                "Could not parse the thread limit from "
-                f"'{self.rocprofsys_avail} --max-threads' output: "
-                f"{result.stdout!r}"
-            )
-        return int(match.group(1))
+        return int(match.group(1)) if match else 0
 
     # ---------------------------------------------------------------------------
     # Do NOT make this a persistent_cached_property: the result depends on the

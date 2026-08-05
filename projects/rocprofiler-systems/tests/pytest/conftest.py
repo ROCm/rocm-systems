@@ -1574,6 +1574,9 @@ def _build_rocprofsys_config_header() -> list[str]:
         else "Not found"
     )
 
+    # capabilities.max_threads reports 0 when rocprof-sys-avail could not be queried
+    max_threads_str = cap.max_threads if cap.max_threads else "Not found"
+
     W = 22  # label width for alignment
 
     def _row(label: str, value) -> str:
@@ -1617,7 +1620,7 @@ def _build_rocprofsys_config_header() -> list[str]:
         "-" * 70,
         "System Capabilities:",
         _row("Detected num procs:", cap.num_procs),
-        _row("Max threads:", cap.max_threads),
+        _row("Max threads:", max_threads_str),
         _row("UCX available:", cap.ucx_availability),
         _row("Perf event paranoid:", cap.perf_event_paranoid),
         _row("CAP_SYS_ADMIN:", cap.cap_sys_admin),

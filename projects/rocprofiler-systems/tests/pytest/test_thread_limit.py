@@ -87,8 +87,14 @@ THREAD_LIMIT_CASES: dict[str, ThreadLimitCase] = {
 
 
 def get_thread_limit() -> int:
-    """Get the thread limit for the test"""
-    return get_rocprof_config().capabilities.max_threads
+    """Thread limit for the test, or skip when rocprof-sys-avail could not report it."""
+    thread_limit = get_rocprof_config().capabilities.max_threads
+    if not thread_limit:
+        pytest.skip(
+            "Could not determine ROCPROFSYS_MAX_THREADS from "
+            "'rocprof-sys-avail --max-threads'"
+        )
+    return thread_limit
 
 
 def get_thread_limit_warning_regex(thread_limit: int) -> str:
