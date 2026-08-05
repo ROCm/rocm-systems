@@ -79,7 +79,7 @@ jobs:
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          sparse-checkout: .github/scripts
+          sparse-checkout: projects/rccl/ci/scripts
           path: "rocm-systems"
 
       - name: Run setup test environment
@@ -108,7 +108,7 @@ jobs:
           [ -n "$NOTIFY_EMAIL" ] && NOTIFY_ARGS+=(--notify-email "$NOTIFY_EMAIL")
           [ -n "$NOTIFY_WEBHOOK" ] && NOTIFY_ARGS+=(--notify-webhook "$NOTIFY_WEBHOOK")
           set -o pipefail
-          python rocm-systems/.github/scripts/test_rccl_rocprof.py \
+          python rocm-systems/projects/rccl/ci/scripts/test_rccl_rocprof.py \
             "${NOTIFY_ARGS[@]}" \
             2>&1 | tee rocprof_test_results.txt
 
