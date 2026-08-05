@@ -116,6 +116,8 @@ jobs:
           TORCH_NCCL_BLOCKING_WAIT: 1
           TORCH_NCCL_ASYNC_ERROR_HANDLING: 1
           NOTIFY_EMAIL: ${{ inputs.notify_email }}
+          # Falls back to repo secret for scheduled runs (no input webhook).
+          # Empty on forked PRs (secrets unavailable) — script skips gracefully.
           NOTIFY_WEBHOOK: ${{ inputs.notify_webhook || secrets.RCCL_CI_TEAMS_WEBHOOK }}
         run: |
           # The dynamic linker caches LD_LIBRARY_PATH at process startup.

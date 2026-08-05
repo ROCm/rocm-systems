@@ -178,9 +178,9 @@ def parse_junit_xml(xml_path: Path) -> dict:
     errors = 0
 
     for suite in root.iter("testsuite"):
-        tests_run = int(suite.get("tests", 0))
-        failures = int(suite.get("failures", 0))
-        errors = int(suite.get("errors", 0))
+        tests_run += int(suite.get("tests", 0))
+        failures += int(suite.get("failures", 0))
+        errors += int(suite.get("errors", 0))
 
     for tc in root.iter("testcase"):
         name = tc.get("name", "")
