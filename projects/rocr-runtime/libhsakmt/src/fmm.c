@@ -712,30 +712,19 @@ static void reserved_aperture_release(manageable_aperture_t *app,
 		/* Reset NUMA policy */
 		mbind(address, MemorySizeInBytes, MPOL_DEFAULT, NULL, 0, 0);
 
-		/* Remove any CPU mapping, but keep the address range reserved */
+		/*
+		 * Drop the CPU mapping to release shmem pages for MAP_SHARED
+		 * allocations, then re-reserve the VA range as PROT_NONE.
+		 * Callers hold fmm_mutex (see contract above), which serializes
+		 * this against aperture allocations, so no allocation can claim
+		 * the VA in the window between munmap() and mmap().
+		 */
+		munmap(address, MemorySizeInBytes);
 		mmap_ret = mmap(address, MemorySizeInBytes, PROT_NONE,
 			MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
 			-1, 0);
-		if (mmap_ret == MAP_FAILED && errno == ENOMEM) {
-			/* When mmap count reaches max_map_count, any mmap will
-			 * fail. Reduce the count with munmap then map it as
-			 * NORESERVE immediately.
-			 */
-			if (munmap(address, MemorySizeInBytes) == 0) {
-				/* After unmapping, try mmap again and handle failure
-				 * */
-				mmap_ret = mmap(address, MemorySizeInBytes, PROT_NONE,
-						MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
-						-1, 0);
-				if (mmap_ret == MAP_FAILED) {
-					/* Handle mmap failure gracefully, log if needed */
-					pr_err("Failed to remap memory after unmap\n");
-				}
-			} else {
-				/* Handle munmap failure if needed */
-				pr_err("Failed to unmap memory\n");
-			}
-		}
+		if (mmap_ret == MAP_FAILED)
+			pr_err("Failed to reserve VA range %p: %s\n", address, strerror(errno));
 	}
 }
 
@@ -4320,8 +4309,16 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(HsaKFDContext *ctx,
 	const HsaSharedMemoryStruct *SharedMemoryStruct =
 		to_const_hsa_shared_memory_struct(SharedMemoryHandle);
 	HSAuint64 SizeInPages = SharedMemoryStruct->SizeInPages;
+	HSAuint64 SizeInBytesCalc;
 	HsaMemFlags mflags;
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+
+	SizeInBytesCalc = SizeInPages << PAGE_SHIFT;
+
+	if (SizeInPages == 0) {
+		pr_err("IPC import: size cannot be zero\n");
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
 
 	if (gpu_id_array_size > 0 && !gpu_id_array)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
@@ -4333,6 +4330,14 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(HsaKFDContext *ctx,
 	aperture = fmm_get_aperture(fmm_ctx, SharedMemoryStruct->ApeInfo);
 	if (!aperture)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	HSAuint64 aperture_size = VOID_PTRS_SUB(aperture->limit, aperture->base) + 1;
+	if (SizeInBytesCalc > aperture_size) {
+		pr_err("IPC import: size 0x%llx exceeds aperture range 0x%llx\n",
+				(unsigned long long)SizeInBytesCalc,
+		(unsigned long long)aperture_size);
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
 
 	pthread_mutex_lock(&aperture->fmm_mutex);
 	reservedMem = aperture_allocate_area(aperture, NULL,

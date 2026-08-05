@@ -55,7 +55,6 @@
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/scoped_fd.h"
-#include "config/amd_smi_config.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
@@ -704,7 +703,7 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
   }
 
   amd::smi::AMDSmiLibraryLoader libdrm_amdgpu_;
-  amdsmi_status_t status = libdrm_amdgpu_.load(LIBDRM_AMDGPU_SONAME);
+  amdsmi_status_t status = libdrm_amdgpu_.load(amd::smi::libdrm_amdgpu_sonames());
   if (status != AMDSMI_STATUS_SUCCESS) {
     libdrm_amdgpu_.unload();
     return status;
@@ -798,6 +797,41 @@ amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDe
   }
   *enabled = false;
   return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* device,
+                                                uint32_t* vcn_busy_percent) {
+  if (vcn_busy_percent == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  SMIGPUDEVICE_MUTEX(device->get_mutex())
+  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/vcn_busy_percent";
+
+  std::ifstream fs(fullpath.c_str());
+  if (fs.fail()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  std::string line;
+  if (std::getline(fs, line)) {
+    try {
+      uint32_t line_value = std::stoul(std::string(trim(line)));
+      if (line_value > 100) {
+        // max of uint32_t is used to indicate the erroneous value
+        *vcn_busy_percent = std::numeric_limits<uint32_t>::max();
+        return AMDSMI_STATUS_UNEXPECTED_DATA;
+      }
+      *vcn_busy_percent = line_value;
+      return AMDSMI_STATUS_SUCCESS;
+    } catch (const std::exception&) {
+      *vcn_busy_percent = std::numeric_limits<uint32_t>::max();
+      return AMDSMI_STATUS_UNEXPECTED_DATA;
+    }
+  }
+
+  *vcn_busy_percent = std::numeric_limits<uint32_t>::max();
+  return AMDSMI_STATUS_UNEXPECTED_DATA;
 }
 
 std::string smi_amdgpu_split_string(std::string str, char delim) {

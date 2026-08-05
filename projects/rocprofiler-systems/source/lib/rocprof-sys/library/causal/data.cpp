@@ -8,6 +8,7 @@
 #include "binary/link_map.hpp"
 #include "binary/scope_filter.hpp"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "common/units.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/config.hpp"
@@ -810,8 +811,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
             {
                 auto _location =
                     (_dl_info.location)
-                        ? filepath::realpath(std::string{ _dl_info.location.name },
-                                             nullptr, false)
+                        ? path::realpath(std::string{ _dl_info.location.name })
                         : std::string{};
                 for(const auto& itr : linfo)
                 {

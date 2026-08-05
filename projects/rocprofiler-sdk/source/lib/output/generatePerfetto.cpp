@@ -33,7 +33,7 @@
 #include <rocprofiler-sdk/cxx/operators.hpp>
 #include <rocprofiler-sdk/cxx/perfetto.hpp>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #include <atomic>
 #include <future>

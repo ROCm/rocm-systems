@@ -60,8 +60,11 @@ public:
     // HSA has been inited.
     void init(CoreApiTable& core_table, AmdExtTable& ext_table);
 
-    // Called to add a queue that was created by the user program
-    void add_queue(hsa_queue_t*, std::unique_ptr<Queue>);
+    // Called to add a queue that was created by the user program.
+    // When |create_interposition_state| is false, the queue is registered in the queue map and
+    // serializer but no inline QueueState is created.  Use this for non-compute queues (e.g. SDMA)
+    // whose packet format and queue-size semantics are incompatible with AQL interposition.
+    void add_queue(hsa_queue_t*, std::unique_ptr<Queue>, bool create_interposition_state = true);
     void destroy_queue(hsa_queue_t*);
 
     // Add callback to queues associated with the agent. Returns a client

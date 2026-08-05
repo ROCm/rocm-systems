@@ -7,6 +7,7 @@
 #include "backend/asyncop-fallback.h"
 #include "backend/memcpy-kernel.h"
 #include "buffer.h"
+#include "configuration.h"
 #include "context.h"
 #include "hip.h"
 #include "io.h"
@@ -773,6 +774,127 @@ INSTANTIATE_TEST_SUITE_P(
     });
 
 #ifdef __HIP_PLATFORM_AMD__
+
+enum class AsyncIoTestBackend {
+    Fastpath,
+    Fallback,
+};
+
+struct AsyncBackendParam {
+    AsyncIoTestBackend backend;
+    std::string        backend_name;
+    AsyncIoFunction    io;
+};
+
+HIPFILE_WARN_NO_EXIT_DTOR_OFF
+static std::array<AsyncBackendParam, 4> asyncBackendParams{{
+    {AsyncIoTestBackend::Fastpath, "Fastpath", {hipFileReadAsync, "hipFileReadAsync"}},
+    {AsyncIoTestBackend::Fastpath, "Fastpath", {hipFileWriteAsync, "hipFileWriteAsync"}},
+    {AsyncIoTestBackend::Fallback, "Fallback", {hipFileReadAsync, "hipFileReadAsync"}},
+    {AsyncIoTestBackend::Fallback, "Fallback", {hipFileWriteAsync, "hipFileWriteAsync"}},
+}};
+HIPFILE_WARN_NO_EXIT_DTOR_ON
+
+// Exercises the read/write async golden path against each backend explicitly.
+// Only one backend is enabled at a time so that if the selected backend's
+// score() rejects the op, hipFileIOAsync throws instead of silently choosing
+// the other backend. This guarantees the intended backend is actually run.
+class HipAsyncBackendForced : public HipAsync, public ::testing::WithParamInterface<AsyncBackendParam> {
+public:
+    void SetUp() override
+    {
+        HipAsync::SetUp();
+        backend = GetParam().backend;
+        io_op   = GetParam().io.function;
+        name    = GetParam().io.name;
+
+        Context<Configuration>::get()->fastpath(false);
+        Context<Configuration>::get()->fallback(false);
+        switch (backend) {
+            case AsyncIoTestBackend::Fastpath:
+                Context<Configuration>::get()->fastpath(true);
+                break;
+            case AsyncIoTestBackend::Fallback:
+                Context<Configuration>::get()->fallback(true);
+                break;
+            default:
+                FAIL() << "Unsupported AsyncIoTestBackend";
+        }
+
+        if (name == "hipFileReadAsync") {
+            HipFileDataOps::zeroMemoryRegion(dev_ptr, 0, buffer_size);
+            HipFileDataOps::randomizeFileRegion(tf.fd, file_size);
+        }
+        else {
+            HipFileDataOps::zeroFileRegion(tf.fd, file_size);
+            HipFileDataOps::randomizeMemoryRegion(dev_ptr, 0, buffer_size);
+        }
+
+        ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
+        ASSERT_EQ(hipFileStreamRegister(stream, 0xf), HIPFILE_SUCCESS);
+    }
+    void TearDown() override
+    {
+        ASSERT_EQ(hipFileStreamDeregister(stream), HIPFILE_SUCCESS);
+        ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+        Context<Configuration>::get()->fastpath(true);
+        Context<Configuration>::get()->fallback(true);
+        HipAsync::TearDown();
+    }
+    AsyncIoTestBackend backend = AsyncIoTestBackend::Fastpath;
+    hipFileError_t (*io_op)(hipFileHandle_t, void *, size_t *, hoff_t *, hoff_t *, ssize_t *, hipStream_t);
+    std::string name;
+    hipStream_t stream;
+};
+
+TEST_P(HipAsyncBackendForced, zeroOffsets)
+{
+    ASSERT_EQ(io_op(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
+              HIPFILE_SUCCESS);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    ASSERT_EQ(bytes_transferred, io_size);
+    HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, buffer_offset, tf.fd, file_offset, io_size);
+}
+
+TEST_P(HipAsyncBackendForced, bufferOffsetAligned)
+{
+    buffer_offset = 4_KiB;
+    io_size -= 4_KiB;
+    ASSERT_EQ(io_op(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
+              HIPFILE_SUCCESS);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    ASSERT_EQ(bytes_transferred, io_size);
+    HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, buffer_offset, tf.fd, file_offset, io_size);
+    if (name == "hipFileReadAsync") {
+        HipFileDataOps::assertZeroedMemRegion(dev_ptr, 0, 4_KiB);
+    }
+    else {
+        HipFileDataOps::assertZeroedFileRegion(tf.fd, static_cast<hoff_t>(io_size), 4_KiB);
+    }
+}
+
+TEST_P(HipAsyncBackendForced, fileOffsetAligned)
+{
+    file_offset = 4_KiB;
+    io_size -= 4_KiB;
+    ASSERT_EQ(io_op(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
+              HIPFILE_SUCCESS);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    ASSERT_EQ(bytes_transferred, io_size);
+    HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, buffer_offset, tf.fd, file_offset, io_size);
+    if (name == "hipFileReadAsync") {
+        HipFileDataOps::assertZeroedMemRegion(dev_ptr, static_cast<hoff_t>(io_size), 4_KiB);
+    }
+    else {
+        HipFileDataOps::assertZeroedFileRegion(tf.fd, 0, 4_KiB);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(HipAsyncBackendForcedSuite, HipAsyncBackendForced,
+                         ::testing::ValuesIn(asyncBackendParams),
+                         [](const testing::TestParamInfo<HipAsyncBackendForced::ParamType> &param_info) {
+                             return param_info.param.backend_name + "_" + param_info.param.io.name;
+                         });
 
 class HipAsyncStreamUnfixedPaused : public HipAsync {
 public:

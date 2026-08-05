@@ -156,7 +156,7 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       for (uint32_t i = 0; i < vgpr_count; ++i) {
         uint32_t val = 0;
         if (!cu.sram_ecc() && d.elem_size <= 2 && (d.d16_hi || d.d16_lo)) {
-          const uint32_t old = cu.read_vgpr(d.dst_reg_base + i, lane);
+          const uint32_t old = cu.read_vgpr_storage(d.dst_reg_base + i, lane);
           val = d.d16_hi ? (old & 0x0000FFFFu) : (old & 0xFFFF0000u);
         }
         cu.write_vgpr(d.dst_reg_base + i, lane, val);
@@ -185,7 +185,7 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
           else
             val = val & 0xFFFF;
         } else {
-          uint32_t old = cu.read_vgpr(d.dst_reg_base + i, lane);
+          uint32_t old = cu.read_vgpr_storage(d.dst_reg_base + i, lane);
           if (d.d16_hi)
             val = (old & 0xFFFF) | (val << 16);
           else
@@ -296,28 +296,29 @@ template <typename F> F apply_fp_atomic(AtomicOp op, F old_val, F src_val) {
   }
 }
 
-uint32_t atomic_source_stride(const VectorMemState &d) {
+uint32_t atomic_source_stride(const VectorMemState &d, const std::vector<uint8_t> &store_data) {
   const bool uses_two_sources =
       (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR);
   const uint32_t fallback = uses_two_sources ? d.elem_size * 2 : d.elem_size;
-  if (d.wf_size == 0 || d.store_data.empty())
+  if (d.wf_size == 0 || store_data.empty())
     return fallback;
 
-  const size_t per_lane = d.store_data.size() / d.wf_size;
+  const size_t per_lane = store_data.size() / d.wf_size;
   return per_lane == 0 ? fallback : static_cast<uint32_t>(per_lane);
 }
 
 /// @brief Perform a per-lane atomic RMW through L2.
 ///
-/// Reads old value from L2, applies the atomic operation, writes new value
-/// back. Invalidates the L1 line to prevent stale reads. Old values are
-/// stored in response_data for GLC return.
-void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1, uint32_t vmid) {
+/// Reads the old value through L2's backing-memory atomic path, applies the
+/// operation, and writes the new value back. The device coherence epoch makes
+/// cached L1/L2 lines stale at the atomic boundary. Old values are stored in
+/// response_data for GLC return.
+void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid) {
   const uint32_t esz = d.elem_size;
   d.response_data.resize(d.wf_size * esz);
   const bool uses_two_sources =
       (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR);
-  const uint32_t src_stride = atomic_source_stride(d);
+  const uint32_t src_stride = atomic_source_stride(d, d.store_data);
   const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
                       d.atomic_op == AtomicOp::FMAX);
 
@@ -374,19 +375,19 @@ void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1, uint3
           }
         },
         vmid);
-
-    // Invalidate stale L1 line.
-    l1->invalidate(ea, vmid);
   }
 }
 
 /// @brief Perform a per-lane atomic RMW on LDS memory.
-void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
+void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
+                            const std::array<uint64_t, 64> &per_lane_addr,
+                            const std::vector<uint8_t> &store_data,
+                            std::vector<uint8_t> &response_data) {
   const uint32_t esz = d.elem_size;
-  d.response_data.resize(d.wf_size * esz);
+  response_data.resize(d.wf_size * esz);
   const bool uses_two_sources =
       (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR);
-  const uint32_t src_stride = atomic_source_stride(d);
+  const uint32_t src_stride = atomic_source_stride(d, store_data);
   const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
                       d.atomic_op == AtomicOp::FMAX);
 
@@ -395,7 +396,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
     bool any_lane = false;
     for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
       if (d.lane_mask & (1ULL << lane)) {
-        addr = static_cast<uint32_t>(d.per_lane_addr[lane]);
+        addr = static_cast<uint32_t>(per_lane_addr[lane]);
         any_lane = true;
         break;
       }
@@ -411,7 +412,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
         continue;
       const uint32_t result =
           d.atomic_op == AtomicOp::APPEND ? old_val + active_rank : old_val - active_rank - 1;
-      std::memcpy(&d.response_data[lane * 4], &result, 4);
+      std::memcpy(&response_data[lane * 4], &result, 4);
       ++active_rank;
     }
     const uint32_t new_val =
@@ -424,7 +425,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
     if (!(d.lane_mask & (1ULL << lane)))
       continue;
 
-    auto addr = static_cast<uint32_t>(d.per_lane_addr[lane]);
+    auto addr = static_cast<uint32_t>(per_lane_addr[lane]);
 
     if (esz == 4) {
       uint32_t old_val = lds->read32(addr);
@@ -432,40 +433,40 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
       if (is_fp) {
         float old_f = std::bit_cast<float>(old_val);
         float src_f;
-        std::memcpy(&src_f, &d.store_data[lane * src_stride], 4);
+        std::memcpy(&src_f, &store_data[lane * src_stride], 4);
         new_val = std::bit_cast<uint32_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
       } else {
         uint32_t src_val = 0, cmp_val = 0;
-        std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
+        std::memcpy(&src_val, &store_data[lane * src_stride], 4);
         if (uses_two_sources)
-          std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 4], 4);
+          std::memcpy(&cmp_val, &store_data[lane * src_stride + 4], 4);
         new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
       }
       lds->write32(addr, new_val);
-      std::memcpy(&d.response_data[lane * 4], &old_val, 4);
+      std::memcpy(&response_data[lane * 4], &old_val, 4);
     } else if (esz == 8) {
       uint64_t old_val = lds->read64(addr);
       uint64_t new_val;
       if (d.atomic_op == AtomicOp::BARRIER_ARRIVE) {
         uint64_t decrement = 0;
-        const bool has_decrement = d.store_data.size() >= lane * src_stride + 8;
+        const bool has_decrement = store_data.size() >= lane * src_stride + 8;
         if (has_decrement)
-          std::memcpy(&decrement, &d.store_data[lane * src_stride], 8);
+          std::memcpy(&decrement, &store_data[lane * src_stride], 8);
         new_val = lds_barrier_cell_update_arrive(old_val, has_decrement ? decrement : 1);
       } else if (is_fp) {
         double old_f = std::bit_cast<double>(old_val);
         double src_f;
-        std::memcpy(&src_f, &d.store_data[lane * src_stride], 8);
+        std::memcpy(&src_f, &store_data[lane * src_stride], 8);
         new_val = std::bit_cast<uint64_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
       } else {
         uint64_t src_val = 0, cmp_val = 0;
-        std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
+        std::memcpy(&src_val, &store_data[lane * src_stride], 8);
         if (uses_two_sources)
-          std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 8], 8);
+          std::memcpy(&cmp_val, &store_data[lane * src_stride + 8], 8);
         new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
       }
       lds->write64(addr, new_val);
-      std::memcpy(&d.response_data[lane * 8], &old_val, 8);
+      std::memcpy(&response_data[lane * 8], &old_val, 8);
     }
   }
 }
@@ -481,7 +482,7 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   }
 
   if (d.atomic_op != AtomicOp::NONE) {
-    execute_atomic_rmw(d, l2_, l1_, wf.process_id());
+    execute_atomic_rmw(d, l2_, wf.process_id());
     return;
   }
 
@@ -506,6 +507,7 @@ MemoryAccessCompletion GlobalMemPipeline::complete_access(Instruction &inst, Wav
 void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
   auto &lds = wf.lds();
+  d.wf_size = wf.wf_size();
   if (d.cu_path.empty()) {
     d.cu_path = wf.cu().full_path();
     d.wg_id = wf.wg_id();
@@ -513,7 +515,10 @@ void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   }
 
   if (d.atomic_op != AtomicOp::NONE) {
-    execute_lds_atomic_rmw(d, &lds);
+    execute_lds_atomic_rmw(d, &lds, d.per_lane_addr, d.store_data, d.response_data);
+    if (d.ds2_active) {
+      execute_lds_atomic_rmw(d, &lds, d.ds2_per_lane_addr, d.ds2_store_data, d.ds2_response_data);
+    }
     return;
   }
 
@@ -603,7 +608,7 @@ MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wave
     transpose_response(d);
   MemoryAccessCompletion completion = vector_complete(d, wf, wf.raw_cu(), std::move(complete));
 
-  // DS dual-access (ds_read2/ds_write2): write the second access results.
+  // DS dual-access: write the second load or returning-atomic result.
   if (d.ds2_active && d.is_load) {
     auto &cu = wf.raw_cu();
     uint32_t vgpr_count = d.elem_size / 4;
@@ -617,18 +622,18 @@ MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wave
         cu.write_vgpr(d.ds2_dst_reg_base + i, lane, val);
       }
     }
-    // Per-lane DS read2 complete trace: show first 4 lanes with both accesses.
+    // Per-lane dual-access completion trace.
     util::Logger::vm([&](auto &os) {
       static thread_local uint64_t ds2_comp_trace = 0;
       if (++ds2_comp_trace > 80)
         return;
-      os << std::format("DS read2 complete: dst1_v={} dst2_v={}", d.dst_reg_base,
+      os << std::format("DS dual-access complete: dst1_v={} dst2_v={}", d.dst_reg_base,
                         d.ds2_dst_reg_base);
       for (uint32_t ln = 0; ln < d.wf_size; ++ln) {
         if (!(d.lane_mask & (1ULL << ln)))
           continue;
-        uint32_t v1 = cu.read_vgpr(d.dst_reg_base, ln);
-        uint32_t v2 = cu.read_vgpr(d.ds2_dst_reg_base, ln);
+        uint32_t v1 = cu.read_vgpr_storage(d.dst_reg_base, ln);
+        uint32_t v2 = cu.read_vgpr_storage(d.ds2_dst_reg_base, ln);
         os << std::format(" L{}:v{}={:#x},v{}={:#x}", ln, d.dst_reg_base, v1, d.ds2_dst_reg_base,
                           v2);
       }

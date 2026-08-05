@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/instruction.h"
+#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -418,6 +419,7 @@ public:
   bool has_lit();
   using OpEncoding = Vop1MachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
@@ -446,6 +448,7 @@ public:
   bool has_lit();
   using OpEncoding = VopcMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
@@ -475,6 +478,7 @@ public:
   bool hasImpliedLiteral();
   using OpEncoding = Vop2MachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
   uint32_t literal_ = 0;
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
@@ -510,6 +514,7 @@ public:
   bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3MachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 3> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
@@ -533,6 +538,7 @@ public:
   bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3pMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 3> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
@@ -619,6 +625,7 @@ public:
   bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3SdstEncMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 3> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;

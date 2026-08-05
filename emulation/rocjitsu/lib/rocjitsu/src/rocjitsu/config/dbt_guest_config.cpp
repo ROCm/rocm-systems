@@ -10,12 +10,15 @@
 #include "flatbuffers/idl.h"
 #include "simulation_config_generated.h"
 
+#include <charconv>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unistd.h>
+#include <vector>
 
 namespace rocjitsu {
 namespace config {
@@ -31,22 +34,40 @@ DbtExecutionBackend execution_backend_from_fb(fb::DbtExecutionBackend backend) {
   throw std::runtime_error("dbt_guest.execution_backend is invalid");
 }
 
+DbtSiliconRevision silicon_revision_from_fb(fb::DbtSiliconRevision revision) {
+  switch (revision) {
+  case fb::DbtSiliconRevision_unspecified:
+    return DbtSiliconRevision::Unspecified;
+  case fb::DbtSiliconRevision_gfx1250_a0:
+    return DbtSiliconRevision::Gfx1250A0;
+  case fb::DbtSiliconRevision_gfx1250_b0:
+    return DbtSiliconRevision::Gfx1250B0;
+  }
+  throw std::runtime_error("dbt_guest silicon revision is invalid");
+}
+
 void validate_guest_device_geometry(const KfdDeviceConfig &device) {
   if (!device.present || device.simd_count == 0)
     return;
 
-  const uint64_t expected_simds =
-      static_cast<uint64_t>(device.num_shader_engines) * device.num_cu_per_sh * device.simd_per_cu;
+  // num_cu_per_sh counts CUs per shader *array*, so the engine count only
+  // yields the CU total once it is multiplied out by the arrays each engine
+  // carries -- the same product KFD reports as node_props.array_count.
+  const uint32_t arrays_per_engine =
+      device.num_shader_arrays_per_engine == 0 ? 1u : device.num_shader_arrays_per_engine;
+  const uint64_t expected_simds = static_cast<uint64_t>(device.num_shader_engines) *
+                                  arrays_per_engine * device.num_cu_per_sh * device.simd_per_cu;
   if (expected_simds == device.simd_count)
     return;
 
   // DBT guest configs are written verbatim into synthetic KFD sysfs. Reject
   // internally inconsistent CU/SIMD geometry before ROCR observes properties
   // that disagree with each other during guest-agent discovery.
-  throw std::runtime_error("dbt_guest.guest_device simd_count (" +
-                           std::to_string(device.simd_count) +
-                           ") must equal num_shader_engines * num_cu_per_sh * simd_per_cu (" +
-                           std::to_string(expected_simds) + ")");
+  throw std::runtime_error(
+      "dbt_guest.guest_device simd_count (" + std::to_string(device.simd_count) +
+      ") must equal num_shader_engines * num_shader_arrays_per_engine * num_cu_per_sh * "
+      "simd_per_cu (" +
+      std::to_string(expected_simds) + ")");
 }
 
 } // namespace
@@ -95,6 +116,8 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
   config.log_level = guest->log_level();
   config.signal_backtrace = guest->signal_backtrace();
   config.guest_device = kfd_device_from_fb(guest->guest_device());
+  config.guest_revision = silicon_revision_from_fb(guest->guest_revision());
+  config.host_revision = silicon_revision_from_fb(guest->host_revision());
   validate_guest_device_geometry(config.guest_device);
   if (config.enabled && config.host.backend == DbtExecutionBackend::Hardware &&
       !config.host.simulator_config_path.empty())
@@ -134,16 +157,112 @@ DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
       false);
 }
 
+void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view value) {
+  if (!config.enabled || config.host.gpu_id != 0)
+    return;
+
+  uint32_t gpu_id = 0;
+  const char *begin = value.data();
+  const char *end = begin + value.size();
+  auto [ptr, error] = std::from_chars(begin, end, gpu_id);
+  if (error != std::errc{} || ptr != end || gpu_id == 0)
+    throw std::runtime_error("runtime config handoff must contain a nonzero KFD gpu_id");
+  config.host.gpu_id = gpu_id;
+}
+
+bool write_dbt_runtime_config_handoff(const std::string &config_path, const DbtGuestConfig &config,
+                                      pid_t pid) {
+  if (config.enabled && config.host.gpu_id == 0)
+    return false;
+
+  const std::string handoff_file = rpc_invocation_config_file_path(pid);
+  std::error_code directory_error;
+  std::filesystem::create_directories(std::filesystem::path(handoff_file).parent_path(),
+                                      directory_error);
+  if (directory_error)
+    return false;
+  const std::string temp_file = handoff_file + ".tmp";
+  std::ofstream output(temp_file);
+  if (!output)
+    return false;
+  output << config_path << '\n';
+  if (config.enabled)
+    output << config.host.gpu_id << '\n';
+  output.close();
+  if (!output.good()) {
+    std::filesystem::remove(temp_file);
+    return false;
+  }
+
+  std::error_code rename_error;
+  std::filesystem::rename(temp_file, handoff_file, rename_error);
+  if (rename_error)
+    std::filesystem::remove(temp_file);
+  return !rename_error;
+}
+
+std::optional<DbtRuntimeConfigHandoff> parse_dbt_runtime_config_handoff(std::string_view contents) {
+  const size_t first_newline = contents.find('\n');
+  std::string_view config_path = contents.substr(0, first_newline);
+  if (!config_path.empty() && config_path.back() == '\r')
+    config_path.remove_suffix(1);
+  if (config_path.empty())
+    return std::nullopt;
+
+  std::optional<std::string> resolved_gpu_id;
+  if (first_newline != std::string_view::npos) {
+    std::string_view second_line = contents.substr(first_newline + 1);
+    if (!second_line.empty()) {
+      const size_t second_newline = second_line.find_first_of("\r\n");
+      resolved_gpu_id = second_line.substr(0, second_newline);
+    }
+  }
+  return DbtRuntimeConfigHandoff{std::string(config_path), std::move(resolved_gpu_id)};
+}
+
+DbtGuestConfig load_dbt_guest_config_from_handoff(const DbtRuntimeConfigHandoff &handoff) {
+  DbtGuestConfig config = load_dbt_guest_config_from_file(handoff.config_path);
+  if (handoff.resolved_gpu_id) {
+    apply_resolved_dbt_host_gpu_id(config, *handoff.resolved_gpu_id);
+  } else if (config.enabled && config.host.gpu_id == 0) {
+    throw std::runtime_error("runtime config handoff must contain a resolved KFD gpu_id for "
+                             "automatic DBT host selection");
+  }
+  return config;
+}
+
 std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
-  std::ifstream file(rocjitsu::rpc_default_config_file_path());
+  // Try the handoff tiers in priority order, opening the first that exists:
+  //   1. $ROCJITSU_INVOCATION_DIR/config_path — the launcher exports this dir before
+  //      execvp so every descendant (incl. grandchildren via ctest, whose PID differs)
+  //      finds it. Treat an empty value as unset (dir && *dir), matching interposer
+  //      init(); an empty value would otherwise build "/config_path".
+  //   2. this process's PID-scoped path (execvp preserves the launcher's PID for the
+  //      direct child) — also the fallback if the env var is set but stale/misdirected.
+  //   3. the well-known location for attach / daemon-only scenarios.
+  // Falling straight from tier 1 to tier 3 (skipping tier 2) would miss a valid
+  // per-PID handoff when the env var is set but its config_path is absent.
+  std::vector<std::string> candidates;
+  if (const char *dir = getenv(rocjitsu::kRpcInvocationDirEnv); dir && *dir)
+    candidates.push_back(std::string(dir) + "/config_path");
+  candidates.push_back(rocjitsu::rpc_invocation_config_file_path(getpid()));
+  candidates.push_back(rocjitsu::rpc_default_config_file_path());
+
+  std::ifstream file;
+  for (const auto &candidate : candidates) {
+    file.open(candidate);
+    if (file.is_open())
+      break;
+  }
   if (!file.is_open())
     return std::nullopt;
 
-  std::string path;
-  std::getline(file, path);
-  if (path.empty())
+  const std::string contents((std::istreambuf_iterator<char>(file)),
+                             std::istreambuf_iterator<char>());
+  std::optional<DbtRuntimeConfigHandoff> handoff = parse_dbt_runtime_config_handoff(contents);
+  if (!handoff)
     return std::nullopt;
-  return load_dbt_guest_config_from_file(path);
+  return load_dbt_guest_config_from_handoff(*handoff);
 }
 
 } // namespace config

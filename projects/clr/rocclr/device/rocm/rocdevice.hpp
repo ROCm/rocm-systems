@@ -384,6 +384,11 @@ class Device : public NullDevice {
   //! Get the CPU agent with the least NUMA distance to this GPU
   const hsa_agent_t& getCpuAgent() const { return cpu_agent_info_->agent; }
 
+  //! Maps an HSA agent to a stable global index shared across all devices. GPU agents
+  //! occupy [0, numGpuAgents); CPU agents occupy [numGpuAgents, numGpuAgents + numCpuAgents).
+  //! Returns -1 if the agent is not one of the enumerated agents.
+  static int agentGlobalIndex(hsa_agent_t agent);
+
   //! Get the CPU agent that is in a 'index' NUMA node
   const hsa_agent_t getCpuAgent(int index) const {
     if ((index < 0) || (index >= cpu_agents_.size())) {
@@ -471,10 +476,6 @@ class Device : public NullDevice {
   void deviceVmemRelease(uint64_t mem_handle) const;
   uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
 
-  //! Whether host-resident NUMA VMM allocation is supported for the given node.
-  //! Queries the CPU agent's HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED; returns
-  //! false against a ROCr that predates the query (graceful degrade).
-  bool hostVmemSupported(int numaNode) const;
   //! Allocate a host-resident VMM handle on a CPU NUMA pool. numaNode < 0 resolves
   //! to the calling thread's current node (HostNumaCurrent). Returns 0 on failure.
   uint64_t hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const;
@@ -595,6 +596,13 @@ class Device : public NullDevice {
 
   VirtualGPU* xferQueue() const;
 
+  struct QueueExtras {
+    void* metadataRingBuffer = nullptr;
+    //! Cached hardware doorbell (UC MMIO), only set when DEBUG_CLR_DIRECT_DOORBELL is enabled.
+    volatile uint64_t* doorbellPtr = nullptr;
+    bool deviceMemRingBuf = false;
+  };
+
   //! Acquire HSA queue. This method can create a new HSA queue or
   hsa_queue_t* acquireQueue(
       uint32_t queue_size_hint, bool coop_queue = false, const std::vector<uint32_t>& cuMask = {},
@@ -610,9 +618,11 @@ class Device : public NullDevice {
 
   hsa_queue_t* AcquireActiveQueue(amd::CommandQueue::Priority priority,
                                    hsa_queue_t* preferred = nullptr,
-                                   const std::unordered_set<uint64_t>* excluded_ids = nullptr,
-                                   void** metadata_ring_buffer = nullptr);
+                                   const std::unordered_set<uint64_t>* excluded_ids = nullptr);
   bool ReleaseActiveQueue(hsa_queue_t* queue, amd::CommandQueue::Priority priority);
+
+  //! Look up per-queue extras (metadata ring buffer and placement).
+  QueueExtras GetQueueExtras(hsa_queue_t* queue);
 
   //! Return the pre-computed metadata packet version header bits
   uint32_t MetadataVersionHeader() const { return metadata_version_header_; }
@@ -717,6 +727,7 @@ class Device : public NullDevice {
 
   bool populateOCLDeviceConstants();
   static bool isHsaInitialized_;
+  static bool hostVmemSupported_;
   static std::vector<hsa_agent_t> gpu_agents_;
   static std::vector<AgentInfo> cpu_agents_;
   uint32_t preferred_numa_node_;
@@ -761,10 +772,9 @@ class Device : public NullDevice {
   struct QueueInfo {
     int refCount;             //! Reference counter. Shows how many time the queue was shared
     bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
-    void* metadataRingBuffer_; //! Metadata prefetch ring buffer base
 
     // Constructor
-    QueueInfo() : refCount(0), hasDedicatedQueue_(false), metadataRingBuffer_(nullptr) {}
+    QueueInfo() : refCount(0), hasDedicatedQueue_(false) {}
 
     //! Get the current hardware queue depth (wptr - rptr)
     static uint64_t GetHwQueueDepth(hsa_queue_t* queue) {
@@ -799,8 +809,11 @@ class Device : public NullDevice {
   //! Use dynamic queues mode to get a queue from pool
   hsa_queue_t* getQueueFromPool(const uint qIndex, bool force_reuse = false,
                                 hsa_queue_t* preferred = nullptr,
-                                const std::unordered_set<uint64_t>* excluded_ids = nullptr,
-                                void** metadata_ring_buffer = nullptr);
+                                const std::unordered_set<uint64_t>* excluded_ids = nullptr);
+
+  //! Per-queue extras (metadata ring buffer and placement), keyed by queue pointer.
+  //! Populated at queue creation, erased when non-pooled queues are destroyed.
+  std::unordered_map<hsa_queue_t*, QueueExtras> queue_extras_;
 
   //! returns value for corresponding LinkAttrbutes in a vector given Memory pool.
   virtual bool findLinkInfo(const hsa_amd_memory_pool_t& pool,

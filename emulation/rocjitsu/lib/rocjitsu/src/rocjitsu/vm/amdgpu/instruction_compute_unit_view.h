@@ -20,6 +20,10 @@ class SimulationEngine;
 namespace rocjitsu {
 template <typename Isa> class AmdgpuIsaOperand;
 
+namespace gfx1250 {
+class Operand;
+}
+
 namespace amdgpu {
 class ComputeUnitCore;
 class GpuMemory;
@@ -47,6 +51,7 @@ public:
   rj_code_arch_t arch() const;
   uint32_t wf_size() const;
   uint32_t sgprs_per_wf() const;
+  uint32_t vgpr_allocation_block_size() const;
   std::string full_path() const;
   simdojo::ComponentID id() const;
   simdojo::SimulationEngine *engine() const;
@@ -69,6 +74,7 @@ private:
   // The ISA operand backend is the only instruction-side code allowed to reach
   // private CU register hooks. It remains private behind Operand/RegisterAccess.
   template <typename Isa> friend class ::rocjitsu::AmdgpuIsaOperand;
+  friend class ::rocjitsu::gfx1250::Operand;
 };
 
 } // namespace amdgpu

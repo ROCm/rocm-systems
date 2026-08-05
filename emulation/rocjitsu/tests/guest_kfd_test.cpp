@@ -3,7 +3,11 @@
 
 #include <gtest/gtest.h>
 
+#include "long_path_handoff.h"
+#include "scoped_temp.h"
+
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/kmd/linux/rpc.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
@@ -27,6 +31,7 @@ RJ_DIAGNOSTIC_POP
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -45,12 +50,45 @@ constexpr int kStressIterations = 25;
 constexpr uint64_t kAllocVa = 0x1000000000ULL;
 constexpr uint64_t kAllocSize = 4096;
 
-std::optional<std::string> read_active_config_json() {
-  const char *runtime_dir = std::getenv("ROCJITSU_RUNTIME_DIR");
-  if (!runtime_dir || !*runtime_dir)
-    return std::nullopt;
+// Resolve the directory holding the config-path handoff file, mirroring the exact
+// precedence in load_dbt_guest_config_from_runtime_config() so a config the test
+// installs is the one the in-process DBT guest hook actually reads:
+//   1. $ROCJITSU_INVOCATION_DIR (the launcher's per-invocation dir), then
+//   2. <$ROCJITSU_RUNTIME_DIR>/<pid>/ (the per-PID tier the reader probes next;
+//      the test and the hook share this process, so getpid() matches), then
+//   3. <$ROCJITSU_RUNTIME_DIR>/ (the well-known location for the no-launcher case).
+// The reader opens the FIRST tier whose config_path handoff actually exists, so this
+// must probe them in the same order rather than short-circuiting on tier 1 merely
+// being set: an $ROCJITSU_INVOCATION_DIR pointing at a dir without config_path must
+// still fall through to the per-PID/base tiers a valid handoff may live in. When no
+// tier has a handoff yet, return the highest-priority writable tier so
+// install_inline_dbt_config() writes where the reader looks first.
+// rpc_default_runtime_dir() already treats an unset OR empty $ROCJITSU_RUNTIME_DIR as
+// "use $XDG_RUNTIME_DIR/rocjitsu or /tmp/rocjitsu-<uid>", so the per-PID and base tiers
+// are always well-formed and a directory is always returned — otherwise the test would
+// write nowhere while the runtime hook still reads the default location. The return
+// type spells that out: callers cannot be asked to handle an absence that cannot occur.
+std::filesystem::path config_handoff_dir() {
+  std::vector<std::filesystem::path> tiers;
+  if (const char *inv = std::getenv("ROCJITSU_INVOCATION_DIR"); inv && *inv)
+    tiers.emplace_back(inv);
+  const std::filesystem::path base(rocjitsu::rpc_default_runtime_dir());
+  tiers.push_back(base / std::to_string(getpid()));
+  tiers.push_back(base);
 
-  std::ifstream active_config(std::filesystem::path(runtime_dir) / "config_path");
+  std::error_code ec;
+  for (const auto &tier : tiers) {
+    if (std::filesystem::exists(tier / "config_path", ec))
+      return tier;
+  }
+  // No handoff exists yet: install into the highest-priority tier the reader probes.
+  return tiers.front();
+}
+
+std::optional<std::string> read_active_config_json() {
+  const std::filesystem::path dir = config_handoff_dir();
+
+  std::ifstream active_config(dir / "config_path");
   std::string configured_path;
   if (!std::getline(active_config, configured_path) || configured_path.empty())
     return std::nullopt;
@@ -62,13 +100,10 @@ std::optional<std::string> read_active_config_json() {
 }
 
 bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
-                               uint32_t lds_size_kb, std::string_view external_host_config = {}) {
-  const char *runtime_dir = std::getenv("ROCJITSU_RUNTIME_DIR");
-  if (!runtime_dir || !*runtime_dir)
-    return false;
-
+                               uint32_t lds_size_kb, std::string_view external_host_config = {},
+                               bool include_resolved_gpu_id = true) {
   try {
-    const std::filesystem::path runtime(runtime_dir);
+    const std::filesystem::path runtime = config_handoff_dir();
     std::filesystem::create_directories(runtime);
     const std::filesystem::path config_path = runtime / "inline_dbt_failure_config.json";
 
@@ -116,10 +151,42 @@ bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
     if (!active_config)
       return false;
     active_config << config_path.string() << '\n';
+    if (include_resolved_gpu_id)
+      active_config << "50148\n";
     return active_config.good();
   } catch (const std::filesystem::filesystem_error &) {
     return false;
   }
+}
+
+using rocjitsu::test::LongPathHandoff;
+
+/// @brief kSkip when this process's runtime directory is too deep to host the oversized handoff.
+/// @details Consulted before anything is installed, so the environmental limit surfaces as a
+/// skip rather than as a red install for the very same reason.
+LongPathHandoff long_path_handoff_supported() {
+  return rocjitsu::test::long_path_handoff_supported(config_handoff_dir());
+}
+
+// Move the active config to a path just under PATH_MAX so the handoff the KFD interposer
+// parses exceeds 4095 bytes. The path arithmetic and the resolved gpu_id both live in
+// long_path_handoff.h, shared with the HSA-hook side of the same pairing
+// (ConfigLoaderTest.ReadsRuntimeHandoffLargerThan4095Bytes), so the two consumers are handed
+// bytes built the same way and pinned to the same host GPU.
+LongPathHandoff relocate_active_config_to_long_path() {
+  const std::filesystem::path dir = config_handoff_dir();
+  // Checked before the config is read so the skip-half test, which installs nothing, reaches
+  // the environmental verdict instead of failing on the missing config below.
+  if (LongPathHandoff supported = rocjitsu::test::long_path_handoff_supported(dir);
+      supported.status() != LongPathHandoff::Status::kOk)
+    return supported;
+
+  // The caller asserts the config is installed before calling, so an unreadable
+  // one here is a defect in the run rather than a property of the environment.
+  const auto json = read_active_config_json();
+  if (!json)
+    return LongPathHandoff::fail("no active config JSON to relocate");
+  return rocjitsu::test::install_oversized_handoff(dir, *json);
 }
 
 bool read_gpu_id(const std::string &path, uint32_t *gpu_id) {
@@ -356,10 +423,8 @@ TEST(GuestKfdMemoryTest, GuestAllocationMmapOffsetIsRejected) {
 }
 
 TEST(GuestKfdFailureTest, NonexistentSimulatorConfigFailsCleanly) {
-  const char *runtime_dir = std::getenv("ROCJITSU_RUNTIME_DIR");
-  ASSERT_NE(runtime_dir, nullptr);
   const std::string nonexistent =
-      (std::filesystem::path(runtime_dir) / "nonexistent_simulator_config.json").string();
+      (config_handoff_dir() / "nonexistent_simulator_config.json").string();
   ASSERT_TRUE(install_inline_dbt_config(R"({"max_ticks": 1})", "gfx942", 64, nonexistent));
 
   errno = 0;
@@ -394,6 +459,81 @@ TEST(GuestKfdFailureTest, SimulatorOversizedLdsFailsCleanly) {
   EXPECT_EQ(errno, ENODEV);
   if (fd >= 0)
     close(fd);
+}
+
+TEST(GuestKfdFailureTest, PathOnlyAutomaticDbtHandoffFailsClosed) {
+  const auto simulator_json = read_active_config_json();
+  ASSERT_TRUE(simulator_json.has_value());
+  ASSERT_TRUE(install_inline_dbt_config(*simulator_json, "gfx942", 64, {}, false));
+
+  errno = 0;
+  const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
+  EXPECT_EQ(fd, -1);
+  EXPECT_EQ(errno, ENODEV);
+  if (fd >= 0)
+    close(fd);
+}
+
+// The KFD half of a pair. ConfigLoaderTest.ReadsRuntimeHandoffLargerThan4095Bytes drives the
+// same oversized handoff through the other consumer -- the HSA hook's
+// load_dbt_guest_config_from_runtime_config() -- and both pin test::kOversizedHandoffHostGpuId,
+// so the two independent readers cannot resolve different host GPUs from the same bytes.
+TEST(GuestKfdConfigTest, ReadsRuntimeHandoffLargerThan4095Bytes) {
+  // Consulted before anything is installed: a runtime directory too deep to host the
+  // oversized handoff is also too deep to host the ordinary config the install below
+  // writes, so checking only at relocation time would surface that environmental limit
+  // as a red install and the skip would never be reached.
+  if (const LongPathHandoff supported = long_path_handoff_supported();
+      supported.status() == LongPathHandoff::Status::kSkip)
+    GTEST_SKIP() << "cannot build the oversized handoff here: " << supported.reason();
+
+  const auto simulator_json = read_active_config_json();
+  ASSERT_TRUE(simulator_json.has_value());
+  ASSERT_TRUE(install_inline_dbt_config(*simulator_json, "gfx942", 64));
+
+  // A second skip site rather than a redundant one: the relocation can still find the
+  // filesystem itself unable to hold the path, which the gate above cannot predict.
+  const LongPathHandoff handoff = relocate_active_config_to_long_path();
+  if (handoff.status() == LongPathHandoff::Status::kSkip)
+    GTEST_SKIP() << "cannot build the oversized handoff here: " << handoff.reason();
+  ASSERT_TRUE(handoff.status() == LongPathHandoff::Status::kOk) << handoff.reason();
+
+  // The overlay only comes up once GuestKfd::ensure_ready_locked() has found a topology GPU
+  // carrying the host ISA under the gpu_id it read out of this >4095-byte handoff; an
+  // unresolved or wrong id fails closed with ENODEV, as PathOnlyAutomaticDbtHandoffFailsClosed
+  // pins. So a visible guest overlay here says the interposer resolved
+  // test::kOversizedHandoffHostGpuId specifically -- which only holds while the launcher config
+  // this test runs under declares that same GPU, hence the pin.
+  static_assert(rocjitsu::test::kOversizedHandoffHostGpuId == 50148,
+                "must stay the gpu_id in configs/gfx942_cdna3_kmd.json, the topology this test "
+                "is launched against; otherwise bring-up below stops proving which id was read");
+
+  const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
+  ASSERT_GE(fd, 0) << std::strerror(errno);
+  EXPECT_TRUE(guest_gpu_is_visible());
+  close(fd);
+}
+
+// Pins the skip half of the classification above. A $ROCJITSU_INVOCATION_DIR deeper
+// than the path the helper builds is a limit of where the test runs, not a defect in
+// the handoff reader, so the helper must report kSkip with a reason rather than red.
+// Nothing is created on disk: config_handoff_dir() falls back to the highest-priority
+// tier when no tier holds a handoff, so a directory that does not exist is enough.
+TEST(GuestKfdConfigTest, LongPathHandoffSkipsWhenRuntimeDirIsTooDeep) {
+  // 4082 bytes: one past the 4081-byte parent the helper targets, and still short
+  // enough that the kernel would accept it as a path.
+  std::string too_deep;
+  for (int i = 0; i < 20; ++i)
+    too_deep += "/" + std::string(200, 'd');
+  too_deep += "/" + std::string(61, 'd');
+  ASSERT_EQ(too_deep.size(), 4082u);
+
+  const rocjitsu::test::ScopedEnvironmentVariable invocation_dir("ROCJITSU_INVOCATION_DIR",
+                                                                 too_deep);
+  const LongPathHandoff handoff = relocate_active_config_to_long_path();
+
+  EXPECT_TRUE(handoff.status() == LongPathHandoff::Status::kSkip) << handoff.reason();
+  EXPECT_FALSE(handoff.reason().empty());
 }
 
 // Overwriting the interposer's hidden real /dev/kfd fd number via dup2 must not

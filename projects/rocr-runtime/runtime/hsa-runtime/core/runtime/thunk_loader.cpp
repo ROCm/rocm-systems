@@ -46,12 +46,20 @@
 #include <core/util/os.h>
 #include <iostream>
 #if defined(__linux__)
-#include <dlfcn.h>
 #include <fcntl.h>
 #endif
 
 namespace rocr {
 namespace core {
+
+namespace {
+
+std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
+  return rocr::os::GetAdjacentLibraryPath(
+      reinterpret_cast<const void*>(&GetAdjacentThunkLibraryPath), library_name);
+}
+
+}  // namespace
 
   std::string ThunkLoader::whoami() {
     is_dtif_ = is_win_dxg_ = is_wsl_dxg_ = false;
@@ -85,12 +93,24 @@ namespace core {
       library_name(whoami()),
       is_loaded_(false) {
     if (!library_name.empty()) {
+      std::string loaded_path = library_name;
       rocr::os::DlError();  // Clear any existing error messages
       thunk_handle = rocr::os::LoadLib(library_name.c_str());
       if (thunk_handle == nullptr) {
-        fprintf(stderr, "Cannot load %s, failed:%s\n", library_name.c_str(), rocr::os::DlError());
-      } else {
-        debug_print("Load %s successully!\n", library_name.c_str());
+        const std::string relative_path = GetAdjacentThunkLibraryPath(library_name);
+        if (!relative_path.empty()) {
+          rocr::os::DlError();
+          thunk_handle = rocr::os::LoadLib(relative_path.c_str());
+          if (thunk_handle != nullptr) loaded_path = relative_path;
+        }
+        if (thunk_handle == nullptr) {
+          const char* error = rocr::os::DlError();
+          fprintf(stderr, "Cannot load %s, failed:%s\n", library_name.c_str(),
+            error == nullptr ? "unknown error" : error);
+        }
+      }
+      if (thunk_handle != nullptr) {
+        debug_print("Load %s successfully!\n", loaded_path.c_str());
       }
       is_loaded_ = true;
     }

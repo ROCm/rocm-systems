@@ -170,7 +170,7 @@ roctx_api_impl<TableIdx, OpIdx>::functor(Args... args)
     constexpr auto external_corr_id_domain_idx =
         roctx_domain_info<TableIdx>::external_correlation_id_domain_idx;
 
-    ROCP_INFO_IF(registration::get_fini_status() != 0) << "Executing " << info_type::name;
+    ROCP_TRACE_IF(registration::get_fini_status() != 0) << "Executing " << info_type::name;
 
     auto thr_id            = common::get_tid();
     auto callback_contexts = tracing::callback_context_data_vec_t{};
@@ -284,7 +284,7 @@ roctx_api_impl<TableIdx, OpIdx>::push_functor(Args... args)
     constexpr auto external_corr_id_domain_idx =
         roctx_domain_info<TableIdx>::external_correlation_id_domain_idx;
 
-    ROCP_INFO_IF(registration::get_fini_status() != 0) << "Executing " << info_type::name;
+    ROCP_TRACE_IF(registration::get_fini_status() != 0) << "Executing " << info_type::name;
 
     auto  thr_id            = common::get_tid();
     auto  range_data        = range_data_t{};

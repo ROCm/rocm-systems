@@ -200,8 +200,11 @@ public:
   }
 
   ~ScalarSccFixture() {
-    if (cu)
-      cu->reset_all_wf();
+    // A wave frees its SGPR/VGPR blocks when it halts (s_endpgm-equivalent
+    // termination), so halt the resident wave to release its resources rather
+    // than a CU-wide reset.
+    if (wf && !wf->is_halted())
+      wf->halt();
   }
 
   bool ready() const { return cu != nullptr && decoder != nullptr && wf != nullptr; }
@@ -281,11 +284,23 @@ void expect_wrexec_def_use(const ScalarSccProfile &profile, const WrexecPair &pa
 
     const RegisterRef source{RegClass::SGPR, kSourceSgpr, width};
     const RegisterRef destination{RegClass::SGPR, kDestSgpr, width};
-    ASSERT_EQ(inst->num_src_operands(), 1) << profile.name << " " << mnemonic;
-    ASSERT_EQ(inst->num_dst_operands(), 1) << profile.name << " " << mnemonic;
+    // The implicit EXEC read/write and SCC def are modeled as inert fieldless
+    // operands (to_register_ref() == nullopt): they add to the operand counts
+    // but contribute nothing to def/use at this time. The field-bearing SGPR
+    // source/dest stay at index 0.
+    ASSERT_EQ(inst->num_src_operands(), 2) << profile.name << " " << mnemonic;
+    ASSERT_EQ(inst->num_dst_operands(), 3) << profile.name << " " << mnemonic;
     EXPECT_EQ(inst->src_operand(0)->to_register_ref(), source) << profile.name << " " << mnemonic;
     EXPECT_EQ(inst->dst_operand(0)->to_register_ref(), destination)
         << profile.name << " " << mnemonic;
+    for (uint8_t i = 1; i < inst->num_src_operands(); ++i) {
+      EXPECT_TRUE(inst->src_operand(i)->is_fieldless()) << profile.name << " " << mnemonic;
+      EXPECT_FALSE(inst->src_operand(i)->to_register_ref()) << profile.name << " " << mnemonic;
+    }
+    for (uint8_t i = 1; i < inst->num_dst_operands(); ++i) {
+      EXPECT_TRUE(inst->dst_operand(i)->is_fieldless()) << profile.name << " " << mnemonic;
+      EXPECT_FALSE(inst->dst_operand(i)->to_register_ref()) << profile.name << " " << mnemonic;
+    }
 
     const InstDefUse def_use(*inst);
     EXPECT_TRUE(def_use.uses.contains(source)) << profile.name << " " << mnemonic;
@@ -673,8 +688,15 @@ TEST(ScalarSccTest, AddkAndMulkRegisterDestinationRead) {
       ASSERT_NE(inst, nullptr) << profile.name << " " << mnemonic;
       ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic) << profile.name;
 
+      // s_addk_i32 sets SCC, modeled as an inert fieldless dst operand;
+      // s_mulk_i32 does not touch SCC. SCC carries no def/use either way.
+      const bool sets_scc = mnemonic != std::string_view{"s_mulk_i32"};
       ASSERT_EQ(inst->num_src_operands(), 2) << profile.name << " " << mnemonic;
-      ASSERT_EQ(inst->num_dst_operands(), 1) << profile.name << " " << mnemonic;
+      ASSERT_EQ(inst->num_dst_operands(), sets_scc ? 2 : 1) << profile.name << " " << mnemonic;
+      if (sets_scc) {
+        EXPECT_TRUE(inst->dst_operand(1)->is_fieldless()) << profile.name << " " << mnemonic;
+        EXPECT_FALSE(inst->dst_operand(1)->to_register_ref()) << profile.name << " " << mnemonic;
+      }
       EXPECT_EQ(inst->src_operand(0)->to_register_ref(), (RegisterRef{RegClass::SGPR, 4, 1}))
           << profile.name << " " << mnemonic;
       EXPECT_EQ(inst->src_operand(0), inst->dst_operand(0)) << profile.name << " " << mnemonic;

@@ -445,18 +445,28 @@ RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(const std::string& device_n
     }
 
     if (g_rocjpeg_logger.GetLogLevel() >= kRocJpegLogInfo) {
-        std::ostringstream oss;
-        oss << '{';
-        bool first = true;
+        InfoLog(g_rocjpeg_logger, "gpu_uuids_to_render_nodes_map_:");
         for (const auto& entry : gpu_uuids_to_render_nodes_map_) {
-            if (!first) oss << ", ";
-            oss << entry.first << ": " << entry.second;
-            first = false;
+            InfoLog(g_rocjpeg_logger, "  " + entry.first + " -> renderD" + std::to_string(entry.second));
         }
-        oss << '}';
-        InfoLog(g_rocjpeg_logger, "gpu_uuids_to_render_nodes_map_: " + oss.str());
+        InfoLog(g_rocjpeg_logger, "gpu_pci_bdf_to_render_nodes_map_:");
+        for (const auto& entry : gpu_pci_bdf_to_render_nodes_map_) {
+            InfoLog(g_rocjpeg_logger, "  " + entry.first + " -> renderD" + std::to_string(entry.second));
+        }
+
+        auto partition_name = [](ComputePartition p) -> const char* {
+            switch (p) {
+                case kSpx: return "SPX";
+                case kDpx: return "DPX";
+                case kTpx: return "TPX";
+                case kQpx: return "QPX";
+                case kCpx: return "CPX";
+                default:   return "unknown";
+            }
+        };
         InfoLog(g_rocjpeg_logger, "Selected GPU UUID: " + gpu_uuid);
         InfoLog(g_rocjpeg_logger, "Selected GPU BDF: " + gpu_pci_bdf_lower);
+        InfoLog(g_rocjpeg_logger, "Selected compute partition: " + std::string(partition_name(current_compute_partition)));
         InfoLog(g_rocjpeg_logger, "Selected DRM node: " + drm_node);
     }
 

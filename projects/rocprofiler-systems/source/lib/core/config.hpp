@@ -347,6 +347,9 @@ std::string
 get_sampling_ainics();
 
 bool
+get_ainic_supported();
+
+bool
 get_trace_thread_locks();
 
 bool

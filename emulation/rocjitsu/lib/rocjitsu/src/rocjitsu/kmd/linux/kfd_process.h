@@ -14,6 +14,7 @@
 
 #include "rocjitsu/kmd/linux/events.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "util/unique_handle.h"
 
 #include <atomic>
 #include <cassert>
@@ -25,45 +26,8 @@
 #include <vector>
 
 #include <sys/types.h> // pid_t
-#include <unistd.h>
 
 namespace rocjitsu {
-
-/// @brief Move-only RAII owner of a file descriptor.
-///
-/// @details Closes the descriptor on destruction, reset, or move-assignment.
-/// Used where a KfdProcess must deterministically release a descriptor it owns
-/// — e.g. the daemon-mode debugger notifier the transport dup'd into our fd
-/// table via SCM_RIGHTS. A -1 descriptor owns nothing.
-class UniqueFd {
-public:
-  UniqueFd() = default;
-  explicit UniqueFd(int fd) : fd_(fd) {}
-  UniqueFd(UniqueFd &&other) noexcept : fd_(other.fd_) { other.fd_ = -1; }
-  UniqueFd &operator=(UniqueFd &&other) noexcept {
-    if (this != &other) {
-      reset(other.fd_);
-      other.fd_ = -1;
-    }
-    return *this;
-  }
-  UniqueFd(const UniqueFd &) = delete;
-  UniqueFd &operator=(const UniqueFd &) = delete;
-  ~UniqueFd() { reset(); }
-
-  /// @brief The owned descriptor, or -1 if none.
-  [[nodiscard]] int get() const { return fd_; }
-
-  /// @brief Close the current descriptor and take ownership of @p fd (none by default).
-  void reset(int fd = -1) {
-    if (fd_ >= 0 && fd_ != fd)
-      ::close(fd_);
-    fd_ = fd;
-  }
-
-private:
-  int fd_ = -1;
-};
 
 /// @brief Per-process KFD state.
 ///
@@ -123,6 +87,11 @@ public:
     bool user_va = false;
     bool imported = false;
     int dmabuf_fd = -1;
+    // True when the driver created host_ptr (mmap it itself) and must munmap it
+    // on teardown. False for caller-owned pages (e.g. reused MAP_FIXED pages
+    // from the thunk) that the driver must never unmap, since unmapping them
+    // races with the owning process still accessing the memory.
+    bool host_ptr_owned = false;
   };
 
   /// @brief Memory policy descriptor.
@@ -197,7 +166,7 @@ public:
     /// debug session ends (DISABLE) or the process tears down. Engaged only in
     /// daemon mode; empty in local mode, where @ref dbg_fd is the debugger's own
     /// descriptor and is not owned here. RAII replaces an explicit close.
-    UniqueFd owned_dbg_fd;
+    util::UniqueHandle owned_dbg_fd;
 
     /// @brief Mirrors @c kfd_process::debugger_process (stored as pid instead of pointer).
     /// Linux PID of the attached debugger (ptrace parent). 0 when not attached.
@@ -230,6 +199,10 @@ public:
     auto *base = static_cast<uint8_t *>(host_ptr);
     for (size_t off = 0; off < size; off += kPageSize)
       page_table_[(gpu_va + off) >> kPageShift] = {base + off, mtype};
+    // Keep publication in the page-table critical section. Cached readers
+    // validate this generation while holding the shared side of the same lock;
+    // publishing after unlock would permit a stale-cache hit in between.
+    publish_page_table_mutation_locked();
   }
 
   /// @brief Unmap pages from this process's GPU page table.
@@ -237,7 +210,49 @@ public:
     std::unique_lock lock(page_table_mutex_);
     for (size_t off = 0; off < size; off += kPageSize)
       page_table_.erase((gpu_va + off) >> kPageShift);
+    // See map_pages(): the mutation and generation publication are one
+    // page-table critical section by design.
+    publish_page_table_mutation_locked();
   }
+
+  /// @brief Replace mapped host pages while preserving their other PTE fields.
+  /// @details The mutation and cache-generation publication occur under one
+  /// page-table critical section. Only entries still pointing at the expected
+  /// old page are changed.
+  void remap_page_host_ptrs(uint64_t gpu_va, void *old_host_ptr, void *new_host_ptr, size_t size) {
+    std::unique_lock lock(page_table_mutex_);
+    auto *old_base = static_cast<uint8_t *>(old_host_ptr);
+    auto *new_base = static_cast<uint8_t *>(new_host_ptr);
+    bool changed = false;
+    for (size_t off = 0; off < size; off += kPageSize) {
+      auto it = page_table_.find((gpu_va + off) >> kPageShift);
+      if (it != page_table_.end() && it->second.host_ptr == old_base + off &&
+          it->second.host_ptr != new_base + off) {
+        it->second.host_ptr = new_base + off;
+        changed = true;
+      }
+    }
+    if (changed)
+      publish_page_table_mutation_locked();
+  }
+
+  /// @brief Update the MTYPE of mapped pages and invalidate cached PTE copies.
+  void set_page_mtype(uint64_t gpu_va, size_t size, amdgpu::Mtype mtype) {
+    std::unique_lock lock(page_table_mutex_);
+    bool changed = false;
+    for (size_t off = 0; off < size; off += kPageSize) {
+      auto it = page_table_.find((gpu_va + off) >> kPageShift);
+      if (it != page_table_.end() && it->second.mtype != mtype) {
+        it->second.mtype = mtype;
+        changed = true;
+      }
+    }
+    if (changed)
+      publish_page_table_mutation_locked();
+  }
+
+  /// @brief Return the mutation counter used by GpuMemory translation caches.
+  const uint64_t *page_table_generation() const { return &page_table_generation_; }
 
   mutable std::shared_mutex page_table_mutex_;
   PageTable page_table_;
@@ -287,6 +302,13 @@ public:
   DebugSession debug_session_;
 
 private:
+  void publish_page_table_mutation_locked() { ++page_table_generation_; }
+
+  /// @brief Page table version counter, bumped on every PTE mutation.
+  /// @details GpuMemory keeps per-thread TLB-like translation caches keyed by
+  ///          this generation; all reads and writes occur while holding
+  ///          page_table_mutex_, so the counter itself does not need atomics.
+  uint64_t page_table_generation_{1};
 };
 
 } // namespace rocjitsu
