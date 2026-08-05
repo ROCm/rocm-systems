@@ -22,6 +22,7 @@ _COLLECTOR_SOURCE_NAMES = (
     "torch_trace_collector_module.cpp",
 )
 _COLLECTOR_HEADER_NAMES = (
+    "args_capture.h",
     "leaf_context.h",
     "marker_stack.h",
     "process_state.h",

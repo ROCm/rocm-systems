@@ -13,9 +13,9 @@ import inspect
 import threading
 from functools import partial, partialmethod
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
-from utils.inject_roctx import core
+from utils.inject_roctx import core, marker_format
 from utils.inject_roctx.core import (
     _pop_scope,
     _push_scope,
@@ -25,6 +25,12 @@ from utils.inject_roctx.registry import register
 from utils.logger import console_log, console_warning
 
 _BACKEND_NAME = "triton"
+
+# Launch kwargs that carry runtime geometry rather than kernel arguments.
+_TRITON_SKIP_KWARGS = frozenset({"grid", "warmup", "stream", "num_warps", "num_stages"})
+
+# Launcher-internal types that are not kernel arguments.
+_TRITON_INTERNAL_TYPES = frozenset({"LazyDict", "HookChain"})
 
 
 class _TritonState:
@@ -119,10 +125,103 @@ def _extract_kernel_name(obj: object, default: str = "<triton_kernel>") -> str:
     return default
 
 
+def _format_triton_arg(obj: object) -> str:
+    """Render one launch arg as ``dtype[d0xd1]`` for tensors, else a type name
+    (or its value when value capture is enabled)."""
+    shape = getattr(obj, "shape", None)
+    dtype = getattr(obj, "dtype", None)
+    if shape is not None and dtype is not None and not isinstance(obj, (str, bytes)):
+        try:
+            dims = "x".join(str(int(d)) for d in shape)
+        except Exception:
+            dims = "?"
+        return f"{str(dtype).replace('torch.', '')}[{dims}]"
+    if isinstance(obj, (list, tuple)):
+        return "[" + ", ".join(_format_triton_arg(o) for o in obj[:8]) + "]"
+    if core.args_values_enabled():
+        if isinstance(obj, (int, float)):
+            return repr(obj)
+        if isinstance(obj, str):
+            return repr(obj[:32])
+    return type(obj).__name__
+
+
+def _kernel_param_names(self_obj: object) -> Optional[list[Optional[str]]]:
+    """Resolve ordered kernel parameter names for a launch entry point.
+
+    Covers ``JITFunction`` (``params``) and ``CompiledKernel`` (``src``), and
+    falls back to legacy ``arg_names``. Returns None when no names are found.
+    """
+    params = getattr(self_obj, "params", None)
+    if params:
+        try:
+            return [getattr(p, "name", None) for p in params]
+        except Exception:
+            pass
+
+    src = getattr(self_obj, "src", None)
+    if src is not None:
+        fn_params = getattr(getattr(src, "fn", None), "params", None)
+        if fn_params:
+            try:
+                return [getattr(p, "name", None) for p in fn_params]
+            except Exception:
+                pass
+        signature = getattr(src, "signature", None)
+        if isinstance(signature, dict) and signature:
+            return list(signature.keys())
+
+    arg_names = getattr(self_obj, "arg_names", None)
+    return list(arg_names) if arg_names else None
+
+
+def _build_triton_args(
+    self_obj: object,
+    call_args: tuple[object, ...],
+    call_kwargs: dict[str, object],
+) -> str:
+    """Build the unencoded leaf-args blob for a Triton kernel launch.
+
+    The ``CompiledKernel`` launcher prepends grid, stream, function, metadata,
+    and hook arguments before the kernel parameters. When parameter names are
+    known, the trailing positional args matching them are kept and labelled;
+    otherwise launcher-internal objects are dropped.
+    """
+    if not core.args_capture_enabled():
+        return ""
+    try:
+        names = _kernel_param_names(self_obj)
+        selected = call_args
+        if names and 0 < len(names) <= len(call_args):
+            selected = call_args[-len(names) :]
+
+        parts: list[str] = []
+        # Cap the combined positional and keyword count at MAX_ARG_ITEMS.
+        for i, value in enumerate(selected[: marker_format.MAX_ARG_ITEMS]):
+            if names is None and type(value).__name__ in _TRITON_INTERNAL_TYPES:
+                continue
+            label = names[i] if names and i < len(names) and names[i] else None
+            rendered = _format_triton_arg(value)
+            parts.append(f"{label}={rendered}" if label else rendered)
+        remaining = marker_format.MAX_ARG_ITEMS - len(parts)
+        if remaining > 0:
+            for key, value in list(call_kwargs.items())[:remaining]:
+                if key in _TRITON_SKIP_KWARGS:
+                    continue
+                parts.append(f"{key}={_format_triton_arg(value)}")
+        if not parts:
+            return ""
+        return marker_format.cap_args("(" + ", ".join(parts) + ")")
+    except Exception:
+        return ""
+
+
 def _run_with_marker(
     self_obj: object,
     marker_prefix: str,
     thunk: Callable[[], Any],
+    call_args: tuple[object, ...] = (),
+    call_kwargs: Optional[dict[str, object]] = None,
 ) -> object:
     """Run ``thunk`` inside a ROCTX range; nested launches reuse the outer range."""
     if _in_launch():
@@ -131,10 +230,11 @@ def _run_with_marker(
     marker = f"{marker_prefix}.{kernel_name}"
     location = resolve_user_caller_location()
     index = _next_launch_index(marker)
+    op_args = _build_triton_args(self_obj, call_args, call_kwargs or {})
     _thread_local.in_launch = True
     pushed = False
     try:
-        _push_scope(marker, f"#{index}@{location}", backend=_BACKEND_NAME)
+        _push_scope(marker, f"#{index}@{location}", backend=_BACKEND_NAME, args=op_args)
         pushed = True
         return thunk()
     finally:
@@ -152,7 +252,11 @@ def _roctx_method_call(
 ) -> object:
     """Run a wrapped method ``original`` inside a ROCTX range."""
     return _run_with_marker(
-        instance, marker_prefix, partial(original, instance, *args, **kwargs)
+        instance,
+        marker_prefix,
+        partial(original, instance, *args, **kwargs),
+        args,
+        kwargs,
     )
 
 
@@ -173,7 +277,13 @@ def _roctx_launch(
     **kwargs: Any,
 ) -> object:
     """Run a property-returned ``launcher`` inside a ROCTX range."""
-    return _run_with_marker(instance, marker_prefix, partial(launcher, *args, **kwargs))
+    return _run_with_marker(
+        instance,
+        marker_prefix,
+        partial(launcher, *args, **kwargs),
+        args,
+        kwargs,
+    )
 
 
 def _roctx_property_get(
