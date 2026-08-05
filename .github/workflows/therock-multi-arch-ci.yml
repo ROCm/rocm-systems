@@ -71,8 +71,6 @@ jobs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
       skip_tests: ${{ steps.configure.outputs.skip_tests }}
-      rebuild_stages: ${{ steps.configure.outputs.rebuild_stages }}
-      reusable_stages: ${{ steps.configure.outputs.reusable_stages }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -107,8 +105,6 @@ jobs:
           echo "changed_projects: ${{ steps.configure.outputs.changed_projects }}"
           echo "run_all_tests: ${{ steps.configure.outputs.run_all_tests }}"
           echo "skip_tests: ${{ steps.configure.outputs.skip_tests }}"
-          echo "rebuild_stages: ${{ steps.configure.outputs.rebuild_stages }}"
-          echo "reusable_stages: ${{ steps.configure.outputs.reusable_stages }}"
 
   resolve_therock_ref:
     name: Resolve TheRock ref
