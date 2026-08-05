@@ -129,8 +129,11 @@ ncclResult_t ncclTopoCheckCrossNicSupport(bool* supported) {
   if (supported) *supported = false;
   return ncclSuccess;
 }
+int g_gdrSupportValue = 0;
+int g_gdrSupportCalls = 0;
 ncclResult_t ncclGpuGdrSupport(struct ncclComm*, int* gdrSupport) {
-  if (gdrSupport) *gdrSupport = 0;
+  ++g_gdrSupportCalls;
+  if (gdrSupport) *gdrSupport = g_gdrSupportValue;
   return ncclSuccess;
 }
 ncclResult_t rocmLibraryInit(void) { return ncclSuccess; }
@@ -156,4 +159,6 @@ void ResetInitFakes() {
   g_ginHasError = false;
   g_validHsaScratch = true;
   g_firmwareVersion = 0;
+  g_gdrSupportValue = 0;
+  g_gdrSupportCalls = 0;
 }

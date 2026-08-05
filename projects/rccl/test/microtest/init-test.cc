@@ -449,6 +449,43 @@ TEST_F(InitMicrotest, FillInfo_FreeFault_ReturnsUnhandledCudaError) {
   EXPECT_EQ(ncclUnhandledCudaError, fillInfo(comm.get(), &info, 0));
 }
 
+// Rich fillInfo scenarios reach the end (need sharedRes for ginState; ncclNet
+// for the alloc-success dmaBuf probe). rmaState is embedded (value-inited).
+namespace {
+class FillInfoComm {
+ public:
+  FillInfoComm()
+      : comm_(new ncclComm{}), sr_(new ncclSharedResources{}), net_(new ncclNet_t{}) {
+    comm_->sharedRes = sr_.get();
+    comm_->ncclNet = net_.get();  // regMrDmaBuf == NULL -> dmaBuf unsupported
+  }
+  ncclComm* get() { return comm_.get(); }
+ private:
+  std::unique_ptr<ncclComm> comm_;
+  std::unique_ptr<ncclSharedResources> sr_;
+  std::unique_ptr<ncclNet_t> net_;
+};
+}  // namespace
+
+TEST_F(InitMicrotest, FillInfo_ExtMallocFails_DisablesFineGrainAndContinues) {
+  FillInfoComm c;
+  ncclPeerInfo info{};
+  g_hipExtMallocWithFlags = [](void**, std::size_t, unsigned) { return hipErrorOutOfMemory; };
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_FALSE(info.hasFineGrain);
+  EXPECT_EQ(0, info.gdrSupport);
+  EXPECT_EQ(0, g_gdrSupportCalls);  // dmaBuf/GDR probe skipped entirely
+}
+TEST_F(InitMicrotest, FillInfo_AllocOk_DmaBufUnsupported_UsesGdrFallback) {
+  FillInfoComm c;
+  ncclPeerInfo info{};
+  g_gdrSupportValue = 1;  // fallback reports GDR-capable
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_TRUE(info.hasFineGrain);        // alloc succeeded
+  EXPECT_EQ(1, g_gdrSupportCalls);       // dmaBuf unsupported -> fallback taken
+  EXPECT_EQ(1, info.gdrSupport);         // value from the fallback
+}
+
 #if defined(HIP_HOST_UNCACHED_MEMORY)
 TEST_F(InitMicrotest, CheckHostUncacheMemSetting_Uncached_AlwaysSucceeds) {
   TopoComm t("gfx950:sramecc+");  // even gfx950 is OK when the build flag is set

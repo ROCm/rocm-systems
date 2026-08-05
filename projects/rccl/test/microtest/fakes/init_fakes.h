@@ -41,6 +41,11 @@ extern bool g_ginHasError;
 extern bool g_validHsaScratch;
 extern int g_firmwareVersion;
 
+// fillInfo GDR fallback seam: ncclGpuGdrSupport() writes g_gdrSupportValue and
+// bumps g_gdrSupportCalls, so tests can assert the fallback path was taken.
+extern int g_gdrSupportValue;
+extern int g_gdrSupportCalls;
+
 // Reset every init-layer fake to defaults. Cascades to ResetHipFakes() and
 // ResetNcclFakes(). Called from the fixture TearDown().
 void ResetInitFakes();
