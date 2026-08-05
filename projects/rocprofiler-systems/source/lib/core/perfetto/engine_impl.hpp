@@ -10,7 +10,6 @@
 #include <cstdint>
 #include <exception>
 #include <utility>
-#include <variant>
 
 namespace rocprofsys::core
 {
@@ -73,7 +72,7 @@ basic_cached_perfetto_engine<Backend>::start(trace_sink& sink)
     m_collected_bytes_frozen.store(false, std::memory_order_release);
 
     m_running     = true;
-    m_active_sink = sink;
+    m_active_sink = &sink;
 
     void* prev =
         activate_cached_engine(this, &basic_cached_perfetto_engine::collect_thunk);
@@ -115,14 +114,14 @@ basic_cached_perfetto_engine<Backend>::stop()
         drained.swap(m_collected_bytes);
     }
 
-    if(!m_active_sink.has_value())
+    if(m_active_sink == nullptr)
     {
         if(first_exc) std::rethrow_exception(first_exc);
         return;
     }
 
-    auto& sink = m_active_sink->get();
-    m_active_sink.reset();
+    auto& sink    = *m_active_sink;
+    m_active_sink = nullptr;
 
     const auto dropped = m_dropped_packet_count.exchange(0, std::memory_order_relaxed);
     if(dropped > 0)
@@ -136,11 +135,7 @@ basic_cached_perfetto_engine<Backend>::stop()
         if(bytes.empty()) continue;
         try
         {
-            std::visit(
-                [source_pid, &bytes](auto& s) {
-                    s.on_source_drained(source_pid, std::move(bytes));
-                },
-                sink);
+            sink.on_source_drained(source_pid, std::move(bytes));
         } catch(...)
         {
             if(!first_exc) first_exc = std::current_exception();
@@ -149,7 +144,7 @@ basic_cached_perfetto_engine<Backend>::stop()
 
     try
     {
-        std::visit([](auto& s) { s.finalize(); }, sink);
+        sink.finalize();
     } catch(...)
     {
         if(!first_exc) first_exc = std::current_exception();
