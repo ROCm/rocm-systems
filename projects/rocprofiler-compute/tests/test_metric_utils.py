@@ -282,6 +282,57 @@ class TestExpression:
         """
         assert update_normal_unit_string(equation, normal_unit) == expected
 
+    @pytest.mark.parametrize(
+        "formula",
+        [
+            (
+                "100 * SUM(SQ_ACTIVE_INST_SCA)"
+                " / SUM(ammolite__GRBM_GUI_ACTIVE_PER_XCD"
+                " * ammolite__cu_per_gpu)"
+            ),
+            (
+                "TCC_EA_RDREQ_LEVEL_31 / TCC_EA_RDREQ_31"
+                " if (TCC_EA_RDREQ_31 != 0) else TCC_EA_RDREQ_31"
+            ),
+            "ROUND(AVG(4 * SQ_BUSY_CU_CYCLES), 0)",
+        ],
+    )
+    def test_code_transformer_accepts_legitimate_formulas(
+        self,
+        formula: str,
+    ) -> None:
+        """CodeTransformer.generic_visit passes for real metric formulas."""
+        tree = ast.parse(formula)
+        transformer = CodeTransformer()
+        transformer.visit(tree)
+
+    @pytest.mark.parametrize(
+        "formula, blocked_node",
+        [
+            ('"".__class__', "Attribute"),
+            ("(lambda: 1)()", "Lambda"),
+            ("[x for x in (1,)]", "ListComp"),
+            ("(x for x in (1,))", "GeneratorExp"),
+            ("{x: 1 for x in (1,)}", "DictComp"),
+            ("{x for x in (1,)}", "SetComp"),
+        ],
+    )
+    def test_code_transformer_rejects_unsafe_node_types(
+        self,
+        formula: str,
+        blocked_node: str,
+    ) -> None:
+        """CodeTransformer.generic_visit raises for disallowed AST node types."""
+        tree = ast.parse(formula)
+        transformer = CodeTransformer()
+        with pytest.raises(ValueError, match=blocked_node):
+            transformer.visit(tree)
+
+    def test_build_eval_string_exits_on_unsafe_formula(self) -> None:
+        """build_eval_string exits via console_error for unsafe formulas."""
+        with pytest.raises(SystemExit):
+            build_eval_string('"".__class__')
+
 
 # =============================================================================
 # Tests for utils.metrics.evaluation_pipeline
