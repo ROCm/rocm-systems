@@ -90,6 +90,15 @@ ncclResult_t ncclGinQueryLastError(struct ncclGinState*, bool* hasError) {
   return ncclSuccess;
 }
 
+// The NCCL_API dispatch symbol ncclCommGetAsyncError is emitted outside init.cc
+// (the api-trace layer, not linked here); ncclCommEnsureReady calls it. Route it
+// to the in-TU _impl (defined in the init-test.cc object via the UUT include).
+// nccl.h (via nccl_fakes.h) supplies the public declaration + its linkage.
+extern ncclResult_t ncclCommGetAsyncError_impl(ncclComm_t comm, ncclResult_t* asyncError);
+ncclResult_t ncclCommGetAsyncError(ncclComm_t comm, ncclResult_t* asyncError) {
+  return ncclCommGetAsyncError_impl(comm, asyncError);
+}
+
 void ResetInitFakes() {
   ResetHipFakes();
   ResetNcclFakes();
