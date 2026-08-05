@@ -72,6 +72,12 @@ extern std::function<hipError_t(int* /*version*/)> g_hipRuntimeGetVersion;
 extern std::function<hipError_t(hipDeviceProp_t* /*prop*/, int /*device*/)>
     g_hipGetDeviceProperties;
 
+// Fine-grain allocation probe (fillInfo). Default: succeed with a real host
+// allocation so the hipFree path runs; tests inject failure/fault.
+extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/, unsigned /*flags*/)>
+    g_hipExtMallocWithFlags;
+extern std::function<hipError_t(void* /*ptr*/)> g_hipFree;
+
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.
 void ResetHipFakes();

@@ -31,6 +31,7 @@
 //      than pretending to succeed.
 
 #include <cstring>
+#include <cstdlib>
 #include <functional>
 
 #include <hip/hip_runtime_api.h>
@@ -128,6 +129,16 @@ std::function<hipError_t(int*)> g_hipRuntimeGetVersion = DefaultHipRuntimeGetVer
 std::function<hipError_t(hipDeviceProp_t*, int)>
     g_hipGetDeviceProperties = DefaultHipGetDeviceProperties;
 
+static hipError_t DefaultHipExtMallocWithFlags(void** ptr, std::size_t size, unsigned)
+{
+    if (ptr) { *ptr = std::malloc(size ? size : 1); return *ptr ? hipSuccess : hipErrorOutOfMemory; }
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipFree(void* ptr) { std::free(ptr); return hipSuccess; }
+std::function<hipError_t(void**, std::size_t, unsigned)>
+    g_hipExtMallocWithFlags = DefaultHipExtMallocWithFlags;
+std::function<hipError_t(void*)> g_hipFree = DefaultHipFree;
+
 // Restore every HIP hook to its default. Called from ResetP2pFakes().
 void ResetHipFakes()
 {
@@ -139,6 +150,8 @@ void ResetHipFakes()
     g_hipPointerGetAttribute        = DefaultHipPointerGetAttribute;
     g_hipRuntimeGetVersion          = DefaultHipRuntimeGetVersion;
     g_hipGetDeviceProperties        = DefaultHipGetDeviceProperties;
+    g_hipExtMallocWithFlags         = DefaultHipExtMallocWithFlags;
+    g_hipFree                       = DefaultHipFree;
 }
 
 // ===========================================================================
@@ -215,13 +228,12 @@ hipError_t hipEventDestroy(hipEvent_t)      { return hipErrorInvalidValue; }
 hipError_t hipEventQuery(hipEvent_t)        { return hipErrorInvalidValue; }
 hipError_t hipEventRecord(hipEvent_t, hipStream_t) { return hipErrorInvalidValue; }
 
-hipError_t hipExtMallocWithFlags(void** ptr, size_t, unsigned int)
+hipError_t hipExtMallocWithFlags(void** ptr, size_t size, unsigned int flags)
 {
-    if (ptr) *ptr = nullptr;
-    return hipErrorInvalidValue;
+    return g_hipExtMallocWithFlags(ptr, size, flags);
 }
 
-hipError_t hipFree(void*) { return hipErrorInvalidValue; }
+hipError_t hipFree(void* ptr) { return g_hipFree(ptr); }
 
 hipError_t hipGetDevice(int* deviceId)
 {

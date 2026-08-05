@@ -427,6 +427,28 @@ class TopoComm {
 };
 }  // namespace
 
+// fillInfo (init.cc:1023): cheap GPU-return branches. Properties fault returns
+// before the alloc probe; hipFree fault returns before downstream topology/smi.
+// (Rich success/DMA-BUF/GDR scenarios need the sharedRes/rmaState/ncclNet
+// fixture and land next.) getHostHash/getPidHash use the real utils.cc oracle.
+TEST_F(InitMicrotest, FillInfo_PropertiesFault_DoesNotAllocate) {
+  auto comm = std::make_unique<ncclComm>();
+  ncclPeerInfo info{};
+  g_hipGetDeviceProperties = [](hipDeviceProp_t*, int) { return hipErrorInvalidValue; };
+  g_hipExtMallocWithFlags = [](void**, std::size_t, unsigned) -> hipError_t {
+    ADD_FAILURE() << "alloc probe must not run after a properties fault";
+    return hipErrorInvalidValue;
+  };
+  EXPECT_EQ(ncclUnhandledCudaError, fillInfo(comm.get(), &info, 0));
+}
+TEST_F(InitMicrotest, FillInfo_FreeFault_ReturnsUnhandledCudaError) {
+  auto comm = std::make_unique<ncclComm>();
+  ncclPeerInfo info{};
+  // properties + alloc succeed (defaults); the post-alloc hipFree faults.
+  g_hipFree = [](void*) { return hipErrorInvalidValue; };
+  EXPECT_EQ(ncclUnhandledCudaError, fillInfo(comm.get(), &info, 0));
+}
+
 #if defined(HIP_HOST_UNCACHED_MEMORY)
 TEST_F(InitMicrotest, CheckHostUncacheMemSetting_Uncached_AlwaysSucceeds) {
   TopoComm t("gfx950:sramecc+");  // even gfx950 is OK when the build flag is set

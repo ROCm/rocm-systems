@@ -111,6 +111,10 @@ bool validHsaScratchEnvSetting(const char* /*hsaScratchEnv*/, int /*hipRuntimeVe
 }
 int getFirmwareVersion() { return g_firmwareVersion; }
 
+// fillInfo reads ncclCuMemEnable() (cuMem support flag). Default: disabled.
+// (getHostHash/getPidHash come from the real utils.cc oracle, not faked here.)
+int ncclCuMemEnable() { return 0; }
+
 // The NCCL_API dispatch symbol ncclCommGetAsyncError is emitted outside init.cc
 // (the api-trace layer, not linked here); ncclCommEnsureReady calls it. Route it
 // to the in-TU _impl (defined in the init-test.cc object via the UUT include).
