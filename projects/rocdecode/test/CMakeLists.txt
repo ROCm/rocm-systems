@@ -150,24 +150,11 @@ endif()
 set(USING_THE_ROCK OFF)
 if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
   set(USING_THE_ROCK ON)
-  set(THEROCK_SYSDEPS_LIB "${ROCM_PATH}/lib/rocm_sysdeps/lib")
-  set(VA_LIBS "${THEROCK_SYSDEPS_LIB}/librocm_sysdeps_va.so.2:${THEROCK_SYSDEPS_LIB}/librocm_sysdeps_va-drm.so.2")
-  if(ASAN_PRELOAD)
-    set(THEROCK_ENV
-      "LD_PRELOAD=${ASAN_PRELOAD}:${VA_LIBS};LIBVA_DRIVERS_PATH=${THEROCK_SYSDEPS_LIB}"
-    )
-  else()
-    set(THEROCK_ENV
-      "LD_PRELOAD=${VA_LIBS};LIBVA_DRIVERS_PATH=${THEROCK_SYSDEPS_LIB}"
-    )
-  endif()
 endif()
 
-# Helper macro: apply test environment (ASAN preload and/or TheRock VA libs)
+# Helper macro: apply test environment (ASAN preload when enabled).
 macro(set_test_env TEST_NAME)
-  if(USING_THE_ROCK)
-    set_property(TEST ${TEST_NAME} PROPERTY ENVIRONMENT "${THEROCK_ENV}")
-  elseif(ASAN_PRELOAD)
+  if(ASAN_PRELOAD)
     set_property(TEST ${TEST_NAME} PROPERTY ENVIRONMENT "LD_PRELOAD=${ASAN_PRELOAD}")
   endif()
 endmacro()

@@ -1,0 +1,16 @@
+{
+  "semantics": [
+    "cluster_load_test",
+    "ds_2addr_test",
+    "ds_addtid_test",
+    "ds_storexchg_2addr_test",
+    "fp8_e5m3_unpack_test",
+    "integer_wmma_hazard_test",
+    "s_clause_test",
+    "tensor_load_to_lds_test",
+    "wmma_scale_regular_test",
+    "wmma_scale16_m16_test",
+    "wmma_scale16_m32_test",
+    "wmma_split_f32_test"
+  ]
+}

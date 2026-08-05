@@ -3027,7 +3027,7 @@ std::string
 get_ump_absolute_path()
 {
     auto ensure_dir = [](std::string path) {
-        if(!path.empty() && !tim::filepath::direxists(path))
+        if(!path.empty() && !path::is_directory(path))
         {
             tim::filepath::makedir(path);
         }
@@ -3509,9 +3509,7 @@ get_tmp_file(std::string _basename, std::string _ext)
     // subdirectory="rocprofsys-output/%ppid%" (not
     // "/home/user/rocprofsys-output/%ppid%"), so files go under
     // get_tmpdir()/rocprofsys-output/.
-    auto _output_path = settings::output_path();
-    auto _pos         = _output_path.rfind('/');
-    if(_pos != std::string::npos) _output_path = _output_path.substr(_pos + 1);
+    auto _output_path = path::filename(settings::output_path());
     if(_output_path.empty()) _output_path = "rocprofsys";
     _cfg.subdirectory = fmt::format("{}/{}/", _output_path, "%ppid%");
     auto _fname =

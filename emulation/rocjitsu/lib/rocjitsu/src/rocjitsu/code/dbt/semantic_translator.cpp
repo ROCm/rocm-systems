@@ -25,9 +25,8 @@ semantic_expand_rules_for(rj_code_arch_t guest, rj_code_arch_t host,
     return semantic_expand_rules_cdna4_to_rdna4();
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3)
     return semantic_expand_rules_cdna4_to_cdna3();
-  // gfx1250 A0 and B0 share one architectural target ID. Apply the errata only
-  // for the explicit B0-to-A0 direction; same-ISA translation alone must not
-  // silently select a silicon workaround policy.
+  // gfx1250 A0 and B0 share one architectural target ID. Select the B0-to-A0
+  // profile only for that explicit revision pair.
   if (guest == ROCJITSU_CODE_ARCH_GFX1250 && host == ROCJITSU_CODE_ARCH_GFX1250 &&
       input_revision == ProcessorRevision::Gfx1250B0 &&
       output_revision == ProcessorRevision::Gfx1250A0)
@@ -62,6 +61,8 @@ SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host
 }
 
 const TranslationRule *SemanticTranslator::find_expand_rule(const Instruction &inst) const {
+  if (!has_expand_rule_encoding(inst.encoding_id()))
+    return nullptr;
   const uint32_t key = packed_rule_key(inst.encoding_id(), inst.opcode());
   auto it = std::lower_bound(expand_rule_keys_.begin(), expand_rule_keys_.end(), key);
   if (it == expand_rule_keys_.end() || *it != key)
@@ -84,6 +85,11 @@ ExpandResult SemanticTranslator::try_lower_expand(const Instruction &inst, uint6
 
 bool SemanticTranslator::has_expand_rule(const Instruction &inst) const {
   return has_expand_rule(inst.encoding_id(), inst.opcode());
+}
+
+bool SemanticTranslator::expand_rule_requires_liveness(const Instruction &inst) const {
+  const TranslationRule *rule = find_expand_rule(inst);
+  return rule != nullptr && rule->requires_liveness;
 }
 
 } // namespace rocjitsu

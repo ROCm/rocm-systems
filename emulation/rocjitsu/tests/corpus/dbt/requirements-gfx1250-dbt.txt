@@ -1,0 +1,4 @@
+--index-url https://rocm.nightlies.amd.com/whl-multi-arch/
+
+amd-torch-device-gfx1250==2.12.0+rocm7.15.0a20260726
+rocm-sdk-devel==7.15.0a20260726

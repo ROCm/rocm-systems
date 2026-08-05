@@ -50,8 +50,10 @@ struct ncclKernelMatch {
 };
 
 #define ncclGetKernelIndex(p_comm) ((p_comm)->unroll)
-static ncclKernelMatch const ncclKerns[3] = {
-  {(void*)ncclDevKernel_Generic_1, true}, {(void*)ncclDevKernel_Generic_2, true}, {(void*)ncclDevKernel_Generic_4, true}
+static ncclKernelMatch const ncclKerns[6] = {
+  {(void*)ncclDevKernel_Generic_1, true},  {(void*)ncclDevKernel_Generic_2, true},
+  {(void*)ncclDevKernel_Generic_4, true},  {(void*)ncclDevKernel_Generic_8, true},
+  {(void*)ncclDevKernel_Generic_16, true}, {(void*)ncclDevKernel_Generic_32, true}
 };
 
 static int rcclProtoGrainSize(int proto, ncclComm* comm) {
@@ -651,7 +653,8 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
     bool regNeedConnect = true;
     ncclRegisterCollNvlsBuffers(comm, task, regBufSend, regBufRecv, &planner->collCleanupQueue, &regNeedConnect);
 
-    if (comm->runtimeConn && comm->initAlgoChannels[task->algorithm] == false) {
+    // Connect PAT on demand even when runtimeConn is off (ROCm default), so PAT QPs are created lazily on first PAT collective.
+    if ((comm->runtimeConn || task->algorithm == NCCL_ALGO_PAT) && comm->initAlgoChannels[task->algorithm] == false) {
       if (task->algorithm == NCCL_ALGO_NVLS_TREE && comm->initAlgoChannels[NCCL_ALGO_NVLS] == false &&
           regNeedConnect == true) {
         comm->initAlgoChannels[NCCL_ALGO_NVLS] = true;
@@ -823,8 +826,9 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
       devWork->channelLo = 0;
       devWork->channelHi = nChannels - 1;
       // RCCL: CollNet path never set task->nChannels; profiler received 0.
-      // Clamp to UINT8_MAX: ENABLE_WARP_SPEED pushes MAXCHANNELS to 512 which wraps uint8.
-      task->nChannels = (nChannels <= UINT8_MAX) ? (uint8_t)nChannels : UINT8_MAX;
+      // task->nChannels is uint16_t — clamp to UINT16_MAX so ENABLE_WARP_SPEED
+      // (MAXCHANNELS=512) doesn't wrap.
+      task->nChannels = (nChannels <= UINT16_MAX) ? (uint16_t)nChannels : UINT16_MAX;
       devWork->collnet.count = task->count;
       devWork->collnet.chunkCount = chunkSize / ncclTypeSize(task->datatype);
       devWork->direct = directFlags;
@@ -889,12 +893,9 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
       (countHi != 0 ? countHi : countLo) -= cells * elementsPerCell - task->count;
 
       nChannels = (countLo != 0 ? 1 : 0) + nMidChannels + (cellsHi != 0 ? 1 : 0);
-      // Update number of channels propagated to the profiler
-#ifdef ENABLE_WARP_SPEED
-      task->nChannels = nChannels;
-#else
-      task->nChannels = (uint8_t)nChannels;
-#endif
+      // Update number of channels propagated to the profiler. task->nChannels
+      // is uint16_t — wide enough for MAXCHANNELS=256 without wrap.
+      task->nChannels = (uint16_t)nChannels;
       // Ensure room for worst case of one new batch per channel
       if (!ncclTestBudget(budget, plan->nWorkBatches + nChannels, plan->workBytes + workNode->size)) {
         return ncclSuccess;
@@ -1032,8 +1033,31 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
     plan->threadPerBlock = std::max(plan->threadPerBlock, 192 /* 3*WARP_SIZE */);
 #endif
     if (!plan->kernelSpecialized) {
-      plan->kernelFn = ncclKerns[ncclGetKernelIndex(comm)].kernelFn;
-      plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
+      int kernelIndex = ncclGetKernelIndex(comm);
+      if (IsArchMatch(comm->archName, "gfx1250") && task->protocol == NCCL_PROTO_LL) {
+        if (getenv("RCCL_UNROLL_FACTOR") != nullptr) {
+          if (kernelIndex == NCCL_UNROLL_32) {
+            static bool warnedLlUnroll32 = false;
+            if (!warnedLlUnroll32) {
+              WARN("RCCL_UNROLL_FACTOR=5 (unroll 32) may cause issues with LL protocol on gfx1250; "
+                   "consider RCCL_UNROLL_FACTOR=3 (unroll 8) for LL protocol collectives.");
+              warnedLlUnroll32 = true;
+            }
+          }
+        } else if (ncclDevFuncUnrollGenerated[NCCL_UNROLL_8]) {
+          if (kernelIndex != NCCL_UNROLL_8) {
+            static bool loggedLlUnrollClamp = false;
+            if (!loggedLlUnrollClamp) {
+              INFO(NCCL_INIT, "Using unroll 8 for LL protocol on gfx1250 (default unroll %d)",
+                   (int)(pow(2.0, (double)kernelIndex)));
+              loggedLlUnrollClamp = true;
+            }
+          }
+          kernelIndex = NCCL_UNROLL_8;
+        }
+      }
+      plan->kernelFn = ncclKerns[kernelIndex].kernelFn;
+      plan->kernelSpecialized = ncclKerns[kernelIndex].specialized;
     }
     // Profiler
     plan->groupApiEventHandle = task->groupApiEventHandle;
@@ -1934,6 +1958,12 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
         plan->ceCollArgs->func = task->func;
         plan->ceCollArgs->sendWin = task->sendWin;
         plan->ceCollArgs->recvWin = task->recvWin;
+        plan->ceCollArgs->useDda = task->useDda;
+        plan->ceCollArgs->ddaPeerBases = task->ddaPeerBases;
+        plan->ceCollArgs->ddaUserRecvBuff = task->ddaUserRecvBuff;
+        plan->ceCollArgs->ddaCopyBackBytes = task->ddaCopyBackBytes;
+        plan->ceCollArgs->datatype = task->datatype;
+        plan->ceCollArgs->redOp = task->opHost;
         plan->ceCollArgs->collApiEventHandle = task->collApiEventHandle;
 
         if (comm->rank == 0) {
@@ -2084,7 +2114,7 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   ncclResult_t ret = ncclSuccess;
   struct ncclKernelPlanner* planner = &comm->planner;
   int nChannels = 0;
-  for (int i = 0; i < MAXCHANNELS / 64; i++) nChannels += countOneBits(plan->channelMask.masks[i]);
+  for (int i = 0; i < MAXCHANNELS / CHANNELS_PER_MASK_WORD; i++) nChannels += countOneBits(plan->channelMask.masks[i]);
   void* sym = plan->kernelFn;
 #ifdef ENABLE_WARP_SPEED
   int warpsPerBlock = plan->threadPerBlock / comm->WarpSize;
@@ -2096,6 +2126,14 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   dim3 block = {(unsigned)plan->threadPerBlock, 1, 1};
   int smem = plan->isSymColl ? plan->kernelDynSmem : rcclShmemDynamicSize(comm->cudaArch, comm->WarpSize);
   cudaStream_t launchStream = planner->streams->stream;
+
+  // Verify actual kernel launch geometry against init-time channel counts.
+  bool isP2pPlan = !ncclIntruQueueEmpty(&plan->p2pTaskQueue);
+  INFO(NCCL_COLL,
+       "Launch %s kernel: gridDim.x=%u blockDim.x=%u (p2pnChannels=%d, p2pnChannelsPerPeer=%d, nChannels=%d, "
+       "nWorkBatches=%d)",
+       isP2pPlan ? "P2P" : "COLL", grid.x, block.x, comm->p2pnChannels, comm->p2pnChannelsPerPeer, comm->nChannels,
+       plan->nWorkBatches);
 
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));
 
@@ -2570,8 +2608,18 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
   } else if (info->algorithm == NCCL_ALGO_TREE) {
     nc = std::min(nc, 64); // Tree uses at most 64 channels as we don't support WarpSpeed Tree.
 #else
+    // Mirror the WarpSpeed cap: TREE multi-node correctness has not been
+    // validated past 64 channels even though MAXCHANNELS now permits 256.
+    // Cap nc to 64 here so an opt-in NCCL_MAX_NCHANNELS=256 doesn't push TREE
+    // into the unvalidated regime; RING is unaffected and scales to 256.
+    nc = std::min(nc, 64);
     info->nMaxChannels = nc;
 #endif
+  } else if (info->algorithm == NCCL_ALGO_TREE) {
+    // Same TREE cap for the non-AllReduce path (in case a tree-only collective
+    // ends up here under an opt-in higher max).
+    nc = std::min(nc, 64);
+    info->nMaxChannels = nc;
   } else {
     info->nMaxChannels = nc;
   }
@@ -3308,17 +3356,15 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
 }
 
 static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* info, struct ncclDevrWindow* sendWin,
-                                     struct ncclDevrWindow* recvWin, struct ncclDevRedOpFull opDev) {
+                                     struct ncclDevrWindow* recvWin,
+                                     void* ddaRecvBase, // non-null -> DDA path: local scratch buffer
+                                     void** ddaPeerBasesHost, // host [nRanks] peer scratch bases (DDA path)
+                                     struct ncclDevRedOpFull opDev) {
   struct ncclKernelPlanner* planner = &comm->planner;
 
-  // Check if CE needs initialization
-  if (comm->ceColl.baseUCSymReadyPtr == NULL && ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
-    struct ncclCeInitTask* ceTask;
-    NCCLCHECK(ncclCalloc(&ceTask, 1));
-    ceTask->comm = comm;
-    ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
-    ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
-  }
+  // CE init is triggered in taskAppend() before this function is called,
+  // covering all CE-capable collectives including AllReduce (when user buffers
+  // are symmetrically registered via ncclMemAlloc / -R 2).
 
   // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
   ncclGroupCommJoin(info->comm, ncclGroupTaskTypeCollective);
@@ -3333,7 +3379,14 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
 
   t->func = info->coll;
   t->sendbuff = info->sendbuff;
-  t->recvbuff = info->recvbuff;
+  t->recvbuff = ddaRecvBase != nullptr ? ddaRecvBase : info->recvbuff;
+  t->useDda = ddaRecvBase != nullptr;
+  t->ddaPeerBases = ddaPeerBasesHost;
+  // DDA path stages results in scratch (t->recvbuff); remember the real user
+  // recvbuff. The copy-back size is collective-specific and computed at the copy
+  // site (ncclLaunchCeColl).
+  t->ddaUserRecvBuff = ddaRecvBase != nullptr ? info->recvbuff : nullptr;
+  t->ddaCopyBackBytes = 0;
   t->count = info->count;
   t->root = info->root;
   t->datatype = info->datatype;
@@ -3581,6 +3634,7 @@ static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
   return ncclSuccess;
 }
 
+RCCL_PARAM(ForceCe, "FORCE_CE", 1);
 // Converts `info` to a task and adds it to `comm->planner`. The exception is with
 // single rank communicators, collectives are issued as `ncclMemcpyAsync`s and
 // thus don't need a task.
@@ -3618,17 +3672,82 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       struct ncclDevrWindow* recvWin;
       ncclDevrFindWindow(comm, info->sendbuff, &sendWin);
       ncclDevrFindWindow(comm, info->recvbuff, &recvWin);
-      // Append CE collective task if CE is supported and requested by user
-      ncclSymRegType_t winRegType;
-      NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
-      bool ceAvailable = ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
+
       bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
 
-      if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment) {
-        NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
+      // CE collectives are not graph-capture-safe (hipMemcpyBatchAsync and the
+      // cross-rank memop barrier deadlock on graph replay), so skip CE entirely
+      // while the stream is capturing and fall through to the graph-safe
+      // DDA/symmetric/kernel paths.
+      bool ceCapturing, ceArGraphAllowed;
+      if (info->ceGraphDecisionValid) {
+        // Already computed by ncclAllReduce_impl() for this call.
+        ceCapturing = info->ceCapturing;
+        ceArGraphAllowed = info->ceArGraphAllowed;
+      } else {
+        struct ncclCudaGraph ceGraph;
+        NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, info->stream, comm->config.graphUsageMode));
+        ceCapturing = ncclCudaGraphValid(ceGraph);
+        rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
+        ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
       }
-      // Append kernel-based collective
-      else {
+
+      // Trigger CE initialization on the first CE-capable collective.
+      // This covers collectives whose user buffers ARE registered (AllGather,
+      // AlltoAll, Scatter, Gather) as well as AllReduce, which may bypass the
+      // ceCollTaskAppend path when user buffers are not symmetrically registered.
+      // Without this trigger, CE AllReduce-only workloads would never initialize
+      // the CE runtime (ceARTmpBuf stays NULL).
+      if (!ceCapturing && ncclCeImplemented(info->coll, info->op, info->datatype) && comm->symmetricSupport &&
+          comm->nNodes == 1 && comm->ceColl.baseUCSymReadyPtr == NULL && ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
+        struct ncclCeInitTask* ceTask;
+        NCCLCHECK(ncclCalloc(&ceTask, 1));
+        ceTask->comm = comm;
+        ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
+        ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+      }
+      // enable ce allreduce for allreduce with size >= 4MB and <= 256MB
+      // Size gate for CE AllReduce: ceARTmpBuf is sized for at most
+      // NCCL_CE_AR_MAX_MSG_BYTES total bytes.
+      bool ceAllReduceFits = true;
+      ncclSymRegType_t winRegType;
+      NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+      bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
+      if (info->coll == ncclFuncAllReduce) {
+        if (!ceArGraphAllowed || !rcclUseCeAllReduce(comm, info->count, info->datatype, info->op)) {
+          ceAvailable = false;
+        } else {
+          size_t totalBytes = info->count * ncclTypeSize(info->datatype);
+          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || totalBytes < (size_t)NCCL_CE_AR_MIN_MSG_BYTES) {
+            ceAllReduceFits = false;
+            INFO(NCCL_COLL, "CE AllReduce: msg %zu B range (%zu, %zu) B, falling back to standard NCCL AllReduce",
+                 totalBytes, (size_t)NCCL_CE_AR_MIN_MSG_BYTES, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
+          }
+        }
+      }
+
+      // Append CE collective task if CE is supported and requested by user
+      bool CeScratchAvailable =
+        !ceCapturing && ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
+      size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
+      if (rcclParamForceCe() && CeScratchAvailable && winRegType != ncclSymSendRegRecvReg &&
+          winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr &&
+          recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
+        INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);
+        NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr, comm->ddaScratch,
+                                   comm->ddaPeerPtrsHost, opDev));
+      } else if (ceAllReduceFits && ceAvailable && !hasSysmemSegment) {
+        INFO(NCCL_INIT, "Taking CE collective path for AllReduce");
+        NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
+                                   opDev));
+      } else if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment &&
+                 ceAllReduceFits) {
+        INFO(NCCL_INIT, "Taking CE collective path with symmetric registered windows for user buffers");
+        NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
+                                   opDev));
+        // Append kernel-based collective
+      } else {
+        INFO(NCCL_INIT, "Taking kernel-based collective path");
         // currently legacy sendrecv needs src and dst buffers to be registered
         // we cannot allow UB if alltoall/scatter/gather fallback to legacy sendrecv
         // when src or dst buffers are not registered
@@ -3695,7 +3814,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         } else if (ceAvailable && comm->symmetricSupport && info->coll == ncclFuncAllGather &&
                    info->count > ncclParamSymCeThreshold() && comm->minCompCap >= 100 && comm->isAllDirectNvlink) {
           // Use CE for Allgather on Blackwell with size > 8MB
-          NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
+          NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
+                                     opDev));
         } else {
           NCCLCHECK(collTaskAppend(comm, info, opDev));
         }

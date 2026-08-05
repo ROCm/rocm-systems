@@ -811,26 +811,30 @@ TEST(Instrumentor, PreservesOuterCoverageAcrossOverlappingSClauses) {
 }
 
 TEST(Instrumentor, UnsupportedArchReportsErrorInsteadOfCrashing) {
-  // Decoder::create returns nullptr for RV32I/RV64I/INVALID. The Instrumentor
-  // must surface that as a structured ValidationResult error rather than
-  // dereferencing a null decoder during block construction.
+  // The RISC-V decoder is available through the generic target registry, but
+  // the AMDGPU Instrumentor must reject it explicitly rather than attempting
+  // to decode an AMDGPU code object with the wrong ISA.
   auto image = make_gfx950_elf_with_two_nops();
   AmdGpuCodeObject obj(image.data(), image.size());
   ASSERT_TRUE(obj.is_valid());
 
-  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_RV32I);
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_RV64I);
   instrumentor.add_point_by_offset(/*anchor_offset=*/4);
 
   auto result = instrumentor.validate_points();
   EXPECT_TRUE(result.sites.empty());
   ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("does not support RISC-V"), std::string::npos)
+      << "error was: " << result.errors.front();
 
   // patch() must surface the same error rather than crashing.
-  Instrumentor instrumentor2(obj, ROCJITSU_CODE_ARCH_RV32I);
+  Instrumentor instrumentor2(obj, ROCJITSU_CODE_ARCH_RV64I);
   instrumentor2.add_point_by_offset(/*anchor_offset=*/4);
   auto patched = instrumentor2.patch();
   EXPECT_TRUE(patched.elf_bytes.empty());
   ASSERT_FALSE(patched.errors.empty());
+  EXPECT_NE(patched.errors.front().find("does not support RISC-V"), std::string::npos)
+      << "error was: " << patched.errors.front();
 }
 
 //==============================================================================

@@ -206,6 +206,19 @@ hsa_status_t SdmaQueue::Inactivate() {
   return status;
 }
 
+hsa_status_t SdmaQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value) {
+  switch (attribute) {
+    case HSA_AMD_QUEUE_INFO_ENGINE_TYPE:
+      *static_cast<hsa_amd_queue_engine_t*>(value) = HSA_AMD_QUEUE_ENGINE_SDMA;
+      return HSA_STATUS_SUCCESS;
+    case HSA_AMD_QUEUE_INFO_SDMA_ENGINE_ID:
+      *static_cast<uint32_t*>(value) = static_cast<uint32_t>(sdma_engine_id_);
+      return HSA_STATUS_SUCCESS;
+    default:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+}
+
 hsa_status_t SdmaQueue::RingDoorbell(uint64_t write_index) {
   if (queue_wptr_ == nullptr || queue_doorbell_ == nullptr) {
     return HSA_STATUS_ERROR_INVALID_QUEUE;

@@ -4,6 +4,7 @@
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
+#include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 
@@ -232,6 +233,7 @@ SimulatedKfd::~SimulatedKfd() {
 void SimulatedKfd::setup_topology(const Sysfs::GpuInfo &gpu) {
   if (!gpus_.empty())
     gpus_[0].gpu_id = gpu.gpu_id;
+  gpu_infos_ = {gpu};
   topology_.generate(gpu);
   topology_.setup_environment();
 }
@@ -249,7 +251,8 @@ void SimulatedKfd::setup_topology(const std::vector<config::KfdDeviceConfig> &de
     return;
   for (size_t i = 0; i < infos.size() && i < gpus_.size(); ++i)
     gpus_[i].gpu_id = infos[i].gpu_id;
-  topology_.generate(infos);
+  gpu_infos_ = std::move(infos);
+  topology_.generate(gpu_infos_);
   topology_.setup_environment();
 }
 
@@ -299,10 +302,11 @@ void SimulatedKfd::init_command_processors_locked() {
       continue;
     if (!g.soc)
       continue;
-    uint64_t lds_base = 0x1000000000000ULL + i * 0x10000000000ULL;
-    uint64_t scratch_base = 0x2000000000000ULL + i * 0x10000000000ULL;
-    g.soc->set_apertures(lds_base, lds_base + 0xFFFFFFFFULL, scratch_base,
-                         scratch_base + 0xFFFFFFFFULL);
+    // Same source as the apertures GET_PROCESS_APERTURES_NEW and the DBG_TRAP
+    // device snapshot advertise: what the shaders translate LDS/scratch against
+    // must be what the runtime and the debugger were told.
+    const kfd_process_device_apertures ap = gpu_apertures(static_cast<uint32_t>(i));
+    g.soc->set_apertures(ap.lds_base, ap.lds_limit, ap.scratch_base, ap.scratch_limit);
     g.soc->for_each_cp([this](amdgpu::CommandProcessor *cp) {
       cp->set_interrupt_callback([this](uint32_t process_id, uint32_t event_id) {
         std::lock_guard<std::mutex> ilk(interrupt_mutex_);
@@ -370,7 +374,8 @@ int SimulatedKfd::open() {
   proc->event_state_.reset();
   for (auto &g : gpus_) {
     if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
-      mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_);
+      mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_,
+                            proc->page_table_generation());
       if (!daemon_mode_)
         mem->set_passthrough(true);
     }
@@ -431,7 +436,8 @@ uint32_t SimulatedKfd::open_process(pid_t client_pid) {
     proc->event_state_.reset();
     for (auto &g : gpus_) {
       if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
-        mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_);
+        mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_,
+                              proc->page_table_generation());
         if (client_pid > 0)
           mem->set_process_client_pid(pid, client_pid);
       }
@@ -1163,24 +1169,34 @@ int SimulatedKfd::get_process_apertures_ioctl(void *arg) {
 
   auto *apertures =
       reinterpret_cast<kfd_process_device_apertures *>(args->kfd_process_device_apertures_ptr);
-  for (uint32_t i = 0; i < n && i < args->num_of_nodes; ++i) {
-    apertures[i].lds_base = 0x1000000000000ULL + static_cast<uint64_t>(i) * 0x10000000000ULL;
-    apertures[i].lds_limit = apertures[i].lds_base + 0xFFFFFFFFULL;
-    apertures[i].scratch_base = 0x2000000000000ULL + static_cast<uint64_t>(i) * 0x10000000000ULL;
-    apertures[i].scratch_limit = apertures[i].scratch_base + 0xFFFFFFFFULL;
-    // Wide GPUVM aperture: rocjitsu maps GPU VAs directly to host pointers (the
-    // doorbell base and GEM_VA mappings publish reinterpret_cast<uint64_t>(ptr) as
-    // the GPU VA), so this aperture must span the host address range the runtime
-    // validates VAs against — hence a low base and a 47-bit limit rather than the
-    // narrower hardware GPUVM window.
-    apertures[i].gpuvm_base = 0x10000ULL;
-    apertures[i].gpuvm_limit = 0x7FFFFFFFFFFFULL;
-    apertures[i].gpu_id = gpus_[i].gpu_id;
-    apertures[i].pad = 0;
-  }
+  const uint32_t filled = std::min(n, args->num_of_nodes);
+  for (uint32_t i = 0; i < filled; ++i)
+    apertures[i] = gpu_apertures(i);
 
-  args->num_of_nodes = n;
+  // The count written back is how many entries were filled, not how many nodes
+  // exist -- kfd_ioctl_get_process_apertures_new() reports the loop index. A
+  // caller whose buffer was smaller than the node count would otherwise iterate
+  // past its own allocation over entries this call never wrote.
+  args->num_of_nodes = filled;
   return 0;
+}
+
+kfd_process_device_apertures SimulatedKfd::gpu_apertures(uint32_t ordinal) const {
+  const uint64_t offset = static_cast<uint64_t>(ordinal) * kApertureStride;
+  const uint64_t lds_base = 0x1000000000000ULL + offset;
+  const uint64_t scratch_base = 0x2000000000000ULL + offset;
+  return {
+      .lds_base = lds_base,
+      .lds_limit = lds_base + 0xFFFFFFFFULL,
+      .scratch_base = scratch_base,
+      .scratch_limit = scratch_base + 0xFFFFFFFFULL,
+      // rocjitsu maps GPU VAs directly to host pointers, so the aperture must
+      // cover the host addresses accepted by the runtime.
+      .gpuvm_base = 0x10000ULL,
+      .gpuvm_limit = 0x7FFFFFFFFFFFULL,
+      .gpu_id = ordinal < gpus_.size() ? gpus_[ordinal].gpu_id : 0,
+      .pad = 0,
+  };
 }
 
 int SimulatedKfd::get_available_memory_ioctl(void *arg) {
@@ -1767,17 +1783,7 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
                          "true sharing)");
       }
 
-      {
-        std::unique_lock ptlk(proc.page_table_mutex_);
-        auto *old_base = static_cast<uint8_t *>(alloc.host_ptr);
-        auto *new_base = static_cast<uint8_t *>(new_host_ptr);
-        for (size_t off = 0; off < alloc.size; off += KfdProcess::kPageSize) {
-          uint64_t page_num = (alloc.gpu_va + off) >> KfdProcess::kPageShift;
-          auto pt_it = proc.page_table_.find(page_num);
-          if (pt_it != proc.page_table_.end() && pt_it->second.host_ptr == old_base + off)
-            pt_it->second.host_ptr = new_base + off;
-        }
-      }
+      proc.remap_page_host_ptrs(alloc.gpu_va, alloc.host_ptr, new_host_ptr, alloc.size);
 
       if (alloc.host_ptr_owned)
         libc_passthrough().munmap(alloc.host_ptr, alloc.size);
@@ -1808,15 +1814,7 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
     // the local GPU sees writes from the importing GPU.  On real hardware
     // xGMI snoops handle this; in the simulator CC forces L2 invalidate
     // before every refetch, emulating the cross-GPU coherence protocol.
-    {
-      std::unique_lock ptlk(proc.page_table_mutex_);
-      for (size_t off = 0; off < alloc.size; off += KfdProcess::kPageSize) {
-        uint64_t page_num = (alloc.gpu_va + off) >> KfdProcess::kPageShift;
-        auto pt_it = proc.page_table_.find(page_num);
-        if (pt_it != proc.page_table_.end())
-          pt_it->second.mtype = amdgpu::Mtype::CC;
-      }
-    }
+    proc.set_page_mtype(alloc.gpu_va, alloc.size, amdgpu::Mtype::CC);
 
     alloc_size = alloc.size;
     alloc_flags = alloc.flags;
@@ -2186,12 +2184,14 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     // mode nothing is owned, so the debugger's own fd is left untouched.
     sess = KfdProcess::DebugSession{};
     return 0;
+  case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+    return debug_device_snapshot(args->device_snapshot);
 
   // Recognized ops whose handlers are not wired up yet. The kernel dispatches
   // each to a real implementation; the skeleton reports ENOSYS ("not
   // implemented") so a debugger can tell a stubbed-but-valid op apart from a
   // genuinely unknown one (EINVAL below). Each case graduates out of this group
-  // as its handler lands.
+  // as its handler lands — move it above this comment, not below it.
   case KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT:
   case KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED:
   case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE:
@@ -2204,11 +2204,88 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   case KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT:
   case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
   case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
-  case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
     return -ENOSYS;
   default:
     return -EINVAL;
   }
+}
+
+int SimulatedKfd::debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args &args) {
+  // Mirrors kfd_dbg_trap_device_snapshot() (amd/amdkfd/kfd_debug.c): report the
+  // total device count, clamp the per-entry size, and fill up to the caller's
+  // buffer capacity. The two-call protocol is to call once with a small buffer
+  // and read the true total back, then call again sized for it -- rocdbgapi's
+  // kfd_snapshots::fetch() probes with a one-entry buffer, not a null pointer.
+  //
+  // The buffer is validated first, before any output is written: the driver
+  // rejects a malformed request outright (-EINVAL) rather than half-answering
+  // it, so a caller cannot read a device total off a call that failed this way.
+  if (args.snapshot_buf_ptr == 0)
+    return -EINVAL;
+
+  // Only devices we can actually describe are enumerable. gpu_infos_ is filled
+  // by setup_topology, which every embedder is free to skip or to call with
+  // fewer devices than gpus_ holds (a config whose device block is absent, or
+  // the single-GpuInfo overload on a multi-SoC driver). Reporting gpus_.size()
+  // regardless would hand rocdbgapi entries with simd_count/array_count zero,
+  // which its agent_snapshot treats as a fatal error rather than a bad ioctl.
+  const uint32_t total = static_cast<uint32_t>(std::min(gpus_.size(), gpu_infos_.size()));
+  const uint32_t in_entry_size = args.entry_size;
+  const uint32_t fill = std::min<uint32_t>(args.num_devices, total);
+
+  args.num_devices = total;
+  args.entry_size = std::min<uint32_t>(in_entry_size, sizeof(kfd_dbg_device_info_entry));
+
+  if (fill == 0)
+    return 0;
+
+  // A zero stride is not an error: the driver's per-entry copy_to_user() moves
+  // entry_size(OUT) == 0 bytes and succeeds, so the call reports the device
+  // total and writes nothing. Falling through reproduces that exactly.
+  auto *out = reinterpret_cast<uint8_t *>(static_cast<uintptr_t>(args.snapshot_buf_ptr));
+  for (uint32_t i = 0; i < fill; ++i) {
+    const Sysfs::GpuInfo &info = gpu_infos_[i];
+    const kfd_process_device_apertures ap = gpu_apertures(i);
+
+    kfd_dbg_device_info_entry entry{};
+    entry.gpu_id = gpus_[i].gpu_id;
+    entry.lds_base = ap.lds_base;
+    entry.lds_limit = ap.lds_limit;
+    entry.scratch_base = ap.scratch_base;
+    entry.scratch_limit = ap.scratch_limit;
+    entry.gpuvm_base = ap.gpuvm_base;
+    entry.gpuvm_limit = ap.gpuvm_limit;
+    entry.location_id = info.location_id;
+    entry.vendor_id = info.vendor_id;
+    entry.device_id = info.device_id;
+    entry.revision_id = info.pci_revision_id;
+    entry.subsystem_vendor_id = info.vendor_id;
+    entry.subsystem_device_id = info.device_id;
+    entry.fw_version = info.fw_version;
+    entry.gfx_target_version = info.gfx_target_version;
+    entry.simd_count = info.simd_count;
+    entry.max_waves_per_simd = info.max_waves_per_simd;
+    // KFD array_count is the per-XCC shader-array count (node_props.array_count).
+    // Unlike sysfs, kfd_debug.c passes it through unscaled and reports num_xcc
+    // alongside, so rocdbgapi recovers the SoC's total shader-engine count as
+    // array_count * num_xcc / simd_arrays_per_engine. Normalize the XCC count
+    // the same way sysfs does so that quotient cannot come out zero.
+    entry.array_count = info.array_count_per_xcc();
+    entry.simd_arrays_per_engine = info.effective_arrays_per_engine();
+    entry.num_xcc = info.effective_num_xcc();
+    const kmd::DebugTopology topology =
+        kmd::effective_topology_for(info.gfx_target_version, info.capability, info.capability2,
+                                    info.debug_prop, info.revision_id);
+    entry.capability = topology.capability;
+    // debug_prop is __u32 in the snapshot entry but __u64 in the sysfs node
+    // property, so a config that captured a debug_prop above 2^32 would have
+    // the two paths report different values. The derived bits all fit; make the
+    // narrowing the uapi struct imposes explicit rather than incidental.
+    entry.debug_prop = static_cast<uint32_t>(topology.debug_prop);
+
+    std::memcpy(out + static_cast<uint64_t>(i) * in_entry_size, &entry, args.entry_size);
+  }
+  return 0;
 }
 
 int SimulatedKfd::set_xnack_mode_ioctl(void *arg) {
