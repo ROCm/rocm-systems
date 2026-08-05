@@ -370,8 +370,26 @@ ROCprofiler-SDK, use the SDK tool:
 
    rocprofv3-avail list --spm
 
-Sample output (one counter on one GPU; the full listing covers every
-SPM-capable counter on each agent):
+Sample output (excerpt):
+
+.. code-block:: text
+
+   GPU                           : 0
+   Name                          : gfx942
+   spm                           :
+
+   ...
+   SQ_WAVES                            SQ_WAVES_EQ_64                      SQ_WAVES_LT_16
+   SQ_WAVES_LT_32                      SQ_WAVES_LT_48                      SQ_WAVES_LT_64
+   SQ_WAVES_RESTORED                   SQ_WAVES_SAVED                      SQ_WAVE_CYCLES
+
+To inspect SPM metadata for a specific counter, use:
+
+.. code-block:: shell
+
+   rocprofv3-avail info --spm SQ_WAVES
+
+Sample output (truncated to one GPU):
 
 .. code-block:: text
 
