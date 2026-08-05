@@ -21,6 +21,7 @@
 #include <string_view>
 #include <vector>
 
+#include <dlfcn.h>
 #include <sys/stat.h>
 
 namespace {
@@ -221,6 +222,57 @@ TEST_F(TranslationStoreTest, ASharedTreeAnyoneCanWriteIsRefused) {
     EXPECT_FALSE(runtime->available()) << domain;
   }
 }
+
+#if defined(RJ_TRANSLATOR_PROBE_a) && defined(RJ_TRANSLATOR_PROBE_b)
+/// @brief A store keyed on a translator loaded from @p module.
+///
+/// @details The module stays loaded for the process lifetime. Unloading it while
+/// a store still names an address inside it would leave that address pointing at
+/// nothing, and the store resolves it lazily.
+[[nodiscard]] std::unique_ptr<TranslationStore>
+open_against_module(const char *module, std::string_view domain, const char *root) {
+  void *handle = dlopen(module, RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);
+  EXPECT_NE(handle, nullptr) << dlerror();
+  if (handle == nullptr)
+    return nullptr;
+  void *anchor = dlsym(handle, "rj_probe_translator_anchor");
+  EXPECT_NE(anchor, nullptr) << module;
+  if (anchor == nullptr)
+    return nullptr;
+  auto store = std::make_unique<TranslationStore>(domain, anchor);
+  store->set_root_for_test(root);
+  return store;
+}
+
+TEST_F(TranslationStoreTest, ARebuiltTranslatorDoesNotReadTheOldEntries) {
+  // The anti-staleness guarantee. Translation output is a function of the
+  // translator, so an entry produced by one build must never satisfy a request
+  // made against another -- a miss costs a retranslation, whereas a stale hit
+  // silently runs code the current translator would not have emitted.
+  //
+  // The two modules differ in build id and nothing else, which is what a rebuild
+  // that changed emitted bytes looks like to the store.
+  auto first = open_against_module(RJ_TRANSLATOR_PROBE_a, "pair-a", root_);
+  ASSERT_NE(first, nullptr);
+  put(*first, kObject);
+  ASSERT_EQ(get(*first), kObject) << "the entry was never written";
+
+  auto second = open_against_module(RJ_TRANSLATOR_PROBE_b, "pair-a", root_);
+  ASSERT_NE(second, nullptr);
+  EXPECT_TRUE(get(*second).empty()) << "a differently-built translator read a stale entry";
+
+  // The keys must actually differ, rather than the miss coming from some
+  // unrelated refusal that would also hide a real collision.
+  EXPECT_NE(first->key_for(kSource, kIdentity).digest, second->key_for(kSource, kIdentity).digest);
+
+  // And the second build can hold its own entry for the same source alongside
+  // the first, so this is separation rather than the tier being unusable.
+  const std::vector<uint8_t> rebuilt{'n', 'e', 'w', 'e', 'r'};
+  put(*second, rebuilt);
+  EXPECT_EQ(get(*second), rebuilt);
+  EXPECT_EQ(get(*first), kObject);
+}
+#endif // RJ_TRANSLATOR_PROBE_a && RJ_TRANSLATOR_PROBE_b
 
 TEST_F(TranslationStoreTest, TheSharedTierHoldsWhatTheSessionTierRefuses) {
   // The reason the shared tier exists. The session tier is rooted in the
