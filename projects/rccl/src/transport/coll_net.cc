@@ -558,24 +558,28 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
                                                        &resources->sendMhandles[NCCL_PROTO_SIMPLE]),
                   ret, peermem_send);
     (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
     needReg = false;
   }
 peermem_send:
+  // A failed cuMem attempt is recoverable here: the fallbacks below register the same
+  // buffer, so drop its error and the fd it may have left open before they run.
+  if (needReg) {
+    ret = ncclSuccess;
+    if (dmabuf_fd != -1) {
+      (void)close(dmabuf_fd);
+      dmabuf_fd = -1;
+    }
+  }
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
   if (needReg && resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf &&
       proxyState->ncclCollNet->regMrDmaBuf) {
-    uint64_t offset;
-    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)mapMem->cpuPtr, mapMem->size, &dmabuf_fd, &offset), ret,
-                 peermem_send_hsa);
-    NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
-                                                       NCCL_PTR_CUDA, offset, dmabuf_fd,
-                                                       &resources->sendMhandles[NCCL_PROTO_SIMPLE]),
-                  ret, peermem_send_hsa);
-    (void)close(dmabuf_fd);
-    needReg = false;
+    if (ncclHsaRegMrDmaBuf(proxyState->ncclCollNet->regMrDmaBuf, resources->collNetComm, mapMem->cpuPtr, mapMem->size,
+                           NCCL_PTR_CUDA, &resources->sendMhandles[NCCL_PROTO_SIMPLE])) {
+      needReg = false;
+    }
   }
-peermem_send_hsa:
 #endif
   if (needReg) {
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMr(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
@@ -671,24 +675,28 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
                                                        &resources->mhandles[NCCL_PROTO_SIMPLE]),
                   ret, peermem_recv);
     (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
     needReg = false;
   }
 peermem_recv:
+  // A failed cuMem attempt is recoverable here: the fallbacks below register the same
+  // buffer, so drop its error and the fd it may have left open before they run.
+  if (needReg) {
+    ret = ncclSuccess;
+    if (dmabuf_fd != -1) {
+      (void)close(dmabuf_fd);
+      dmabuf_fd = -1;
+    }
+  }
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
   if (needReg && resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf &&
       proxyState->ncclCollNet->regMrDmaBuf) {
-    uint64_t offset;
-    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)mapMem->cpuPtr, mapMem->size, &dmabuf_fd, &offset), ret,
-                 peermem_recv_hsa);
-    NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
-                                                       NCCL_PTR_CUDA, offset, dmabuf_fd,
-                                                       &resources->mhandles[NCCL_PROTO_SIMPLE]),
-                  ret, peermem_recv_hsa);
-    (void)close(dmabuf_fd);
-    needReg = false;
+    if (ncclHsaRegMrDmaBuf(proxyState->ncclCollNet->regMrDmaBuf, resources->collNetComm, mapMem->cpuPtr, mapMem->size,
+                           NCCL_PTR_CUDA, &resources->mhandles[NCCL_PROTO_SIMPLE])) {
+      needReg = false;
+    }
   }
-peermem_recv_hsa:
 #endif
   if (needReg) {
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMr(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
@@ -1494,21 +1502,21 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
     needReg = false;
   }
 peermem:
+  // A failed cuMem attempt is recoverable here: the fallbacks below register the same
+  // buffer, so close the fd it may have left open before they run.
+  if (dmabuf_fd != -1) {
+    (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
+  }
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
   if (needReg && resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf &&
       proxyState->ncclCollNet->regMrDmaBuf) {
-    uint64_t offset;
-    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret,
-                 peermem_hsa);
-    NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, (void*)info->buffer, info->size,
-                                                       NCCL_PTR_CUDA, offset, dmabuf_fd, &handle),
-                  ret, peermem_hsa);
-    (void)close(dmabuf_fd);
-    dmabuf_fd = -1;
-    needReg = false;
+    if (ncclHsaRegMrDmaBuf(proxyState->ncclCollNet->regMrDmaBuf, resources->collNetComm, (void*)info->buffer,
+                           info->size, NCCL_PTR_CUDA, &handle)) {
+      needReg = false;
+    }
   }
-peermem_hsa:
 #endif
   if (needReg) {
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMr(resources->collNetComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA,
@@ -1557,21 +1565,21 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
     needReg = false;
   }
 peermem:
+  // A failed cuMem attempt is recoverable here: the fallbacks below register the same
+  // buffer, so close the fd it may have left open before they run.
+  if (dmabuf_fd != -1) {
+    (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
+  }
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
   if (needReg && resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf &&
       proxyState->ncclCollNet->regMrDmaBuf) {
-    uint64_t offset;
-    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret,
-                 peermem_hsa);
-    NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, (void*)info->buffer, info->size,
-                                                       NCCL_PTR_CUDA, offset, dmabuf_fd, &handle),
-                  ret, peermem_hsa);
-    (void)close(dmabuf_fd);
-    dmabuf_fd = -1;
-    needReg = false;
+    if (ncclHsaRegMrDmaBuf(proxyState->ncclCollNet->regMrDmaBuf, resources->collNetComm, (void*)info->buffer,
+                           info->size, NCCL_PTR_CUDA, &handle)) {
+      needReg = false;
+    }
   }
-peermem_hsa:
 #endif
   if (needReg) {
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMr(resources->collNetComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA,

@@ -2381,9 +2381,9 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
   assert(respSize == sizeof(void*));
 
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+  int dmabuf_fd = -1;
   /* DMA-BUF support */
   if (resources->useDmaBuf && ncclCuMemEnable()) {
-    int dmabuf_fd;
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size,
                                               CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
                                               getHandleForAddressRangeFlags(resources->useGdr)),
@@ -2392,23 +2392,24 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
                                                    NCCL_PTR_CUDA, 0ULL, dmabuf_fd, &handle),
                   ret, peermem);
     (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
     needReg = false;
   }
 peermem:
+  // A failed cuMem attempt is recoverable here: the fallbacks below register the same
+  // buffer, so close the fd it may have left open before they run.
+  if (dmabuf_fd != -1) {
+    (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
+  }
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
   if (needReg && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
-    int dmabuf_fd;
-    uint64_t offset;
-    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret,
-                 peermem_hsa);
-    NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, (void*)info->buffer, info->size,
-                                                   NCCL_PTR_CUDA, offset, dmabuf_fd, &handle),
-                  ret, peermem_hsa);
-    (void)close(dmabuf_fd);
-    needReg = false;
+    if (ncclHsaRegMrDmaBuf(proxyState->ncclNet->regMrDmaBuf, resources->netSendComm, (void*)info->buffer, info->size,
+                           NCCL_PTR_CUDA, &handle)) {
+      needReg = false;
+    }
   }
-peermem_hsa:
 #endif
   if (needReg) {
     // Non-dmabuf regMr does not support multiple physical segments
@@ -2454,9 +2455,9 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
   assert(respSize == sizeof(void*));
 
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+  int dmabuf_fd = -1;
   /* DMA-BUF support */
   if (resources->useDmaBuf && ncclCuMemEnable()) {
-    int dmabuf_fd;
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size,
                                               CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
                                               getHandleForAddressRangeFlags(resources->useGdr)),
@@ -2465,23 +2466,24 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
                                                    NCCL_PTR_CUDA, 0ULL, dmabuf_fd, &handle),
                   ret, peermem);
     (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
     needReg = false;
   }
 peermem:
+  // A failed cuMem attempt is recoverable here: the fallbacks below register the same
+  // buffer, so close the fd it may have left open before they run.
+  if (dmabuf_fd != -1) {
+    (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
+  }
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
   if (needReg && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
-    int dmabuf_fd;
-    uint64_t offset;
-    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret,
-                 peermem_hsa);
-    NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, (void*)info->buffer, info->size,
-                                                   NCCL_PTR_CUDA, offset, dmabuf_fd, &handle),
-                  ret, peermem_hsa);
-    (void)close(dmabuf_fd);
-    needReg = false;
+    if (ncclHsaRegMrDmaBuf(proxyState->ncclNet->regMrDmaBuf, resources->netRecvComm, (void*)info->buffer, info->size,
+                           NCCL_PTR_CUDA, &handle)) {
+      needReg = false;
+    }
   }
-peermem_hsa:
 #endif
   if (needReg) {
     // Non-dmabuf regMr does not support multiple physical segments
