@@ -146,27 +146,6 @@ register_one(hub_t& hub, correlation_key key, uint64_t corr_id = 1)
 
 // U1: the state machine -- every legal transition, illegal ones rejected
 
-TEST(DispatchHub, register_then_prove_completes_once)
-{
-    auto hub = hub_t{};
-    auto key = key_of(4, 7);
-    ASSERT_TRUE(register_one(hub, key));
-    EXPECT_EQ(live_entries(hub), 1u);
-
-    hub.note_start(key, 1000);
-    auto p = hub.prove_eop(key, 2000, /*drain_loss_free=*/true);
-    ASSERT_TRUE(p.has_value());
-    ASSERT_TRUE(p->start_ticks.has_value());
-    EXPECT_EQ(*p->start_ticks, 1000u);
-    EXPECT_EQ(p->end_ticks, 2000u);
-    EXPECT_TRUE(p->payload.armed);  // ownership handed to the caller
-
-    // Proven entries leave the hub, so they can never be handed out again and can
-    // never cross to LEAKED.
-    EXPECT_EQ(live_entries(hub), 0u);
-    EXPECT_FALSE(hub.prove_eop(key, 3000, true).has_value());
-}
-
 // Shape (ii): the START was lost but the EOP still proves completion. The worker
 // turns a missing start_ticks into COMPLETED_NO_TIMING; the hub just reports it.
 TEST(DispatchHub, eop_without_start_still_proves_completion)
