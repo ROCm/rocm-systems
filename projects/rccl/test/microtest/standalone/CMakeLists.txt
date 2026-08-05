@@ -149,7 +149,8 @@ add_executable(rccl-UnitTestsMicroInit
 
 target_compile_options(rccl-UnitTestsMicroInit PRIVATE
   -isystem ${SA}/stubs
-  -include cstdint
+  # Absolute-path force-include prelude (<cstdint> + <ostream>); see the header.
+  -include ${SA}/init_host_prelude.h
   -Wno-unused-parameter -Wno-unused-variable)
 
 target_include_directories(rccl-UnitTestsMicroInit PRIVATE
@@ -160,6 +161,11 @@ target_include_directories(rccl-UnitTestsMicroInit PRIVATE
   ${GENINC}
   ${HIPIFY}/src
   ${HIPIFY}/src/graph
+  # Trailing (lowest-priority) fallback to the real source headers for the few
+  # host-only headers hipify does NOT copy under the main build's config -- e.g.
+  # rocm_smi_wrap.h (the USE_AMDSMI build never compiles the rocm_smi path, so
+  # its header isn't in the snapshot). hipified headers still win (listed first).
+  ${RCCL}/src/include
   ${TESTDIR}
   ${TESTDIR}/common
   ${fmt_SOURCE_DIR}/include

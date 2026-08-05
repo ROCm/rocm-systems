@@ -8,7 +8,7 @@
 // `getenv` is NOT active in this translation unit, so micro_getenv() can call
 // the real libc getenv() as its default.
 
-#include "fakes/init_fakes.h"
+#include "init_fakes.h"
 
 #include <cstdlib>
 #include <string>
