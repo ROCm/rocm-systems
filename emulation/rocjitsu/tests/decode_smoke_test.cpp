@@ -347,6 +347,20 @@ TEST(LiteralDisassemblyTest, Simm32HexUsesUnsignedEncodingBits) {
 TEST(Rdna3Vop3LiteralDecodeTest, TrigPreopF64ClassifiesMixedWidthLiteralsPerOperand) {
   constexpr uint32_t literal = 0xaf123456u;
 
+  amdgpu::GpuMemory gpu_mem("f64_literal_mem");
+  amdgpu::L2Cache l2("f64_literal_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA3;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("f64_literal", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  amdgpu::RegisterAccess regs(*wf);
+
   rdna3::Vop3InstLiteralMachineInst raw{};
   raw.vdst = 0;
   raw.src0 = 255;
@@ -362,8 +376,9 @@ TEST(Rdna3Vop3LiteralDecodeTest, TrigPreopF64ClassifiesMixedWidthLiteralsPerOper
   ASSERT_NE(src1, nullptr);
 
   EXPECT_EQ(src0->size_bits(), 64);
-  ASSERT_TRUE(src0->literal64_value().has_value());
-  EXPECT_EQ(*src0->literal64_value(), 0xaf12345600000000ULL);
+  EXPECT_EQ(static_cast<uint32_t>(src0->encoding_value()), literal);
+  EXPECT_FALSE(src0->literal64_value().has_value());
+  EXPECT_EQ(regs.read_lane64(*src0, 0), 0xaf12345600000000ULL);
 
   EXPECT_EQ(src1->size_bits(), 32);
   EXPECT_FALSE(src1->literal64_value().has_value());

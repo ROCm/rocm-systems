@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/encodings.h"
+#include "util/except.h"
 #include <cstring>
 #include <string>
 
@@ -406,6 +407,8 @@ Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn 
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  if (inst_.src0 == 254 || inst_.src1 == 254 || inst_.src2 == 254)
+    throw util::InvalidInst("Vop3p does not support Literal64", "");
   if (has_lit_0() || has_lit_1() || has_lit_0_and_has_lit_1() || has_lit_2() ||
       has_lit_0_and_has_lit_2() || has_lit_1_and_has_lit_2() ||
       has_lit_0_and_has_lit_1_and_has_lit_2())

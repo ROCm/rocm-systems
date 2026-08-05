@@ -19,6 +19,8 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop2.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -34,6 +36,8 @@
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 #include "rocjitsu/vm/soc.h"
 #include "util/except.h"
+#include "util/simd.h"
+#include "util/simd_test_hooks.h"
 
 #include "simdojo/sim/simulation.h"
 
@@ -122,6 +126,15 @@ constexpr uint32_t kSdmaOpGcr = 17;
 constexpr uint32_t kSdmaSubopCopyLinear = 0;
 constexpr uint32_t kSdmaSubopFence64 = 2;
 constexpr uint32_t kSdmaSubopPollMem64 = 5;
+
+class ForceScalarGuard {
+public:
+  ForceScalarGuard() : original_(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(original_); }
+
+private:
+  bool original_;
+};
 
 class TestMemoryInstruction : public Instruction {
 public:
@@ -1752,6 +1765,514 @@ TEST(Gfx1250LiteralOperandTest, SplitBackendPreservesSignedAndEncodingSemantics)
     EXPECT_EQ(regs.read_scalar64(*b64_value), static_cast<uint64_t>(literal));
     b64->execute_impl(*wf);
     EXPECT_EQ(regs.read_scalar64(*b64->dst_operand(0)), static_cast<uint64_t>(literal));
+  }
+}
+
+TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPath) {
+  ForceScalarGuard force_scalar_guard;
+  const auto run_case = [](bool force_scalar) {
+    SCOPED_TRACE(force_scalar ? "scalar" : "simd");
+    util::set_force_scalar_for_testing(force_scalar);
+
+    Gfx1250Sim sim;
+    auto *cu = sim.cu();
+    auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(0x3u);
+
+    const uint32_t vgpr_base = wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < 2; ++lane) {
+      cu->write_vgpr(vgpr_base, lane, 0u);
+      cu->write_vgpr(vgpr_base + 1, lane, 0u);
+    }
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_NE(decoder, nullptr);
+    const auto compare_base =
+        gfx1250::build_vop3(gfx1250::kVCmpLtI64Vop3, {.vdst = 0, .src0 = 255, .src1 = 256});
+    const std::array compare_words{compare_base[0], compare_base[1], 0xffffffffu};
+    std::unique_ptr<Instruction> compare(decoder->decode(compare_words.data()));
+    ASSERT_NE(compare, nullptr);
+    EXPECT_EQ(compare->mnemonic(), "v_cmp_lt_i64");
+    EXPECT_EQ(compare->size(), 12);
+
+    auto *typed_compare = dynamic_cast<gfx1250::VCmpLtI64Vop3 *>(compare.get());
+    ASSERT_NE(typed_compare, nullptr);
+    if (!force_scalar) {
+      EXPECT_TRUE(amdgpu::try_execute_vopc64_vop3_int_simd<int64_t>(
+          *typed_compare, *wf, [](auto a, auto b) { return a < b; }));
+      EXPECT_EQ(read_wave_sgpr(*cu, *wf, 0), 0x3u);
+      write_wave_sgpr(*cu, *wf, 0, 0u);
+      write_wave_sgpr(*cu, *wf, 1, 0u);
+    }
+
+    cu->execute_instruction(compare.get(), *wf);
+    EXPECT_EQ(read_wave_sgpr(*cu, *wf, 0), 0x3u);
+  };
+
+  run_case(true);
+  if constexpr (util::has_stdx_simd && !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS)
+    run_case(false);
+}
+
+TEST(Gfx1250LiteralOperandTest, PkF32LiteralReplicatesAndUsesAvailableSimdPath) {
+  ForceScalarGuard force_scalar_guard;
+  const auto run_case = [](bool force_scalar) {
+    SCOPED_TRACE(force_scalar ? "scalar" : "simd");
+    util::set_force_scalar_for_testing(force_scalar);
+
+    constexpr uint32_t literal = 0x3f800000u;
+    constexpr uint64_t replicated =
+        (static_cast<uint64_t>(literal) << 32) | static_cast<uint64_t>(literal);
+    const auto add_base = gfx1250::build_vop3p(
+        gfx1250::kVPkAddF32Vop3p, {.vdst = 0, .src0 = 255, .src1 = 128, .opsel_hi = 3});
+    const std::array add_words{add_base[0], add_base[1], literal};
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> add(decoder->decode(add_words.data()));
+    ASSERT_NE(add, nullptr);
+    auto *typed_add = dynamic_cast<gfx1250::VPkAddF32Vop3p *>(add.get());
+    ASSERT_NE(typed_add, nullptr);
+
+    Gfx1250Sim sim;
+    auto *cu = sim.cu();
+    auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(0x3u);
+
+    const Operand *literal_operand = typed_add->src_operand(0);
+    ASSERT_NE(literal_operand, nullptr);
+    EXPECT_EQ(static_cast<uint32_t>(literal_operand->encoding_value()), literal);
+    EXPECT_FALSE(literal_operand->literal64_value().has_value());
+    EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane64(*literal_operand, 0), replicated);
+
+    const uint32_t vgpr_base = wf->vgpr_alloc().base;
+    if (!force_scalar) {
+      EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(
+          *typed_add, *wf, 0u, 3u, [](auto a, auto b) { return a + b; }));
+      for (uint32_t lane = 0; lane < 2; ++lane) {
+        EXPECT_EQ(cu->read_vgpr(vgpr_base, lane), literal);
+        EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, lane), literal);
+        cu->write_vgpr(vgpr_base, lane, 0u);
+        cu->write_vgpr(vgpr_base + 1, lane, 0u);
+      }
+    }
+
+    cu->execute_instruction(add.get(), *wf);
+    for (uint32_t lane = 0; lane < 2; ++lane) {
+      EXPECT_EQ(cu->read_vgpr(vgpr_base, lane), literal);
+      EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, lane), literal);
+    }
+  };
+
+  run_case(true);
+  if constexpr (util::has_stdx_simd)
+    run_case(false);
+}
+
+TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath) {
+  if constexpr (!util::has_stdx_simd)
+    GTEST_SKIP() << "requires stdx SIMD";
+
+  ForceScalarGuard force_scalar_guard;
+  util::set_force_scalar_for_testing(false);
+  enum class Operation { Add, Mul, Fma };
+  struct TestCase {
+    Operation operation;
+    uint16_t opcode;
+    uint32_t literal_source;
+    float expected_lo;
+    float expected_hi;
+  };
+  constexpr std::array test_cases{
+      TestCase{Operation::Add, gfx1250::kVPkAddF32Vop3p, 0, 7.0f, 8.0f},
+      TestCase{Operation::Add, gfx1250::kVPkAddF32Vop3p, 1, 5.0f, 6.0f},
+      TestCase{Operation::Mul, gfx1250::kVPkMulF32Vop3p, 0, 10.0f, 12.0f},
+      TestCase{Operation::Mul, gfx1250::kVPkMulF32Vop3p, 1, 6.0f, 8.0f},
+      TestCase{Operation::Fma, gfx1250::kVPkFmaF32Vop3p, 0, 17.0f, 20.0f},
+      TestCase{Operation::Fma, gfx1250::kVPkFmaF32Vop3p, 1, 13.0f, 16.0f},
+      TestCase{Operation::Fma, gfx1250::kVPkFmaF32Vop3p, 2, 17.0f, 26.0f},
+  };
+  constexpr uint32_t kLiteral = 0x40000000u; // 2.0f
+  constexpr uint64_t kReplicatedLiteral = (static_cast<uint64_t>(kLiteral) << 32) | kLiteral;
+
+  for (const TestCase &test_case : test_cases) {
+    SCOPED_TRACE(static_cast<uint32_t>(test_case.operation));
+    SCOPED_TRACE(test_case.literal_source);
+    gfx1250::Vop3pBuilderFields fields;
+    fields.vdst = 6;
+    fields.src0 = 256;
+    fields.src1 = 258;
+    fields.src2 = 260;
+    fields.opsel_hi = 3;
+    if (test_case.literal_source == 0)
+      fields.src0 = 255;
+    else if (test_case.literal_source == 1)
+      fields.src1 = 255;
+    else
+      fields.src2 = 255;
+
+    auto base = gfx1250::build_vop3p(test_case.opcode, fields);
+    if (test_case.operation == Operation::Fma)
+      base[0] |= uint32_t{1} << 14; // pad_14 is the src2 high-half selector.
+    const std::array words{base[0], base[1], kLiteral};
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
+    ASSERT_NE(instruction, nullptr);
+
+    const Operand *literal_operand = instruction->src_operand(test_case.literal_source);
+    ASSERT_NE(literal_operand, nullptr);
+
+    Gfx1250Sim sim;
+    auto *cu = sim.cu();
+    auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1u);
+    EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane64(*literal_operand, 0), kReplicatedLiteral);
+    const uint32_t vgpr_base = wf->vgpr_alloc().base;
+    cu->write_vgpr(vgpr_base, 0, std::bit_cast<uint32_t>(3.0f));
+    cu->write_vgpr(vgpr_base + 1, 0, std::bit_cast<uint32_t>(4.0f));
+    cu->write_vgpr(vgpr_base + 2, 0, std::bit_cast<uint32_t>(5.0f));
+    cu->write_vgpr(vgpr_base + 3, 0, std::bit_cast<uint32_t>(6.0f));
+    cu->write_vgpr(vgpr_base + 4, 0, std::bit_cast<uint32_t>(7.0f));
+    cu->write_vgpr(vgpr_base + 5, 0, std::bit_cast<uint32_t>(8.0f));
+
+    bool accepted = false;
+    if (test_case.operation == Operation::Add) {
+      auto *typed = dynamic_cast<gfx1250::VPkAddF32Vop3p *>(instruction.get());
+      ASSERT_NE(typed, nullptr);
+      accepted = amdgpu::try_execute_vop3p_pk_binary_f32_simd(*typed, *wf, 0u, 3u,
+                                                              [](auto a, auto b) { return a + b; });
+    } else if (test_case.operation == Operation::Mul) {
+      auto *typed = dynamic_cast<gfx1250::VPkMulF32Vop3p *>(instruction.get());
+      ASSERT_NE(typed, nullptr);
+      accepted = amdgpu::try_execute_vop3p_pk_binary_f32_simd(*typed, *wf, 0u, 3u,
+                                                              [](auto a, auto b) { return a * b; });
+    } else {
+      auto *typed = dynamic_cast<gfx1250::VPkFmaF32Vop3p *>(instruction.get());
+      ASSERT_NE(typed, nullptr);
+      accepted = amdgpu::try_execute_vop3p_pk_ternary_f32_simd(
+          *typed, *wf, 0u, 3u, 1u, [](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); });
+    }
+    EXPECT_TRUE(accepted);
+    EXPECT_EQ(cu->read_vgpr(vgpr_base + 6, 0), std::bit_cast<uint32_t>(test_case.expected_lo));
+    EXPECT_EQ(cu->read_vgpr(vgpr_base + 7, 0), std::bit_cast<uint32_t>(test_case.expected_hi));
+
+    cu->write_vgpr(vgpr_base + 6, 0, 0u);
+    cu->write_vgpr(vgpr_base + 7, 0, 0u);
+    cu->execute_instruction(instruction.get(), *wf);
+    EXPECT_EQ(cu->read_vgpr(vgpr_base + 6, 0), std::bit_cast<uint32_t>(test_case.expected_lo));
+    EXPECT_EQ(cu->read_vgpr(vgpr_base + 7, 0), std::bit_cast<uint32_t>(test_case.expected_hi));
+  }
+}
+
+TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralSourceSpecificSelectorFallsBackToScalar) {
+  ForceScalarGuard force_scalar_guard;
+  util::set_force_scalar_for_testing(false);
+  constexpr uint32_t kLiteral = 0x40000000u; // 2.0f
+  const auto base = gfx1250::build_vop3p(gfx1250::kVPkAddF32Vop3p,
+                                         {.vdst = 4, .src0 = 255, .src1 = 258, .opsel_hi = 2});
+  const std::array words{base[0], base[1], kLiteral};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
+  ASSERT_NE(instruction, nullptr);
+  auto *typed = dynamic_cast<gfx1250::VPkAddF32Vop3p *>(instruction.get());
+  ASSERT_NE(typed, nullptr);
+
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_vgpr(vgpr_base + 2, 0, std::bit_cast<uint32_t>(5.0f));
+  cu->write_vgpr(vgpr_base + 3, 0, std::bit_cast<uint32_t>(6.0f));
+
+  EXPECT_FALSE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(*typed, *wf, 0u, 2u,
+                                                            [](auto a, auto b) { return a + b; }));
+  cu->execute_instruction(instruction.get(), *wf);
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 4, 0), std::bit_cast<uint32_t>(7.0f));
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 5, 0), std::bit_cast<uint32_t>(8.0f));
+}
+
+TEST(Gfx1250ExecutionTest, PkF32AddMulSimdMatchesScalarWithPartialExec) {
+  ForceScalarGuard force_scalar_guard;
+  struct TestCase {
+    uint16_t opcode;
+    const char *name;
+  };
+  constexpr std::array test_cases{
+      TestCase{gfx1250::kVPkAddF32Vop3p, "add"},
+      TestCase{gfx1250::kVPkMulF32Vop3p, "mul"},
+  };
+  constexpr uint32_t kExec = 0xa5a5a5a5u;
+  constexpr uint32_t kDstLoSeed = 0xdeadbeefu;
+  constexpr uint32_t kDstHiSeed = 0xbaadf00du;
+
+  for (const TestCase &test_case : test_cases) {
+    SCOPED_TRACE(test_case.name);
+    std::array<uint32_t, 64> scalar_result{};
+    std::array<uint32_t, 64> simd_result{};
+    const auto run_case = [&](bool force_scalar, std::array<uint32_t, 64> &result) {
+      SCOPED_TRACE(force_scalar ? "scalar" : "simd");
+      util::set_force_scalar_for_testing(force_scalar);
+
+      const auto words = gfx1250::build_vop3p(
+          test_case.opcode,
+          {.vdst = 4, .neg_hi = 2, .src0 = 256, .src1 = 258, .opsel_hi = 3, .neg = 1});
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+      ASSERT_NE(decoder, nullptr);
+      std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
+      ASSERT_NE(instruction, nullptr);
+
+      Gfx1250Sim sim;
+      auto *cu = sim.cu();
+      auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(kExec);
+      const uint32_t vgpr_base = wf->vgpr_alloc().base;
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        const float lane_value = static_cast<float>(lane + 1);
+        cu->write_vgpr(vgpr_base, lane, std::bit_cast<uint32_t>(lane_value * 0.25f));
+        cu->write_vgpr(vgpr_base + 1, lane, std::bit_cast<uint32_t>(lane_value * -0.5f));
+        cu->write_vgpr(vgpr_base + 2, lane, std::bit_cast<uint32_t>(lane_value + 0.75f));
+        cu->write_vgpr(vgpr_base + 3, lane, std::bit_cast<uint32_t>(lane_value * 1.5f));
+        cu->write_vgpr(vgpr_base + 4, lane, kDstLoSeed);
+        cu->write_vgpr(vgpr_base + 5, lane, kDstHiSeed);
+      }
+
+      if (!force_scalar) {
+        bool accepted = false;
+        if (test_case.opcode == gfx1250::kVPkAddF32Vop3p) {
+          auto *typed = dynamic_cast<gfx1250::VPkAddF32Vop3p *>(instruction.get());
+          ASSERT_NE(typed, nullptr);
+          accepted = amdgpu::try_execute_vop3p_pk_binary_f32_simd(
+              *typed, *wf, 0u, 3u, [](auto a, auto b) { return a + b; });
+        } else {
+          auto *typed = dynamic_cast<gfx1250::VPkMulF32Vop3p *>(instruction.get());
+          ASSERT_NE(typed, nullptr);
+          accepted = amdgpu::try_execute_vop3p_pk_binary_f32_simd(
+              *typed, *wf, 0u, 3u, [](auto a, auto b) { return a * b; });
+        }
+        EXPECT_TRUE(accepted);
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          cu->write_vgpr(vgpr_base + 4, lane, kDstLoSeed);
+          cu->write_vgpr(vgpr_base + 5, lane, kDstHiSeed);
+        }
+      }
+
+      cu->execute_instruction(instruction.get(), *wf);
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        result[lane * 2] = cu->read_vgpr(vgpr_base + 4, lane);
+        result[lane * 2 + 1] = cu->read_vgpr(vgpr_base + 5, lane);
+        if ((kExec & (1u << lane)) == 0u) {
+          EXPECT_EQ(result[lane * 2], kDstLoSeed);
+          EXPECT_EQ(result[lane * 2 + 1], kDstHiSeed);
+        } else {
+          const float lane_value = static_cast<float>(lane + 1);
+          const float a_lo = lane_value * 0.25f;
+          const float a_hi = lane_value * -0.5f;
+          const float b_lo = lane_value + 0.75f;
+          const float b_hi = lane_value * 1.5f;
+          const float expected_lo =
+              test_case.opcode == gfx1250::kVPkAddF32Vop3p ? -a_lo + b_lo : -a_lo * b_lo;
+          const float expected_hi =
+              test_case.opcode == gfx1250::kVPkAddF32Vop3p ? a_hi - b_hi : a_hi * -b_hi;
+          EXPECT_EQ(result[lane * 2], std::bit_cast<uint32_t>(expected_lo));
+          EXPECT_EQ(result[lane * 2 + 1], std::bit_cast<uint32_t>(expected_hi));
+        }
+      }
+    };
+
+    run_case(true, scalar_result);
+    if constexpr (util::has_stdx_simd) {
+      run_case(false, simd_result);
+      EXPECT_EQ(simd_result, scalar_result);
+    }
+  }
+}
+
+TEST(Gfx1250ExecutionTest, PkF32EveryNondefaultSelectorGateFallsBackToScalar) {
+  ForceScalarGuard force_scalar_guard;
+  struct TestCase {
+    const char *name;
+    bool ternary;
+    uint32_t op_sel;
+    uint32_t op_sel_hi;
+    uint32_t op_sel_hi_2;
+  };
+  constexpr std::array test_cases{
+      TestCase{"binary-opsel", false, 1u, 3u, 0u},
+      TestCase{"binary-opsel-hi", false, 0u, 2u, 0u},
+      TestCase{"ternary-opsel", true, 1u, 3u, 1u},
+      TestCase{"ternary-opsel-hi", true, 0u, 2u, 1u},
+      TestCase{"ternary-opsel-hi-2", true, 0u, 3u, 0u},
+  };
+  constexpr uint32_t kExec = 0x5a5a5a5au;
+  constexpr uint32_t kDstLoSeed = 0xdeadbeefu;
+  constexpr uint32_t kDstHiSeed = 0xbaadf00du;
+
+  for (const TestCase &test_case : test_cases) {
+    SCOPED_TRACE(test_case.name);
+    std::array<uint32_t, 64> scalar_result{};
+    std::array<uint32_t, 64> fallback_result{};
+    const auto run_case = [&](bool force_scalar, std::array<uint32_t, 64> &result) {
+      util::set_force_scalar_for_testing(force_scalar);
+      gfx1250::Vop3pBuilderFields fields;
+      fields.vdst = 6;
+      fields.opsel = static_cast<uint8_t>(test_case.op_sel);
+      fields.src0 = 256;
+      fields.src1 = 258;
+      fields.src2 = 260;
+      fields.opsel_hi = static_cast<uint8_t>(test_case.op_sel_hi);
+      auto words = gfx1250::build_vop3p(
+          test_case.ternary ? gfx1250::kVPkFmaF32Vop3p : gfx1250::kVPkAddF32Vop3p, fields);
+      if (test_case.op_sel_hi_2 != 0u)
+        words[0] |= uint32_t{1} << 14;
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+      ASSERT_NE(decoder, nullptr);
+      std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
+      ASSERT_NE(instruction, nullptr);
+
+      Gfx1250Sim sim;
+      auto *cu = sim.cu();
+      auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(kExec);
+      const uint32_t vgpr_base = wf->vgpr_alloc().base;
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        const float value = static_cast<float>(lane + 1);
+        cu->write_vgpr(vgpr_base, lane, std::bit_cast<uint32_t>(value));
+        cu->write_vgpr(vgpr_base + 1, lane, std::bit_cast<uint32_t>(value + 0.5f));
+        cu->write_vgpr(vgpr_base + 2, lane, std::bit_cast<uint32_t>(value * 2.0f));
+        cu->write_vgpr(vgpr_base + 3, lane, std::bit_cast<uint32_t>(value * -3.0f));
+        cu->write_vgpr(vgpr_base + 4, lane, std::bit_cast<uint32_t>(value + 4.0f));
+        cu->write_vgpr(vgpr_base + 5, lane, std::bit_cast<uint32_t>(value * 0.25f));
+        cu->write_vgpr(vgpr_base + 6, lane, kDstLoSeed);
+        cu->write_vgpr(vgpr_base + 7, lane, kDstHiSeed);
+      }
+
+      if (!force_scalar) {
+        if (test_case.ternary) {
+          auto *typed = dynamic_cast<gfx1250::VPkFmaF32Vop3p *>(instruction.get());
+          ASSERT_NE(typed, nullptr);
+          EXPECT_FALSE(amdgpu::try_execute_vop3p_pk_ternary_f32_simd(
+              *typed, *wf, test_case.op_sel, test_case.op_sel_hi, test_case.op_sel_hi_2,
+              [](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }));
+        } else {
+          auto *typed = dynamic_cast<gfx1250::VPkAddF32Vop3p *>(instruction.get());
+          ASSERT_NE(typed, nullptr);
+          EXPECT_FALSE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(
+              *typed, *wf, test_case.op_sel, test_case.op_sel_hi,
+              [](auto a, auto b) { return a + b; }));
+        }
+      }
+      cu->execute_instruction(instruction.get(), *wf);
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        result[lane * 2] = cu->read_vgpr(vgpr_base + 6, lane);
+        result[lane * 2 + 1] = cu->read_vgpr(vgpr_base + 7, lane);
+        if ((kExec & (1u << lane)) == 0u) {
+          EXPECT_EQ(result[lane * 2], kDstLoSeed);
+          EXPECT_EQ(result[lane * 2 + 1], kDstHiSeed);
+        }
+      }
+    };
+
+    run_case(true, scalar_result);
+    if constexpr (util::has_stdx_simd) {
+      run_case(false, fallback_result);
+      EXPECT_EQ(fallback_result, scalar_result);
+    }
+  }
+}
+
+TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
+  ForceScalarGuard force_scalar_guard;
+  constexpr uint32_t kExec = 0xc3c3c3c3u;
+  constexpr uint32_t kDstLoSeed = 0xdeadbeefu;
+  constexpr uint32_t kDstHiSeed = 0xbaadf00du;
+  std::array<uint32_t, 64> scalar_result{};
+  std::array<uint32_t, 64> simd_result{};
+
+  const auto run_case = [&](bool force_scalar, std::array<uint32_t, 64> &result) {
+    util::set_force_scalar_for_testing(force_scalar);
+    auto words = gfx1250::build_vop3p(
+        gfx1250::kVPkFmaF32Vop3p,
+        {.vdst = 6, .neg_hi = 4, .src0 = 256, .src1 = 258, .src2 = 260, .opsel_hi = 3, .neg = 2});
+    words[0] |= uint32_t{1} << 14; // pad_14 is the src2 high-half selector.
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
+    ASSERT_NE(instruction, nullptr);
+    auto *typed = dynamic_cast<gfx1250::VPkFmaF32Vop3p *>(instruction.get());
+    ASSERT_NE(typed, nullptr);
+
+    Gfx1250Sim sim;
+    auto *cu = sim.cu();
+    auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(kExec);
+    const uint32_t vgpr_base = wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < 32; ++lane) {
+      const float value = static_cast<float>(lane + 1);
+      cu->write_vgpr(vgpr_base, lane, std::bit_cast<uint32_t>(value * 0.25f));
+      cu->write_vgpr(vgpr_base + 1, lane, std::bit_cast<uint32_t>(value * -0.5f));
+      cu->write_vgpr(vgpr_base + 2, lane, std::bit_cast<uint32_t>(value + 0.75f));
+      cu->write_vgpr(vgpr_base + 3, lane, std::bit_cast<uint32_t>(value * 1.5f));
+      cu->write_vgpr(vgpr_base + 4, lane, std::bit_cast<uint32_t>(value * -2.0f));
+      cu->write_vgpr(vgpr_base + 5, lane, std::bit_cast<uint32_t>(value + 3.0f));
+      cu->write_vgpr(vgpr_base + 6, lane, kDstLoSeed);
+      cu->write_vgpr(vgpr_base + 7, lane, kDstHiSeed);
+    }
+
+    if (!force_scalar) {
+      EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_ternary_f32_simd(
+          *typed, *wf, 0u, 3u, 1u,
+          [](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }));
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        cu->write_vgpr(vgpr_base + 6, lane, kDstLoSeed);
+        cu->write_vgpr(vgpr_base + 7, lane, kDstHiSeed);
+      }
+    }
+
+    cu->execute_instruction(instruction.get(), *wf);
+    for (uint32_t lane = 0; lane < 32; ++lane) {
+      result[lane * 2] = cu->read_vgpr(vgpr_base + 6, lane);
+      result[lane * 2 + 1] = cu->read_vgpr(vgpr_base + 7, lane);
+      if ((kExec & (1u << lane)) == 0u) {
+        EXPECT_EQ(result[lane * 2], kDstLoSeed);
+        EXPECT_EQ(result[lane * 2 + 1], kDstHiSeed);
+      } else {
+        const float value = static_cast<float>(lane + 1);
+        const float expected_lo = std::fma(value * 0.25f, -(value + 0.75f), value * -2.0f);
+        const float expected_hi = std::fma(value * -0.5f, value * 1.5f, -(value + 3.0f));
+        EXPECT_EQ(result[lane * 2], std::bit_cast<uint32_t>(expected_lo));
+        EXPECT_EQ(result[lane * 2 + 1], std::bit_cast<uint32_t>(expected_hi));
+      }
+    }
+  };
+
+  run_case(true, scalar_result);
+  if constexpr (util::has_stdx_simd) {
+    run_case(false, simd_result);
+    EXPECT_EQ(simd_result, scalar_result);
+  }
+}
+
+TEST(Gfx1250DecodeTest, Vop3pRejectsLiteral64SelectorInEverySourcePosition) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  for (const gfx1250::Vop3pBuilderFields fields : {
+           gfx1250::Vop3pBuilderFields{.src0 = 254},
+           gfx1250::Vop3pBuilderFields{.src1 = 254},
+           gfx1250::Vop3pBuilderFields{.src2 = 254},
+       }) {
+    const auto words = gfx1250::build_vop3p(gfx1250::kVPkFmaF32Vop3p, fields);
+    EXPECT_THROW(static_cast<void>(decoder->decode(words.data())), util::InvalidInst);
   }
 }
 
@@ -4449,6 +4970,52 @@ TEST(Gfx1250SimulationTest, SAddPcI64SkipsRelativeToNextPc) {
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
   EXPECT_EQ(wf->sgpr(4), 2u);
+}
+
+TEST(Gfx1250SimulationTest, SAddPcI64NegativeLiteralJumpsBackwardFromNextPc) {
+  const auto initial_branch = gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = 2});
+  const auto set_result = gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = 130, .sdst = 4});
+  const auto add_pc = gfx1250::build_sop1(gfx1250::kSAddPcI64Sop1, {.ssrc0 = 255});
+  const std::array code{
+      initial_branch[0], // Branch forward to s_add_pc_i64.
+      set_result[0],     // Backward-jump target: s_mov_b32 s4, 2.
+      S_ENDPGM_GFX12,
+      add_pc[0],  // s_add_pc_i64 0xfffffff0.
+      0xfffffff0u // -16 bytes from the next PC reaches set_result.
+  };
+
+  Gfx1250Sim sim;
+  const auto *wf = dispatch_one_wave(sim, code.data(), code.size());
+  ASSERT_NE(wf, nullptr);
+  EXPECT_EQ(wf->sgpr(4), 2u);
+}
+
+TEST(Gfx1250SimulationTest, SAddPcI64WrapsAtUnsignedBoundaries) {
+  const auto add_one = gfx1250::build_sop1(gfx1250::kSAddPcI64Sop1, {.ssrc0 = 129});
+  const auto add_minus_one = gfx1250::build_sop1(gfx1250::kSAddPcI64Sop1, {.ssrc0 = 193});
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> increment(decoder->decode(add_one.data()));
+  std::unique_ptr<Instruction> decrement(decoder->decode(add_minus_one.data()));
+  ASSERT_NE(increment, nullptr);
+  ASSERT_NE(decrement, nullptr);
+
+  Gfx1250Sim sim;
+  auto *wf = sim.cu()->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+
+  wf->pc = 0x7fffffffffffffffULL;
+  sim.cu()->execute_instruction(increment.get(), *wf);
+  EXPECT_EQ(wf->pc, 0x8000000000000000ULL);
+
+  wf->pc = 0;
+  sim.cu()->execute_instruction(decrement.get(), *wf);
+  EXPECT_EQ(wf->pc, 0xffffffffffffffffULL);
+
+  wf->pc = 0x8000000000000000ULL;
+  sim.cu()->execute_instruction(decrement.get(), *wf);
+  EXPECT_EQ(wf->pc, 0x7fffffffffffffffULL);
 }
 
 TEST(Gfx1250SimulationTest, SSetPcI64JumpsToScalarAddress) {

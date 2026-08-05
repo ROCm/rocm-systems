@@ -18,6 +18,7 @@ namespace gfx1250 {
 
 class Operand : public IsaOperand<Isa> {
 public:
+  enum class Literal32Widening { ZeroExtend, SignExtend, Replicate32, F64HighBits };
   Operand(int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source = false,
           bool packed_16bit_dst = false);
   Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,
@@ -25,7 +26,7 @@ public:
   Operand(int size_bits, OperandType opr_type, int encoding_value, uint16_t literal16_display_value,
           bool has_literal16_display);
   Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);
-  static Operand make_signed_literal32(uint32_t literal_value);
+  static Operand make_literal32(uint32_t literal_value, Literal32Widening widening);
   std::string name() const override;
   std::optional<uint64_t> literal64_value() const override;
   std::optional<uint64_t> const_value() const override;
@@ -124,14 +125,12 @@ private:
   void simd_notify_read64_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;
   void simd_notify_write_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;
   void simd_notify_write64_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;
-
-private:
+  uint64_t widened_literal32_value() const;
   uint16_t literal16_display_value_ = 0;
   bool has_literal16_display_ = false;
   uint64_t literal64_value_ = 0;
   bool has_literal64_ = false;
-  uint64_t sign_extended_literal32_value() const;
-  bool sign_extend_literal32_ = false;
+  std::optional<Literal32Widening> literal32_widening_;
   bool packed_16bit_source_ = false;
   bool packed_16bit_dst_ = false;
 };
