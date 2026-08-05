@@ -1283,8 +1283,14 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
       // store reports exactly as one translated here would.
       TranslationRecord stored;
       stored.output = reused;
-      stored.info.source_code_object_id =
-          rocjitsu::stable_code_object_id(source->data(), source->size());
+      // Only when someone is listening. This walks the whole source -- about
+      // 237 ms for the 212 MiB device library -- and its only consumer is a
+      // field in a log line that log_translation() drops unless verbose output
+      // is on. Paying that on the path whose entire purpose is to be fast, for
+      // output almost nobody asks for, is the wrong trade.
+      if (verbose_logging())
+        stored.info.source_code_object_id =
+            rocjitsu::stable_code_object_id(source->data(), source->size());
       remember(stored);
 
       const hsa_status_t reused_status =

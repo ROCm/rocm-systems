@@ -957,15 +957,29 @@ namespace {
 
 std::vector<uint8_t> TranslationStore::Impl::lookup(const std::string &key,
                                                     const TranslationIdentity &identity) {
-  std::lock_guard lock(mutex_);
-  ensure_open_locked();
-  if (dir_fd_ < 0)
+  // Only opening needs the lock. Holding it across the file reads and the
+  // digest made independent hits serialise against each other -- repeated
+  // lookups of one 8 MiB entry went from 320 ms on one thread to 2561 ms on
+  // eight -- and none of that work touches shared state. Once the descriptor
+  // and the build identity are settled they do not change again, and a
+  // concurrent publication is already invisible: rename is atomic, so a reader
+  // sees the previous entry or the new one, and anything else fails the
+  // manifest and digest checks and degrades to a miss.
+  int dir_fd = -1;
+  std::string build_id;
+  {
+    std::lock_guard lock(mutex_);
+    ensure_open_locked();
+    dir_fd = dir_fd_;
+    build_id = build_id_;
+  }
+  if (dir_fd < 0)
     return {};
 
   const std::string manifest_name = key + ".man";
   const std::string object_name = key + ".obj";
   constexpr uint64_t kManifestLimit = 4096;
-  const std::optional<std::string> manifest = read_whole(dir_fd_, manifest_name, kManifestLimit);
+  const std::optional<std::string> manifest = read_whole(dir_fd, manifest_name, kManifestLimit);
   if (!manifest || !manifest->starts_with(kManifestMagic))
     return {};
 
@@ -977,7 +991,7 @@ std::vector<uint8_t> TranslationStore::Impl::lookup(const std::string &key,
     return {};
   const std::pair<std::string_view, std::string> expected[] = {
       {"key", key},
-      {"build", build_id_},
+      {"build", build_id},
       {"epoch", std::to_string(kCacheEpoch)},
       {"profile", std::to_string(identity.profile_id)},
       {"in_rev", std::to_string(identity.input_revision)},
@@ -990,7 +1004,7 @@ std::vector<uint8_t> TranslationStore::Impl::lookup(const std::string &key,
       return {};
   }
 
-  const std::optional<std::string> object = read_whole(dir_fd_, object_name, max_object_bytes());
+  const std::optional<std::string> object = read_whole(dir_fd, object_name, max_object_bytes());
   if (!object || std::to_string(object->size()) != *recorded_size)
     return {};
 
@@ -1003,11 +1017,14 @@ std::vector<uint8_t> TranslationStore::Impl::lookup(const std::string &key,
   // the shared tier never evicts, so it has no order to keep.
   if (writable()) {
     const timespec now[2] = {{0, UTIME_NOW}, {0, UTIME_NOW}};
-    (void)utimensat(dir_fd_, object_name.c_str(), now, AT_SYMLINK_NOFOLLOW);
+    (void)utimensat(dir_fd, object_name.c_str(), now, AT_SYMLINK_NOFOLLOW);
   }
 
 #if defined(RJ_TRANSLATION_STORE_TEST_HOOKS)
-  ++hits_;
+  {
+    std::lock_guard lock(mutex_);
+    ++hits_;
+  }
 #endif
   return std::vector<uint8_t>(object->begin(), object->end());
 }
@@ -1027,6 +1044,25 @@ void TranslationStore::Impl::store(const std::string &key, std::span<const uint8
   const DirectoryWriteLock directory_lock(dir_fd_);
   if (!directory_lock.held())
     return;
+
+  // Refuse what cannot fit before hashing it. build_manifest() digests the whole
+  // object, so a refused 64 MiB entry spent 234 ms on a SHA-256 whose result was
+  // discarded -- with the directory locked and the mutex held, so every other
+  // writer and every opening reader waited behind it. The bound only has to be
+  // no smaller than the real manifest; the reservation below still uses the
+  // exact size.
+  // The object alone already exceeding the per-entry share is enough to refuse:
+  // the manifest only makes it larger, so this can never reject something the
+  // exact check below would have accepted. Anything subtler belongs to that
+  // check, which still runs with the real size.
+  if (shared()) {
+    if (object.size() > kSharedMaxObjectBytes)
+      return;
+  } else {
+    const uint64_t preflight_capacity = capacity_locked();
+    if (preflight_capacity == 0 || object.size() > preflight_capacity / kMaxEntryDivisor)
+      return;
+  }
 
   const std::string manifest = build_manifest(key, object, identity, build_id_);
   if (!reserve_space_locked(object.size() + manifest.size()))
