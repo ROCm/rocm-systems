@@ -27,7 +27,10 @@
 # only that, and only on a full erase ($1=0) -- on upgrade ($1=1) the new
 # tests package's files are already in place.
 if [ "$1" -eq 0 ]; then
-    _tests_root="@CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@"
+    # $RPM_INSTALL_PREFIX0 is the prefix the package was actually installed
+    # under, which is what the rest of the scriptlets use; the configure-time
+    # prefix would miss the real tree for a relocated install.
+    _tests_root="$RPM_INSTALL_PREFIX0/@SHARE_INSTALL_PREFIX@"
     rm -rf "${_tests_root}/tests/python_unittest/__pycache__"
     rm -rf "${_tests_root}/tests/__pycache__"
     rm -rf "${_tests_root}/tools/__pycache__"
