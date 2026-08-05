@@ -79,8 +79,8 @@ get_hsa_pcs_buffer_size(uint32_t gfx_target_version)
 
     // Since ROCM-22213, the buffer is split per XCC, so we need larger buffers for these GPUs.
     // Right now, just enable for MI300/350/400 series chips.
-    const bool is_multi_xcc = (major == 9 && (minor == 4 || minor == 5)) ||
-                              (major == 12 && minor == 5);
+    const bool is_multi_xcc =
+        (major == 9 && (minor == 4 || minor == 5)) || (major == 12 && minor == 5);
 
     if(is_multi_xcc)
     {
