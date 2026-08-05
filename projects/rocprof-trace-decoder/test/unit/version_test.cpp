@@ -29,6 +29,7 @@ TEST(VersionTest, ReportsBuildVersion)
     rocprof_trace_decoder_version_t version{};
 
     EXPECT_EQ(rocprof_trace_decoder_get_version(&version), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
+    EXPECT_EQ(version.size, sizeof(rocprof_trace_decoder_version_t));
     EXPECT_EQ(version.major, ROCPROF_TRACE_DECODER_VERSION_MAJOR);
     EXPECT_EQ(version.minor, ROCPROF_TRACE_DECODER_VERSION_MINOR);
     EXPECT_EQ(version.patch, ROCPROF_TRACE_DECODER_VERSION_PATCH);

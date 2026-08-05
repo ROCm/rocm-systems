@@ -575,6 +575,7 @@ rocprof_trace_decoder_get_version(rocprof_trace_decoder_version_t* version)
 {
     if (version == nullptr) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
+    version->size = sizeof(rocprof_trace_decoder_version_t);
     version->major = ROCPROF_TRACE_DECODER_VERSION_MAJOR;
     version->minor = ROCPROF_TRACE_DECODER_VERSION_MINOR;
     version->patch = ROCPROF_TRACE_DECODER_VERSION_PATCH;

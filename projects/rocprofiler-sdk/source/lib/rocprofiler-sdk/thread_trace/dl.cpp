@@ -36,8 +36,8 @@ namespace thread_trace
 namespace
 {
 // EVENT and DISPATCH records arrived with rocprof_trace_decoder_create_handle in 0.2, and
-// rocprof_trace_decoder_get_version was added in 0.3, so either symbol implies a decoder new
-// enough to emit them.
+// rocprof_trace_decoder_get_version was added in 0.2.2, so either symbol implies a decoder
+// new enough to emit them.
 bool
 decoder_supports_event_records(void* handle)
 {

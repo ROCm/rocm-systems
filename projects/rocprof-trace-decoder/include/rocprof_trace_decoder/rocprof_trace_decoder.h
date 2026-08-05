@@ -117,6 +117,7 @@ ROCPROF_TRACE_DECODER_API const char* rocprof_trace_decoder_get_status_string(
  */
 typedef struct
 {
+    uint64_t size; ///< Size of this struct
     uint32_t major;
     uint32_t minor;
     uint32_t patch;
@@ -125,8 +126,8 @@ typedef struct
 /**
  * @brief Returns the version of this decoder library.
  *
- * Added in 0.3. Callers loading the decoder dynamically should treat absence of this symbol
- * as a decoder older than 0.3.
+ * Added in 0.2.2. Callers loading the decoder dynamically should treat absence of this
+ * symbol as a decoder older than 0.2.2.
  *
  * @param[out] version Where the version is written.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
