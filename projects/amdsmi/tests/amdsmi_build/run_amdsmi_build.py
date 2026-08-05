@@ -1147,7 +1147,7 @@ def parse_args() -> RunnerConfig:
         "--python-interpreters",
         default=None,
         help="Comma-separated interpreters for the Python-version loader tests "
-        "(default: discovered python3.6..3.13)",
+        "(default: discovered python3.6..3.14)",
     )
     parser.add_argument(
         "--no-autodetect",
