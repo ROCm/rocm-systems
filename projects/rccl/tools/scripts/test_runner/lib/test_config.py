@@ -38,8 +38,7 @@ if "RCCL_TESTS_DIR" not in os.environ:
 # Must match install.sh's build/<flavor> output directory names.
 RCCL_BUILD_TYPES = ("debug", "release")
 
-# install.sh hard-errors on --enable-mpi-tests unless --debug is also passed, so
-# all three have to go when a Release build is requested.
+# install.sh hard-errors on --enable-mpi-tests unless --debug is also passed.
 DEBUG_ONLY_INSTALL_FLAGS = ("--debug", "--debug-fast", "--enable-mpi-tests")
 
 
@@ -47,10 +46,9 @@ def classify_test_kinds(config_data):
     """
     Determine which kinds of tests a config actually runs.
 
-    ``is_gtest`` is resolved the way the executor resolves it -- per-test value,
-    else suite value, else the test_configuration's value following its
-    ``extends`` chain, else True -- and only configurations referenced by an
-    enabled suite count, so abstract base entries never decide this on their own.
+    Mirrors the executor's own ``is_gtest`` resolution -- per-test, else suite,
+    else the test_configuration's ``extends`` chain, else True -- so the two
+    cannot disagree about what a config runs.
 
     Args:
         config_data: Raw (unexpanded) configuration dict
@@ -111,11 +109,9 @@ def resolve_rccl_build_type(build_config, override=None, perf_only=False):
       3. "release" when perf_only            (config runs only rccl-tests)
       4. presence of --debug/--debug-fast in build_configuration.install_flags
 
-    Rule 4 is the historical behavior, so mixed and gtest-only configs keep
-    resolving to the flavor they always did. Rule 3 exists because perf numbers
-    from a Debug build are meaningless: a config that runs nothing but
-    rccl-tests must ask for Debug explicitly rather than inherit it from a
-    stray --debug.
+    Rule 4 is the historical behavior, kept so mixed and gtest-only configs
+    resolve as they always did. Rule 3 exists because perf numbers from a Debug
+    build are meaningless, so a perf-only config must ask for Debug explicitly.
 
     Args:
         build_config: The "build_configuration" section (may be empty/None)
@@ -239,8 +235,7 @@ class TestConfigProcessor:
 
         self.runs_rccl_tests, self.runs_gtest = classify_test_kinds(config_data)
 
-        # Must precede the path expansion below: configs may reference the
-        # selected flavor as "${WORKDIR}/build/${RCCL_BUILD_TYPE}".
+        # Must precede the path expansion below; configs may use ${RCCL_BUILD_TYPE}.
         self.rccl_build_type = resolve_rccl_build_type(
             config_data.get("build_configuration", {}), build_type_override,
             perf_only=self.runs_rccl_tests and not self.runs_gtest,

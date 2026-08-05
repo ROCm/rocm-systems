@@ -272,7 +272,6 @@ class TestExecutor:
         self.build_config = config_processor.get_build_config()
         self.rccl_tests_build_config = config_processor.get_rccl_tests_build_config()
 
-        # Already has the --rccl-build-type override applied.
         self.rccl_build_type = config_processor.get_rccl_build_type()
         self.runs_rccl_tests, self.runs_gtest = config_processor.get_test_kinds()
 
@@ -604,11 +603,9 @@ class TestExecutor:
         """
         Refuse to benchmark rccl-tests against a Debug build of RCCL.
 
-        A config running nothing but rccl-tests defaults to Release, so reaching
-        Debug takes an explicit build_type or --rccl-build-type: treat it as an
-        error. Configs that also run gtest suites are only warned, because
-        rccl-UnitTestsMPI and rccl-UnitTestsFixturesDebug are not built in
-        Release and those suites genuinely need Debug.
+        Perf-only configs default to Release, so Debug there was explicit -- an
+        error. Mixed configs are only warned: rccl-UnitTestsMPI and
+        rccl-UnitTestsFixturesDebug are not built in Release, so they need Debug.
 
         Returns:
             bool: False if the run should abort
@@ -616,8 +613,7 @@ class TestExecutor:
         if not self.runs_rccl_tests or self.rccl_build_type != "debug":
             return True
 
-        # A custom build dir is used verbatim, so the resolved flavor says
-        # nothing about what it actually contains.
+        # A custom build dir is used verbatim, so its flavor is unknown here.
         if self.using_custom_lib:
             return True
 
@@ -639,9 +635,9 @@ class TestExecutor:
         """
         Reconcile install.sh flags with the selected RCCL build flavor.
 
-        install.sh switches to Debug only when --debug/--debug-fast is passed, so
-        the flags must agree with self.rccl_build_type or the library lands in
-        the other build/<flavor> directory.
+        install.sh only builds Debug when --debug/--debug-fast is present, so the
+        flags must agree with the selected flavor or the library lands in the
+        other build/<flavor> directory.
 
         Args:
             install_flags: Flags from build_configuration.install_flags
@@ -859,7 +855,7 @@ class TestExecutor:
         rccl_home = _expand(cfg.get("rccl_home", self.build_dir))
 
         # Configs predating build_type hardcode the other flavor here, which would
-        # silently link a stale librccl.so. Only that exact sibling path is redirected.
+        # silently link a stale librccl.so.
         other_flavor = "debug" if self.rccl_build_type == "release" else "release"
         sibling_build_dir = os.path.join(workdir, "build", other_flavor)
         if not self.using_custom_lib and os.path.normpath(rccl_home) == os.path.normpath(sibling_build_dir):
