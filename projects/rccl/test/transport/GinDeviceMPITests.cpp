@@ -1073,19 +1073,13 @@ TEST_F(GinMPIDeviceTests, Barrier_TwoRanks) {
   // appended after the user-facing ginSignalCount range, so it never shifts
   // user signal indices.
   //
-  // ginForceEnable is REQUIRED. ncclDevCommCreateInternal only activates
-  // GIN (populating ginHandles[]/ginSignalBase) when nNodes>1 OR
-  // ginForceEnable OR ginSignalCount!=0 OR ginCounterCount!=0 -- the gate
-  // intentionally ignores railGinBarrierCount. Without this flag a
-  // single-node test that asks only for railGinBarrierCount gets NULL
-  // ginHandles[0], and the barrier's internal waitSignal -> getSignalPtr
-  // dispatch dereferences a NULL ncclGinProxyGpuCtx and faults at (nil)
-  // on the GPU. Other tests dodge the gate accidentally by setting
-  // ginSignalCount/ginCounterCount non-zero; this one has neither so we
-  // ask for GIN explicitly.
+  // GIN activation matters here: without it ginHandles[0] is NULL and the
+  // barrier's internal waitSignal -> getSignalPtr dispatch faults on a NULL
+  // ncclGinProxyGpuCtx. defaultGinReqs() asks for it explicitly by setting
+  // ginConnectionType=FULL, which is what a single-node run needs since this
+  // test requests no signal or counter pool of its own.
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
-  reqs.ginForceEnable      = true;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
   auto devCommCleanup = makeScopeGuard([&]() {
@@ -1156,12 +1150,10 @@ TEST_F(GinMPIDeviceTests, Barrier_FourRanks) {
   constexpr int kIters = 16;
 
   // worldGinBarrierCount=1 covers the 1-CTA launch (barrierIndex=0) and sizes
-  // the pool at 1*worldTeam.nRanks = 4 cells. ginForceEnable mirrors
-  // Barrier_TwoRanks so a run whose GIN activation gate does not count barrier
-  // requirements still gets a valid proxy ctx behind waitSignal.
+  // the pool at 1*worldTeam.nRanks = 4 cells. GIN activation comes from
+  // defaultGinReqs()'s ginConnectionType=FULL, as in Barrier_TwoRanks.
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.worldGinBarrierCount = 1;
-  reqs.ginForceEnable       = true;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
   auto devCommCleanup = makeScopeGuard([&]() {
@@ -1327,11 +1319,11 @@ TEST_F(GinMPIDeviceTests, BarrierSession_Hybrid) {
   constexpr int kIters = 16;
 
   // The world-team ncclBarrierSession sizes its hybrid LSA+rail-GIN barriers from
-  // reqs.barrierCount (not lsa/railGinBarrierCount); 0 hangs the rail arm. ginForceEnable
-  // activates GIN so the outer barrier's waitSignal has a valid ctx (see Barrier_TwoRanks).
+  // reqs.barrierCount (not lsa/railGinBarrierCount); 0 hangs the rail arm.
+  // defaultGinReqs()'s ginConnectionType=FULL activates GIN so the outer
+  // barrier's waitSignal has a valid ctx (see Barrier_TwoRanks).
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.barrierCount        = 1;
-  reqs.ginForceEnable      = true;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
   auto devCommCleanup = makeScopeGuard([&]() {
@@ -1886,8 +1878,7 @@ TEST_F(GinMPIDeviceTests, Alltoall_PureReference) {
   ASSERT_LE(nRanks, 8);
 
   // ginSignalCount=1 covers signalIndex=0; railGinBarrierCount=1 matches
-  // our single-CTA launch. Both non-zero so GIN activates without
-  // ginForceEnable.
+  // our single-CTA launch.
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount      = 1;
