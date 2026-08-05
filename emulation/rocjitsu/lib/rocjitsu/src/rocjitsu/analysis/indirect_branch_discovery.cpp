@@ -1495,26 +1495,42 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
     return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u) && dst != tmp_sreg;
   };
 
-  size_t abs_index = block.first_index;
-  while (abs_index <= block.last_index && is_gfx1250_padding(abs_index))
-    ++abs_index;
-  if (abs_index + 3 > block.last_index)
+  // Padding is skipped before every step, not just before the first and the last.
+  // The compiler places the prefetch pair wherever it likes within the template,
+  // so stepping by a fixed +1/+2 through the middle stops matching the moment it
+  // lands between s_abs_i32 and the subtract -- which is exactly where gfx1250
+  // hipBLASLt kernels put it. The sibling add-half matcher already walks this
+  // way, and the two halves have to agree: recover_signed_delta_templates()
+  // discards a recovered add-half whenever the sub-half misses, so a gap matched
+  // by only one of them leaves BOTH setpcs unrecovered and refuses the kernel.
+  const auto skip_padding = [&](size_t index) {
+    while (index <= block.last_index && is_gfx1250_padding(index))
+      ++index;
+    return index;
+  };
+
+  const size_t abs_index = skip_padding(block.first_index);
+  if (abs_index > block.last_index)
     return std::nullopt;
-  const Instruction &abs_inst = *ctx.insts[abs_index];
-  const Instruction &low_inst = *ctx.insts[abs_index + 1];
-  const Instruction &high_inst = *ctx.insts[abs_index + 2];
-  size_t setpc_index = abs_index + 3;
-  while (setpc_index <= block.last_index && is_gfx1250_padding(setpc_index))
-    ++setpc_index;
+  const size_t low_index = skip_padding(abs_index + 1);
+  if (low_index > block.last_index)
+    return std::nullopt;
+  const size_t high_index = skip_padding(low_index + 1);
+  if (high_index > block.last_index)
+    return std::nullopt;
+  const size_t setpc_index = skip_padding(high_index + 1);
   if (setpc_index > block.last_index)
     return std::nullopt;
+  const Instruction &abs_inst = *ctx.insts[abs_index];
+  const Instruction &low_inst = *ctx.insts[low_index];
+  const Instruction &high_inst = *ctx.insts[high_index];
   const Instruction &setpc_inst = *ctx.insts[setpc_index];
   if (!sop1_same_sreg(abs_inst, ctx.facts[abs_index].word, "s_abs_i32", tmp_sreg))
     return std::nullopt;
-  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[abs_index + 1].word, *sub_u32_opcode, pair_lo,
+  if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[low_index].word, *sub_u32_opcode, pair_lo,
                                 pair_lo, tmp_sreg))
     return std::nullopt;
-  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[abs_index + 2].word, *subb_u32_opcode,
+  if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[high_index].word, *subb_u32_opcode,
                                      static_cast<uint16_t>(pair_lo + 1),
                                      static_cast<uint16_t>(pair_lo + 1)))
     return std::nullopt;

@@ -2694,6 +2694,76 @@ TEST(CfgAnalysis, Gfx1250DoesNotReuseStashFromSkippedFallthroughPredecessor) {
   EXPECT_TRUE(fixups.empty()) << "must-dataflow must not reuse a skipped-path stash";
 }
 
+// The signed PC-delta template with the gfx1250 instruction-prefetch pair sitting
+// between s_abs_i32 and the subtract. The encodings are lifted verbatim from a
+// hipBLASLt gfx1250 Tensile kernel, where this is what the compiler emits.
+//
+// Both halves have to recover together: the sub half proves the negative path and
+// the add half the positive one, and recover_signed_delta_templates() discards a
+// recovered add half whenever the sub half misses. Tolerating the padding in only
+// one matcher therefore leaves BOTH consumers unrecovered, and a kernel whose text
+// has to move is then refused outright -- which reached a user as a null kernel
+// handle and a segfault.
+TEST(CfgAnalysis, SignedDeltaTemplateToleratesPrefetchPaddingBeforeTheSubtract) {
+  std::vector<uint32_t> words = {
+      0xBE9C4700u, // 0x00: s_get_pc_i64 s[28:29].
+      0x811E84FFu, // 0x04: s_add_co_i32 s30, lit, 4.
+      0x00000034u, // 0x08: literal -> target 0x3c (getpc_next + lit + 4).
+      0xBF03801Eu, // 0x0c: s_cmp_ge_i32 s30, 0.
+      0xBFA20007u, // 0x10: s_cbranch_scc1 -> add half at 0x30.
+      0xBE9E151Eu, // 0x14: s_abs_i32 s30, s30.
+      0xBE8E009Fu, // 0x18: s_mov_b32 s14, 31        <- the prefetch-config move and
+      0xF404A000u, // 0x1c: s_prefetch_inst_pc_rel      prefetch that broke the match
+      0x1C000000u,
+      0x809C1E1Cu,                                // 0x24: s_sub_co_u32 s28, s28, s30.
+      0x829D801Du,                                // 0x28: s_sub_co_ci_u32 s29, s29, 0.
+      0xBE80481Cu,                                // 0x2c: s_set_pc_i64 s[28:29]  (negative path).
+      0x801C1E1Cu,                                // 0x30: s_add_co_u32 s28, s28, s30.
+      0x821D801Du,                                // 0x34: s_add_co_ci_u32 s29, s29, 0.
+      0xBE80481Cu,                                // 0x38: s_set_pc_i64 s[28:29]  (positive path).
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: recovered target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  const auto *sec = co.text_sections().front();
+  const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
+  const size_t inst_data_size = sec->size() / sizeof(uint32_t);
+  std::vector<std::unique_ptr<Instruction>> owned;
+  for (size_t pc = 0, byte_offset = 0; pc < inst_data_size;) {
+    if (inst_data[pc] == 0) {
+      ++pc;
+      byte_offset += sizeof(uint32_t);
+      continue;
+    }
+    std::unique_ptr<Instruction> inst(decoder->decode(&inst_data[pc], byte_offset));
+    ASSERT_NE(inst, nullptr);
+    const uint32_t inst_words = static_cast<uint32_t>(inst->size()) / sizeof(uint32_t);
+    byte_offset += inst->size();
+    pc += inst_words;
+    owned.push_back(std::move(inst));
+  }
+  std::vector<const Instruction *> decoded_insts;
+  decoded_insts.reserve(owned.size());
+  for (const auto &inst : owned)
+    decoded_insts.push_back(inst.get());
+  const auto text =
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(sec->data()), sec->size());
+
+  const auto fixups = discover_indirect_branch_edges(
+      std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size()), text,
+      ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_EQ(fixups.size(), 2u) << "both halves of the signed-delta template must recover";
+  for (const auto &fixup : fixups) {
+    EXPECT_EQ(fixup.source_target_offset, 0x3cu);
+    EXPECT_EQ(fixup.source_getpc_offset, 0x00u);
+    EXPECT_EQ(fixup.source_call_sreg, 28u);
+  }
+}
+
 TEST(CfgAnalysis, ReversePostOrderStraightLine) {
   auto blocks =
       build_test_blocks({TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::UseSgpr4});
