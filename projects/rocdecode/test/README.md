@@ -53,7 +53,8 @@ test/build_samples.sh [JOBS]
 
 Runs the CTest suite followed by the per-codec conformance tests, then prints a combined
 summary box and exits `0` if everything passed, `1` otherwise. Per-phase logs are written
-to `validation_results/<timestamp>/`.
+to `$HOME/rocDecode_validation_results/<timestamp>/` (outside the repo, to keep `git
+status` clean; override the base with `ROCDECODE_VALIDATION_RESULTS_DIR`).
 
 ```shell
 test/validate.sh [--build-dir DIR] [--skip-ctest] [--skip-conformance]

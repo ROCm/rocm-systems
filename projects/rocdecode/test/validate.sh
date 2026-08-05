@@ -57,6 +57,9 @@ Environment:
                               stream folders AvcConformance, Av1Conformance,
                               HevcConformance, Vp9Conformance.
                               Default: $HOME/rocDecodeConformance
+  ROCDECODE_VALIDATION_RESULTS_DIR
+                              Base directory for timestamped result logs.
+                              Default: $HOME/rocDecode_validation_results
 EOF
 }
 
@@ -134,7 +137,10 @@ if [[ $CHECK_ROCM -eq 1 ]]; then
 fi
 
 TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
-RESULTS_DIR="$SCRIPT_DIR/../validation_results/$TIMESTAMP"
+# Write results outside the repo tree (default: $HOME) so they do not clutter
+# `git status`. Override the base dir with ROCDECODE_VALIDATION_RESULTS_DIR.
+RESULTS_BASE="${ROCDECODE_VALIDATION_RESULTS_DIR:-$HOME/rocDecode_validation_results}"
+RESULTS_DIR="$RESULTS_BASE/$TIMESTAMP"
 mkdir -p "$RESULTS_DIR"
 
 # ANSI colors
