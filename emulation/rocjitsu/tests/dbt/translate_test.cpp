@@ -9878,24 +9878,39 @@ TEST(BinaryTranslatorE2E, Gfx1250EmulatesCvtSrFp8F32ClampSetForA0) {
             1);
 }
 
+/// @brief What executing one translated E5M3 replacement left behind.
+struct Gfx1250E5m3Execution {
+  uint32_t vdst = 0;          ///< Destination VGPR of the operand's own bank.
+  uint8_t final_msb_mode = 0; ///< VGPR-MSB mode the replacement left in effect.
+};
+
 /// @brief Run one translated gfx1250 E5M3 replacement on the emulated CU.
 ///
 /// @details The B0 conversion is translated on its own and every instruction of
 /// the A0 replacement then executes in order on a single-lane wavefront. That
 /// makes the emitted sequence comparable against the execution model's own
 /// conversion helpers, which mnemonic-counting tests cannot check.
-std::optional<uint32_t> run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t opsel,
-                                                     uint32_t src0_value, uint32_t src1_value,
-                                                     uint32_t vdst_initial, bool fp16_ovfl,
-                                                     uint8_t vgpr_msb_mode = 0) {
+///
+/// @param vgpr_msb_mode Incoming S_SET_VGPR_MSB layout. Each operand is read and
+///        written through its own role's bank, so a lowering that forwards the
+///        wrong role's bank addresses a register the test never wrote.
+std::optional<Gfx1250E5m3Execution>
+run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t opsel, uint32_t src0_value,
+                             uint32_t src1_value, uint32_t vdst_initial, bool fp16_ovfl,
+                             uint8_t vgpr_msb_mode = 0) {
   constexpr uint16_t kSrc0Vgpr = 22;
   constexpr uint16_t kSrc1Vgpr = 2;
   constexpr uint16_t kDstVgpr = 30;
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const uint32_t src0_bank = vgpr_msb_mode & 0x3u;
+  const uint32_t src1_bank = (vgpr_msb_mode >> 2) & 0x3u;
+  const uint32_t dst_bank = (vgpr_msb_mode >> 6) & 0x3u;
 
   std::vector<uint32_t> source_words;
-  if (vgpr_msb_mode != 0)
-    source_words.push_back(gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0})[0]);
+  if (vgpr_msb_mode != 0) {
+    source_words.push_back(
+        gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = vgpr_msb_mode})[0]);
+  }
   const auto conversion = gfx1250::build_vop3(opcode, {.vdst = kDstVgpr,
                                                        .opsel = opsel,
                                                        .clamp = 1,
@@ -9930,7 +9945,8 @@ std::optional<uint32_t> run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t op
   cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
-  cfg.vgprs_per_wf = 256;
+  // Both banks must be addressable: a banked operand resolves to reg + 256.
+  cfg.vgprs_per_wf = 512;
   cfg.lds_size_kb = 64;
   auto cu = rocjitsu::amdgpu::ComputeUnitCore::create("gfx1250_e5m3", cfg, &gpu_mem, &l2);
   if (cu == nullptr) {
@@ -9945,9 +9961,9 @@ std::optional<uint32_t> run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t op
   wf->set_exec(0x1u);
   wf->set_mode_raw(fp16_ovfl ? rocjitsu::amdgpu::Wavefront::FP16_OVFL_BIT : 0u);
   const uint32_t vb = wf->vgpr_alloc().base;
-  cu->write_vgpr(vb + kSrc0Vgpr, 0, src0_value);
-  cu->write_vgpr(vb + kSrc1Vgpr, 0, src1_value);
-  cu->write_vgpr(vb + kDstVgpr, 0, vdst_initial);
+  cu->write_vgpr(vb + (src0_bank << 8) + kSrc0Vgpr, 0, src0_value);
+  cu->write_vgpr(vb + (src1_bank << 8) + kSrc1Vgpr, 0, src1_value);
+  cu->write_vgpr(vb + (dst_bank << 8) + kDstVgpr, 0, vdst_initial);
 
   auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   if (!decoder) {
@@ -9973,7 +9989,8 @@ std::optional<uint32_t> run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t op
     cu->execute_instruction(inst.get(), *wf);
     index += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
   }
-  return cu->read_vgpr(vb + kDstVgpr, 0);
+  return Gfx1250E5m3Execution{cu->read_vgpr(vb + (dst_bank << 8) + kDstVgpr, 0),
+                              wf->vgpr_msb_mode()};
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250E5m3PackReplacementMatchesReferenceConversion) {
@@ -10002,7 +10019,7 @@ TEST(BinaryTranslatorE2E, Gfx1250E5m3PackReplacementMatchesReferenceConversion) 
              << 8);
         const uint32_t expected = write_high ? ((kDstInitial & 0x0000ffffu) | (packed << 16))
                                              : ((kDstInitial & 0xffff0000u) | packed);
-        EXPECT_EQ(*produced, expected)
+        EXPECT_EQ(produced->vdst, expected)
             << "src0=" << std::hex << src0 << " src1=" << src1 << " fp16_ovfl=" << std::dec
             << fp16_ovfl << " write_high=" << write_high;
       }
@@ -10031,10 +10048,57 @@ TEST(BinaryTranslatorE2E, Gfx1250E5m3StochasticReplacementMatchesReferenceConver
               util::f32_to_fp8_e5m3_sr_mode(std::bit_cast<float>(value), seed, fp16_ovfl);
           const uint32_t shift = static_cast<uint32_t>(dst_byte) * 8u;
           const uint32_t expected = (kDstInitial & ~(0xffu << shift)) | (byte << shift);
-          EXPECT_EQ(*produced, expected)
+          EXPECT_EQ(produced->vdst, expected)
               << "value=" << std::hex << value << " seed=" << seed << std::dec
               << " fp16_ovfl=" << fp16_ovfl << " dst_byte=" << static_cast<unsigned>(dst_byte);
         }
+      }
+    }
+  }
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250E5m3ReplacementsHonorPerRoleVgprBanks) {
+  // Only two banks are addressable, so no single mode can separate all three
+  // roles. Raising each role's bank on its own does: whichever pair a lowering
+  // confuses, one of these modes has them differ, and the operand then resolves
+  // to a register nothing wrote instead of one that happens to hold the answer.
+  static constexpr std::array<uint8_t, 3> modes = {
+      1u,      // src0 in the high bank.
+      1u << 2, // src1 in the high bank.
+      1u << 6, // destination in the high bank.
+  };
+  static constexpr std::array<uint32_t, 6> kValues = {0x00000000u, 0x37000000u, 0x3F800000u,
+                                                      0x47E00000u, 0x47F80000u, 0x7FC00000u};
+  constexpr uint32_t kDstInitial = 0x5a5a5a5au;
+
+  for (const uint8_t mode : modes) {
+    for (const bool fp16_ovfl : {false, true}) {
+      for (size_t index = 0; index < kValues.size(); ++index) {
+        const uint32_t src0 = kValues[index];
+        const uint32_t src1 = kValues[(index + 2) % kValues.size()];
+
+        const auto packed_run = run_gfx1250_e5m3_replacement(gfx1250::kVCvtPkFp8F32Vop3, 0, src0,
+                                                             src1, kDstInitial, fp16_ovfl, mode);
+        ASSERT_TRUE(packed_run.has_value());
+        const uint32_t packed =
+            util::f32_to_fp8_e5m3_rne_mode(std::bit_cast<float>(src0), fp16_ovfl) |
+            (static_cast<uint32_t>(
+                 util::f32_to_fp8_e5m3_rne_mode(std::bit_cast<float>(src1), fp16_ovfl))
+             << 8);
+        EXPECT_EQ(packed_run->vdst, (kDstInitial & 0xffff0000u) | packed)
+            << "src0=" << std::hex << src0 << " src1=" << src1 << std::dec
+            << " fp16_ovfl=" << fp16_ovfl << " mode=" << static_cast<unsigned>(mode);
+        EXPECT_EQ(packed_run->final_msb_mode, mode) << "the incoming mode must be restored";
+
+        const auto stochastic_run = run_gfx1250_e5m3_replacement(
+            gfx1250::kVCvtSrFp8F32Vop3, 2u << 2, src0, src1, kDstInitial, fp16_ovfl, mode);
+        ASSERT_TRUE(stochastic_run.has_value());
+        const uint32_t byte =
+            util::f32_to_fp8_e5m3_sr_mode(std::bit_cast<float>(src0), src1, fp16_ovfl);
+        EXPECT_EQ(stochastic_run->vdst, (kDstInitial & ~(0xffu << 16)) | (byte << 16))
+            << "value=" << std::hex << src0 << " seed=" << src1 << std::dec
+            << " fp16_ovfl=" << fp16_ovfl << " mode=" << static_cast<unsigned>(mode);
+        EXPECT_EQ(stochastic_run->final_msb_mode, mode) << "the incoming mode must be restored";
       }
     }
   }
