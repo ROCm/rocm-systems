@@ -584,7 +584,7 @@ def clear_rank_env(monkeypatch, *env_vars):
 
 
 def skip_unsupported_roofline_soc():
-    if soc in {"MI100", "RDNA35_GORGON_POINT"}:
+    if soc == "MI100":
         pytest.skip(f"Roofline is not supported on {soc}")
 
 
