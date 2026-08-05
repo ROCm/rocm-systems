@@ -161,7 +161,11 @@ the affected bytes, and LDS races are tracked per byte.
 Every in-flight memory operation has an **event** that goes through the
 following lifecycle:
 
-1. **ACTIVE** — the operation is in flight.
+1. **ACTIVE** — the operation is in flight. Ordinary DS operations issued by
+   the same wave remain ordered with respect to each other, so a later
+   same-wave DS read or write does not race solely because the earlier DS event
+   is still active. Direct-to-LDS VMEM writes still require the owning wave to
+   wait for `vmcnt` before accessing the destination bytes.
 1. **WAVE_COMPLETE** — `s_waitcnt` has retired the event for the owning wave.
    This means the event is no longer in flight from the perspective of the wave
    that issued the operation, but is still in flight from the perspective of

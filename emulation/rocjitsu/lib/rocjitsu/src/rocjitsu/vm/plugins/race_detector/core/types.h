@@ -56,7 +56,7 @@ inline void removeFromUnorderedList(std::vector<EventId> &list, EventId eventId)
 
 /// Status of a memory event in the race detection lifecycle.
 enum class EventStatus {
-  ACTIVE,        // Pending. Unsafe for everyone.
+  ACTIVE,        // Pending. Ordinary same-wave DS accesses remain ordered.
   WAVE_COMPLETE, // s_waitcnt passed. Safe for owning wave, unsafe for others.
   RETIRED        // Fully retired (s_barrier). No longer referenced.
 };
