@@ -65,9 +65,13 @@ typedef void (*rj_gfx1250_b0_to_a0_diagnostic_callback_t)(
 /// @param[out] info Stable source identity and changed-instruction count. This
 ///             is cleared before argument validation. When all arguments are
 ///             valid, source_code_object_id is populated before parsing.
-/// @param[in] diagnostic_callback Optional synchronous sink for diagnostics
-///            when the result is not dispatchable. The callback receives the
-///            complete diagnostic set, including required-work items.
+/// @param[in] diagnostic_callback Optional synchronous sink invoked for every
+///            non-success return, including an invalid argument, an input that
+///            is not a gfx1250 code object, a non-dispatchable result, a failed
+///            allocation, and a translator exception. Only a failure that came
+///            from translation delivers the complete translator diagnostic set
+///            with its required-work items; the other paths report one
+///            diagnostic describing the failure itself.
 /// @param[in] user_data Opaque value passed to @p diagnostic_callback.
 /// @retval ROCJITSU_STATUS_SUCCESS Translation succeeded.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT An input or output argument is invalid.

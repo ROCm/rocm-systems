@@ -14,13 +14,13 @@
 
 #include "hsa/hsa_api_trace_minimal.h"
 #include "rocjitsu/code/amdgpu_elf.h"
-#include "rocjitsu/code/code_object_identity.h"
 #include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
 
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cinttypes>
+#include <climits>
 #include <condition_variable>
 #include <cstdarg>
 #include <cstdio>
@@ -37,6 +37,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -80,11 +81,56 @@ void remember_test_dump(const char *path) noexcept {
 void remember_test_dump(const char *) noexcept {}
 #endif
 
-void dump_failed_source(std::span<const uint8_t> bytes) noexcept {
-  const uint64_t source_id = rocjitsu::stable_code_object_id(bytes.data(), bytes.size());
-  char path[256];
-  const int length = std::snprintf(
-      path, sizeof(path), "/tmp/rocjitsu-gfx1250-b0-to-a0-%016" PRIx64 "-XXXXXX.elf", source_id);
+/// @brief Whether the operator asked for failing inputs to be written to disk.
+///
+/// @details Capture is opt-in because the objects are large -- RCCL's gfx1250
+/// device image is 212 MiB -- and an environmental failure is deliberately not
+/// memoized, so it repeats on every load of the same bytes.
+bool source_capture_enabled() {
+  const char *value = std::getenv("HSA_HOTSWAP_DUMP_SOURCE");
+  return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+}
+
+/// @brief Directory that receives captured sources, most specific setting first.
+const char *source_capture_directory() {
+  for (const char *name : {"HSA_HOTSWAP_DUMP_DIR", "TMPDIR"}) {
+    const char *value = std::getenv(name);
+    if (value != nullptr && value[0] != '\0')
+      return value;
+  }
+  return "/tmp";
+}
+
+std::mutex g_captured_sources_mutex;
+std::unordered_set<uint64_t> g_captured_sources;
+
+/// @brief Take the single capture slot for @p source_id.
+///
+/// @returns False when this source was already reported, so a failure repeating
+/// on every load of the same bytes leaves one artifact, not one per attempt.
+bool claim_source_capture(uint64_t source_id) noexcept {
+  try {
+    std::lock_guard lock(g_captured_sources_mutex);
+    return g_captured_sources.insert(source_id).second;
+  } catch (...) {
+    return false;
+  }
+}
+
+void dump_failed_source(uint64_t source_id, std::span<const uint8_t> bytes) noexcept {
+  if (!claim_source_capture(source_id))
+    return;
+  if (!source_capture_enabled()) {
+    log_error("translation failed; set HSA_HOTSWAP_DUMP_SOURCE=1 to save the source code object "
+              "source_id=fnv1a64:%016" PRIx64 " input_bytes=%zu; please file a bug report",
+              source_id, bytes.size());
+    return;
+  }
+
+  char path[PATH_MAX];
+  const int length =
+      std::snprintf(path, sizeof(path), "%s/rocjitsu-gfx1250-b0-to-a0-%016" PRIx64 "-XXXXXX.elf",
+                    source_capture_directory(), source_id);
   if (length < 0 || static_cast<size_t>(length) >= sizeof(path)) {
     log_error("translation failed and its source code object could not be saved: path is too long "
               "source_id=fnv1a64:%016" PRIx64 "; please file a bug report",
@@ -152,12 +198,19 @@ void log_error(const char *format, ...) noexcept {
   va_end(args);
 }
 
+/// @brief Report one load attempt.
+///
+/// @param replay True when the outcome is a remembered verdict rather than a
+///        fresh one. A refusal is reported unconditionally the one time it is
+///        reached, but the reuses that follow are not new failures: a device
+///        library registered once per kernel and per device replays the same
+///        verdict hundreds of times, and reporting each one buries the original.
 void log_translation(uint64_t source_id, const char *outcome, size_t changed, size_t input_bytes,
-                     size_t output_bytes, rj_status_t translation_status,
-                     hsa_status_t load_status) noexcept {
+                     size_t output_bytes, rj_status_t translation_status, hsa_status_t load_status,
+                     bool replay = false) noexcept {
   const bool failed =
       translation_status != ROCJITSU_STATUS_SUCCESS || load_status != HSA_STATUS_SUCCESS;
-  if (!failed && !verbose_logging())
+  if ((!failed || replay) && !verbose_logging())
     return;
   flockfile(stderr);
   std::fputs("[hsa-hotswap-rj] ", stderr);
@@ -1303,15 +1356,16 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
       memo_publish(claim, fingerprint, source, outcome);
     };
 
-    // Serve a remembered outcome, whichever way it went. Reporting it through the
-    // same record as a fresh translation keeps every load attributable to its
-    // source object; a reuse that logged less would blind that linkage precisely
-    // when almost every load is a reuse.
+    // Serve a remembered outcome, whichever way it went. Both reuses carry the
+    // same record as a fresh translation so every load stays attributable to its
+    // source object, but only the verbose channel sees them: the reuse itself is
+    // not news, and almost every load is a reuse.
     if (lookup == MemoLookup::kHit) {
       if (translation.output == nullptr) {
         log_translation(translation.info.source_code_object_id, "reused_failure",
                         translation.info.changed_instruction_count, source->size(), 0,
-                        translation.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+                        translation.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
+                        /*replay=*/true);
         return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
       }
       const hsa_status_t reused_status = load_owned_bytes(executable, agent, translation.output,
@@ -1337,7 +1391,10 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
     if (translation.status != ROCJITSU_STATUS_SUCCESS || translated_data == nullptr ||
         translated_size == 0) {
       rj_gfx1250_b0_to_a0_free(translated_data);
-      dump_failed_source(*source);
+      // Copying a large input to disk after an allocation failure adds pressure
+      // to a system that just ran out, and the bytes are not what failed.
+      if (translation.status != ROCJITSU_STATUS_OUT_OF_RESOURCES)
+        dump_failed_source(translation.info.source_code_object_id, *source);
       // Remember a refusal only when it is a verdict on the bytes. The translator
       // reports an environmental failure -- an allocation it could not make, an
       // exception it could not attribute -- with a status that promises nothing
@@ -1481,6 +1538,12 @@ extern "C" RJ_HOOK_EXPORT void rj_test_clear_retained_storage() {
   }
   for (const std::string &path : dump_paths)
     (void)unlink(path.c_str());
+  // The capture claim is process-wide, so a case that leaves its source claimed
+  // would silently suppress the artifact every later case expects.
+  {
+    std::lock_guard lock(g_captured_sources_mutex);
+    g_captured_sources.clear();
+  }
   {
     std::lock_guard lock(g_state.storage_mutex);
     g_state.readers.clear();
@@ -1579,6 +1642,12 @@ extern "C" RJ_HOOK_EXPORT void rj_test_force_next_translation_status(int status)
   std::lock_guard lock(g_forced_status_mutex);
   g_forced_status_armed = true;
   g_forced_status = static_cast<rj_status_t>(status);
+}
+
+// Test-only: how many source captures this process has written.
+extern "C" RJ_HOOK_EXPORT uint64_t rj_test_dump_path_count() {
+  std::lock_guard lock(g_test_dump_mutex);
+  return g_test_dump_paths.size();
 }
 
 // Test-only: bytes the memo is currently holding, sources and outputs together.
