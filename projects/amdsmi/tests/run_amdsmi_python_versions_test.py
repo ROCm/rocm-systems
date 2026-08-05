@@ -76,7 +76,11 @@ def _import_smoke(interp: str) -> None:
 
 
 def _run_unit_tests(interp: str) -> None:
-    for test in ("test_abi_compat.py", "test_dual_copy_guard.py"):
+    for test in (
+        "test_abi_compat.py",
+        "test_dual_copy_guard.py",
+        "test_cpack_path_guard.py",
+    ):
         subprocess.run([interp, str(TEST_DIR / test)], check=True)
 
 
