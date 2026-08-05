@@ -10,11 +10,9 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-# Every test below is disabled for now. validate_all_agents_are_sampled() asserts that
-# samples land between hardcoded transpose.cpp line numbers that the kernel has since
-# moved past, so the suite fails on every machine regardless of PC sampling support. To
-# re-enable, restore rocprofiler_sdk_pc_sampling_disabled(IS_PC_SAMPLING_DISABLED) and
-# gate the tests on it.
+# Disabled for now: multi-GPU tests are generally unstable in our CI. Re-enabling means
+# gating these on rocprofiler_sdk_pc_sampling_disabled() again and fixing
+# validate_all_agents_are_sampled(), which asserts on stale transpose.cpp line numbers.
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
