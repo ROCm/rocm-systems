@@ -47,18 +47,21 @@ constexpr std::string_view kKeyDomain = "rjc1";
 constexpr std::string_view kManifestMagic = "rjcache1";
 
 /// @brief Largest store, before the proportional and headroom limits apply.
-constexpr uint64_t kAbsoluteCapacityBytes = 256ull << 20;
+constexpr uint64_t operator""_MiB(unsigned long long value) { return value << 20; }
+constexpr uint64_t operator""_GiB(unsigned long long value) { return value << 30; }
+
+constexpr uint64_t kAbsoluteCapacityBytes = 256_MiB;
 
 /// @brief Share of the filesystem this store may occupy.
-constexpr uint64_t kCapacityPermilleOfTotal = 100; // 10%
+constexpr uint64_t kCapacityPercentOfTotal = 10;
 
 /// @brief Share of currently free space this store may take.
-constexpr uint64_t kCapacityPermilleOfFree = 500; // 50%
+constexpr uint64_t kCapacityPercentOfFree = 50;
 
 /// @brief Below this much free space the store stops accepting writes.
 /// @details The runtime directory is shared with the daemon socket and config,
 /// and is memory-backed, so exhausting it breaks more than caching.
-constexpr uint64_t kHeadroomBytes = 64ull << 20;
+constexpr uint64_t kHeadroomBytes = 64_MiB;
 
 /// @brief Fraction of capacity a single entry may occupy.
 constexpr uint64_t kMaxEntryDivisor = 16;
@@ -79,10 +82,10 @@ constexpr uint64_t kMaxObjectBytes = kAbsoluteCapacityBytes / kMaxEntryDivisor;
 /// few hundred megabytes takes minutes to translate, which is the case the tier
 /// was built for. What remains is a sanity bound, so a corrupt size never turns
 /// into an allocation of that size.
-constexpr uint64_t kSharedMaxObjectBytes = 4ull << 30;
+constexpr uint64_t kSharedMaxObjectBytes = 4_GiB;
 
 /// @brief Evict down to this share of capacity so eviction is amortised.
-constexpr uint64_t kEvictTargetPermille = 900; // 90%
+constexpr uint64_t kEvictTargetPercent = 90;
 
 /// @brief Age at which an unrenamed temporary is treated as abandoned.
 /// @details A writer killed between creating its temporary and renaming it
@@ -799,8 +802,8 @@ uint64_t TranslationStore::Impl::capacity_locked() const {
     return capacity_override_;
 #endif
   uint64_t cap = kAbsoluteCapacityBytes;
-  cap = std::min(cap, total / 1000u * kCapacityPermilleOfTotal);
-  cap = std::min(cap, free_now / 1000u * kCapacityPermilleOfFree);
+  cap = std::min(cap, total / 100u * kCapacityPercentOfTotal);
+  cap = std::min(cap, free_now / 100u * kCapacityPercentOfFree);
   return cap;
 }
 
@@ -833,7 +836,7 @@ bool TranslationStore::Impl::reserve_space_locked(uint64_t needed) {
   // insertion order, which is acceptable for uniformly sized entries.
   std::sort(entries.begin(), entries.end(),
             [](const Entry &a, const Entry &b) { return a.used < b.used; });
-  const uint64_t target = cap / 1000u * kEvictTargetPermille;
+  const uint64_t target = cap / 100u * kEvictTargetPercent;
   // A manifest with no object first, whatever its age. It can never satisfy a
   // lookup, so reclaiming it frees space at no cost to the hit rate -- and if
   // nothing here removed it, nothing ever would.

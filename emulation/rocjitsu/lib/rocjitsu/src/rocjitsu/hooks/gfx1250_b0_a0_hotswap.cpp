@@ -63,6 +63,10 @@ constexpr TranslationIdentity kTranslationIdentity = rocjitsu::kGfx1250B0A0Ident
 /// this hook's state: the store may be consulted from a load that arrives after
 /// static destructors would otherwise have run.
 TranslationStore &translation_store() {
+  // The *new is deliberate and never freed: a load can arrive after static
+  // destructors would have run, so the store has to outlive them. It stays
+  // reachable through this reference, so LeakSanitizer does not report it --
+  // confirmed under the ASan/UBSan build with detect_leaks=1.
   static TranslationStore &store = *new TranslationStore(
       rocjitsu::kGfx1250B0A0Domain, rocjitsu::gfx1250_b0_a0_translator_anchor());
   return store;

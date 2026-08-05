@@ -76,7 +76,7 @@ void usage(const char *program) {
                "\n"
                "Each input must be a standalone AMDGPU code object. Extracting\n"
                "those from fat binaries, bundles and archives is the caller's job;\n"
-               "see scripts/rocjitsu-pretranslate.py.\n",
+               "see rocjitsu-pretranslate.py, installed alongside this tool.\n",
                program);
 }
 

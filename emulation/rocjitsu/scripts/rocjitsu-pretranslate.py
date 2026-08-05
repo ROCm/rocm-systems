@@ -336,6 +336,7 @@ class Discovery:
     compressed_bundles: list[Path] = field(default_factory=list)
     compressed_unpacked: int = 0
     kpack_archives: list[Path] = field(default_factory=list)
+    kpack_skipped: int = 0
     failures: list[dict[str, object]] = field(default_factory=list)
 
 
@@ -364,7 +365,11 @@ def walk(roots: list[Path]):
 
 
 def discover(
-    roots: list[Path], target: str, kpack: Kpack | None, bundler: str | None
+    roots: list[Path],
+    target: str,
+    kpack: Kpack | None,
+    bundler: str | None,
+    kpack_intentionally_skipped: bool = False,
 ) -> Discovery:
     found = Discovery()
     # (path, container bytes) for every compressed bundle, resolved after the
@@ -453,6 +458,14 @@ def discover(
 
     for archive in found.kpack_archives:
         if kpack is None:
+            # An archive nobody meant to open is not a failure. --skip-kpack
+            # documents those as accepted skips, so reporting them as errors and
+            # exiting nonzero contradicts the option and breaks any build step
+            # that checks the exit status. An archive that WAS meant to be
+            # processed and could not be is still a failure.
+            if kpack_intentionally_skipped:
+                found.kpack_skipped += 1
+                continue
             found.failures.append(
                 {
                     "category": "kpack",
@@ -638,7 +651,7 @@ def main() -> int:
                 file=sys.stderr,
             )
 
-    found = discover(roots, args.target, kpack, bundler)
+    found = discover(roots, args.target, kpack, bundler, args.skip_kpack)
 
     # Content-address before translating. An install tree holds the same object
     # under several names, and the whole point is not to do the work twice.
@@ -702,6 +715,7 @@ def main() -> int:
         "unique_objects": len(unique),
         "duplicate_objects": duplicates,
         "kpack_archives": len(found.kpack_archives),
+        "kpack_archives_skipped": found.kpack_skipped,
         "compressed_bundles": len(found.compressed_bundles),
         "compressed_bundles_unpacked": found.compressed_unpacked,
         "discovery_failures": len(found.failures),

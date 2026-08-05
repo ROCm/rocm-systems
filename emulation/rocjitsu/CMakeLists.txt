@@ -443,6 +443,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         TARGETS rocjitsu_bin rj_pretranslate
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
+    # And the wrapper ships with it. rj_pretranslate takes standalone code
+    # objects; the script is the only piece that knows how to find them inside
+    # fat binaries, offload bundles and KPACK archives, and the tool's own help
+    # text points at it. Installing one without the other leaves that pointer
+    # dangling and the deployed workflow with no entry point.
+    install(
+        PROGRAMS scripts/rocjitsu-pretranslate.py
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
 endif()
 
 # Config files and schemas: share/rocjitsu/

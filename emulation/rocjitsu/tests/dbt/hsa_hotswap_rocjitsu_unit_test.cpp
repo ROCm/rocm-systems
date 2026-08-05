@@ -281,16 +281,26 @@ std::vector<uint8_t> read_translation_fixture() {
 /// that wants it populated fills this in.
 class ScopedCacheRoot {
 public:
+  /// A path no store can open, so a fixture that failed to build its own
+  /// directory disables the store instead of falling back to the real one.
+  static constexpr const char *kUnusableRoot = "/dev/null/rj-fixture-has-no-root";
+
   ScopedCacheRoot() {
     std::strcpy(path_, "/tmp/rj-hotswap-cache-XXXXXX");
     if (mkdtemp(path_) == nullptr)
       path_[0] = '\0';
-    rj_test_set_cache_root(path_[0] == '\0' ? nullptr : path_);
+    // A failed mkdtemp used to pass nullptr, which restores the REAL per-user
+    // store: the fixture would then exercise production state, and on a machine
+    // with a populated install tier a test could pass without ever touching its
+    // own directory. Point the store at a path that cannot exist instead, so a
+    // broken fixture disables the store rather than escaping into the real one.
+    // Callers assert on has_roots() before relying on either.
+    rj_test_set_cache_root(path_[0] == '\0' ? kUnusableRoot : path_);
 
     std::strcpy(pretranslation_path_, "/tmp/rj-hotswap-aot-XXXXXX");
     if (mkdtemp(pretranslation_path_) == nullptr)
       pretranslation_path_[0] = '\0';
-    rj_test_set_pretranslation_root(pretranslation_path_[0] == '\0' ? nullptr
+    rj_test_set_pretranslation_root(pretranslation_path_[0] == '\0' ? kUnusableRoot
                                                                     : pretranslation_path_);
   }
   ~ScopedCacheRoot() {
@@ -305,6 +315,11 @@ public:
   }
   ScopedCacheRoot(const ScopedCacheRoot &) = delete;
   ScopedCacheRoot &operator=(const ScopedCacheRoot &) = delete;
+
+  /// @brief Whether both private directories were created.
+  [[nodiscard]] bool has_roots() const {
+    return path_[0] != '\0' && pretranslation_path_[0] != '\0';
+  }
 
   [[nodiscard]] const char *path() const { return path_; }
   [[nodiscard]] const char *pretranslation_path() const { return pretranslation_path_; }
@@ -509,6 +524,7 @@ class HsaHotswapCacheTest : public HsaHotswapHookTest {
 protected:
   void SetUp() override {
     HsaHotswapHookTest::SetUp();
+    ASSERT_TRUE(cache_root.has_roots()) << "fixture could not create its private store roots";
     ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
     source = read_translation_fixture();
     ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
@@ -775,6 +791,10 @@ TEST_F(HsaHotswapCacheTest, EntriesAreDisplacedOnceTheStoreReachesCapacity) {
 // they are about what the store itself will and will not hand back.
 class HsaHotswapCacheApiTest : public ::testing::Test {
 protected:
+  void SetUp() override {
+    ASSERT_TRUE(cache_root.has_roots()) << "fixture could not create its private store roots";
+  }
+
   static constexpr uint32_t kProfile = 1;
   static constexpr uint32_t kInputRevision = 1;
   static constexpr uint32_t kOutputRevision = 0;
