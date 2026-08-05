@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <span>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
@@ -74,7 +75,7 @@ private:
   uint8_t wave_size_ = 0;
   std::vector<BlockExec> states_;
   std::unordered_map<const BasicBlock *, size_t> block_index_;
-  std::unordered_map<const Instruction *, ExecState> before_;
+  std::unordered_set<const Instruction *> full_before_;
 };
 
 } // namespace rocjitsu

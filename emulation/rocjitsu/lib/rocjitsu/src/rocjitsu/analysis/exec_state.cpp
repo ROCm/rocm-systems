@@ -309,15 +309,15 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks, std::span<const ScopedCf
       continue;
     ExecState state = states_[i].in;
     for (const auto &inst : block->instructions()) {
-      before_.emplace(&inst, state);
+      if (state == ExecState::Full)
+        full_before_.insert(&inst);
       state = transfer(state, inst, wave_size_);
     }
   }
 }
 
 ExecState ExecMaskAnalysis::before(const Instruction &inst) const {
-  auto it = before_.find(&inst);
-  return it != before_.end() ? it->second : ExecState::Unknown;
+  return full_before_.contains(&inst) ? ExecState::Full : ExecState::Unknown;
 }
 
 } // namespace rocjitsu
