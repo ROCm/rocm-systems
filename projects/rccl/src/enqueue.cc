@@ -3851,6 +3851,22 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
     goto fail;
   }
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // RCCL: a collective must not be issued on a suspended communicator. The queues cover a suspend or resume still
+  // pending in this group, which the group drains before launching.
+  if (info->comm->memManager) {
+    bool commIsSuspended = ncclIntruQueueEmpty(&info->comm->resumeTaskQueue) &&
+                           (!ncclIntruQueueEmpty(&info->comm->suspendTaskQueue) ||
+                            __atomic_load_n(&info->comm->memManager->released, __ATOMIC_ACQUIRE));
+    if (commIsSuspended) {
+      WARN("%s: communicator %p is suspended; call ncclCommResume before issuing collectives", info->opName,
+           info->comm);
+      ret = ncclInvalidUsage;
+      goto fail;
+    }
+  }
+#endif
+
   if (info->comm->checkMode != ncclCheckModeDefault) {
     CUDACHECKGOTO(cudaGetDevice(&devOld), ret, fail);
     CUDACHECKGOTO(cudaSetDevice(info->comm->cudaDev), ret, fail);
