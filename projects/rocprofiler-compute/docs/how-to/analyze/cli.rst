@@ -766,9 +766,33 @@ For example, the same Triton kernel launch under each capture level::
     shapes:  (in_ptr0=float32[4096x4096], in_ptr1=float32[4096x4096], out_ptr0=float32[4096x4096], xnumel=int, XBLOCK=int)
     values:  (in_ptr0=float32[4096x4096], in_ptr1=float32[4096x4096], out_ptr0=float32[4096x4096], xnumel=16777216, XBLOCK=2048)
 
+Captured arguments are shown in the call tree next to the operator that
+recorded them. An operator whose calls all passed the same arguments shows
+them inline::
+
+    └─ aten::clamp_min args=(self=float32[5x20], min=Int) (calls: 1)
+       └─ vectorized_elementwise_kernel (dispatches: 1, total: 3.92 us)
+
+The call tree merges every call to an operator into a single node. When those
+calls passed differing arguments, each distinct set is listed below the node,
+most frequent first, with the number of calls that used it::
+
+    └─ aten::addmm (calls: 3)
+       args variants:
+         2 calls  (self=float32[20], mat1=float32[5x10], mat2=float32[10x20], beta=Int, alpha=Int)
+         1 call   (self=float32[10], mat1=float32[5x20], mat2=float32[20x10], beta=Int, alpha=Int)
+       └─ Cijk_Ailk_Bljk_SB_MT128x128 (dispatches: 3, total: 0.28 ms)
+
+One set of arguments is limited to 8 items and 160 characters, and at most five
+sets are listed; any beyond that are reported as ``... N more variants``. The
+``Args`` column of ``ml_api_trace/consolidated.csv`` holds the untruncated
+arguments.
+
 The flat **Operator summary** table below the call tree has one row per
-operator that ran at least one GPU kernel. Time cells auto-switch between
-milliseconds and microseconds per cell; missing values render as ``N/A``.
+operator that ran at least one GPU kernel, aggregated over every source
+location the operator ran from; the call tree above shows the per-location
+breakdown. Time cells auto-switch between milliseconds and microseconds per
+cell; missing values render as ``N/A``.
 
 * **Operator** — full operator path (for example
   ``aten::matmul/aten::mm``).
