@@ -70,11 +70,24 @@ get_matching_hsa_pcs_units(rocprofiler_pc_sampling_unit_t unit)
     ROCP_FATAL << "Illegal pc sampling unit " << unit;
 }
 
-size_t get_hsa_pcs_buffer_size(uint32_t /*gfx_target_version*/)
+size_t
+get_hsa_pcs_buffer_size(uint32_t gfx_target_version)
 {
-    // Small buffers result in dropped samples on actual silicon.
-    // ROCM-22213 further splits the buffer per XCC, so we use a large size.
-    return 1024 * 1024 * sizeof(perf_sample_hosttrap_v1_t);  // 64MB
+    // gfx_target_version encodes major*10000 + minor*100 + patch
+    const uint32_t major = (gfx_target_version / 10000) % 100;
+    const uint32_t minor = (gfx_target_version / 100) % 100;
+
+    // Since ROCM-22213, the buffer is split per XCC, so we need larger buffers for these GPUs.
+    // Right now, just enable for MI300/350/400 series chips.
+    const bool is_multi_xcc = (major == 9 && (minor == 4 || minor == 5)) ||
+                              (major == 12 && minor == 5);
+
+    if(is_multi_xcc)
+    {
+        return 1024 * 1024 * sizeof(perf_sample_hosttrap_v1_t);  // 64MB
+    }
+
+    return 64 * 1024 * sizeof(perf_sample_hosttrap_v1_t);  // 4MB
 }
 }  // namespace utils
 }  // namespace pc_sampling
