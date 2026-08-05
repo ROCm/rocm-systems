@@ -63,24 +63,11 @@ namespace rocprofiler
 {
 namespace kfd
 {
-enum class entry_state : uint8_t
-{
-    pending = 0,
-    eop_proven,           // completion proven, payload owned by the caller
-    result_ready,         // worker: converted + sane -> emit KFD record, retire
-    completed_no_timing,  // worker: no start_ticks or convert/sanity failed -> retire
-    leaked,               // loss: no record, corr-id deliberately NOT retired
-};
-
-// Session lifecycle. No terminal mode returns to `running` without recreating
-// the stream.
+// Session lifecycle. Gates eligibility only; registration and completion are
+// deliberately unconditional.
 enum class session_mode : uint8_t
 {
     running = 0,
-    // Retained for the tombstone cap and reader death -- a ring overrun no longer
-    // poisons the session, since that turned a bounded loss into a total one.
-    loss_poisoned,
-    reader_dead,
     stopping,
     child_stale,  // post-fork child
 };
@@ -103,19 +90,16 @@ public:
     {
         correlation_key key            = {};
         uint64_t        correlation_id = 0;
-        uint64_t        queue_token    = 0;
-        uint64_t        submit_index   = 0;
         PayloadT        payload        = {};
     };
 
     // Ownership handed to the reader on a proven completion.
     struct proven
     {
-        correlation_key         key            = {};
-        uint64_t                correlation_id = 0;
-        std::optional<uint64_t> start_ticks    = {};  // absent -> COMPLETED_NO_TIMING
-        uint64_t                end_ticks      = 0;
-        PayloadT                payload        = {};
+        correlation_key         key         = {};
+        std::optional<uint64_t> start_ticks = {};  // absent -> COMPLETED_NO_TIMING
+        uint64_t                end_ticks   = 0;
+        PayloadT                payload     = {};
     };
 
     // Ownership handed back on a loss. The payload is released; the correlation id
@@ -126,9 +110,6 @@ public:
         uint64_t        correlation_id = 0;
         PayloadT        payload        = {};
     };
-
-    // Tombstones are unbounded in principle, so cap them.
-    static constexpr size_t kMaxTombstones = 8192;
 
     DispatchHub()  = default;
     ~DispatchHub() = default;
@@ -160,12 +141,8 @@ public:
 
         for(auto& reg : batch)
         {
-            ++m_outstanding[reg.queue_token];
             auto& e          = m_entries[reg.key];
-            e.state          = entry_state::pending;
             e.correlation_id = reg.correlation_id;
-            e.queue_token    = reg.queue_token;
-            e.submit_index   = reg.submit_index;
             e.payload        = std::move(reg.payload);
         }
         return true;
@@ -199,7 +176,7 @@ public:
 
         auto lk = std::lock_guard<std::mutex>{m_mu};
         auto it = m_entries.find(key);
-        if(it == m_entries.end() || it->second.state != entry_state::pending) return false;
+        if(it == m_entries.end()) return false;
         it->second.start_ticks = start_ticks;
         return true;
     }
@@ -224,44 +201,18 @@ public:
         auto lk = std::lock_guard<std::mutex>{m_mu};
 
         auto it = m_entries.find(key);
-        if(it == m_entries.end() || it->second.state != entry_state::pending) return std::nullopt;
+        if(it == m_entries.end()) return std::nullopt;
 
-        auto out           = proven{};
-        out.key            = key;
-        out.correlation_id = it->second.correlation_id;
-        out.start_ticks    = it->second.start_ticks;
-        out.end_ticks      = end_ticks;
-        out.payload        = std::move(it->second.payload);
-        release_locked(it->second.queue_token);
+        auto out        = proven{};
+        out.key         = key;
+        out.start_ticks = it->second.start_ticks;
+        out.end_ticks   = end_ticks;
+        out.payload     = std::move(it->second.payload);
         m_entries.erase(it);
-        ++m_proven;
         return out;
     }
 
     // --- loss side --------------------------------------------------------
-
-    // Single-winner loss transition for one dispatch.
-    std::optional<leaked> leak(const correlation_key& key)
-    {
-        if(m_abandoned.load(std::memory_order_acquire)) return std::nullopt;
-
-        auto lk = std::lock_guard<std::mutex>{m_mu};
-        auto it = m_entries.find(key);
-        if(it == m_entries.end()) return std::nullopt;
-        auto out = leak_locked(it);
-        m_entries.erase(it);
-        return out;
-    }
-
-    // Leak every still-matchable entry and latch the terminal mode.
-    std::pair<std::vector<leaked>, loss_stats> poison(session_mode terminal_mode)
-    {
-        if(m_abandoned.load(std::memory_order_acquire)) return {};
-
-        auto lk = std::lock_guard<std::mutex>{m_mu};
-        m_mode  = terminal_mode;
-        return leak_all_locked();
-    }
 
     // Eligibility must stop RESERVING the slot before the queue's gate_lock is
     // fenced, or a batch can slip in behind the fence.
@@ -303,29 +254,6 @@ public:
         return out;
     }
 
-    // Queue destroy: leak whatever that queue still has outstanding. Paired with
-    // quarantine_slot() by the caller, which owns the doorbell generation bump.
-    std::vector<leaked> close_queue(uint64_t queue_token)
-    {
-        if(m_abandoned.load(std::memory_order_acquire)) return {};
-
-        auto lk  = std::lock_guard<std::mutex>{m_mu};
-        auto out = std::vector<leaked>{};
-        for(auto it = m_entries.begin(); it != m_entries.end();)
-        {
-            if(it->second.queue_token == queue_token)
-            {
-                out.emplace_back(leak_locked(it));
-                it = m_entries.erase(it);
-            }
-            else
-            {
-                ++it;
-            }
-        }
-        return out;
-    }
-
     // Teardown step 5: everything still PENDING becomes LEAKED before the task
     // group is joined and correlation ids are finalized (requirement 7, U18).
     std::pair<std::vector<leaked>, loss_stats> drain_for_teardown()
@@ -348,22 +276,6 @@ public:
         return m_ledger.count(correlation_id) != 0;
     }
 
-    bool is_quarantined(uint32_t gpu_id, uint32_t doorbell_slot) const
-    {
-        if(m_abandoned.load(std::memory_order_acquire)) return false;
-        auto lk = std::lock_guard<std::mutex>{m_mu};
-        return m_quarantined.count({gpu_id, doorbell_slot}) != 0;
-    }
-
-    // ++ on register, -- on any terminal transition (invariant 7).
-    size_t outstanding(uint64_t queue_token) const
-    {
-        if(m_abandoned.load(std::memory_order_acquire)) return 0;
-        auto lk = std::lock_guard<std::mutex>{m_mu};
-        auto it = m_outstanding.find(queue_token);
-        return (it == m_outstanding.end()) ? 0 : it->second;
-    }
-
     // Exactly what the close drain waits on.
     size_t pending_for_slot(uint32_t gpu_id, uint32_t doorbell_slot) const
     {
@@ -372,28 +284,10 @@ public:
         size_t pending = 0;
         for(const auto& itr : m_entries)
         {
-            if(itr.first.gpu_id == gpu_id && itr.first.doorbell_off == doorbell_slot &&
-               itr.second.state == entry_state::pending)
-                ++pending;
+            if(itr.first.gpu_id == gpu_id && itr.first.doorbell_off == doorbell_slot) ++pending;
         }
         return pending;
     }
-
-    size_t live_entries() const
-    {
-        if(m_abandoned.load(std::memory_order_acquire)) return 0;
-        auto lk = std::lock_guard<std::mutex>{m_mu};
-        return m_entries.size();
-    }
-
-    size_t tombstones() const
-    {
-        if(m_abandoned.load(std::memory_order_acquire)) return 0;
-        auto lk = std::lock_guard<std::mutex>{m_mu};
-        return m_tombstones.size();
-    }
-
-    uint64_t proven_count() const { return m_proven.load(std::memory_order_relaxed); }
 
     session_mode mode() const
     {
@@ -417,27 +311,23 @@ public:
     // thread may have held locked. One-way: nothing un-abandons a child.
     void abandon_in_child() { m_abandoned.store(true, std::memory_order_release); }
 
-    bool abandoned() const { return m_abandoned.load(std::memory_order_acquire); }
-
 private:
     struct entry
     {
-        entry_state             state          = entry_state::pending;
         uint64_t                correlation_id = 0;
-        uint64_t                queue_token    = 0;
-        uint64_t                submit_index   = 0;
         std::optional<uint64_t> start_ticks    = {};
         PayloadT                payload        = {};
     };
 
     using map_t = std::unordered_map<correlation_key, entry, correlation_key_hash>;
 
-    // Caller holds m_mu. A key may be registered only once, never onto a
-    // tombstone, and never onto a quarantined slot. Session mode is deliberately
-    // NOT part of this: it gates eligibility, not registration.
+    // Caller holds m_mu. A key may be registered only once and never onto a
+    // quarantined slot -- which, being permanent, is what keeps a leaked key from
+    // ever matching again. Session mode is deliberately NOT part of this: it
+    // gates eligibility, not registration.
     bool key_admissible_locked(const correlation_key& key) const
     {
-        return m_entries.count(key) == 0 && m_tombstones.count(key) == 0 &&
+        return m_entries.count(key) == 0 &&
                m_quarantined.count({key.gpu_id, key.doorbell_off}) == 0;
     }
 
@@ -448,9 +338,6 @@ private:
         out.key            = it->first;
         out.correlation_id = it->second.correlation_id;
         out.payload        = std::move(it->second.payload);
-        it->second.state   = entry_state::leaked;
-        release_locked(it->second.queue_token);
-        tombstone_locked(it->first);
         m_ledger.insert(out.correlation_id);
         return out;
     }
@@ -471,36 +358,18 @@ private:
         return {std::move(out), stats};
     }
 
-    void tombstone_locked(const correlation_key& key)
-    {
-        m_tombstones.insert(key);
-        // Bounded: poison rather than forget a tombstone (see kMaxTombstones).
-        if(m_tombstones.size() > kMaxTombstones && m_mode == session_mode::running)
-            m_mode = session_mode::loss_poisoned;
-    }
-
-    void release_locked(uint64_t queue_token)
-    {
-        auto it = m_outstanding.find(queue_token);
-        if(it == m_outstanding.end()) return;
-        if(--it->second == 0) m_outstanding.erase(it);
-    }
-
     mutable std::mutex m_mu = {};
     // Checked before m_mu on every operation, so a forked child never touches the
     // inherited mutex or map.
-    std::atomic<bool>     m_abandoned = {false};
-    std::atomic<uint64_t> m_proven    = {0};
+    std::atomic<bool> m_abandoned = {false};
 
-    session_mode                                              m_mode       = session_mode::running;
-    map_t                                                     m_entries    = {};
-    std::unordered_set<correlation_key, correlation_key_hash> m_tombstones = {};
-    std::unordered_set<uint64_t>                              m_ledger     = {};
+    session_mode                 m_mode    = session_mode::running;
+    map_t                        m_entries = {};
+    std::unordered_set<uint64_t> m_ledger  = {};
     // Keyed by (gpu_id, slot): slot numbers repeat across GPUs, so a single set
     // would let one GPU's queue destroy quarantine another GPU's live slot.
     std::set<std::pair<uint32_t, uint32_t>> m_quarantined = {};
     std::set<std::pair<uint32_t, uint32_t>> m_closing     = {};
-    std::unordered_map<uint64_t, size_t>    m_outstanding = {};
 };
 }  // namespace kfd
 }  // namespace rocprofiler

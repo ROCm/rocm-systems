@@ -313,8 +313,9 @@ drain_close_signal_less_queue(uint64_t                             queue_token,
     auto& _hub = signal_less_hub();
 
     // A queue that never registered a signal-less dispatch has nothing to wait
-    // for, so it pays nothing at destroy.
-    if(_hub.outstanding(queue_token) == 0) return 0;
+    // for, so it pays nothing at destroy. Injectivity makes this slot's pending
+    // count exactly this queue's outstanding count.
+    if(_hub.pending_for_slot(*_gpu, *_slot) == 0) return 0;
 
     // ONE budget for both waits: the GPU finishing and the reader pairing are two
     // halves of the same close, and doubling the timeout would double teardown.

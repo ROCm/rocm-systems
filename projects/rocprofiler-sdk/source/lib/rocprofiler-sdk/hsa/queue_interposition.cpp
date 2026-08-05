@@ -1097,8 +1097,6 @@ write_interceptor(Queue*                                queue,
                 auto _reg           = kfd::signal_less_hub_t::registration{};
                 _reg.key            = *_signal_less_keys[i];
                 _reg.correlation_id = internal_corr_id;
-                _reg.queue_token    = queue->get_id().handle;
-                _reg.submit_index   = _base_pkt_index + i;
 
                 auto& _pl           = _reg.payload;
                 _pl.callback_record = _packet_data.callback_record;
@@ -1109,8 +1107,7 @@ write_interceptor(Queue*                                queue,
                 _pl.tid            = thr_id;
                 _pl.agent_id       = queue->get_agent().get_rocp_agent()->id;
                 _pl.enqueue_ts     = _info_session.enqueue_ts;
-                _pl.queue_token    = _reg.queue_token;
-                _pl.submit_index   = _reg.submit_index;
+                _pl.submit_index   = _base_pkt_index + i;
 
                 _signal_less_regs.emplace_back(std::move(_reg));
             }

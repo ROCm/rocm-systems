@@ -106,23 +106,40 @@ key_of(uint32_t slot, uint32_t dispatch_id, uint32_t generation = 0)
 }
 
 hub_t::registration
-reg_of(correlation_key key, uint64_t corr_id = 1, uint64_t queue_token = 1, uint64_t payload_id = 0)
+reg_of(correlation_key key, uint64_t corr_id = 1, uint64_t payload_id = 0)
 {
     auto r           = hub_t::registration{};
     r.key            = key;
     r.correlation_id = corr_id;
-    r.queue_token    = queue_token;
-    r.submit_index   = key.dispatch_idx_low32;
     r.payload        = tracked_payload{payload_id != 0 ? payload_id : key.dispatch_idx_low32};
     return r;
 }
 
+// The hub exposes no global live count -- production only ever asks per slot --
+// so tests sum over the small key space they use.
+size_t
+live_entries(const hub_t& hub)
+{
+    size_t n = 0;
+    for(uint32_t gpu = 0; gpu < 4; ++gpu)
+        for(uint32_t slot = 0; slot < 64; ++slot)
+            n += hub.pending_for_slot(gpu, slot);
+    return n;
+}
+
+// A slot is quarantined exactly when no key on it is admissible any more.
+bool
+slot_quarantined(const hub_t& hub, uint32_t gpu, uint32_t slot)
+{
+    return !hub.can_register_batch({correlation_key{slot, 0xFEEDu, 0u, gpu}});
+}
+
 // Register a single dispatch; returns whether the hub accepted the batch.
 bool
-register_one(hub_t& hub, correlation_key key, uint64_t corr_id = 1, uint64_t queue_token = 1)
+register_one(hub_t& hub, correlation_key key, uint64_t corr_id = 1)
 {
     auto batch = std::vector<hub_t::registration>{};
-    batch.emplace_back(reg_of(key, corr_id, queue_token));
+    batch.emplace_back(reg_of(key, corr_id));
     return hub.register_batch(std::move(batch));
 }
 }  // namespace
@@ -134,8 +151,7 @@ TEST(DispatchHub, register_then_prove_completes_once)
     auto hub = hub_t{};
     auto key = key_of(4, 7);
     ASSERT_TRUE(register_one(hub, key));
-    EXPECT_EQ(hub.live_entries(), 1u);
-    EXPECT_EQ(hub.outstanding(1), 1u);
+    EXPECT_EQ(live_entries(hub), 1u);
 
     hub.note_start(key, 1000);
     auto p = hub.prove_eop(key, 2000, /*drain_loss_free=*/true);
@@ -147,10 +163,8 @@ TEST(DispatchHub, register_then_prove_completes_once)
 
     // Proven entries leave the hub, so they can never be handed out again and can
     // never cross to LEAKED.
-    EXPECT_EQ(hub.live_entries(), 0u);
-    EXPECT_EQ(hub.outstanding(1), 0u);
+    EXPECT_EQ(live_entries(hub), 0u);
     EXPECT_FALSE(hub.prove_eop(key, 3000, true).has_value());
-    EXPECT_FALSE(hub.leak(key).has_value());
 }
 
 // Shape (ii): the START was lost but the EOP still proves completion. The worker
@@ -178,7 +192,7 @@ TEST(DispatchHub, result_before_register_is_rejected_not_cached)
 
     ASSERT_TRUE(register_one(hub, key));
     // The earlier result was not retained: the new dispatch is still pending.
-    EXPECT_EQ(hub.live_entries(), 1u);
+    EXPECT_EQ(live_entries(hub), 1u);
     auto p = hub.prove_eop(key, 5000, true);
     ASSERT_TRUE(p.has_value());
     EXPECT_EQ(p->end_ticks, 5000u);  // the fresh record, not the stale one
@@ -193,7 +207,7 @@ TEST(DispatchHub, eop_under_lossy_drain_completes_nothing)
     ASSERT_TRUE(register_one(hub, key));
 
     EXPECT_FALSE(hub.prove_eop(key, 2000, /*drain_loss_free=*/false).has_value());
-    EXPECT_EQ(hub.live_entries(), 1u);  // still pending, not consumed
+    EXPECT_EQ(live_entries(hub), 1u);  // still pending, not consumed
 }
 
 // U8: a START is retained for as long as the entry lives -- no 5 s eviction --
@@ -216,7 +230,7 @@ TEST(DispatchHub, unmatched_start_is_dropped)
 {
     auto hub = hub_t{};
     EXPECT_FALSE(hub.note_start(key_of(4, 12), 1));
-    EXPECT_EQ(hub.live_entries(), 0u);
+    EXPECT_EQ(live_entries(hub), 0u);
 }
 
 // Invariant 1 / U2: whole-batch atomicity
@@ -229,8 +243,7 @@ TEST(DispatchHub, batch_registers_all_or_none)
     ok.emplace_back(reg_of(key_of(4, 2)));
     ok.emplace_back(reg_of(key_of(4, 3)));
     ASSERT_TRUE(hub.register_batch(std::move(ok)));
-    EXPECT_EQ(hub.live_entries(), 3u);
-    EXPECT_EQ(hub.outstanding(1), 3u);
+    EXPECT_EQ(live_entries(hub), 3u);
 
     // A batch whose LAST entry collides with a live key must insert none of it.
     auto clash = std::vector<hub_t::registration>{};
@@ -238,7 +251,7 @@ TEST(DispatchHub, batch_registers_all_or_none)
     clash.emplace_back(reg_of(key_of(4, 11)));
     clash.emplace_back(reg_of(key_of(4, 2)));  // already live
     EXPECT_FALSE(hub.register_batch(std::move(clash)));
-    EXPECT_EQ(hub.live_entries(), 3u);  // unchanged: no partial registration
+    EXPECT_EQ(live_entries(hub), 3u);  // unchanged: no partial registration
     EXPECT_FALSE(hub.prove_eop(key_of(4, 10), 1, true).has_value());
     EXPECT_FALSE(hub.prove_eop(key_of(4, 11), 1, true).has_value());
 }
@@ -252,31 +265,15 @@ TEST(DispatchHub, duplicate_key_within_batch_rejected)
     batch.emplace_back(reg_of(key_of(4, 1)));
     batch.emplace_back(reg_of(key_of(4, 1)));
     EXPECT_FALSE(hub.register_batch(std::move(batch)));
-    EXPECT_EQ(hub.live_entries(), 0u);
+    EXPECT_EQ(live_entries(hub), 0u);
 }
 
 // Invariant 4 / U4: result-vs-loss has exactly one winner
 
-TEST(DispatchHub, prove_and_leak_race_has_one_winner)
-{
-    auto hub = hub_t{};
-    auto key = key_of(4, 20);
-    ASSERT_TRUE(register_one(hub, key));
-
-    auto p = hub.prove_eop(key, 1, true);
-    ASSERT_TRUE(p.has_value());
-    EXPECT_FALSE(hub.leak(key).has_value());  // loss loses: no double ownership
-
-    auto key2 = key_of(4, 21);
-    ASSERT_TRUE(register_one(hub, key2));
-    auto l = hub.leak(key2);
-    ASSERT_TRUE(l.has_value());
-    EXPECT_FALSE(hub.prove_eop(key2, 1, true).has_value());  // result loses
-}
-
-// The same race under real concurrency: N dispatches, a prover thread and a
-// leaker thread going after every key. Each key must resolve exactly once, and
-// the payload accounting must show exactly one live owner per resolution.
+// The same race under real concurrency: N dispatches, a prover thread racing a
+// thread that keeps quarantining the slot out from under it. Each key must
+// resolve exactly once, and payload accounting must show one owner per
+// resolution.
 TEST(DispatchHub, concurrent_prove_vs_leak_resolves_each_key_once)
 {
     constexpr uint32_t kCount = 512;
@@ -298,94 +295,19 @@ TEST(DispatchHub, concurrent_prove_vs_leak_resolves_each_key_once)
     }};
     auto leaker = std::thread{[&hub, &leaked_n]() {
         for(uint32_t i = 0; i < kCount; ++i)
-            if(hub.leak(key_of(4, i)).has_value()) ++leaked_n;
+            leaked_n += hub.quarantine_slot(0, 4).size();
     }};
     prover.join();
     leaker.join();
 
     // Exactly one winner per key, and nothing left behind.
     EXPECT_EQ(proven_n.load() + leaked_n.load(), kCount);
-    EXPECT_EQ(hub.live_entries(), 0u);
-    EXPECT_EQ(hub.outstanding(1), 0u);
+    EXPECT_EQ(live_entries(hub), 0u);
     // Every payload handed to a winner was destroyed by that winner exactly once.
     EXPECT_EQ(tracked_payload::live.load(), 0);
 }
 
-// P1 loss policy: poison, ledger, tombstones (U11, U14, U15)
-
-// U15: the loud warning needs dispatches AND unique correlation ids separately --
-// a batch shares one correlation id with one reference per dispatch.
-TEST(DispatchHub, poison_leaks_everything_and_counts_dispatches_and_corr_ids)
-{
-    auto hub = hub_t{};
-    // Two batches: 3 dispatches on corr id 100, 2 on corr id 200.
-    auto b1 = std::vector<hub_t::registration>{};
-    for(uint32_t i = 0; i < 3; ++i)
-        b1.emplace_back(reg_of(key_of(4, i), /*corr_id=*/100));
-    ASSERT_TRUE(hub.register_batch(std::move(b1)));
-
-    auto b2 = std::vector<hub_t::registration>{};
-    for(uint32_t i = 10; i < 12; ++i)
-        b2.emplace_back(reg_of(key_of(5, i), /*corr_id=*/200));
-    ASSERT_TRUE(hub.register_batch(std::move(b2)));
-
-    auto [lost, stats] = hub.poison(session_mode::loss_poisoned);
-
-    EXPECT_EQ(stats.dispatches, 5u);
-    EXPECT_EQ(stats.correlation_ids, 2u);
-    EXPECT_EQ(lost.size(), 5u);
-    EXPECT_EQ(hub.live_entries(), 0u);
-    EXPECT_EQ(hub.mode(), session_mode::loss_poisoned);
-
-    // U14: both ids are on the loss ledger, so correlation_id_finalize() must skip
-    // force-retiring them.
-    EXPECT_TRUE(hub.is_ledgered(100));
-    EXPECT_TRUE(hub.is_ledgered(200));
-    EXPECT_FALSE(hub.is_ledgered(300));
-}
-
-// Poison is terminal: nothing registers or completes afterwards, so no dispatch
-// can be admitted to a session that has already lost records.
-TEST(DispatchHub, poison_blocks_further_registration_and_completion)
-{
-    auto hub = hub_t{};
-    auto key = key_of(4, 30);
-    ASSERT_TRUE(register_one(hub, key));
-    hub.poison(session_mode::loss_poisoned);
-
-    // Eligibility refuses; registration is unconditional by design.
-    EXPECT_FALSE(hub.can_register_batch({key_of(4, 31)}));
-    EXPECT_FALSE(hub.prove_eop(key_of(4, 31), 1, true).has_value());
-    EXPECT_FALSE(hub.note_start(key_of(4, 31), 1));
-}
-
-// U11: a leaked key is tombstoned, so a recurring low-32 dispatch id cannot
-// reactivate it or be registered onto it again.
-TEST(DispatchHub, leaked_key_is_tombstoned_and_non_matchable)
-{
-    auto hub = hub_t{};
-    auto key = key_of(4, 40);
-    ASSERT_TRUE(register_one(hub, key));
-    ASSERT_TRUE(hub.leak(key).has_value());
-
-    EXPECT_EQ(hub.tombstones(), 1u);
-    EXPECT_FALSE(hub.prove_eop(key, 1, true).has_value());  // cannot be reactivated
-    EXPECT_FALSE(register_one(hub, key));                   // and cannot be re-registered
-}
-
-// Tombstones are bounded: rather than forget one (which would let a recurring key
-// reactivate), exceeding the cap poisons the session.
-TEST(DispatchHub, tombstone_growth_is_bounded_by_poisoning)
-{
-    auto hub = hub_t{};
-    for(uint32_t i = 0; i <= hub_t::kMaxTombstones; ++i)
-    {
-        if(!register_one(hub, key_of(4, i))) break;
-        hub.leak(key_of(4, i));
-    }
-    EXPECT_LE(hub.tombstones(), hub_t::kMaxTombstones + 1);
-    EXPECT_EQ(hub.mode(), session_mode::loss_poisoned);
-}
+// P1 loss policy: ledger (U14, U15)
 
 // Invariant 9 / requirements 3+4: slot quarantine and generation closure
 
@@ -400,8 +322,8 @@ TEST(DispatchHub, quarantine_leaks_slot_and_blocks_reservation)
 
     auto lost = hub.quarantine_slot(0, 4);
     EXPECT_EQ(lost.size(), 2u);
-    EXPECT_TRUE(hub.is_quarantined(0, 4));
-    EXPECT_EQ(hub.live_entries(), 1u);
+    EXPECT_TRUE(slot_quarantined(hub, 0, 4));
+    EXPECT_EQ(live_entries(hub), 1u);
 
     EXPECT_FALSE(register_one(hub, key_of(4, 3)));  // permanently unusable
     EXPECT_TRUE(register_one(hub, key_of(9, 2)));   // unaffected slot still works
@@ -415,21 +337,6 @@ TEST(DispatchHub, quarantined_slot_refuses_a_new_generation)
     ASSERT_TRUE(register_one(hub, key_of(4, 1, /*generation=*/0)));
     hub.quarantine_slot(0, 4);
     EXPECT_FALSE(register_one(hub, key_of(4, 1, /*generation=*/1)));
-}
-
-// Invariant 7: queue destroy explicitly leaks whatever the queue still owns.
-TEST(DispatchHub, close_queue_leaks_its_outstanding_work)
-{
-    auto hub = hub_t{};
-    ASSERT_TRUE(register_one(hub, key_of(4, 1), 1, /*queue_token=*/77));
-    ASSERT_TRUE(register_one(hub, key_of(4, 2), 1, /*queue_token=*/77));
-    ASSERT_TRUE(register_one(hub, key_of(5, 1), 1, /*queue_token=*/88));
-    EXPECT_EQ(hub.outstanding(77), 2u);
-
-    auto lost = hub.close_queue(77);
-    EXPECT_EQ(lost.size(), 2u);
-    EXPECT_EQ(hub.outstanding(77), 0u);
-    EXPECT_EQ(hub.outstanding(88), 1u);
 }
 
 // U18: teardown
@@ -464,7 +371,7 @@ TEST(DispatchHub, teardown_leaks_still_pending_entries)
     auto [lost, stats] = hub.drain_for_teardown();
     EXPECT_EQ(stats.dispatches, 2u);
     EXPECT_EQ(stats.correlation_ids, 1u);
-    EXPECT_EQ(hub.live_entries(), 0u);
+    EXPECT_EQ(live_entries(hub), 0u);
     EXPECT_EQ(hub.mode(), session_mode::stopping);
     // Their correlation id is on the ledger, so finalize must not force-retire it.
     EXPECT_TRUE(hub.is_ledgered(11));
@@ -488,91 +395,37 @@ TEST(DispatchHub, child_epoch_short_circuits_every_operation)
     ASSERT_TRUE(register_one(hub, key_of(4, 1)));
 
     hub.abandon_in_child();
-    EXPECT_TRUE(hub.abandoned());
 
     EXPECT_FALSE(register_one(hub, key_of(4, 2)));
     EXPECT_FALSE(hub.note_start(key_of(4, 1), 1));
     EXPECT_FALSE(hub.prove_eop(key_of(4, 1), 1, true).has_value());
-    EXPECT_FALSE(hub.leak(key_of(4, 1)).has_value());
     EXPECT_FALSE(hub.is_ledgered(1));
     EXPECT_TRUE(hub.quarantine_slot(0, 4).empty());
-    EXPECT_TRUE(hub.close_queue(1).empty());
     EXPECT_TRUE(hub.drain_for_teardown().first.empty());
-    EXPECT_TRUE(hub.poison(session_mode::child_stale).first.empty());
 }
 
 // Payload ownership (U17 core): exactly one owner, cleanup exactly once
 
-TEST(DispatchHub, payload_has_exactly_one_owner_across_every_terminal)
-{
-    const int before = tracked_payload::live.load();
-    {
-        auto hub = hub_t{};
-        ASSERT_TRUE(register_one(hub, key_of(4, 1)));
-        ASSERT_TRUE(register_one(hub, key_of(4, 2)));
-        ASSERT_TRUE(register_one(hub, key_of(4, 3)));
-        EXPECT_EQ(tracked_payload::live.load(), before + 3);
-
-        {
-            auto p = hub.prove_eop(key_of(4, 1), 1, true);
-            ASSERT_TRUE(p.has_value());
-            EXPECT_EQ(tracked_payload::live.load(), before + 3);  // moved, not copied
-        }
-        EXPECT_EQ(tracked_payload::live.load(), before + 2);  // released once
-
-        {
-            auto l = hub.leak(key_of(4, 2));
-            ASSERT_TRUE(l.has_value());
-        }
-        EXPECT_EQ(tracked_payload::live.load(), before + 1);
-    }
-    // The hub's own destruction releases whatever was still pending, exactly once.
-    EXPECT_EQ(tracked_payload::live.load(), before);
-}
-
 // Enqueue-side batch admission: the hub pre-check the eligibility decision uses
 
-// Eligibility must be final BEFORE any packet is modified, so it asks the hub up
-// front whether the batch's keys are admissible. The answer must match what
-// register_batch() would actually do.
-TEST(DispatchHub, can_register_batch_agrees_with_register_batch)
-{
-    auto hub  = hub_t{};
-    auto keys = std::vector<correlation_key>{key_of(4, 1), key_of(4, 2)};
-    EXPECT_TRUE(hub.can_register_batch(keys));
-
-    auto batch = std::vector<hub_t::registration>{};
-    for(const auto& k : keys)
-        batch.emplace_back(reg_of(k));
-    EXPECT_TRUE(hub.register_batch(std::move(batch)));
-
-    // Now the same keys are live, so a second batch must be refused by both.
-    EXPECT_FALSE(hub.can_register_batch(keys));
-    auto again = std::vector<hub_t::registration>{};
-    for(const auto& k : keys)
-        again.emplace_back(reg_of(k));
-    EXPECT_FALSE(hub.register_batch(std::move(again)));
-}
-
-TEST(DispatchHub, can_register_batch_refuses_quarantine_tombstone_and_duplicates)
+TEST(DispatchHub, can_register_batch_refuses_live_quarantined_and_duplicate_keys)
 {
     auto hub = hub_t{};
 
     // Duplicate within the batch.
     EXPECT_FALSE(hub.can_register_batch({key_of(4, 1), key_of(4, 1)}));
 
-    // Tombstoned key.
+    // Live key.
     ASSERT_TRUE(register_one(hub, key_of(4, 2)));
-    ASSERT_TRUE(hub.leak(key_of(4, 2)).has_value());
     EXPECT_FALSE(hub.can_register_batch({key_of(4, 2)}));
 
-    // Quarantined slot.
+    // Quarantined slot -- permanent, so a leaked key can never match again.
     hub.quarantine_slot(0, 6);
     EXPECT_FALSE(hub.can_register_batch({key_of(6, 1)}));
 
-    // Poisoned session.
+    // Stopping session.
     EXPECT_TRUE(hub.can_register_batch({key_of(7, 1)}));
-    hub.poison(session_mode::loss_poisoned);
+    hub.set_mode(session_mode::stopping);
     EXPECT_FALSE(hub.can_register_batch({key_of(7, 1)}));
 }
 
@@ -686,7 +539,7 @@ TEST(DispatchHub, shape_ii_proves_completion_without_a_start)
     ASSERT_TRUE(p.has_value());
     EXPECT_FALSE(p->start_ticks.has_value());
     EXPECT_EQ(p->end_ticks, 900u);
-    EXPECT_EQ(hub.live_entries(), 0u);
+    EXPECT_EQ(live_entries(hub), 0u);
 }
 
 // The same EOP under a lossy drain proves nothing: the record may be torn and
@@ -698,36 +551,7 @@ TEST(DispatchHub, shape_ii_under_a_lossy_drain_proves_nothing)
     ASSERT_TRUE(register_one(hub, key));
 
     EXPECT_FALSE(hub.prove_eop(key, 900, /*drain_loss_free=*/false).has_value());
-    EXPECT_EQ(hub.live_entries(), 1u);  // still pending, still matchable
-}
-
-// Leak-and-shout: one overrun strands every in-flight dispatch, reports the two
-// counts the warning needs, poisons the session, and puts the ids on the ledger.
-TEST(DispatchHub, overrun_strands_everything_and_reports_both_counts)
-{
-    auto hub = hub_t{};
-
-    auto b1 = std::vector<hub_t::registration>{};
-    for(uint32_t i = 0; i < 4; ++i)
-        b1.emplace_back(reg_of(key_of(4, i), /*corr_id=*/700));
-    ASSERT_TRUE(hub.register_batch(std::move(b1)));
-
-    auto b2 = std::vector<hub_t::registration>{};
-    b2.emplace_back(reg_of(key_of(5, 0), /*corr_id=*/800));
-    ASSERT_TRUE(hub.register_batch(std::move(b2)));
-
-    auto loss = hub.poison(session_mode::loss_poisoned);
-
-    EXPECT_EQ(loss.second.dispatches, 5u);       // five stranded dispatches
-    EXPECT_EQ(loss.second.correlation_ids, 2u);  // sharing two correlation ids
-    EXPECT_EQ(loss.first.size(), 5u);            // payloads handed back for release
-
-    // Signal-less is off for the rest of the process: no later batch is eligible.
-    EXPECT_EQ(hub.mode(), session_mode::loss_poisoned);
-    EXPECT_FALSE(hub.can_register_batch({key_of(6, 0)}));
-
-    // A late record for a stranded dispatch completes nothing.
-    EXPECT_FALSE(hub.prove_eop(key_of(4, 0), 1, true).has_value());
+    EXPECT_EQ(live_entries(hub), 1u);  // still pending, still matchable
 }
 
 // The ledger drives the finalize skip: leaked ids must be excluded from
@@ -744,9 +568,9 @@ TEST(DispatchHub, loss_ledger_selects_exactly_the_leaked_ids)
     ASSERT_TRUE(register_one(hub, key_of(4, 1), /*corr_id=*/11));
     ASSERT_TRUE(register_one(hub, key_of(4, 2), /*corr_id=*/22));
 
-    // 11 completes normally, 22 is leaked.
+    // 11 completes normally, 22 is leaked by its slot being quarantined.
     ASSERT_TRUE(hub.prove_eop(key_of(4, 1), 1, true).has_value());
-    ASSERT_TRUE(hub.leak(key_of(4, 2)).has_value());
+    ASSERT_EQ(hub.quarantine_slot(0, 4).size(), 1u);
 
     EXPECT_FALSE(hub.is_ledgered(11));  // completed -> retires normally
     EXPECT_TRUE(hub.is_ledgered(22));   // leaked -> finalize must skip it
@@ -807,7 +631,7 @@ TEST(OwnerRegistry, second_owner_collides_and_quarantines)
     // The caller's response: quarantine, stranding what was pending on the slot.
     auto stranded = hub.quarantine_slot(0, 40);
     EXPECT_EQ(stranded.size(), 2u);
-    EXPECT_TRUE(hub.is_quarantined(0, 40));
+    EXPECT_TRUE(slot_quarantined(hub, 0, 40));
     EXPECT_FALSE(hub.can_register_batch({key_of(40, 3)}));  // both owners now signal-path
 }
 
@@ -825,7 +649,7 @@ TEST(OwnerRegistry, quarantine_persists_after_the_collision_clears)
 
     reg.remove_queue(2);
     EXPECT_TRUE(reg.is_injective(0, 40));    // ownership looks clean again...
-    EXPECT_TRUE(hub.is_quarantined(0, 40));  // ...but the slot stays unusable
+    EXPECT_TRUE(slot_quarantined(hub, 0, 40));  // ...but the slot stays unusable
     EXPECT_FALSE(hub.can_register_batch({key_of(40, 9)}));
 }
 
@@ -945,8 +769,8 @@ TEST(DispatchHub, destroy_closes_the_slot_for_reuse)
 
     // Queue A owns slot 40 and has two dispatches in flight.
     reg.add_queue(/*token=*/1, /*gpu=*/0, uint32_t{40});
-    ASSERT_TRUE(register_one(hub, key_of(40, 1), /*corr_id=*/500, /*queue_token=*/1));
-    ASSERT_TRUE(register_one(hub, key_of(40, 2), /*corr_id=*/500, /*queue_token=*/1));
+    ASSERT_TRUE(register_one(hub, key_of(40, 1), /*corr_id=*/500));
+    ASSERT_TRUE(register_one(hub, key_of(40, 2), /*corr_id=*/500));
 
     // Step 1: stop new reservations (hub lock taken and released).
     hub.mark_slot_closing(0, 40);
@@ -958,8 +782,8 @@ TEST(DispatchHub, destroy_closes_the_slot_for_reuse)
     // Step 3+4: strand what is left and quarantine permanently.
     auto stranded = hub.quarantine_slot(0, 40);
     EXPECT_EQ(stranded.size(), 2u);
-    EXPECT_TRUE(hub.is_quarantined(0, 40));
-    EXPECT_EQ(hub.live_entries(), 0u);
+    EXPECT_TRUE(slot_quarantined(hub, 0, 40));
+    EXPECT_EQ(live_entries(hub), 0u);
 
     // Their correlation id is on the ledger: deliberately not retired.
     EXPECT_TRUE(hub.is_ledgered(500));
@@ -971,7 +795,7 @@ TEST(DispatchHub, destroy_closes_the_slot_for_reuse)
     reg.add_queue(/*token=*/2, 0, uint32_t{40});
     EXPECT_TRUE(reg.is_injective(0, 40));
     EXPECT_FALSE(hub.can_register_batch({key_of(40, 1)}));
-    EXPECT_FALSE(register_one(hub, key_of(40, 7), 600, 2));
+    EXPECT_FALSE(register_one(hub, key_of(40, 7), 600));
 
     // A stale late record from queue A completes nothing.
     EXPECT_FALSE(hub.prove_eop(key_of(40, 1), 999, /*loss_free=*/true).has_value());
@@ -1010,8 +834,7 @@ TEST(DispatchHub, clean_destroy_strands_nothing)
     auto stranded = hub.quarantine_slot(0, 40);
 
     EXPECT_TRUE(stranded.empty());
-    EXPECT_EQ(hub.live_entries(), 0u);
-    EXPECT_EQ(hub.tombstones(), 0u);
+    EXPECT_EQ(live_entries(hub), 0u);
     EXPECT_EQ(hub.mode(), session_mode::running);
 }
 
@@ -1024,7 +847,7 @@ TEST(DispatchHub, concurrent_destroy_and_registration_stay_consistent)
     auto hub = hub_t{};
     for(uint32_t s = 0; s < kSlots; ++s)
     {
-        ASSERT_TRUE(register_one(hub, key_of(s, 1), /*corr_id=*/s, /*queue_token=*/s));
+        ASSERT_TRUE(register_one(hub, key_of(s, 1), /*corr_id=*/s));
     }
 
     // "Destroy" thread walks the slots doing the close sequence.
@@ -1050,9 +873,9 @@ TEST(DispatchHub, concurrent_destroy_and_registration_stay_consistent)
     // exactly one way -- proven or stranded, never both.
     for(uint32_t s = 0; s < kSlots; ++s)
     {
-        EXPECT_TRUE(hub.is_quarantined(0, s));
+        EXPECT_TRUE(slot_quarantined(hub, 0, s));
     }
-    EXPECT_EQ(hub.live_entries(), 0u);
+    EXPECT_EQ(live_entries(hub), 0u);
     EXPECT_LE(prover.load(), kSlots);
     EXPECT_EQ(tracked_payload::live.load(), 0);
 }
@@ -1094,20 +917,13 @@ all_entry_points_short_circuit()
     ok = ok && !register_one(forked_hub(), key_of(40, 99));
     ok = ok && !forked_hub().prove_eop(key_of(40, 1), 1, true).has_value();
     ok = ok && !forked_hub().note_start(key_of(40, 1), 1);
-    ok = ok && !forked_hub().leak(key_of(40, 1)).has_value();
-    ok = ok && forked_hub().live_entries() == 0;
-    ok = ok && forked_hub().tombstones() == 0;
-    ok = ok && forked_hub().outstanding(1) == 0;
-    ok = ok && !forked_hub().is_quarantined(0, 40);
+    ok = ok && forked_hub().pending_for_slot(0, 40) == 0;
     ok = ok && !forked_hub().is_closing(0, 40);
     ok = ok && !forked_hub().is_ledgered(500);
     ok = ok && forked_hub().mode() == session_mode::child_stale;
     ok = ok && forked_hub().quarantine_slot(0, 40).empty();
-    ok = ok && forked_hub().close_queue(1).empty();
     ok = ok && forked_hub().drain_for_teardown().first.empty();
-    ok = ok && forked_hub().poison(session_mode::loss_poisoned).first.empty();
 
-    ok = ok && forked_registry().live_queues() == 0;
     ok = ok && !forked_registry().is_injective(0, 40);
     ok = ok && !forked_registry().slot_of(1).has_value();
     ok = ok && forked_registry().owners_of(0, 40) == 0;
@@ -1140,9 +956,6 @@ TEST(fork_safety, abandoned_objects_short_circuit_every_entry_point)
     forked_registry().abandon_in_child();
     forked_retry().abandon_in_child();
 
-    EXPECT_TRUE(forked_hub().abandoned());
-    EXPECT_TRUE(forked_registry().abandoned());
-    EXPECT_TRUE(forked_retry().abandoned());
     EXPECT_TRUE(all_entry_points_short_circuit());
 }
 
@@ -1182,7 +995,7 @@ TEST(fork_safety, forked_child_short_circuits_and_survives_normal_exit)
     }
 
     // The parent is untouched by the child's abandonment.
-    EXPECT_EQ(parent_only.live_entries(), 1u);
+    EXPECT_EQ(live_entries(parent_only), 1u);
     EXPECT_TRUE(parent_only.prove_eop(key_of(9, 1), 5, true).has_value());
 }
 
@@ -1199,7 +1012,7 @@ TEST(fork_safety, child_survives_a_fork_taken_under_contention)
         {
             register_one(hub, key_of(1, i % 512));
             hub.prove_eop(key_of(1, i % 512), 1, true);
-            hub.live_entries();
+            live_entries(hub);
         }
     }};
 
@@ -1212,7 +1025,7 @@ TEST(fork_safety, child_survives_a_fork_taken_under_contention)
             // The inherited hub's mutex may be locked by the thread that did not
             // survive; abandoning makes every entry point avoid it entirely.
             hub.abandon_in_child();
-            const bool ok = hub.live_entries() == 0 && !register_one(hub, key_of(1, 7)) &&
+            const bool ok = live_entries(hub) == 0 && !register_one(hub, key_of(1, 7)) &&
                             !hub.prove_eop(key_of(1, 7), 1, true).has_value();
             // _exit, not exit: this case is about not DEADLOCKING on an inherited
             // locked mutex. The busy thread's allocations are unreachable in the
@@ -1255,20 +1068,22 @@ struct reference_model
 {
     std::map<std::pair<uint32_t, uint32_t>, model_state> state;    // (slot,id) -> state
     std::map<std::pair<uint32_t, uint32_t>, uint64_t>    corr_of;  // -> correlation id
-    std::set<std::pair<uint32_t, uint32_t>>              tombstoned;
+
     std::set<uint32_t>                                   quarantined;
     std::set<uint64_t>                                   ledger;
     std::map<std::pair<uint32_t, uint32_t>, int>         emitted;
     std::map<std::pair<uint32_t, uint32_t>, int>         retired;
-    bool                                                 poisoned = false;
-    bool                                                 stopping = false;
 
     using key_t = std::pair<uint32_t, uint32_t>;
 
+    bool                                                 stopping = false;
+
+    // What ELIGIBILITY accepts. A proven or leaked key is no longer in the hub, so
+    // only a still-pending one is inadmissible; the session mode and the permanent
+    // slot quarantine are what stop a leaked key ever being reserved again.
     bool admissible(const key_t& k) const
     {
-        return !poisoned && !stopping && state.count(k) == 0 && tombstoned.count(k) == 0 &&
-               quarantined.count(k.first) == 0;
+        return !stopping && at(k) != model_state::pending && quarantined.count(k.first) == 0;
     }
 
     model_state at(const key_t& k) const
@@ -1345,7 +1160,7 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
                     auto k = random_key();
                     if(std::find(keys.begin(), keys.end(), k) != keys.end()) continue;
                     keys.emplace_back(k);
-                    batch.emplace_back(reg_of(to_key(k), corr, /*queue_token=*/k.first));
+                    batch.emplace_back(reg_of(to_key(k), corr));
                 }
                 if(keys.empty()) break;
 
@@ -1353,8 +1168,17 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
                 for(const auto& k : keys)
                     expect_ok = expect_ok && model.admissible(k);
 
+                // Production always asks eligibility first and only registers if it
+                // said yes -- and a batch eligibility accepted must always register.
+                auto flat = std::vector<correlation_key>{};
+                for(const auto& k : keys)
+                    flat.emplace_back(to_key(k));
+                const bool eligible = hub.can_register_batch(flat);
+                EXPECT_EQ(eligible, expect_ok) << "can_register_batch disagreed with the model";
+                if(!eligible) break;
+
                 const bool got = hub.register_batch(std::move(batch));
-                EXPECT_EQ(got, expect_ok) << "register_batch disagreed with the model";
+                EXPECT_TRUE(got) << "an eligible batch failed to register";
                 if(got)
                 {
                     for(const auto& k : keys)
@@ -1376,8 +1200,9 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
             {
                 auto       k             = random_key();
                 const bool loss_free     = (rng() % 4) != 0;
-                const bool expect_proven = loss_free && !model.poisoned && !model.stopping &&
-                                           model.at(k) == model_state::pending;
+                // No session-mode term: prove_eop completes an in-flight EOP even
+                // once teardown has begun.
+                const bool expect_proven = loss_free && model.at(k) == model_state::pending;
 
                 auto got = hub.prove_eop(to_key(k), 900, loss_free);
                 EXPECT_EQ(got.has_value(), expect_proven) << "prove_eop disagreed with the model";
@@ -1428,7 +1253,6 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
                     if(kv.first.first == slot && kv.second == model_state::pending)
                     {
                         kv.second = model_state::leaked;
-                        model.tombstoned.insert(kv.first);
                         model.ledger.insert(model.corr_of[kv.first]);
                     }
                 }
@@ -1436,34 +1260,16 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
                     EXPECT_EQ(l.key.doorbell_off, slot);
                 break;
             }
-            case 7:  // DestroyQueue
+            case 8:  // Teardown drain (bulk loss)
             {
-                const uint32_t token = rng() % kSlots;
-                hub.close_queue(token);
-                for(auto& kv : model.state)
-                {
-                    // queue_token was set to the slot at registration.
-                    if(kv.first.first == token && kv.second == model_state::pending)
-                    {
-                        kv.second = model_state::leaked;
-                        model.tombstoned.insert(kv.first);
-                        model.ledger.insert(model.corr_of[kv.first]);
-                    }
-                }
-                break;
-            }
-            case 8:  // Poison (ring overrun / reader dead)
-            {
-                if(model.poisoned) break;
-                if((rng() % 12) != 0) break;  // rare, it is terminal
-                hub.poison(session_mode::loss_poisoned);
-                model.poisoned = true;
+                if((rng() % 12) != 0) break;  // rare, and terminal
+                hub.drain_for_teardown();
+                model.stopping = true;
                 for(auto& kv : model.state)
                 {
                     if(kv.second == model_state::pending)
                     {
                         kv.second = model_state::leaked;
-                        model.tombstoned.insert(kv.first);
                         model.ledger.insert(model.corr_of[kv.first]);
                     }
                 }
@@ -1510,7 +1316,7 @@ TEST(DispatchHub, stateful_model_matches_the_reference_across_random_events)
         // A quarantined slot never accepts a reservation again.
         for(auto slot : model.quarantined)
         {
-            EXPECT_TRUE(hub.is_quarantined(0, slot));
+            EXPECT_TRUE(slot_quarantined(hub, 0, slot));
         }
     }
 
@@ -1569,7 +1375,6 @@ TEST(DispatchHub, a_clean_drain_strands_nothing_and_ledgers_nothing)
     // The deadline expires with nothing left, so the strand is a no-op.
     auto stranded = hub.quarantine_slot(0, 40);
     EXPECT_TRUE(stranded.empty());
-    EXPECT_EQ(hub.tombstones(), 0u);
     EXPECT_FALSE(hub.is_ledgered(900)) << "a fully drained close must not leak a correlation id";
 }
 
@@ -1591,12 +1396,11 @@ TEST(DispatchHub, an_incomplete_drain_strands_only_the_remainder)
     auto stranded = hub.quarantine_slot(0, 40);
     EXPECT_EQ(stranded.size(), 2u);
 
-    // The one that paired retired normally; the two that did not are ledgered and
-    // tombstoned, so a recurring key cannot reactivate them (U11).
+    // The one that paired retired normally; the two that did not are ledgered, and
+    // the permanent quarantine keeps their keys from ever matching again.
     EXPECT_FALSE(hub.is_ledgered(902));
     EXPECT_TRUE(hub.is_ledgered(901));
     EXPECT_TRUE(hub.is_ledgered(903));
-    EXPECT_EQ(hub.tombstones(), 2u);
     EXPECT_FALSE(hub.can_register_batch({key_of(40, 1)}));
     EXPECT_FALSE(hub.can_register_batch({key_of(40, 3)}));
 }
@@ -1646,35 +1450,18 @@ TEST(DispatchHub, entries_on_different_gpus_never_collide)
     batch.emplace_back(reg_of(on_gpu1, /*corr_id=*/20, /*queue_token=*/2));
     ASSERT_TRUE(hub.register_batch(std::move(batch)))
         << "the same slot on two GPUs must not look like a duplicate key";
-    EXPECT_EQ(hub.live_entries(), 2u);
+    EXPECT_EQ(live_entries(hub), 2u);
 
     // Proving GPU 0's dispatch leaves GPU 1's untouched.
     auto p0 = hub.prove_eop(on_gpu0, 500, true);
     ASSERT_TRUE(p0.has_value());
     EXPECT_EQ(p0->key.gpu_id, 0u);
-    EXPECT_EQ(hub.live_entries(), 1u);
+    EXPECT_EQ(live_entries(hub), 1u);
 
     auto p1 = hub.prove_eop(on_gpu1, 600, true);
     ASSERT_TRUE(p1.has_value());
     EXPECT_EQ(p1->key.gpu_id, 1u);
     EXPECT_EQ(p1->end_ticks, 600u) << "GPU 1 must get its own record, not GPU 0's";
-}
-
-// Leaking a dispatch on one GPU must not tombstone the same slot/index on
-// another -- otherwise one GPU's loss would silently disable the other.
-TEST(DispatchHub, a_leak_on_one_gpu_does_not_tombstone_another)
-{
-    auto hub     = hub_t{};
-    auto on_gpu0 = correlation_key{40, 1, 0, 0};
-    auto on_gpu1 = correlation_key{40, 1, 0, 1};
-
-    ASSERT_TRUE(register_one(hub, on_gpu0, 10, 1));
-    ASSERT_TRUE(hub.leak(on_gpu0).has_value());
-
-    EXPECT_FALSE(hub.can_register_batch({on_gpu0}));  // tombstoned
-    EXPECT_TRUE(hub.can_register_batch({on_gpu1}));   // the other GPU is unaffected
-    EXPECT_TRUE(register_one(hub, on_gpu1, 20, 2));
-    EXPECT_TRUE(hub.prove_eop(on_gpu1, 7, true).has_value());
 }
 
 // The close drain has two phases and the order matters: wait for the hardware to
@@ -1683,9 +1470,8 @@ TEST(DispatchHub, a_leak_on_one_gpu_does_not_tombstone_another)
 TEST(DispatchHub, a_queue_with_no_signal_less_work_needs_no_drain)
 {
     auto hub = hub_t{};
-    // Nothing was ever registered for this queue, so a close has nothing to wait
+    // Nothing was ever registered on this slot, so a close has nothing to wait
     // for -- the early-out that keeps non-signal-less queues from paying.
-    EXPECT_EQ(hub.outstanding(/*queue_token=*/77), 0u);
     EXPECT_EQ(hub.pending_for_slot(0, 40), 0u);
 
     auto stranded = hub.quarantine_slot(0, 40);
@@ -1697,11 +1483,10 @@ TEST(DispatchHub, a_queue_with_no_signal_less_work_needs_no_drain)
 TEST(DispatchHub, records_arriving_after_hw_completion_still_complete)
 {
     auto hub = hub_t{};
-    ASSERT_TRUE(register_one(hub, key_of(40, 1), /*corr_id=*/900, /*queue_token=*/77));
-    ASSERT_TRUE(register_one(hub, key_of(40, 2), /*corr_id=*/900, /*queue_token=*/77));
+    ASSERT_TRUE(register_one(hub, key_of(40, 1), /*corr_id=*/900));
+    ASSERT_TRUE(register_one(hub, key_of(40, 2), /*corr_id=*/900));
 
     hub.mark_slot_closing(0, 40);
-    EXPECT_EQ(hub.outstanding(77), 2u);
     EXPECT_EQ(hub.pending_for_slot(0, 40), 2u);
 
     // Phase 1 returns: the GPU has finished, so the EOPs now exist and the reader
@@ -1709,7 +1494,6 @@ TEST(DispatchHub, records_arriving_after_hw_completion_still_complete)
     ASSERT_TRUE(hub.prove_eop(key_of(40, 1), 500, true).has_value());
     ASSERT_TRUE(hub.prove_eop(key_of(40, 2), 600, true).has_value());
     EXPECT_EQ(hub.pending_for_slot(0, 40), 0u);
-    EXPECT_EQ(hub.outstanding(77), 0u);
 
     // Phase 3: nothing left to strand, and no correlation id leaks.
     auto stranded = hub.quarantine_slot(0, 40);
