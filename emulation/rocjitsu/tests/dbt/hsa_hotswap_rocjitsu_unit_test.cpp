@@ -438,11 +438,26 @@ TEST_F(HsaHotswapHookTest, TranslationFailureDoesNotLoadOrRetain) {
   ASSERT_EQ(
       api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
       HSA_STATUS_SUCCESS);
+  ASSERT_EQ(unsetenv("HSA_HOTSWAP_VERBOSE"), 0);
+  testing::internal::CaptureStderr();
   EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
                                                               nullptr, nullptr),
             HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  const std::string log_text = testing::internal::GetCapturedStderr();
   EXPECT_EQ(g_load_agent_calls, 0);
   EXPECT_EQ(rj_test_retained_executable_buffer_count(), 0u);
+  EXPECT_NE(log_text.find("[hsa-hotswap-rj] error: eager translation "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find("[hsa-hotswap-rj] error: translation diagnostic "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" severity=error kind=invalid-code-object "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" message=source is not a valid gfx1250 AMDGPU code object"),
+            std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" outcome=translation_failed "), std::string::npos) << log_text;
+  EXPECT_NE(log_text.find(" translation_status="), std::string::npos) << log_text;
+  EXPECT_NE(log_text.find(" status="), std::string::npos) << log_text;
 }
 
 // The translated backing storage retained for an A0 load must SURVIVE OnUnload()
@@ -686,10 +701,18 @@ TEST_F(HsaHotswapHookTest, ContainsExceptionsAtTheHsaBoundary) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   g_asic_revision = 1;
   g_throw_from_deprecated_load = true;
+  ASSERT_EQ(unsetenv("HSA_HOTSWAP_VERBOSE"), 0);
+  testing::internal::CaptureStderr();
   EXPECT_EQ(api.core.hsa_executable_load_code_object_fn(kExecutable, kA0Agent, hsa_code_object_t{1},
                                                         nullptr),
             HSA_STATUS_ERROR_OUT_OF_RESOURCES);
+  const std::string log_text = testing::internal::GetCapturedStderr();
   EXPECT_EQ(g_load_deprecated_calls, 1);
+  EXPECT_NE(log_text.find("[hsa-hotswap-rj] error: "), std::string::npos) << log_text;
+  EXPECT_NE(log_text.find("operation=hsa_executable_load_code_object"), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find("exception=std::bad_alloc"), std::string::npos) << log_text;
+  EXPECT_NE(log_text.find("status="), std::string::npos) << log_text;
 }
 
 TEST_F(HsaHotswapHookTest, CallbackApiSnapshotIsSafeDuringUnload) {

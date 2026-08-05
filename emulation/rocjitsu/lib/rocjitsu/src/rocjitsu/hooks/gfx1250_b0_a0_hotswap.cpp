@@ -7,7 +7,12 @@
 /// @section env Environment controls
 ///
 /// - `HSA_HOTSWAP_VERBOSE` -- debug logging to stderr. Changes what is reported,
-///   never what is done.
+///   never what is done. Errors are always reported, independently of this flag.
+/// - `HSA_HOTSWAP_DUMP_DIR` -- write each intercepted source code object to this
+///   existing directory for offline diagnosis.
+/// - `HSA_HOTSWAP_DUMP_ONLY` -- when nonzero, dump intercepted code objects and
+///   pass them to the lower loader without translation. Intended only for
+///   collecting an input for offline translation.
 ///
 /// `HSA_HOTSWAP_DISABLE` belongs to CLR rather than this hook: it stops CLR
 /// forwarding anything here at all.
@@ -62,35 +67,142 @@ bool verbose_logging() {
   return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
 }
 
-void log(const char *format, ...) {
-  if (!verbose_logging())
+bool dump_only() {
+  const char *value = std::getenv("HSA_HOTSWAP_DUMP_ONLY");
+  return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+}
+
+void log(const char *format, ...) noexcept;
+void log_error(const char *format, ...) noexcept;
+
+uint64_t exact_source_id(std::span<const uint8_t> bytes) noexcept {
+  constexpr uint64_t kOffsetBasis = 14695981039346656037ULL;
+  constexpr uint64_t kPrime = 1099511628211ULL;
+  uint64_t value = kOffsetBasis;
+  for (const uint8_t byte : bytes) {
+    value ^= byte;
+    value *= kPrime;
+  }
+  return value;
+}
+
+void dump_source_for_diagnostics(std::span<const uint8_t> bytes) noexcept {
+  const char *directory = std::getenv("HSA_HOTSWAP_DUMP_DIR");
+  if (directory == nullptr || directory[0] == '\0')
+    return;
+
+  char path[4096];
+  const uint64_t source_id = exact_source_id(bytes);
+  const int length = std::snprintf(path, sizeof(path), "%s/gfx1250-%016" PRIx64 "-%zu.elf",
+                                   directory, source_id, bytes.size());
+  if (length < 0 || static_cast<size_t>(length) >= sizeof(path)) {
+    log_error("diagnostic dump path is too long source_id=fnv1a64:%016" PRIx64, source_id);
+    return;
+  }
+
+  FILE *output = std::fopen(path, "wb");
+  if (output == nullptr) {
+    log_error("diagnostic dump open failed source_id=fnv1a64:%016" PRIx64 " path=%s errno=%d",
+              source_id, path, errno);
+    return;
+  }
+  const size_t written = std::fwrite(bytes.data(), 1, bytes.size(), output);
+  const int close_status = std::fclose(output);
+  if (written != bytes.size() || close_status != 0) {
+    log_error("diagnostic dump write failed source_id=fnv1a64:%016" PRIx64
+              " path=%s written=%zu expected=%zu errno=%d",
+              source_id, path, written, bytes.size(), errno);
+    return;
+  }
+  log("diagnostic dump source_id=fnv1a64:%016" PRIx64 " input_bytes=%zu path=%s", source_id,
+      bytes.size(), path);
+}
+
+void write_log(bool enabled, const char *level, const char *format, va_list args) noexcept {
+  if (!enabled)
     return;
   flockfile(stderr);
   std::fputs("[hsa-hotswap-rj] ", stderr);
-  va_list args;
-  va_start(args, format);
+  if (level != nullptr)
+    std::fprintf(stderr, "%s: ", level);
   std::vfprintf(stderr, format, args);
-  va_end(args);
   std::fputc('\n', stderr);
   funlockfile(stderr);
 }
 
-void log_translation(uint64_t source_id, const char *outcome, size_t changed, size_t input_bytes,
-                     size_t output_bytes, rj_status_t translation_status,
-                     hsa_status_t load_status) {
-  log("eager translation source_id=fnv1a64:%016" PRIx64
-      " input_revision=b0 output_revision=a0 outcome=%s changed=%zu"
-      " input_bytes=%zu output_bytes=%zu translation_status=%d status=%d",
-      source_id, outcome, changed, input_bytes, output_bytes, static_cast<int>(translation_status),
-      static_cast<int>(load_status));
+void log(const char *format, ...) noexcept {
+  va_list args;
+  va_start(args, format);
+  write_log(verbose_logging(), nullptr, format, args);
+  va_end(args);
 }
 
-template <typename Fn> hsa_status_t hsa_boundary(Fn &&fn) noexcept {
+void log_error(const char *format, ...) noexcept {
+  va_list args;
+  va_start(args, format);
+  write_log(true, "error", format, args);
+  va_end(args);
+}
+
+void log_translation(uint64_t source_id, const char *outcome, size_t changed, size_t input_bytes,
+                     size_t output_bytes, rj_status_t translation_status,
+                     hsa_status_t load_status) noexcept {
+  const bool failed = translation_status != ROCJITSU_STATUS_SUCCESS ||
+                      load_status != HSA_STATUS_SUCCESS;
+  if (!failed && !verbose_logging())
+    return;
+  flockfile(stderr);
+  std::fputs("[hsa-hotswap-rj] ", stderr);
+  if (failed)
+    std::fputs("error: ", stderr);
+  std::fprintf(stderr,
+               "eager translation source_id=fnv1a64:%016" PRIx64
+               " input_revision=b0 output_revision=a0 outcome=%s changed=%zu"
+               " input_bytes=%zu output_bytes=%zu translation_status=%d status=%d\n",
+               source_id, outcome, changed, input_bytes, output_bytes,
+               static_cast<int>(translation_status), static_cast<int>(load_status));
+  funlockfile(stderr);
+}
+
+void log_translation_diagnostic(
+    uint64_t source_id, const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic) noexcept {
+  if (diagnostic == nullptr)
+    return;
+  const char *severity = diagnostic->severity != nullptr ? diagnostic->severity : "unknown";
+  const char *kind = diagnostic->kind != nullptr ? diagnostic->kind : "unknown";
+  const char *mnemonic = diagnostic->mnemonic != nullptr ? diagnostic->mnemonic : "";
+  const char *message = diagnostic->message != nullptr ? diagnostic->message : "";
+
+  flockfile(stderr);
+  std::fprintf(stderr,
+               "[hsa-hotswap-rj] error: translation diagnostic "
+               "source_id=fnv1a64:%016" PRIx64 " severity=%s kind=%s",
+               source_id, severity, kind);
+  if (diagnostic->has_guest_offset)
+    std::fprintf(stderr, " guest_offset=.text+0x%" PRIx64, diagnostic->guest_offset);
+  if (mnemonic[0] != '\0')
+    std::fprintf(stderr, " mnemonic=%s", mnemonic);
+  if (diagnostic->required_work)
+    std::fprintf(stderr, " required=%s\n", message);
+  else
+    std::fprintf(stderr, " message=%s\n", message);
+  funlockfile(stderr);
+}
+
+template <typename Fn> hsa_status_t hsa_boundary(const char *operation, Fn &&fn) noexcept {
   try {
     return fn();
   } catch (const std::bad_alloc &) {
+    log_error("operation=%s exception=std::bad_alloc status=%d", operation,
+              static_cast<int>(HSA_STATUS_ERROR_OUT_OF_RESOURCES));
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  } catch (const std::exception &error) {
+    log_error("operation=%s exception=std::exception what=%s status=%d", operation, error.what(),
+              static_cast<int>(HSA_STATUS_ERROR));
+    return HSA_STATUS_ERROR;
   } catch (...) {
+    log_error("operation=%s exception=unknown status=%d", operation,
+              static_cast<int>(HSA_STATUS_ERROR));
     return HSA_STATUS_ERROR;
   }
 }
@@ -714,15 +826,24 @@ void override_translation_status_for_test(rj_status_t &, uint8_t *&, size_t &) {
 
 bool install(HsaApiTable *table) {
   std::lock_guard lock(g_state.lifecycle_mutex);
-  if (g_state.core != nullptr || table == nullptr || table->core_ == nullptr)
+  if (g_state.core != nullptr) {
+    log_error("OnLoad refused: hook is already installed");
     return false;
+  }
+  if (table == nullptr || table->core_ == nullptr) {
+    log_error("OnLoad refused: missing HSA API table");
+    return false;
+  }
 
   CoreApiTable *core = table->core_;
   constexpr size_t required_size =
       offsetof(CoreApiTable, hsa_executable_load_agent_code_object_fn) +
       sizeof(CoreApiTable::hsa_executable_load_agent_code_object_fn);
-  if (core->version.minor_id < required_size)
+  if (core->version.minor_id < required_size) {
+    log_error("OnLoad refused: HSA core API table is too small size=%u required=%zu",
+              core->version.minor_id, required_size);
     return false;
+  }
 
   OriginalApi original{
       core->hsa_code_object_reader_create_from_file_fn,
@@ -743,8 +864,10 @@ bool install(HsaApiTable *table) {
       original.load_agent == nullptr || original.load_program == nullptr ||
       original.load_deprecated == nullptr || original.get_extension_table == nullptr ||
       original.iterate_agents == nullptr || original.agent_get_info == nullptr ||
-      original.agent_iterate_isas == nullptr || original.isa_get_info == nullptr)
+      original.agent_iterate_isas == nullptr || original.isa_get_info == nullptr) {
+    log_error("OnLoad refused: HSA core API table has a missing required entry");
     return false;
+  }
 
   // Do NOT free the previous generation's translated backing storage here. Those
   // buffers can still be referenced by consumers whose lifetime is NOT bounded by
@@ -859,8 +982,11 @@ Blob read_file_region(hsa_file_t file, size_t offset, size_t requested_size) {
 }
 
 hsa_status_t capture_reader(const OriginalApi &api, hsa_code_object_reader_t *reader, Blob bytes) {
-  if (bytes != nullptr && store_reader(*reader, std::move(bytes)))
-    return HSA_STATUS_SUCCESS;
+  if (bytes != nullptr) {
+    dump_source_for_diagnostics(*bytes);
+    if (store_reader(*reader, std::move(bytes)))
+      return HSA_STATUS_SUCCESS;
+  }
   (void)api.destroy_reader(*reader);
   *reader = {};
   return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -1012,7 +1138,7 @@ hsa_status_t load_owned_bytes(hsa_executable_t executable, hsa_agent_t agent, co
 
 hsa_status_t HSA_API reader_create_from_memory(const void *code_object, size_t size,
                                                hsa_code_object_reader_t *reader) {
-  return hsa_boundary([&] {
+  return hsa_boundary("hsa_code_object_reader_create_from_memory", [&] {
     // Reject a null output pointer before forwarding: the lower/vendor API may write
     // through it without checking, so fail fast the way ROCr's own layer does.
     if (reader == nullptr)
@@ -1031,7 +1157,7 @@ hsa_status_t HSA_API reader_create_from_memory(const void *code_object, size_t s
 }
 
 hsa_status_t HSA_API reader_create_from_file(hsa_file_t file, hsa_code_object_reader_t *reader) {
-  return hsa_boundary([&] {
+  return hsa_boundary("hsa_code_object_reader_create_from_file", [&] {
     if (reader == nullptr)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     const std::shared_ptr<const OriginalApi> api =
@@ -1048,7 +1174,7 @@ hsa_status_t HSA_API reader_create_from_file(hsa_file_t file, hsa_code_object_re
 
 hsa_status_t vendor_reader_create(hsa_file_t file, size_t offset, size_t size,
                                   hsa_code_object_reader_t *reader) {
-  return hsa_boundary([&] {
+  return hsa_boundary("amd_loader_code_object_reader_create_from_file", [&] {
     if (reader == nullptr)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     const std::shared_ptr<const OriginalApi> api =
@@ -1067,7 +1193,7 @@ hsa_status_t vendor_reader_create(hsa_file_t file, size_t offset, size_t size,
 
 hsa_status_t HSA_API system_get_major_extension_table(uint16_t extension, uint16_t version_major,
                                                       size_t table_length, void *table) {
-  return hsa_boundary([&] {
+  return hsa_boundary("hsa_system_get_major_extension_table", [&] {
     const std::shared_ptr<const OriginalApi> api =
         g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
@@ -1092,7 +1218,7 @@ hsa_status_t HSA_API system_get_major_extension_table(uint16_t extension, uint16
 }
 
 hsa_status_t HSA_API reader_destroy(hsa_code_object_reader_t reader) {
-  return hsa_boundary([&] {
+  return hsa_boundary("hsa_code_object_reader_destroy", [&] {
     const std::shared_ptr<const OriginalApi> api =
         g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
@@ -1106,7 +1232,7 @@ hsa_status_t HSA_API reader_destroy(hsa_code_object_reader_t reader) {
 }
 
 hsa_status_t HSA_API executable_destroy(hsa_executable_t executable) {
-  return hsa_boundary([&] {
+  return hsa_boundary("hsa_executable_destroy", [&] {
     const std::shared_ptr<const OriginalApi> api =
         g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
@@ -1122,7 +1248,7 @@ hsa_status_t HSA_API executable_destroy(hsa_executable_t executable) {
 hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_agent_t agent,
                                             hsa_code_object_reader_t reader, const char *options,
                                             hsa_loaded_code_object_t *loaded) {
-  return hsa_boundary([&] {
+  return hsa_boundary("hsa_executable_load_agent_code_object", [&] {
     const std::shared_ptr<const OriginalApi> api =
         g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
@@ -1138,6 +1264,10 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
     Blob source = lookup_reader(reader);
     if (source == nullptr)
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
+    if (dump_only()) {
+      log("diagnostic dump-only pass-through input_bytes=%zu", source->size());
+      return original_load(executable, agent, reader, options, loaded);
+    }
     if (!is_gfx1250(source))
       return load_owned_bytes(executable, agent, source, options, loaded, *api, original_load);
 
@@ -1195,8 +1325,14 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
     size_t translated_size = 0;
     g_state.translations.fetch_add(1, std::memory_order_relaxed);
     hold_claimed_translation_for_test();
-    translation.status = rj_gfx1250_b0_to_a0_translate_with_info(
-        source->data(), source->size(), &translated_data, &translated_size, &translation.info);
+    translation.status = rj_gfx1250_b0_to_a0_translate(
+        source->data(), source->size(), &translated_data, &translated_size, &translation.info,
+        [](const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic, void *user_data) noexcept {
+          const auto *info =
+              static_cast<const rj_gfx1250_b0_to_a0_translation_info_t *>(user_data);
+          log_translation_diagnostic(info->source_code_object_id, diagnostic);
+        },
+        &translation.info);
     override_translation_status_for_test(translation.status, translated_data, translated_size);
     if (translation.status != ROCJITSU_STATUS_SUCCESS || translated_data == nullptr ||
         translated_size == 0) {
@@ -1239,7 +1375,7 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
 hsa_status_t HSA_API load_program_code_object(hsa_executable_t executable,
                                               hsa_code_object_reader_t reader, const char *options,
                                               hsa_loaded_code_object_t *loaded) {
-  return hsa_boundary([&] {
+  return hsa_boundary("hsa_executable_load_program_code_object", [&] {
     const std::shared_ptr<const OriginalApi> api =
         g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
@@ -1261,7 +1397,7 @@ hsa_status_t HSA_API load_program_code_object(hsa_executable_t executable,
 
 hsa_status_t HSA_API load_code_object(hsa_executable_t executable, hsa_agent_t agent,
                                       hsa_code_object_t code_object, const char *options) {
-  return hsa_boundary([&] {
+  return hsa_boundary("hsa_executable_load_code_object", [&] {
     const std::shared_ptr<const OriginalApi> api =
         g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
@@ -1290,7 +1426,14 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
   (void)failed_tool_names;
   try {
     return install(table);
+  } catch (const std::bad_alloc &) {
+    log_error("OnLoad failed: exception=std::bad_alloc");
+    return false;
+  } catch (const std::exception &error) {
+    log_error("OnLoad failed: exception=std::exception what=%s", error.what());
+    return false;
   } catch (...) {
+    log_error("OnLoad failed: exception=unknown");
     return false;
   }
 }
@@ -1298,7 +1441,10 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
 extern "C" RJ_HOOK_EXPORT void OnUnload() {
   try {
     uninstall();
+  } catch (const std::exception &error) {
+    log_error("OnUnload failed: exception=std::exception what=%s", error.what());
   } catch (...) {
+    log_error("OnUnload failed: exception=unknown");
   }
 }
 

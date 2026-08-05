@@ -25,6 +25,25 @@ typedef struct rj_gfx1250_b0_to_a0_translation_info_s {
   size_t changed_instruction_count;
 } rj_gfx1250_b0_to_a0_translation_info_t;
 
+/// Borrowed view of one diagnostic produced by a failed translation.
+///
+/// All string pointers are valid only for the duration of the callback. A
+/// required-work item is delivered as a separate view with @c required_work set;
+/// its kind and source location identify the diagnostic it belongs to.
+typedef struct rj_gfx1250_b0_to_a0_diagnostic_s {
+  const char *severity;
+  const char *kind;
+  int has_guest_offset;
+  uint64_t guest_offset;
+  const char *mnemonic;
+  const char *message;
+  int required_work;
+} rj_gfx1250_b0_to_a0_diagnostic_t;
+
+/// Synchronous sink for diagnostics from a failed translation.
+typedef void (*rj_gfx1250_b0_to_a0_diagnostic_callback_t)(
+    const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic, void *user_data);
+
 /// Translate one gfx1250 B0 AMDGPU code-object ELF for execution on gfx1250 A0.
 ///
 /// The input must be a standalone gfx1250 AMDGPU code object. On success, the
@@ -36,6 +55,13 @@ typedef struct rj_gfx1250_b0_to_a0_translation_info_s {
 /// @param[in] source_size Number of bytes in @p source_elf.
 /// @param[out] translated_elf Newly allocated translated code-object bytes.
 /// @param[out] translated_size Number of bytes in @p translated_elf.
+/// @param[out] info Stable source identity and changed-instruction count. This
+///             is cleared before argument validation. When all arguments are
+///             valid, source_code_object_id is populated before parsing.
+/// @param[in] diagnostic_callback Optional synchronous sink for diagnostics
+///            when the result is not dispatchable. The callback receives the
+///            complete diagnostic set, including required-work items.
+/// @param[in] user_data Opaque value passed to @p diagnostic_callback.
 /// @retval ROCJITSU_STATUS_SUCCESS Translation succeeded.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT An input or output argument is invalid.
 /// @retval ROCJITSU_STATUS_INVALID_CODE_OBJECT The input is not a gfx1250 code object, or
@@ -49,27 +75,11 @@ typedef struct rj_gfx1250_b0_to_a0_translation_info_s {
 #endif
 RJ_API_EXPORT rj_status_t rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size,
                                                         uint8_t **translated_elf,
-                                                        size_t *translated_size);
-
-/// Translate one gfx1250 B0 code object and report source provenance.
-///
-/// This is the provenance-reporting form of rj_gfx1250_b0_to_a0_translate().
-/// @p info is cleared before argument validation. When all arguments are valid,
-/// source_code_object_id is populated before parsing, so failed translation
-/// attempts can still be associated with their exact input.
-///
-/// @param[in] source_elf Source code-object bytes.
-/// @param[in] source_size Number of bytes in @p source_elf.
-/// @param[out] translated_elf Newly allocated translated code-object bytes.
-/// @param[out] translated_size Number of bytes in @p translated_elf.
-/// @param[out] info Stable source identity and changed-instruction count.
-/// @return The same status values as rj_gfx1250_b0_to_a0_translate().
-#ifdef __cplusplus
-[[nodiscard]]
-#endif
-RJ_API_EXPORT rj_status_t rj_gfx1250_b0_to_a0_translate_with_info(
-    const void *source_elf, size_t source_size, uint8_t **translated_elf, size_t *translated_size,
-    rj_gfx1250_b0_to_a0_translation_info_t *info);
+                                                        size_t *translated_size,
+                                                        rj_gfx1250_b0_to_a0_translation_info_t *info,
+                                                        rj_gfx1250_b0_to_a0_diagnostic_callback_t
+                                                            diagnostic_callback,
+                                                        void *user_data);
 
 /// Release storage returned by rj_gfx1250_b0_to_a0_translate().
 /// @param[in] translated_elf Allocation to release; NULL is accepted.
