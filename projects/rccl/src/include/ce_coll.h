@@ -125,13 +125,11 @@ ncclResult_t ncclCeGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cu
 
 ncclResult_t ncclCeAlltoAll(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream);
 
-<<<<<<< HEAD
 ncclResult_t ncclCeAlltoAllv(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream);
-=======
+
 // CE AllReduce: scatter → local-reduce → allgather (→ optional copy-to-user-recvbuff).
 // Requires comm->ceColl.ceARTmpBuf != NULL (i.e. ncclCeInit has run).
 ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
                              struct ncclDevrWindow* recvWin = nullptr);
->>>>>>> origin/develop
 #endif /* NCCL_CE_COLL_H_ */
