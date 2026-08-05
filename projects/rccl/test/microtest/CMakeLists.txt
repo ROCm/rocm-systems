@@ -88,39 +88,40 @@ set(TEST_MICRO_INIT_SOURCE_FILES
   ../common/ProcessIsolatedTestRunner.cpp
 )
 
-add_executable(rccl-UnitTestsMicroInit ${TEST_MICRO_INIT_SOURCE_FILES})
-
-target_include_directories(rccl-UnitTestsMicroInit PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
-target_compile_definitions(rccl-UnitTestsMicroInit PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
-target_link_libraries(rccl-UnitTestsMicroInit PRIVATE ${MICRO_TEST_LINK_LIBS})
-
-# src/init.cc is the FIRST of the duplicate basenames (src/init.cc vs
-# transport/net_ib/init.cc), so hipify keeps its name -- NO _tmp suffix.
-target_compile_definitions(rccl-UnitTestsMicroInit PRIVATE
-  INIT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/init.cc"
-)
-
-add_dependencies(rccl-UnitTestsMicroInit hipify_all copy_nccl_device_headers)
-
-# Coverage (host pass only; device pass disabled -- same rationale as above) +
-# -ffunction-sections so the surviving-symbol probe link can --gc-sections.
-target_compile_options(rccl-UnitTestsMicroInit PRIVATE
-  -ffunction-sections
-  -fprofile-instr-generate -fcoverage-mapping
-  -Xarch_device -fno-profile-instr-generate
-  -Xarch_device -fno-coverage-mapping)
-target_link_options(rccl-UnitTestsMicroInit PRIVATE
-  -fprofile-instr-generate -fcoverage-mapping
-  # GC unreferenced functions (paired with -ffunction-sections) so the real
-  # oracle TUs contribute only the handful of symbols init-test actually uses.
-  -Wl,--gc-sections)
-
-if(BUILD_ADDRESS_SANITIZER)
-  target_compile_options(rccl-UnitTestsMicroInit PRIVATE -fsanitize=address)
-  target_link_options(rccl-UnitTestsMicroInit PRIVATE -fsanitize=address -shared-libasan)
-  if(DEFINED ASAN_RUNTIME_DIR)
-    target_link_options(rccl-UnitTestsMicroInit PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+# Two compile variants (D2): the default (cached) build leaves HIP_*_UNCACHED_MEMORY
+# undefined -> checkHostUncacheMemSetting takes the gfx950-check arm and fillInfo
+# uses the finegrained-malloc line; the -uncached build defines both -> the
+# unconditional-success arm and the uncached-malloc line. Tests self-select via
+# #ifdef HIP_HOST_UNCACHED_MEMORY; coverage is merged across both binaries.
+foreach(_variant "" "-uncached")
+  set(_tgt "rccl-UnitTestsMicroInit${_variant}")
+  add_executable(${_tgt} ${TEST_MICRO_INIT_SOURCE_FILES})
+  target_include_directories(${_tgt} PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
+  # src/init.cc is the FIRST of the duplicate basenames (vs transport/net_ib/init.cc),
+  # so hipify keeps its name -- NO _tmp suffix.
+  target_compile_definitions(${_tgt} PRIVATE ${RCCL_COMMON_COMPILE_DEFS}
+    INIT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/init.cc")
+  if(_variant STREQUAL "-uncached")
+    target_compile_definitions(${_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
   endif()
-endif()
-
-rocm_install(TARGETS rccl-UnitTestsMicroInit COMPONENT tests)
+  target_link_libraries(${_tgt} PRIVATE ${MICRO_TEST_LINK_LIBS})
+  add_dependencies(${_tgt} hipify_all copy_nccl_device_headers)
+  # Coverage (host pass only) + -ffunction-sections so --gc-sections drops the
+  # unreferenced oracle-TU / deep-path symbols init-test never calls.
+  target_compile_options(${_tgt} PRIVATE
+    -ffunction-sections
+    -fprofile-instr-generate -fcoverage-mapping
+    -Xarch_device -fno-profile-instr-generate
+    -Xarch_device -fno-coverage-mapping)
+  target_link_options(${_tgt} PRIVATE
+    -fprofile-instr-generate -fcoverage-mapping
+    -Wl,--gc-sections)
+  if(BUILD_ADDRESS_SANITIZER)
+    target_compile_options(${_tgt} PRIVATE -fsanitize=address)
+    target_link_options(${_tgt} PRIVATE -fsanitize=address -shared-libasan)
+    if(DEFINED ASAN_RUNTIME_DIR)
+      target_link_options(${_tgt} PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+    endif()
+  endif()
+  rocm_install(TARGETS ${_tgt} COMPONENT tests)
+endforeach()

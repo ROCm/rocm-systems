@@ -407,3 +407,38 @@ TEST_F(InitMicrotest, CheckHsaEnvSetting_InvalidSetting_WarnsButSucceeds) {
   g_validHsaScratch = false;  // validator false -> WARN, still ncclSuccess
   EXPECT_EQ(ncclSuccess, checkHsaEnvSetting());
 }
+
+// checkHostUncacheMemSetting (init.cc:253): #if HIP_HOST_UNCACHED_MEMORY returns
+// success unconditionally; otherwise IsArchMatch(gcn,"gfx950") -> ncclSystemError.
+// Real IsArchMatch oracle reads comm->topo->nodes[GPU].nodes[0].gpu.gcn.
+namespace {
+class TopoComm {
+ public:
+  explicit TopoComm(const char* gcn) : comm_(new ncclComm{}), topo_(new ncclTopoSystem{}) {
+    topo_->nodes[GPU].count = 1;
+    std::strncpy(topo_->nodes[GPU].nodes[0].gpu.gcn, gcn,
+                 sizeof(topo_->nodes[GPU].nodes[0].gpu.gcn) - 1);
+    comm_->topo = topo_.get();
+  }
+  ncclComm* get() { return comm_.get(); }
+ private:
+  std::unique_ptr<ncclComm> comm_;
+  std::unique_ptr<ncclTopoSystem> topo_;
+};
+}  // namespace
+
+#if defined(HIP_HOST_UNCACHED_MEMORY)
+TEST_F(InitMicrotest, CheckHostUncacheMemSetting_Uncached_AlwaysSucceeds) {
+  TopoComm t("gfx950:sramecc+");  // even gfx950 is OK when the build flag is set
+  EXPECT_EQ(ncclSuccess, checkHostUncacheMemSetting(t.get()));
+}
+#else
+TEST_F(InitMicrotest, CheckHostUncacheMemSetting_Cached_Gfx950_ReturnsSystemError) {
+  TopoComm t("gfx950:sramecc+");
+  EXPECT_EQ(ncclSystemError, checkHostUncacheMemSetting(t.get()));
+}
+TEST_F(InitMicrotest, CheckHostUncacheMemSetting_Cached_Gfx942_ReturnsSuccess) {
+  TopoComm t("gfx942:sramecc+:xnack-");
+  EXPECT_EQ(ncclSuccess, checkHostUncacheMemSetting(t.get()));
+}
+#endif
